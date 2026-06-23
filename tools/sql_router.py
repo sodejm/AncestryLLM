@@ -29,6 +29,7 @@ SQL_AGENT_PREFIX = (
 
 
 def list_family_tree_files() -> str:
+    """Return a formatted list of available ``.rmtree`` files, or a not-found message."""
     if not os.path.exists(FAMILY_TREES_DIR):
         return f"No .rmtree files found in {FAMILY_TREES_DIR}."
 
@@ -42,6 +43,11 @@ def list_family_tree_files() -> str:
 
 
 def _resolve_tree_path(tree_name: str) -> Path | None:
+    """Resolve *tree_name* to an absolute path inside the family-trees directory.
+
+    Returns ``None`` when the resolved path escapes the allowed directory (path
+    traversal prevention).
+    """
     candidate = FAMILY_TREES_DIR / tree_name
     if candidate.suffix != ".rmtree":
         candidate = candidate.with_suffix(".rmtree")
@@ -54,12 +60,16 @@ def _resolve_tree_path(tree_name: str) -> Path | None:
 
 
 def _build_read_only_sqlite_uri(tree_path: Path) -> str:
+    """Build a SQLAlchemy URI that opens *tree_path* in read-only mode."""
     return f"sqlite+pysqlite:///{tree_path.as_posix()}?mode=ro&uri=true"
 
 
-def _build_engine_args() -> dict:
-    # Thread-safe pooled connections keep the SQLite footprint low and recycle
-    # idle handles instead of leaking them per request.
+def _build_engine_args() -> dict[str, object]:
+    """Return SQLAlchemy engine kwargs for pooled, thread-safe SQLite connections.
+
+    Thread-safe pooled connections keep the SQLite footprint low and recycle
+    idle handles instead of leaking them per request.
+    """
     return {
         "pool_size": 5,
         "max_overflow": 10,
@@ -70,6 +80,11 @@ def _build_engine_args() -> dict:
 
 
 def _build_sql_agent(database: SQLDatabase):
+    """Construct a LangChain SQL agent backed by a local Ollama LLM.
+
+    The agent is configured with the shared prefix and row-count cap defined
+    at module level to constrain query scope and memory usage.
+    """
     from langchain_ollama import ChatOllama
 
     llm = ChatOllama(
@@ -86,7 +101,14 @@ def _build_sql_agent(database: SQLDatabase):
     )
 
 
-def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
+def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
+    """Route *query* to the appropriate family-tree SQLite database.
+
+    When *tree_name* is omitted, returns a listing of available ``.rmtree``
+    files instead of executing the query.  Raises nothing on ordinary errors;
+    human-readable messages are returned as strings so callers can relay them
+    directly to end-users.
+    """
     if not tree_name:
         return list_family_tree_files()
 
@@ -107,10 +129,6 @@ def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
     if isinstance(result, dict) and "output" in result:
         return str(result["output"])
     return str(result)
-
-
-def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
-    return dynamic_sqlite_router(query=query, tree_name=tree_name)
 
 
 if __name__ == "__main__":

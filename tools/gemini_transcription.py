@@ -21,7 +21,7 @@ def normalize_transcription(text: str) -> str:
     """Strip whitespace, duplicate lines, and non-ASCII OCR artifacts.
 
     Pre-processing OCR text before sending it to the Gemini API trims token
-    usage and removes noise that wastes paid input tokens.
+    usage and removes noise that would otherwise waste paid input tokens.
     """
     if not text:
         return ""
@@ -41,8 +41,14 @@ def normalize_transcription(text: str) -> str:
     return "\n".join(cleaned_lines)
 
 
-def map_transcription(raw_text: str, api_key: Optional[str] = None) -> str:
-    """Send a pre-trimmed OCR transcription to Gemini and return JSON text."""
+def extract_genealogy_json(raw_text: str, api_key: Optional[str] = None) -> str:
+    """Send normalised OCR text to Gemini and return structured genealogy JSON.
+
+    Normalises *raw_text* with :func:`normalize_transcription`, then calls the
+    configured Gemini model with a strict system instruction that enforces
+    minified JSON output.  Raises :exc:`RuntimeError` when the API key is
+    absent from both the *api_key* argument and the environment.
+    """
     api_key = api_key or os.getenv(GEMINI_API_KEY_ENV)
     if not api_key:
         raise RuntimeError(
