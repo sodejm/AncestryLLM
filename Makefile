@@ -3,7 +3,7 @@ VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
 
-.PHONY: help quickstart doctor setup start stop test security hooks
+.PHONY: help quickstart doctor setup start stop test lint security hooks
 
 help:
 	@echo "Available targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  start       - Start services via bootstrapper"
 	@echo "  stop        - Stop docker compose services"
 	@echo "  test        - Run pytest"
+	@echo "  lint        - Run pre-commit quality checks"
 	@echo "  security    - Run semgrep, pip-audit, trivy, and gitleaks"
 
 quickstart:
@@ -39,6 +40,9 @@ stop:
 
 test:
 	@$(VENV_PYTHON) -m pytest --verbose
+
+lint:
+	@$(VENV_DIR)/bin/pre-commit run --all-files
 
 security:
 	@semgrep scan --config auto

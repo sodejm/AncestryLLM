@@ -34,13 +34,54 @@ git checkout -b feature/short-description
 - Add or update tests for behavioral changes.
 - Do not commit secrets or personal genealogy data.
 
-## Test Before Push
+## Linting Best Practices
 
-Run both local checks before opening a PR:
+Use automated checks locally before every push:
+
+1. Run repository linting and formatting hooks:
 
 ```bash
-pre-commit run --all-files
+make lint
+```
+
+2. If you add Python code, also run static analysis locally (recommended):
+
+```bash
+pip install ruff
+ruff check .
+```
+
+Best-practice expectations:
+
+- Keep imports organized and remove dead code.
+- Prefer explicit error handling and actionable error messages.
+- Avoid large refactors without accompanying tests.
+
+## Security Testing Best Practices
+
+Run security checks before opening or updating a PR:
+
+```bash
+make security
+```
+
+This executes:
+
+- `semgrep` for SAST logic and code security checks.
+- `pip-audit` for known package vulnerabilities.
+- `trivy config` for IaC misconfiguration scanning.
+- `gitleaks` for credential/secret detection.
+
+Treat any security finding as blocking until resolved or explicitly documented.
+
+## Test Before Push
+
+Run local quality checks before opening a PR:
+
+```bash
+make lint
 pytest --verbose
+make security
 ```
 
 ## Pull Request Checklist
@@ -49,7 +90,8 @@ Before opening a pull request, ensure:
 
 - Your branch is rebased on latest `main`.
 - Tests pass locally.
-- Security checks pass (`pre-commit` includes gitleaks).
+- Linting and formatting checks pass (`make lint`).
+- Security checks pass (`make security`).
 - Documentation is updated for behavior or configuration changes.
 - PR description includes: summary, rationale, risk, and test evidence.
 
