@@ -15,10 +15,10 @@ def test_normalize_handles_empty_input():
     assert gemini.normalize_transcription("") == ""
 
 
-def test_map_transcription_requires_api_key():
+def test_extract_genealogy_json_requires_api_key():
     with patch.dict("os.environ", {}, clear=True):
         try:
-            gemini.map_transcription("anything", api_key=None)
+            gemini.extract_genealogy_json("anything", api_key=None)
         except RuntimeError as exc:
             assert gemini.GEMINI_API_KEY_ENV in str(exc)
         else:
