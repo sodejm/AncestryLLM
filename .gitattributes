@@ -1,0 +1,12 @@
+# Normalize line endings to LF across platforms.
+* text=auto eol=lf
+
+# Treat genealogy databases as binary if ever force-added (defense in depth).
+*.rmtree binary
+*.rmgc binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Keep shell scripts LF.
+*.sh text eol=lf

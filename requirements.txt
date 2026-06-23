@@ -1,0 +1,6 @@
+langchain
+langchain-community
+sqlalchemy
+pip-audit
+pytest
+pytest-mock

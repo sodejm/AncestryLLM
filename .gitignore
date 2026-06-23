@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Secrets & private data  (NEVER commit these to a public repo)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# RootsMagic / genealogy databases are private personal data.
+*.rmtree
+*.rmgc
+*.db
+*.sqlite
+*.sqlite3
+family_trees/*
+!family_trees/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+*.egg
+.installed.cfg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test & coverage artifacts
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.dmypy.json
+
+# ---------------------------------------------------------------------------
+# OS & editor noise
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/

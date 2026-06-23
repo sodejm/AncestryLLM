@@ -1,0 +1,35 @@
+# Pre-commit hooks: run automatically before each commit to block secrets and
+# common mistakes from ever entering the public history.
+#
+# Setup:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run against all files on demand:
+#   pre-commit run --all-files
+repos:
+  # Use the locally installed gitleaks binary (brew) so no Go build is required.
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: Detect hardcoded secrets (gitleaks)
+        entry: gitleaks protect --staged --redact
+        language: system
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
