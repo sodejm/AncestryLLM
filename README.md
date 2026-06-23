@@ -114,6 +114,18 @@ flowchart LR
 
 ## Quickstart Guide
 
+### Fastest Path (Recommended)
+
+```bash
+git clone https://github.com/sodejm/AncestryLLM.git local-ai-genealogy-tool
+cd local-ai-genealogy-tool
+make quickstart
+```
+
+This runs environment diagnostics, creates `.venv`, installs dependencies,
+installs pre-commit hooks, creates `.env` from `.env.example` if needed, and
+starts the stack.
+
 1. **Clone the repository**
 
    ```bash
@@ -174,6 +186,17 @@ flowchart LR
 6. **Open the Web UI**
 
    Visit **http://localhost:3000** and start asking questions about your tree.
+
+### Useful Make Targets
+
+```bash
+make help       # list all tasks
+make doctor     # validate prerequisites
+make setup      # create venv + install deps
+make start      # run bootstrapper
+make test       # run pytest --verbose
+make security   # run semgrep, pip-audit, trivy, gitleaks
+```
 
 ## Configuration Reference
 
