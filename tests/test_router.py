@@ -99,7 +99,7 @@ def test_router_reuses_cached_agent_for_repeated_queries():
 def test_router_invalidates_cache_when_mtime_changes():
     """A stale cache entry (mtime changed) must trigger a full rebuild."""
     build_count = {"db": 0, "agent": 0}
-    mtime_value = [1000.0]
+    current_mtime = 1000.0
 
     def fake_sql_database_from_uri(uri, engine_args=None):
         build_count["db"] += 1
@@ -115,7 +115,8 @@ def test_router_invalidates_cache_when_mtime_changes():
         return FakeAgent()
 
     def fake_getmtime(path):
-        return mtime_value[0]
+        # Reads current_mtime from the enclosing test-function scope via closure.
+        return current_mtime
 
     with patch("tools.sql_router.os.path.exists", return_value=True), patch(
         "tools.sql_router.os.path.getmtime", side_effect=fake_getmtime
@@ -123,8 +124,8 @@ def test_router_invalidates_cache_when_mtime_changes():
         "tools.sql_router.SQLDatabase.from_uri", side_effect=fake_sql_database_from_uri
     ), patch("tools.sql_router._build_sql_agent", side_effect=fake_build_sql_agent):
         sql_router.route_sql_query("first query", tree_name="alpha")
-        # Simulate file modification.
-        mtime_value[0] = 2000.0
+        # Simulate file modification by bumping the mtime.
+        current_mtime = 2000.0
         sql_router.route_sql_query("second query", tree_name="alpha")
 
     # The mtime change must have triggered a second build.

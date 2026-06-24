@@ -31,7 +31,9 @@ SQL_AGENT_PREFIX = (
 # In-memory cache: maps (tree_path_str, model, base_url, num_ctx, top_k) -> (mtime, database, agent).
 # Entries are invalidated when the underlying .rmtree file changes (detected via mtime) or when
 # the active LLM configuration changes.  Never persisted to disk.
-_agent_cache: dict[tuple, tuple[float, object, object]] = {}
+_CacheKey = tuple[str, str, str, int, int]
+_CacheEntry = tuple[float, SQLDatabase, object]
+_agent_cache: dict[_CacheKey, _CacheEntry] = {}
 _cache_lock = threading.Lock()
 
 
@@ -108,7 +110,7 @@ def _build_sql_agent(database: SQLDatabase):
     )
 
 
-def _get_cache_key(tree_path: Path) -> tuple:
+def _get_cache_key(tree_path: Path) -> _CacheKey:
     """Build a cache key from the resolved tree path and active LLM configuration.
 
     Including the configuration variables means any environment-variable change
@@ -117,7 +119,7 @@ def _get_cache_key(tree_path: Path) -> tuple:
     return (str(tree_path), OLLAMA_MODEL, OLLAMA_BASE_URL, OLLAMA_NUM_CTX, SQL_AGENT_TOP_K)
 
 
-def _get_or_build_agent(tree_path: Path) -> tuple:
+def _get_or_build_agent(tree_path: Path) -> _CacheEntry:
     """Return a cached (database, agent) pair, rebuilding when the file or config changes.
 
     Cache hits avoid the cost of re-initialising SQLAlchemy and the LLM client
@@ -163,7 +165,7 @@ def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
     if not os.path.exists(tree_path):
         return f"Tree file not found: {tree_path.name}"
 
-    _, agent = _get_or_build_agent(tree_path)
+    _database, agent = _get_or_build_agent(tree_path)  # database owned by cache
     result = agent.invoke({"input": query})
     if isinstance(result, dict) and "output" in result:
         return str(result["output"])
