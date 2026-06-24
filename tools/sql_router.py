@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,12 @@ SQL_AGENT_PREFIX = (
     f"Always append a LIMIT clause of at most {SQL_AGENT_TOP_K} rows to every query. "
     "Read only the columns required to answer the question."
 )
+
+# In-memory cache: maps (tree_path_str, model, base_url, num_ctx, top_k) -> (mtime, database, agent).
+# Entries are invalidated when the underlying .rmtree file changes (detected via mtime) or when
+# the active LLM configuration changes.  Never persisted to disk.
+_agent_cache: dict[tuple, tuple[float, object, object]] = {}
+_cache_lock = threading.Lock()
 
 
 def list_family_tree_files() -> str:
@@ -101,6 +108,43 @@ def _build_sql_agent(database: SQLDatabase):
     )
 
 
+def _get_cache_key(tree_path: Path) -> tuple:
+    """Build a cache key from the resolved tree path and active LLM configuration.
+
+    Including the configuration variables means any environment-variable change
+    automatically produces a cache miss, so stale agents are never reused.
+    """
+    return (str(tree_path), OLLAMA_MODEL, OLLAMA_BASE_URL, OLLAMA_NUM_CTX, SQL_AGENT_TOP_K)
+
+
+def _get_or_build_agent(tree_path: Path) -> tuple:
+    """Return a cached (database, agent) pair, rebuilding when the file or config changes.
+
+    Cache hits avoid the cost of re-initialising SQLAlchemy and the LLM client
+    for repeated queries against the same tree.  Stale entries are detected via
+    the file's mtime so any write to the underlying ``.rmtree`` file causes a
+    transparent rebuild on the next query.
+    """
+    config_key = _get_cache_key(tree_path)
+    current_mtime = os.path.getmtime(tree_path)
+
+    with _cache_lock:
+        cached = _agent_cache.get(config_key)
+        if cached is not None:
+            cached_mtime, database, agent = cached
+            if cached_mtime == current_mtime:
+                return database, agent
+
+        # Cache miss or stale entry — build fresh objects.
+        database = SQLDatabase.from_uri(
+            _build_read_only_sqlite_uri(tree_path),
+            engine_args=_build_engine_args(),
+        )
+        agent = _build_sql_agent(database)
+        _agent_cache[config_key] = (current_mtime, database, agent)
+        return database, agent
+
+
 def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
     """Route *query* to the appropriate family-tree SQLite database.
 
@@ -119,12 +163,7 @@ def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
     if not os.path.exists(tree_path):
         return f"Tree file not found: {tree_path.name}"
 
-    database = SQLDatabase.from_uri(
-        _build_read_only_sqlite_uri(tree_path),
-        engine_args=_build_engine_args(),
-    )
-
-    agent = _build_sql_agent(database)
+    _, agent = _get_or_build_agent(tree_path)
     result = agent.invoke({"input": query})
     if isinstance(result, dict) and "output" in result:
         return str(result["output"])
