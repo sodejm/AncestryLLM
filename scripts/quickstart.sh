@@ -5,6 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "[quickstart] Running environment diagnostics"
+if [[ ! -f .env ]]; then
+  echo "[quickstart] Creating .env from .env.example"
+  cp .env.example .env
+  echo "[quickstart] Update .env with your keys and local storage paths before startup."
+fi
+
 ./scripts/doctor.sh || {
   echo "[quickstart] Please fix the issues above and re-run quickstart."
   exit 1
@@ -18,12 +24,6 @@ fi
 echo "[quickstart] Installing Python dependencies"
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
-
-if [[ ! -f .env ]]; then
-  echo "[quickstart] Creating .env from .env.example"
-  cp .env.example .env
-  echo "[quickstart] Update .env with your keys before OCR or frontier model use."
-fi
 
 echo "[quickstart] Installing pre-commit hook"
 .venv/bin/pip install pre-commit

@@ -14,6 +14,9 @@ This is a local-first project. To keep your data and credentials safe:
 
 - **Never commit `.env`.** Only `.env.example` (with empty placeholders) belongs
   in version control. Real API keys must stay local.
+- Local storage paths such as `FAMILY_TREES_HOST_DIR` and
+  `OPEN_WEBUI_DATA_DIR` are configured through `.env`; keep those paths local
+  and keep the RootsMagic mount read-only.
 - **Never commit `.rmtree` databases.** RootsMagic files contain private,
   personally identifiable genealogy data and are ignored by `.gitignore`.
 - API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are read

@@ -7,7 +7,7 @@ from typing import Optional
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_community.utilities import SQLDatabase
 
-FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
+DEFAULT_FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 # Bound the local model context window so it fits within a 24GB VRAM budget
@@ -16,7 +16,6 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 # Cap the rows the SQL agent may return to avoid memory-exhausting dumps from a
 # 15,000-person database.
 SQL_AGENT_TOP_K = int(os.getenv("SQL_AGENT_TOP_K", "20"))
-BASE_FAMILY_TREES_DIR = FAMILY_TREES_DIR.resolve(strict=False)
 
 # Concise prompt forces explicit column lists and LIMIT clauses to keep query
 # result sets small and predictable.
@@ -28,27 +27,37 @@ SQL_AGENT_PREFIX = (
 )
 
 
+def _get_family_trees_dir() -> Path:
+    return Path(os.getenv("FAMILY_TREES_DIR", str(DEFAULT_FAMILY_TREES_DIR)))
+
+
 def list_family_tree_files() -> str:
-    if not os.path.exists(FAMILY_TREES_DIR):
-        return f"No .rmtree files found in {FAMILY_TREES_DIR}."
+    family_trees_dir = _get_family_trees_dir()
+    if not os.path.exists(family_trees_dir):
+        return f"No .rmtree files found in {family_trees_dir}."
 
     tree_files = sorted(
-        file_name for file_name in os.listdir(FAMILY_TREES_DIR) if file_name.endswith(".rmtree")
+        file_name for file_name in os.listdir(family_trees_dir) if file_name.endswith(".rmtree")
     )
     if not tree_files:
-        return f"No .rmtree files found in {FAMILY_TREES_DIR}."
+        return f"No .rmtree files found in {family_trees_dir}."
 
     return "Available .rmtree files:\n" + "\n".join(f"- {file_name}" for file_name in tree_files)
 
 
 def _resolve_tree_path(tree_name: str) -> Path | None:
-    candidate = FAMILY_TREES_DIR / tree_name
+    family_trees_dir = _get_family_trees_dir()
+    base_family_trees_dir = family_trees_dir.resolve(strict=False)
+
+    candidate = family_trees_dir / tree_name
     if candidate.suffix != ".rmtree":
         candidate = candidate.with_suffix(".rmtree")
 
     candidate_path = candidate.resolve(strict=False)
     candidate_path_str = os.fspath(candidate_path)
-    if os.path.commonpath([str(BASE_FAMILY_TREES_DIR), candidate_path_str]) != str(BASE_FAMILY_TREES_DIR):
+    if os.path.commonpath([str(base_family_trees_dir), candidate_path_str]) != str(
+        base_family_trees_dir
+    ):
         return None
     return candidate_path
 

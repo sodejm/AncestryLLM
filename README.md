@@ -77,7 +77,7 @@ This is enforced at two independent layers:
 
    ```yaml
    volumes:
-     - ./family_trees:/app/backend/data/family_trees:ro
+     - ${FAMILY_TREES_HOST_DIR:-./family_trees}:${FAMILY_TREES_DIR:-/app/backend/data/family_trees}:ro
    ```
 
 2. **SQLite connection URI** — the router opens each database with the
@@ -141,9 +141,14 @@ starts the stack.
    cp .env.example .env
    ```
 
-   Then edit `.env` and set:
+   Then edit `.env` and set the paths you want to use locally. The defaults keep
+   the current behavior, but `FAMILY_TREES_HOST_DIR` can point at any directory
+   on your machine that already contains `.rmtree` files:
 
    ```dotenv
+   OPEN_WEBUI_DATA_DIR=open-webui-data
+   FAMILY_TREES_HOST_DIR=/absolute/path/to/RootsMagic
+   FAMILY_TREES_DIR=/app/backend/data/family_trees
    GEMINI_API_KEY=your-real-gemini-key
    ```
 
@@ -161,14 +166,16 @@ starts the stack.
 
 4. **Add a family tree**
 
-   Place one or more RootsMagic `.rmtree` files into the `family_trees/`
-   directory:
+   Either keep using the default `family_trees/` directory, or point
+   `FAMILY_TREES_HOST_DIR` at the directory where your RootsMagic files already
+   live. If you stay with the default:
 
    ```bash
    cp /path/to/MyTree.rmtree family_trees/
    ```
 
-   These files are mounted read-only and are never modified.
+   The configured RootsMagic directory is mounted read-only and is never
+   modified.
 
 5. **Bootstrap the stack**
 
@@ -210,6 +217,9 @@ All settings are read from environment variables (see [`.env.example`](.env.exam
 | `OLLAMA_MODEL` | `llama3.1` | Local model used by the SQL router. |
 | `OLLAMA_NUM_CTX` | `8192` | Bounded context window to fit within a typical VRAM budget. |
 | `SQL_AGENT_TOP_K` | `20` | Maximum rows the SQL agent may return per query. |
+| `OPEN_WEBUI_DATA_DIR` | `open-webui-data` | Host storage location for Open WebUI data. Leave the default to keep using the existing Docker volume name, or set a path outside the repo (or `./open-webui-data`, which is gitignored) to bind it to a directory. |
+| `FAMILY_TREES_HOST_DIR` | `./family_trees` | Host directory that contains your `.rmtree` files. Set an absolute path to read trees in place. |
+| `FAMILY_TREES_DIR` | `/app/backend/data/family_trees` | Container mount point for RootsMagic files. Change only if you need a different in-container path. |
 | `OPENAI_API_KEY` | _(empty)_ | Optional BYOK key to enable GPT-4o in Open WebUI. |
 | `ANTHROPIC_API_KEY` | _(empty)_ | Optional BYOK key to enable Claude 3.5 Sonnet in Open WebUI. |
 
@@ -253,8 +263,8 @@ pytest --verbose
 
 - **Close RootsMagic** before querying. While the database is treated as
   read-only here, a live editor holding the file can still cause lock contention.
-- Ensure the `.rmtree` file is readable by your user:
-  `chmod u+r family_trees/MyTree.rmtree`.
+- Ensure the configured `.rmtree` file is readable by your user, for example:
+  `chmod u+r /absolute/path/to/MyTree.rmtree`.
 - If you ever see SQLite Error 11 (malformed disk image), restore the tree from a
   RootsMagic backup — this project never writes to the file, so corruption
   originates from the live editor or a copy made mid-write.

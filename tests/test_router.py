@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -51,3 +52,16 @@ def test_router_gracefully_handles_missing_tree_name():
         result = sql_router.dynamic_sqlite_router("select 1", tree_name="missing")
 
     assert result == "Tree file not found: missing.rmtree"
+
+
+def test_router_uses_env_configured_family_trees_dir():
+    custom_dir = "/mounted/rootsmagic"
+
+    with patch.dict(os.environ, {"FAMILY_TREES_DIR": custom_dir}, clear=False), patch(
+        "tools.sql_router.os.path.exists", return_value=True
+    ), patch("tools.sql_router.os.listdir", return_value=["alpha.rmtree"]):
+        result = sql_router.dynamic_sqlite_router("select 1")
+        resolved_path = sql_router._resolve_tree_path("alpha")
+
+    assert result == "Available .rmtree files:\n- alpha.rmtree"
+    assert resolved_path == Path(f"{custom_dir}/alpha.rmtree")
