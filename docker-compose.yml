@@ -1,13 +1,14 @@
-version: '3.8'
-
 services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
     environment:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - FAMILY_TREES_DIR=${FAMILY_TREES_DIR:-/app/backend/data/family_trees}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_ADMIN_EMAIL=${WEBUI_ADMIN_EMAIL:-admin@localhost}
+      - WEBUI_ADMIN_PASSWORD=${WEBUI_ADMIN_PASSWORD}
       # OPTIONAL: Frontier Cloud Models (BYOK). The ':-' default keeps the value
       # empty when unset so a blank key never breaks container startup.
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -15,8 +16,10 @@ services:
     read_only: true
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
-      - ${OPEN_WEBUI_DATA_DIR:-open-webui-data}:/app/backend/data
+      - ${OPEN_WEBUI_DATA_DIR:-./open-webui-data}:/app/backend/data
       - ${FAMILY_TREES_HOST_DIR:-./family_trees}:${FAMILY_TREES_DIR:-/app/backend/data/family_trees}:ro
     tmpfs:
       - /tmp
