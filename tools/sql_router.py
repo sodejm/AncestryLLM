@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
 from langchain.agents import create_agent
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
-from langchain_community.utilities import SQLDatabase
+
+# `SQLDatabase`/`SQLDatabaseToolkit` still live in `langchain-community`, which
+# emits a package-level sunset DeprecationWarning at import time. No standalone
+# replacement package exists yet (see
+# https://github.com/langchain-ai/langchain-community/issues/674), so we suppress
+# only that specific notice here. TODO: drop this filter and migrate once an
+# official standalone SQL utilities package ships.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="`langchain-community` is being sunset",
+        category=DeprecationWarning,
+    )
+    from langchain_community.agent_toolkits import SQLDatabaseToolkit
+    from langchain_community.utilities import SQLDatabase
 
 DEFAULT_FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
