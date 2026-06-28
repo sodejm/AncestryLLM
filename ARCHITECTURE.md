@@ -12,6 +12,8 @@
 - Detects OS.
 - On macOS, ensures Homebrew + Ollama setup.
 - Starts Docker Compose stack.
+- Probes service readiness with maintained SDKs (the `ollama` client and
+  `httpx`) rather than shelling out to `curl`.
 
 2. Web interface: [docker-compose.yml](docker-compose.yml)
 - Runs Open WebUI on port 3000.
