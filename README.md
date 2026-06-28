@@ -265,8 +265,8 @@ All settings are read from environment variables (see [`.env.example`](.env.exam
 | `ANTHROPIC_API_KEY` | _(empty)_ | Optional BYOK key to enable Claude 3.5 Sonnet in Open WebUI. |
 
 > Some runtime integrations are imported lazily and only required when used:
-> `langchain-ollama` (local LLM) and `google-generativeai` (Gemini OCR). Install
-> them when you enable those features.
+> `langchain-ollama` (local LLM) and `google-genai` (Gemini OCR). Both are
+> declared in `requirements.txt` and installed by the standard setup.
 
 ## Running the Tests
 
