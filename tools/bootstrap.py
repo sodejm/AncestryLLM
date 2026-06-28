@@ -15,6 +15,13 @@ OLLAMA_BOOTSTRAP_MODELS = os.getenv(
 DOCKER_READY_TIMEOUT_SECONDS = int(os.getenv("DOCKER_READY_TIMEOUT_SECONDS", "120"))
 SERVICE_READY_TIMEOUT_SECONDS = int(os.getenv("SERVICE_READY_TIMEOUT_SECONDS", "180"))
 DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "localhost").strip().lower()
+# Readiness probes target the local service endpoints via maintained SDKs
+# (the `ollama` client and `httpx`) instead of shelling out to `curl`.
+OLLAMA_HEALTHCHECK_URL = os.getenv("OLLAMA_HEALTHCHECK_URL", "http://127.0.0.1:11434")
+OPEN_WEBUI_HEALTHCHECK_URL = os.getenv(
+    "OPEN_WEBUI_HEALTHCHECK_URL", "http://127.0.0.1:3000/"
+)
+HEALTHCHECK_POLL_SECONDS = int(os.getenv("HEALTHCHECK_POLL_SECONDS", "2"))
 
 
 def configure_ollama_runtime() -> None:
@@ -171,27 +178,39 @@ def ensure_docker_daemon(system_name: str) -> None:
 
 
 def wait_for_ollama_ready(timeout_seconds: int) -> None:
-    """Poll the local Ollama API until it responds or timeout is reached."""
-    deadline = time.time() + timeout_seconds
-    command = ["curl", "--silent", "--show-error", "--fail", "http://127.0.0.1:11434/api/tags"]
-    while time.time() < deadline:
-        if command_succeeds(command):
-            return
-        time.sleep(2)
+    """Poll the local Ollama API via the official SDK until ready or timeout."""
+    import httpx
+    import ollama
 
-    raise RuntimeError("Ollama did not become ready at http://127.0.0.1:11434/api/tags")
+    client = ollama.Client(host=OLLAMA_HEALTHCHECK_URL)
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            client.list()
+            return
+        except (ollama.ResponseError, httpx.HTTPError, OSError):
+            time.sleep(HEALTHCHECK_POLL_SECONDS)
+
+    raise RuntimeError(f"Ollama did not become ready at {OLLAMA_HEALTHCHECK_URL}")
 
 
 def wait_for_open_webui_ready(timeout_seconds: int) -> None:
-    """Poll Open WebUI until the HTTP endpoint responds or timeout is reached."""
-    deadline = time.time() + timeout_seconds
-    command = ["curl", "--silent", "--show-error", "--fail", "http://127.0.0.1:3000/"]
-    while time.time() < deadline:
-        if command_succeeds(command):
-            return
-        time.sleep(2)
+    """Poll Open WebUI via httpx until the endpoint responds or timeout is reached."""
+    import httpx
 
-    raise RuntimeError("Open WebUI did not become ready at http://127.0.0.1:3000/")
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            response = httpx.get(OPEN_WEBUI_HEALTHCHECK_URL, timeout=5)
+            if response.is_success:
+                return
+        except httpx.HTTPError:
+            pass
+        time.sleep(HEALTHCHECK_POLL_SECONDS)
+
+    raise RuntimeError(
+        f"Open WebUI did not become ready at {OPEN_WEBUI_HEALTHCHECK_URL}"
+    )
 
 
 def resolve_compose_files() -> list[str]:

@@ -11,6 +11,8 @@ setup(
         'langchain',
         'langchain-community',
         'langchain-ollama',
+        'ollama',
+        'httpx',
         'google-genai',
         'sqlalchemy',
     ],

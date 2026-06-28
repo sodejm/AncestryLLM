@@ -243,3 +243,47 @@ def test_ensure_ollama_models_errors_when_every_pull_fails():
     ), patch("tools.bootstrap.run_command", side_effect=RuntimeError("failed")):
         with pytest.raises(RuntimeError):
             bootstrap.ensure_ollama_models()
+
+def test_wait_for_ollama_ready_returns_when_client_lists_models():
+    fake_client = Mock()
+    fake_client.list.return_value = {"models": []}
+    with patch("ollama.Client", return_value=fake_client) as client_ctor, patch(
+        "tools.bootstrap.time.sleep"
+    ):
+        bootstrap.wait_for_ollama_ready(10)
+
+    client_ctor.assert_called_once_with(host=bootstrap.OLLAMA_HEALTHCHECK_URL)
+    fake_client.list.assert_called_once()
+
+
+def test_wait_for_ollama_ready_raises_after_timeout():
+    fake_client = Mock()
+    fake_client.list.side_effect = ConnectionError("ollama is down")
+    times = iter([1000.0, 1001.0, 2000.0])
+    with patch("ollama.Client", return_value=fake_client), patch(
+        "tools.bootstrap.time.sleep"
+    ), patch("tools.bootstrap.time.time", side_effect=lambda: next(times)):
+        with pytest.raises(RuntimeError):
+            bootstrap.wait_for_ollama_ready(10)
+
+
+def test_wait_for_open_webui_ready_returns_on_success():
+    response = Mock()
+    response.is_success = True
+    with patch("httpx.get", return_value=response) as httpx_get, patch(
+        "tools.bootstrap.time.sleep"
+    ):
+        bootstrap.wait_for_open_webui_ready(10)
+
+    httpx_get.assert_called_once_with(bootstrap.OPEN_WEBUI_HEALTHCHECK_URL, timeout=5)
+
+
+def test_wait_for_open_webui_ready_raises_after_timeout():
+    import httpx
+
+    times = iter([1000.0, 1001.0, 2000.0])
+    with patch("httpx.get", side_effect=httpx.ConnectError("webui is down")), patch(
+        "tools.bootstrap.time.sleep"
+    ), patch("tools.bootstrap.time.time", side_effect=lambda: next(times)):
+        with pytest.raises(RuntimeError):
+            bootstrap.wait_for_open_webui_ready(10)
