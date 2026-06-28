@@ -1,5 +1,7 @@
 langchain
 langchain-community
+langchain-ollama
+google-genai
 sqlalchemy
 pip-audit
 pytest
