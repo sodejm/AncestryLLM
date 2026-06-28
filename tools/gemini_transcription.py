@@ -51,13 +51,16 @@ def map_transcription(raw_text: str, api_key: Optional[str] = None) -> str:
 
     cleaned_text = normalize_transcription(raw_text)
 
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        GEMINI_MODEL,
-        system_instruction=GENEALOGY_SYSTEM_INSTRUCTION,
-        generation_config={"response_mime_type": "application/json"},
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=cleaned_text,
+        config=types.GenerateContentConfig(
+            system_instruction=GENEALOGY_SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+        ),
     )
-    response = model.generate_content(cleaned_text)
-    return response.text
+    return response.text or ""
