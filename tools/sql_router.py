@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from langchain_community.agent_toolkits import create_sql_agent
+from langchain.agents import create_agent
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 
 DEFAULT_FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
@@ -86,13 +87,27 @@ def _build_sql_agent(database: SQLDatabase):
         base_url=OLLAMA_BASE_URL,
         num_ctx=OLLAMA_NUM_CTX,
     )
-    return create_sql_agent(
-        llm=llm,
-        db=database,
-        verbose=False,
-        prefix=SQL_AGENT_PREFIX,
-        top_k=SQL_AGENT_TOP_K,
+    toolkit = SQLDatabaseToolkit(db=database, llm=llm)
+    return create_agent(
+        llm,
+        toolkit.get_tools(),
+        system_prompt=SQL_AGENT_PREFIX,
     )
+
+
+def _extract_agent_output(result: Any) -> str:
+    if isinstance(result, dict):
+        messages = result.get("messages")
+        if messages:
+            last_message = messages[-1]
+            content = getattr(last_message, "content", None)
+            if content is None and isinstance(last_message, dict):
+                content = last_message.get("content")
+            if content is not None:
+                return str(content)
+        if "output" in result:
+            return str(result["output"])
+    return str(result)
 
 
 def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
@@ -112,10 +127,8 @@ def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
     )
 
     agent = _build_sql_agent(database)
-    result = agent.invoke({"input": query})
-    if isinstance(result, dict) and "output" in result:
-        return str(result["output"])
-    return str(result)
+    result = agent.invoke({"messages": [{"role": "user", "content": query}]})
+    return _extract_agent_output(result)
 
 
 def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:

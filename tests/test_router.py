@@ -29,7 +29,7 @@ def test_router_builds_read_only_database_for_requested_tree():
         class FakeAgent:
             def invoke(self, payload):
                 calls["payload"] = payload
-                return {"output": "answer"}
+                return {"messages": [{"role": "assistant", "content": "answer"}]}
 
         return FakeAgent()
 
@@ -40,7 +40,9 @@ def test_router_builds_read_only_database_for_requested_tree():
 
     assert result == "answer"
     assert calls["uri"] == f"sqlite+pysqlite:///{fake_tree_path.as_posix()}?mode=ro&uri=true"
-    assert calls["payload"] == {"input": "select * from people"}
+    assert calls["payload"] == {
+        "messages": [{"role": "user", "content": "select * from people"}]
+    }
     assert calls["engine_args"]["pool_size"] == 5
     assert calls["engine_args"]["connect_args"] == {"check_same_thread": False}
 
