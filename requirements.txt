@@ -1,6 +1,9 @@
 langchain
 langchain-community
 sqlalchemy
+python-gedcom
+rapidfuzz
+python-dateutil
 pip-audit
 pytest
 pytest-mock
