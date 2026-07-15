@@ -1,0 +1,1 @@
+//a python tool to merge multiple ged com files. prompt the user to resolve conflict if people can not be resolved using a local ollama model or gemini for reasoning. 
