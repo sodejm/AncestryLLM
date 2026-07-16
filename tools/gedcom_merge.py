@@ -1,42 +1,16 @@
-"""Loss-minimising GEDCOM merge tool with optional AI adjudication.
+"""Merge GEDCOM 5.5-style files with conservative identity adjudication.
 
-The tool intentionally keeps a small, lossless representation of each GEDCOM
-record instead of serialising a third-party object model.  ``python-gedcom``
-is used as a standards-aware validation/semantic parser when installed, while
-the original GEDCOM lines remain the source of truth for output.  This matters
-because GEDCOM files commonly contain vendor tags, nested source citations,
-media links, notes, and custom facts that a convenient object model may not
-round-trip.
+The CLI reads two or more GEDCOM files and atomically writes one master file.
+Source fact blocks remain the data-fidelity authority, although xrefs, dates,
+headers, ordering, and line wrapping may be normalized.  A rooted export
+intentionally omits people outside the selected connected component.
 
-AI is a decision aid, not an authority over the data.  An AI response can say
-that two people are the same and can suggest which value should be displayed
-as the canonical summary value.  The merge still retains both conflicting
-facts as separate GEDCOM blocks, so a bad model response cannot destroy
-evidence.
-
-Examples::
-
-    python tools/gedcom_merge.py a.ged b.ged -o master.ged --ai-backend none
-    python tools/gedcom_merge.py *.ged --ai-backend ollama --auto
-    python tools/gedcom_merge.py *.ged --root-person @I123@ \\
-        --gedcom-version 5.5.5 -o rooted-master.ged
-    python tools/gedcom_merge.py *.ged --root-person "Jane Smith" \\
-        --gedcom-version 5.5.1 -o legacy-import.ged
-    OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
-        --ai-backend openai --openai-model gpt-5.4-mini \\
-        --credit-check best-effort --auto
-    OPENROUTER_API_KEY=... OPENROUTER_MANAGEMENT_KEY=... \\
-        python tools/gedcom_merge.py a.ged b.ged --ai-backend auto \\
-        --openrouter-model openrouter/auto --auto
-
-Recommended installation::
-
-    python3.12 -m venv .venv
-    . .venv/bin/activate
-    python -m pip install -r requirements.txt
-
-The parser accepts GEDCOM 5.5-style files.  It does not execute anything from
-an input file and it never writes credentials to the output.
+Deterministic scoring and optional AI may decide identity and choose a summary
+value, but conflicting source blocks remain in the output.  Missing facts are
+unknown rather than negative evidence, and remote prompts exclude notes,
+citations, media, and government identifiers.  See tools/README.md for the CLI
+contract, privacy boundaries, setup, and examples.  Private underscore-prefixed
+helpers are not a stable library API.
 """
 
 from __future__ import annotations
@@ -55,7 +29,7 @@ import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 try:
     from dotenv import load_dotenv
@@ -97,6 +71,119 @@ DEFAULT_OPENROUTER_MODELS = (
     "openai/gpt-5*",
     "google/gemini-*",
 )
+# Standard individual facts that can corroborate identity without exposing
+# free-form notes, source text, or government identifiers to an AI provider.
+# BIRT and DEAT are scored separately but remain here so alternative events
+# participate in comparison rather than being overwritten by one summary value.
+IDENTITY_FACT_TAGS = frozenset({
+    "ADOP",
+    "BAPM",
+    "BARM",
+    "BASM",
+    "BIRT",
+    "BLES",
+    "BURI",
+    "CAST",
+    "CENS",
+    "CHR",
+    "CHRA",
+    "CONF",
+    "CREM",
+    "DEAT",
+    "DSCR",
+    "EDUC",
+    "EMIG",
+    "EVEN",
+    "FCOM",
+    "GRAD",
+    "IMMI",
+    "NATI",
+    "NATU",
+    "OCCU",
+    "ORDN",
+    "PROB",
+    "PROP",
+    "RELI",
+    "RESI",
+    "RETI",
+    "TITL",
+})
+FAMILY_IDENTITY_FACT_TAGS = frozenset({
+    "ANUL",
+    "DIV",
+    "DIVF",
+    "ENGA",
+    "MARB",
+    "MARC",
+    "MARL",
+    "MARR",
+    "MARS",
+})
+COUNTRY_ALIASES = {
+    "america": "united states",
+    "england": "united kingdom",
+    "great britain": "united kingdom",
+    "scotland": "united kingdom",
+    "u k": "united kingdom",
+    "uk": "united kingdom",
+    "united states of america": "united states",
+    "us": "united states",
+    "u s": "united states",
+    "usa": "united states",
+    "u s a": "united states",
+    "wales": "united kingdom",
+}
+KNOWN_COUNTRY_NAMES = frozenset(COUNTRY_ALIASES.values()) | frozenset({
+    "argentina",
+    "australia",
+    "austria",
+    "belgium",
+    "brazil",
+    "bulgaria",
+    "canada",
+    "chile",
+    "china",
+    "croatia",
+    "cuba",
+    "czech republic",
+    "czechoslovakia",
+    "denmark",
+    "estonia",
+    "finland",
+    "france",
+    "germany",
+    "greece",
+    "hungary",
+    "iceland",
+    "india",
+    "ireland",
+    "israel",
+    "italy",
+    "japan",
+    "latvia",
+    "lithuania",
+    "luxembourg",
+    "mexico",
+    "netherlands",
+    "new zealand",
+    "norway",
+    "poland",
+    "portugal",
+    "prussia",
+    "romania",
+    "russia",
+    "serbia",
+    "slovakia",
+    "slovenia",
+    "south africa",
+    "soviet union",
+    "spain",
+    "sweden",
+    "switzerland",
+    "turkey",
+    "ukraine",
+    "yugoslavia",
+})
 LINE_RE = re.compile(r"^(?P<level>[0-9]{1,2})(?:\s+(?P<xref>@[^@\s]+@))?\s+"
                      r"(?P<tag>[A-Za-z0-9_]+)(?:\s+(?P<value>.*))?$")
 
@@ -137,7 +224,18 @@ class GedcomLine:
 
 
 def parse_gedcom_line(line: str, line_number: int = 0) -> GedcomLine:
-    """Parse one GEDCOM line without evaluating its contents."""
+    """Parse one GEDCOM line without evaluating its contents.
+
+    Args:
+        line: A physical GEDCOM line, with or without its newline terminator.
+        line_number: Optional one-based source location used in error messages.
+
+    Returns:
+        Parsed level, xref, uppercase tag, value, and untouched logical text.
+
+    Raises:
+        GedcomParseError: The line has an invalid level or GEDCOM grammar.
+    """
     raw = line.rstrip("\r\n").lstrip("\ufeff")
     if not re.match(r"^(?:0|[1-9][0-9]?)(?:\s|$)", raw):
         raise GedcomParseError(f"Invalid GEDCOM level {line_number}: {raw!r}")
@@ -185,6 +283,17 @@ def iter_gedcom_records(path: str | Path) -> Iterator[GedcomRecord]:
     of loading a complete parse tree for every source before any work starts.
     The deduplication index necessarily retains person summaries, but arbitrary
     non-person records are not duplicated in the person index.
+
+    Args:
+        path: UTF-8/UTF-8-BOM or UTF-16 GEDCOM file to stream.
+
+    Yields:
+        Complete level-zero records in source order.
+
+    Raises:
+        OSError: The file cannot be opened or read.
+        UnicodeError: The declared/sensed text cannot be decoded strictly.
+        GedcomParseError: A nonblank input line is structurally invalid.
     """
     file_path = Path(path).resolve()
     current: list[str] = []
@@ -489,7 +598,20 @@ def resolve_root_person(
     source_pointer_maps: Sequence[dict[str, str]],
     merged_pointer_map: dict[str, str],
 ) -> str:
-    """Resolve a pointer or unique full name to a canonical person pointer."""
+    """Resolve a pointer or unique full name to a canonical person pointer.
+
+    Args:
+        requested: Current/source xref or case-insensitive full name.
+        records: Surviving merged people.
+        source_pointer_maps: Per-file original-to-global xref mappings.
+        merged_pointer_map: Duplicate-to-canonical xref mappings.
+
+    Returns:
+        The canonical pointer used by the rooted export.
+
+    Raises:
+        ValueError: The person is absent or the supplied name is ambiguous.
+    """
     requested = requested.strip()
     pointers = {record.pointer for record in records}
     if requested in pointers:
@@ -522,7 +644,12 @@ def connected_tree_pointers(
     source_records: Iterable[GedcomRecord],
     merged_pointer_map: Optional[dict[str, str]] = None,
 ) -> tuple[set[str], set[str]]:
-    """Return all people and families in the root person's connected tree."""
+    """Return the complete family-connected component around one person.
+
+    The traversal follows spouse/partner and parent/child family membership in
+    both directions.  It intentionally includes collateral relatives connected
+    through retained family records; unrelated components are omitted.
+    """
     family_members = _family_members(source_records)
     if merged_pointer_map:
         family_members = {
@@ -572,7 +699,23 @@ def _load_python_gedcom(path: Path) -> None:
 
 
 def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
-    """Read sources twice: first for xref allocation, then for record content."""
+    """Load sources after allocating collision-free global xrefs.
+
+    Undefined references are namespaced as well as declared records.  This
+    prevents a dangling pointer in one file from binding accidentally to a
+    similarly named record in another file.
+
+    Args:
+        paths: GEDCOM files in deterministic source-priority order.
+
+    Returns:
+        Parsed documents with rewritten records and original-to-global maps.
+
+    Raises:
+        FileNotFoundError: A source path is not a regular file.
+        OSError: A source cannot be read.
+        GedcomParseError: A source contains invalid GEDCOM line structure.
+    """
     used: set[str] = set()
     sources: list[ParsedSource] = []
     for source_number, raw_path in enumerate(paths, 1):
@@ -610,7 +753,12 @@ def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
 
 
 def normalise_gedcom_date(raw_date: str) -> str:
-    """Return a best-effort GEDCOM date while leaving unknown text unchanged."""
+    """Normalize common dates without fabricating missing precision.
+
+    Existing GEDCOM ranges are preserved, common qualifiers are canonicalized,
+    and fully specified dates become ``DD MMM YYYY``.  Unrecognized text is
+    returned unchanged so normalization cannot erase source evidence.
+    """
     if not raw_date or not raw_date.strip():
         return raw_date
     original = raw_date.strip()
@@ -685,9 +833,137 @@ def _extract_year(date_value: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
+def _normalise_country(value: str) -> str:
+    """Return a comparison form for a country or country-like jurisdiction."""
+    normalised = " ".join(re.findall(r"[\w]+", value.casefold()))
+    return COUNTRY_ALIASES.get(normalised, normalised)
+
+
+def _country_from_place(place: str) -> str:
+    """Infer the country component from a comma-delimited GEDCOM place.
+
+    GEDCOM 5.5.x commonly stores jurisdictions from smallest to largest in a
+    single ``PLAC`` value.  The final component is therefore useful evidence,
+    but a one-component place such as ``London`` must not be labeled a country.
+    Recognized aliases such as ``USA`` are accepted without a comma.
+    """
+    components = [part.strip() for part in place.split(",") if part.strip()]
+    candidate = _normalise_country(components[-1] if components else place)
+    if candidate in KNOWN_COUNTRY_NAMES:
+        return candidate
+    return ""
+
+
+@dataclass(frozen=True, slots=True)
+class GenealogicalFact:
+    """Structured identity evidence extracted from one GEDCOM fact block.
+
+    The complete source block remains in ``IndividualRecord.raw_lines``.
+    This compact view exists only for comparison and bounded AI prompts.
+    """
+
+    tag: str
+    value: str = ""
+    date: str = ""
+    place: str = ""
+    country: str = ""
+
+    @property
+    def effective_country(self) -> str:
+        """Return an explicit country or a conservative place inference."""
+        return _normalise_country(self.country) or _country_from_place(self.place)
+
+    def summary(self) -> str:
+        """Return a concise, deterministic representation for comparison."""
+        parts = [part for part in (self.value, self.date, self.place) if part]
+        if self.effective_country and self.effective_country not in {
+            _normalise_country(part) for part in parts
+        }:
+            parts.append(self.effective_country)
+        return " | ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class RelativeIdentity:
+    """Bounded genealogical context for a partner, parent, or child.
+
+    Names, dates, places, and relationships are personal data.  They are kept
+    deliberately compact because this projection can be included in a remote
+    adjudication prompt when the operator enables a remote provider.
+    """
+
+    pointer: str
+    name: str
+    birth_date: str = ""
+    death_date: str = ""
+    relationship: str = ""
+    alternate_names: tuple[str, ...] = field(default_factory=tuple)
+    birth_place: str = ""
+    death_place: str = ""
+
+    def summary(self) -> str:
+        """Return a compact relative description that benefits sparse people."""
+        parts = [self.name or "(unknown)"]
+        if self.birth_date:
+            parts.append(f"b. {self.birth_date}")
+        if self.death_date:
+            parts.append(f"d. {self.death_date}")
+        if self.birth_place:
+            parts.append(f"b.place={self.birth_place}")
+        if self.death_place:
+            parts.append(f"d.place={self.death_place}")
+        if self.relationship:
+            parts.append(f"relationship={self.relationship}")
+        return " ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class MatchAssessment:
+    """Explain a composite identity score and whether auto-merge is safe."""
+
+    score: float
+    evidence_weight: float
+    compared_fields: tuple[str, ...]
+    conflicts: tuple[str, ...]
+
+    @property
+    def automatic_merge_safe(self) -> bool:
+        """Return whether independent evidence supports deterministic merge."""
+        personal_anchors = {
+            "birth date",
+            "birth place",
+            "birth country",
+            "death date",
+            "death place",
+            "death country",
+            "sex",
+            "occupation",
+            "residence",
+            "other standard facts",
+        }
+        relative_anchors = {"partners", "parents", "children"}
+        compared = set(self.compared_fields)
+        independent_anchor = bool(personal_anchors.intersection(compared)) or (
+            "family events" in compared
+            and len(relative_anchors.intersection(compared)) >= 2
+        )
+        return (
+            self.score >= 95.0
+            and self.evidence_weight >= 50.0
+            and len(self.compared_fields) >= 3
+            and not self.conflicts
+            and independent_anchor
+        )
+
+
 @dataclass
 class IndividualRecord:
-    """Deduplication summary plus the complete underlying INDI record."""
+    """Deduplication summary plus the complete underlying INDI record.
+
+    Missing summary fields mean "unknown," never "different."  Relationship
+    context is attached after all FAM records are available so a sparse aunt,
+    uncle, or parent can still be matched through well-documented relatives.
+    """
 
     pointer: str
     given_name: str = ""
@@ -702,6 +978,13 @@ class IndividualRecord:
     extra_fields: dict[str, list[str]] = field(default_factory=dict)
     raw_lines: list[str] = field(default_factory=list, repr=False, compare=False)
     family_links: tuple[str, ...] = field(default_factory=tuple)
+    family_references: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    alternate_names: tuple[str, ...] = field(default_factory=tuple)
+    facts: dict[str, tuple[GenealogicalFact, ...]] = field(default_factory=dict)
+    marriages: tuple[GenealogicalFact, ...] = field(default_factory=tuple)
+    partners: tuple[RelativeIdentity, ...] = field(default_factory=tuple)
+    parents: tuple[RelativeIdentity, ...] = field(default_factory=tuple)
+    children: tuple[RelativeIdentity, ...] = field(default_factory=tuple)
 
     @property
     def full_name(self) -> str:
@@ -722,21 +1005,106 @@ class IndividualRecord:
         """Return the death year, if present."""
         return _extract_year(self.death_date)
 
+    @property
+    def birth_country(self) -> str:
+        """Return the best explicit or inferred country of birth."""
+        return self.birth_countries[0] if self.birth_countries else ""
+
+    @property
+    def birth_countries(self) -> tuple[str, ...]:
+        """Return every distinct explicit or inferred birth country."""
+        countries = tuple(
+            fact.effective_country
+            for fact in self.facts.get("BIRT", ())
+            if fact.effective_country
+        )
+        fallback = _country_from_place(self.birth_place)
+        return tuple(dict.fromkeys(countries + ((fallback,) if fallback else ())))
+
+    @property
+    def death_country(self) -> str:
+        """Return the best explicit or inferred country of death."""
+        return self.death_countries[0] if self.death_countries else ""
+
+    @property
+    def death_countries(self) -> tuple[str, ...]:
+        """Return every distinct explicit or inferred death country."""
+        countries = tuple(
+            fact.effective_country
+            for fact in self.facts.get("DEAT", ())
+            if fact.effective_country
+        )
+        fallback = _country_from_place(self.death_place)
+        return tuple(dict.fromkeys(countries + ((fallback,) if fallback else ())))
+
+    @property
+    def occupations(self) -> tuple[GenealogicalFact, ...]:
+        """Return all standard occupation facts used as identity evidence."""
+        return self.facts.get("OCCU", ())
+
+    @property
+    def residences(self) -> tuple[GenealogicalFact, ...]:
+        """Return all residence facts, including their dates and places."""
+        return self.facts.get("RESI", ())
+
+    @property
+    def partner_names(self) -> tuple[str, ...]:
+        """Return known partner names without exposing family pointers."""
+        return tuple(relative.name for relative in self.partners if relative.name)
+
     def summary(self) -> str:
         """Return a prompt/logging summary without dumping sensitive notes."""
         parts = [f"[{self.pointer}] {self.full_name or '(unknown)'}"]
+        if self.alternate_names:
+            parts.append(f"alternate-names={list(self.alternate_names[:3])}")
         if self.birth_date:
             parts.append(f"b. {self.birth_date}")
         if self.birth_place:
             parts.append(f"b.place={self.birth_place}")
+        if self.birth_country:
+            parts.append(f"b.country={self.birth_country}")
+        if len(self.facts.get("BIRT", ())) > 1:
+            values = [fact.summary() for fact in self.facts["BIRT"][:3]]
+            parts.append(f"birth-alternatives={values}")
         if self.death_date:
             parts.append(f"d. {self.death_date}")
         if self.death_place:
             parts.append(f"d.place={self.death_place}")
+        if self.death_country:
+            parts.append(f"d.country={self.death_country}")
+        if len(self.facts.get("DEAT", ())) > 1:
+            values = [fact.summary() for fact in self.facts["DEAT"][:3]]
+            parts.append(f"death-alternatives={values}")
         if self.gender:
             parts.append(f"sex={self.gender}")
         if self.family_links:
             parts.append(f"family-links={len(self.family_links)}")
+        if self.occupations:
+            values = [fact.summary() for fact in self.occupations[:3]]
+            parts.append(f"occupations={values}")
+        if self.residences:
+            values = [fact.summary() for fact in self.residences[:3]]
+            parts.append(f"residences={values}")
+        if self.marriages:
+            values = [fact.summary() for fact in self.marriages[:3]]
+            parts.append(f"marriages={values}")
+        other_fact_values = [
+            f"{tag}:{fact.summary()}"
+            for tag, facts in sorted(self.facts.items())
+            if tag not in {"BIRT", "DEAT", "OCCU", "RESI"}
+            for fact in facts[:2]
+            if fact.summary()
+        ][:8]
+        if other_fact_values:
+            parts.append(f"other-facts={other_fact_values}")
+        for label, relatives in (
+            ("partners", self.partners),
+            ("parents", self.parents),
+            ("children", self.children),
+        ):
+            if relatives:
+                values = [relative.summary() for relative in relatives[:5]]
+                parts.append(f"{label}={values}")
         if self.source_file:
             parts.append(f"src={Path(self.source_file).name}")
         return "  ".join(parts)
@@ -770,35 +1138,122 @@ def _top_level_blocks(lines: list[str]) -> list[list[str]]:
     return blocks
 
 
+def _fact_from_block(block: Sequence[str]) -> GenealogicalFact:
+    """Extract comparable fields from one individual or family fact block.
+
+    ``PLAC`` is preferred for location.  Some writers instead emit the
+    structured ``ADDR/CITY/STAE/CTRY`` hierarchy, so those components form a
+    fallback.  Free-form notes and citations are intentionally excluded from
+    this comparison view while remaining untouched in the raw GEDCOM block.
+    """
+    first = parse_gedcom_line(block[0])
+    value = first.value.strip()
+    if value.upper() == "Y":
+        value = ""
+    date_value = ""
+    place_value = ""
+    country_value = ""
+    address_parts: dict[str, str] = {}
+    for index, line in enumerate(block[1:], 1):
+        child = parse_gedcom_line(line)
+        child_value = child.value.strip()
+        continuation_parts = [child_value]
+        for continuation_line in block[index + 1:]:
+            continuation = parse_gedcom_line(continuation_line)
+            if continuation.level <= child.level:
+                break
+            if continuation.tag == "CONC":
+                continuation_parts[-1] += continuation.value
+            elif continuation.tag == "CONT":
+                continuation_parts.append(continuation.value)
+        child_value = "\n".join(continuation_parts).strip()
+        if child.tag == "DATE" and not date_value:
+            date_value = normalise_gedcom_date(child_value)
+        elif child.tag == "PLAC" and not place_value:
+            place_value = child_value
+        elif child.tag == "CTRY" and not country_value:
+            country_value = child_value
+        elif child.tag in {"ADDR", "CITY", "STAE"} and child_value:
+            address_parts.setdefault(child.tag, child_value)
+    if not place_value and address_parts:
+        ordered = [
+            address_parts.get("ADDR", ""),
+            address_parts.get("CITY", ""),
+            address_parts.get("STAE", ""),
+            country_value,
+        ]
+        place_value = ", ".join(part for part in ordered if part)
+    return GenealogicalFact(
+        tag=first.tag,
+        value=value,
+        date=date_value,
+        place=place_value,
+        country=country_value,
+    )
+
+
+def _most_complete_fact(
+    facts: Sequence[GenealogicalFact],
+) -> Optional[GenealogicalFact]:
+    """Choose a display fact while retaining every alternative for scoring."""
+    if not facts:
+        return None
+    return max(
+        facts,
+        key=lambda fact: (
+            bool(fact.date),
+            len(fact.date),
+            bool(fact.place),
+            len(fact.place),
+            bool(fact.country),
+        ),
+    )
+
+
 def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
-    """Build a summary from a lossless INDI record."""
+    """Build structured identity evidence from a lossless INDI record.
+
+    Multiple names and event alternatives are retained.  The most complete
+    birth/death event becomes the compact display value, but all alternatives
+    remain in ``facts`` and ``raw_lines`` so comparison never discards them.
+    """
     lines = _normalise_record_dates(record.lines)
     name = surname = birth_date = birth_place = death_date = death_place = gender = ""
     family_links: list[str] = []
+    family_references: list[tuple[str, str]] = []
+    alternate_names: list[str] = []
+    facts: dict[str, list[GenealogicalFact]] = defaultdict(list)
     extra: dict[str, list[str]] = defaultdict(list)
     for block in _top_level_blocks(lines):
         first = parse_gedcom_line(block[0])
         if first.tag == "NAME":
-            name, surname = _name_parts(first.value)
+            given_name, family_name = _name_parts(first.value)
+            display_name = " ".join(
+                part for part in (given_name, family_name) if part
+            )
+            if not name and not surname:
+                name, surname = given_name, family_name
+            elif display_name:
+                alternate_names.append(display_name)
         elif first.tag == "SEX":
             gender = first.value.strip().upper()
         elif first.tag in {"FAMS", "FAMC"}:
             if first.value.strip():
                 family_links.append(first.value.strip())
+                family_references.append((first.tag, first.value.strip()))
         elif first.tag in {"BIRT", "DEAT"}:
-            date_value = place_value = ""
-            for line in block[1:]:
-                child = parse_gedcom_line(line)
-                if child.level == first.level + 1 and child.tag == "DATE":
-                    date_value = normalise_gedcom_date(child.value)
-                elif child.level == first.level + 1 and child.tag == "PLAC":
-                    place_value = child.value.strip()
-            if first.tag == "BIRT":
-                birth_date, birth_place = date_value, place_value
-            else:
-                death_date, death_place = date_value, place_value
+            facts[first.tag].append(_fact_from_block(block))
         else:
             extra[first.tag].append("\n".join(block) + "\n")
+            if first.tag in IDENTITY_FACT_TAGS:
+                facts[first.tag].append(_fact_from_block(block))
+
+    birth_fact = _most_complete_fact(facts.get("BIRT", ()))
+    if birth_fact is not None:
+        birth_date, birth_place = birth_fact.date, birth_fact.place
+    death_fact = _most_complete_fact(facts.get("DEAT", ()))
+    if death_fact is not None:
+        death_date, death_place = death_fact.date, death_fact.place
     return IndividualRecord(
         pointer=record.pointer,
         given_name=name,
@@ -813,7 +1268,131 @@ def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
         extra_fields=dict(extra),
         raw_lines=lines,
         family_links=tuple(family_links),
+        family_references=tuple(family_references),
+        alternate_names=tuple(dict.fromkeys(alternate_names)),
+        facts={tag: tuple(values) for tag, values in facts.items()},
     )
+
+
+def _relative_identity(
+    record: IndividualRecord,
+    relationship: str = "",
+) -> RelativeIdentity:
+    """Project a person into the bounded context shared with related people."""
+    return RelativeIdentity(
+        pointer=record.pointer,
+        name=record.full_name,
+        birth_date=record.birth_date,
+        death_date=record.death_date,
+        relationship=relationship,
+        alternate_names=record.alternate_names,
+        birth_place=record.birth_place,
+        death_place=record.death_place,
+    )
+
+
+def enrich_relationship_context(
+    people: Sequence[IndividualRecord],
+    source_records: Iterable[GedcomRecord],
+) -> list[IndividualRecord]:
+    """Attach marriages and relative identities from standard FAM records.
+
+    Family context is corroborating evidence, not a completeness requirement.
+    A person with no birth date is not penalized, and a richer child or partner
+    can support the match.  Unknown references are skipped because inventing a
+    relative identity would be more dangerous than omitting that evidence.
+
+    Args:
+        people: Parsed people whose pointers already match the family records.
+        source_records: All source records, including ``FAM`` records.
+
+    Returns:
+        New person objects with partner, parent, child, and marriage context.
+    """
+    by_pointer = {person.pointer: person for person in people}
+    partners: dict[str, list[RelativeIdentity]] = defaultdict(list)
+    parents: dict[str, list[RelativeIdentity]] = defaultdict(list)
+    children: dict[str, list[RelativeIdentity]] = defaultdict(list)
+    marriages: dict[str, list[GenealogicalFact]] = defaultdict(list)
+    pedigree_by_person_family: dict[tuple[str, str], str] = {}
+    for person in people:
+        for block in _top_level_blocks(person.raw_lines):
+            first = parse_gedcom_line(block[0])
+            if first.tag != "FAMC" or not first.value.strip():
+                continue
+            pedigree = ""
+            for line in block[1:]:
+                child = parse_gedcom_line(line)
+                if child.tag == "PEDI":
+                    pedigree = child.value.strip().casefold()
+                    break
+            if pedigree:
+                pedigree_by_person_family[
+                    (person.pointer, first.value.strip())
+                ] = pedigree
+
+    for family in source_records:
+        if family.tag != "FAM":
+            continue
+        partner_pointers: list[str] = []
+        child_pointers: list[str] = []
+        family_facts: list[GenealogicalFact] = []
+        for block in _top_level_blocks(family.lines):
+            first = parse_gedcom_line(block[0])
+            pointers = XREF_RE.findall(first.value)
+            if first.tag in {"HUSB", "WIFE"}:
+                partner_pointers.extend(pointers)
+            elif first.tag == "CHIL":
+                child_pointers.extend(pointers)
+            elif first.tag in FAMILY_IDENTITY_FACT_TAGS:
+                family_facts.append(_fact_from_block(block))
+
+        known_partners = [
+            by_pointer[pointer]
+            for pointer in dict.fromkeys(partner_pointers)
+            if pointer in by_pointer
+        ]
+        known_children = [
+            by_pointer[pointer]
+            for pointer in dict.fromkeys(child_pointers)
+            if pointer in by_pointer
+        ]
+        for person in known_partners:
+            partners[person.pointer].extend(
+                _relative_identity(other)
+                for other in known_partners
+                if other.pointer != person.pointer
+            )
+            children[person.pointer].extend(
+                _relative_identity(
+                    child,
+                    pedigree_by_person_family.get(
+                        (child.pointer, family.pointer),
+                        "",
+                    ),
+                )
+                for child in known_children
+            )
+            marriages[person.pointer].extend(family_facts)
+        for child in known_children:
+            pedigree = pedigree_by_person_family.get(
+                (child.pointer, family.pointer),
+                "",
+            )
+            parents[child.pointer].extend(
+                _relative_identity(parent, pedigree) for parent in known_partners
+            )
+
+    return [
+        dataclasses.replace(
+            person,
+            partners=tuple(dict.fromkeys(partners[person.pointer])),
+            parents=tuple(dict.fromkeys(parents[person.pointer])),
+            children=tuple(dict.fromkeys(children[person.pointer])),
+            marriages=tuple(dict.fromkeys(marriages[person.pointer])),
+        )
+        for person in people
+    ]
 
 
 def load_gedcom(path: str | Path) -> list[IndividualRecord]:
@@ -823,13 +1402,15 @@ def load_gedcom(path: str | Path) -> list[IndividualRecord]:
     disambiguates pointers and retains family/source records for output.
     This compatibility helper is useful for callers and tests.
     """
-    return [
+    source_records = list(iter_gedcom_records(path))
+    people = [
         _individual_from_record(
             dataclasses.replace(record, lines=_normalise_record_dates(record.lines))
         )
-        for record in iter_gedcom_records(path)
+        for record in source_records
         if record.tag == "INDI"
     ]
+    return enrich_relationship_context(people, source_records)
 
 
 def _text_similarity(left: str, right: str) -> float:
@@ -841,63 +1422,490 @@ def _text_similarity(left: str, right: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio() * 100
 
 
-def _year_similarity(left: Optional[int], right: Optional[int]) -> float:
-    """Score year agreement while giving missing values neutral credit."""
-    if left is None and right is None:
-        return 80.0
-    if left is None or right is None:
-        return 60.0
-    difference = abs(left - right)
-    if difference == 0:
+def _date_similarity(left: str, right: str) -> float:
+    """Compare genealogical dates while tolerating qualified/partial values."""
+    normalised_left = normalise_gedcom_date(left)
+    normalised_right = normalise_gedcom_date(right)
+    if normalised_left.casefold() == normalised_right.casefold():
         return 100.0
-    if difference <= 5:
-        return max(0.0, 100.0 - difference * 20)
+    left_years = [int(year) for year in re.findall(r"\b\d{4}\b", normalised_left)]
+    right_years = [int(year) for year in re.findall(r"\b\d{4}\b", normalised_right)]
+    if not left_years or not right_years:
+        return 0.0
+
+    def bounds(value: str, years: Sequence[int]) -> tuple[int, int]:
+        lower, upper = min(years), max(years)
+        if value.startswith(("ABT ", "CAL ", "EST ")):
+            return lower - 2, upper + 2
+        if value.startswith("BEF "):
+            return lower - 5, upper - 1
+        if value.startswith("AFT "):
+            return lower + 1, upper + 5
+        return lower, upper
+
+    left_lower, left_upper = bounds(normalised_left.upper(), left_years)
+    right_lower, right_upper = bounds(normalised_right.upper(), right_years)
+    if left_upper >= right_lower and right_upper >= left_lower:
+        return 90.0
+    gap = min(abs(left_upper - right_lower), abs(right_upper - left_lower))
+    if gap <= 5:
+        return max(0.0, 100.0 - gap * 20.0)
     return 0.0
 
 
-def similarity_score(a: IndividualRecord, b: IndividualRecord) -> float:
-    """Return a conservative composite score in the range 0--100."""
-    name_score = (
-        _text_similarity(a.full_name, b.full_name)
-        if a.full_name and b.full_name
-        else 50.0
+def _collection_similarity(
+    left: Sequence[Any],
+    right: Sequence[Any],
+    comparator: Callable[[Any, Any], float],
+) -> float:
+    """Compare evidence sets with one-to-one, completeness-tolerant matching.
+
+    Genealogy sources are asymmetrically complete.  Matching from the smaller
+    collection means an extra residence, spouse, or child in the richer source
+    does not count as a contradiction.  Each richer-source item can be used at
+    most once, preventing two same-named children from both matching one child.
+    The greedy assignment uses O(n) auxiliary memory so unusually large
+    families cannot create a quadratic score matrix.
+    """
+    if not left or not right:
+        return 0.0
+    smaller, larger = (left, right) if len(left) <= len(right) else (right, left)
+    available = list(range(len(larger)))
+    assigned_scores: list[float] = []
+    for item in smaller:
+        best_index, best_score = max(
+            (
+                (index, comparator(item, larger[index]))
+                for index in available
+            ),
+            key=lambda candidate: candidate[1],
+        )
+        available.remove(best_index)
+        assigned_scores.append(best_score)
+    return sum(assigned_scores) / len(assigned_scores)
+
+
+def _fact_similarity(left: GenealogicalFact, right: GenealogicalFact) -> float:
+    """Compare value, date, place, and country within the same fact type."""
+    if left.tag != right.tag:
+        return 0.0
+    components: list[tuple[float, float]] = []
+    if left.value and right.value:
+        components.append((_text_similarity(left.value, right.value), 0.30))
+    if left.date and right.date:
+        components.append((_date_similarity(left.date, right.date), 0.35))
+    if left.place and right.place:
+        components.append((_text_similarity(left.place, right.place), 0.25))
+    if left.effective_country and right.effective_country:
+        country_score = (
+            100.0
+            if left.effective_country == right.effective_country
+            else 0.0
+        )
+        components.append((country_score, 0.10))
+    if not components:
+        return 0.0
+    total_weight = sum(weight for _, weight in components)
+    return sum(score * weight for score, weight in components) / total_weight
+
+
+def _relative_similarity(
+    left: RelativeIdentity,
+    right: RelativeIdentity,
+) -> float:
+    """Compare relative names, life events, places, and pedigree roles."""
+    components: list[tuple[float, float]] = []
+    left_names = tuple(
+        value for value in (left.name, *left.alternate_names) if value
     )
-    if a.gender and b.gender:
-        gender_score = 100.0 if a.gender == b.gender else 0.0
-    else:
-        gender_score = 100.0
-    if a.family_links and b.family_links:
+    right_names = tuple(
+        value for value in (right.name, *right.alternate_names) if value
+    )
+    if left_names and right_names:
+        components.append((
+            _collection_similarity(left_names, right_names, _text_similarity),
+            0.50,
+        ))
+    if left.birth_date and right.birth_date:
+        components.append(
+            (_date_similarity(left.birth_date, right.birth_date), 0.20)
+        )
+    if left.death_date and right.death_date:
+        components.append(
+            (_date_similarity(left.death_date, right.death_date), 0.10)
+        )
+    if left.birth_place and right.birth_place:
+        components.append(
+            (_text_similarity(left.birth_place, right.birth_place), 0.10)
+        )
+    if left.death_place and right.death_place:
+        components.append(
+            (_text_similarity(left.death_place, right.death_place), 0.05)
+        )
+    left_birth_country = _country_from_place(left.birth_place)
+    right_birth_country = _country_from_place(right.birth_place)
+    if left_birth_country and right_birth_country:
+        components.append((
+            100.0 if left_birth_country == right_birth_country else 0.0,
+            0.05,
+        ))
+    if left.relationship and right.relationship:
         relationship_score = (
             100.0
-            if len(a.family_links) == len(b.family_links)
-            else 60.0
+            if left.relationship.casefold() == right.relationship.casefold()
+            else 20.0
         )
-    else:
-        relationship_score = 100.0
-    score = (
-        name_score * 0.60
-        + _year_similarity(a.birth_year, b.birth_year) * 0.18
-        + _year_similarity(a.death_year, b.death_year) * 0.10
-        + gender_score * 0.07
-        + relationship_score * 0.05
+        components.append((relationship_score, 0.10))
+    if not components:
+        return 0.0
+    total_weight = sum(weight for _, weight in components)
+    return sum(score * weight for score, weight in components) / total_weight
+
+
+def _event_values(
+    record: IndividualRecord,
+    tag: str,
+    attribute: str,
+    fallback: str,
+) -> tuple[str, ...]:
+    """Return every populated event value, with the summary as a fallback."""
+    values = tuple(
+        str(getattr(fact, attribute))
+        for fact in record.facts.get(tag, ())
+        if getattr(fact, attribute)
     )
-    return round(max(0.0, min(100.0, score)), 2)
+    if values:
+        return tuple(dict.fromkeys(values))
+    return (fallback,) if fallback else ()
+
+
+def _country_values(
+    record: IndividualRecord,
+    tag: str,
+    fallback: str,
+) -> tuple[str, ...]:
+    """Return normalized countries for every alternative event."""
+    values = tuple(
+        fact.effective_country
+        for fact in record.facts.get(tag, ())
+        if fact.effective_country
+    )
+    if values:
+        return tuple(dict.fromkeys(values))
+    return (fallback,) if fallback else ()
+
+
+def _event_years(record: IndividualRecord, tag: str, fallback: str) -> set[int]:
+    """Return every year represented by an event's source alternatives."""
+    values = _event_values(record, tag, "date", fallback)
+    return {
+        int(year)
+        for value in values
+        for year in re.findall(r"\b\d{4}\b", value)
+    }
+
+
+def _sets_are_distant(left: set[int], right: set[int], years: int = 5) -> bool:
+    """Return whether every cross-set year pairing exceeds a tolerance."""
+    return bool(left and right) and all(
+        abs(left_year - right_year) > years
+        for left_year in left
+        for right_year in right
+    )
+
+
+def _other_fact_similarity(
+    left: IndividualRecord,
+    right: IndividualRecord,
+) -> Optional[float]:
+    """Aggregate matching standard facts not scored by dedicated components."""
+    excluded = {"BIRT", "DEAT", "OCCU", "RESI"}
+    common_tags = (left.facts.keys() & right.facts.keys()) - excluded
+    scores = [
+        _collection_similarity(
+            left.facts[tag],
+            right.facts[tag],
+            _fact_similarity,
+        )
+        for tag in sorted(common_tags)
+        if left.facts[tag] and right.facts[tag]
+    ]
+    return sum(scores) / len(scores) if scores else None
+
+
+def assess_similarity(a: IndividualRecord, b: IndividualRecord) -> MatchAssessment:
+    """Assess identity using available person and family evidence.
+
+    Missing data is omitted from the denominator rather than assigned a low or
+    artificially neutral score.  This protects sparse collateral relatives.
+    Strong contradictions lower and cap the result, while extra facts on only
+    one record are preserved but do not count against the match.
+
+    Returns:
+        A score, the evidence considered, explicit conflicts, and a guarded
+        ``automatic_merge_safe`` decision used by merge orchestration.
+    """
+    components: list[tuple[str, float, float]] = []
+    conflicts: list[str] = []
+
+    def add(label: str, score: float, weight: float) -> None:
+        components.append((label, max(0.0, min(100.0, score)), weight))
+
+    left_names = tuple(
+        name for name in (a.full_name, *a.alternate_names) if name
+    )
+    right_names = tuple(
+        name for name in (b.full_name, *b.alternate_names) if name
+    )
+    if left_names and right_names:
+        add(
+            "name",
+            _collection_similarity(left_names, right_names, _text_similarity),
+            30.0,
+        )
+
+    event_components = (
+        (
+            "birth date",
+            _event_values(a, "BIRT", "date", a.birth_date),
+            _event_values(b, "BIRT", "date", b.birth_date),
+            _date_similarity,
+            12.0,
+        ),
+        (
+            "birth place",
+            _event_values(a, "BIRT", "place", a.birth_place),
+            _event_values(b, "BIRT", "place", b.birth_place),
+            _text_similarity,
+            8.0,
+        ),
+        (
+            "birth country",
+            _country_values(a, "BIRT", a.birth_country),
+            _country_values(b, "BIRT", b.birth_country),
+            _text_similarity,
+            7.0,
+        ),
+        (
+            "death date",
+            _event_values(a, "DEAT", "date", a.death_date),
+            _event_values(b, "DEAT", "date", b.death_date),
+            _date_similarity,
+            8.0,
+        ),
+        (
+            "death place",
+            _event_values(a, "DEAT", "place", a.death_place),
+            _event_values(b, "DEAT", "place", b.death_place),
+            _text_similarity,
+            6.0,
+        ),
+        (
+            "death country",
+            _country_values(a, "DEAT", a.death_country),
+            _country_values(b, "DEAT", b.death_country),
+            _text_similarity,
+            5.0,
+        ),
+    )
+    for label, left_values, right_values, comparator, weight in event_components:
+        if left_values and right_values:
+            add(
+                label,
+                _collection_similarity(
+                    left_values,
+                    right_values,
+                    comparator,
+                ),
+                weight,
+            )
+
+    if a.gender and b.gender:
+        gender_match = a.gender.casefold() == b.gender.casefold()
+        add("sex", 100.0 if gender_match else 0.0, 4.0)
+        if not gender_match:
+            conflicts.append("sex")
+
+    collection_components = (
+        ("occupation", a.occupations, b.occupations, _fact_similarity, 5.0),
+        ("residence", a.residences, b.residences, _fact_similarity, 7.0),
+        ("family events", a.marriages, b.marriages, _fact_similarity, 8.0),
+        ("partners", a.partners, b.partners, _relative_similarity, 12.0),
+        ("parents", a.parents, b.parents, _relative_similarity, 10.0),
+        ("children", a.children, b.children, _relative_similarity, 8.0),
+    )
+    collection_scores: dict[str, float] = {}
+    for label, left_values, right_values, comparator, weight in collection_components:
+        if left_values and right_values:
+            collection_score = _collection_similarity(
+                left_values,
+                right_values,
+                comparator,
+            )
+            collection_scores[label] = collection_score
+            add(label, collection_score, weight)
+
+    other_fact_score = _other_fact_similarity(a, b)
+    if other_fact_score is not None:
+        add("other standard facts", other_fact_score, 6.0)
+
+    left_birth_years = _event_years(a, "BIRT", a.birth_date)
+    right_birth_years = _event_years(b, "BIRT", b.birth_date)
+    left_death_years = _event_years(a, "DEAT", a.death_date)
+    right_death_years = _event_years(b, "DEAT", b.death_date)
+    if _sets_are_distant(left_birth_years, right_birth_years):
+        conflicts.append("birth year")
+    if _sets_are_distant(left_death_years, right_death_years):
+        conflicts.append("death year")
+    if left_birth_years and max(left_birth_years) - min(left_birth_years) > 5:
+        conflicts.append("birth date alternatives")
+    if right_birth_years and max(right_birth_years) - min(right_birth_years) > 5:
+        conflicts.append("birth date alternatives")
+    if left_death_years and max(left_death_years) - min(left_death_years) > 5:
+        conflicts.append("death date alternatives")
+    if right_death_years and max(right_death_years) - min(right_death_years) > 5:
+        conflicts.append("death date alternatives")
+
+    left_birth_countries = set(a.birth_countries)
+    right_birth_countries = set(b.birth_countries)
+    left_death_countries = set(a.death_countries)
+    right_death_countries = set(b.death_countries)
+    if (
+        left_birth_countries
+        and right_birth_countries
+        and left_birth_countries.isdisjoint(right_birth_countries)
+    ):
+        conflicts.append("birth country")
+    if (
+        left_death_countries
+        and right_death_countries
+        and left_death_countries.isdisjoint(right_death_countries)
+    ):
+        conflicts.append("death country")
+    if len(left_birth_countries) > 1 or len(right_birth_countries) > 1:
+        conflicts.append("birth country alternatives")
+    if len(left_death_countries) > 1 or len(right_death_countries) > 1:
+        conflicts.append("death country alternatives")
+    if collection_scores.get("partners", 100.0) < 50.0:
+        conflicts.append("partners")
+    if collection_scores.get("parents", 100.0) < 45.0:
+        conflicts.append("parents")
+    if (
+        len(a.children) >= 2
+        and len(b.children) >= 2
+        and collection_scores.get("children", 100.0) < 45.0
+    ):
+        conflicts.append("children")
+
+    evidence_weight = sum(weight for _, _, weight in components)
+    if evidence_weight:
+        score = sum(
+            component_score * weight
+            for _, component_score, weight in components
+        ) / evidence_weight
+    else:
+        score = 0.0
+    if len(components) == 1:
+        score = min(score, 88.0)
+    elif evidence_weight < 45.0:
+        score = min(score, 94.0)
+    if conflicts:
+        score = min(score - min(36.0, 12.0 * len(set(conflicts))), 84.0)
+    score = round(max(0.0, min(100.0, score)), 2)
+    return MatchAssessment(
+        score=score,
+        evidence_weight=evidence_weight,
+        compared_fields=tuple(label for label, _, _ in components),
+        conflicts=tuple(dict.fromkeys(conflicts)),
+    )
+
+
+def similarity_score(a: IndividualRecord, b: IndividualRecord) -> float:
+    """Return the evidence-aware identity score in the range 0--100."""
+    return assess_similarity(a, b).score
 
 
 def _blocking_keys(record: IndividualRecord) -> set[tuple[str, ...]]:
-    """Create several inexpensive keys so candidate generation is sub-quadratic."""
-    surname = re.sub(r"[^a-z0-9]", "", record.surname.casefold())
-    given = re.sub(r"[^a-z0-9]", "", record.given_name.casefold())
-    surname_initial = surname[:1] or "?"
-    given_initial = given[:1] or "?"
+    """Create inexpensive person, event, and family candidate keys.
+
+    Broad initial keys protect spelling variants and sparse records.  Relative
+    keys allow a person with no life dates to be found through a documented
+    partner, parent, or child.  Dated/placed event keys allow unnamed but
+    documented people to be compared without placing every anonymous record in
+    one quadratic bucket.
+    """
     year = record.birth_year
     buckets = {year // 5} if year is not None else {"?"}
     keys: set[tuple[str, ...]] = set()
-    for bucket in buckets:
-        keys.add(("sn", surname_initial, "gn", given_initial, "y", str(bucket)))
-        keys.add(("sn", surname_initial, "y", str(bucket)))
-        keys.add(("gn", given_initial, "y", str(bucket)))
-    keys.add(("name", surname_initial, given_initial))
+    names = [record.full_name, *record.alternate_names]
+    for display_name in names:
+        if not display_name:
+            continue
+        given_name, surname = _name_parts(display_name)
+        normalised_surname = re.sub(
+            r"[^a-z0-9]",
+            "",
+            surname.casefold(),
+        )
+        normalised_given = re.sub(
+            r"[^a-z0-9]",
+            "",
+            given_name.casefold(),
+        )
+        surname_initial = normalised_surname[:1] or "?"
+        given_initial = normalised_given[:1] or "?"
+        for bucket in buckets:
+            keys.add((
+                "sn",
+                surname_initial,
+                "gn",
+                given_initial,
+                "y",
+                str(bucket),
+            ))
+            keys.add(("sn", surname_initial, "y", str(bucket)))
+            keys.add(("gn", given_initial, "y", str(bucket)))
+        keys.add(("name", surname_initial, given_initial))
+
+    for label, date_value, place, countries in (
+        (
+            "birth",
+            record.birth_date,
+            record.birth_place,
+            record.birth_countries,
+        ),
+        (
+            "death",
+            record.death_date,
+            record.death_place,
+            record.death_countries,
+        ),
+    ):
+        event_year = _extract_year(date_value)
+        normalised_place = re.sub(r"[^a-z0-9]", "", place.casefold())[:18]
+        if event_year is not None:
+            keys.add((label, "year", str(event_year)))
+            for country in countries:
+                keys.add((label, "year-country", str(event_year), country))
+        if normalised_place:
+            keys.add((label, "place", normalised_place))
+
+    for role, relatives in (
+        ("partner", record.partners),
+        ("parent", record.parents),
+        ("child", record.children),
+    ):
+        for relative in relatives:
+            relative_name = re.sub(
+                r"[^a-z0-9]",
+                "",
+                relative.name.casefold(),
+            )
+            if relative_name:
+                keys.add((role, relative_name[:18]))
+                relative_year = _extract_year(relative.birth_date)
+                if relative_year is not None:
+                    keys.add((role, relative_name[:12], str(relative_year)))
     return keys
 
 
@@ -1554,7 +2562,18 @@ def merge_two_records(
     secondary: IndividualRecord,
     ai_verdict: Optional[dict[str, object]] = None,
 ) -> IndividualRecord:
-    """Merge summaries and complete raw blocks without deleting conflicts."""
+    """Merge summaries and complete raw blocks without deleting conflicts.
+
+    Args:
+        primary: Survivor whose pointer and source ordering are retained.
+        secondary: Duplicate whose unique facts and relationships are appended.
+        ai_verdict: Optional preferred summary values.  A suggestion is honored
+            only when it exactly equals a value found on one input record.
+
+    Returns:
+        A new record containing the union of facts, names, family references,
+        relative context, extra fields, and original level-one blocks.
+    """
     preferred = (ai_verdict or {}).get("preferred_values", {})
     preferred = preferred if isinstance(preferred, dict) else {}
 
@@ -1570,12 +2589,24 @@ def merge_two_records(
             first_date = normalise_gedcom_date(first)
             second_date = normalise_gedcom_date(second)
             return first_date if len(first_date) >= len(second_date) else second_date
+        if field_name in {"birth_place", "death_place"} and second:
+            first_parts = set(re.findall(r"[\w]+", first.casefold()))
+            second_parts = set(re.findall(r"[\w]+", second.casefold()))
+            if first_parts < second_parts:
+                return second
         return first
 
     merged_extra = {tag: list(values) for tag, values in primary.extra_fields.items()}
     for tag, values in secondary.extra_fields.items():
         target = merged_extra.setdefault(tag, [])
         target.extend(value for value in values if value not in target)
+    merged_facts: dict[str, tuple[GenealogicalFact, ...]] = {
+        tag: tuple(values) for tag, values in primary.facts.items()
+    }
+    for tag, values in secondary.facts.items():
+        merged_facts[tag] = tuple(
+            dict.fromkeys(merged_facts.get(tag, ()) + tuple(values))
+        )
     first_lines = (
         primary.raw_lines
         or _record_to_gedcom_lines(primary).rstrip("\n").splitlines()
@@ -1603,6 +2634,24 @@ def merge_two_records(
         family_links=tuple(
             dict.fromkeys(primary.family_links + secondary.family_links)
         ),
+        family_references=tuple(dict.fromkeys(
+            primary.family_references + secondary.family_references
+        )),
+        alternate_names=tuple(dict.fromkeys(
+            primary.alternate_names
+            + secondary.alternate_names
+            + (
+                (secondary.full_name,)
+                if secondary.full_name
+                and secondary.full_name != primary.full_name
+                else ()
+            )
+        )),
+        facts=merged_facts,
+        marriages=tuple(dict.fromkeys(primary.marriages + secondary.marriages)),
+        partners=tuple(dict.fromkeys(primary.partners + secondary.partners)),
+        parents=tuple(dict.fromkeys(primary.parents + secondary.parents)),
+        children=tuple(dict.fromkeys(primary.children + secondary.children)),
         extra_fields=merged_extra,
         raw_lines=merged_lines,
     )
@@ -1649,12 +2698,37 @@ def merge_records(
     ai_kwargs: Optional[dict[str, object]] = None,
     pointer_map: Optional[dict[str, str]] = None,
 ) -> list[IndividualRecord]:
-    """Deduplicate with union-find-style canonical pointers and safe fallbacks."""
+    """Merge candidate people while retaining every source fact and family edge.
+
+    Deterministic merging requires at least three independent comparable fields,
+    sufficient evidence weight, an identity anchor, and no hard conflict.  All
+    other candidates use the configured adjudicator and fail closed if it is
+    unavailable.  Merging parents never removes their child/family records;
+    ``pointer_map`` redirects every retained family edge to the survivor.
+
+    Args:
+        all_records: Globally namespaced, relationship-enriched people.
+        threshold: Minimum composite score considered for adjudication.
+        ai_backend: Resolver name, including ``none`` for deterministic only.
+        auto: Skip low-confidence operator confirmation when true.
+        ai_kwargs: Provider-specific options forwarded to the resolver.
+        pointer_map: Optional mutable map populated with survivor pointers.
+
+    Returns:
+        Canonical people in stable source order.
+
+    Raises:
+        ValueError: The threshold is outside 0 through 100.
+    """
     if not 0 <= threshold <= 100:
         raise ValueError("similarity threshold must be between 0 and 100")
     kwargs = ai_kwargs or {}
     by_pointer = {record.pointer: record for record in all_records}
     parent = {record.pointer: record.pointer for record in all_records}
+    cluster_members = {
+        record.pointer: [record]
+        for record in all_records
+    }
 
     def find(pointer: str) -> str:
         while parent[pointer] != pointer:
@@ -1669,16 +2743,46 @@ def merge_records(
         root_right = find(all_records[right].pointer)
         if root_left == root_right:
             continue
+        if len(cluster_members[root_left]) > 1 or len(cluster_members[root_right]) > 1:
+            pairwise_conflicts = {
+                conflict
+                for left_member in cluster_members[root_left]
+                for right_member in cluster_members[root_right]
+                for conflict in assess_similarity(
+                    left_member,
+                    right_member,
+                ).conflicts
+            }
+            if pairwise_conflicts:
+                log.warning(
+                    "Retaining candidate cluster %s/%s; a source member "
+                    "conflicts on %s",
+                    root_left,
+                    root_right,
+                    ", ".join(sorted(pairwise_conflicts)),
+                )
+                continue
         first, second = by_pointer[root_left], by_pointer[root_right]
         verdict: dict[str, object]
-        if score >= 95:
+        assessment = assess_similarity(first, second)
+        if assessment.automatic_merge_safe:
             verdict = {
                 "is_duplicate": True,
                 "confidence": 1.0,
-                "reasoning": "deterministic high score",
+                "reasoning": (
+                    "deterministic multi-field evidence: "
+                    + ", ".join(assessment.compared_fields)
+                ),
                 "preferred_values": {},
             }
         else:
+            if assessment.conflicts:
+                log.info(
+                    "Candidate %s/%s requires review; conflicts: %s",
+                    root_left,
+                    root_right,
+                    ", ".join(assessment.conflicts),
+                )
             verdict = _get_ai_verdict(first, second, ai_backend, kwargs)
             if verdict.get("_provider"):
                 log.info(
@@ -1696,6 +2800,7 @@ def merge_records(
             merged = merge_two_records(first, second, verdict)
             parent[root_right] = root_left
             by_pointer[root_left] = merged
+            cluster_members[root_left].extend(cluster_members.pop(root_right))
             log.info(
                 "Merged %s <- %s (score %.1f)",
                 root_left,
@@ -1718,7 +2823,15 @@ def merge_records(
 
 
 def _record_to_gedcom_lines(record: IndividualRecord) -> str:
-    """Serialize a synthetic summary for backwards-compatible callers."""
+    """Serialize structured individual data when no source block is available.
+
+    The normal CLI writes preserved source blocks.  This fallback supports
+    library callers that construct ``IndividualRecord`` objects directly, so it
+    must include alternative names, all structured individual facts, and typed
+    family references rather than silently reducing a person to vital dates.
+    Derived partner/parent/child summaries are not emitted as invented family
+    records; callers must provide source ``FAM`` records for those edges.
+    """
     lines = [f"0 {record.pointer} INDI\n"]
     name = (
         f"{record.given_name} /{record.surname}/".strip()
@@ -1727,19 +2840,42 @@ def _record_to_gedcom_lines(record: IndividualRecord) -> str:
     )
     if name:
         lines.append(f"1 NAME {name}\n")
+    for alternate_name in record.alternate_names:
+        if alternate_name and alternate_name != record.full_name:
+            lines.append(f"1 NAME {alternate_name}\n")
     if record.gender:
         lines.append(f"1 SEX {record.gender}\n")
-    events = (
+
+    def append_fact(fact: GenealogicalFact) -> None:
+        value = f" {fact.value}" if fact.value else ""
+        lines.append(f"1 {fact.tag}{value}\n")
+        if fact.date:
+            lines.append(f"2 DATE {fact.date}\n")
+        if fact.place:
+            lines.append(f"2 PLAC {fact.place}\n")
+            if fact.country:
+                lines.append(f"3 CTRY {fact.country}\n")
+        elif fact.country:
+            lines.append(f"2 PLAC {fact.country}\n")
+
+    for tag, date_value, place in (
         ("BIRT", record.birth_date, record.birth_place),
         ("DEAT", record.death_date, record.death_place),
-    )
-    for tag, date_value, place in events:
-        if date_value or place:
-            lines.append(f"1 {tag}\n")
-            if date_value:
-                lines.append(f"2 DATE {date_value}\n")
-            if place:
-                lines.append(f"2 PLAC {place}\n")
+    ):
+        facts = record.facts.get(tag, ())
+        if facts:
+            for fact in facts:
+                append_fact(fact)
+        elif date_value or place:
+            append_fact(GenealogicalFact(tag, date=date_value, place=place))
+    for tag, facts in sorted(record.facts.items()):
+        if tag in {"BIRT", "DEAT"} or tag in record.extra_fields:
+            continue
+        for fact in facts:
+            append_fact(fact)
+    for tag, pointer in record.family_references:
+        if tag in {"FAMS", "FAMC"} and pointer:
+            lines.append(f"1 {tag} {pointer}\n")
     for values in record.extra_fields.values():
         lines.extend(
             value if value.endswith("\n") else value + "\n"
@@ -1758,11 +2894,27 @@ def write_gedcom(
     include_families: Optional[set[str]] = None,
     gedcom_version: str = "5.5.5",
 ) -> None:
-    """Write an atomic master file, preserving all source root records.
+    """Write an atomic master file while preserving source fact blocks.
 
-    ``source_documents`` is the lossless path used by this module.  The older
-    ``source_parsers`` argument remains accepted for synthetic/unit callers;
-    DOM elements are copied only when they expose ``to_gedcom_string``.
+    Xrefs, headers, order, dates, and line wrapping may be normalized.  Rooted
+    exports intentionally omit unrelated people and families.  The older
+    ``source_parsers`` path remains for synthetic/unit callers; DOM elements
+    are copied only when they expose ``to_gedcom_string``.
+
+    Args:
+        records: Surviving merged people.
+        output_path: Destination, which must not be an input file.
+        source_parsers: Legacy parser objects for compatibility tests.
+        source_documents: Preferred source-preserving parsed documents.
+        pointer_map: Duplicate-to-canonical xref rewrites.
+        include_individuals: Optional rooted person allowlist.
+        include_families: Optional rooted family allowlist.
+        gedcom_version: ``5.5.5`` or compatibility mode ``5.5.1``.
+
+    Raises:
+        ValueError: The requested version is unsupported.
+        OSError: The destination directory or atomic replacement fails.
+        GedcomParseError: Emitted 5.5.5 structure fails validation.
     """
     if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
         raise ValueError(
@@ -2048,6 +3200,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             for record in source.records
             if record.tag == "INDI"
         ]
+        all_source_records = [
+            record for source in sources for record in source.records
+        ]
+        all_records = enrich_relationship_context(
+            all_records,
+            all_source_records,
+        )
         kwargs: dict[str, object] = {}
         if args.ai_backend == "ollama":
             kwargs = {"model": args.ollama_model, "base_url": args.ollama_url}
@@ -2105,11 +3264,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                 [source.pointer_map for source in sources],
                 pointer_map,
             )
-            all_source_records = [
-                record
-                for source in sources
-                for record in source.records
-            ]
             include_individuals, include_families = connected_tree_pointers(
                 root_pointer,
                 merged,

@@ -1,12 +1,12 @@
 """Tests for tools.gedcom_merge.
 
-Each test is self-contained: no GEDCOM files are read from disk; all
-individual records are constructed programmatically so the suite runs
-without the network, Ollama, or Gemini.
+Fixtures are constructed programmatically or written to pytest temporary
+directories, so the suite runs without the network, Ollama, or remote APIs.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -137,6 +137,198 @@ class TestIndividualRecord:
 
 
 # ---------------------------------------------------------------------------
+# Structured GEDCOM identity evidence
+# ---------------------------------------------------------------------------
+
+
+def _parse_individual(lines, source="/source.ged"):
+    """Parse one synthetic INDI block through the production extractor."""
+    return gm._individual_from_record(gm.GedcomRecord(lines, source, 0))
+
+
+class TestIdentityFactExtraction:
+    """Cover five high-risk fact-extraction and preservation edge cases."""
+
+    def test_country_aliases_are_normalized(self):
+        person = _parse_individual([
+            "0 @I1@ INDI",
+            "1 NAME Jane /Doe/",
+            "1 BIRT",
+            "2 PLAC Boston, Massachusetts, USA",
+            "1 DEAT",
+            "2 PLAC London, England",
+        ])
+        assert person.birth_country == "united states"
+        assert person.death_country == "united kingdom"
+
+    def test_multiple_birth_facts_are_retained(self):
+        person = _parse_individual([
+            "0 @I1@ INDI",
+            "1 NAME Jane /Doe/",
+            "1 BIRT",
+            "2 DATE 1900",
+            "1 BIRT",
+            "2 DATE 01 JAN 1900",
+            "2 PLAC Boston, Massachusetts, USA",
+        ])
+        assert len(person.facts["BIRT"]) == 2
+        assert person.birth_date == "01 JAN 1900"
+        assert "Boston" in person.birth_place
+
+    def test_occupation_and_residence_are_structured(self):
+        person = _parse_individual([
+            "0 @I1@ INDI",
+            "1 NAME Jane /Doe/",
+            "1 OCCU Textile worker",
+            "2 DATE 1920",
+            "2 PLAC Lowell, Massachusetts, USA",
+            "1 RESI",
+            "2 DATE 1930",
+            "2 ADDR 10 Main Street",
+            "3 CITY Boston",
+            "3 STAE Massachusetts",
+            "3 CTRY United States",
+        ])
+        assert person.occupations[0].value == "Textile worker"
+        assert person.occupations[0].date == "1920"
+        assert person.residences[0].effective_country == "united states"
+        assert "Boston" in person.residences[0].place
+
+    def test_alternate_names_are_not_overwritten(self):
+        person = _parse_individual([
+            "0 @I1@ INDI",
+            "1 NAME William /Smith/",
+            "1 NAME Bill /Smith/",
+            "1 NAME Wilhelm /Schmidt/",
+        ])
+        assert person.full_name == "William Smith"
+        assert person.alternate_names == ("Bill Smith", "Wilhelm Schmidt")
+
+    def test_standard_and_custom_facts_have_safe_roles(self):
+        person = _parse_individual([
+            "0 @I1@ INDI",
+            "1 NAME Jane /Doe/",
+            "1 CENS",
+            "2 DATE 01 APR 1940",
+            "2 PLAC Boston, Massachusetts, USA",
+            "1 _VENDOR secret vendor value",
+        ])
+        assert person.facts["CENS"][0].date == "01 APR 1940"
+        assert "_VENDOR" not in person.facts
+        assert "_VENDOR" in person.extra_fields
+
+
+# ---------------------------------------------------------------------------
+# Relationship enrichment
+# ---------------------------------------------------------------------------
+
+
+def _family_record(pointer, lines, sequence=0):
+    """Build one synthetic FAM record for relationship tests."""
+    return gm.GedcomRecord([f"0 {pointer} FAM", *lines], "/family.ged", sequence)
+
+
+class TestRelationshipEnrichment:
+    """Cover five partner, marriage, dependent, and pedigree edge cases."""
+
+    def test_partner_and_marriage_are_resolved(self):
+        people = [
+            _make_record(pointer="@I1@", given_name="Jane", surname="Doe"),
+            _make_record(pointer="@I2@", given_name="Alex", surname="Roe"),
+        ]
+        family = _family_record("@F1@", [
+            "1 WIFE @I1@",
+            "1 HUSB @I2@",
+            "1 MARR",
+            "2 DATE 15 JUN 1920",
+            "2 PLAC Boston, Massachusetts, USA",
+        ])
+        enriched = gm.enrich_relationship_context(people, [family])
+        assert enriched[0].partner_names == ("Alex Roe",)
+        assert enriched[0].marriages[0].date == "15 JUN 1920"
+        assert enriched[0].marriages[0].effective_country == "united states"
+
+    def test_parent_child_edges_are_direction_aware(self):
+        parents = [
+            _make_record(pointer="@I1@", given_name="Jane", surname="Doe"),
+            _make_record(pointer="@I2@", given_name="Alex", surname="Doe"),
+        ]
+        child = _make_record(
+            pointer="@I3@",
+            given_name="Casey",
+            surname="Doe",
+        )
+        family = _family_record("@F1@", [
+            "1 WIFE @I1@",
+            "1 HUSB @I2@",
+            "1 CHIL @I3@",
+        ])
+        enriched = gm.enrich_relationship_context([*parents, child], [family])
+        assert {relative.name for relative in enriched[0].children} == {"Casey Doe"}
+        assert {relative.name for relative in enriched[2].parents} == {
+            "Jane Doe",
+            "Alex Doe",
+        }
+
+    def test_child_details_support_sparse_parent(self):
+        parent = _make_record(
+            pointer="@I1@",
+            given_name="Jane",
+            surname="Doe",
+            birth_date="",
+            death_date="",
+        )
+        child = _make_record(
+            pointer="@I2@",
+            given_name="Casey",
+            surname="Doe",
+            birth_date="01 JAN 1940",
+        )
+        family = _family_record("@F1@", ["1 WIFE @I1@", "1 CHIL @I2@"])
+        enriched = gm.enrich_relationship_context([parent, child], [family])
+        assert enriched[0].children[0].birth_date == "01 JAN 1940"
+
+    def test_pedigree_relationship_is_preserved(self):
+        parent = _make_record(
+            pointer="@I1@",
+            given_name="Jane",
+            surname="Doe",
+        )
+        child = _make_record(
+            pointer="@I2@",
+            given_name="Casey",
+            surname="Doe",
+            raw_lines=[
+                "0 @I2@ INDI",
+                "1 NAME Casey /Doe/",
+                "1 FAMC @F1@",
+                "2 PEDI adopted",
+            ],
+        )
+        family = _family_record("@F1@", ["1 WIFE @I1@", "1 CHIL @I2@"])
+        enriched = gm.enrich_relationship_context([parent, child], [family])
+        assert enriched[0].children[0].relationship == "adopted"
+        assert enriched[1].parents[0].relationship == "adopted"
+
+    def test_multiple_unions_and_unknown_pointers_are_safe(self):
+        person = _make_record(pointer="@I1@", given_name="Jane", surname="Doe")
+        first = _family_record("@F1@", [
+            "1 WIFE @I1@",
+            "1 HUSB @MISSING@",
+            "1 MARR",
+            "2 DATE 1920",
+        ])
+        second = _family_record("@F2@", [
+            "1 WIFE @I1@",
+            "1 MARR",
+            "2 DATE 1930",
+        ])
+        enriched = gm.enrich_relationship_context([person], [first, second])
+        assert enriched[0].partners == ()
+        assert {fact.date for fact in enriched[0].marriages} == {"1920", "1930"}
+
+
+# ---------------------------------------------------------------------------
 # Similarity scoring
 # ---------------------------------------------------------------------------
 
@@ -157,7 +349,7 @@ class TestSimilarityScore:
         a = _make_record(birth_date="1850", death_date="1920", source_file="/a.ged")
         b = _make_record(birth_date="1780", death_date="1850", source_file="/b.ged")
         score = gm.similarity_score(a, b)
-        # Name is the same (60 % weight) but years are far off.
+        # Exact names cannot overcome two strong life-year contradictions.
         assert score < 80
 
     def test_gender_mismatch_reduces_score(self):
@@ -174,6 +366,259 @@ class TestSimilarityScore:
         b = _make_record(given_name="", surname="", source_file="/b.ged")
         score = gm.similarity_score(a, b)
         assert 0 <= score <= 100
+
+
+class TestEvidenceAwareSimilarity:
+    """Cover five false-merge and sparse-relative scoring edge cases."""
+
+    def test_name_only_cannot_auto_merge(self):
+        a = _make_record(
+            birth_date="",
+            death_date="",
+            gender="",
+            source_file="/a.ged",
+        )
+        b = _make_record(
+            pointer="@I2@",
+            birth_date="",
+            death_date="",
+            gender="",
+            source_file="/b.ged",
+        )
+        assessment = gm.assess_similarity(a, b)
+        assert assessment.score == 88.0
+        assert assessment.automatic_merge_safe is False
+
+    def test_sparse_parent_can_match_through_partner_and_child(self):
+        partner_a = gm.RelativeIdentity("@P1@", "Alex Doe", "1900")
+        partner_b = gm.RelativeIdentity("@P9@", "Alex Doe", "1900")
+        child_a = gm.RelativeIdentity("@C1@", "Casey Doe", "1940")
+        child_b = gm.RelativeIdentity("@C9@", "Casey Doe", "1940")
+        residence = gm.GenealogicalFact(
+            "RESI",
+            date="1930",
+            place="Boston, Massachusetts, USA",
+        )
+        a = _make_record(
+            birth_date="",
+            death_date="",
+            gender="",
+            partners=(partner_a,),
+            children=(child_a,),
+            facts={"RESI": (residence,)},
+            source_file="/a.ged",
+        )
+        b = _make_record(
+            pointer="@I2@",
+            birth_date="",
+            death_date="",
+            gender="",
+            partners=(partner_b,),
+            children=(child_b,),
+            facts={"RESI": (residence,)},
+            source_file="/b.ged",
+        )
+        assessment = gm.assess_similarity(a, b)
+        assert assessment.score == 100.0
+        assert assessment.automatic_merge_safe is True
+        family_only = gm.assess_similarity(
+            dataclasses.replace(a, facts={}),
+            dataclasses.replace(b, facts={}),
+        )
+        assert family_only.automatic_merge_safe is False
+
+    def test_conflicting_birth_countries_block_auto_merge(self):
+        a = _make_record(
+            birth_place="Boston, Massachusetts, USA",
+            source_file="/a.ged",
+        )
+        b = _make_record(
+            pointer="@I2@",
+            birth_place="Toronto, Ontario, Canada",
+            source_file="/b.ged",
+        )
+        assessment = gm.assess_similarity(a, b)
+        assert "birth country" in assessment.conflicts
+        assert assessment.automatic_merge_safe is False
+
+    def test_matching_work_and_residence_add_evidence(self):
+        occupation = gm.GenealogicalFact("OCCU", "Carpenter", "1920")
+        shared_residence = gm.GenealogicalFact(
+            "RESI",
+            date="1930",
+            place="Boston, Massachusetts, USA",
+        )
+        extra_residence = gm.GenealogicalFact(
+            "RESI",
+            date="1940",
+            place="Cambridge, Massachusetts, USA",
+        )
+        baseline_a = _make_record(birth_date="", death_date="", gender="")
+        baseline_b = _make_record(
+            pointer="@I2@",
+            birth_date="",
+            death_date="",
+            gender="",
+        )
+        rich_a = dataclasses.replace(
+            baseline_a,
+            facts={"OCCU": (occupation,), "RESI": (shared_residence,)},
+        )
+        rich_b = dataclasses.replace(
+            baseline_b,
+            facts={
+                "OCCU": (occupation,),
+                "RESI": (shared_residence, extra_residence),
+            },
+        )
+        assert gm.similarity_score(rich_a, rich_b) > gm.similarity_score(
+            baseline_a,
+            baseline_b,
+        )
+
+    def test_disjoint_well_populated_children_are_a_conflict(self):
+        left_children = (
+            gm.RelativeIdentity("@C1@", "Alpha One"),
+            gm.RelativeIdentity("@C2@", "Beta Two"),
+        )
+        right_children = (
+            gm.RelativeIdentity("@C8@", "Xylophone Zed"),
+            gm.RelativeIdentity("@C9@", "Quasar Voss"),
+        )
+        a = _make_record(children=left_children, source_file="/a.ged")
+        b = _make_record(
+            pointer="@I2@",
+            children=right_children,
+            source_file="/b.ged",
+        )
+        assessment = gm.assess_similarity(a, b)
+        assert "children" in assessment.conflicts
+        assert assessment.score <= 84.0
+        assert assessment.automatic_merge_safe is False
+
+
+class TestIdentitySafetyRegressions:
+    """Cover failures that could collapse distinct people or family events."""
+
+    def test_state_or_province_is_not_inferred_as_country(self):
+        assert gm._country_from_place("Boston, Massachusetts") == ""
+        assert gm._country_from_place("Toronto, Ontario") == ""
+        assert gm._country_from_place("Boston, Massachusetts, USA") == (
+            "united states"
+        )
+
+    def test_different_family_event_tags_do_not_match(self):
+        marriage = gm.GenealogicalFact("MARR", date="1920", place="Boston")
+        divorce = gm.GenealogicalFact("DIV", date="1920", place="Boston")
+        assert gm._fact_similarity(marriage, divorce) == 0.0
+
+    def test_conflicting_alternative_countries_force_review(self):
+        shared = gm.GenealogicalFact(
+            "BIRT",
+            date="1900",
+            place="Boston, Massachusetts, USA",
+        )
+        conflict = gm.GenealogicalFact(
+            "BIRT",
+            date="1900",
+            place="Toronto, Ontario, Canada",
+        )
+        a = _make_record(facts={"BIRT": (shared, conflict,)})
+        b = _make_record(pointer="@I2@", facts={"BIRT": (shared,)})
+        assessment = gm.assess_similarity(a, b)
+        assert "birth country alternatives" in assessment.conflicts
+        assert assessment.automatic_merge_safe is False
+
+    def test_one_relative_cannot_match_two_children(self):
+        left = (
+            gm.RelativeIdentity("@C1@", "Alex Smith", "1940"),
+            gm.RelativeIdentity("@C2@", "Alex Smith", "1940"),
+        )
+        right = (
+            gm.RelativeIdentity("@C8@", "Alex Smith", "1940"),
+            gm.RelativeIdentity("@C9@", "Quasar Jones", "1975"),
+        )
+        score = gm._collection_similarity(left, right, gm._relative_similarity)
+        assert score < 70.0
+
+    def test_transitive_cluster_conflict_retains_third_person(self):
+        usa = gm.GenealogicalFact(
+            "BIRT",
+            date="1900",
+            place="Boston, Massachusetts, USA",
+        )
+        canada = gm.GenealogicalFact(
+            "BIRT",
+            date="1900",
+            place="Toronto, Ontario, Canada",
+        )
+        a = _make_record(pointer="@A@", facts={"BIRT": (usa,)})
+        bridge = _make_record(
+            pointer="@B@",
+            birth_place="",
+            facts={},
+            source_file="/b.ged",
+        )
+        c = _make_record(
+            pointer="@C@",
+            facts={"BIRT": (canada,)},
+            source_file="/c.ged",
+        )
+        verdict = {
+            "is_duplicate": True,
+            "confidence": 1.0,
+            "reasoning": "test bridge",
+            "preferred_values": {},
+        }
+        candidates = [(0, 1, 100.0), (1, 2, 95.0)]
+        with (
+            patch(
+                "tools.gedcom_merge.find_duplicate_candidates",
+                return_value=candidates,
+            ),
+            patch("tools.gedcom_merge.ai_resolve", return_value=verdict),
+        ):
+            merged = gm.merge_records([a, bridge, c], auto=True)
+        assert {person.pointer for person in merged} == {"@A@", "@C@"}
+
+
+class TestAiPromptContext:
+    """Verify useful structured evidence is sent without free-form source data."""
+
+    def test_prompt_contains_extended_identity_context(self):
+        person = _make_record(
+            birth_place="Boston, Massachusetts, USA",
+            facts={
+                "OCCU": (gm.GenealogicalFact("OCCU", "Carpenter"),),
+                "RESI": (gm.GenealogicalFact("RESI", date="1930", place="Boston"),),
+            },
+            marriages=(gm.GenealogicalFact("MARR", date="1920"),),
+            partners=(gm.RelativeIdentity("@P1@", "Alex Smith"),),
+            children=(gm.RelativeIdentity("@C1@", "Casey Smith", "1940"),),
+        )
+        prompt = gm._build_dedup_prompt(person, person)
+        for expected in (
+            "b.country=united states",
+            "Carpenter",
+            "residences",
+            "marriages",
+            "Alex Smith",
+            "Casey Smith",
+        ):
+            assert expected in prompt
+
+    def test_prompt_excludes_notes_sources_and_vendor_text(self):
+        person = _make_record(
+            extra_fields={
+                "NOTE": ["1 NOTE private medical detail\n"],
+                "SOUR": ["1 SOUR secret source text\n"],
+                "_VENDOR": ["1 _VENDOR private extension\n"],
+            },
+        )
+        prompt = gm._build_dedup_prompt(person, person)
+        assert "private medical detail" not in prompt
+        assert "secret source text" not in prompt
+        assert "private extension" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +673,23 @@ class TestFindDuplicateCandidates:
         scores = [s for _, _, s in candidates]
         assert scores == sorted(scores, reverse=True)
 
+    def test_alternate_name_can_create_candidate_block(self):
+        a = _make_record(
+            pointer="@I1@",
+            given_name="William",
+            surname="Smith",
+            source_file="/a.ged",
+        )
+        b = _make_record(
+            pointer="@I2@",
+            given_name="Bill",
+            surname="Jones",
+            alternate_names=("William Smith",),
+            source_file="/b.ged",
+        )
+        candidates = gm.find_duplicate_candidates([a, b], threshold=70)
+        assert len(candidates) == 1
+
 
 # ---------------------------------------------------------------------------
 # Merging two records
@@ -260,7 +722,9 @@ class TestMergeTwoRecords:
 
     def test_extra_fields_combined(self):
         primary = _make_record(extra_fields={"OCCU": ["1 OCCU Farmer\n"]})
-        secondary = _make_record(extra_fields={"OCCU": ["1 OCCU Farmer\n", "1 OCCU Miller\n"]})
+        secondary = _make_record(extra_fields={
+            "OCCU": ["1 OCCU Farmer\n", "1 OCCU Miller\n"],
+        })
         merged = gm.merge_two_records(primary, secondary)
         assert "1 OCCU Farmer\n" in merged.extra_fields["OCCU"]
         assert "1 OCCU Miller\n" in merged.extra_fields["OCCU"]
@@ -272,6 +736,186 @@ class TestMergeTwoRecords:
         secondary = _make_record(given_name="Jonathan")
         merged = gm.merge_two_records(primary, secondary)
         assert merged.given_name == "John"
+
+
+class TestSyntheticSerialization:
+    """Ensure source-less library records retain all serializable evidence."""
+
+    def test_names_facts_and_typed_family_links_are_emitted(self):
+        record = _make_record(
+            alternate_names=("Jonathan Smith",),
+            facts={
+                "BIRT": (
+                    gm.GenealogicalFact(
+                        "BIRT",
+                        date="15 JUL 1850",
+                        place="Boston, Massachusetts, USA",
+                    ),
+                    gm.GenealogicalFact("BIRT", date="ABT 1851"),
+                ),
+                "OCCU": (gm.GenealogicalFact("OCCU", "Carpenter"),),
+            },
+            family_links=("@F1@", "@F2@"),
+            family_references=(("FAMS", "@F1@"), ("FAMC", "@F2@")),
+        )
+        text = gm._record_to_gedcom_lines(record)
+        assert "1 NAME Jonathan Smith" in text
+        assert text.count("1 BIRT") == 2
+        assert "1 OCCU Carpenter" in text
+        assert "1 FAMS @F1@" in text
+        assert "1 FAMC @F2@" in text
+
+
+class TestDependentPreservation:
+    """Verify that merging a sparse adult cannot discard collateral people."""
+
+    def test_child_contexts_from_both_records_are_retained(self):
+        child_a = gm.RelativeIdentity("@C1@", "Cousin One", "1940")
+        child_b = gm.RelativeIdentity("@C2@", "Cousin Two", "1942")
+        primary = _make_record(children=(child_a,))
+        secondary = _make_record(pointer="@I2@", children=(child_b,))
+        merged = gm.merge_two_records(primary, secondary)
+        assert {child.pointer for child in merged.children} == {"@C1@", "@C2@"}
+
+    def test_pointer_map_redirects_only_the_duplicate_adult(self):
+        child_a = gm.RelativeIdentity("@C1@", "Cousin One", "1940")
+        child_b = gm.RelativeIdentity("@C2@", "Cousin Two", "1942")
+        primary = _make_record(
+            pointer="@P1@",
+            children=(child_a,),
+            source_file="/a.ged",
+        )
+        secondary = _make_record(
+            pointer="@P2@",
+            children=(child_b,),
+            source_file="/b.ged",
+        )
+        first_child = _make_record(
+            pointer="@C1@",
+            given_name="Cousin",
+            surname="One",
+            source_file="/a.ged",
+        )
+        second_child = _make_record(
+            pointer="@C2@",
+            given_name="Cousin",
+            surname="Two",
+            source_file="/b.ged",
+        )
+        pointer_map = {}
+
+        def duplicate(left, right, **kwargs):
+            is_parent_pair = {left.pointer, right.pointer} == {"@P1@", "@P2@"}
+            return {
+                "is_duplicate": is_parent_pair,
+                "confidence": 0.99,
+                "reasoning": "same adult" if is_parent_pair else "different",
+                "preferred_values": {},
+            }
+
+        with patch("tools.gedcom_merge.ai_resolve", side_effect=duplicate):
+            merged = gm.merge_records(
+                [primary, secondary, first_child, second_child],
+                threshold=70,
+                auto=True,
+                pointer_map=pointer_map,
+            )
+        assert pointer_map["@P2@"] == "@P1@"
+        assert pointer_map["@C1@"] == "@C1@"
+        assert pointer_map["@C2@"] == "@C2@"
+        assert {record.pointer for record in merged} >= {"@P1@", "@C1@", "@C2@"}
+
+    def test_family_records_keep_both_children_after_parent_merge(self, tmp_path):
+        parent_a = _make_record(
+            pointer="@P1@",
+            family_links=("@F1@",),
+            family_references=(("FAMS", "@F1@"),),
+            source_file="/a.ged",
+        )
+        parent_b = _make_record(
+            pointer="@P2@",
+            family_links=("@F2@",),
+            family_references=(("FAMS", "@F2@"),),
+            source_file="/b.ged",
+        )
+        child_a = _make_record(
+            pointer="@C1@",
+            given_name="Cousin",
+            surname="One",
+            family_links=("@F1@",),
+            family_references=(("FAMC", "@F1@"),),
+            source_file="/a.ged",
+        )
+        child_b = _make_record(
+            pointer="@C2@",
+            given_name="Cousin",
+            surname="Two",
+            family_links=("@F2@",),
+            family_references=(("FAMC", "@F2@"),),
+            source_file="/b.ged",
+        )
+        family_a = _family_record("@F1@", [
+            "1 HUSB @P1@",
+            "1 CHIL @C1@",
+        ])
+        family_b = _family_record("@F2@", [
+            "1 HUSB @P2@",
+            "1 CHIL @C2@",
+        ])
+        head = gm.GedcomRecord([
+            "0 HEAD",
+            "1 GEDC",
+            "2 VERS 5.5.5",
+            "1 CHAR UTF-8",
+        ], "/a.ged", 0)
+        sources = [gm.ParsedSource(
+            Path("/a.ged"),
+            [head, family_a, family_b],
+            {},
+        )]
+        pointer_map = {"@P2@": "@P1@"}
+        merged_parent = gm.merge_two_records(parent_a, parent_b)
+        output = tmp_path / "dependents.ged"
+        gm.write_gedcom(
+            [merged_parent, child_a, child_b],
+            output,
+            source_documents=sources,
+            pointer_map=pointer_map,
+        )
+        text = output.read_text(encoding="utf-8")
+        assert "0 @C1@ INDI" in text
+        assert "0 @C2@ INDI" in text
+        assert "1 CHIL @C1@" in text
+        assert "1 CHIL @C2@" in text
+        assert text.count("1 HUSB @P1@") == 2
+        assert "1 FAMS @F1@" in text
+        assert "1 FAMS @F2@" in text
+        assert "1 FAMC @F1@" in text
+        assert "1 FAMC @F2@" in text
+
+    def test_pedigree_qualifier_survives_output(self, tmp_path):
+        child = _make_record(
+            pointer="@C1@",
+            raw_lines=[
+                "0 @C1@ INDI",
+                "1 NAME Cousin /One/",
+                "1 FAMC @F1@",
+                "2 PEDI adopted",
+            ],
+        )
+        head = gm.GedcomRecord([
+            "0 HEAD",
+            "1 GEDC",
+            "2 VERS 5.5.5",
+            "1 CHAR UTF-8",
+        ], "/a.ged", 0)
+        family = _family_record("@F1@", ["1 CHIL @C1@"])
+        source = gm.ParsedSource(Path("/a.ged"), [head, family], {})
+        output = tmp_path / "pedigree.ged"
+        gm.write_gedcom([child], output, source_documents=[source])
+        text = output.read_text(encoding="utf-8")
+        assert "1 FAMC @F1@\n2 PEDI adopted" in text
+        assert "1 CHIL @C1@" in text
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +937,11 @@ class TestParseAiResponse:
         assert result["is_duplicate"] is False
 
     def test_markdown_fenced_json(self):
-        raw = "```json\n{\"is_duplicate\": true, \"confidence\": 0.9, \"reasoning\": \"ok\"}\n```"
+        raw = (
+            "```json\n"
+            '{"is_duplicate": true, "confidence": 0.9, "reasoning": "ok"}'
+            "\n```"
+        )
         result = gm._parse_ai_response(raw)
         assert result["is_duplicate"] is True
 
@@ -394,8 +1042,13 @@ class TestAiResolveGemini:
         fake_genai = types.ModuleType("google.generativeai")
         fake_google = types.ModuleType("google")
         fake_google.generativeai = fake_genai  # type: ignore[attr-defined]
-        with patch.dict("sys.modules", {"google": fake_google, "google.generativeai": fake_genai}), \
-             patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict(
+                "sys.modules",
+                {"google": fake_google, "google.generativeai": fake_genai},
+            ),
+            patch.dict("os.environ", {}, clear=True),
+        ):
             with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
                 gm.ai_resolve_gemini(a, b, api_key=None)
 
@@ -404,7 +1057,10 @@ class TestAiResolveGemini:
         b = _make_record(pointer="@I2@", source_file="/b.ged")
 
         fake_response = MagicMock()
-        fake_response.text = '{"is_duplicate": true, "confidence": 0.92, "reasoning": "same"}'
+        fake_response.text = (
+            '{"is_duplicate": true, "confidence": 0.92, '
+            '"reasoning": "same"}'
+        )
 
         fake_model = MagicMock()
         fake_model.generate_content.return_value = fake_response

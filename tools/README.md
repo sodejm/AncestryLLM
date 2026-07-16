@@ -6,8 +6,21 @@ tags, resolves cross-file pointers, optionally exports only the connected tree
 around a root person, and can use local or remote AI to adjudicate uncertain
 duplicate people.
 
-AI is used only for duplicate decisions. A model cannot delete a conflicting
-fact: both source fact blocks remain in the merged GEDCOM.
+AI adjudicates uncertain identity and may suggest which source value should be
+the canonical summary. It cannot delete a conflicting fact: both source fact
+blocks remain in the merged GEDCOM.
+
+## Directory and API status
+
+- `gedcom_merge.py` is the supported command-line entry point and contains the
+  reusable parsing, scoring, merge, and writing functions.
+- `bootstrap.py`, `gemini_transcription.py`, and `sql_router.py` support other
+  project workflows; they are not part of GEDCOM merging.
+- Complex public entry points document their inputs, outputs, failures, and
+  safety restrictions. Small value-object accessors remain self-describing.
+  Private helpers may change as GEDCOM importer behavior evolves.
+- Keep this README, function contracts, and behavior tests in the same change
+  as implementation updates.
 
 ## Quick start
 
@@ -36,6 +49,45 @@ python tools/gedcom_merge.py tree-a.ged tree-b.ged \
 ```
 
 Use `python tools/gedcom_merge.py --help` for every option.
+
+## Identity scoring and family safety
+
+Candidate scores use only evidence available on both records. A missing birth
+date, death date, residence, or relative is unknown and is omitted from the
+score denominator; it is never assigned a low score. Additional facts found in
+only one source are retained without counting against that person.
+
+The scorer compares:
+
+- primary and alternate names;
+- all birth and death dates, places, and explicit or inferred countries;
+- sex when both records provide it;
+- occupations and dated/placed residences;
+- marriage, engagement, annulment, separation, and divorce facts, compared
+  only against the same GEDCOM event tag;
+- partner, parent, and child names plus available life dates;
+- biological, adopted, foster, and other `PEDI` relationship values; and
+- corroborating standard facts such as baptism, burial, census, immigration,
+  nationality, education, religion, title, property, and retirement.
+
+Name agreement alone is capped below deterministic-merge confidence. Automatic
+merging requires at least three independent fields, sufficient evidence weight,
+no hard contradiction, and either a person-level anchor or a matching family
+event plus two distinct relative categories. Names plus relatives alone route
+to AI or manual review instead of collapsing two common-name people. Sex,
+distant life years,
+different birth/death countries, incompatible partners/parents, or two
+well-populated but disjoint child sets force review or retention.
+
+Family records remain separate root records in the output. When two parents are
+merged, every `FAMS`, `FAMC`, `HUSB`, `WIFE`, and `CHIL` edge is rewritten to
+the survivor rather than deleted. A sparse aunt therefore is not rejected for
+lacking a birth date, and her better-documented spouse, parents, or children can
+support identity without putting cousins at risk.
+
+Free-form notes, citations, media, source text, custom tags, and government
+identifiers remain in the GEDCOM but are excluded from remote prompts. They are
+too sensitive or ambiguous to be safe default identity evidence.
 
 ## Environment and API keys
 
@@ -98,6 +150,11 @@ cost/quality policy. By default, this tool restricts it to OpenAI GPT-5 and
 Google Gemini model families, denies providers that collect prompt data, and
 requires zero-data-retention endpoints. Use `--no-openrouter-zdr` only after a
 deliberate privacy review.
+
+With `--ai-backend auto`, a configured and funded OpenRouter route is preferred.
+The decision prompt still passes through OpenRouter before reaching a downstream
+provider; ZDR and `data_collection=deny` constrain retention and downstream
+selection, but do not make OpenRouter a local processor.
 
 For strict account-credit checking, set both keys:
 
@@ -164,9 +221,13 @@ python tools/gedcom_merge.py tree-a.ged tree-b.ged \
 ### Why direct providers use `best-effort`
 
 OpenRouter documents an account-credit endpoint for management keys. Normal
-OpenAI and Gemini inference keys do not currently have a documented API that
-returns remaining prepaid balance. Their dashboards show billing information,
-but an authentication/model probe is not proof of available credits.
+As verified on 2026-07-15, normal OpenAI and Gemini inference keys do not have a
+documented API that returns remaining prepaid balance. Their dashboards show
+billing information, but an authentication/model probe is not proof of
+available credits. See [OpenAI prepaid
+billing](https://help.openai.com/en/articles/8264778-what-is-prepaid-billing),
+the [OpenAI Usage API](https://platform.openai.com/docs/api-reference/usage),
+and [Gemini billing](https://ai.google.dev/gemini-api/docs/billing).
 
 The default `--credit-check required` therefore blocks direct OpenAI and Gemini
 before any person data is sent. `--credit-check best-effort` is an explicit
@@ -177,6 +238,13 @@ Credit preflights contain credentials and billing metadata only—never names,
 dates, relationships, GEDCOM lines, or model prompts. Auto routing may fall
 back after a failed preflight, but it does not retry an already-submitted
 person prompt through a second remote provider.
+
+Remote decision prompts contain the bounded person summaries listed in
+"Identity scoring and family safety," source filenames, and GEDCOM pointers.
+They do not contain notes, citations, media, government/external identifiers,
+or custom vendor text. GEDCOM pointers and source filenames are internal
+identifiers and are included. Use `none` or local Ollama when names, dates,
+places, relationships, pointers, or filenames must not leave the computer.
 
 ## Rooted tree export
 
@@ -212,8 +280,8 @@ python tools/gedcom_merge.py tree-a.ged tree-b.ged \
   --gedcom-version 5.5.5 --ai-backend none --auto -o master.ged
 ```
 
-If a destination rejects that version declaration, create a 5.5.1 compatibility
-export from the same source inputs:
+If a destination rejects that version declaration, create a 5.5.1
+header/version fallback from the same source inputs:
 
 ```bash
 python tools/gedcom_merge.py tree-a.ged tree-b.ged \
@@ -221,7 +289,9 @@ python tools/gedcom_merge.py tree-a.ged tree-b.ged \
   -o master-5.5.1.ged
 ```
 
-For Geni, prefer the 5.5.1 export first: [Geni's GEDCOM
+This option does not perform a complete dialect downgrade or prove 5.5.1
+conformance; test the result in the target importer. For Geni, prefer the 5.5.1
+header/version fallback first: [Geni's GEDCOM
 guidance](https://help.geni.com/hc/en-us/articles/229705167-How-can-I-export-my-GEDCOM)
 identifies 5.5.1 as its standard export type, and [its
 importer](https://help.geni.com/hc/en-us/articles/229705127-Can-I-import-a-GEDCOM-into-Geni)
@@ -238,14 +308,19 @@ increase data-loss risk.
 
 ## Merge safety and review
 
-- Cross-file candidates are blocked by name/year keys before fuzzy scoring,
-  reducing unnecessary AI calls and memory use.
-- Very high deterministic matches can merge without AI.
+- Cross-file candidates are blocked by names, year buckets, and documented
+  relatives before fuzzy scoring, reducing unnecessary AI calls and memory use.
+- Only independently supported, conflict-free deterministic matches merge
+  without AI.
 - Uncertain pairs go to the configured adjudicator.
 - AI suggestions can choose a canonical displayed value only from source
   values; conflicts remain as alternative event blocks.
-- Remote errors and invalid JSON fail closed: both people are retained.
-- Output is written atomically; 5.5.5 output is validated before replacement.
+- Inference failures and invalid JSON fail closed: both people are retained.
+  Credit-preflight failures may try another configured route before any person
+  prompt is submitted.
+- Output is written atomically; 5.5.5 output receives structural grammar and
+  reference validation before replacement. This is not complete specification
+  conformance certification.
 - Input code is never evaluated and unsafe deserialization is not used.
 
 Omit `--auto` to receive interactive confirmation for lower-confidence AI
@@ -291,17 +366,7 @@ Install the tested dependency ranges from the repository root:
 python -m pip install -r requirements.txt
 ```
 
-The relevant packages are:
-
-```text
-python-gedcom==1.1.0
-rapidfuzz>=3.14.1
-python-dateutil>=2.9.0
-python-dotenv>=1.1.0,<2
-openai>=2.45.0,<3
-google-genai>=2.12.0,<3
-openrouter>=0.11.37,<0.12
-```
+`requirements.txt` is the single source of truth for dependency ranges.
 
 Run checks with:
 
@@ -309,3 +374,18 @@ Run checks with:
 python -m pytest -q tests/test_gedcom_merge.py
 python -m py_compile tools/gedcom_merge.py
 ```
+
+## Documentation conventions
+
+Documentation follows the [MIT Communication Lab coding and comment
+guidance](https://mitcommlab.mit.edu/broad/commkit/coding-and-comment-style/)
+and [Google documentation best
+practices](https://google.github.io/styleguide/docguide/best_practices.html):
+
+- descriptive names and small structured helpers carry the primary explanation;
+- comments explain risks, invariants, and design choices rather than restating
+  the next line;
+- public contracts state inputs, outputs, failures, and important restrictions;
+- the simplest working command appears first;
+- behavior described in a contract receives a focused test; and
+- stale or duplicated prose is removed instead of maintained in two places.
