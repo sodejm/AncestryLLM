@@ -313,6 +313,71 @@ class TestParseAiResponse:
 
 
 # ---------------------------------------------------------------------------
+# Remote credit gate (unit - no network)
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteCreditGate:
+    """Verify that no decision data can bypass the strict remote gate."""
+
+    def test_direct_openai_is_blocked_under_required_policy(self):
+        with pytest.raises(gm.RemoteCreditError, match="Cannot verify openai"):
+            gm.ensure_remote_credit(
+                "openai",
+                api_key="fake-key",
+                policy="required",
+            )
+
+    def test_direct_provider_can_be_explicitly_best_effort(self):
+        status = gm.ensure_remote_credit(
+            "gemini",
+            api_key="fake-key",
+            policy="best-effort",
+        )
+        assert status.checked is False
+        assert status.remaining_usd is None
+
+    def test_openrouter_management_balance_passes(self):
+        payload = {
+            "data": {"total_credits": 10.0, "total_usage": 2.5},
+        }
+        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+            status = gm.ensure_remote_credit(
+                "openrouter",
+                api_key="inference-key",
+                management_key="management-key",
+                policy="required",
+                minimum_credit_usd=1.0,
+            )
+        assert status.checked is True
+        assert status.remaining_usd == pytest.approx(7.5)
+
+    def test_openrouter_key_limit_is_not_account_balance(self):
+        payload = {"data": {"limit_remaining": 5.0}}
+        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+            with pytest.raises(gm.RemoteCreditError, match="not the account"):
+                gm.ensure_remote_credit(
+                    "openrouter",
+                    api_key="inference-key",
+                    policy="required",
+                )
+
+    def test_openrouter_insufficient_balance_is_blocked(self):
+        payload = {
+            "data": {"total_credits": 10.0, "total_usage": 9.995},
+        }
+        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+            with pytest.raises(gm.RemoteCreditError, match="at least"):
+                gm.ensure_remote_credit(
+                    "openrouter",
+                    api_key="inference-key",
+                    management_key="management-key",
+                    policy="required",
+                    minimum_credit_usd=0.01,
+                )
+
+
+# ---------------------------------------------------------------------------
 # Gemini AI resolver (unit – no network)
 # ---------------------------------------------------------------------------
 
@@ -356,7 +421,11 @@ class TestAiResolveGemini:
             "sys.modules",
             {"google": fake_google, "google.generativeai": fake_genai},
         ), patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}):
-            result = gm.ai_resolve_gemini(a, b)
+            result = gm.ai_resolve_gemini(
+                a,
+                b,
+                credit_policy="best-effort",
+            )
 
         assert result["is_duplicate"] is True
         assert result["confidence"] == pytest.approx(0.92)
@@ -531,6 +600,18 @@ class TestBuildArgParser:
         ap = gm._build_arg_parser()
         args = ap.parse_args(["a.ged", "b.ged", "--ai-backend", "gemini"])
         assert args.ai_backend == "gemini"
+
+    def test_ai_backend_openrouter(self):
+        ap = gm._build_arg_parser()
+        args = ap.parse_args(
+            ["a.ged", "b.ged", "--ai-backend", "openrouter"]
+        )
+        assert args.ai_backend == "openrouter"
+
+    def test_credit_check_defaults_to_required(self):
+        ap = gm._build_arg_parser()
+        args = ap.parse_args(["a.ged", "b.ged"])
+        assert args.credit_check == "required"
 
     def test_auto_flag(self):
         ap = gm._build_arg_parser()

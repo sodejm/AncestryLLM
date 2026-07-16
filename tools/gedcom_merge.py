@@ -23,7 +23,10 @@ Examples::
     python tools/gedcom_merge.py *.ged --root-person "Jane Smith" \\
         --gedcom-version 5.5.1 -o legacy-import.ged
     OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
-        --ai-backend openai --openai-model gpt-4.1-mini --auto
+        --ai-backend openai --openai-model gpt-5.4-mini \\
+        --credit-check best-effort --auto
+    OPENROUTER_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
+        --ai-backend auto --openrouter-model openrouter/auto --auto
 
 Recommended installation::
 
@@ -54,6 +57,16 @@ from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
 
 try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional in minimal installations
+    load_dotenv = None
+
+if load_dotenv is not None:
+    # Search from the caller/script location upward.  Existing process
+    # variables win, so deployment secrets are never overwritten by .env.
+    load_dotenv(override=False)
+
+try:
     from rapidfuzz import fuzz as _rapidfuzz
 except ImportError:  # pragma: no cover - exercised in minimal installations
     _rapidfuzz = None
@@ -75,12 +88,43 @@ AI_CONFIDENCE_AUTO_ACCEPT = 0.85
 MAX_AI_TEXT = 2_000
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
+REMOTE_CREDIT_POLICIES = ("required", "best-effort", "off")
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+DEFAULT_OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "openrouter/auto",
+)
+DEFAULT_OPENROUTER_MODELS = (
+    "openai/gpt-5*",
+    "google/gemini-*",
+)
 LINE_RE = re.compile(r"^(?P<level>[0-9]{1,2})(?:\s+(?P<xref>@[^@\s]+@))?\s+"
                      r"(?P<tag>[A-Za-z0-9_]+)(?:\s+(?P<value>.*))?$")
 
 
 class GedcomParseError(ValueError):
     """Raised when an input line cannot be interpreted as a GEDCOM line."""
+
+
+class RemoteCreditError(RuntimeError):
+    """Raised when a remote provider cannot pass the configured credit gate."""
+
+
+@dataclass(frozen=True, slots=True)
+class CreditStatus:
+    """Result of a provider preflight that never contains genealogy data.
+
+    ``checked`` is true only for an account-level balance.  A numeric
+    ``remaining_usd`` can still be merely a per-key cap when ``checked`` is
+    false.  This distinction prevents an authentication, key-limit, or model
+    probe from being misrepresented as a real account credit check.
+    """
+
+    provider: str
+    checked: bool
+    remaining_usd: Optional[float]
+    detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -899,6 +943,42 @@ def _build_dedup_prompt(a: IndividualRecord, b: IndividualRecord) -> str:
     )
 
 
+def _dedup_response_schema() -> dict[str, object]:
+    """Return one strict schema shared by every structured-output backend."""
+    fact_fields = (
+        "given_name",
+        "surname",
+        "birth_date",
+        "birth_place",
+        "death_date",
+        "death_place",
+        "gender",
+    )
+    return {
+        "type": "object",
+        "properties": {
+            "is_duplicate": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "reasoning": {"type": "string"},
+            "preferred_values": {
+                "type": "object",
+                "properties": {
+                    name: {"type": "string"} for name in fact_fields
+                },
+                "required": list(fact_fields),
+                "additionalProperties": False,
+            },
+        },
+        "required": [
+            "is_duplicate",
+            "confidence",
+            "reasoning",
+            "preferred_values",
+        ],
+        "additionalProperties": False,
+    }
+
+
 def _parse_ai_response(response_text: str) -> dict[str, object]:
     """Parse and clamp an AI response to a safe, typed decision structure."""
     cleaned = re.sub(r"```(?:json)?", "", response_text, flags=re.IGNORECASE).strip()
@@ -933,6 +1013,175 @@ def _parse_ai_response(response_text: str) -> dict[str, object]:
     }
 
 
+def _get_remote_json(
+    url: str,
+    bearer_token: str,
+    timeout: float,
+) -> dict[str, object]:
+    """GET JSON metadata without sending any GEDCOM or person information."""
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RemoteCreditError(
+            f"Credit preflight returned HTTP {exc.code}: {detail}"
+        ) from exc
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise RemoteCreditError(f"Credit preflight failed: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RemoteCreditError("Credit preflight returned a non-object response")
+    return payload
+
+
+def check_openrouter_credit(
+    api_key: str,
+    management_key: Optional[str] = None,
+    timeout: float = 15.0,
+) -> CreditStatus:
+    """Check OpenRouter credit without disclosing any genealogy data.
+
+    A management key can read the account-level purchased and consumed credit
+    totals.  A normal inference key can read its own configured remaining
+    limit.  If that key is unlimited, the normal-key endpoint cannot prove an
+    account balance, so strict policy requires a management key.
+    """
+    if management_key:
+        payload = _get_remote_json(
+            "https://openrouter.ai/api/v1/credits",
+            management_key,
+            timeout,
+        )
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
+        try:
+            purchased = float(data["total_credits"])
+            used = float(data["total_usage"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RemoteCreditError(
+                "OpenRouter credit response omitted numeric totals"
+            ) from exc
+        return CreditStatus(
+            provider="openrouter",
+            checked=True,
+            remaining_usd=max(0.0, purchased - used),
+            detail="account balance from the OpenRouter credits endpoint",
+        )
+
+    payload = _get_remote_json(
+        "https://openrouter.ai/api/v1/key",
+        api_key,
+        timeout,
+    )
+    data = payload.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+    remaining = data.get("limit_remaining")
+    if remaining is None:
+        return CreditStatus(
+            provider="openrouter",
+            checked=False,
+            remaining_usd=None,
+            detail=(
+                "the API key is unlimited; set OPENROUTER_MANAGEMENT_KEY "
+                "to verify the account balance"
+            ),
+        )
+    try:
+        numeric_remaining = max(0.0, float(remaining))
+    except (TypeError, ValueError) as exc:
+        raise RemoteCreditError(
+            "OpenRouter key response omitted a numeric remaining limit"
+        ) from exc
+    return CreditStatus(
+        provider="openrouter",
+        checked=False,
+        remaining_usd=numeric_remaining,
+        detail=(
+            "remaining limit reported for the OpenRouter API key; this is "
+            "not the account credit balance"
+        ),
+    )
+
+
+def ensure_remote_credit(
+    provider: str,
+    *,
+    api_key: Optional[str] = None,
+    policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    management_key: Optional[str] = None,
+    timeout: float = 15.0,
+) -> CreditStatus:
+    """Enforce a no-person-data remote credit preflight.
+
+    OpenRouter publishes credit endpoints.  OpenAI and Gemini currently expose
+    usage/billing dashboards (and some administrative cost reporting), but a
+    normal inference key has no documented endpoint for a reliable remaining
+    prepaid balance.  Under ``required`` policy those direct providers are
+    therefore blocked before the decision prompt is built or transmitted.
+    ``best-effort`` is an explicit operator acknowledgement of that limitation.
+    """
+    if policy not in REMOTE_CREDIT_POLICIES:
+        raise ValueError(f"Unknown remote credit policy: {policy}")
+    if minimum_credit_usd < 0:
+        raise ValueError("minimum remote credit must not be negative")
+    if policy == "off":
+        return CreditStatus(provider, False, None, "credit check disabled")
+    if provider == "openrouter":
+        if not api_key:
+            raise RemoteCreditError("OPENROUTER_API_KEY is not set")
+        status = check_openrouter_credit(
+            api_key,
+            management_key=management_key,
+            timeout=timeout,
+        )
+    else:
+        status = CreditStatus(
+            provider=provider,
+            checked=False,
+            remaining_usd=None,
+            detail=(
+                f"{provider} does not expose a documented remaining-credit "
+                "endpoint to a normal inference API key"
+            ),
+        )
+    if status.remaining_usd is not None:
+        if status.remaining_usd < minimum_credit_usd:
+            raise RemoteCreditError(
+                f"{provider} has ${status.remaining_usd:.4f} available; "
+                f"at least ${minimum_credit_usd:.4f} is required"
+            )
+        if status.checked:
+            log.info(
+                "%s credit preflight passed: $%.4f available (%s)",
+                provider,
+                status.remaining_usd,
+                status.detail,
+            )
+            return status
+    if policy == "required":
+        raise RemoteCreditError(
+            f"Cannot verify {provider} credits: {status.detail}. Use "
+            "--credit-check best-effort only if you accept this limitation."
+        )
+    log.warning(
+        "Credit preflight is best-effort for %s: %s",
+        provider,
+        status.detail,
+    )
+    return status
+
+
 def ai_resolve_ollama(
     a: IndividualRecord,
     b: IndividualRecord,
@@ -960,14 +1209,19 @@ def ai_resolve_ollama(
             body = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Ollama request failed: {exc}") from exc
-    return _parse_ai_response(str(body.get("response", "")))
+    verdict = _parse_ai_response(str(body.get("response", "")))
+    verdict.update({"_provider": "ollama", "_model": model})
+    return verdict
 
 
 def ai_resolve_openai(
     a: IndividualRecord,
     b: IndividualRecord,
     api_key: Optional[str] = None,
-    model: str = "gpt-4.1-mini",
+    model: str = DEFAULT_OPENAI_MODEL,
+    reasoning_effort: str = "low",
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
     **_: object,
 ) -> dict[str, object]:
     """Call the OpenAI Responses API using an environment-provided key."""
@@ -980,36 +1234,37 @@ def ai_resolve_openai(
     key = api_key or os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError("OPENAI_API_KEY is not set")
-    schema = {
-        "type": "object",
-        "properties": {
-            "is_duplicate": {"type": "boolean"},
-            "confidence": {"type": "number"},
-            "reasoning": {"type": "string"},
-            "preferred_values": {
-                "type": "object",
-                "additionalProperties": {"type": "string"},
-            },
-        },
-        "required": ["is_duplicate", "confidence", "reasoning", "preferred_values"],
-        "additionalProperties": False,
-    }
+    ensure_remote_credit(
+        "openai",
+        api_key=key,
+        policy=credit_policy,
+        minimum_credit_usd=minimum_credit_usd,
+    )
     try:
         client = OpenAI(api_key=key)
-        response = client.responses.create(
-            model=model,
-            instructions="Return only the JSON object requested by the user.",
-            input=_build_dedup_prompt(a, b),
-            text={
+        request: dict[str, object] = {
+            "model": model,
+            "instructions": "Return only the JSON object requested by the user.",
+            "input": _build_dedup_prompt(a, b),
+            "store": False,
+            "text": {
                 "format": {
                     "type": "json_schema",
                     "name": "dedup_decision",
                     "strict": True,
-                    "schema": schema,
+                    "schema": _dedup_response_schema(),
                 },
             },
-        )
-        return _parse_ai_response(response.output_text)
+        }
+        if reasoning_effort != "none":
+            request["reasoning"] = {"effort": reasoning_effort}
+        response = client.responses.create(**request)
+        verdict = _parse_ai_response(response.output_text)
+        verdict.update({
+            "_provider": "openai",
+            "_model": str(getattr(response, "model", None) or model),
+        })
+        return verdict
     except Exception as exc:  # noqa: BLE001 - SDK exception types vary by version
         raise RuntimeError(f"OpenAI request failed: {exc}") from exc
 
@@ -1018,28 +1273,228 @@ def ai_resolve_gemini(
     a: IndividualRecord,
     b: IndividualRecord,
     api_key: Optional[str] = None,
-    model: str = "gemini-2.0-flash",
+    model: str = DEFAULT_GEMINI_MODEL,
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
     **_: object,
 ) -> dict[str, object]:
-    """Compatibility resolver for the optional Google Gemini SDK."""
-    try:
-        import google.generativeai as genai
-    except ImportError as exc:
-        raise RuntimeError(
-            "Install the optional 'google-generativeai' package"
-        ) from exc
-    key = api_key or os.environ.get("GEMINI_API_KEY")
+    """Call Gemini with ``google-genai``, retaining a legacy SDK fallback."""
+    key = (
+        api_key
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+    )
     if not key:
-        raise RuntimeError("GEMINI_API_KEY is not set")
-    genai.configure(api_key=key)
+        raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is not set")
+    ensure_remote_credit(
+        "gemini",
+        api_key=key,
+        policy=credit_policy,
+        minimum_credit_usd=minimum_credit_usd,
+    )
     try:
-        response = genai.GenerativeModel(
-            model,
-            generation_config={"response_mime_type": "application/json"},
-        ).generate_content(_build_dedup_prompt(a, b))
-        return _parse_ai_response(response.text)
+        from google import genai as google_genai
+    except ImportError:
+        google_genai = None
+    try:
+        if google_genai is not None:
+            client = google_genai.Client(api_key=key)
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=_build_dedup_prompt(a, b),
+                    config={
+                        "temperature": 0,
+                        "response_mime_type": "application/json",
+                        "response_json_schema": _dedup_response_schema(),
+                    },
+                )
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+        else:  # pragma: no cover - temporary migration compatibility
+            try:
+                import google.generativeai as legacy_genai
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Install the optional 'google-genai' package"
+                ) from exc
+            legacy_genai.configure(api_key=key)
+            response = legacy_genai.GenerativeModel(
+                model,
+                generation_config={"response_mime_type": "application/json"},
+            ).generate_content(_build_dedup_prompt(a, b))
+        verdict = _parse_ai_response(str(response.text))
+        verdict.update({"_provider": "gemini", "_model": model})
+        return verdict
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Gemini request failed: {exc}") from exc
+
+
+def _openrouter_message_text(content: object) -> str:
+    """Normalise SDK message content across current and future response types."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content or "")
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            text_value = item.get("text", "")
+        else:
+            text_value = getattr(item, "text", "")
+        if text_value:
+            parts.append(str(text_value))
+    return "".join(parts)
+
+
+def ai_resolve_openrouter(
+    a: IndividualRecord,
+    b: IndividualRecord,
+    api_key: Optional[str] = None,
+    model: str = DEFAULT_OPENROUTER_MODEL,
+    allowed_models: Optional[Sequence[str]] = None,
+    cost_quality_tradeoff: int = 7,
+    zero_data_retention: bool = False,
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    credit_timeout: float = 15.0,
+    **_: object,
+) -> dict[str, object]:
+    """Use OpenRouter, optionally delegating selection to its Auto Router."""
+    try:
+        from openrouter import OpenRouter
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the optional 'openrouter' package for this backend"
+        ) from exc
+    key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+    if not 0 <= cost_quality_tradeoff <= 10:
+        raise ValueError("OpenRouter cost-quality tradeoff must be from 0 to 10")
+    ensure_remote_credit(
+        "openrouter",
+        api_key=key,
+        management_key=os.environ.get("OPENROUTER_MANAGEMENT_KEY"),
+        policy=credit_policy,
+        minimum_credit_usd=minimum_credit_usd,
+        timeout=credit_timeout,
+    )
+    request: dict[str, object] = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return only the requested valid JSON object.",
+            },
+            {"role": "user", "content": _build_dedup_prompt(a, b)},
+        ],
+        "provider": {
+            "data_collection": "deny",
+            **({"zdr": True} if zero_data_retention else {}),
+        },
+        "temperature": 0,
+    }
+    if model == "openrouter/auto":
+        request["plugins"] = [{
+            "id": "auto-router",
+            "allowed_models": list(allowed_models or DEFAULT_OPENROUTER_MODELS),
+            "cost_quality_tradeoff": cost_quality_tradeoff,
+        }]
+    try:
+        with OpenRouter(api_key=key) as client:
+            response = client.chat.send(**request)
+        content = response.choices[0].message.content
+        verdict = _parse_ai_response(_openrouter_message_text(content))
+        verdict.update({
+            "_provider": "openrouter",
+            "_model": str(getattr(response, "model", None) or model),
+        })
+        return verdict
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
+
+
+def ai_resolve_auto(
+    a: IndividualRecord,
+    b: IndividualRecord,
+    openai_model: str = DEFAULT_OPENAI_MODEL,
+    gemini_model: str = DEFAULT_GEMINI_MODEL,
+    openrouter_model: str = DEFAULT_OPENROUTER_MODEL,
+    ollama_model: str = "llama3.1",
+    ollama_url: str = "http://localhost:11434",
+    reasoning_effort: str = "low",
+    allowed_models: Optional[Sequence[str]] = None,
+    cost_quality_tradeoff: int = 7,
+    zero_data_retention: bool = False,
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    **_: object,
+) -> dict[str, object]:
+    """Choose a funded remote route, falling back locally without data loss.
+
+    OpenRouter Auto Router is preferred when configured because it can make a
+    current server-side cost/quality decision.  A failed *credit preflight*
+    may safely fall through because no person data has yet been sent.  Once an
+    inference request is attempted, errors are not retried at another remote
+    provider; that avoids sending the same genealogy data to multiple parties.
+    """
+    candidates: list[tuple[str, Any]] = []
+    if os.environ.get("OPENROUTER_API_KEY"):
+        candidates.append((
+            "openrouter",
+            lambda: ai_resolve_openrouter(
+                a,
+                b,
+                model=openrouter_model,
+                allowed_models=allowed_models,
+                cost_quality_tradeoff=cost_quality_tradeoff,
+                zero_data_retention=zero_data_retention,
+                credit_policy=credit_policy,
+                minimum_credit_usd=minimum_credit_usd,
+            ),
+        ))
+    if os.environ.get("OPENAI_API_KEY"):
+        candidates.append((
+            "openai",
+            lambda: ai_resolve_openai(
+                a,
+                b,
+                model=openai_model,
+                reasoning_effort=reasoning_effort,
+                credit_policy=credit_policy,
+                minimum_credit_usd=minimum_credit_usd,
+            ),
+        ))
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        candidates.append((
+            "gemini",
+            lambda: ai_resolve_gemini(
+                a,
+                b,
+                model=gemini_model,
+                credit_policy=credit_policy,
+                minimum_credit_usd=minimum_credit_usd,
+            ),
+        ))
+    for provider, resolver in candidates:
+        try:
+            return resolver()
+        except RemoteCreditError as exc:
+            log.warning(
+                "Skipping unfunded/unverifiable %s route: %s",
+                provider,
+                exc,
+            )
+    log.info("No verified remote route available; using local Ollama")
+    return ai_resolve_ollama(
+        a,
+        b,
+        model=ollama_model,
+        base_url=ollama_url,
+    )
 
 
 def ai_resolve(
@@ -1062,6 +1517,10 @@ def ai_resolve(
         return ai_resolve_openai(a, b, **kwargs)
     if backend == "gemini":
         return ai_resolve_gemini(a, b, **kwargs)
+    if backend == "openrouter":
+        return ai_resolve_openrouter(a, b, **kwargs)
+    if backend == "auto":
+        return ai_resolve_auto(a, b, **kwargs)
     raise ValueError(f"Unknown AI backend: {backend}")
 
 
@@ -1201,6 +1660,12 @@ def merge_records(
             }
         else:
             verdict = _get_ai_verdict(first, second, ai_backend, kwargs)
+            if verdict.get("_provider"):
+                log.info(
+                    "AI decision route: %s/%s",
+                    verdict.get("_provider"),
+                    verdict.get("_model", "unknown"),
+                )
             confidence = float(verdict.get("confidence", 0.0))
             if not auto and confidence < AI_CONFIDENCE_AUTO_ACCEPT:
                 verdict = dict(verdict)
@@ -1435,8 +1900,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", default="merged.ged")
     parser.add_argument(
         "--ai-backend",
-        choices=("none", "ollama", "openai", "gemini"),
-        default="ollama",
+        choices=(
+            "none",
+            "ollama",
+            "openai",
+            "gemini",
+            "openrouter",
+            "auto",
+        ),
+        default=os.getenv("GEDCOM_AI_BACKEND", "ollama"),
     )
     parser.add_argument(
         "--similarity-threshold",
@@ -1468,11 +1940,60 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--openai-model",
-        default=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        default=DEFAULT_OPENAI_MODEL,
     )
     parser.add_argument(
         "--gemini-model",
-        default=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        default=DEFAULT_GEMINI_MODEL,
+    )
+    parser.add_argument(
+        "--openrouter-model",
+        default=DEFAULT_OPENROUTER_MODEL,
+    )
+    parser.add_argument(
+        "--openrouter-allowed-model",
+        action="append",
+        dest="openrouter_allowed_models",
+        metavar="PATTERN",
+        help=(
+            "Allowed OpenRouter Auto Router model pattern; repeat as needed. "
+            "Defaults to OpenAI GPT-5 and Google Gemini families."
+        ),
+    )
+    parser.add_argument(
+        "--openrouter-cost-quality",
+        type=int,
+        default=int(os.getenv("OPENROUTER_COST_QUALITY", "7")),
+        metavar="0..10",
+        help="OpenRouter Auto Router tradeoff: 0 quality, 10 cost savings.",
+    )
+    parser.add_argument(
+        "--openrouter-zdr",
+        action=argparse.BooleanOptionalAction,
+        default=os.getenv("OPENROUTER_ZDR", "").casefold()
+        in {"1", "true", "yes"},
+        help="Require an OpenRouter zero-data-retention route.",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default=os.getenv("AI_REASONING_EFFORT", "low"),
+    )
+    parser.add_argument(
+        "--credit-check",
+        choices=REMOTE_CREDIT_POLICIES,
+        default=os.getenv("REMOTE_CREDIT_CHECK", "required"),
+        help=(
+            "Credit policy before sending person data. 'required' is safest; "
+            "direct OpenAI/Gemini need explicit 'best-effort' because their "
+            "normal API keys cannot query remaining prepaid balance."
+        ),
+    )
+    parser.add_argument(
+        "--minimum-credit-usd",
+        type=float,
+        default=float(os.getenv("MINIMUM_REMOTE_CREDIT_USD", "0.01")),
+        help="Minimum verified OpenRouter balance/remaining key limit.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -1484,6 +2005,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
     if len(args.input_files) < 2:
         parser.error("At least two input GEDCOM files are required")
+    if not 0 <= args.openrouter_cost_quality <= 10:
+        parser.error("--openrouter-cost-quality must be between 0 and 10")
+    if args.minimum_credit_usd < 0:
+        parser.error("--minimum-credit-usd must not be negative")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -1504,9 +2029,41 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.ai_backend == "ollama":
             kwargs = {"model": args.ollama_model, "base_url": args.ollama_url}
         elif args.ai_backend == "openai":
-            kwargs = {"model": args.openai_model}
+            kwargs = {
+                "model": args.openai_model,
+                "reasoning_effort": args.reasoning_effort,
+                "credit_policy": args.credit_check,
+                "minimum_credit_usd": args.minimum_credit_usd,
+            }
         elif args.ai_backend == "gemini":
-            kwargs = {"model": args.gemini_model}
+            kwargs = {
+                "model": args.gemini_model,
+                "credit_policy": args.credit_check,
+                "minimum_credit_usd": args.minimum_credit_usd,
+            }
+        elif args.ai_backend == "openrouter":
+            kwargs = {
+                "model": args.openrouter_model,
+                "allowed_models": args.openrouter_allowed_models,
+                "cost_quality_tradeoff": args.openrouter_cost_quality,
+                "zero_data_retention": args.openrouter_zdr,
+                "credit_policy": args.credit_check,
+                "minimum_credit_usd": args.minimum_credit_usd,
+            }
+        elif args.ai_backend == "auto":
+            kwargs = {
+                "openai_model": args.openai_model,
+                "gemini_model": args.gemini_model,
+                "openrouter_model": args.openrouter_model,
+                "ollama_model": args.ollama_model,
+                "ollama_url": args.ollama_url,
+                "reasoning_effort": args.reasoning_effort,
+                "allowed_models": args.openrouter_allowed_models,
+                "cost_quality_tradeoff": args.openrouter_cost_quality,
+                "zero_data_retention": args.openrouter_zdr,
+                "credit_policy": args.credit_check,
+                "minimum_credit_usd": args.minimum_credit_usd,
+            }
         pointer_map: dict[str, str] = {}
         merged = merge_records(
             all_records,
