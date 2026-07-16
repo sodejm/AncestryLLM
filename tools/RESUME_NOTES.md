@@ -67,24 +67,32 @@ prompt is sent.
 - `Mill` (`019f6899-fe89-76e3-a7fe-790d900310ff`) completed the initial
   documentation audit. Its privacy-identifier wording, 5.5.1 overclaim,
   structural-validation wording, remote-error wording, volatile billing claim,
-  and public-contract concerns were addressed or narrowed. A final
-  “remaining material issues only” re-review was requested and was still
-  running when this handoff was written.
+  and public-contract concerns were addressed or narrowed. Its final re-review
+  completed immediately before closure and identified four remaining items:
+  clarify that selected standard fact values such as `EVEN`, `DSCR`, `PROP`,
+  and `RELI` can be sent even though `NOTE`, citation, and source records are
+  excluded; date the code-level OpenAI/Gemini billing statement; repeat the
+  5.5.1 header-only qualification in troubleshooting; and either complete the
+  public contracts for validation, rooted traversal, candidate detection, and
+  AI resolvers or narrow the README contract claim again.
 - `Kant` (`019f6899-feec-7621-8201-80b02f07c428`) completed the initial scoring
   and data-loss audit. Its sparse-family auto-merge, family-event tag,
   state-as-country, alternative-country, one-to-one collection, richer-relative,
   richer-place, transitive-cluster, anonymous-blocking, and synthetic-output
-  findings were addressed with code and regression tests. A final P0/P1
-  re-review was requested and was still running when this handoff was written.
-- Both agents should be closed after this branch is pushed. A resumed run should
-  perform a fresh short review rather than relying on an unfinished response.
+  findings were addressed with code and regression tests. Its final P0/P1
+  re-review was still running when it was closed, so it produced no final
+  report.
+- Both agents were closed after checkpoint commit `6348c3c` was pushed. A
+  resumed run should perform a fresh P0/P1 scoring/data-loss review and address
+  Mill's four documentation findings above.
 
 ## Recommended next steps
 
 1. Read this file, `tools/README.md`, and the current diff/commit before editing.
-2. Run a fresh P0/P1 correctness review and a documentation/privacy review.
-3. Address only concrete remaining findings; preserve all unrelated worktree
-   changes.
+2. Address Mill's four concrete documentation findings listed above.
+3. Run a fresh P0/P1 scoring/data-loss review because Kant's final pass was
+   interrupted, then address only concrete findings and preserve unrelated
+   worktree changes.
 4. Install the repository requirements in an isolated environment and run the
    full test suite, then rerun the 100 focused GEDCOM tests.
 5. Consider adding mocked coverage for direct OpenAI, Gemini, and OpenRouter SDK
