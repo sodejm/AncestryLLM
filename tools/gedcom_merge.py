@@ -25,8 +25,9 @@ Examples::
     OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
         --ai-backend openai --openai-model gpt-5.4-mini \\
         --credit-check best-effort --auto
-    OPENROUTER_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
-        --ai-backend auto --openrouter-model openrouter/auto --auto
+    OPENROUTER_API_KEY=... OPENROUTER_MANAGEMENT_KEY=... \\
+        python tools/gedcom_merge.py a.ged b.ged --ai-backend auto \\
+        --openrouter-model openrouter/auto --auto
 
 Recommended installation::
 
@@ -89,12 +90,9 @@ MAX_AI_TEXT = 2_000
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
 REMOTE_CREDIT_POLICIES = ("required", "best-effort", "off")
-DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-DEFAULT_OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL",
-    "openrouter/auto",
-)
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL") or "gpt-5.4-mini"
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.5-flash"
+DEFAULT_OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL") or "openrouter/auto"
 DEFAULT_OPENROUTER_MODELS = (
     "openai/gpt-5*",
     "google/gemini-*",
@@ -958,7 +956,7 @@ def _dedup_response_schema() -> dict[str, object]:
         "type": "object",
         "properties": {
             "is_duplicate": {"type": "boolean"},
-            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "confidence": {"type": "number"},
             "reasoning": {"type": "string"},
             "preferred_values": {
                 "type": "object",
@@ -1073,7 +1071,7 @@ def check_openrouter_credit(
         return CreditStatus(
             provider="openrouter",
             checked=True,
-            remaining_usd=max(0.0, purchased - used),
+            remaining_usd=purchased - used,
             detail="account balance from the OpenRouter credits endpoint",
         )
 
@@ -1356,7 +1354,7 @@ def ai_resolve_openrouter(
     model: str = DEFAULT_OPENROUTER_MODEL,
     allowed_models: Optional[Sequence[str]] = None,
     cost_quality_tradeoff: int = 7,
-    zero_data_retention: bool = False,
+    zero_data_retention: bool = True,
     credit_policy: str = "required",
     minimum_credit_usd: float = 0.01,
     credit_timeout: float = 15.0,
@@ -1393,7 +1391,16 @@ def ai_resolve_openrouter(
         ],
         "provider": {
             "data_collection": "deny",
+            "require_parameters": True,
             **({"zdr": True} if zero_data_retention else {}),
+        },
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "dedup_decision",
+                "strict": True,
+                "schema": _dedup_response_schema(),
+            },
         },
         "temperature": 0,
     }
@@ -1406,8 +1413,21 @@ def ai_resolve_openrouter(
     try:
         with OpenRouter(api_key=key) as client:
             response = client.chat.send(**request)
-        content = response.choices[0].message.content
-        verdict = _parse_ai_response(_openrouter_message_text(content))
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("OpenRouter returned no choices")
+        choice = choices[0]
+        choice_error = getattr(choice, "error", None)
+        if choice_error:
+            raise RuntimeError(f"OpenRouter choice error: {choice_error}")
+        if getattr(choice, "finish_reason", None) == "error":
+            raise RuntimeError("OpenRouter choice finished with an error")
+        message = getattr(choice, "message", None)
+        content = getattr(message, "content", None)
+        response_text = _openrouter_message_text(content)
+        if not response_text.strip():
+            raise RuntimeError("OpenRouter returned an empty decision")
+        verdict = _parse_ai_response(response_text)
         verdict.update({
             "_provider": "openrouter",
             "_model": str(getattr(response, "model", None) or model),
@@ -1428,7 +1448,7 @@ def ai_resolve_auto(
     reasoning_effort: str = "low",
     allowed_models: Optional[Sequence[str]] = None,
     cost_quality_tradeoff: int = 7,
-    zero_data_retention: bool = False,
+    zero_data_retention: bool = True,
     credit_policy: str = "required",
     minimum_credit_usd: float = 0.01,
     **_: object,
@@ -1908,7 +1928,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "openrouter",
             "auto",
         ),
-        default=os.getenv("GEDCOM_AI_BACKEND", "ollama"),
+        default=os.getenv("GEDCOM_AI_BACKEND") or "ollama",
     )
     parser.add_argument(
         "--similarity-threshold",
@@ -1933,10 +1953,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="5.5.5",
         help="Output version; 5.5.1 is a compatibility fallback.",
     )
-    parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL", "llama3.1"))
+    parser.add_argument(
+        "--ollama-model",
+        default=os.getenv("OLLAMA_MODEL") or "llama3.1",
+    )
     parser.add_argument(
         "--ollama-url",
-        default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        default=os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434",
     )
     parser.add_argument(
         "--openai-model",
@@ -1963,14 +1986,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--openrouter-cost-quality",
         type=int,
-        default=int(os.getenv("OPENROUTER_COST_QUALITY", "7")),
+        default=os.getenv("OPENROUTER_COST_QUALITY") or "7",
         metavar="0..10",
         help="OpenRouter Auto Router tradeoff: 0 quality, 10 cost savings.",
     )
     parser.add_argument(
         "--openrouter-zdr",
         action=argparse.BooleanOptionalAction,
-        default=os.getenv("OPENROUTER_ZDR", "").casefold()
+        default=(os.getenv("OPENROUTER_ZDR") or "true").casefold()
         in {"1", "true", "yes"},
         help="Require an OpenRouter zero-data-retention route.",
     )
@@ -1992,8 +2015,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--minimum-credit-usd",
         type=float,
-        default=float(os.getenv("MINIMUM_REMOTE_CREDIT_USD", "0.01")),
-        help="Minimum verified OpenRouter balance/remaining key limit.",
+        default=os.getenv("MINIMUM_REMOTE_CREDIT_USD") or "0.01",
+        help="Minimum verified OpenRouter account balance.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser

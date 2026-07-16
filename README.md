@@ -200,6 +200,10 @@ make security   # run semgrep, pip-audit, trivy, gitleaks
 
 ## Configuration Reference
 
+For the GEDCOM merge CLI, including provider keys, strict credit checks,
+OpenRouter Auto Router, root-person exports, and upload compatibility, see
+[the GEDCOM Merge Tool README](tools/README.md).
+
 All settings are read from environment variables (see [`.env.example`](.env.example)):
 
 | Variable | Default | Purpose |
