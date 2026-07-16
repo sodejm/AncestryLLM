@@ -1,9 +1,10 @@
 langchain
 langchain-community
 sqlalchemy
-python-gedcom
-rapidfuzz
-python-dateutil
+python-gedcom==1.1.0
+rapidfuzz>=3.14.1
+python-dateutil>=2.9.0
+openai>=2.45.0
 pip-audit
 pytest
 pytest-mock

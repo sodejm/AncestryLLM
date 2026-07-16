@@ -1,259 +1,511 @@
-"""GEDCOM Merge Tool.
+"""Loss-minimising GEDCOM merge tool with optional AI adjudication.
 
-Merges two or more GEDCOM (.ged) genealogy files into a single master file
-with minimal duplicate individuals and maximum data fidelity.
+The tool intentionally keeps a small, lossless representation of each GEDCOM
+record instead of serialising a third-party object model.  ``python-gedcom``
+is used as a standards-aware validation/semantic parser when installed, while
+the original GEDCOM lines remain the source of truth for output.  This matters
+because GEDCOM files commonly contain vendor tags, nested source citations,
+media links, notes, and custom facts that a convenient object model may not
+round-trip.
 
-Key features:
+AI is a decision aid, not an authority over the data.  An AI response can say
+that two people are the same and can suggest which value should be displayed
+as the canonical summary value.  The merge still retains both conflicting
+facts as separate GEDCOM blocks, so a bad model response cannot destroy
+evidence.
 
-* **Date standardisation** – all birth and death dates are normalised to the
-  GEDCOM 5.5 date specification (e.g. ``15 JUL 1850``, ``ABT 1900``).
-* **Fuzzy deduplication** – ``rapidfuzz`` token-sort-ratio similarity is
-  applied to full names; birth/death year proximity and gender agreement
-  refine the score.
-* **AI-assisted resolution** – ambiguous candidate pairs are sent to a
-  *local* Ollama LLM (default) or the *remote* Google Gemini API for a
-  yes/no duplicate verdict with confidence reasoning.
-* **Interactive fallback** – when AI confidence is low *and* ``--auto`` mode
-  is not requested, the operator is prompted at the terminal.
-* **Security** – input paths are validated to prevent directory traversal;
-  no credentials are written to output files.
+Examples::
 
-Usage::
+    python tools/gedcom_merge.py a.ged b.ged -o master.ged --ai-backend none
+    python tools/gedcom_merge.py *.ged --ai-backend ollama --auto
+    OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \
+        --ai-backend openai --openai-model gpt-4.1-mini --auto
 
-    python -m tools.gedcom_merge file1.ged file2.ged -o merged.ged
+Recommended installation::
 
-    python -m tools.gedcom_merge *.ged \\
-        --ai-backend gemini \\
-        --similarity-threshold 78 \\
-        --auto \\
-        -o master.ged
+    python3.12 -m venv .venv
+    . .venv/bin/activate
+    python -m pip install -r requirements.txt
 
-Environment variables::
-
-    OLLAMA_BASE_URL   Ollama server URL  (default: http://localhost:11434)
-    OLLAMA_MODEL      Model name         (default: llama3.1)
-    OLLAMA_NUM_CTX    Context window     (default: 8192)
-    GEMINI_API_KEY    Google Gemini key  (required when --ai-backend=gemini)
-    GEMINI_MODEL      Gemini model name  (default: gemini-1.5-pro)
+The parser accepts GEDCOM 5.5-style files.  It does not execute anything from
+an input file and it never writes credentials to the output.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import datetime as dt
+import difflib
+import json
 import logging
 import os
 import re
-import sys
+import tempfile
+import urllib.error
+import urllib.request
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterator, Optional, Sequence
 
-from gedcom.element.individual import IndividualElement
-from gedcom.element.family import FamilyElement
-from gedcom.parser import Parser
-from rapidfuzz import fuzz
-
-# ---------------------------------------------------------------------------
-# Module-level configuration (overridable via environment variables)
-# ---------------------------------------------------------------------------
-
-OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1")
-OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
-
-GEMINI_API_KEY_ENV: str = "GEMINI_API_KEY"
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
-
-# Minimum similarity score (0–100) for two individuals to be considered
-# candidate duplicates.  The default is deliberately conservative: lower
-# values increase recall (catching more real duplicates) at the cost of
-# precision (more false positives sent to the AI/operator).
-DEFAULT_SIMILARITY_THRESHOLD: int = 80
-
-# When AI confidence for a duplicate verdict is at or above this threshold
-# the result is applied automatically without prompting the operator.
-AI_CONFIDENCE_AUTO_ACCEPT: float = 0.85
-
-# GEDCOM 5.5 month abbreviations in canonical uppercase order.
-GEDCOM_MONTHS: tuple[str, ...] = (
-    "JAN",
-    "FEB",
-    "MAR",
-    "APR",
-    "MAY",
-    "JUN",
-    "JUL",
-    "AUG",
-    "SEP",
-    "OCT",
-    "NOV",
-    "DEC",
-)
-
-# Map common date-qualifier strings to their GEDCOM equivalents.
-_DATE_QUALIFIER_MAP: dict[str, str] = {
-    "about": "ABT",
-    "abt": "ABT",
-    "approximately": "ABT",
-    "circa": "ABT",
-    "ca": "ABT",
-    "ca.": "ABT",
-    "c.": "ABT",
-    "before": "BEF",
-    "bef": "BEF",
-    "after": "AFT",
-    "aft": "AFT",
-    "estimated": "EST",
-    "est": "EST",
-    "calculated": "CAL",
-    "cal": "CAL",
-}
+try:
+    from rapidfuzz import fuzz as _rapidfuzz
+except ImportError:  # pragma: no cover - exercised in minimal installations
+    _rapidfuzz = None
 
 log = logging.getLogger(__name__)
 
+GEDCOM_MONTHS: tuple[str, ...] = (
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+)
+DATE_QUALIFIERS: dict[str, str] = {
+    "about": "ABT", "abt": "ABT", "approximately": "ABT",
+    "circa": "ABT", "ca": "ABT", "ca.": "ABT", "c.": "ABT",
+    "before": "BEF", "bef": "BEF", "after": "AFT", "aft": "AFT",
+    "estimated": "EST", "est": "EST", "calculated": "CAL", "cal": "CAL",
+}
+DEFAULT_SIMILARITY_THRESHOLD = 78
+AI_CONFIDENCE_AUTO_ACCEPT = 0.85
+MAX_AI_TEXT = 2_000
+XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
+SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
+LINE_RE = re.compile(r"^(?P<level>\d+)(?:\s+(?P<xref>@[^@\s]+@))?\s+"
+                     r"(?P<tag>[A-Za-z0-9_]+)(?:\s+(?P<value>.*))?$")
 
-# ---------------------------------------------------------------------------
-# Date normalisation
-# ---------------------------------------------------------------------------
+
+class GedcomParseError(ValueError):
+    """Raised when an input line cannot be interpreted as a GEDCOM line."""
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomLine:
+    """Parsed metadata for one original GEDCOM line."""
+
+    level: int
+    xref: str
+    tag: str
+    value: str
+    raw: str
+
+
+def parse_gedcom_line(line: str, line_number: int = 0) -> GedcomLine:
+    """Parse one GEDCOM line without evaluating its contents."""
+    raw = line.rstrip("\r\n").lstrip("\ufeff")
+    match = LINE_RE.fullmatch(raw)
+    if not match:
+        raise GedcomParseError(f"Invalid GEDCOM line {line_number}: {raw!r}")
+    level = int(match.group("level"))
+    return GedcomLine(
+        level=level,
+        xref=match.group("xref") or "",
+        tag=match.group("tag").upper(),
+        value=match.group("value") or "",
+        raw=raw,
+    )
+
+
+@dataclass
+class GedcomRecord:
+    """A complete level-zero record, kept as lines for round-trip fidelity."""
+
+    lines: list[str]
+    source_file: str
+    sequence: int
+
+    @property
+    def header(self) -> GedcomLine:
+        """Return parsed metadata for the level-zero line."""
+        return parse_gedcom_line(self.lines[0])
+
+    @property
+    def pointer(self) -> str:
+        """Return this record's xref, if it has one."""
+        return self.header.xref
+
+    @property
+    def tag(self) -> str:
+        """Return the record type, such as ``INDI`` or ``FAM``."""
+        return self.header.tag
+
+
+def iter_gedcom_records(path: str | Path) -> Iterator[GedcomRecord]:
+    """Yield level-zero GEDCOM records one at a time.
+
+    Only one record is accumulated at a time.  This avoids the common mistake
+    of loading a complete parse tree for every source before any work starts.
+    The deduplication index necessarily retains person summaries, but arbitrary
+    non-person records are not duplicated in the person index.
+    """
+    file_path = Path(path).resolve()
+    current: list[str] = []
+    sequence = 0
+    with file_path.open("r", encoding="utf-8-sig", errors="strict") as handle:
+        for line_number, raw_line in enumerate(handle, 1):
+            line = raw_line.rstrip("\r\n")
+            if not line.strip():
+                continue
+            parsed = parse_gedcom_line(line, line_number)
+            if parsed.level == 0 and current:
+                yield GedcomRecord(current, str(file_path), sequence)
+                sequence += 1
+                current = []
+            current.append(line)
+        if current:
+            yield GedcomRecord(current, str(file_path), sequence)
+
+
+@dataclass
+class ParsedSource:
+    """All source records after pointer names have been made globally unique."""
+
+    path: Path
+    records: list[GedcomRecord]
+    pointer_map: dict[str, str]
+
+
+def _unique_pointer(original: str, used: set[str], source_number: int) -> str:
+    """Return a collision-free pointer while retaining the original when safe."""
+    if original not in used:
+        used.add(original)
+        return original
+    match = re.fullmatch(r"@([A-Za-z_]+)(\d+)@", original)
+    prefix = match.group(1) if match else "X"
+    counter = 1
+    candidate = f"@{prefix}{source_number}_{counter}@"
+    while candidate in used:
+        counter += 1
+        candidate = f"@{prefix}{source_number}_{counter}@"
+    used.add(candidate)
+    return candidate
+
+
+def _rewrite_xrefs(line: str, pointer_map: dict[str, str]) -> str:
+    """Rewrite exact reference fields, never arbitrary note text."""
+    parsed = parse_gedcom_line(line)
+    reference_tags = {
+        "ASSO", "CHIL", "FAMC", "FAMS", "HUSB", "WIFE", "OBJE",
+        "NOTE", "REPO", "SOUR", "SUBM",
+    }
+    if not parsed.xref and parsed.tag not in reference_tags:
+        return line
+    return XREF_RE.sub(
+        lambda match: pointer_map.get(match.group(), match.group()),
+        line,
+    )
+
+
+def _normalise_record_dates(lines: list[str]) -> list[str]:
+    """Normalise BIRT/DEAT dates and retain changed originals with a custom tag."""
+    output: list[str] = []
+    event_tag = ""
+    event_level = -1
+    for line in lines:
+        parsed = parse_gedcom_line(line)
+        if parsed.level <= 1:
+            event_tag = parsed.tag if parsed.level == 1 else ""
+            event_level = parsed.level if parsed.level == 1 else -1
+        if (parsed.level == event_level + 1 and parsed.tag == "DATE"
+                and event_tag in {"BIRT", "DEAT"}):
+            normalised = normalise_gedcom_date(parsed.value)
+            if normalised != parsed.value and normalised.strip():
+                output.append(f"{parsed.level} DATE {normalised}")
+                output.append(f"{parsed.level} _ORIGDATE {parsed.value}")
+                continue
+        output.append(line)
+    return output
+
+
+def _normalise_header_lines(
+    headers: Sequence[GedcomRecord],
+    version: str,
+) -> list[str]:
+    """Create one compliant HEAD while retaining distinct source metadata."""
+    if not headers:
+        return [
+            "0 HEAD",
+            "1 SOUR GedcomMergeTool",
+            "1 GEDC",
+            f"2 VERS {version}",
+            "1 CHAR UTF-8",
+        ]
+
+    blocks: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for header in headers:
+        for block in _top_level_blocks(header.lines):
+            tag = parse_gedcom_line(block[0]).tag
+            if tag in {"GEDC", "CHAR"}:
+                continue
+            key = tuple(block)
+            if key not in seen:
+                blocks.append(block)
+                seen.add(key)
+
+    result = ["0 HEAD"]
+    for block in blocks:
+        result.extend(block)
+    result.extend(["1 GEDC", f"2 VERS {version}", "1 CHAR UTF-8"])
+    return result
+
+
+def validate_gedcom_555(lines: Sequence[str]) -> None:
+    """Validate the structural requirements emitted for GEDCOM 5.5.5.
+
+    This deliberately validates the generic grammar and referential shape,
+    rather than trying to hard-code every vendor extension.  Custom tags are
+    allowed by GEDCOM and are retained; a destination service may ignore them.
+    """
+    if not lines:
+        raise GedcomParseError("GEDCOM output is empty")
+    parsed_lines = [parse_gedcom_line(line, number) for number, line in enumerate(lines, 1)]
+    if parsed_lines[0].level != 0 or parsed_lines[0].tag != "HEAD":
+        raise GedcomParseError("GEDCOM must start with 0 HEAD")
+    if parsed_lines[-1].level != 0 or parsed_lines[-1].tag != "TRLR":
+        raise GedcomParseError("GEDCOM must end with 0 TRLR")
+    pointers: set[str] = set()
+    previous_level = 0
+    head_version = ""
+    head_charset = ""
+    in_gedc = False
+    for parsed in parsed_lines:
+        if len(parsed.tag) > 15:
+            raise GedcomParseError(f"GEDCOM tag is longer than 15 characters: {parsed.tag}")
+        if parsed.xref:
+            if parsed.level != 0:
+                raise GedcomParseError("xref IDs may only introduce level-zero records")
+            if parsed.xref in pointers:
+                raise GedcomParseError(f"Duplicate GEDCOM xref ID: {parsed.xref}")
+            pointers.add(parsed.xref)
+        if parsed.level > previous_level + 1:
+            raise GedcomParseError("GEDCOM levels may not skip a level")
+        previous_level = parsed.level
+        if parsed.level == 1:
+            in_gedc = parsed.tag == "GEDC"
+            if parsed.tag == "CHAR":
+                head_charset = parsed.value.strip().upper()
+        elif parsed.level == 2 and in_gedc and parsed.tag == "VERS":
+            head_version = parsed.value.strip()
+    if head_version != "5.5.5":
+        raise GedcomParseError(
+            f"Expected HEAD.GEDC.VERS 5.5.5, found {head_version or '(missing)'}"
+        )
+    if head_charset != "UTF-8":
+        raise GedcomParseError(
+            f"Expected HEAD.CHAR UTF-8, found {head_charset or '(missing)'}"
+        )
+
+
+def _family_members(source_records: Iterable[GedcomRecord]) -> dict[str, set[str]]:
+    """Return family xref -> member-person xrefs for root traversal."""
+    result: dict[str, set[str]] = {}
+    for record in source_records:
+        if record.tag != "FAM" or not record.pointer:
+            continue
+        members: set[str] = set()
+        for block in _top_level_blocks(record.lines):
+            first = parse_gedcom_line(block[0])
+            if first.tag in {"HUSB", "WIFE", "CHIL"} and first.value:
+                members.update(XREF_RE.findall(first.value))
+        result[record.pointer] = members
+    return result
+
+
+def resolve_root_person(
+    requested: str,
+    records: Sequence[IndividualRecord],
+    source_pointer_maps: Sequence[dict[str, str]],
+    merged_pointer_map: dict[str, str],
+) -> str:
+    """Resolve a pointer or unique full name to a canonical person pointer."""
+    requested = requested.strip()
+    pointers = {record.pointer for record in records}
+    if requested in pointers:
+        return requested
+    mapped = {
+        merged_pointer_map.get(pointer_map[requested], pointer_map[requested])
+        for pointer_map in source_pointer_maps
+        if requested in pointer_map
+    }
+    mapped &= pointers
+    if len(mapped) == 1:
+        return mapped.pop()
+    name_matches = {
+        record.pointer
+        for record in records
+        if record.full_name.casefold() == requested.casefold()
+    }
+    if len(name_matches) == 1:
+        return name_matches.pop()
+    if not name_matches and not mapped:
+        raise ValueError(f"Root person not found: {requested}")
+    raise ValueError(
+        f"Root person is ambiguous: {requested!r}; use a unique GEDCOM pointer"
+    )
+
+
+def connected_tree_pointers(
+    root_pointer: str,
+    people: Sequence[IndividualRecord],
+    source_records: Iterable[GedcomRecord],
+    merged_pointer_map: Optional[dict[str, str]] = None,
+) -> tuple[set[str], set[str]]:
+    """Return all people and families in the root person's connected tree."""
+    family_members = _family_members(source_records)
+    if merged_pointer_map:
+        family_members = {
+            family: {
+                merged_pointer_map.get(member, member) for member in members
+            }
+            for family, members in family_members.items()
+        }
+    person_to_families: dict[str, set[str]] = defaultdict(set)
+    for family_pointer, members in family_members.items():
+        for member in members:
+            person_to_families[member].add(family_pointer)
+    keep_people: set[str] = set()
+    keep_families: set[str] = set()
+    pending = [root_pointer]
+    known_people = {person.pointer for person in people}
+    while pending:
+        pointer = pending.pop()
+        if pointer in keep_people or pointer not in known_people:
+            continue
+        keep_people.add(pointer)
+        for family_pointer in person_to_families.get(pointer, set()):
+            if family_pointer in keep_families:
+                continue
+            keep_families.add(family_pointer)
+            pending.extend(family_members.get(family_pointer, set()))
+    return keep_people, keep_families
+
+
+def _load_python_gedcom(path: Path) -> None:
+    """Run python-gedcom's parser as an additional standards-aware check.
+
+    The raw parser remains authoritative for unknown-tag preservation.  This
+    optional check provides useful warnings and exercises the trusted parser
+    without making a fragile DOM the serialization source.
+    """
+    try:
+        from gedcom.parser import Parser
+    except ImportError:
+        log.debug("python-gedcom is not installed; using lossless line parser")
+        return
+    try:
+        parser = Parser()
+        parser.parse_file(str(path), strict=False)
+    except Exception as exc:  # noqa: BLE001 - source files may be vendor-specific
+        log.warning("python-gedcom validation warning for %s: %s", path, exc)
+
+
+def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
+    """Read sources twice: first for xref allocation, then for record content."""
+    used: set[str] = set()
+    sources: list[ParsedSource] = []
+    for source_number, raw_path in enumerate(paths, 1):
+        path = Path(raw_path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"GEDCOM file not found: {path}")
+        _load_python_gedcom(path)
+        original_records = list(iter_gedcom_records(path))
+        pointer_map: dict[str, str] = {}
+        for record in original_records:
+            if record.pointer:
+                pointer_map[record.pointer] = _unique_pointer(
+                    record.pointer, used, source_number
+                )
+        rewritten: list[GedcomRecord] = []
+        for record in original_records:
+            lines = _normalise_record_dates(
+                [_rewrite_xrefs(line, pointer_map) for line in record.lines]
+            )
+            rewritten.append(GedcomRecord(lines, str(path), record.sequence))
+        sources.append(ParsedSource(path, rewritten, pointer_map))
+        log.info("Loaded %d records from %s", len(rewritten), path.name)
+    return sources
 
 
 def normalise_gedcom_date(raw_date: str) -> str:
-    """Return *raw_date* in GEDCOM 5.5 date format where possible.
-
-    Accepted inputs include:
-
-    * Already-valid GEDCOM dates (``15 JUL 1850``, ``ABT 1900``)
-    * ISO-style dates (``1850-07-15``, ``1850/07/15``)
-    * Natural-language forms (``July 15, 1850``, ``abt 1900``, ``ca. 1850``)
-    * Year-only (``1850``)
-    * GEDCOM range/period forms are passed through unchanged.
-
-    Non-parseable strings are returned unchanged so no information is lost.
-
-    :param raw_date: Raw date string as found in a GEDCOM file or user input.
-    :returns: Normalised GEDCOM date string, or *raw_date* if parsing fails.
-    """
+    """Return a best-effort GEDCOM date while leaving unknown text unchanged."""
     if not raw_date or not raw_date.strip():
         return raw_date
-
     original = raw_date.strip()
     upper = original.upper()
-
-    # Pass through GEDCOM range and period forms without modification.
     if upper.startswith(("BET ", "FROM ", "TO ")):
         return original
-
-    # Strip a leading qualifier (ABT, BEF, AFT, EST, CAL) and remember it.
     qualifier = ""
-    for key, gedcom_key in _DATE_QUALIFIER_MAP.items():
-        prefix = key + " "
-        if upper.startswith(gedcom_key + " "):
-            qualifier = gedcom_key
-            original = original[len(gedcom_key) + 1 :].strip()
-            upper = original.upper()
+    for prefix, gedcom_prefix in DATE_QUALIFIERS.items():
+        if upper == gedcom_prefix or upper.startswith(gedcom_prefix + " "):
+            qualifier = gedcom_prefix
+            original = original[len(gedcom_prefix):].strip()
             break
-        if upper.startswith(prefix.upper()):
-            qualifier = gedcom_key
-            original = original[len(prefix) :].strip()
-            upper = original.upper()
+        if upper == prefix.upper() or upper.startswith(prefix.upper() + " "):
+            qualifier = gedcom_prefix
+            original = original[len(prefix):].strip()
             break
-
-    # If what remains looks like a plain year (optionally suffixed with /NN for
-    # Old Style dates), return early.
-    year_only_re = re.fullmatch(r"(\d{3,4})(?:/\d{2})?", original.strip())
-    if year_only_re:
-        year = year_only_re.group(1)
-        return f"{qualifier} {year}".strip() if qualifier else year
-
-    # Try to interpret as ISO date: YYYY-MM-DD or YYYY/MM/DD.
-    iso_re = re.fullmatch(r"(\d{3,4})[-/](\d{1,2})[-/](\d{1,2})", original.strip())
-    if iso_re:
-        year, month, day = iso_re.groups()
-        month_int = int(month)
-        if 1 <= month_int <= 12:
-            gedcom_month = GEDCOM_MONTHS[month_int - 1]
-            result = f"{int(day):02d} {gedcom_month} {year}"
-            return f"{qualifier} {result}".strip() if qualifier else result
-
-    # Try the already-valid GEDCOM form: DD MON YYYY or MON YYYY.
-    gedcom_full_re = re.fullmatch(
-        r"(\d{1,2}) ([A-Z]{3}) (\d{3,4})", upper.strip()
-    )
-    if gedcom_full_re:
-        day_s, mon_s, year_s = gedcom_full_re.groups()
-        if mon_s in GEDCOM_MONTHS:
-            result = f"{int(day_s):02d} {mon_s} {year_s}"
-            return f"{qualifier} {result}".strip() if qualifier else result
-
-    gedcom_mon_year_re = re.fullmatch(r"([A-Z]{3}) (\d{3,4})", upper.strip())
-    if gedcom_mon_year_re:
-        mon_s, year_s = gedcom_mon_year_re.groups()
-        if mon_s in GEDCOM_MONTHS:
-            result = f"{mon_s} {year_s}"
-            return f"{qualifier} {result}".strip() if qualifier else result
-
-    # Fall back to dateutil for natural language dates.
+    year_match = re.fullmatch(r"(\d{3,4})(?:/\d{2})?", original)
+    if year_match:
+        result = year_match.group(1)
+        return f"{qualifier} {result}".strip()
+    iso_match = re.fullmatch(r"(\d{3,4})[-/](\d{1,2})[-/](\d{1,2})", original)
+    if iso_match:
+        year, month, day = (int(part) for part in iso_match.groups())
+        try:
+            dt.date(year, month, day)
+        except ValueError:
+            return raw_date
+        result = f"{day:02d} {GEDCOM_MONTHS[month - 1]} {year:04d}"
+        return f"{qualifier} {result}".strip()
+    full_match = re.fullmatch(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{3,4})", original)
+    if full_match and full_match.group(2).upper() in GEDCOM_MONTHS:
+        day, month, year = full_match.groups()
+        try:
+            dt.date(int(year), GEDCOM_MONTHS.index(month.upper()) + 1, int(day))
+        except ValueError:
+            return raw_date
+        result = f"{int(day):02d} {month.upper()} {year}"
+        return f"{qualifier} {result}".strip()
+    month_year = re.fullmatch(r"([A-Za-z]{3})\s+(\d{3,4})", original)
+    if month_year and month_year.group(1).upper() in GEDCOM_MONTHS:
+        result = f"{month_year.group(1).upper()} {month_year.group(2)}"
+        return f"{qualifier} {result}".strip()
     try:
-        import datetime
-
-        from dateutil import parser as du_parser
-
-        # Parse with two distinct sentinels to detect whether month/day were
-        # present in the original string or merely defaulted.
-        sentinel_a = datetime.datetime(1111, 11, 11)
-        sentinel_b = datetime.datetime(2222, 2, 22)
-        dt_a = du_parser.parse(original, default=sentinel_a)
-        dt_b = du_parser.parse(original, default=sentinel_b)
-
-        month_defaulted = (
-            dt_a.month == sentinel_a.month
-            and dt_a.day == sentinel_a.day
-            and dt_b.month == sentinel_b.month
-            and dt_b.day == sentinel_b.day
-        )
-
-        if month_defaulted:
-            result = str(dt_a.year)
+        from dateutil import parser as date_parser
+        sentinel = dt.datetime(1111, 11, 11)
+        parsed = date_parser.parse(original, default=sentinel, fuzzy=False)
+        if re.fullmatch(r"[A-Za-z]+\s+\d{3,4}", original):
+            result = f"{GEDCOM_MONTHS[parsed.month - 1]} {parsed.year}"
         else:
-            gedcom_month = GEDCOM_MONTHS[dt_a.month - 1]
-            result = f"{dt_a.day:02d} {gedcom_month} {dt_a.year}"
-        return f"{qualifier} {result}".strip() if qualifier else result
-    except Exception:  # noqa: BLE001
-        pass
+            result = f"{parsed.day:02d} {GEDCOM_MONTHS[parsed.month - 1]} {parsed.year}"
+        return f"{qualifier} {result}".strip()
+    except (ImportError, ValueError, OverflowError, TypeError):
+        # Keep a small standard-library fallback so date normalisation still
+        # works when the optional dateutil dependency is not installed.
+        for pattern in ("%B %d, %Y", "%d %B %Y", "%b %d, %Y", "%d %b %Y"):
+            try:
+                parsed = dt.datetime.strptime(original, pattern)
+                result = (
+                    f"{parsed.day:02d} {GEDCOM_MONTHS[parsed.month - 1]} "
+                    f"{parsed.year}"
+                )
+                return f"{qualifier} {result}".strip()
+            except ValueError:
+                continue
+        log.debug("Could not normalise date %r", raw_date)
+        return raw_date
 
-    # Unable to parse – return as-is to preserve the original value.
-    log.debug("Could not normalise date %r; returning unchanged.", raw_date)
-    return raw_date
 
-
-# ---------------------------------------------------------------------------
-# Individual record
-# ---------------------------------------------------------------------------
+def _extract_year(date_value: str) -> Optional[int]:
+    """Extract the first four-digit year from a date or return ``None``."""
+    match = re.search(r"\b(\d{4})\b", date_value or "")
+    return int(match.group(1)) if match else None
 
 
 @dataclass
 class IndividualRecord:
-    """Lightweight, immutable snapshot of a GEDCOM individual.
-
-    This dataclass is constructed from a :class:`~gedcom.element.individual.IndividualElement`
-    and carries only the fields required for deduplication and merging.  It is
-    intentionally decoupled from the ``python-gedcom`` DOM so that tests can
-    construct instances without a full GEDCOM parse.
-
-    :param pointer: GEDCOM pointer (e.g. ``@I1@``).
-    :param given_name: First/given name(s).
-    :param surname: Family/last name.
-    :param birth_date: Normalised birth date string.
-    :param birth_place: Birth location.
-    :param death_date: Normalised death date string.
-    :param death_place: Death location.
-    :param gender: ``M``, ``F``, or empty string when unknown.
-    :param source_file: Path of the originating GEDCOM file.
-    :param element: Reference to the underlying DOM element (may be ``None``
-        when constructed synthetically in tests).
-    :param extra_fields: Additional GEDCOM tag/value pairs not covered by the
-        fields above, preserved verbatim for round-trip fidelity.
-    """
+    """Deduplication summary plus the complete underlying INDI record."""
 
     pointer: str
     given_name: str = ""
@@ -266,302 +518,388 @@ class IndividualRecord:
     source_file: str = ""
     element: object = field(default=None, repr=False, compare=False)
     extra_fields: dict[str, list[str]] = field(default_factory=dict)
+    raw_lines: list[str] = field(default_factory=list, repr=False, compare=False)
+    family_links: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def full_name(self) -> str:
-        """Return ``"given_name surname"`` with extra whitespace collapsed."""
-        parts = [p for p in (self.given_name, self.surname) if p]
-        return " ".join(parts)
+        """Return the compact display name."""
+        return " ".join(
+            part.strip()
+            for part in (self.given_name, self.surname)
+            if part.strip()
+        )
 
     @property
     def birth_year(self) -> Optional[int]:
-        """Extract a four-digit birth year from :attr:`birth_date`, or ``None``."""
+        """Return the birth year, if present."""
         return _extract_year(self.birth_date)
 
     @property
     def death_year(self) -> Optional[int]:
-        """Extract a four-digit death year from :attr:`death_date`, or ``None``."""
+        """Return the death year, if present."""
         return _extract_year(self.death_date)
 
     def summary(self) -> str:
-        """Return a compact, human-readable one-liner for logging and prompts."""
-        parts: list[str] = [f"[{self.pointer}] {self.full_name or '(unknown)'}"]
+        """Return a prompt/logging summary without dumping sensitive notes."""
+        parts = [f"[{self.pointer}] {self.full_name or '(unknown)'}"]
         if self.birth_date:
             parts.append(f"b. {self.birth_date}")
+        if self.birth_place:
+            parts.append(f"b.place={self.birth_place}")
         if self.death_date:
             parts.append(f"d. {self.death_date}")
+        if self.death_place:
+            parts.append(f"d.place={self.death_place}")
         if self.gender:
             parts.append(f"sex={self.gender}")
+        if self.family_links:
+            parts.append(f"family-links={len(self.family_links)}")
         if self.source_file:
             parts.append(f"src={Path(self.source_file).name}")
         return "  ".join(parts)
 
 
-def _extract_year(date_str: str) -> Optional[int]:
-    """Return the first four-digit year found in *date_str*, or ``None``."""
-    if not date_str:
-        return None
-    match = re.search(r"\b(\d{4})\b", date_str)
-    return int(match.group(1)) if match else None
+def _name_parts(value: str) -> tuple[str, str]:
+    """Parse common ``Given /Surname/`` and plain-name variants."""
+    value = value.strip()
+    if "/" in value:
+        before, rest = value.split("/", 1)
+        surname = rest.split("/", 1)[0].strip()
+        return before.strip(), surname
+    tokens = value.split()
+    return " ".join(tokens[:-1]), tokens[-1] if tokens else ""
 
 
-# ---------------------------------------------------------------------------
-# GEDCOM file parsing
-# ---------------------------------------------------------------------------
+def _top_level_blocks(lines: list[str]) -> list[list[str]]:
+    """Split an INDI record into its level-one child blocks."""
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines[1:]:
+        parsed = parse_gedcom_line(line)
+        if parsed.level == 1:
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
+    """Build a summary from a lossless INDI record."""
+    lines = _normalise_record_dates(record.lines)
+    name = surname = birth_date = birth_place = death_date = death_place = gender = ""
+    family_links: list[str] = []
+    extra: dict[str, list[str]] = defaultdict(list)
+    for block in _top_level_blocks(lines):
+        first = parse_gedcom_line(block[0])
+        if first.tag == "NAME":
+            name, surname = _name_parts(first.value)
+        elif first.tag == "SEX":
+            gender = first.value.strip().upper()
+        elif first.tag in {"FAMS", "FAMC"}:
+            if first.value.strip():
+                family_links.append(first.value.strip())
+        elif first.tag in {"BIRT", "DEAT"}:
+            date_value = place_value = ""
+            for line in block[1:]:
+                child = parse_gedcom_line(line)
+                if child.level == first.level + 1 and child.tag == "DATE":
+                    date_value = normalise_gedcom_date(child.value)
+                elif child.level == first.level + 1 and child.tag == "PLAC":
+                    place_value = child.value.strip()
+            if first.tag == "BIRT":
+                birth_date, birth_place = date_value, place_value
+            else:
+                death_date, death_place = date_value, place_value
+        else:
+            extra[first.tag].append("\n".join(block) + "\n")
+    return IndividualRecord(
+        pointer=record.pointer,
+        given_name=name,
+        surname=surname,
+        birth_date=birth_date,
+        birth_place=birth_place,
+        death_date=death_date,
+        death_place=death_place,
+        gender=gender,
+        source_file=record.source_file,
+        element=record,
+        extra_fields=dict(extra),
+        raw_lines=lines,
+        family_links=tuple(family_links),
+    )
 
 
 def load_gedcom(path: str | Path) -> list[IndividualRecord]:
-    """Parse a GEDCOM file and return one :class:`IndividualRecord` per individual.
+    """Load only INDI summaries from one GEDCOM file.
 
-    Dates are normalised to GEDCOM 5.5 format during loading.  The original
-    :class:`~gedcom.element.individual.IndividualElement` is retained on
-    :attr:`IndividualRecord.element` so callers can access the full DOM for
-    output generation.
-
-    :param path: Absolute or relative path to a ``.ged`` file.
-    :returns: List of :class:`IndividualRecord` instances.
-    :raises FileNotFoundError: If *path* does not exist.
-    :raises ValueError: If *path* resolves outside its declared directory
-        (path-traversal guard).
+    ``load_sources`` should be preferred by the CLI because it globally
+    disambiguates pointers and retains family/source records for output.
+    This compatibility helper is useful for callers and tests.
     """
-    file_path = Path(path).resolve()
-    if not file_path.exists():
-        raise FileNotFoundError(f"GEDCOM file not found: {file_path}")
-
-    parser = Parser()
-    parser.parse_file(str(file_path), strict=False)
-
-    records: list[IndividualRecord] = []
-    for element in parser.get_root_child_elements():
-        if not isinstance(element, IndividualElement):
-            continue
-
-        given_name, surname = element.get_name()
-        birth_date_raw, birth_place, _ = element.get_birth_data()
-        death_date_raw, death_place, _ = element.get_death_data()
-        gender = element.get_gender()
-
-        # Preserve additional tags (occupation, notes, sources, etc.) for
-        # round-trip fidelity.
-        extra: dict[str, list[str]] = {}
-        for child in element.get_child_elements():
-            tag = child.get_tag()
-            if tag not in {"NAME", "BIRT", "DEAT", "SEX"}:
-                extra.setdefault(tag, []).append(child.to_gedcom_string(recursive=True))
-
-        records.append(
-            IndividualRecord(
-                pointer=element.get_pointer(),
-                given_name=given_name.strip(),
-                surname=surname.strip(),
-                birth_date=normalise_gedcom_date(birth_date_raw),
-                birth_place=birth_place.strip(),
-                death_date=normalise_gedcom_date(death_date_raw),
-                death_place=death_place.strip(),
-                gender=gender.strip().upper(),
-                source_file=str(file_path),
-                element=element,
-                extra_fields=extra,
-            )
+    return [
+        _individual_from_record(
+            dataclasses.replace(record, lines=_normalise_record_dates(record.lines))
         )
-
-    log.info("Loaded %d individuals from %s", len(records), file_path.name)
-    return records
-
-
-# ---------------------------------------------------------------------------
-# Similarity scoring
-# ---------------------------------------------------------------------------
+        for record in iter_gedcom_records(path)
+        if record.tag == "INDI"
+    ]
 
 
-def similarity_score(a: IndividualRecord, b: IndividualRecord) -> float:
-    """Return a composite similarity score in the range [0, 100].
-
-    The score combines:
-
-    * **Name similarity** (60 % weight) – ``rapidfuzz`` token-sort-ratio on
-      the full name handles "John Smith" vs "Smith, John" gracefully.
-    * **Birth year proximity** (20 % weight) – exact match scores 100;
-      within two years scores proportionally; beyond that scores 0.
-    * **Death year proximity** (10 % weight) – same logic as birth year.
-    * **Gender agreement** (10 % weight) – 100 when equal or either unknown;
-      0 when both are set and differ.
-
-    :param a: First individual.
-    :param b: Second individual.
-    :returns: Score in [0, 100]; higher means more likely a duplicate.
-    """
-    # --- Name component (60 %) ---
-    name_a = a.full_name.lower()
-    name_b = b.full_name.lower()
-    if not name_a or not name_b:
-        # One record has no name: give a neutral score so it can still match
-        # if dates and gender are strong.
-        name_sim = 50.0
-    else:
-        name_sim = float(fuzz.token_sort_ratio(name_a, name_b))
-
-    # --- Birth year component (20 %) ---
-    birth_sim = _year_similarity(a.birth_year, b.birth_year)
-
-    # --- Death year component (10 %) ---
-    death_sim = _year_similarity(a.death_year, b.death_year)
-
-    # --- Gender component (10 %) ---
-    if a.gender and b.gender:
-        gender_sim = 100.0 if a.gender == b.gender else 0.0
-    else:
-        gender_sim = 100.0  # unknown gender is not penalised
-
-    score = (
-        name_sim * 0.60
-        + birth_sim * 0.20
-        + death_sim * 0.10
-        + gender_sim * 0.10
-    )
-    return round(score, 2)
+def _text_similarity(left: str, right: str) -> float:
+    """Return a 0--100 case-insensitive token similarity."""
+    a = " ".join(re.findall(r"[\w]+", left.casefold()))
+    b = " ".join(re.findall(r"[\w]+", right.casefold()))
+    if _rapidfuzz is not None:
+        return float(_rapidfuzz.token_sort_ratio(a, b))
+    return difflib.SequenceMatcher(None, a, b).ratio() * 100
 
 
-def _year_similarity(year_a: Optional[int], year_b: Optional[int]) -> float:
-    """Return 0–100 year-proximity score; both ``None`` → neutral 80."""
-    if year_a is None and year_b is None:
-        return 80.0  # neither has a year; don't heavily penalise
-    if year_a is None or year_b is None:
-        return 60.0  # one side missing; partial credit
-    diff = abs(year_a - year_b)
-    if diff == 0:
+def _year_similarity(left: Optional[int], right: Optional[int]) -> float:
+    """Score year agreement while giving missing values neutral credit."""
+    if left is None and right is None:
+        return 80.0
+    if left is None or right is None:
+        return 60.0
+    difference = abs(left - right)
+    if difference == 0:
         return 100.0
-    if diff <= 2:
-        return max(0.0, 100.0 - diff * 20)
+    if difference <= 5:
+        return max(0.0, 100.0 - difference * 20)
     return 0.0
 
 
-# ---------------------------------------------------------------------------
-# AI-assisted deduplication
-# ---------------------------------------------------------------------------
+def similarity_score(a: IndividualRecord, b: IndividualRecord) -> float:
+    """Return a conservative composite score in the range 0--100."""
+    name_score = (
+        _text_similarity(a.full_name, b.full_name)
+        if a.full_name and b.full_name
+        else 50.0
+    )
+    if a.gender and b.gender:
+        gender_score = 100.0 if a.gender == b.gender else 0.0
+    else:
+        gender_score = 100.0
+    if a.family_links and b.family_links:
+        relationship_score = (
+            100.0
+            if len(a.family_links) == len(b.family_links)
+            else 60.0
+        )
+    else:
+        relationship_score = 100.0
+    score = (
+        name_score * 0.60
+        + _year_similarity(a.birth_year, b.birth_year) * 0.18
+        + _year_similarity(a.death_year, b.death_year) * 0.10
+        + gender_score * 0.07
+        + relationship_score * 0.05
+    )
+    return round(max(0.0, min(100.0, score)), 2)
+
+
+def _blocking_keys(record: IndividualRecord) -> set[tuple[str, ...]]:
+    """Create several inexpensive keys so candidate generation is sub-quadratic."""
+    surname = re.sub(r"[^a-z0-9]", "", record.surname.casefold())
+    given = re.sub(r"[^a-z0-9]", "", record.given_name.casefold())
+    surname_initial = surname[:1] or "?"
+    given_initial = given[:1] or "?"
+    year = record.birth_year
+    buckets = {year // 5} if year is not None else {"?"}
+    keys: set[tuple[str, ...]] = set()
+    for bucket in buckets:
+        keys.add(("sn", surname_initial, "gn", given_initial, "y", str(bucket)))
+        keys.add(("sn", surname_initial, "y", str(bucket)))
+        keys.add(("gn", given_initial, "y", str(bucket)))
+    keys.add(("name", surname_initial, given_initial))
+    return keys
+
+
+def find_duplicate_candidates(
+    records: list[IndividualRecord],
+    threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
+) -> list[tuple[int, int, float]]:
+    """Find cross-file candidates using blocking before fuzzy comparison."""
+    buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for index, record in enumerate(records):
+        for key in _blocking_keys(record):
+            buckets[key].append(index)
+    pairs: set[tuple[int, int]] = set()
+    for indexes in buckets.values():
+        for position, left in enumerate(indexes):
+            for right in indexes[position + 1:]:
+                if records[left].source_file != records[right].source_file:
+                    pairs.add((min(left, right), max(left, right)))
+    candidates: list[tuple[int, int, float]] = []
+    for left, right in pairs:
+        score = similarity_score(records[left], records[right])
+        if score >= threshold:
+            candidates.append((left, right, score))
+    return sorted(candidates, key=lambda item: item[2], reverse=True)
 
 
 def _build_dedup_prompt(a: IndividualRecord, b: IndividualRecord) -> str:
-    """Build a structured prompt asking whether two genealogy records are duplicates.
-
-    The prompt is intentionally concise to stay within small context windows.
-
-    :param a: First individual record.
-    :param b: Second individual record.
-    :returns: Plain-text prompt string.
-    """
+    """Build a bounded JSON-only prompt for an AI adjudicator."""
     return (
-        "You are an expert genealogist. Decide whether the two individuals "
-        "below refer to the same real person.\n\n"
-        f"Person A: {a.summary()}\n"
-        f"Person B: {b.summary()}\n\n"
-        "Reply in this exact JSON format (no prose, no markdown):\n"
-        '{"is_duplicate": true|false, "confidence": 0.0-1.0, '
-        '"reasoning": "one sentence"}\n'
+        "You are adjudicating two genealogy records. Decide whether they are "
+        "the same real person. Dates may be approximate and names may be "
+        "transliterated. Never infer identity from a name alone. Return only "
+        "valid JSON. A preferred value is optional and cannot delete the other "
+        "value; the merge tool retains every source fact.\n\n"
+        f"A: {a.summary()[:MAX_AI_TEXT]}\n"
+        f"B: {b.summary()[:MAX_AI_TEXT]}\n\n"
+        '{"is_duplicate":true,"confidence":0.0,"reasoning":"...",'
+        '"preferred_values":{"given_name":"","surname":"",'
+        '"birth_date":"","birth_place":"","death_date":"",'
+        '"death_place":"","gender":""}}'
     )
 
 
 def _parse_ai_response(response_text: str) -> dict[str, object]:
-    """Extract JSON fields from *response_text*, tolerating surrounding prose.
-
-    :param response_text: Raw text returned by the LLM.
-    :returns: Dict with ``is_duplicate`` (bool), ``confidence`` (float), and
-        ``reasoning`` (str) keys.  Missing keys are filled with safe defaults.
-    """
-    import json
-
-    # Strip markdown code fences if present.
-    cleaned = re.sub(r"```(?:json)?", "", response_text).strip()
-
-    # Try to locate the JSON object.
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group())
-            return {
-                "is_duplicate": bool(data.get("is_duplicate", False)),
-                "confidence": float(data.get("confidence", 0.0)),
-                "reasoning": str(data.get("reasoning", "")),
-            }
-        except json.JSONDecodeError:
-            pass
-
-    log.debug("AI response could not be parsed as JSON: %r", response_text)
-    return {"is_duplicate": False, "confidence": 0.0, "reasoning": "parse error"}
+    """Parse and clamp an AI response to a safe, typed decision structure."""
+    cleaned = re.sub(r"```(?:json)?", "", response_text, flags=re.IGNORECASE).strip()
+    try:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        data = json.loads(cleaned[start:end + 1]) if start >= 0 and end > start else {}
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    preferred = data.get("preferred_values", {})
+    if not isinstance(preferred, dict):
+        preferred = {}
+    allowed = {
+        "given_name", "surname", "birth_date", "birth_place",
+        "death_date", "death_place", "gender",
+    }
+    preferred_values = {
+        key: str(value)
+        for key, value in preferred.items()
+        if key in allowed and value
+    }
+    return {
+        "is_duplicate": data.get("is_duplicate") is True,
+        "confidence": confidence,
+        "reasoning": str(data.get("reasoning", ""))[:MAX_AI_TEXT],
+        "preferred_values": preferred_values,
+    }
 
 
 def ai_resolve_ollama(
     a: IndividualRecord,
     b: IndividualRecord,
-    model: str = OLLAMA_MODEL,
-    base_url: str = OLLAMA_BASE_URL,
-    num_ctx: int = OLLAMA_NUM_CTX,
+    model: str = "llama3.1",
+    base_url: str = "http://localhost:11434",
+    timeout: float = 60.0,
+    **_: object,
 ) -> dict[str, object]:
-    """Ask a local Ollama model whether two individual records are duplicates.
-
-    Uses :class:`~langchain_ollama.ChatOllama` following the same pattern as
-    :mod:`tools.sql_router`.
-
-    :param a: First individual record.
-    :param b: Second individual record.
-    :param model: Ollama model tag (default: ``OLLAMA_MODEL`` env var).
-    :param base_url: Ollama server base URL.
-    :param num_ctx: Context-window size; kept within a 24 GB VRAM budget.
-    :returns: Dict with ``is_duplicate``, ``confidence``, and ``reasoning``.
-    :raises RuntimeError: If the Ollama server is unreachable.
-    """
-    from langchain_ollama import ChatOllama
-
-    llm = ChatOllama(model=model, base_url=base_url, num_ctx=num_ctx)
-    prompt = _build_dedup_prompt(a, b)
+    """Call Ollama's local HTTP API without executing model-produced code."""
+    payload = json.dumps({
+        "model": model,
+        "prompt": _build_dedup_prompt(a, b),
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
-        response = llm.invoke(prompt)
-        text = response.content if hasattr(response, "content") else str(response)
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            f"Ollama request failed (model={model}, url={base_url}): {exc}"
-        ) from exc
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Ollama request failed: {exc}") from exc
+    return _parse_ai_response(str(body.get("response", "")))
 
-    return _parse_ai_response(text)
+
+def ai_resolve_openai(
+    a: IndividualRecord,
+    b: IndividualRecord,
+    api_key: Optional[str] = None,
+    model: str = "gpt-4.1-mini",
+    **_: object,
+) -> dict[str, object]:
+    """Call the OpenAI Responses API using an environment-provided key."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the optional 'openai' package for this backend"
+        ) from exc
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
+    schema = {
+        "type": "object",
+        "properties": {
+            "is_duplicate": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+            "preferred_values": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+        },
+        "required": ["is_duplicate", "confidence", "reasoning", "preferred_values"],
+        "additionalProperties": False,
+    }
+    try:
+        client = OpenAI(api_key=key)
+        response = client.responses.create(
+            model=model,
+            instructions="Return only the JSON object requested by the user.",
+            input=_build_dedup_prompt(a, b),
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "dedup_decision",
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+        )
+        return _parse_ai_response(response.output_text)
+    except Exception as exc:  # noqa: BLE001 - SDK exception types vary by version
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
 
 
 def ai_resolve_gemini(
     a: IndividualRecord,
     b: IndividualRecord,
     api_key: Optional[str] = None,
-    model: str = GEMINI_MODEL,
+    model: str = "gemini-2.0-flash",
+    **_: object,
 ) -> dict[str, object]:
-    """Ask Google Gemini whether two individual records are duplicates.
-
-    :param a: First individual record.
-    :param b: Second individual record.
-    :param api_key: Gemini API key.  Falls back to the ``GEMINI_API_KEY``
-        environment variable when not supplied.
-    :param model: Gemini model name.
-    :returns: Dict with ``is_duplicate``, ``confidence``, and ``reasoning``.
-    :raises RuntimeError: If no API key is available.
-    """
-    import google.generativeai as genai
-
-    resolved_key = api_key or os.getenv(GEMINI_API_KEY_ENV)
-    if not resolved_key:
-        raise RuntimeError(
-            f"{GEMINI_API_KEY_ENV} is not set; populate it in your .env file."
-        )
-
-    genai.configure(api_key=resolved_key)
-    gemini_model = genai.GenerativeModel(
-        model,
-        generation_config={"response_mime_type": "application/json"},
-    )
-    prompt = _build_dedup_prompt(a, b)
+    """Compatibility resolver for the optional Google Gemini SDK."""
     try:
-        response = gemini_model.generate_content(prompt)
-        text = response.text
+        import google.generativeai as genai
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the optional 'google-generativeai' package"
+        ) from exc
+    key = api_key or os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    genai.configure(api_key=key)
+    try:
+        response = genai.GenerativeModel(
+            model,
+            generation_config={"response_mime_type": "application/json"},
+        ).generate_content(_build_dedup_prompt(a, b))
+        return _parse_ai_response(response.text)
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Gemini request failed (model={model}): {exc}") from exc
-
-    return _parse_ai_response(text)
+        raise RuntimeError(f"Gemini request failed: {exc}") from exc
 
 
 def ai_resolve(
@@ -570,281 +908,99 @@ def ai_resolve(
     backend: str = "ollama",
     **kwargs: object,
 ) -> dict[str, object]:
-    """Dispatch a deduplication query to the configured AI backend.
-
-    :param a: First individual record.
-    :param b: Second individual record.
-    :param backend: ``"ollama"`` (default, local) or ``"gemini"`` (remote).
-    :param kwargs: Additional keyword arguments forwarded to the backend
-        function (e.g. ``model=``, ``base_url=``).
-    :returns: Dict with ``is_duplicate``, ``confidence``, and ``reasoning``.
-    :raises ValueError: If *backend* is not a recognised value.
-    """
+    """Dispatch to an AI backend; ``none`` is an explicit offline mode."""
+    if backend == "none":
+        return {
+            "is_duplicate": False,
+            "confidence": 0.0,
+            "reasoning": "AI disabled",
+            "preferred_values": {},
+        }
     if backend == "ollama":
-        return ai_resolve_ollama(a, b, **kwargs)  # type: ignore[arg-type]
+        return ai_resolve_ollama(a, b, **kwargs)
+    if backend == "openai":
+        return ai_resolve_openai(a, b, **kwargs)
     if backend == "gemini":
-        return ai_resolve_gemini(a, b, **kwargs)  # type: ignore[arg-type]
-    raise ValueError(
-        f"Unknown AI backend {backend!r}. Choose 'ollama' or 'gemini'."
+        return ai_resolve_gemini(a, b, **kwargs)
+    raise ValueError(f"Unknown AI backend: {backend}")
+
+
+def _field_value(record: IndividualRecord, field_name: str) -> str:
+    """Read a mergeable summary field by name."""
+    return str(getattr(record, field_name, ""))
+
+
+def merge_two_records(
+    primary: IndividualRecord,
+    secondary: IndividualRecord,
+    ai_verdict: Optional[dict[str, object]] = None,
+) -> IndividualRecord:
+    """Merge summaries and complete raw blocks without deleting conflicts."""
+    preferred = (ai_verdict or {}).get("preferred_values", {})
+    preferred = preferred if isinstance(preferred, dict) else {}
+
+    def choose(field_name: str) -> str:
+        first = _field_value(primary, field_name)
+        second = _field_value(secondary, field_name)
+        suggested = str(preferred.get(field_name, "")).strip()
+        if suggested and suggested in {first, second}:
+            return suggested
+        if not first:
+            return second
+        if field_name in {"birth_date", "death_date"} and second:
+            first_date = normalise_gedcom_date(first)
+            second_date = normalise_gedcom_date(second)
+            return first_date if len(first_date) >= len(second_date) else second_date
+        return first
+
+    merged_extra = {tag: list(values) for tag, values in primary.extra_fields.items()}
+    for tag, values in secondary.extra_fields.items():
+        target = merged_extra.setdefault(tag, [])
+        target.extend(value for value in values if value not in target)
+    first_lines = (
+        primary.raw_lines
+        or _record_to_gedcom_lines(primary).rstrip("\n").splitlines()
     )
-
-
-# ---------------------------------------------------------------------------
-# Interactive conflict resolution
-# ---------------------------------------------------------------------------
+    second_lines = (
+        secondary.raw_lines
+        or _record_to_gedcom_lines(secondary).rstrip("\n").splitlines()
+    )
+    merged_lines = list(first_lines)
+    existing_blocks = (
+        {tuple(block) for block in _top_level_blocks(merged_lines)}
+        if len(merged_lines) > 1
+        else set()
+    )
+    for block in _top_level_blocks(second_lines):
+        block_key = tuple(block)
+        if block_key not in existing_blocks:
+            merged_lines.extend(block)
+            existing_blocks.add(block_key)
+    return dataclasses.replace(
+        primary,
+        given_name=choose("given_name"),
+        surname=choose("surname"),
+        birth_date=choose("birth_date"),
+        birth_place=choose("birth_place"),
+        death_date=choose("death_date"),
+        death_place=choose("death_place"),
+        gender=choose("gender"),
+        family_links=tuple(
+            dict.fromkeys(primary.family_links + secondary.family_links)
+        ),
+        extra_fields=merged_extra,
+        raw_lines=merged_lines,
+    )
 
 
 def prompt_operator(a: IndividualRecord, b: IndividualRecord) -> bool:
-    """Ask the terminal operator whether two records are the same person.
-
-    Displays a formatted summary of both records and reads a ``y``/``n``
-    answer.  Loops until a valid answer is received.
-
-    :param a: First individual record.
-    :param b: Second individual record.
-    :returns: ``True`` if the operator confirms a duplicate; ``False`` otherwise.
-    """
-    print("\n" + "=" * 70)
-    print("POTENTIAL DUPLICATE — human review required")
-    print("-" * 70)
-    print(f"  A: {a.summary()}")
-    print(f"  B: {b.summary()}")
-    print("=" * 70)
-
-    while True:
-        try:
-            answer = input("Are these the same person? [y/n/skip]: ").strip().lower()
-        except EOFError:
-            # Non-interactive environment (e.g. CI pipeline): default to safe
-            # choice of *not* merging.
-            print("Non-interactive environment detected; skipping merge.")
-            return False
-
-        if answer in {"y", "yes"}:
-            return True
-        if answer in {"n", "no"}:
-            return False
-        if answer in {"s", "skip"}:
-            return False
-        print("  Please answer y, n, or skip.")
-
-
-# ---------------------------------------------------------------------------
-# Merging logic
-# ---------------------------------------------------------------------------
-
-
-def merge_two_records(primary: IndividualRecord, secondary: IndividualRecord) -> IndividualRecord:
-    """Merge *secondary* into *primary*, filling blanks and preferring longer values.
-
-    The merge strategy maximises completeness while keeping the primary record's
-    data when both sides have a value:
-
-    * Empty fields on *primary* are filled from *secondary*.
-    * Date fields: the more specific (longer) value wins.
-    * Extra GEDCOM tags: combined, removing exact duplicates.
-
-    :param primary: The record that will be kept (its pointer is preserved).
-    :param secondary: The record whose data supplements *primary*.
-    :returns: A new :class:`IndividualRecord` with merged data.
-    """
-
-    def _prefer(val_a: str, val_b: str) -> str:
-        """Return *val_a* if non-empty, else *val_b*."""
-        return val_a if val_a.strip() else val_b
-
-    def _prefer_date(date_a: str, date_b: str) -> str:
-        """Return the more specific date (longer after normalisation)."""
-        norm_a = normalise_gedcom_date(date_a)
-        norm_b = normalise_gedcom_date(date_b)
-        if not norm_a:
-            return norm_b
-        if not norm_b:
-            return norm_a
-        # Prefer the longer (more specific) date.
-        return norm_a if len(norm_a) >= len(norm_b) else norm_b
-
-    # Merge extra_fields: combine lists, deduplicate preserving order.
-    merged_extra: dict[str, list[str]] = {}
-    for tag, values in primary.extra_fields.items():
-        merged_extra[tag] = list(values)
-    for tag, values in secondary.extra_fields.items():
-        existing = merged_extra.setdefault(tag, [])
-        for v in values:
-            if v not in existing:
-                existing.append(v)
-
-    return IndividualRecord(
-        pointer=primary.pointer,
-        given_name=_prefer(primary.given_name, secondary.given_name),
-        surname=_prefer(primary.surname, secondary.surname),
-        birth_date=_prefer_date(primary.birth_date, secondary.birth_date),
-        birth_place=_prefer(primary.birth_place, secondary.birth_place),
-        death_date=_prefer_date(primary.death_date, secondary.death_date),
-        death_place=_prefer(primary.death_place, secondary.death_place),
-        gender=_prefer(primary.gender, secondary.gender),
-        source_file=primary.source_file,
-        element=primary.element,
-        extra_fields=merged_extra,
-    )
-
-
-def find_duplicate_candidates(
-    records: list[IndividualRecord],
-    threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
-) -> list[tuple[int, int, float]]:
-    """Return index pairs whose similarity score meets *threshold*.
-
-    An O(n²) comparison is used.  For the typical genealogy file size
-    (hundreds to low thousands of individuals) this is fast enough; for very
-    large files (tens of thousands) consider chunking by surname prefix.
-
-    :param records: Flat list of all individuals from all source files.
-    :param threshold: Minimum similarity score to flag as a candidate pair.
-    :returns: List of ``(index_a, index_b, score)`` tuples, sorted descending
-        by score so the most confident matches are processed first.
-    """
-    candidates: list[tuple[int, int, float]] = []
-    n = len(records)
-    for i in range(n):
-        for j in range(i + 1, n):
-            # Skip pairs from the same source file; they are unlikely to be
-            # duplicates of one another (the source app should have prevented
-            # that) and this halves the search space for two-file merges.
-            if records[i].source_file == records[j].source_file:
-                continue
-            score = similarity_score(records[i], records[j])
-            if score >= threshold:
-                candidates.append((i, j, score))
-
-    candidates.sort(key=lambda t: t[2], reverse=True)
-    return candidates
-
-
-# ---------------------------------------------------------------------------
-# Main merge orchestration
-# ---------------------------------------------------------------------------
-
-
-def merge_records(
-    all_records: list[IndividualRecord],
-    threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
-    ai_backend: str = "ollama",
-    auto: bool = False,
-    ai_kwargs: Optional[dict[str, object]] = None,
-) -> list[IndividualRecord]:
-    """Deduplicate and merge a flat list of individuals from multiple files.
-
-    Algorithm:
-
-    1. Find all candidate duplicate pairs above *threshold*.
-    2. For each pair (most confident first):
-
-       a. If score ≥ 95, merge automatically (high confidence).
-       b. Otherwise ask the configured AI backend.
-       c. If AI confidence ≥ :data:`AI_CONFIDENCE_AUTO_ACCEPT` or *auto* is
-          ``True``, honour the AI verdict.
-       d. Otherwise prompt the terminal operator.
-
-    3. Build the deduplicated output list, applying pointer remapping so that
-       family links remain consistent.
-
-    :param all_records: Combined list from all source GEDCOM files.
-    :param threshold: Minimum similarity score for a pair to be considered.
-    :param ai_backend: ``"ollama"`` or ``"gemini"``.
-    :param auto: When ``True`` skip interactive prompts; use AI only.
-    :param ai_kwargs: Extra keyword arguments passed to the AI backend.
-    :returns: Deduplicated, merged list of :class:`IndividualRecord`.
-    """
-    if ai_kwargs is None:
-        ai_kwargs = {}
-
-    # Map from original pointer → merged record's pointer to track which
-    # records have been consumed.
-    merged_into: dict[str, str] = {}  # secondary_pointer → primary_pointer
-    records_by_pointer: dict[str, IndividualRecord] = {
-        r.pointer: r for r in all_records
-    }
-
-    candidates = find_duplicate_candidates(all_records, threshold)
-    log.info(
-        "Found %d candidate duplicate pair(s) at threshold=%d",
-        len(candidates),
-        threshold,
-    )
-
-    for idx_a, idx_b, score in candidates:
-        rec_a = all_records[idx_a]
-        rec_b = all_records[idx_b]
-
-        # Resolve through prior merges.
-        ptr_a = merged_into.get(rec_a.pointer, rec_a.pointer)
-        ptr_b = merged_into.get(rec_b.pointer, rec_b.pointer)
-        if ptr_a == ptr_b:
-            continue  # already merged transitively
-        if ptr_a not in records_by_pointer or ptr_b not in records_by_pointer:
-            continue
-
-        rec_a = records_by_pointer[ptr_a]
-        rec_b = records_by_pointer[ptr_b]
-
-        is_dup: bool
-        if score >= 95.0:
-            is_dup = True
-            log.info(
-                "Auto-merging %s ← %s (score=%.1f)",
-                rec_a.pointer,
-                rec_b.pointer,
-                score,
-            )
-        else:
-            verdict = _get_ai_verdict(rec_a, rec_b, ai_backend, ai_kwargs)
-            confidence = float(verdict.get("confidence", 0.0))
-            is_dup_ai = bool(verdict.get("is_duplicate", False))
-            reasoning = str(verdict.get("reasoning", ""))
-
-            log.info(
-                "AI verdict for %s vs %s: is_duplicate=%s confidence=%.2f — %s",
-                rec_a.pointer,
-                rec_b.pointer,
-                is_dup_ai,
-                confidence,
-                reasoning,
-            )
-
-            if confidence >= AI_CONFIDENCE_AUTO_ACCEPT or auto:
-                is_dup = is_dup_ai
-            else:
-                print(f"\n[AI] {reasoning} (confidence={confidence:.0%})")
-                is_dup = prompt_operator(rec_a, rec_b)
-
-        if is_dup:
-            merged = merge_two_records(rec_a, rec_b)
-            records_by_pointer[ptr_a] = merged
-            merged_into[ptr_b] = ptr_a
-            log.info(
-                "Merged %s ← %s; merged record: %s",
-                ptr_a,
-                ptr_b,
-                merged.summary(),
-            )
-
-    # Collect surviving records, preserving original order.
-    seen_pointers: set[str] = set()
-    result: list[IndividualRecord] = []
-    for rec in all_records:
-        canonical_ptr = merged_into.get(rec.pointer, rec.pointer)
-        if canonical_ptr in seen_pointers:
-            continue
-        seen_pointers.add(canonical_ptr)
-        result.append(records_by_pointer[canonical_ptr])
-
-    log.info(
-        "Merge complete: %d input → %d output individual(s).",
-        len(all_records),
-        len(result),
-    )
-    return result
+    """Ask for confirmation, defaulting to no on EOF or invalid input."""
+    print(f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}")
+    try:
+        answer = input("Same person? [y/N]: ").strip().casefold()
+    except EOFError:
+        return False
+    return answer in {"y", "yes"}
 
 
 def _get_ai_verdict(
@@ -853,296 +1009,370 @@ def _get_ai_verdict(
     backend: str,
     kwargs: dict[str, object],
 ) -> dict[str, object]:
-    """Call the AI backend and return the parsed verdict dict.
-
-    Returns a low-confidence "unsure" verdict if the backend raises an error,
-    allowing the caller to fall through to the interactive prompt.
-    """
+    """Return a safe no-merge verdict if an optional backend is unavailable."""
     try:
         return ai_resolve(a, b, backend=backend, **kwargs)
     except Exception as exc:  # noqa: BLE001
-        log.warning("AI backend error (%s); falling back to operator: %s", backend, exc)
-        return {"is_duplicate": False, "confidence": 0.0, "reasoning": str(exc)}
+        log.warning(
+            "AI backend %s unavailable; retaining both records: %s",
+            backend,
+            exc,
+        )
+        return {
+            "is_duplicate": False,
+            "confidence": 0.0,
+            "reasoning": str(exc),
+            "preferred_values": {},
+        }
 
 
-# ---------------------------------------------------------------------------
-# GEDCOM output
-# ---------------------------------------------------------------------------
+def merge_records(
+    all_records: list[IndividualRecord],
+    threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
+    ai_backend: str = "ollama",
+    auto: bool = False,
+    ai_kwargs: Optional[dict[str, object]] = None,
+    pointer_map: Optional[dict[str, str]] = None,
+) -> list[IndividualRecord]:
+    """Deduplicate with union-find-style canonical pointers and safe fallbacks."""
+    if not 0 <= threshold <= 100:
+        raise ValueError("similarity threshold must be between 0 and 100")
+    kwargs = ai_kwargs or {}
+    by_pointer = {record.pointer: record for record in all_records}
+    parent = {record.pointer: record.pointer for record in all_records}
+
+    def find(pointer: str) -> str:
+        while parent[pointer] != pointer:
+            parent[pointer] = parent[parent[pointer]]
+            pointer = parent[pointer]
+        return pointer
+
+    candidates = find_duplicate_candidates(all_records, threshold)
+    log.info("Found %d candidate pairs", len(candidates))
+    for left, right, score in candidates:
+        root_left = find(all_records[left].pointer)
+        root_right = find(all_records[right].pointer)
+        if root_left == root_right:
+            continue
+        first, second = by_pointer[root_left], by_pointer[root_right]
+        verdict: dict[str, object]
+        if score >= 95:
+            verdict = {
+                "is_duplicate": True,
+                "confidence": 1.0,
+                "reasoning": "deterministic high score",
+                "preferred_values": {},
+            }
+        else:
+            verdict = _get_ai_verdict(first, second, ai_backend, kwargs)
+            confidence = float(verdict.get("confidence", 0.0))
+            if not auto and confidence < AI_CONFIDENCE_AUTO_ACCEPT:
+                verdict = dict(verdict)
+                verdict["is_duplicate"] = prompt_operator(first, second)
+            elif not bool(verdict.get("is_duplicate", False)):
+                continue
+        if bool(verdict.get("is_duplicate", False)):
+            merged = merge_two_records(first, second, verdict)
+            parent[root_right] = root_left
+            by_pointer[root_left] = merged
+            log.info(
+                "Merged %s <- %s (score %.1f)",
+                root_left,
+                root_right,
+                score,
+            )
+    result: list[IndividualRecord] = []
+    seen: set[str] = set()
+    for record in all_records:
+        root = find(record.pointer)
+        if root not in seen:
+            result.append(by_pointer[root])
+            seen.add(root)
+    if pointer_map is not None:
+        pointer_map.update(
+            {record.pointer: find(record.pointer) for record in all_records}
+        )
+    log.info("Merge complete: %d -> %d individuals", len(all_records), len(result))
+    return result
+
+
+def _record_to_gedcom_lines(record: IndividualRecord) -> str:
+    """Serialize a synthetic summary for backwards-compatible callers."""
+    lines = [f"0 {record.pointer} INDI\n"]
+    name = (
+        f"{record.given_name} /{record.surname}/".strip()
+        if record.surname
+        else record.given_name
+    )
+    if name:
+        lines.append(f"1 NAME {name}\n")
+    if record.gender:
+        lines.append(f"1 SEX {record.gender}\n")
+    events = (
+        ("BIRT", record.birth_date, record.birth_place),
+        ("DEAT", record.death_date, record.death_place),
+    )
+    for tag, date_value, place in events:
+        if date_value or place:
+            lines.append(f"1 {tag}\n")
+            if date_value:
+                lines.append(f"2 DATE {date_value}\n")
+            if place:
+                lines.append(f"2 PLAC {place}\n")
+    for values in record.extra_fields.values():
+        lines.extend(
+            value if value.endswith("\n") else value + "\n"
+            for value in values
+        )
+    return "".join(lines)
 
 
 def write_gedcom(
     records: list[IndividualRecord],
     output_path: str | Path,
-    source_parsers: Optional[list[Parser]] = None,
+    source_parsers: Optional[list[Any]] = None,
+    source_documents: Optional[list[ParsedSource]] = None,
+    pointer_map: Optional[dict[str, str]] = None,
+    include_individuals: Optional[set[str]] = None,
+    include_families: Optional[set[str]] = None,
+    gedcom_version: str = "5.5.5",
 ) -> None:
-    """Write *records* to a GEDCOM 5.5 file at *output_path*.
+    """Write an atomic master file, preserving all source root records.
 
-    The output preserves the header from the first source parser (if supplied)
-    and appends a ``TRLR`` trailer.  Family records from the source parsers are
-    written after the individuals; pointer references that pointed to merged
-    records are remapped automatically.
-
-    :param records: Merged individual records to write.
-    :param output_path: Destination file path.  Parent directories must exist.
-    :param source_parsers: Optional list of parsed source files.  When
-        supplied their ``HEAD`` record and ``FAM`` records are copied through.
-    :raises OSError: If the output path cannot be written.
+    ``source_documents`` is the lossless path used by this module.  The older
+    ``source_parsers`` argument remains accepted for synthetic/unit callers;
+    DOM elements are copied only when they expose ``to_gedcom_string``.
     """
-    out_path = Path(output_path)
+    if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
+        raise ValueError(
+            f"Unsupported GEDCOM version {gedcom_version}; "
+            f"choose from {SUPPORTED_GEDCOM_VERSIONS}"
+        )
+    out_path = Path(output_path).resolve()
+    if out_path.parent and not out_path.parent.exists():
+        raise OSError(f"Output directory does not exist: {out_path.parent}")
     lines: list[str] = []
-
-    # Write header.
-    if source_parsers:
-        for element in source_parsers[0].get_root_child_elements():
-            if element.get_tag() == "HEAD":
-                lines.append(element.to_gedcom_string(recursive=True))
-                break
-    if not lines:
-        # Minimal compliant header.
-        lines.append("0 HEAD\n1 SOUR GedcomMergeTool\n1 GEDC\n2 VERS 5.5\n1 CHAR UTF-8\n")
-
-    # Write merged individuals.
-    for rec in records:
-        if rec.element is not None:
-            # Update the DOM element's child date values from the merged record
-            # so normalised dates appear in the output.
-            _patch_element_dates(rec)
-            lines.append(rec.element.to_gedcom_string(recursive=True))
-        else:
-            # Synthetic record (no DOM element); write minimal GEDCOM lines.
-            lines.append(_record_to_gedcom_lines(rec))
-
-    # Write family records from all source parsers.
-    if source_parsers:
+    if source_documents:
+        all_source_records = [
+            record
+            for source in source_documents
+            for record in source.records
+        ]
+        heads = [record for record in all_source_records if record.tag == "HEAD"]
+        header_lines = _normalise_header_lines(heads, gedcom_version)
+        lines.extend(
+            _rewrite_xrefs(line, pointer_map or {}) for line in header_lines
+        )
+        for record in all_source_records:
+            if record.tag not in {"HEAD", "TRLR", "INDI"}:
+                if (
+                    record.tag == "FAM"
+                    and include_families is not None
+                    and record.pointer not in include_families
+                ):
+                    continue
+                lines.extend(
+                    _rewrite_xrefs(line, pointer_map or {})
+                    for line in record.lines
+                )
+        survivor_lines = {
+            record.pointer: record.raw_lines
+            for record in records
+            if record.raw_lines
+        }
+        for record in records:
+            if (
+                include_individuals is not None
+                and record.pointer not in include_individuals
+            ):
+                continue
+            source_lines = survivor_lines.get(record.pointer) or (
+                _record_to_gedcom_lines(record).rstrip("\n").splitlines()
+            )
+            lines.extend(
+                _rewrite_xrefs(line, pointer_map or {})
+                for line in source_lines
+            )
+    elif source_parsers:
+        # Compatibility path for callers of the previous DOM-based API.
+        # New CLI calls use source_documents so unknown lines are retained.
         for parser in source_parsers:
             for element in parser.get_root_child_elements():
-                if isinstance(element, FamilyElement):
-                    lines.append(element.to_gedcom_string(recursive=True))
-
-    # Trailer.
-    lines.append("0 TRLR\n")
-
-    with out_path.open("w", encoding="utf-8") as fh:
-        fh.writelines(lines)
-
-    log.info("Wrote %d individual(s) to %s", len(records), out_path)
-
-
-def _patch_element_dates(rec: IndividualRecord) -> None:
-    """Update birth/death DATE sub-elements of *rec.element* with normalised values.
-
-    Modifies the DOM in-place so that :meth:`~gedcom.element.Element.to_gedcom_string`
-    emits the normalised dates.
-
-    :param rec: Merged record whose :attr:`~IndividualRecord.element` will be
-        patched.
-    """
-    import gedcom.tags as tags
-
-    for child in rec.element.get_child_elements():  # type: ignore[union-attr]
-        tag = child.get_tag()
-        if tag == tags.GEDCOM_TAG_BIRTH and rec.birth_date:
-            _set_date_child(child, rec.birth_date)
-        elif tag == tags.GEDCOM_TAG_DEATH and rec.death_date:
-            _set_date_child(child, rec.death_date)
-
-
-def _set_date_child(event_element: object, normalised_date: str) -> None:
-    """Set the DATE sub-element of *event_element* to *normalised_date*.
-
-    :param event_element: A GEDCOM event element (BIRT, DEAT, etc.).
-    :param normalised_date: The normalised GEDCOM date string.
-    """
-    import gedcom.tags as tags
-
-    for child in event_element.get_child_elements():  # type: ignore[union-attr]
-        if child.get_tag() == tags.GEDCOM_TAG_DATE:
-            child.set_value(normalised_date)
-            return
-
-
-def _record_to_gedcom_lines(rec: IndividualRecord) -> str:
-    """Serialise a synthetic :class:`IndividualRecord` to GEDCOM text.
-
-    Used when :attr:`IndividualRecord.element` is ``None`` (e.g. unit tests).
-
-    :param rec: Record to serialise.
-    :returns: Multi-line GEDCOM string terminated with a newline.
-    """
-    lines: list[str] = [f"0 {rec.pointer} INDI\n"]
-    full = f"{rec.given_name} /{rec.surname}/".strip() if rec.surname else rec.given_name
-    if full:
-        lines.append(f"1 NAME {full}\n")
-    if rec.gender:
-        lines.append(f"1 SEX {rec.gender}\n")
-    if rec.birth_date or rec.birth_place:
-        lines.append("1 BIRT\n")
-        if rec.birth_date:
-            lines.append(f"2 DATE {rec.birth_date}\n")
-        if rec.birth_place:
-            lines.append(f"2 PLAC {rec.birth_place}\n")
-    if rec.death_date or rec.death_place:
-        lines.append("1 DEAT\n")
-        if rec.death_date:
-            lines.append(f"2 DATE {rec.death_date}\n")
-        if rec.death_place:
-            lines.append(f"2 PLAC {rec.death_place}\n")
-    for _tag, tag_lines in rec.extra_fields.items():
-        for line in tag_lines:
-            lines.append(line if line.endswith("\n") else line + "\n")
-    return "".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
+                tag = element.get_tag()
+                text = element.to_gedcom_string(recursive=True)
+                if tag == "HEAD" and not lines:
+                    lines.extend(text.rstrip("\n").splitlines())
+                elif tag not in {"HEAD", "TRLR", "INDI"}:
+                    lines.extend(text.rstrip("\n").splitlines())
+        for record in records:
+            if (
+                include_individuals is not None
+                and record.pointer not in include_individuals
+            ):
+                continue
+            lines.extend(_record_to_gedcom_lines(record).rstrip("\n").splitlines())
+    else:
+        lines.extend(_normalise_header_lines([], gedcom_version))
+        for record in records:
+            if (
+                include_individuals is not None
+                and record.pointer not in include_individuals
+            ):
+                continue
+            lines.extend(
+                _record_to_gedcom_lines(record).rstrip("\n").splitlines()
+            )
+    lines.append("0 TRLR")
+    if gedcom_version == "5.5.5":
+        validate_gedcom_555(lines)
+    payload = "\n".join(lines) + "\n"
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=out_path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(payload)
+    try:
+        os.replace(temporary, out_path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+    log.info("Wrote %d individuals to %s", len(records), out_path)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    """Construct and return the CLI argument parser."""
-    ap = argparse.ArgumentParser(
-        prog="python -m tools.gedcom_merge",
-        description=(
-            "Merge multiple GEDCOM files into a single master file "
-            "using AI-assisted deduplication."
-        ),
+    """Build the command-line parser."""
+    parser = argparse.ArgumentParser(
+        description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
     )
-    ap.add_argument(
-        "input_files",
-        metavar="FILE",
-        nargs="+",
-        help="Two or more GEDCOM (.ged) input files.",
-    )
-    ap.add_argument(
-        "-o",
-        "--output",
-        default="merged.ged",
-        metavar="OUTPUT",
-        help="Output GEDCOM file path (default: merged.ged).",
-    )
-    ap.add_argument(
+    parser.add_argument("input_files", nargs="+", metavar="FILE")
+    parser.add_argument("-o", "--output", default="merged.ged")
+    parser.add_argument(
         "--ai-backend",
-        choices=["ollama", "gemini"],
+        choices=("none", "ollama", "openai", "gemini"),
         default="ollama",
-        metavar="BACKEND",
-        help="AI backend for deduplication: 'ollama' (local, default) or 'gemini' (remote).",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--similarity-threshold",
         type=int,
         default=DEFAULT_SIMILARITY_THRESHOLD,
-        metavar="N",
-        help=(
-            f"Minimum similarity score 0–100 for a pair to be examined "
-            f"(default: {DEFAULT_SIMILARITY_THRESHOLD})."
-        ),
     )
-    ap.add_argument(
+    parser.add_argument(
         "--auto",
         action="store_true",
-        help="Skip interactive prompts; apply AI verdicts automatically.",
+        help="Do not ask interactive questions.",
     )
-    ap.add_argument(
-        "--ollama-model",
-        default=OLLAMA_MODEL,
-        help=f"Ollama model name (default: {OLLAMA_MODEL!r}, env: OLLAMA_MODEL).",
+    parser.add_argument(
+        "--root-person",
+        help=(
+            "Export only the connected tree containing this GEDCOM pointer "
+            "(for example @I1@) or unique full name."
+        ),
     )
-    ap.add_argument(
+    parser.add_argument(
+        "--gedcom-version",
+        choices=SUPPORTED_GEDCOM_VERSIONS,
+        default="5.5.5",
+        help="Output version; 5.5.1 is a compatibility fallback.",
+    )
+    parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL", "llama3.1"))
+    parser.add_argument(
         "--ollama-url",
-        default=OLLAMA_BASE_URL,
-        help=f"Ollama base URL (default: {OLLAMA_BASE_URL!r}, env: OLLAMA_BASE_URL).",
+        default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
     )
-    ap.add_argument(
+    parser.add_argument(
+        "--openai-model",
+        default=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+    )
+    parser.add_argument(
         "--gemini-model",
-        default=GEMINI_MODEL,
-        help=f"Gemini model name (default: {GEMINI_MODEL!r}, env: GEMINI_MODEL).",
+        default=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
     )
-    ap.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable DEBUG logging.",
-    )
-    return ap
+    parser.add_argument("-v", "--verbose", action="store_true")
+    return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """Parse CLI arguments, run the merge, and return an exit code.
-
-    :param argv: Argument list (defaults to :data:`sys.argv`).
-    :returns: ``0`` on success, ``1`` on error.
-    """
-    ap = _build_arg_parser()
-    args = ap.parse_args(argv)
-
+    """Run the merge command and return a shell exit code."""
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    if len(args.input_files) < 2:
+        parser.error("At least two input GEDCOM files are required")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-
-    if len(args.input_files) < 2:
-        ap.error("At least two input GEDCOM files are required.")
-
-    # Validate that all input paths are regular files (path-traversal guard).
-    input_paths: list[Path] = []
-    for raw in args.input_files:
-        resolved = Path(raw).resolve()
-        if not resolved.is_file():
-            log.error("Input file not found: %s", resolved)
-            return 1
-        input_paths.append(resolved)
-
-    # Load all source files.
-    all_records: list[IndividualRecord] = []
-    source_parsers: list[Parser] = []
-    for path in input_paths:
-        try:
-            parser = Parser()
-            parser.parse_file(str(path), strict=False)
-            source_parsers.append(parser)
-            records = load_gedcom(path)
-            all_records.extend(records)
-        except (FileNotFoundError, OSError) as exc:
-            log.error("Failed to load %s: %s", path, exc)
-            return 1
-
-    log.info("Total individuals loaded: %d", len(all_records))
-
-    # Build AI kwargs.
-    ai_kwargs: dict[str, object] = {}
-    if args.ai_backend == "ollama":
-        ai_kwargs = {
-            "model": args.ollama_model,
-            "base_url": args.ollama_url,
-            "num_ctx": OLLAMA_NUM_CTX,
-        }
-    elif args.ai_backend == "gemini":
-        ai_kwargs = {"model": args.gemini_model}
-
-    # Run merge.
-    merged = merge_records(
-        all_records,
-        threshold=args.similarity_threshold,
-        ai_backend=args.ai_backend,
-        auto=args.auto,
-        ai_kwargs=ai_kwargs,
-    )
-
-    # Write output.
-    output_path = Path(args.output).resolve()
     try:
-        write_gedcom(merged, output_path, source_parsers=source_parsers)
-    except OSError as exc:
-        log.error("Failed to write output %s: %s", output_path, exc)
+        paths = [Path(path).resolve() for path in args.input_files]
+        output = Path(args.output).resolve()
+        if output in paths:
+            raise ValueError("Output path must not overwrite an input file")
+        sources = load_sources(paths)
+        all_records = [
+            _individual_from_record(record)
+            for source in sources
+            for record in source.records
+            if record.tag == "INDI"
+        ]
+        kwargs: dict[str, object] = {}
+        if args.ai_backend == "ollama":
+            kwargs = {"model": args.ollama_model, "base_url": args.ollama_url}
+        elif args.ai_backend == "openai":
+            kwargs = {"model": args.openai_model}
+        elif args.ai_backend == "gemini":
+            kwargs = {"model": args.gemini_model}
+        pointer_map: dict[str, str] = {}
+        merged = merge_records(
+            all_records,
+            args.similarity_threshold,
+            args.ai_backend,
+            args.auto,
+            kwargs,
+            pointer_map,
+        )
+        include_individuals: Optional[set[str]] = None
+        include_families: Optional[set[str]] = None
+        if args.root_person:
+            root_pointer = resolve_root_person(
+                args.root_person,
+                merged,
+                [source.pointer_map for source in sources],
+                pointer_map,
+            )
+            all_source_records = [
+                record
+                for source in sources
+                for record in source.records
+            ]
+            include_individuals, include_families = connected_tree_pointers(
+                root_pointer,
+                merged,
+                all_source_records,
+                pointer_map,
+            )
+            log.info(
+                "Rooted export at %s: %d people, %d families",
+                root_pointer,
+                len(include_individuals),
+                len(include_families),
+            )
+        write_gedcom(
+            merged,
+            output,
+            source_documents=sources,
+            pointer_map=pointer_map,
+            include_individuals=include_individuals,
+            include_families=include_families,
+            gedcom_version=args.gedcom_version,
+        )
+        print(
+            f"Merge complete: {len(all_records)} individuals -> "
+            f"{len(merged)} in {output}"
+        )
+        return 0
+    except (OSError, ValueError, GedcomParseError) as exc:
+        log.error("Merge failed: %s", exc)
         return 1
-
-    print(
-        f"Merge complete: {len(all_records)} individuals → "
-        f"{len(merged)} in {output_path}"
-    )
-    return 0
 
 
 if __name__ == "__main__":
