@@ -18,7 +18,11 @@ Examples::
 
     python tools/gedcom_merge.py a.ged b.ged -o master.ged --ai-backend none
     python tools/gedcom_merge.py *.ged --ai-backend ollama --auto
-    OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \
+    python tools/gedcom_merge.py *.ged --root-person @I123@ \\
+        --gedcom-version 5.5.5 -o rooted-master.ged
+    python tools/gedcom_merge.py *.ged --root-person "Jane Smith" \\
+        --gedcom-version 5.5.1 -o legacy-import.ged
+    OPENAI_API_KEY=... python tools/gedcom_merge.py a.ged b.ged \\
         --ai-backend openai --openai-model gpt-4.1-mini --auto
 
 Recommended installation::
@@ -71,7 +75,7 @@ AI_CONFIDENCE_AUTO_ACCEPT = 0.85
 MAX_AI_TEXT = 2_000
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
-LINE_RE = re.compile(r"^(?P<level>\d+)(?:\s+(?P<xref>@[^@\s]+@))?\s+"
+LINE_RE = re.compile(r"^(?P<level>[0-9]{1,2})(?:\s+(?P<xref>@[^@\s]+@))?\s+"
                      r"(?P<tag>[A-Za-z0-9_]+)(?:\s+(?P<value>.*))?$")
 
 
@@ -93,6 +97,8 @@ class GedcomLine:
 def parse_gedcom_line(line: str, line_number: int = 0) -> GedcomLine:
     """Parse one GEDCOM line without evaluating its contents."""
     raw = line.rstrip("\r\n").lstrip("\ufeff")
+    if not re.match(r"^(?:0|[1-9][0-9]?)(?:\s|$)", raw):
+        raise GedcomParseError(f"Invalid GEDCOM level {line_number}: {raw!r}")
     match = LINE_RE.fullmatch(raw)
     if not match:
         raise GedcomParseError(f"Invalid GEDCOM line {line_number}: {raw!r}")
@@ -141,7 +147,13 @@ def iter_gedcom_records(path: str | Path) -> Iterator[GedcomRecord]:
     file_path = Path(path).resolve()
     current: list[str] = []
     sequence = 0
-    with file_path.open("r", encoding="utf-8-sig", errors="strict") as handle:
+    with file_path.open("rb") as binary_handle:
+        prefix = binary_handle.read(4)
+    if prefix.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encoding = "utf-16"
+    else:
+        encoding = "utf-8-sig"
+    with file_path.open("r", encoding=encoding, errors="strict") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             line = raw_line.rstrip("\r\n")
             if not line.strip():
@@ -185,10 +197,12 @@ def _rewrite_xrefs(line: str, pointer_map: dict[str, str]) -> str:
     """Rewrite exact reference fields, never arbitrary note text."""
     parsed = parse_gedcom_line(line)
     reference_tags = {
-        "ASSO", "CHIL", "FAMC", "FAMS", "HUSB", "WIFE", "OBJE",
-        "NOTE", "REPO", "SOUR", "SUBM",
+        "ALIA", "ASSO", "CHIL", "FAMC", "FAMS", "HUSB", "WIFE",
+        "OBJE", "NOTE", "REPO", "SOUR", "SUBM", "SNOTE", "WITN",
     }
     if not parsed.xref and parsed.tag not in reference_tags:
+        return line
+    if not parsed.xref and not XREF_RE.fullmatch(parsed.value.strip()):
         return line
     return XREF_RE.sub(
         lambda match: pointer_map.get(match.group(), match.group()),
@@ -226,6 +240,7 @@ def _normalise_header_lines(
         return [
             "0 HEAD",
             "1 SOUR GedcomMergeTool",
+            "1 SUBM @U1@",
             "1 GEDC",
             f"2 VERS {version}",
             "1 CHAR UTF-8",
@@ -233,15 +248,26 @@ def _normalise_header_lines(
 
     blocks: list[list[str]] = []
     seen: set[tuple[str, ...]] = set()
+    single_value_tags = {
+        "SOUR", "DEST", "DATE", "SUBM", "FILE", "COPR", "LANG",
+        "PLAC",
+    }
+    seen_tags: set[str] = set()
     for header in headers:
         for block in _top_level_blocks(header.lines):
             tag = parse_gedcom_line(block[0]).tag
             if tag in {"GEDC", "CHAR"}:
                 continue
             key = tuple(block)
-            if key not in seen:
+            if (
+                key not in seen
+                and not (tag in single_value_tags and tag in seen_tags)
+            ):
                 blocks.append(block)
                 seen.add(key)
+                seen_tags.add(tag)
+    if "SUBM" not in seen_tags:
+        blocks.append(["1 SUBM @U1@"])
 
     result = ["0 HEAD"]
     for block in blocks:
@@ -259,22 +285,42 @@ def validate_gedcom_555(lines: Sequence[str]) -> None:
     """
     if not lines:
         raise GedcomParseError("GEDCOM output is empty")
-    parsed_lines = [parse_gedcom_line(line, number) for number, line in enumerate(lines, 1)]
+    parsed_lines = [
+        parse_gedcom_line(line, number)
+        for number, line in enumerate(lines, 1)
+    ]
     if parsed_lines[0].level != 0 or parsed_lines[0].tag != "HEAD":
         raise GedcomParseError("GEDCOM must start with 0 HEAD")
     if parsed_lines[-1].level != 0 or parsed_lines[-1].tag != "TRLR":
         raise GedcomParseError("GEDCOM must end with 0 TRLR")
     pointers: set[str] = set()
+    if sum(parsed.tag == "HEAD" for parsed in parsed_lines if parsed.level == 0) != 1:
+        raise GedcomParseError("GEDCOM must contain exactly one 0 HEAD record")
+    if sum(parsed.tag == "TRLR" for parsed in parsed_lines if parsed.level == 0) != 1:
+        raise GedcomParseError("GEDCOM must contain exactly one 0 TRLR record")
     previous_level = 0
     head_version = ""
     head_charset = ""
     in_gedc = False
     for parsed in parsed_lines:
-        if len(parsed.tag) > 15:
-            raise GedcomParseError(f"GEDCOM tag is longer than 15 characters: {parsed.tag}")
+        if len(parsed.raw.encode("utf-8")) > 255:
+            raise GedcomParseError("GEDCOM line exceeds the 255-byte limit")
+        if len(parsed.tag) > 31:
+            raise GedcomParseError(
+                f"GEDCOM tag is longer than 31 characters: {parsed.tag}"
+            )
+        tag_index = 2 if parsed.xref else 1
+        raw_tag = parsed.raw.split()[tag_index]
+        if raw_tag != parsed.tag:
+            raise GedcomParseError(f"GEDCOM tags must be uppercase: {raw_tag}")
         if parsed.xref:
             if parsed.level != 0:
                 raise GedcomParseError("xref IDs may only introduce level-zero records")
+            if (
+                len(parsed.xref) > 22
+                or not re.fullmatch(r"@[A-Za-z_][A-Za-z0-9_:-]*@", parsed.xref)
+            ):
+                raise GedcomParseError(f"Invalid GEDCOM xref ID: {parsed.xref}")
             if parsed.xref in pointers:
                 raise GedcomParseError(f"Duplicate GEDCOM xref ID: {parsed.xref}")
             pointers.add(parsed.xref)
@@ -297,6 +343,57 @@ def validate_gedcom_555(lines: Sequence[str]) -> None:
         )
 
 
+def _canonical_gedcom_line(line: str) -> str:
+    """Emit one line with canonical ASCII level/tag spelling."""
+    parsed = parse_gedcom_line(line)
+    prefix = f"{parsed.level} "
+    if parsed.xref:
+        prefix += f"{parsed.xref} "
+    prefix += parsed.tag
+    return f"{prefix} {parsed.value}" if parsed.value else prefix
+
+
+def _take_utf8_prefix(value: str, limit: int) -> tuple[str, str]:
+    """Take the largest character-safe UTF-8 prefix within ``limit`` bytes."""
+    used = 0
+    end = 0
+    for index, character in enumerate(value):
+        size = len(character.encode("utf-8"))
+        if used + size > limit:
+            break
+        used += size
+        end = index + 1
+    if end == 0 and value:
+        raise GedcomParseError("GEDCOM continuation limit cannot hold one character")
+    return value[:end], value[end:]
+
+
+def _wrap_long_gedcom_lines(lines: Sequence[str]) -> list[str]:
+    """Wrap long text values using standard level+1 CONC continuations."""
+    wrapped: list[str] = []
+    for line in lines:
+        parsed = parse_gedcom_line(line)
+        canonical = _canonical_gedcom_line(line)
+        if len(canonical.encode("utf-8")) <= 255 or not parsed.value:
+            wrapped.append(canonical)
+            continue
+        if parsed.level >= 99:
+            raise GedcomParseError("Cannot wrap a value below GEDCOM level 99")
+        prefix = canonical[: len(canonical) - len(parsed.value)]
+        remaining = parsed.value
+        first_limit = 255 - len(prefix.encode("utf-8"))
+        first, remaining = _take_utf8_prefix(remaining, first_limit)
+        wrapped.append(prefix + first)
+        continuation_prefix = f"{parsed.level + 1} CONC "
+        continuation_limit = 255 - len(continuation_prefix.encode("utf-8"))
+        while remaining:
+            chunk, remaining = _take_utf8_prefix(
+                remaining, continuation_limit
+            )
+            wrapped.append(continuation_prefix + chunk)
+    return wrapped
+
+
 def _family_members(source_records: Iterable[GedcomRecord]) -> dict[str, set[str]]:
     """Return family xref -> member-person xrefs for root traversal."""
     result: dict[str, set[str]] = {}
@@ -310,6 +407,38 @@ def _family_members(source_records: Iterable[GedcomRecord]) -> dict[str, set[str
                 members.update(XREF_RE.findall(first.value))
         result[record.pointer] = members
     return result
+
+
+def _ensure_submitter_record(
+    header_lines: list[str],
+    source_records: Sequence[GedcomRecord],
+) -> list[str]:
+    """Ensure HEAD.SUBM points to a real SUBM record without pointer clashes."""
+    submitter_values = [
+        parse_gedcom_line(block[0]).value.strip()
+        for block in _top_level_blocks(header_lines)
+        if parse_gedcom_line(block[0]).tag == "SUBM"
+    ]
+    source_pointers = {record.pointer for record in source_records if record.pointer}
+    source_submitters = {
+        record.pointer for record in source_records if record.tag == "SUBM"
+    }
+    requested = submitter_values[0] if submitter_values else "@U1@"
+    if requested in source_submitters:
+        return []
+    candidate = requested
+    if candidate in source_pointers:
+        suffix = 1
+        candidate = f"@U1_{suffix}@"
+        while candidate in source_pointers:
+            suffix += 1
+            candidate = f"@U1_{suffix}@"
+        for index, line in enumerate(header_lines):
+            parsed = parse_gedcom_line(line)
+            if parsed.level == 1 and parsed.tag == "SUBM":
+                header_lines[index] = f"1 SUBM {candidate}"
+                break
+    return [f"0 {candidate} SUBM", "1 NAME Gedcom Merge Tool"]
 
 
 def resolve_root_person(
@@ -411,11 +540,22 @@ def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
         _load_python_gedcom(path)
         original_records = list(iter_gedcom_records(path))
         pointer_map: dict[str, str] = {}
+        all_xrefs = {
+            xref
+            for record in original_records
+            for line in record.lines
+            for xref in XREF_RE.findall(line)
+        }
         for record in original_records:
             if record.pointer:
                 pointer_map[record.pointer] = _unique_pointer(
                     record.pointer, used, source_number
                 )
+        # Namespace undefined references too.  Otherwise an undefined
+        # @I99@ in source A could be accidentally rebound to a defined @I99@
+        # in source B during the merge.
+        for xref in sorted(all_xrefs - pointer_map.keys()):
+            pointer_map[xref] = _unique_pointer(xref, used, source_number)
         rewritten: list[GedcomRecord] = []
         for record in original_records:
             lines = _normalise_record_dates(
@@ -966,16 +1106,12 @@ def merge_two_records(
         or _record_to_gedcom_lines(secondary).rstrip("\n").splitlines()
     )
     merged_lines = list(first_lines)
-    existing_blocks = (
-        {tuple(block) for block in _top_level_blocks(merged_lines)}
-        if len(merged_lines) > 1
-        else set()
-    )
     for block in _top_level_blocks(second_lines):
-        block_key = tuple(block)
-        if block_key not in existing_blocks:
-            merged_lines.extend(block)
-            existing_blocks.add(block_key)
+        # Keep the source block even when it is byte-for-byte identical.  A
+        # duplicate fact is harmless and preserving it keeps an audit trail;
+        # the summary/extra_fields view still de-duplicates exact values for
+        # callers that need a compact display.
+        merged_lines.extend(block)
     return dataclasses.replace(
         primary,
         given_name=choose("given_name"),
@@ -1152,6 +1288,7 @@ def write_gedcom(
     if out_path.parent and not out_path.parent.exists():
         raise OSError(f"Output directory does not exist: {out_path.parent}")
     lines: list[str] = []
+    synthetic_submitter: list[str] = []
     if source_documents:
         all_source_records = [
             record
@@ -1160,26 +1297,33 @@ def write_gedcom(
         ]
         heads = [record for record in all_source_records if record.tag == "HEAD"]
         header_lines = _normalise_header_lines(heads, gedcom_version)
-        lines.extend(
+        header_lines = [
             _rewrite_xrefs(line, pointer_map or {}) for line in header_lines
+        ]
+        synthetic_submitter = _ensure_submitter_record(
+            header_lines, all_source_records
         )
-        for record in all_source_records:
-            if record.tag not in {"HEAD", "TRLR", "INDI"}:
-                if (
-                    record.tag == "FAM"
-                    and include_families is not None
-                    and record.pointer not in include_families
-                ):
-                    continue
-                lines.extend(
-                    _rewrite_xrefs(line, pointer_map or {})
-                    for line in record.lines
-                )
+        lines.extend(header_lines)
+        non_people = [
+            record
+            for record in all_source_records
+            if record.tag not in {"HEAD", "TRLR", "INDI"}
+        ]
+        ordered_records = (
+            [record for record in non_people if record.tag == "SUBM"]
+            + [record for record in non_people if record.tag == "FAM"]
+            + [
+                record
+                for record in non_people
+                if record.tag not in {"SUBM", "FAM"}
+            ]
+        )
         survivor_lines = {
             record.pointer: record.raw_lines
             for record in records
             if record.raw_lines
         }
+        person_lines: list[str] = []
         for record in records:
             if (
                 include_individuals is not None
@@ -1189,21 +1333,59 @@ def write_gedcom(
             source_lines = survivor_lines.get(record.pointer) or (
                 _record_to_gedcom_lines(record).rstrip("\n").splitlines()
             )
-            lines.extend(
+            person_lines.extend(
                 _rewrite_xrefs(line, pointer_map or {})
                 for line in source_lines
             )
+        # Reorder the standard root records into the conventional sequence:
+        # HEAD, SUBM, INDI, FAM, then NOTE/OBJE/REPO/SOUR/etc.  This is more
+        # interoperable with older importers while preserving every line.
+        subm_lines = []
+        family_lines = []
+        other_lines = []
+        subm_lines.extend(synthetic_submitter)
+        for record in ordered_records:
+            if (
+                record.tag == "FAM"
+                and include_families is not None
+                and record.pointer not in include_families
+            ):
+                continue
+            target = (
+                subm_lines if record.tag == "SUBM"
+                else family_lines if record.tag == "FAM"
+                else other_lines
+            )
+            target.extend(
+                _rewrite_xrefs(line, pointer_map or {})
+                for line in record.lines
+            )
+        lines = (
+            lines[:len(header_lines)]
+            + subm_lines
+            + person_lines
+            + family_lines
+            + other_lines
+        )
     elif source_parsers:
         # Compatibility path for callers of the previous DOM-based API.
         # New CLI calls use source_documents so unknown lines are retained.
+        header_records: list[GedcomRecord] = []
+        other_lines: list[str] = []
         for parser in source_parsers:
             for element in parser.get_root_child_elements():
                 tag = element.get_tag()
                 text = element.to_gedcom_string(recursive=True)
-                if tag == "HEAD" and not lines:
-                    lines.extend(text.rstrip("\n").splitlines())
+                record_lines = text.rstrip("\n").splitlines()
+                if tag == "HEAD" and not header_records:
+                    header_records.append(GedcomRecord(record_lines, "", 0))
                 elif tag not in {"HEAD", "TRLR", "INDI"}:
-                    lines.extend(text.rstrip("\n").splitlines())
+                    other_lines.extend(record_lines)
+        header_lines = _normalise_header_lines(header_records, gedcom_version)
+        synthetic_submitter = _ensure_submitter_record(header_lines, [])
+        lines.extend(header_lines)
+        lines.extend(synthetic_submitter)
+        lines.extend(other_lines)
         for record in records:
             if (
                 include_individuals is not None
@@ -1212,7 +1394,10 @@ def write_gedcom(
                 continue
             lines.extend(_record_to_gedcom_lines(record).rstrip("\n").splitlines())
     else:
-        lines.extend(_normalise_header_lines([], gedcom_version))
+        header_lines = _normalise_header_lines([], gedcom_version)
+        synthetic_submitter = _ensure_submitter_record(header_lines, [])
+        lines.extend(header_lines)
+        lines.extend(synthetic_submitter)
         for record in records:
             if (
                 include_individuals is not None
@@ -1223,6 +1408,7 @@ def write_gedcom(
                 _record_to_gedcom_lines(record).rstrip("\n").splitlines()
             )
     lines.append("0 TRLR")
+    lines = _wrap_long_gedcom_lines(lines)
     if gedcom_version == "5.5.5":
         validate_gedcom_555(lines)
     payload = "\n".join(lines) + "\n"
