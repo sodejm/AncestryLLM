@@ -1331,7 +1331,10 @@ class TestMainCli:
         out = tmp_path / "merged.ged"
 
         result = gm.main(
-            [str(file_a), str(file_b), "-o", str(out), "--auto"]
+            [
+                str(file_a), str(file_b), "-o", str(out), "--auto",
+                "--no-quality-report",
+            ]
         )
         assert result == 0
         assert out.exists()
@@ -1359,7 +1362,10 @@ class TestMainCli:
         out = tmp_path / "merged.ged"
 
         result = gm.main(
-            [str(file_a), str(file_b), "-o", str(out), "--auto"]
+            [
+                str(file_a), str(file_b), "-o", str(out), "--auto",
+                "--no-quality-report",
+            ]
         )
         assert result == 0
         content = out.read_text(encoding="utf-8")

@@ -1,0 +1,85 @@
+0 HEAD
+1 SOUR Fictional Ancestry Snapshot
+2 VERS 1.0
+1 FILE ancestry-snapshot-v1.ged
+1 DATE 15 JAN 2025
+1 GEDC
+2 VERS 5.5.5
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+0 @A-900@ INDI
+1 NAME Elara /Northwood/
+2 TYPE birth
+2 GIVN Elara
+2 SURN Northwood
+1 SEX F
+1 _UID NM-ELARA-001
+1 _APID ancestry-fictional-elara-v1
+1 BIRT
+2 DATE 12 MAR 1970
+2 PLAC Lakehaven, Vermont, USA
+2 SOUR @A-SRC-77@
+3 PAGE Birth ledger, p. 14
+2 SOUR @A-SRC-77@
+3 PAGE Birth ledger, p. 14
+2 SOUR @A-SRC-77@
+3 PAGE Birth index image 42
+1 OCCU School librarian
+1 RESI
+2 DATE 1 JUN 1998
+2 PLAC Cedar Bay, Vermont, USA
+2 SOUR @A-SRC-88@
+3 PAGE City directory, p. 203
+1 EDUC Lakehaven College
+1 NOTE @A-NOTE-1@
+1 OBJE @A-OBJ-1@
+1 FAMS @A-FAM-9@
+1 _TREE Ancestry fictional tree alpha
+0 @A-901@ INDI
+1 NAME Rowan /Vale/
+2 GIVN Rowan
+2 SURN Vale
+1 SEX M
+1 _UID NM-ROWAN-002
+1 BIRT
+2 DATE 04 JUL 1968
+2 PLAC Cedar Bay, Vermont, United States of America
+1 OCCU Cartographer
+1 FAMS @A-FAM-9@
+0 @A-902@ INDI
+1 NAME Mira /Vale/
+2 GIVN Mira
+2 SURN Vale
+1 SEX F
+1 _UID NM-MIRA-003
+1 BIRT
+2 DATE 09 SEP 1995
+2 PLAC Lakehaven, Vermont, USA
+1 FAMC @A-FAM-9@
+0 @A-FAM-9@ FAM
+1 HUSB @A-901@
+1 WIFE @A-900@
+1 CHIL @A-902@
+1 MARR
+2 DATE 18 AUG 1992
+2 PLAC Lakehaven, Vermont, USA
+0 @A-SRC-77@ SOUR
+1 TITL Lakehaven Civil Registry
+1 AUTH Lakehaven Office of Imaginary Records
+1 REPO @A-REPO-4@
+0 @A-SRC-88@ SOUR
+1 TITL Cedar Bay City Directory
+1 AUTH Cedar Bay Fictional Historical Society
+0 @A-REPO-4@ REPO
+1 NAME Lakehaven Fictional Archive
+1 ADDR 10 Archive Lane
+2 CITY Lakehaven
+2 STAE Vermont
+2 CTRY United States
+0 @A-NOTE-1@ NOTE
+1 CONC Fictional Ancestry note linked to Elara.
+0 @A-OBJ-1@ OBJE
+1 FILE media/ancestry-elara-portrait.jpg
+2 FORM image/jpeg
+2 TITL Fictional Ancestry portrait
+0 TRLR

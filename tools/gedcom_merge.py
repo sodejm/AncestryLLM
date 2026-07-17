@@ -19,6 +19,7 @@ import argparse
 import dataclasses
 import datetime as dt
 import difflib
+import hashlib
 import json
 import logging
 import os
@@ -26,10 +27,10 @@ import re
 import tempfile
 import urllib.error
 import urllib.request
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 
 try:
     from dotenv import load_dotenv
@@ -59,11 +60,19 @@ DATE_QUALIFIERS: dict[str, str] = {
     "estimated": "EST", "est": "EST", "calculated": "CAL", "cal": "CAL",
 }
 DEFAULT_SIMILARITY_THRESHOLD = 78
+QUALITY_DUPLICATE_THRESHOLD = 90
+QUALITY_AI_LIMIT = 25
 AI_CONFIDENCE_AUTO_ACCEPT = 0.85
 MAX_AI_TEXT = 2_000
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
 REMOTE_CREDIT_POLICIES = ("required", "best-effort", "off")
+QUALITY_SEVERITY_ORDER = {
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 3,
+}
 DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL") or "gpt-5.4-mini"
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.5-flash"
 DEFAULT_OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL") or "openrouter/auto"
@@ -723,7 +732,10 @@ def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
         if not path.is_file():
             raise FileNotFoundError(f"GEDCOM file not found: {path}")
         _load_python_gedcom(path)
-        original_records = list(iter_gedcom_records(path))
+        try:
+            original_records = list(iter_gedcom_records(path))
+        except GedcomParseError as exc:
+            raise GedcomParseError(f"{path}: {exc}") from exc
         pointer_map: dict[str, str] = {}
         all_xrefs = {
             xref
@@ -956,6 +968,117 @@ class MatchAssessment:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PersonalName:
+    """One losslessly represented GEDCOM ``NAME`` structure.
+
+    GEDCOM permits several names for one person and permits structured
+    components below each ``NAME``.  Keeping these components separate is
+    essential for distinguishing a birth/maiden form from a married form
+    without inventing a surname.
+
+    Attributes:
+        value: Original display value from the ``NAME`` line.
+        given: Structured ``GIVN`` value, or the parsed display-name fallback.
+        surname: Structured ``SURN`` value, or the parsed display-name fallback.
+        prefix: Structured ``NPFX`` value.
+        suffix: Structured ``NSFX`` value.
+        nickname: Structured ``NICK`` value.
+        name_type: Case-insensitive ``TYPE`` value, normalized to lowercase.
+        is_primary: Whether this was the first ``NAME`` structure in the record.
+    """
+
+    value: str
+    given: str = ""
+    surname: str = ""
+    prefix: str = ""
+    suffix: str = ""
+    nickname: str = ""
+    name_type: str = ""
+    is_primary: bool = False
+
+    @property
+    def display_name(self) -> str:
+        """Return a compact display name without changing stored components."""
+        if self.value.strip():
+            given, surname = _name_parts(self.value)
+            return " ".join(part for part in (given, surname) if part)
+        return " ".join(part for part in (self.given, self.surname) if part)
+
+
+@dataclass(frozen=True, slots=True)
+class MergeDecision:
+    """Immutable audit entry for one considered duplicate pair.
+
+    ``disposition`` records whether the pair merged or was retained.  Provider
+    metadata describes the route actually used and is deliberately separate
+    from deterministic score/evidence so a model explanation cannot rewrite
+    the measurable basis for the decision.
+    """
+
+    left_pointer: str
+    right_pointer: str
+    score: float
+    compared_fields: tuple[str, ...]
+    conflicts: tuple[str, ...]
+    disposition: str
+    confidence: float = 0.0
+    provider: str = "deterministic"
+    model: str = ""
+    reasoning: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class QualityFinding:
+    """One deterministic, advisory tree-quality recommendation.
+
+    Findings never mutate a person or family.  ``finding_id`` is stable for
+    equivalent evidence, allowing reports to be compared between runs.
+    ``ai_why`` and ``ai_research`` are the only model-controlled fields; all
+    identity, severity, evidence, targets, and ordering remain deterministic.
+    """
+
+    finding_id: str
+    code: str
+    severity: str
+    category: str
+    title: str
+    description: str
+    recommendation: str
+    person_pointers: tuple[str, ...] = field(default_factory=tuple)
+    family_pointers: tuple[str, ...] = field(default_factory=tuple)
+    evidence: tuple[str, ...] = field(default_factory=tuple)
+    source_files: tuple[str, ...] = field(default_factory=tuple)
+    direct_ancestor: bool = False
+    generation: Optional[int] = None
+    confidence: str = "deterministic"
+    ai_why: str = ""
+    ai_research: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class QualityReport:
+    """Complete deterministic report input and optional AI annotations.
+
+    The model is immutable so rendering and AI refinement must return a new
+    value.  ``ancestor_relationships`` stores pointer, generation, and retained
+    ``PEDI`` context for a recursion-free direct-ancestor roster.
+    """
+
+    root_pointer: str
+    root_name: str
+    input_files: tuple[str, ...]
+    output_file: str
+    findings: tuple[QualityFinding, ...]
+    merge_decisions: tuple[MergeDecision, ...] = field(default_factory=tuple)
+    ancestor_relationships: tuple[tuple[str, int, str], ...] = field(
+        default_factory=tuple
+    )
+    ai_backend: str = "none"
+    ai_refined: bool = False
+    privacy_status: str = "Local deterministic analysis only"
+
+
 @dataclass
 class IndividualRecord:
     """Deduplication summary plus the complete underlying INDI record.
@@ -980,6 +1103,8 @@ class IndividualRecord:
     family_links: tuple[str, ...] = field(default_factory=tuple)
     family_references: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     alternate_names: tuple[str, ...] = field(default_factory=tuple)
+    names: tuple[PersonalName, ...] = field(default_factory=tuple)
+    source_files: tuple[str, ...] = field(default_factory=tuple)
     facts: dict[str, tuple[GenealogicalFact, ...]] = field(default_factory=dict)
     marriages: tuple[GenealogicalFact, ...] = field(default_factory=tuple)
     partners: tuple[RelativeIdentity, ...] = field(default_factory=tuple)
@@ -1210,6 +1335,55 @@ def _most_complete_fact(
     )
 
 
+def _personal_name_from_block(
+    block: Sequence[str],
+    *,
+    is_primary: bool,
+) -> PersonalName:
+    """Parse one ``NAME`` block while preserving every standard component.
+
+    Subordinate tags are matched case-insensitively by
+    :func:`parse_gedcom_line`.  Repeated components are conservatively joined
+    in source order because dropping a repeated value would violate the
+    tool's lossless-data contract.
+
+    Args:
+        block: A complete level-one ``NAME`` structure.
+        is_primary: Whether this is the first name in the individual record.
+
+    Returns:
+        A structured name suitable for analysis and faithful serialization.
+
+    Raises:
+        GedcomParseError: The block does not begin with ``NAME``.
+    """
+    first = parse_gedcom_line(block[0])
+    if first.tag != "NAME":
+        raise GedcomParseError("Personal-name block must begin with NAME")
+    components: dict[str, list[str]] = defaultdict(list)
+    for line in block[1:]:
+        parsed = parse_gedcom_line(line)
+        if parsed.tag in {"GIVN", "SURN", "NICK", "NPFX", "NSFX", "TYPE"}:
+            value = parsed.value.strip()
+            if value:
+                components[parsed.tag].append(value)
+    parsed_given, parsed_surname = _name_parts(first.value)
+
+    def joined(tag: str, fallback: str = "") -> str:
+        return "; ".join(components.get(tag, ())) or fallback
+
+    return PersonalName(
+        value=first.value.strip(),
+        given=joined("GIVN", parsed_given),
+        surname=joined("SURN", parsed_surname),
+        prefix=joined("NPFX"),
+        suffix=joined("NSFX"),
+        nickname=joined("NICK"),
+        name_type=joined("TYPE").casefold(),
+        is_primary=is_primary,
+    )
+
+
 def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
     """Build structured identity evidence from a lossless INDI record.
 
@@ -1222,15 +1396,20 @@ def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
     family_links: list[str] = []
     family_references: list[tuple[str, str]] = []
     alternate_names: list[str] = []
+    names: list[PersonalName] = []
     facts: dict[str, list[GenealogicalFact]] = defaultdict(list)
     extra: dict[str, list[str]] = defaultdict(list)
     for block in _top_level_blocks(lines):
         first = parse_gedcom_line(block[0])
         if first.tag == "NAME":
-            given_name, family_name = _name_parts(first.value)
-            display_name = " ".join(
-                part for part in (given_name, family_name) if part
+            personal_name = _personal_name_from_block(
+                block,
+                is_primary=not names,
             )
+            names.append(personal_name)
+            given_name = personal_name.given
+            family_name = personal_name.surname
+            display_name = personal_name.display_name
             if not name and not surname:
                 name, surname = given_name, family_name
             elif display_name:
@@ -1270,6 +1449,8 @@ def _individual_from_record(record: GedcomRecord) -> IndividualRecord:
         family_links=tuple(family_links),
         family_references=tuple(family_references),
         alternate_names=tuple(dict.fromkeys(alternate_names)),
+        names=tuple(names),
+        source_files=(record.source_file,),
         facts={tag: tuple(values) for tag, values in facts.items()},
     )
 
@@ -2647,6 +2828,11 @@ def merge_two_records(
                 else ()
             )
         )),
+        names=tuple(dict.fromkeys(primary.names + secondary.names)),
+        source_files=tuple(dict.fromkeys(
+            (primary.source_files or (primary.source_file,))
+            + (secondary.source_files or (secondary.source_file,))
+        )),
         facts=merged_facts,
         marriages=tuple(dict.fromkeys(primary.marriages + secondary.marriages)),
         partners=tuple(dict.fromkeys(primary.partners + secondary.partners)),
@@ -2697,6 +2883,7 @@ def merge_records(
     auto: bool = False,
     ai_kwargs: Optional[dict[str, object]] = None,
     pointer_map: Optional[dict[str, str]] = None,
+    decisions: Optional[list[MergeDecision]] = None,
 ) -> list[IndividualRecord]:
     """Merge candidate people while retaining every source fact and family edge.
 
@@ -2713,6 +2900,8 @@ def merge_records(
         auto: Skip low-confidence operator confirmation when true.
         ai_kwargs: Provider-specific options forwarded to the resolver.
         pointer_map: Optional mutable map populated with survivor pointers.
+        decisions: Optional mutable audit sink.  Entries describe considered
+            pairs but do not affect merge behavior.
 
     Returns:
         Canonical people in stable source order.
@@ -2761,6 +2950,16 @@ def merge_records(
                     root_right,
                     ", ".join(sorted(pairwise_conflicts)),
                 )
+                if decisions is not None:
+                    decisions.append(MergeDecision(
+                        left_pointer=root_left,
+                        right_pointer=root_right,
+                        score=score,
+                        compared_fields=(),
+                        conflicts=tuple(sorted(pairwise_conflicts)),
+                        disposition="retained-cluster-conflict",
+                        reasoning="A member of an existing cluster conflicts.",
+                    ))
                 continue
         first, second = by_pointer[root_left], by_pointer[root_right]
         verdict: dict[str, object]
@@ -2795,6 +2994,19 @@ def merge_records(
                 verdict = dict(verdict)
                 verdict["is_duplicate"] = prompt_operator(first, second)
             elif not bool(verdict.get("is_duplicate", False)):
+                if decisions is not None:
+                    decisions.append(MergeDecision(
+                        left_pointer=root_left,
+                        right_pointer=root_right,
+                        score=score,
+                        compared_fields=assessment.compared_fields,
+                        conflicts=assessment.conflicts,
+                        disposition="retained",
+                        confidence=confidence,
+                        provider=str(verdict.get("_provider", ai_backend)),
+                        model=str(verdict.get("_model", "")),
+                        reasoning=str(verdict.get("reasoning", "")),
+                    ))
                 continue
         if bool(verdict.get("is_duplicate", False)):
             merged = merge_two_records(first, second, verdict)
@@ -2807,6 +3019,32 @@ def merge_records(
                 root_right,
                 score,
             )
+            if decisions is not None:
+                decisions.append(MergeDecision(
+                    left_pointer=root_left,
+                    right_pointer=root_right,
+                    score=score,
+                    compared_fields=assessment.compared_fields,
+                    conflicts=assessment.conflicts,
+                    disposition="merged",
+                    confidence=float(verdict.get("confidence", 0.0)),
+                    provider=str(verdict.get("_provider", "deterministic")),
+                    model=str(verdict.get("_model", "")),
+                    reasoning=str(verdict.get("reasoning", "")),
+                ))
+        elif decisions is not None:
+            decisions.append(MergeDecision(
+                left_pointer=root_left,
+                right_pointer=root_right,
+                score=score,
+                compared_fields=assessment.compared_fields,
+                conflicts=assessment.conflicts,
+                disposition="retained-operator",
+                confidence=float(verdict.get("confidence", 0.0)),
+                provider=str(verdict.get("_provider", ai_backend)),
+                model=str(verdict.get("_model", "")),
+                reasoning=str(verdict.get("reasoning", "")),
+            ))
     result: list[IndividualRecord] = []
     seen: set[str] = set()
     for record in all_records:
@@ -2822,6 +3060,1491 @@ def merge_records(
     return result
 
 
+def _stable_finding_id(
+    code: str,
+    people: Sequence[str] = (),
+    families: Sequence[str] = (),
+    evidence: Sequence[str] = (),
+    source_files: Sequence[str] = (),
+) -> str:
+    """Return a short stable identifier derived only from deterministic data."""
+    identity = json.dumps(
+        [
+            code,
+            sorted(people),
+            sorted(families),
+            sorted(evidence),
+            sorted(Path(path).name for path in source_files),
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"{code.lower().replace('_', '-')}-{digest}"
+
+
+def _quality_finding(
+    code: str,
+    severity: str,
+    category: str,
+    title: str,
+    description: str,
+    recommendation: str,
+    *,
+    people: Sequence[str] = (),
+    families: Sequence[str] = (),
+    evidence: Sequence[str] = (),
+    source_files: Sequence[str] = (),
+    generations: Mapping[str, int] | None = None,
+    confidence: str = "deterministic",
+) -> QualityFinding:
+    """Construct a validated finding with ancestry priority metadata."""
+    if severity not in QUALITY_SEVERITY_ORDER:
+        raise ValueError(f"Unknown quality severity: {severity}")
+    generation_values = [
+        generations[pointer]
+        for pointer in people
+        if generations is not None and pointer in generations
+    ]
+    generation = min(generation_values) if generation_values else None
+    return QualityFinding(
+        finding_id=_stable_finding_id(
+            code, people, families, evidence, source_files
+        ),
+        code=code,
+        severity=severity,
+        category=category,
+        title=title,
+        description=description,
+        recommendation=recommendation,
+        person_pointers=tuple(dict.fromkeys(people)),
+        family_pointers=tuple(dict.fromkeys(families)),
+        evidence=tuple(dict.fromkeys(evidence)),
+        source_files=tuple(dict.fromkeys(source_files)),
+        direct_ancestor=bool(generation_values),
+        generation=generation,
+        confidence=confidence,
+    )
+
+
+def _actionability_rank(finding: QualityFinding) -> int:
+    """Rank concrete repairs before open-ended research at equal priority."""
+    immediate = {
+        "ANCESTRY_CYCLE",
+        "BIRTH_AFTER_DEATH",
+        "DANGLING_REFERENCE",
+        "DUPLICATE_HEAD",
+        "DUPLICATE_TRLR",
+        "EMPTY_FAMILY",
+        "INVALID_DATE",
+        "INVALID_MARRIAGE_DATE",
+        "LEVEL_SKIP",
+        "MARRIAGE_AFTER_DEATH",
+        "MISSING_HEAD",
+        "MISSING_TRLR",
+        "NONRECIPROCAL_FAMILY_REFERENCE",
+        "NONRECIPROCAL_PERSON_REFERENCE",
+    }
+    manual_review = {
+        "ALTERNATIVE_VITAL_EVENTS",
+        "POSSIBLE_DUPLICATE",
+        "POSSIBLE_MARRIED_PRIMARY_NAME",
+    }
+    if finding.code in immediate:
+        return 0
+    if finding.code in manual_review:
+        return 2
+    return 1
+
+
+def _canonical_pointer(
+    pointer: str,
+    pointer_map: Mapping[str, str],
+) -> str:
+    """Follow a duplicate pointer map defensively without looping forever."""
+    seen: set[str] = set()
+    while pointer in pointer_map and pointer_map[pointer] != pointer:
+        if pointer in seen:
+            break
+        seen.add(pointer)
+        pointer = pointer_map[pointer]
+    return pointer
+
+
+def _family_graph(
+    source_records: Iterable[GedcomRecord],
+    pointer_map: Mapping[str, str],
+) -> tuple[
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, dict[str, tuple[str, ...]]],
+]:
+    """Build parent, child, spouse, and family-role maps from retained FAMs."""
+    parents: dict[str, set[str]] = defaultdict(set)
+    children: dict[str, set[str]] = defaultdict(set)
+    spouses: dict[str, set[str]] = defaultdict(set)
+    families: dict[str, dict[str, tuple[str, ...]]] = {}
+    for record in source_records:
+        if record.tag != "FAM":
+            continue
+        roles: dict[str, list[str]] = defaultdict(list)
+        for block in _top_level_blocks(record.lines):
+            first = parse_gedcom_line(block[0])
+            if first.tag in {"HUSB", "WIFE", "CHIL"}:
+                roles[first.tag].extend(XREF_RE.findall(first.value))
+        canonical_roles = {
+            role: tuple(dict.fromkeys(
+                _canonical_pointer(pointer, pointer_map)
+                for pointer in pointers
+            ))
+            for role, pointers in roles.items()
+        }
+        families[record.pointer] = canonical_roles
+        parent_people = set(
+            canonical_roles.get("HUSB", ()) + canonical_roles.get("WIFE", ())
+        )
+        child_people = set(canonical_roles.get("CHIL", ()))
+        for child in child_people:
+            parents[child].update(parent_people)
+        for parent in parent_people:
+            children[parent].update(child_people)
+        for left in parent_people:
+            spouses[left].update(parent_people - {left})
+    return parents, children, spouses, families
+
+
+def ancestor_generations(
+    root_pointer: str,
+    source_records: Iterable[GedcomRecord],
+    pointer_map: Mapping[str, str] | None = None,
+) -> tuple[dict[str, int], set[str]]:
+    """Traverse direct ancestors iteratively and report cycle participants.
+
+    Args:
+        root_pointer: Canonical person xref at generation zero.
+        source_records: Retained source records containing family structures.
+        pointer_map: Optional duplicate-to-survivor mapping.
+
+    Returns:
+        A pointer-to-generation map and pointers encountered through an
+        ancestry cycle.  The traversal is iterative, so malformed deep trees
+        cannot exhaust Python's call stack.
+
+    Mutation guarantees:
+        Inputs are never modified.
+    """
+    mapping = pointer_map or {}
+    parents, _, _, _ = _family_graph(source_records, mapping)
+    generations = {root_pointer: 0}
+    cycles: set[str] = set()
+    pending = deque([(root_pointer, (root_pointer,))])
+    while pending:
+        child, path = pending.popleft()
+        next_generation = generations[child] + 1
+        for parent in sorted(parents.get(child, ())):
+            if parent in path:
+                cycles.update(path[path.index(parent):] + (parent,))
+                continue
+            if parent not in generations or next_generation < generations[parent]:
+                generations[parent] = next_generation
+                pending.append((parent, path + (parent,)))
+    return generations, cycles
+
+
+def _valid_quality_date(value: str) -> bool:
+    """Return whether a date contains a plausible GEDCOM year expression."""
+    if not value:
+        return True
+    normalized = normalise_gedcom_date(value).upper()
+    if not re.search(r"\b\d{3,4}\b", normalized):
+        return False
+    full = re.search(r"\b(\d{1,2})\s+([A-Z]{3})\s+(\d{3,4})\b", normalized)
+    if not full:
+        return True
+    day, month, year = full.groups()
+    try:
+        dt.date(int(year), GEDCOM_MONTHS.index(month) + 1, int(day))
+    except (ValueError, IndexError):
+        return False
+    return True
+
+
+def _quality_duplicate_pairs(
+    people: Sequence[IndividualRecord],
+) -> list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]]:
+    """Find report-only same-source and cross-source pairs scoring at least 90."""
+    buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for index, person in enumerate(people):
+        for key in _blocking_keys(person):
+            buckets[key].append(index)
+    pairs: set[tuple[int, int]] = set()
+    for indexes in buckets.values():
+        for offset, left in enumerate(indexes):
+            pairs.update(
+                (min(left, right), max(left, right))
+                for right in indexes[offset + 1:]
+            )
+    results: list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]] = []
+    for left, right in sorted(pairs):
+        assessment = assess_similarity(people[left], people[right])
+        if assessment.score >= QUALITY_DUPLICATE_THRESHOLD:
+            results.append((people[left], people[right], assessment))
+    return sorted(
+        results,
+        key=lambda item: (-item[2].score, item[0].pointer, item[1].pointer),
+    )
+
+
+def _has_source_citation(person: IndividualRecord) -> bool:
+    """Return whether any preserved individual line contains ``SOUR``."""
+    return any(parse_gedcom_line(line).tag == "SOUR" for line in person.raw_lines)
+
+
+def _record_source_files(person: IndividualRecord) -> tuple[str, ...]:
+    """Return complete source provenance, including legacy constructed records."""
+    return tuple(dict.fromkeys(
+        person.source_files or ((person.source_file,) if person.source_file else ())
+    ))
+
+
+def _analyze_married_names(
+    people: Sequence[IndividualRecord],
+    spouses: Mapping[str, set[str]],
+    parents: Mapping[str, set[str]],
+    families: Mapping[str, Mapping[str, tuple[str, ...]]],
+    generations: Mapping[str, int],
+) -> list[QualityFinding]:
+    """Conservatively identify primary names that may be married forms."""
+    by_pointer = {person.pointer: person for person in people}
+    wife_roles = {
+        pointer
+        for roles in families.values()
+        for pointer in roles.get("WIFE", ())
+    }
+    findings: list[QualityFinding] = []
+    maiden_types = {"birth", "maiden", "birth name", "maiden name"}
+    married_types = {"married", "married name"}
+    for person in people:
+        primary = next((name for name in person.names if name.is_primary), None)
+        if primary is None:
+            continue
+        maiden_names = [
+            name for name in person.names if name.name_type in maiden_types
+        ]
+        primary_is_married = primary.name_type in married_types
+        evidence: list[str] = [f"primary name: {primary.display_name}"]
+        severity = ""
+        description = ""
+        confidence = "deterministic"
+        if primary_is_married and maiden_names:
+            severity = "high"
+            description = (
+                "The primary NAME is typed married even though a separate "
+                "birth or maiden NAME is present."
+            )
+            evidence.append("typed birth/maiden NAME exists")
+        elif primary_is_married:
+            severity = "high"
+            description = (
+                "The primary NAME is explicitly TYPE married and no separate "
+                "birth or maiden NAME is present."
+            )
+            evidence.append("TYPE married")
+        elif not maiden_names and primary.surname:
+            spouse_surnames = {
+                by_pointer[pointer].surname.casefold()
+                for pointer in spouses.get(person.pointer, ())
+                if pointer in by_pointer and by_pointer[pointer].surname
+            }
+            parent_surnames = {
+                by_pointer[pointer].surname.casefold()
+                for pointer in parents.get(person.pointer, ())
+                if pointer in by_pointer and by_pointer[pointer].surname
+            }
+            surname = primary.surname.casefold()
+            spouse_match = surname in spouse_surnames
+            parent_match = surname in parent_surnames
+            if spouse_match and parent_surnames and not parent_match:
+                if not person.gender and person.pointer in wife_roles:
+                    severity = "low"
+                    confidence = "low-confidence relationship context"
+                elif person.gender == "F":
+                    severity = "medium"
+                    confidence = "corroborated inference"
+                if severity:
+                    description = (
+                        "The primary surname matches a spouse and differs from "
+                        "all known parent surnames; no typed birth/maiden name "
+                        "is retained."
+                    )
+                    evidence.extend((
+                        f"spouse surnames: {', '.join(sorted(spouse_surnames))}",
+                        f"parent surnames: {', '.join(sorted(parent_surnames))}",
+                    ))
+        if not severity:
+            continue
+        findings.append(_quality_finding(
+            "POSSIBLE_MARRIED_PRIMARY_NAME",
+            severity,
+            "married-name",
+            "Possible married surname used as primary name",
+            description,
+            "Verify records, then retain separate GEDCOM NAME structures with "
+            "TYPE birth/maiden and TYPE married; do not invent a surname.",
+            people=(person.pointer,),
+            evidence=evidence,
+            source_files=_record_source_files(person),
+            generations=generations,
+            confidence=confidence,
+        ))
+    return findings
+
+
+def _analyze_source_structure(
+    sources: Sequence[ParsedSource],
+    generations: Mapping[str, int],
+) -> list[QualityFinding]:
+    """Return advisory diagnostics for source headers, references, and lines."""
+    findings: list[QualityFinding] = []
+    for source in sources:
+        records = source.records
+        source_name = str(source.path)
+        tags = [record.tag for record in records]
+        if tags.count("HEAD") > 1:
+            findings.append(_quality_finding(
+                "DUPLICATE_HEAD", "high", "structural", "Duplicate HEAD records",
+                f"The source contains {tags.count('HEAD')} HEAD records.",
+                "Retain exactly one leading HEAD record.",
+                source_files=(source_name,), generations=generations,
+            ))
+        if tags.count("TRLR") > 1:
+            findings.append(_quality_finding(
+                "DUPLICATE_TRLR", "high", "structural", "Duplicate TRLR records",
+                f"The source contains {tags.count('TRLR')} TRLR records.",
+                "Retain exactly one final TRLR record.",
+                source_files=(source_name,), generations=generations,
+            ))
+        if not records or tags[0] != "HEAD":
+            findings.append(_quality_finding(
+                "MISSING_HEAD", "high", "structural", "Missing leading HEAD",
+                "The source does not begin with a HEAD record.",
+                "Export the source again or add a standards-compliant HEAD.",
+                source_files=(source_name,), generations=generations,
+            ))
+        if not records or tags[-1] != "TRLR":
+            findings.append(_quality_finding(
+                "MISSING_TRLR", "high", "structural", "Missing final TRLR",
+                "The source does not end with a TRLR record.",
+                "Add one final `0 TRLR` record.", source_files=(source_name,),
+                generations=generations,
+            ))
+        heads = [record for record in records if record.tag == "HEAD"]
+        head_lines = heads[0].lines if heads else []
+        parsed_head = [parse_gedcom_line(line) for line in head_lines]
+        charset = next(
+            (line.value for line in parsed_head if line.tag == "CHAR"), ""
+        )
+        versions = [
+            parse_gedcom_line(line).value.strip()
+            for block in _top_level_blocks(head_lines)
+            if parse_gedcom_line(block[0]).tag == "GEDC"
+            for line in block[1:]
+            if parse_gedcom_line(line).tag == "VERS"
+        ]
+        if not charset:
+            findings.append(_quality_finding(
+                "MISSING_CHARSET", "medium", "structural", "Missing charset",
+                "HEAD has no CHAR declaration.",
+                "Declare `1 CHAR UTF-8` for portable output.",
+                source_files=(source_name,), generations=generations,
+            ))
+        elif charset.upper() not in {"UTF-8", "UNICODE", "ANSEL", "ASCII"}:
+            findings.append(_quality_finding(
+                "PORTABILITY_CHARSET", "medium", "structural",
+                "Potentially nonportable charset", f"HEAD.CHAR is {charset!r}.",
+                "Convert the file to UTF-8 before exchanging it.",
+                evidence=(charset,), source_files=(source_name,),
+                generations=generations,
+            ))
+        if not versions:
+            findings.append(_quality_finding(
+                "MISSING_VERSION", "medium", "structural",
+                "Missing GEDCOM version", "HEAD.GEDC.VERS was not found.",
+                "Declare GEDCOM 5.5.5 (or intentional 5.5.1 compatibility).",
+                source_files=(source_name,), generations=generations,
+            ))
+        elif versions[0] not in SUPPORTED_GEDCOM_VERSIONS:
+            findings.append(_quality_finding(
+                "PORTABILITY_VERSION", "medium", "structural",
+                "Potentially unsupported GEDCOM version",
+                f"HEAD.GEDC.VERS is {versions[0]!r}.",
+                "Confirm the source version and test a 5.5.5 or deliberate "
+                "5.5.1 export with the destination importer.",
+                evidence=(versions[0],), source_files=(source_name,),
+                generations=generations,
+            ))
+        pointers = [record.pointer for record in records if record.pointer]
+        pointer_counts: dict[str, int] = defaultdict(int)
+        for pointer in pointers:
+            pointer_counts[pointer] += 1
+        for duplicate in sorted(
+            pointer for pointer, count in pointer_counts.items() if count > 1
+        ):
+            findings.append(_quality_finding(
+                "DUPLICATE_XREF", "high", "structural", "Duplicate xref",
+                f"The source declares {duplicate} more than once.",
+                "Assign one unique xref to each level-zero record.",
+                evidence=(duplicate,), source_files=(source_name,),
+                generations=generations,
+            ))
+        for pointer in sorted(set(pointers)):
+            if (
+                len(pointer) > 22
+                or not re.fullmatch(r"@[A-Za-z_][A-Za-z0-9_:-]*@", pointer)
+            ):
+                findings.append(_quality_finding(
+                    "MALFORMED_XREF", "high", "structural", "Malformed xref",
+                    f"{pointer!r} is not a portable GEDCOM 5.5.5 xref.",
+                    "Replace it with a unique letter-led xref of at most 22 "
+                    "characters.",
+                    evidence=(pointer,), source_files=(source_name,),
+                    generations=generations,
+                ))
+        declared = {record.pointer for record in records if record.pointer}
+        for record in records:
+            previous_level = 0
+            for line in record.lines:
+                parsed = parse_gedcom_line(line)
+                if parsed.level > previous_level + 1:
+                    findings.append(_quality_finding(
+                        "LEVEL_SKIP", "high", "structural",
+                        "GEDCOM hierarchy skips a level",
+                        f"Record {record.pointer or record.tag} jumps to level "
+                        f"{parsed.level} at tag {parsed.tag}.",
+                        "Repair the level numbering before importing.",
+                        people=((record.pointer,) if record.tag == "INDI" else ()),
+                        evidence=(f"level {parsed.level} {parsed.tag}",),
+                        source_files=(source_name,),
+                        generations=generations,
+                    ))
+                previous_level = parsed.level
+                if len(line.encode("utf-8")) > 255:
+                    findings.append(_quality_finding(
+                        "LONG_LINE", "medium", "structural",
+                        "Line exceeds 255 UTF-8 bytes",
+                        f"Record {record.pointer or record.tag} has an overlong line.",
+                        "Wrap text with CONC/CONT for broad importer compatibility.",
+                        evidence=(
+                            f"{parsed.tag}: {len(line.encode('utf-8'))} bytes",
+                        ),
+                        source_files=(source_name,),
+                        generations=generations,
+                    ))
+            references = {
+                pointer
+                for line in record.lines
+                for pointer in XREF_RE.findall(parse_gedcom_line(line).value)
+            }
+            for dangling in sorted(references - declared):
+                findings.append(_quality_finding(
+                    "DANGLING_REFERENCE", "high", "structural",
+                    "Dangling GEDCOM reference",
+                    f"{record.pointer or record.tag} references undefined {dangling}.",
+                    "Restore the referenced record or remove the broken edge.",
+                    people=((record.pointer,) if record.tag == "INDI" else ()),
+                    families=((record.pointer,) if record.tag == "FAM" else ()),
+                    evidence=(dangling,), source_files=(source_name,),
+                    generations=generations,
+                ))
+    return findings
+
+
+def analyze_quality(
+    people: Sequence[IndividualRecord],
+    source_records: Sequence[GedcomRecord],
+    sources: Sequence[ParsedSource],
+    root_pointer: str,
+    *,
+    pointer_map: Mapping[str, str] | None = None,
+    merge_decisions: Sequence[MergeDecision] = (),
+    output_file: str = "",
+) -> QualityReport:
+    """Analyze a merged tree without mutating genealogy or merge decisions.
+
+    The analysis prioritizes direct ancestors but also checks every surviving
+    person.  Missing values are never treated as contradictions, and a missing
+    death date becomes actionable only when a birth year indicates age 120 or
+    older.  Duplicate findings are recommendations, never merge commands.
+
+    Args:
+        people: Surviving, relationship-enriched people.
+        source_records: Globally namespaced source records.
+        sources: Parsed source documents used for structural diagnostics.
+        root_pointer: Canonical report root.
+        pointer_map: Optional duplicate-to-survivor mappings.
+        merge_decisions: Optional audit entries from :func:`merge_records`.
+        output_file: Planned merged GEDCOM path shown in the report.
+
+    Returns:
+        An immutable deterministic report model.
+
+    Raises:
+        ValueError: The root pointer is not a surviving person.
+
+    Privacy effects:
+        This function performs no network or filesystem writes.
+
+    Mutation guarantees:
+        Input records and relationships are not changed.
+    """
+    by_pointer = {person.pointer: person for person in people}
+    if root_pointer not in by_pointer:
+        raise ValueError(f"Quality root person not found: {root_pointer}")
+    mapping = pointer_map or {}
+    generations, cycles = ancestor_generations(
+        root_pointer, source_records, mapping
+    )
+    parents, children, spouses, families = _family_graph(source_records, mapping)
+    findings: list[QualityFinding] = []
+    current_year = dt.date.today().year
+    for person in people:
+        person_files = _record_source_files(person)
+        common = {
+            "people": (person.pointer,),
+            "source_files": person_files,
+            "generations": generations,
+        }
+        if not person.full_name:
+            findings.append(_quality_finding(
+                "MISSING_NAME", "high", "person", "Person has no name",
+                f"{person.pointer} has no usable NAME value.",
+                "Add a sourced NAME or an explicit unknown-name convention.",
+                **common,
+            ))
+        for tag, label in (("BIRT", "birth"), ("DEAT", "death")):
+            facts = person.facts.get(tag, ())
+            for fact in facts:
+                if fact.date and not _valid_quality_date(fact.date):
+                    findings.append(_quality_finding(
+                        "INVALID_DATE", "high", "chronology",
+                        f"Invalid {label} date",
+                        f"{person.full_name or person.pointer} has {fact.date!r}.",
+                        "Verify the source and encode a valid GEDCOM date.",
+                        evidence=(tag, fact.date), **common,
+                    ))
+            distinct = {fact.summary() for fact in facts if fact.summary()}
+            if len(distinct) > 1:
+                findings.append(_quality_finding(
+                    "ALTERNATIVE_VITAL_EVENTS", "medium", "person",
+                    f"Multiple {label} events retained",
+                    f"{person.full_name or person.pointer} has conflicting or "
+                    f"alternative {label} facts.",
+                    "Compare citations; retain alternatives until one is disproved.",
+                    evidence=tuple(sorted(distinct)), **common,
+                ))
+        if not person.birth_date:
+            findings.append(_quality_finding(
+                "MISSING_BIRTH_DATE", "medium", "person", "Missing birth date",
+                f"{person.full_name or person.pointer} has no birth date.",
+                "Research a birth, baptism, census, or age-based estimate.", **common,
+            ))
+        if not person.birth_place:
+            findings.append(_quality_finding(
+                "MISSING_BIRTH_PLACE", "medium", "person", "Missing birth place",
+                f"{person.full_name or person.pointer} has no birth place.",
+                "Research and cite the smallest defensible jurisdiction.", **common,
+            ))
+        if (
+            not person.death_date
+            and person.birth_year is not None
+            and current_year - person.birth_year >= 120
+        ):
+            findings.append(_quality_finding(
+                "MISSING_DEATH_DATE", "medium", "person", "Likely missing death date",
+                f"Birth year {person.birth_year} implies age at least 120.",
+                "Research death, burial, probate, obituary, or cemetery records.",
+                evidence=(str(person.birth_year),), **common,
+            ))
+        if person.death_date and not person.death_place:
+            findings.append(_quality_finding(
+                "MISSING_DEATH_PLACE", "low", "person", "Missing death place",
+                f"{person.full_name or person.pointer} has a death date but no place.",
+                "Research a death certificate, obituary, or burial record.", **common,
+            ))
+        if not _has_source_citation(person):
+            findings.append(_quality_finding(
+                "MISSING_CITATION", "medium", "citation", "No source citation",
+                "No SOUR structure is retained for "
+                f"{person.full_name or person.pointer}.",
+                "Add citations to the specific facts they support.", **common,
+            ))
+        if not person.family_references:
+            findings.append(_quality_finding(
+                "MISSING_RELATIONSHIPS", "low", "relationship",
+                "No family relationships", "No FAMC or FAMS edge is retained.",
+                "Confirm whether this person is intentionally unlinked.", **common,
+            ))
+        if not any(tag == "FAMC" for tag, _ in person.family_references):
+            findings.append(_quality_finding(
+                "MISSING_PARENT_LINK",
+                "medium" if person.pointer == root_pointer else "low",
+                "relationship",
+                "No parent-family link",
+                f"{person.full_name or person.pointer} has no FAMC reference.",
+                "Confirm whether the parents are unknown or link a verified "
+                "parent family.",
+                **common,
+            ))
+        for fact in person.occupations:
+            if not fact.value:
+                findings.append(_quality_finding(
+                    "INCOMPLETE_OCCUPATION", "low", "person",
+                    "Incomplete occupation", "An OCCU fact has no occupation value.",
+                    "Add the occupation text and supporting citation.", **common,
+                ))
+        for fact in person.residences:
+            if not fact.date or not fact.place:
+                findings.append(_quality_finding(
+                    "INCOMPLETE_RESIDENCE", "low", "person",
+                    "Incomplete residence",
+                    "A RESI fact is missing a date or place.",
+                    "Add the known date/place without fabricating precision.",
+                    evidence=(fact.summary(),), **common,
+                ))
+        if (
+            person.birth_year is not None
+            and person.death_year is not None
+            and person.birth_year > person.death_year
+        ):
+            findings.append(_quality_finding(
+                "BIRTH_AFTER_DEATH", "critical", "chronology",
+                "Birth occurs after death",
+                f"Birth {person.birth_year} is after death {person.death_year}.",
+                "Verify both events and their person attribution immediately.",
+                evidence=(str(person.birth_year), str(person.death_year)), **common,
+            ))
+        if (
+            person.birth_year is not None
+            and person.death_year is not None
+            and person.death_year - person.birth_year > 120
+        ):
+            findings.append(_quality_finding(
+                "IMPLAUSIBLE_LIFESPAN", "high", "chronology",
+                "Implausible lifespan",
+                "The recorded lifespan is "
+                f"{person.death_year - person.birth_year} years.",
+                "Check for transcription errors or combined identities.", **common,
+            ))
+
+    for child_pointer, parent_pointers in parents.items():
+        child = by_pointer.get(child_pointer)
+        if child is None or child.birth_year is None:
+            continue
+        for parent_pointer in parent_pointers:
+            parent = by_pointer.get(parent_pointer)
+            if parent is None or parent.birth_year is None:
+                continue
+            age = child.birth_year - parent.birth_year
+            if age < 12 or age > 80:
+                findings.append(_quality_finding(
+                    "PARENT_CHILD_CHRONOLOGY", "high", "chronology",
+                    "Implausible parent-child chronology",
+                    f"{parent.full_name or parent.pointer} would be age {age} "
+                    f"at {child.full_name or child.pointer}'s birth.",
+                    "Verify the relationship and both birth dates.",
+                    people=(parent.pointer, child.pointer), evidence=(str(age),),
+                    source_files=_record_source_files(parent)
+                    + _record_source_files(child), generations=generations,
+                ))
+    source_by_family = {
+        record.pointer: record for record in source_records if record.tag == "FAM"
+    }
+    for family_pointer, roles in families.items():
+        members = set(
+            roles.get("HUSB", ()) + roles.get("WIFE", ()) + roles.get("CHIL", ())
+        )
+        family_record = source_by_family.get(family_pointer)
+        family_source = (
+            (family_record.source_file,) if family_record is not None else ()
+        )
+        if not members:
+            findings.append(_quality_finding(
+                "EMPTY_FAMILY", "high", "relationship", "Empty family record",
+                f"{family_pointer} has no HUSB, WIFE, or CHIL members.",
+                "Restore family members or remove the empty family record.",
+                families=(family_pointer,), source_files=family_source,
+                generations=generations,
+            ))
+        for role in ("HUSB", "WIFE", "CHIL"):
+            expected_tag = "FAMC" if role == "CHIL" else "FAMS"
+            for person_pointer in roles.get(role, ()):
+                person = by_pointer.get(person_pointer)
+                if person is None:
+                    continue
+                linked_families = {
+                    family for tag, family in person.family_references
+                    if tag == expected_tag
+                }
+                if family_pointer not in linked_families:
+                    findings.append(_quality_finding(
+                        "NONRECIPROCAL_FAMILY_REFERENCE", "medium",
+                        "relationship", "Nonreciprocal family reference",
+                        f"{family_pointer} lists {person_pointer} as {role}, but "
+                        f"the person has no matching {expected_tag} reference.",
+                        "Add the reciprocal person-to-family edge after verification.",
+                        people=(person_pointer,), families=(family_pointer,),
+                        evidence=(role, expected_tag),
+                        source_files=family_source + _record_source_files(person),
+                        generations=generations,
+                    ))
+        if family_record is not None:
+            spouse_people = [
+                by_pointer[pointer]
+                for pointer in roles.get("HUSB", ()) + roles.get("WIFE", ())
+                if pointer in by_pointer
+            ]
+            for block in _top_level_blocks(family_record.lines):
+                first = parse_gedcom_line(block[0])
+                if first.tag != "MARR":
+                    continue
+                marriage = _fact_from_block(block)
+                marriage_year = _extract_year(marriage.date)
+                if marriage.date and not _valid_quality_date(marriage.date):
+                    findings.append(_quality_finding(
+                        "INVALID_MARRIAGE_DATE", "high", "chronology",
+                        "Invalid marriage date",
+                        f"{family_pointer} has marriage date {marriage.date!r}.",
+                        "Verify and encode a valid GEDCOM marriage date.",
+                        families=(family_pointer,), evidence=(marriage.date,),
+                        source_files=family_source, generations=generations,
+                    ))
+                if marriage_year is None:
+                    continue
+                for spouse in spouse_people:
+                    if spouse.birth_year is not None:
+                        marriage_age = marriage_year - spouse.birth_year
+                        if marriage_age < 12:
+                            findings.append(_quality_finding(
+                                "MARRIAGE_BEFORE_MATURITY", "high", "chronology",
+                                "Marriage precedes plausible maturity",
+                                f"{spouse.full_name or spouse.pointer} would be "
+                                f"age {marriage_age} at marriage.",
+                                "Verify the marriage, birth date, and family identity.",
+                                people=(spouse.pointer,), families=(family_pointer,),
+                                evidence=(str(marriage_year), str(marriage_age)),
+                                source_files=family_source
+                                + _record_source_files(spouse),
+                                generations=generations,
+                            ))
+                    if (
+                        spouse.death_year is not None
+                        and marriage_year > spouse.death_year
+                    ):
+                        findings.append(_quality_finding(
+                            "MARRIAGE_AFTER_DEATH", "critical", "chronology",
+                            "Marriage occurs after death",
+                            f"{family_pointer}'s marriage is after "
+                            f"{spouse.full_name or spouse.pointer}'s death.",
+                            "Verify the marriage, death event, and family identity.",
+                            people=(spouse.pointer,), families=(family_pointer,),
+                            evidence=(str(marriage_year), str(spouse.death_year)),
+                            source_files=family_source + _record_source_files(spouse),
+                            generations=generations,
+                        ))
+    for person in people:
+        for tag, family_pointer in person.family_references:
+            roles = families.get(family_pointer)
+            if roles is None:
+                continue
+            expected_roles = ("CHIL",) if tag == "FAMC" else ("HUSB", "WIFE")
+            listed = any(
+                person.pointer in roles.get(role, ())
+                for role in expected_roles
+            )
+            if not listed:
+                findings.append(_quality_finding(
+                    "NONRECIPROCAL_PERSON_REFERENCE", "medium", "relationship",
+                    "Person points to a family that omits them",
+                    f"{person.pointer}.{tag} references {family_pointer}, but the "
+                    "family does not list that person in the expected role.",
+                    "Verify both records and add only the correct reciprocal edge.",
+                    people=(person.pointer,), families=(family_pointer,),
+                    evidence=(tag,), source_files=_record_source_files(person),
+                    generations=generations,
+                ))
+    if cycles:
+        findings.append(_quality_finding(
+            "ANCESTRY_CYCLE", "critical", "relationship",
+            "Ancestry cycle detected",
+            "A person is reachable as their own direct ancestor.",
+            "Inspect parent-family links and remove only the erroneous edge.",
+            people=tuple(sorted(cycles)), evidence=tuple(sorted(cycles)),
+            generations=generations,
+        ))
+    for left, right, assessment in _quality_duplicate_pairs(people):
+        evidence = (
+            f"score: {assessment.score:.2f}",
+            f"compared: {', '.join(assessment.compared_fields)}",
+            f"conflicts: {', '.join(assessment.conflicts) or 'none'}",
+            "relatives: "
+            f"{', '.join(left.partner_names + right.partner_names) or 'none'}",
+        )
+        findings.append(_quality_finding(
+            "POSSIBLE_DUPLICATE", "high", "duplicate",
+            "High-confidence possible duplicate",
+            f"{left.full_name or left.pointer} ({left.pointer}) and "
+            f"{right.full_name or right.pointer} ({right.pointer}) score "
+            f"{assessment.score:.2f}.",
+            "Compare original images, citations, relatives, and conflicting "
+            "facts manually; this report never merges the pair.",
+            people=(left.pointer, right.pointer), evidence=evidence,
+            source_files=_record_source_files(left) + _record_source_files(right),
+            generations=generations,
+        ))
+    findings.extend(_analyze_married_names(
+        people, spouses, parents, families, generations
+    ))
+    findings.extend(_analyze_source_structure(sources, generations))
+    findings.sort(key=lambda finding: (
+        QUALITY_SEVERITY_ORDER[finding.severity],
+        not finding.direct_ancestor,
+        finding.generation if finding.generation is not None else 10_000,
+        _actionability_rank(finding),
+        finding.finding_id,
+    ))
+    child_parentage: dict[str, dict[str, str]] = defaultdict(dict)
+    for person in people:
+        for block in _top_level_blocks(person.raw_lines):
+            first = parse_gedcom_line(block[0])
+            if first.tag != "FAMC":
+                continue
+            pedi = next(
+                (
+                    parse_gedcom_line(line).value.strip().casefold()
+                    for line in block[1:]
+                    if parse_gedcom_line(line).tag == "PEDI"
+                ),
+                "birth/unspecified",
+            )
+            family_pointer = first.value.strip()
+            if family_pointer:
+                child_parentage[person.pointer][family_pointer] = pedi
+    ancestor_parentage: dict[str, set[str]] = defaultdict(set)
+    for child_pointer, parent_pointers in parents.items():
+        child_generation = generations.get(child_pointer)
+        if child_generation is None:
+            continue
+        for family_pointer, roles in families.items():
+            if child_pointer not in roles.get("CHIL", ()):
+                continue
+            relationship = child_parentage.get(child_pointer, {}).get(
+                family_pointer, "birth/unspecified"
+            )
+            family_parents = set(
+                roles.get("HUSB", ()) + roles.get("WIFE", ())
+            )
+            for parent_pointer in parent_pointers & family_parents:
+                if generations.get(parent_pointer) == child_generation + 1:
+                    ancestor_parentage[parent_pointer].add(relationship)
+    ancestor_relationships = tuple(
+        (
+            pointer,
+            generation,
+            "self" if generation == 0 else ", ".join(sorted(
+                ancestor_parentage.get(pointer, {"birth/unspecified"})
+            )),
+        )
+        for pointer, generation in sorted(
+            generations.items(), key=lambda item: (item[1], item[0])
+        )
+    )
+    return QualityReport(
+        root_pointer=root_pointer,
+        root_name=by_pointer[root_pointer].full_name,
+        input_files=tuple(str(source.path) for source in sources),
+        output_file=output_file,
+        findings=tuple(findings),
+        merge_decisions=tuple(merge_decisions),
+        ancestor_relationships=ancestor_relationships,
+    )
+
+
+def _markdown(value: object) -> str:
+    """Escape text for Markdown tables and collapse untrusted newlines."""
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace(
+        "\r", " "
+    ).replace("\n", " ").strip()
+
+
+def _render_findings(findings: Sequence[QualityFinding]) -> list[str]:
+    """Render findings in a stable compact Markdown table."""
+    if not findings:
+        return ["No findings in this section.", ""]
+    lines = [
+        "| Severity | ID | Person/family | Recommendation |",
+        "|---|---|---|---|",
+    ]
+    for finding in findings:
+        targets = ", ".join(
+            finding.person_pointers + finding.family_pointers
+        ) or "Tree"
+        generation = (
+            f"; generation {finding.generation}"
+            if finding.generation is not None else ""
+        )
+        detail = f"{finding.title}: {finding.description} {finding.recommendation}"
+        if finding.evidence:
+            detail += f" Evidence: {'; '.join(finding.evidence)}."
+        if finding.source_files:
+            detail += " Sources: " + ", ".join(
+                Path(path).name for path in finding.source_files
+            ) + "."
+        if finding.ai_why:
+            detail += f" AI context: {finding.ai_why}"
+        if finding.ai_research:
+            detail += " AI research suggestions: " + "; ".join(
+                finding.ai_research
+            )
+        lines.append(
+            f"| {_markdown(finding.severity.upper())} | "
+            f"`{_markdown(finding.finding_id)}` | {_markdown(targets + generation)} | "
+            f"{_markdown(detail)} |"
+        )
+    lines.append("")
+    return lines
+
+
+def render_quality_report(report: QualityReport) -> str:
+    """Render the immutable quality model as deterministic Markdown.
+
+    Args:
+        report: Complete report model, optionally carrying bounded AI context.
+
+    Returns:
+        UTF-8 Markdown ending in one newline.
+
+    Mutation guarantees:
+        The report and its findings are not changed.
+    """
+    counts = defaultdict(int)
+    for finding in report.findings:
+        counts[finding.severity] += 1
+    lines = [
+        "# GEDCOM Merge Quality Report",
+        "",
+        "## Run configuration and privacy status",
+        "",
+        f"- Quality root: `{_markdown(report.root_pointer)}` "
+        f"({_markdown(report.root_name or 'unnamed')})",
+        f"- Output GEDCOM: `{_markdown(report.output_file)}`",
+        f"- Inputs: {', '.join(f'`{_markdown(path)}`' for path in report.input_files)}",
+        f"- Privacy: {_markdown(report.privacy_status)}",
+        "- AI refinement: "
+        + _markdown(
+            report.ai_backend
+            if report.ai_refined
+            else "disabled or unavailable"
+        ),
+        "",
+        "## Executive summary",
+        "",
+        f"{len(report.findings)} findings: "
+        + ", ".join(
+            f"{counts[level]} {level}"
+            for level in ("critical", "high", "medium", "low")
+        )
+        + ". This report is advisory and made no GEDCOM changes.",
+        "",
+        "## Top 25 actions",
+        "",
+    ]
+    lines.extend(_render_findings(report.findings[:QUALITY_AI_LIMIT]))
+    lines.extend(["## Direct ancestors by generation", ""])
+    lines.extend([
+        "| Generation | Pointer | Parentage (`PEDI`) |",
+        "|---:|---|---|",
+    ])
+    for pointer, generation, relationship in report.ancestor_relationships:
+        lines.append(
+            f"| {generation} | `{_markdown(pointer)}` | "
+            f"{_markdown(relationship)} |"
+        )
+    lines.append("")
+    direct = sorted(
+        (finding for finding in report.findings if finding.direct_ancestor),
+        key=lambda item: (item.generation or 0, item.finding_id),
+    )
+    lines.extend(_render_findings(direct))
+    sections = (
+        ("High-confidence possible duplicates", "duplicate"),
+        ("Possible married-name-as-primary issues", "married-name"),
+        ("General tree quality", "general"),
+        ("Source and structural diagnostics", "structural"),
+    )
+    for title, category in sections:
+        lines.extend([f"## {title}", ""])
+        selected = (
+            [finding for finding in report.findings if finding.category == category]
+            if category != "general"
+            else [
+                finding for finding in report.findings
+                if finding.category not in {"duplicate", "married-name", "structural"}
+            ]
+        )
+        lines.extend(_render_findings(selected))
+    lines.extend(["## Merge decisions", ""])
+    if report.merge_decisions:
+        lines.extend([
+            "| Pair | Score | Disposition | Evidence/conflicts | Route |",
+            "|---|---:|---|---|---|",
+        ])
+        for decision in report.merge_decisions:
+            evidence = ", ".join(decision.compared_fields) or "none"
+            conflicts = ", ".join(decision.conflicts) or "none"
+            route = "/".join(
+                value for value in (decision.provider, decision.model) if value
+            )
+            lines.append(
+                f"| `{_markdown(decision.left_pointer)}` / "
+                f"`{_markdown(decision.right_pointer)}` | {decision.score:.2f} | "
+                f"{_markdown(decision.disposition)} | "
+                f"{_markdown(evidence)}; conflicts: {_markdown(conflicts)} | "
+                f"{_markdown(route)} |"
+            )
+        lines.append("")
+    else:
+        lines.extend(["No duplicate merge decisions were required.", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_quality_report(report: QualityReport, output_path: str | Path) -> None:
+    """Atomically write a quality report without modifying genealogy data.
+
+    Raises:
+        OSError: The parent directory is absent or atomic replacement fails.
+    """
+    path = Path(output_path).resolve()
+    if not path.parent.is_dir():
+        raise OSError(f"Quality report directory does not exist: {path.parent}")
+    payload = render_quality_report(report)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(payload)
+    try:
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def write_quality_diagnostic(
+    output_path: str | Path,
+    source_path: str,
+    error: BaseException,
+) -> None:
+    """Atomically write a syntax-failure report when ancestry cannot begin."""
+    message = str(error)
+    line_match = re.search(r"(?:line|level)\s+(\d+)", message, re.IGNORECASE)
+    line_number = line_match.group(1) if line_match else "unknown"
+    payload = "\n".join((
+        "# GEDCOM Merge Diagnostic Report",
+        "",
+        "The merge was rejected before any output GEDCOM was written.",
+        "",
+        f"- Source path: `{_markdown(source_path)}`",
+        f"- Line: {_markdown(line_number)}",
+        f"- Parser error: {_markdown(message)}",
+        "- Remediation: repair the malformed GEDCOM line, validate the source, "
+        "and rerun the merge. No AI request was made.",
+        "",
+    ))
+    path = Path(output_path).resolve()
+    if not path.parent.is_dir():
+        raise OSError(f"Quality report directory does not exist: {path.parent}")
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(payload)
+    try:
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _quality_response_schema() -> dict[str, object]:
+    """Return the strict, provider-neutral quality annotation schema."""
+    return {
+        "type": "object",
+        "properties": {
+            "annotations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "finding_id": {"type": "string"},
+                        "why_this_matters": {"type": "string"},
+                        "research_suggestions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": [
+                        "finding_id",
+                        "why_this_matters",
+                        "research_suggestions",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["annotations"],
+        "additionalProperties": False,
+    }
+
+
+def _build_quality_prompt(report: QualityReport) -> str:
+    """Build one bounded prompt containing only deterministic top findings."""
+    payload = [
+        {
+            "finding_id": finding.finding_id,
+            "severity": finding.severity,
+            "title": finding.title[:200],
+            "description": finding.description[:400],
+            "evidence": [value[:160] for value in finding.evidence[:4]],
+            "recommendation": finding.recommendation[:400],
+        }
+        for finding in report.findings[:QUALITY_AI_LIMIT]
+    ]
+    return (
+        "Explain the deterministic genealogy quality findings below. Return "
+        "one annotation per supplied finding ID. You may add only why the "
+        "finding matters and cautious research suggestions. Do not change or "
+        "question severity, suppress findings, assert identities, invent "
+        "people or names, or introduce facts absent from the evidence. Keep "
+        "each field concise.\n\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+
+
+def _parse_quality_ai_response(
+    response_text: str,
+    allowed_ids: set[str],
+) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """Validate model annotations against deterministic finding IDs."""
+    cleaned = re.sub(r"```(?:json)?", "", response_text, flags=re.IGNORECASE)
+    try:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        value = json.loads(cleaned[start:end + 1])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict) or not isinstance(value.get("annotations"), list):
+        return {}
+    annotations: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for item in value["annotations"][:QUALITY_AI_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        finding_id = str(item.get("finding_id", ""))
+        if finding_id not in allowed_ids or finding_id in annotations:
+            continue
+        why = str(item.get("why_this_matters", ""))[:MAX_AI_TEXT].strip()
+        raw_suggestions = item.get("research_suggestions", [])
+        suggestions = tuple(
+            str(suggestion)[:500].strip()
+            for suggestion in (
+                raw_suggestions if isinstance(raw_suggestions, list) else []
+            )[:5]
+            if str(suggestion).strip()
+        )
+        annotations[finding_id] = (why, suggestions)
+    return annotations
+
+
+def ai_refine_quality_ollama(
+    report: QualityReport,
+    model: str = "llama3.1",
+    base_url: str = "http://localhost:11434",
+    timeout: float = 60.0,
+    **_: object,
+) -> tuple[dict[str, tuple[str, tuple[str, ...]]], str, str]:
+    """Request one local Ollama annotation pass for the top findings."""
+    payload = json.dumps({
+        "model": model,
+        "prompt": _build_quality_prompt(report),
+        "stream": False,
+        "format": _quality_response_schema(),
+        "options": {"temperature": 0},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Ollama quality request failed: {exc}") from exc
+    allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
+    annotations = _parse_quality_ai_response(str(body.get("response", "")), allowed)
+    return annotations, "ollama", model
+
+
+def ai_refine_quality_openai(
+    report: QualityReport,
+    api_key: Optional[str] = None,
+    model: str = DEFAULT_OPENAI_MODEL,
+    reasoning_effort: str = "low",
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    **_: object,
+) -> tuple[dict[str, tuple[str, tuple[str, ...]]], str, str]:
+    """Use schema-constrained OpenAI Responses output after credit preflight."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("Install the optional 'openai' package") from exc
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
+    ensure_remote_credit(
+        "openai", api_key=key, policy=credit_policy,
+        minimum_credit_usd=minimum_credit_usd,
+    )
+    request: dict[str, object] = {
+        "model": model,
+        "instructions": "Return only the requested JSON object.",
+        "input": _build_quality_prompt(report),
+        "store": False,
+        "text": {"format": {
+            "type": "json_schema", "name": "quality_annotations",
+            "strict": True, "schema": _quality_response_schema(),
+        }},
+    }
+    if reasoning_effort != "none":
+        request["reasoning"] = {"effort": reasoning_effort}
+    try:
+        response = OpenAI(api_key=key).responses.create(**request)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"OpenAI quality request failed: {exc}") from exc
+    allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
+    annotations = _parse_quality_ai_response(response.output_text, allowed)
+    used_model = str(getattr(response, "model", None) or model)
+    return annotations, "openai", used_model
+
+
+def ai_refine_quality_gemini(
+    report: QualityReport,
+    api_key: Optional[str] = None,
+    model: str = DEFAULT_GEMINI_MODEL,
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    **_: object,
+) -> tuple[dict[str, tuple[str, tuple[str, ...]]], str, str]:
+    """Use Google Gen AI structured JSON after the configured credit gate."""
+    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get(
+        "GOOGLE_API_KEY"
+    )
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is not set")
+    ensure_remote_credit(
+        "gemini", api_key=key, policy=credit_policy,
+        minimum_credit_usd=minimum_credit_usd,
+    )
+    try:
+        from google import genai as google_genai
+    except ImportError as exc:
+        raise RuntimeError("Install the optional 'google-genai' package") from exc
+    client = google_genai.Client(api_key=key)
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=_build_quality_prompt(report),
+            config={
+                "temperature": 0,
+                "response_mime_type": "application/json",
+                "response_json_schema": _quality_response_schema(),
+            },
+        )
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+    allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
+    return _parse_quality_ai_response(str(response.text), allowed), "gemini", model
+
+
+def ai_refine_quality_openrouter(
+    report: QualityReport,
+    api_key: Optional[str] = None,
+    model: str = DEFAULT_OPENROUTER_MODEL,
+    allowed_models: Optional[Sequence[str]] = None,
+    cost_quality_tradeoff: int = 7,
+    zero_data_retention: bool = True,
+    credit_policy: str = "required",
+    minimum_credit_usd: float = 0.01,
+    credit_timeout: float = 15.0,
+    **_: object,
+) -> tuple[dict[str, tuple[str, tuple[str, ...]]], str, str]:
+    """Use OpenRouter structured output after a no-genealogy credit check."""
+    try:
+        from openrouter import OpenRouter
+    except ImportError as exc:
+        raise RuntimeError("Install the optional 'openrouter' package") from exc
+    key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+    ensure_remote_credit(
+        "openrouter", api_key=key,
+        management_key=os.environ.get("OPENROUTER_MANAGEMENT_KEY"),
+        policy=credit_policy, minimum_credit_usd=minimum_credit_usd,
+        timeout=credit_timeout,
+    )
+    request: dict[str, object] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Return only valid requested JSON."},
+            {"role": "user", "content": _build_quality_prompt(report)},
+        ],
+        "provider": {
+            "data_collection": "deny", "require_parameters": True,
+            **({"zdr": True} if zero_data_retention else {}),
+        },
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "quality_annotations", "strict": True,
+                "schema": _quality_response_schema(),
+            },
+        },
+        "temperature": 0,
+    }
+    if model == "openrouter/auto":
+        request["plugins"] = [{
+            "id": "auto-router",
+            "allowed_models": list(allowed_models or DEFAULT_OPENROUTER_MODELS),
+            "cost_quality_tradeoff": cost_quality_tradeoff,
+        }]
+    with OpenRouter(api_key=key) as client:
+        response = client.chat.send(**request)
+    choices = getattr(response, "choices", None)
+    if not choices:
+        raise RuntimeError("OpenRouter returned no quality annotation choices")
+    content = getattr(getattr(choices[0], "message", None), "content", None)
+    allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
+    annotations = _parse_quality_ai_response(
+        _openrouter_message_text(content), allowed
+    )
+    return annotations, "openrouter", str(getattr(response, "model", None) or model)
+
+
+def refine_quality_report_with_ai(
+    report: QualityReport,
+    backend: str,
+    ai_kwargs: Optional[dict[str, object]] = None,
+) -> QualityReport:
+    """Add bounded model explanations while preserving deterministic authority.
+
+    Provider failure, an empty response, unknown finding IDs, or explicit
+    ``none`` mode returns the original report unchanged.  For remote providers,
+    the provider's existing credit and privacy controls run before the prompt
+    is constructed or transmitted.
+
+    Args:
+        report: Deterministic report to annotate.
+        backend: ``ollama``, ``openai``, ``gemini``, ``openrouter``, ``auto``,
+            or ``none``.
+        ai_kwargs: Provider options already validated by the CLI.
+
+    Returns:
+        A replacement immutable report, or the original object on failure.
+
+    Privacy effects:
+        A successful non-Ollama route sends only the top 25 bounded finding
+        summaries to the selected provider after its configured preflight.
+
+    Mutation guarantees:
+        Severity, evidence, identity, order, and recommendations are unchanged.
+    """
+    if backend == "none" or not report.findings:
+        return report
+    kwargs = dict(ai_kwargs or {})
+    QualityResolver = Callable[
+        ..., tuple[dict[str, tuple[str, tuple[str, ...]]], str, str]
+    ]
+    resolvers: dict[str, QualityResolver] = {
+        "ollama": ai_refine_quality_ollama,
+        "openai": ai_refine_quality_openai,
+        "gemini": ai_refine_quality_gemini,
+        "openrouter": ai_refine_quality_openrouter,
+    }
+    try:
+        if backend == "auto":
+            # Reuse the same future-facing preference order as identity
+            # adjudication, while avoiding retries after genealogy is sent.
+            if os.environ.get("OPENROUTER_API_KEY"):
+                resolver = ai_refine_quality_openrouter
+                kwargs = {
+                    "model": kwargs.get("openrouter_model", DEFAULT_OPENROUTER_MODEL),
+                    "allowed_models": kwargs.get("allowed_models"),
+                    "cost_quality_tradeoff": kwargs.get("cost_quality_tradeoff", 7),
+                    "zero_data_retention": kwargs.get("zero_data_retention", True),
+                    "credit_policy": kwargs.get("credit_policy", "required"),
+                    "minimum_credit_usd": kwargs.get("minimum_credit_usd", 0.01),
+                }
+            elif os.environ.get("OPENAI_API_KEY"):
+                resolver = ai_refine_quality_openai
+                kwargs = {
+                    "model": kwargs.get("openai_model", DEFAULT_OPENAI_MODEL),
+                    "reasoning_effort": kwargs.get("reasoning_effort", "low"),
+                    "credit_policy": kwargs.get("credit_policy", "required"),
+                    "minimum_credit_usd": kwargs.get("minimum_credit_usd", 0.01),
+                }
+            elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+                resolver = ai_refine_quality_gemini
+                kwargs = {
+                    "model": kwargs.get("gemini_model", DEFAULT_GEMINI_MODEL),
+                    "credit_policy": kwargs.get("credit_policy", "required"),
+                    "minimum_credit_usd": kwargs.get("minimum_credit_usd", 0.01),
+                }
+            else:
+                resolver = ai_refine_quality_ollama
+                kwargs = {
+                    "model": kwargs.get("ollama_model", "llama3.1"),
+                    "base_url": kwargs.get("ollama_url", "http://localhost:11434"),
+                }
+        else:
+            resolver = resolvers[backend]
+        annotations, provider, model = resolver(report, **kwargs)
+        if not annotations:
+            return report
+        findings = tuple(
+            dataclasses.replace(
+                finding,
+                ai_why=annotations.get(finding.finding_id, ("", ()))[0],
+                ai_research=annotations.get(finding.finding_id, ("", ()))[1],
+            )
+            for finding in report.findings
+        )
+        privacy = (
+            "Local Ollama refinement; no remote transmission"
+            if provider == "ollama"
+            else f"Bounded top-25 finding summaries sent to {provider}/{model}"
+        )
+        return dataclasses.replace(
+            report, findings=findings, ai_backend=f"{provider}/{model}",
+            ai_refined=True, privacy_status=privacy,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider SDK errors vary by version
+        log.warning("Quality AI refinement unavailable; report unchanged: %s", exc)
+        return report
+
+
 def _record_to_gedcom_lines(record: IndividualRecord) -> str:
     """Serialize structured individual data when no source block is available.
 
@@ -2833,16 +4556,35 @@ def _record_to_gedcom_lines(record: IndividualRecord) -> str:
     records; callers must provide source ``FAM`` records for those edges.
     """
     lines = [f"0 {record.pointer} INDI\n"]
-    name = (
-        f"{record.given_name} /{record.surname}/".strip()
-        if record.surname
-        else record.given_name
-    )
-    if name:
-        lines.append(f"1 NAME {name}\n")
-    for alternate_name in record.alternate_names:
-        if alternate_name and alternate_name != record.full_name:
-            lines.append(f"1 NAME {alternate_name}\n")
+    if record.names:
+        for personal_name in record.names:
+            value = personal_name.value or (
+                f"{personal_name.given} /{personal_name.surname}/".strip()
+                if personal_name.surname
+                else personal_name.given
+            )
+            lines.append(f"1 NAME {value}\n")
+            for tag, component in (
+                ("TYPE", personal_name.name_type),
+                ("NPFX", personal_name.prefix),
+                ("GIVN", personal_name.given),
+                ("NICK", personal_name.nickname),
+                ("SURN", personal_name.surname),
+                ("NSFX", personal_name.suffix),
+            ):
+                if component:
+                    lines.append(f"2 {tag} {component}\n")
+    else:
+        name = (
+            f"{record.given_name} /{record.surname}/".strip()
+            if record.surname
+            else record.given_name
+        )
+        if name:
+            lines.append(f"1 NAME {name}\n")
+        for alternate_name in record.alternate_names:
+            if alternate_name and alternate_name != record.full_name:
+                lines.append(f"1 NAME {alternate_name}\n")
     if record.gender:
         lines.append(f"1 SEX {record.gender}\n")
 
@@ -3100,6 +4842,28 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--quality-root-person",
+        help=(
+            "Person pointer or unique full name used only to prioritize the "
+            "quality report. Defaults to --root-person."
+        ),
+    )
+    parser.add_argument(
+        "--quality-report",
+        metavar="PATH",
+        help="Markdown report path; default is <output-stem>.quality.md.",
+    )
+    parser.add_argument(
+        "--no-quality-report",
+        action="store_true",
+        help="Disable the advisory quality report and its root requirement.",
+    )
+    parser.add_argument(
+        "--quality-ai",
+        action="store_true",
+        help="Add bounded AI context to the top 25 deterministic findings.",
+    )
+    parser.add_argument(
         "--gedcom-version",
         choices=SUPPORTED_GEDCOM_VERSIONS,
         default="5.5.5",
@@ -3175,7 +4939,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """Run the merge command and return a shell exit code."""
+    """Run the merge command and return a shell exit code.
+
+    The command writes the merged GEDCOM atomically, then writes the advisory
+    Markdown report atomically.  A syntax failure writes only a diagnostic
+    report.  Optional quality AI failures are nonfatal and cannot modify the
+    deterministic report or GEDCOM.
+
+    Args:
+        argv: Optional command-line arguments excluding the program name.
+
+    Returns:
+        Zero on success and one for input, validation, or output failure.
+    """
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
     if len(args.input_files) < 2:
@@ -3188,12 +4964,28 @@ def main(argv: Optional[list[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    paths = [Path(path).resolve() for path in args.input_files]
+    output = Path(args.output).resolve()
+    quality_enabled = not args.no_quality_report
+    quality_path = (
+        Path(args.quality_report).resolve()
+        if args.quality_report
+        else output.with_suffix(".quality.md")
+    )
+    quality_requested_root = args.quality_root_person or args.root_person
     try:
-        paths = [Path(path).resolve() for path in args.input_files]
-        output = Path(args.output).resolve()
         if output in paths:
             raise ValueError("Output path must not overwrite an input file")
+        if quality_enabled and quality_path in paths:
+            raise ValueError("Quality report path must not overwrite an input file")
+        if quality_enabled and quality_path == output:
+            raise ValueError("Quality report path must differ from GEDCOM output")
         sources = load_sources(paths)
+        if quality_enabled and not quality_requested_root:
+            raise ValueError(
+                "quality reporting requires --quality-root-person or "
+                "--root-person; use --no-quality-report to disable reporting"
+            )
         all_records = [
             _individual_from_record(record)
             for source in sources
@@ -3247,6 +5039,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "minimum_credit_usd": args.minimum_credit_usd,
             }
         pointer_map: dict[str, str] = {}
+        merge_decisions: list[MergeDecision] = []
         merged = merge_records(
             all_records,
             args.similarity_threshold,
@@ -3254,6 +5047,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             args.auto,
             kwargs,
             pointer_map,
+            merge_decisions,
         )
         include_individuals: Optional[set[str]] = None
         include_families: Optional[set[str]] = None
@@ -3276,6 +5070,23 @@ def main(argv: Optional[list[str]] = None) -> int:
                 len(include_individuals),
                 len(include_families),
             )
+        quality_report: Optional[QualityReport] = None
+        if quality_enabled:
+            quality_root_pointer = resolve_root_person(
+                quality_requested_root,
+                merged,
+                [source.pointer_map for source in sources],
+                pointer_map,
+            )
+            quality_report = analyze_quality(
+                merged,
+                all_source_records,
+                sources,
+                quality_root_pointer,
+                pointer_map=pointer_map,
+                merge_decisions=merge_decisions,
+                output_file=str(output),
+            )
         write_gedcom(
             merged,
             output,
@@ -3285,12 +5096,34 @@ def main(argv: Optional[list[str]] = None) -> int:
             include_families=include_families,
             gedcom_version=args.gedcom_version,
         )
+        if quality_report is not None:
+            if args.quality_ai:
+                quality_report = refine_quality_report_with_ai(
+                    quality_report,
+                    backend=args.ai_backend,
+                    ai_kwargs=kwargs,
+                )
+            write_quality_report(quality_report, quality_path)
         print(
             f"Merge complete: {len(all_records)} individuals -> "
             f"{len(merged)} in {output}"
         )
+        if quality_report is not None:
+            print(f"Quality report: {quality_path}")
         return 0
-    except (OSError, ValueError, GedcomParseError) as exc:
+    except GedcomParseError as exc:
+        if quality_enabled:
+            source_path = next(
+                (str(path) for path in paths if str(path) in str(exc)),
+                str(paths[0]) if paths else "unknown",
+            )
+            try:
+                write_quality_diagnostic(quality_path, source_path, exc)
+            except OSError as report_exc:
+                log.error("Could not write diagnostic report: %s", report_exc)
+        log.error("Merge failed: %s", exc)
+        return 1
+    except (OSError, ValueError) as exc:
         log.error("Merge failed: %s", exc)
         return 1
 
