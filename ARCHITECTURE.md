@@ -12,14 +12,17 @@
 - Detects OS.
 - On macOS, ensures Homebrew + Ollama setup.
 - Starts Docker Compose stack.
+- Probes service readiness with maintained SDKs (the `ollama` client and
+  `httpx`) rather than shelling out to `curl`.
 
 2. Web interface: [docker-compose.yml](docker-compose.yml)
 - Runs Open WebUI on port 3000.
+- Reads host storage locations from `.env` with safe defaults.
 - Mounts family tree data read-only (`:ro`).
 - Supports optional BYOK passthrough for OpenAI and Anthropic.
 
 3. SQL router: [tools/sql_router.py](tools/sql_router.py)
-- Discovers `.rmtree` files from `/app/backend/data/family_trees`.
+- Discovers `.rmtree` files from the configured `FAMILY_TREES_DIR` path.
 - Resolves tree paths safely (no directory traversal).
 - Opens SQLite in read-only mode (`mode=ro`).
 - Uses pooled SQLAlchemy engine args for low-overhead access.

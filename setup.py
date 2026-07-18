@@ -8,7 +8,12 @@ setup(
     description='A local AI tool for genealogy research and family tree management.',
     packages=find_packages(),
     install_requires=[
+        'langchain',
         'langchain-community',
+        'langchain-ollama',
+        'ollama',
+        'httpx',
+        'google-genai',
         'sqlalchemy',
     ],
     entry_points={

@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The langchain-community sunset DeprecationWarning is suppressed at its import
+# site in tools/sql_router.py. This is a documented backup in case import order
+# ever changes; see https://github.com/langchain-ai/langchain-community/issues/674.
+# Remove once the SQL utilities migrate to a maintained standalone package.
+filterwarnings = [
+    "ignore:`langchain-community` is being sunset:DeprecationWarning",
+]

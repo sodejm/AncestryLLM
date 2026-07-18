@@ -1,5 +1,9 @@
 langchain
 langchain-community
+langchain-ollama
+ollama
+httpx
+google-genai
 sqlalchemy
 python-gedcom==1.1.0
 rapidfuzz>=3.14.1

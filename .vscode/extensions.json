@@ -4,6 +4,8 @@
     "ms-python.vscode-pylance",
     "ms-python.debugpy",
     "ms-azuretools.vscode-docker",
-    "redhat.vscode-yaml"
+    "redhat.vscode-yaml",
+    "mads-hartmann.bash-ide-vscode",
+    "mtxr.sqltools"
   ]
 }

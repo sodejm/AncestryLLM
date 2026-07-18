@@ -20,16 +20,14 @@ import json
 import os
 import re
 import shutil
-import sys
 import tempfile
-import traceback
 import unicodedata
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -874,7 +872,6 @@ def _match_people(
     ai_kwargs: Optional[dict[str, object]] = None,
 ) -> tuple[dict[str, str], dict[str, dict[str, str]], list[Any]]:
     """Map snapshot people to stable master pointers conservatively."""
-    source_records = [record for source in sources for record in source.records]
     people_by_source: list[list[Any]] = []
     for source in sources:
         people = [
@@ -1519,7 +1516,6 @@ def _perform_update(args: argparse.Namespace, core: ModuleType) -> int:
     next_generation = int(manifest.get("generation", 0)) + 1
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     release_name = f"g{next_generation:04d}-{timestamp}"
-    planned_master = release_root / release_name / "master.ged"
     manifest["generation"] = next_generation
     manifest["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
     manifest["blocks"] = block_registry

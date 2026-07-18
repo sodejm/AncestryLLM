@@ -1036,7 +1036,6 @@ class TestAiResolveGemini:
         b = _make_record(pointer="@I2@", source_file="/b.ged")
         # Patch google.generativeai into sys.modules to avoid ModuleNotFoundError
         # when the optional google-generativeai package is not installed.
-        import sys
         import types
 
         fake_genai = types.ModuleType("google.generativeai")
@@ -1065,7 +1064,6 @@ class TestAiResolveGemini:
         fake_model = MagicMock()
         fake_model.generate_content.return_value = fake_response
 
-        import sys
         import types
 
         fake_genai = MagicMock()
