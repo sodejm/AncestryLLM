@@ -1,9 +1,113 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ancestryllm"
+version = "0.2.0"
+description = "Local-first, privacy-preserving genealogy research tools with modular LLM providers."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = "MIT"
+authors = [{name = "Justin Soderberg"}]
+dependencies = [
+    "alembic>=1.18,<2",
+    "cmd2>=4,<5",
+    "httpx>=0.28,<1",
+    "jsonschema>=4.25.1,<4.26",
+    "keyring>=25.7,<26",
+    "platformdirs>=4.5,<5",
+    "pydantic>=2.12,<3",
+    "python-dateutil>=2.9,<3",
+    "python-gedcom==1.1.0",
+    "rapidfuzz>=3.14,<4",
+    "sqlalchemy>=2.0,<3",
+    "sqlcipher3>=0.6.2,<0.7",
+    "sqlglot>=28,<29",
+    "tomli-w>=1.2,<2",
+]
+
+[project.optional-dependencies]
+ollama = ["ollama>=0.6,<1"]
+openai = ["openai>=2.45,<3"]
+anthropic = ["anthropic>=0.71,<1"]
+gemini = ["google-genai>=2.12,<3"]
+openrouter = ["openai>=2.45,<3"]
+all-llm = [
+    "anthropic>=0.71,<1",
+    "google-genai>=2.12,<3",
+    "ollama>=0.6,<1",
+    "openai>=2.45,<3",
+]
+dev = [
+    "click>=8.3.3,<9",
+    "cyclonedx-bom>=7.2,<8",
+    "coverage[toml]>=7.12,<8",
+    "mypy>=1.19,<2",
+    "pip-audit>=2.10,<3",
+    "pre-commit>=4.5,<5",
+    "pytest>=9,<10",
+    "pytest-cov>=7,<8",
+    "pytest-mock>=3.15,<4",
+    "ruff>=0.15,<1",
+    "types-python-dateutil>=2.9,<3",
+]
+
+[project.scripts]
+ancestry = "ancestryllm.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"ancestryllm.storage.migrations" = ["*.py", "versions/*.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The langchain-community sunset DeprecationWarning is suppressed at its import
-# site in tools/sql_router.py. This is a documented backup in case import order
-# ever changes; see https://github.com/langchain-ai/langchain-community/issues/674.
-# Remove once the SQL utilities migrate to a maintained standalone package.
+addopts = "--strict-markers"
 filterwarnings = [
-    "ignore:`langchain-community` is being sunset:DeprecationWarning",
+    "error::ResourceWarning",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["ancestryllm"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# Ratchet from the characterized legacy engine baseline; raise as facades gain tests.
+fail_under = 65
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF"]
+ignore = ["E501", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/ancestryllm/gedcom/engine.py" = ["BLE001", "E741", "I001", "RUF005", "RUF059", "S310", "S603", "S607"]
+"src/ancestryllm/gedcom/incremental.py" = ["BLE001", "I001", "RUF005", "RUF059", "S603", "S607"]
+"tests/**" = ["RUF003", "RUF059", "S105", "S106", "S108", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["ancestryllm"]
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["ancestryllm.gedcom.engine", "ancestryllm.gedcom.incremental"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["sqlcipher3", "gedcom.*", "jsonschema"]
+ignore_missing_imports = true

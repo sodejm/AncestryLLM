@@ -11,9 +11,15 @@
 *.db
 *.sqlite
 *.sqlite3
+*.ged
+*.gedcom
+*.bak
+*.backup
+*.report
+*.sarif
+sbom*.json
 family_trees/*
 !family_trees/.gitkeep
-open-webui-data/
 
 # ---------------------------------------------------------------------------
 # Python
