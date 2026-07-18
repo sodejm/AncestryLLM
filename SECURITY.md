@@ -1,36 +1,21 @@
-# Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+Report vulnerabilities privately through GitHub Security Advisories. Do not put
+credentials, genealogy records, exploit payloads containing personal data, or
+database keys in an issue. Include affected version, reproduction with fictional
+data, impact, and suggested mitigation.
 
-Please report security vulnerabilities **privately** using GitHub's
-[Security Advisories](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
-feature for this repository (the **Security** tab → **Report a vulnerability**).
+Supported releases are the current `main` branch and latest tagged release.
+Critical and High findings block a release until fixed or explicitly triaged and
+documented by a maintainer. Absolute absence of vulnerabilities is not claimed.
 
-Please do **not** open a public issue for security reports.
+Security boundaries include the OS keyring, SQLCipher database, consent policy,
+immutable RootsMagic reader, structured-output validation, endpoint allowlisting,
+atomic GEDCOM output, dependency lock, secret scanning, Semgrep, dependency
+audit, CodeQL, and repository artifact guard. See [the threat model](docs/THREAT_MODEL.md).
 
-## Handling Sensitive Data
-
-This is a local-first project. To keep your data and credentials safe:
-
-- **Never commit `.env`.** Only `.env.example` (with empty placeholders) belongs
-  in version control. Real API keys must stay local.
-- Local storage paths such as `FAMILY_TREES_HOST_DIR` and
-  `OPEN_WEBUI_DATA_DIR` are configured through `.env`; keep those paths local
-  and keep the RootsMagic mount read-only.
-- **Never commit `.rmtree` databases.** RootsMagic files contain private,
-  personally identifiable genealogy data and are ignored by `.gitignore`.
-- API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are read
-  from environment variables at runtime and are never hardcoded.
-
-## Automated Safeguards
-
-- `.gitignore` excludes secrets, virtual environments, caches, and all
-  genealogy databases.
-- `.pre-commit-config.yaml` runs `gitleaks` and `detect-private-key` before
-  every commit to block accidental secret disclosure.
-- Continuous integration runs `pip-audit` and `semgrep` on every push and pull
-  request.
-
-## Supported Versions
-
-The latest commit on the `main` branch is the supported version.
+If sensitive data is accidentally committed: stop sharing, revoke exposed
+credentials, rotate the database key only through a documented migration,
+remove the artifact from history with coordinated repository administration,
+and notify affected people as applicable. Never paste the leaked value into a
+ticket or chat while responding.

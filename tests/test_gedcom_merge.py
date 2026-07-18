@@ -1,4 +1,4 @@
-"""Tests for tools.gedcom_merge.
+"""Tests for the internal loss-minimizing GEDCOM engine.
 
 Fixtures are constructed programmatically or written to pytest temporary
 directories, so the suite runs without the network, Ollama, or remote APIs.
@@ -13,8 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import tools.gedcom_merge as gm
-
+from ancestryllm.gedcom import engine as gm
 
 # ---------------------------------------------------------------------------
 # Date normalisation
@@ -150,69 +149,79 @@ class TestIdentityFactExtraction:
     """Cover five high-risk fact-extraction and preservation edge cases."""
 
     def test_country_aliases_are_normalized(self):
-        person = _parse_individual([
-            "0 @I1@ INDI",
-            "1 NAME Jane /Doe/",
-            "1 BIRT",
-            "2 PLAC Boston, Massachusetts, USA",
-            "1 DEAT",
-            "2 PLAC London, England",
-        ])
+        person = _parse_individual(
+            [
+                "0 @I1@ INDI",
+                "1 NAME Jane /Doe/",
+                "1 BIRT",
+                "2 PLAC Boston, Massachusetts, USA",
+                "1 DEAT",
+                "2 PLAC London, England",
+            ]
+        )
         assert person.birth_country == "united states"
         assert person.death_country == "united kingdom"
 
     def test_multiple_birth_facts_are_retained(self):
-        person = _parse_individual([
-            "0 @I1@ INDI",
-            "1 NAME Jane /Doe/",
-            "1 BIRT",
-            "2 DATE 1900",
-            "1 BIRT",
-            "2 DATE 01 JAN 1900",
-            "2 PLAC Boston, Massachusetts, USA",
-        ])
+        person = _parse_individual(
+            [
+                "0 @I1@ INDI",
+                "1 NAME Jane /Doe/",
+                "1 BIRT",
+                "2 DATE 1900",
+                "1 BIRT",
+                "2 DATE 01 JAN 1900",
+                "2 PLAC Boston, Massachusetts, USA",
+            ]
+        )
         assert len(person.facts["BIRT"]) == 2
         assert person.birth_date == "01 JAN 1900"
         assert "Boston" in person.birth_place
 
     def test_occupation_and_residence_are_structured(self):
-        person = _parse_individual([
-            "0 @I1@ INDI",
-            "1 NAME Jane /Doe/",
-            "1 OCCU Textile worker",
-            "2 DATE 1920",
-            "2 PLAC Lowell, Massachusetts, USA",
-            "1 RESI",
-            "2 DATE 1930",
-            "2 ADDR 10 Main Street",
-            "3 CITY Boston",
-            "3 STAE Massachusetts",
-            "3 CTRY United States",
-        ])
+        person = _parse_individual(
+            [
+                "0 @I1@ INDI",
+                "1 NAME Jane /Doe/",
+                "1 OCCU Textile worker",
+                "2 DATE 1920",
+                "2 PLAC Lowell, Massachusetts, USA",
+                "1 RESI",
+                "2 DATE 1930",
+                "2 ADDR 10 Main Street",
+                "3 CITY Boston",
+                "3 STAE Massachusetts",
+                "3 CTRY United States",
+            ]
+        )
         assert person.occupations[0].value == "Textile worker"
         assert person.occupations[0].date == "1920"
         assert person.residences[0].effective_country == "united states"
         assert "Boston" in person.residences[0].place
 
     def test_alternate_names_are_not_overwritten(self):
-        person = _parse_individual([
-            "0 @I1@ INDI",
-            "1 NAME William /Smith/",
-            "1 NAME Bill /Smith/",
-            "1 NAME Wilhelm /Schmidt/",
-        ])
+        person = _parse_individual(
+            [
+                "0 @I1@ INDI",
+                "1 NAME William /Smith/",
+                "1 NAME Bill /Smith/",
+                "1 NAME Wilhelm /Schmidt/",
+            ]
+        )
         assert person.full_name == "William Smith"
         assert person.alternate_names == ("Bill Smith", "Wilhelm Schmidt")
 
     def test_standard_and_custom_facts_have_safe_roles(self):
-        person = _parse_individual([
-            "0 @I1@ INDI",
-            "1 NAME Jane /Doe/",
-            "1 CENS",
-            "2 DATE 01 APR 1940",
-            "2 PLAC Boston, Massachusetts, USA",
-            "1 _VENDOR secret vendor value",
-        ])
+        person = _parse_individual(
+            [
+                "0 @I1@ INDI",
+                "1 NAME Jane /Doe/",
+                "1 CENS",
+                "2 DATE 01 APR 1940",
+                "2 PLAC Boston, Massachusetts, USA",
+                "1 _VENDOR secret vendor value",
+            ]
+        )
         assert person.facts["CENS"][0].date == "01 APR 1940"
         assert "_VENDOR" not in person.facts
         assert "_VENDOR" in person.extra_fields
@@ -236,13 +245,16 @@ class TestRelationshipEnrichment:
             _make_record(pointer="@I1@", given_name="Jane", surname="Doe"),
             _make_record(pointer="@I2@", given_name="Alex", surname="Roe"),
         ]
-        family = _family_record("@F1@", [
-            "1 WIFE @I1@",
-            "1 HUSB @I2@",
-            "1 MARR",
-            "2 DATE 15 JUN 1920",
-            "2 PLAC Boston, Massachusetts, USA",
-        ])
+        family = _family_record(
+            "@F1@",
+            [
+                "1 WIFE @I1@",
+                "1 HUSB @I2@",
+                "1 MARR",
+                "2 DATE 15 JUN 1920",
+                "2 PLAC Boston, Massachusetts, USA",
+            ],
+        )
         enriched = gm.enrich_relationship_context(people, [family])
         assert enriched[0].partner_names == ("Alex Roe",)
         assert enriched[0].marriages[0].date == "15 JUN 1920"
@@ -258,11 +270,14 @@ class TestRelationshipEnrichment:
             given_name="Casey",
             surname="Doe",
         )
-        family = _family_record("@F1@", [
-            "1 WIFE @I1@",
-            "1 HUSB @I2@",
-            "1 CHIL @I3@",
-        ])
+        family = _family_record(
+            "@F1@",
+            [
+                "1 WIFE @I1@",
+                "1 HUSB @I2@",
+                "1 CHIL @I3@",
+            ],
+        )
         enriched = gm.enrich_relationship_context([*parents, child], [family])
         assert {relative.name for relative in enriched[0].children} == {"Casey Doe"}
         assert {relative.name for relative in enriched[2].parents} == {
@@ -312,17 +327,23 @@ class TestRelationshipEnrichment:
 
     def test_multiple_unions_and_unknown_pointers_are_safe(self):
         person = _make_record(pointer="@I1@", given_name="Jane", surname="Doe")
-        first = _family_record("@F1@", [
-            "1 WIFE @I1@",
-            "1 HUSB @MISSING@",
-            "1 MARR",
-            "2 DATE 1920",
-        ])
-        second = _family_record("@F2@", [
-            "1 WIFE @I1@",
-            "1 MARR",
-            "2 DATE 1930",
-        ])
+        first = _family_record(
+            "@F1@",
+            [
+                "1 WIFE @I1@",
+                "1 HUSB @MISSING@",
+                "1 MARR",
+                "2 DATE 1920",
+            ],
+        )
+        second = _family_record(
+            "@F2@",
+            [
+                "1 WIFE @I1@",
+                "1 MARR",
+                "2 DATE 1930",
+            ],
+        )
         enriched = gm.enrich_relationship_context([person], [first, second])
         assert enriched[0].partners == ()
         assert {fact.date for fact in enriched[0].marriages} == {"1920", "1930"}
@@ -503,9 +524,7 @@ class TestIdentitySafetyRegressions:
     def test_state_or_province_is_not_inferred_as_country(self):
         assert gm._country_from_place("Boston, Massachusetts") == ""
         assert gm._country_from_place("Toronto, Ontario") == ""
-        assert gm._country_from_place("Boston, Massachusetts, USA") == (
-            "united states"
-        )
+        assert gm._country_from_place("Boston, Massachusetts, USA") == ("united states")
 
     def test_different_family_event_tags_do_not_match(self):
         marriage = gm.GenealogicalFact("MARR", date="1920", place="Boston")
@@ -523,7 +542,14 @@ class TestIdentitySafetyRegressions:
             date="1900",
             place="Toronto, Ontario, Canada",
         )
-        a = _make_record(facts={"BIRT": (shared, conflict,)})
+        a = _make_record(
+            facts={
+                "BIRT": (
+                    shared,
+                    conflict,
+                )
+            }
+        )
         b = _make_record(pointer="@I2@", facts={"BIRT": (shared,)})
         assessment = gm.assess_similarity(a, b)
         assert "birth country alternatives" in assessment.conflicts
@@ -573,10 +599,10 @@ class TestIdentitySafetyRegressions:
         candidates = [(0, 1, 100.0), (1, 2, 95.0)]
         with (
             patch(
-                "tools.gedcom_merge.find_duplicate_candidates",
+                "ancestryllm.gedcom.engine.find_duplicate_candidates",
                 return_value=candidates,
             ),
-            patch("tools.gedcom_merge.ai_resolve", return_value=verdict),
+            patch("ancestryllm.gedcom.engine.ai_resolve", return_value=verdict),
         ):
             merged = gm.merge_records([a, bridge, c], auto=True)
         assert {person.pointer for person in merged} == {"@A@", "@C@"}
@@ -722,9 +748,11 @@ class TestMergeTwoRecords:
 
     def test_extra_fields_combined(self):
         primary = _make_record(extra_fields={"OCCU": ["1 OCCU Farmer\n"]})
-        secondary = _make_record(extra_fields={
-            "OCCU": ["1 OCCU Farmer\n", "1 OCCU Miller\n"],
-        })
+        secondary = _make_record(
+            extra_fields={
+                "OCCU": ["1 OCCU Farmer\n", "1 OCCU Miller\n"],
+            }
+        )
         merged = gm.merge_two_records(primary, secondary)
         assert "1 OCCU Farmer\n" in merged.extra_fields["OCCU"]
         assert "1 OCCU Miller\n" in merged.extra_fields["OCCU"]
@@ -813,7 +841,7 @@ class TestDependentPreservation:
                 "preferred_values": {},
             }
 
-        with patch("tools.gedcom_merge.ai_resolve", side_effect=duplicate):
+        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=duplicate):
             merged = gm.merge_records(
                 [primary, secondary, first_child, second_child],
                 threshold=70,
@@ -854,25 +882,37 @@ class TestDependentPreservation:
             family_references=(("FAMC", "@F2@"),),
             source_file="/b.ged",
         )
-        family_a = _family_record("@F1@", [
-            "1 HUSB @P1@",
-            "1 CHIL @C1@",
-        ])
-        family_b = _family_record("@F2@", [
-            "1 HUSB @P2@",
-            "1 CHIL @C2@",
-        ])
-        head = gm.GedcomRecord([
-            "0 HEAD",
-            "1 GEDC",
-            "2 VERS 5.5.5",
-            "1 CHAR UTF-8",
-        ], "/a.ged", 0)
-        sources = [gm.ParsedSource(
-            Path("/a.ged"),
-            [head, family_a, family_b],
-            {},
-        )]
+        family_a = _family_record(
+            "@F1@",
+            [
+                "1 HUSB @P1@",
+                "1 CHIL @C1@",
+            ],
+        )
+        family_b = _family_record(
+            "@F2@",
+            [
+                "1 HUSB @P2@",
+                "1 CHIL @C2@",
+            ],
+        )
+        head = gm.GedcomRecord(
+            [
+                "0 HEAD",
+                "1 GEDC",
+                "2 VERS 5.5.5",
+                "1 CHAR UTF-8",
+            ],
+            "/a.ged",
+            0,
+        )
+        sources = [
+            gm.ParsedSource(
+                Path("/a.ged"),
+                [head, family_a, family_b],
+                {},
+            )
+        ]
         pointer_map = {"@P2@": "@P1@"}
         merged_parent = gm.merge_two_records(parent_a, parent_b)
         output = tmp_path / "dependents.ged"
@@ -903,12 +943,16 @@ class TestDependentPreservation:
                 "2 PEDI adopted",
             ],
         )
-        head = gm.GedcomRecord([
-            "0 HEAD",
-            "1 GEDC",
-            "2 VERS 5.5.5",
-            "1 CHAR UTF-8",
-        ], "/a.ged", 0)
+        head = gm.GedcomRecord(
+            [
+                "0 HEAD",
+                "1 GEDC",
+                "2 VERS 5.5.5",
+                "1 CHAR UTF-8",
+            ],
+            "/a.ged",
+            0,
+        )
         family = _family_record("@F1@", ["1 CHIL @C1@"])
         source = gm.ParsedSource(Path("/a.ged"), [head, family], {})
         output = tmp_path / "pedigree.ged"
@@ -937,11 +981,7 @@ class TestParseAiResponse:
         assert result["is_duplicate"] is False
 
     def test_markdown_fenced_json(self):
-        raw = (
-            "```json\n"
-            '{"is_duplicate": true, "confidence": 0.9, "reasoning": "ok"}'
-            "\n```"
-        )
+        raw = '```json\n{"is_duplicate": true, "confidence": 0.9, "reasoning": "ok"}\n```'
         result = gm._parse_ai_response(raw)
         assert result["is_duplicate"] is True
 
@@ -989,7 +1029,7 @@ class TestRemoteCreditGate:
         payload = {
             "data": {"total_credits": 10.0, "total_usage": 2.5},
         }
-        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
             status = gm.ensure_remote_credit(
                 "openrouter",
                 api_key="inference-key",
@@ -1002,7 +1042,7 @@ class TestRemoteCreditGate:
 
     def test_openrouter_key_limit_is_not_account_balance(self):
         payload = {"data": {"limit_remaining": 5.0}}
-        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
             with pytest.raises(gm.RemoteCreditError, match="not the account"):
                 gm.ensure_remote_credit(
                     "openrouter",
@@ -1014,7 +1054,7 @@ class TestRemoteCreditGate:
         payload = {
             "data": {"total_credits": 10.0, "total_usage": 9.995},
         }
-        with patch("tools.gedcom_merge._get_remote_json", return_value=payload):
+        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
             with pytest.raises(gm.RemoteCreditError, match="at least"):
                 gm.ensure_remote_credit(
                     "openrouter",
@@ -1056,10 +1096,7 @@ class TestAiResolveGemini:
         b = _make_record(pointer="@I2@", source_file="/b.ged")
 
         fake_response = MagicMock()
-        fake_response.text = (
-            '{"is_duplicate": true, "confidence": 0.92, '
-            '"reasoning": "same"}'
-        )
+        fake_response.text = '{"is_duplicate": true, "confidence": 0.92, "reasoning": "same"}'
 
         fake_model = MagicMock()
         fake_model.generate_content.return_value = fake_response
@@ -1071,10 +1108,13 @@ class TestAiResolveGemini:
         fake_google = types.ModuleType("google")
         fake_google.generativeai = fake_genai  # type: ignore[attr-defined]
 
-        with patch.dict(
-            "sys.modules",
-            {"google": fake_google, "google.generativeai": fake_genai},
-        ), patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}):
+        with (
+            patch.dict(
+                "sys.modules",
+                {"google": fake_google, "google.generativeai": fake_genai},
+            ),
+            patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}),
+        ):
             result = gm.ai_resolve_gemini(
                 a,
                 b,
@@ -1139,7 +1179,7 @@ class TestMergeRecords:
         def fake_ai_resolve(rec_a, rec_b, backend="ollama", **kwargs):
             return {"is_duplicate": True, "confidence": 0.9, "reasoning": "same"}
 
-        with patch("tools.gedcom_merge.ai_resolve", side_effect=fake_ai_resolve):
+        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=fake_ai_resolve):
             result = gm.merge_records([a, b], threshold=70, auto=True)
 
         assert len(result) == 1
@@ -1164,7 +1204,7 @@ class TestMergeRecords:
         def fail_ai(rec_a, rec_b, backend="ollama", **kwargs):
             raise RuntimeError("Ollama offline")
 
-        with patch("tools.gedcom_merge.ai_resolve", side_effect=fail_ai):
+        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=fail_ai):
             # auto=True so operator prompt is bypassed; AI error → no merge.
             result = gm.merge_records([a, b], threshold=70, auto=True)
 
@@ -1257,9 +1297,7 @@ class TestBuildArgParser:
 
     def test_ai_backend_openrouter(self):
         ap = gm._build_arg_parser()
-        args = ap.parse_args(
-            ["a.ged", "b.ged", "--ai-backend", "openrouter"]
-        )
+        args = ap.parse_args(["a.ged", "b.ged", "--ai-backend", "openrouter"])
         assert args.ai_backend == "openrouter"
 
     def test_credit_check_defaults_to_required(self):
@@ -1330,7 +1368,11 @@ class TestMainCli:
 
         result = gm.main(
             [
-                str(file_a), str(file_b), "-o", str(out), "--auto",
+                str(file_a),
+                str(file_b),
+                "-o",
+                str(out),
+                "--auto",
                 "--no-quality-report",
             ]
         )
@@ -1361,7 +1403,11 @@ class TestMainCli:
 
         result = gm.main(
             [
-                str(file_a), str(file_b), "-o", str(out), "--auto",
+                str(file_a),
+                str(file_b),
+                "-o",
+                str(out),
+                "--auto",
                 "--no-quality-report",
             ]
         )

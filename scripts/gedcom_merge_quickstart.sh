@@ -27,7 +27,7 @@ fail() {
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/gedcom_merge"
-MERGE_TOOL="${REPO_ROOT}/tools/gedcom_merge.py"
+MERGE_TOOL="${REPO_ROOT}/src/ancestryllm/gedcom/engine.py"
 SOURCE_A="${FIXTURE_DIR}/quality-source-a.ged"
 SOURCE_B="${FIXTURE_DIR}/quality-source-b.ged"
 MALFORMED_SOURCE="${FIXTURE_DIR}/malformed-rejected.ged"
@@ -63,9 +63,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
-python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
-  || fail "Python 3.11 or newer is required"
-[[ -f "$MERGE_TOOL" ]] || fail "merge tool not found: $MERGE_TOOL"
+python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' \
+  || fail "Python 3.12 or newer is required"
+[[ -f "$MERGE_TOOL" ]] \
+  || fail "packaged merge engine not found"
 [[ -d "$FIXTURE_DIR" ]] || fail "fixture directory not found: $FIXTURE_DIR"
 [[ -f "$SOURCE_A" ]] || fail "fixture not found: $SOURCE_A"
 [[ -f "$SOURCE_B" ]] || fail "fixture not found: $SOURCE_B"
@@ -89,8 +90,8 @@ if [[ "$SKIP_INSTALL" == false ]]; then
     python3 -m venv "$VENV_DIR"
   fi
   PYTHON="${VENV_DIR}/bin/python"
-  printf 'Installing declared requirements into %s...\n' "$VENV_DIR"
-  "$PYTHON" -m pip install -r "${REPO_ROOT}/requirements.txt"
+  printf 'Installing AncestryLLM into %s...\n' "$VENV_DIR"
+  "$PYTHON" -m pip install --editable "$REPO_ROOT"
 fi
 
 MASTER_GEDCOM="${RUN_DIR}/maren-hollow.ged"

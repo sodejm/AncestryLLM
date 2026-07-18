@@ -1,0 +1,1 @@
+"""Safe interactive console adapter."""

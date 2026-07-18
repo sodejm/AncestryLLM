@@ -1,6 +1,4 @@
-from unittest.mock import patch
-
-import tools.gemini_transcription as gemini
+from ancestryllm.ocr import service as gemini
 
 
 def test_normalize_strips_whitespace_duplicates_and_non_ascii():
@@ -13,13 +11,3 @@ def test_normalize_strips_whitespace_duplicates_and_non_ascii():
 
 def test_normalize_handles_empty_input():
     assert gemini.normalize_transcription("") == ""
-
-
-def test_extract_genealogy_json_requires_api_key():
-    with patch.dict("os.environ", {}, clear=True):
-        try:
-            gemini.extract_genealogy_json("anything", api_key=None)
-        except RuntimeError as exc:
-            assert gemini.GEMINI_API_KEY_ENV in str(exc)
-        else:
-            raise AssertionError("Expected RuntimeError when API key is missing")
