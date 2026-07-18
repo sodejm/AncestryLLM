@@ -13,6 +13,7 @@
 *.sqlite3
 family_trees/*
 !family_trees/.gitkeep
+open-webui-data/
 
 # ---------------------------------------------------------------------------
 # Python
@@ -34,6 +35,7 @@ MANIFEST
 venv/
 env/
 ENV/
+node_modules/
 
 # Test & coverage artifacts
 .pytest_cache/
@@ -69,3 +71,4 @@ Thumbs.db
 # Logs
 *.log
 logs/
+node_modules

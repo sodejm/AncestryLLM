@@ -3,12 +3,26 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from langchain_community.agent_toolkits import create_sql_agent
-from langchain_community.utilities import SQLDatabase
+from langchain.agents import create_agent
 
-FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
+# `SQLDatabase`/`SQLDatabaseToolkit` still live in `langchain-community`, which
+# emits a package-level sunset DeprecationWarning at import time. No standalone
+# replacement package exists yet (see
+# https://github.com/langchain-ai/langchain-community/issues/674), so we suppress
+# only that specific notice here. TODO: drop this filter and migrate once an
+# official standalone SQL utilities package ships.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="`langchain-community` is being sunset",
+        category=DeprecationWarning,
+    )
+    from langchain_community.agent_toolkits import SQLDatabaseToolkit
+    from langchain_community.utilities import SQLDatabase
+
+DEFAULT_FAMILY_TREES_DIR = Path("/app/backend/data/family_trees")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 # Bound the local model context window so it fits within a 24GB VRAM budget
@@ -17,7 +31,6 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 # Cap the rows the SQL agent may return to avoid memory-exhausting dumps from a
 # 15,000-person database.
 SQL_AGENT_TOP_K = int(os.getenv("SQL_AGENT_TOP_K", "20"))
-BASE_FAMILY_TREES_DIR = FAMILY_TREES_DIR.resolve(strict=False)
 
 # Concise prompt forces explicit column lists and LIMIT clauses to keep query
 # result sets small and predictable.
@@ -37,16 +50,20 @@ _agent_cache: dict[_CacheKey, _CacheEntry] = {}
 _cache_lock = threading.Lock()
 
 
+def _get_family_trees_dir() -> Path:
+    return Path(os.getenv("FAMILY_TREES_DIR", str(DEFAULT_FAMILY_TREES_DIR)))
+
+
 def list_family_tree_files() -> str:
     """Return a formatted list of available ``.rmtree`` files, or a not-found message."""
     if not os.path.exists(FAMILY_TREES_DIR):
         return f"No .rmtree files found in {FAMILY_TREES_DIR}."
 
     tree_files = sorted(
-        file_name for file_name in os.listdir(FAMILY_TREES_DIR) if file_name.endswith(".rmtree")
+        file_name for file_name in os.listdir(family_trees_dir) if file_name.endswith(".rmtree")
     )
     if not tree_files:
-        return f"No .rmtree files found in {FAMILY_TREES_DIR}."
+        return f"No .rmtree files found in {family_trees_dir}."
 
     return "Available .rmtree files:\n" + "\n".join(f"- {file_name}" for file_name in tree_files)
 
@@ -63,7 +80,9 @@ def _resolve_tree_path(tree_name: str) -> Path | None:
 
     candidate_path = candidate.resolve(strict=False)
     candidate_path_str = os.fspath(candidate_path)
-    if os.path.commonpath([str(BASE_FAMILY_TREES_DIR), candidate_path_str]) != str(BASE_FAMILY_TREES_DIR):
+    if os.path.commonpath([str(base_family_trees_dir), candidate_path_str]) != str(
+        base_family_trees_dir
+    ):
         return None
     return candidate_path
 
@@ -101,12 +120,11 @@ def _build_sql_agent(database: SQLDatabase):
         base_url=OLLAMA_BASE_URL,
         num_ctx=OLLAMA_NUM_CTX,
     )
-    return create_sql_agent(
-        llm=llm,
-        db=database,
-        verbose=False,
-        prefix=SQL_AGENT_PREFIX,
-        top_k=SQL_AGENT_TOP_K,
+    toolkit = SQLDatabaseToolkit(db=database, llm=llm)
+    return create_agent(
+        llm,
+        toolkit.get_tools(),
+        system_prompt=SQL_AGENT_PREFIX,
     )
 
 
