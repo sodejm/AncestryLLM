@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import warnings
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -41,15 +41,23 @@ SQL_AGENT_PREFIX = (
     "Read only the columns required to answer the question."
 )
 
+# In-memory cache: maps (tree_path_str, model, base_url, num_ctx, top_k) -> (mtime, database, agent).
+# Entries are invalidated when the underlying .rmtree file changes (detected via mtime) or when
+# the active LLM configuration changes.  Never persisted to disk.
+_CacheKey = tuple[str, str, str, int, int]
+_CacheEntry = tuple[float, SQLDatabase, object]
+_agent_cache: dict[_CacheKey, _CacheEntry] = {}
+_cache_lock = threading.Lock()
+
 
 def _get_family_trees_dir() -> Path:
     return Path(os.getenv("FAMILY_TREES_DIR", str(DEFAULT_FAMILY_TREES_DIR)))
 
 
 def list_family_tree_files() -> str:
-    family_trees_dir = _get_family_trees_dir()
-    if not os.path.exists(family_trees_dir):
-        return f"No .rmtree files found in {family_trees_dir}."
+    """Return a formatted list of available ``.rmtree`` files, or a not-found message."""
+    if not os.path.exists(FAMILY_TREES_DIR):
+        return f"No .rmtree files found in {FAMILY_TREES_DIR}."
 
     tree_files = sorted(
         file_name for file_name in os.listdir(family_trees_dir) if file_name.endswith(".rmtree")
@@ -61,10 +69,12 @@ def list_family_tree_files() -> str:
 
 
 def _resolve_tree_path(tree_name: str) -> Path | None:
-    family_trees_dir = _get_family_trees_dir()
-    base_family_trees_dir = family_trees_dir.resolve(strict=False)
+    """Resolve *tree_name* to an absolute path inside the family-trees directory.
 
-    candidate = family_trees_dir / tree_name
+    Returns ``None`` when the resolved path escapes the allowed directory (path
+    traversal prevention).
+    """
+    candidate = FAMILY_TREES_DIR / tree_name
     if candidate.suffix != ".rmtree":
         candidate = candidate.with_suffix(".rmtree")
 
@@ -78,12 +88,16 @@ def _resolve_tree_path(tree_name: str) -> Path | None:
 
 
 def _build_read_only_sqlite_uri(tree_path: Path) -> str:
+    """Build a SQLAlchemy URI that opens *tree_path* in read-only mode."""
     return f"sqlite+pysqlite:///{tree_path.as_posix()}?mode=ro&uri=true"
 
 
-def _build_engine_args() -> dict:
-    # Thread-safe pooled connections keep the SQLite footprint low and recycle
-    # idle handles instead of leaking them per request.
+def _build_engine_args() -> dict[str, object]:
+    """Return SQLAlchemy engine kwargs for pooled, thread-safe SQLite connections.
+
+    Thread-safe pooled connections keep the SQLite footprint low and recycle
+    idle handles instead of leaking them per request.
+    """
     return {
         "pool_size": 5,
         "max_overflow": 10,
@@ -94,6 +108,11 @@ def _build_engine_args() -> dict:
 
 
 def _build_sql_agent(database: SQLDatabase):
+    """Construct a LangChain SQL agent backed by a local Ollama LLM.
+
+    The agent is configured with the shared prefix and row-count cap defined
+    at module level to constrain query scope and memory usage.
+    """
     from langchain_ollama import ChatOllama
 
     llm = ChatOllama(
@@ -109,22 +128,51 @@ def _build_sql_agent(database: SQLDatabase):
     )
 
 
-def _extract_agent_output(result: Any) -> str:
-    if isinstance(result, dict):
-        messages = result.get("messages")
-        if messages:
-            last_message = messages[-1]
-            content = getattr(last_message, "content", None)
-            if content is None and isinstance(last_message, dict):
-                content = last_message.get("content")
-            if content is not None:
-                return str(content)
-        if "output" in result:
-            return str(result["output"])
-    return str(result)
+def _get_cache_key(tree_path: Path) -> _CacheKey:
+    """Build a cache key from the resolved tree path and active LLM configuration.
+
+    Including the configuration variables means any environment-variable change
+    automatically produces a cache miss, so stale agents are never reused.
+    """
+    return (str(tree_path), OLLAMA_MODEL, OLLAMA_BASE_URL, OLLAMA_NUM_CTX, SQL_AGENT_TOP_K)
 
 
-def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
+def _get_or_build_agent(tree_path: Path) -> _CacheEntry:
+    """Return a cached (database, agent) pair, rebuilding when the file or config changes.
+
+    Cache hits avoid the cost of re-initialising SQLAlchemy and the LLM client
+    for repeated queries against the same tree.  Stale entries are detected via
+    the file's mtime so any write to the underlying ``.rmtree`` file causes a
+    transparent rebuild on the next query.
+    """
+    config_key = _get_cache_key(tree_path)
+    current_mtime = os.path.getmtime(tree_path)
+
+    with _cache_lock:
+        cached = _agent_cache.get(config_key)
+        if cached is not None:
+            cached_mtime, database, agent = cached
+            if cached_mtime == current_mtime:
+                return database, agent
+
+        # Cache miss or stale entry — build fresh objects.
+        database = SQLDatabase.from_uri(
+            _build_read_only_sqlite_uri(tree_path),
+            engine_args=_build_engine_args(),
+        )
+        agent = _build_sql_agent(database)
+        _agent_cache[config_key] = (current_mtime, database, agent)
+        return database, agent
+
+
+def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
+    """Route *query* to the appropriate family-tree SQLite database.
+
+    When *tree_name* is omitted, returns a listing of available ``.rmtree``
+    files instead of executing the query.  Raises nothing on ordinary errors;
+    human-readable messages are returned as strings so callers can relay them
+    directly to end-users.
+    """
     if not tree_name:
         return list_family_tree_files()
 
@@ -135,18 +183,11 @@ def dynamic_sqlite_router(query: str, tree_name: Optional[str] = None) -> str:
     if not os.path.exists(tree_path):
         return f"Tree file not found: {tree_path.name}"
 
-    database = SQLDatabase.from_uri(
-        _build_read_only_sqlite_uri(tree_path),
-        engine_args=_build_engine_args(),
-    )
-
-    agent = _build_sql_agent(database)
-    result = agent.invoke({"messages": [{"role": "user", "content": query}]})
-    return _extract_agent_output(result)
-
-
-def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
-    return dynamic_sqlite_router(query=query, tree_name=tree_name)
+    _database, agent = _get_or_build_agent(tree_path)  # database owned by cache
+    result = agent.invoke({"input": query})
+    if isinstance(result, dict) and "output" in result:
+        return str(result["output"])
+    return str(result)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,11 @@ HEALTHCHECK_POLL_SECONDS = int(os.getenv("HEALTHCHECK_POLL_SECONDS", "2"))
 
 
 def configure_ollama_runtime() -> None:
-    """Apply safe default Ollama runtime limits for local hardware."""
+    """Set the ``OLLAMA_NUM_CTX`` environment variable if not already present.
+
+    Bounding the context window keeps local model calls within the available
+    VRAM budget and prevents silent overflow into host RAM.
+    """
     os.environ.setdefault("OLLAMA_NUM_CTX", OLLAMA_NUM_CTX)
     print(
         "[bootstrap] Ollama context window bounded to "
@@ -34,7 +38,11 @@ def configure_ollama_runtime() -> None:
 
 
 def run_command(command: list[str], description: str) -> None:
-    """Run a command with a labeled log line and normalized runtime errors."""
+    """Execute *command* as a subprocess and raise :exc:`RuntimeError` on failure.
+
+    Prints *description* alongside the command before running it so the caller
+    can follow bootstrap progress in the terminal.
+    """
     print(f"[bootstrap] {description}: {' '.join(command)}")
     try:
         subprocess.run(command, check=True)
@@ -62,7 +70,11 @@ def command_succeeds(command: list[str]) -> bool:
 
 
 def ensure_ollama_on_macos() -> None:
-    """Install and start Ollama through Homebrew on macOS."""
+    """Install and start Ollama via Homebrew on macOS.
+
+    Raises :exc:`RuntimeError` when Homebrew is not found, because it is the
+    only supported installation path on macOS.
+    """
     brew_path = shutil.which("brew")
     if not brew_path:
         raise RuntimeError(
@@ -238,7 +250,10 @@ def validate_runtime(system_name: str) -> None:
 
 
 def main() -> int:
-    """Run platform-aware bootstrap and return process exit code."""
+    """Run the bootstrap sequence and return an exit code.
+
+    Returns ``0`` on success or ``1`` when any step raises :exc:`RuntimeError`.
+    """
     try:
         system_name = platform.system()
         print(f"[bootstrap] Detected platform: {system_name}")
