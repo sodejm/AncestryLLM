@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
@@ -56,8 +57,9 @@ def _get_family_trees_dir() -> Path:
 
 def list_family_tree_files() -> str:
     """Return a formatted list of available ``.rmtree`` files, or a not-found message."""
-    if not os.path.exists(FAMILY_TREES_DIR):
-        return f"No .rmtree files found in {FAMILY_TREES_DIR}."
+    family_trees_dir = _get_family_trees_dir()
+    if not os.path.exists(family_trees_dir):
+        return f"No .rmtree files found in {family_trees_dir}."
 
     tree_files = sorted(
         file_name for file_name in os.listdir(family_trees_dir) if file_name.endswith(".rmtree")
@@ -74,7 +76,9 @@ def _resolve_tree_path(tree_name: str) -> Path | None:
     Returns ``None`` when the resolved path escapes the allowed directory (path
     traversal prevention).
     """
-    candidate = FAMILY_TREES_DIR / tree_name
+    family_trees_dir = _get_family_trees_dir()
+    base_family_trees_dir = family_trees_dir.resolve(strict=False)
+    candidate = family_trees_dir / tree_name
     if candidate.suffix != ".rmtree":
         candidate = candidate.with_suffix(".rmtree")
 
@@ -126,6 +130,22 @@ def _build_sql_agent(database: SQLDatabase):
         toolkit.get_tools(),
         system_prompt=SQL_AGENT_PREFIX,
     )
+
+
+def _extract_agent_output(result: Any) -> str:
+    """Return the final assistant content across supported agent responses."""
+    if isinstance(result, dict):
+        messages = result.get("messages")
+        if messages:
+            last_message = messages[-1]
+            content = getattr(last_message, "content", None)
+            if content is None and isinstance(last_message, dict):
+                content = last_message.get("content")
+            if content is not None:
+                return str(content)
+        if "output" in result:
+            return str(result["output"])
+    return str(result)
 
 
 def _get_cache_key(tree_path: Path) -> _CacheKey:
@@ -184,10 +204,8 @@ def route_sql_query(query: str, tree_name: Optional[str] = None) -> str:
         return f"Tree file not found: {tree_path.name}"
 
     _database, agent = _get_or_build_agent(tree_path)  # database owned by cache
-    result = agent.invoke({"input": query})
-    if isinstance(result, dict) and "output" in result:
-        return str(result["output"])
-    return str(result)
+    result = agent.invoke({"messages": [{"role": "user", "content": query}]})
+    return _extract_agent_output(result)
 
 
 if __name__ == "__main__":

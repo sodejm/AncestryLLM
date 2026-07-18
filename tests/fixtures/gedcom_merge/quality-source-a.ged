@@ -1,0 +1,197 @@
+0 HEAD
+1 SOUR Fictional Quality Laboratory A
+2 VERS 1.0
+1 FILE quality-source-a.ged
+1 GEDC
+2 VERS 5.5.1
+1 _FIXTURE Parseable header intentionally omits CHAR
+0 @A_ROOT@ INDI
+1 NAME Maren /Hollow/
+2 TYPE maiden
+1 NAME Maren /Vale/
+2 TYPE married
+1 FAMC @AF_PARENTS@
+1 FAMS @AF_FIRST@
+1 FAMS @AF_SECOND@
+1 _RESEARCH Sparse root record for quality testing
+0 @A_FIRST@ INDI
+1 NAME Oren /Vale/
+1 SEX M
+1 BIRT
+2 DATE 1928
+1 FAMS @AF_FIRST@
+0 @A_CHILD@ INDI
+1 NAME Juniper /Vale/
+1 SEX F
+1 BIRT
+2 PLAC Larkspur, Vermont, USA
+1 FAMC @AF_FIRST@
+2 PEDI adopted
+1 _FABLE Entirely fictional person
+0 @A_SECOND@ INDI
+1 NAME Kellan /Pike/
+1 SEX M
+1 BIRT
+2 DATE 1926
+2 PLAC Bellweather, Maine, USA
+1 FAMS @AF_SECOND@
+0 @A_SIBLING@ INDI
+1 NAME Sol /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 1934
+2 PLAC Larkspur, Vermont, USA
+1 FAMC @AF_PARENTS@
+1 FAMS @AF_COUSIN@
+0 @A_SIBLING_SPOUSE@ INDI
+1 NAME Tavi /North/
+1 SEX F
+1 BIRT
+2 DATE 1935
+1 FAMS @AF_COUSIN@
+0 @A_COUSIN@ INDI
+1 NAME Cato /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 14 SEP 1961
+2 PLAC Bellweather, Maine, USA
+1 FAMC @AF_COUSIN@
+0 @A_FATHER@ INDI
+1 NAME Dorian /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 1902
+2 PLAC Larkspur, Vermont, USA
+1 FAMS @AF_PARENTS@
+0 @A_MOTHER@ INDI
+1 NAME Edda /Reed/
+1 SEX F
+1 BIRT
+2 DATE 1905
+2 PLAC Bellweather, Maine, USA
+1 FAMS @AF_PARENTS@
+0 @AF_PARENTS@ FAM
+1 HUSB @A_FATHER@
+1 WIFE @A_MOTHER@
+1 CHIL @A_ROOT@
+1 CHIL @A_SIBLING@
+1 MARR
+2 DATE 1925
+2 PLAC Larkspur, Vermont, USA
+0 @AF_FIRST@ FAM
+1 HUSB @A_FIRST@
+1 WIFE @A_ROOT@
+1 CHIL @A_CHILD@
+1 MARR
+2 DATE 12 JUN 1954
+2 PLAC Larkspur, Vermont, USA
+0 @AF_SECOND@ FAM
+1 HUSB @A_SECOND@
+1 WIFE @A_ROOT@
+1 MARR
+2 DATE 03 MAR 1972
+2 PLAC Bellweather, Maine, USA
+1 DIV
+2 DATE 1978
+0 @AF_COUSIN@ FAM
+1 HUSB @A_SIBLING@
+1 WIFE @A_SIBLING_SPOUSE@
+1 CHIL @A_COUSIN@
+1 MARR
+2 DATE 1958
+2 PLAC Bellweather, Maine, USA
+0 @A_NAME_BAD@ INDI
+1 NAME Liora /Stone/
+2 TYPE married
+1 NAME Liora /Moss/
+2 TYPE maiden
+1 NAME Lia /Moss/
+2 TYPE aka
+1 ALIA @A_ALIAS_TARGET@
+1 SEX F
+1 BIRT
+2 DATE 07 JUL 1940
+2 PLAC Fernwick, Oregon, USA
+0 @A_ALIAS_TARGET@ INDI
+1 NAME Liora /Moss/
+1 BIRT
+2 DATE 1940
+0 @A_NAME_GOOD@ INDI
+1 NAME Seren /Ash/
+2 TYPE maiden
+1 NAME Seren /Brook/
+2 TYPE married
+1 NAME S. /Ash/
+2 TYPE aka
+1 SEX F
+1 BIRT
+2 DATE 1942
+2 PLAC Fernwick, Oregon, USA
+0 @A_NAME_ONLY_MARRIED@ INDI
+1 NAME Neris /Dale/
+2 TYPE married
+1 SEX F
+0 @A_DUP_ONE@ INDI
+1 NAME Nell /Ember/
+1 SEX F
+1 BIRT
+2 DATE 11 NOV 1950
+2 PLAC Emberfall, Ohio, USA
+2 SOUR @A_SRC@
+3 PAGE Fictional register 11
+1 DEAT
+2 DATE 09 JAN 2020
+2 PLAC Emberfall, Ohio, USA
+2 SOUR @A_SRC@
+3 PAGE Fictional register 12
+0 @A_DUP_TWO@ INDI
+1 NAME Nell /Ember/
+1 SEX F
+1 BIRT
+2 DATE 11 NOV 1950
+2 PLAC Emberfall, Ohio, USA
+2 SOUR @A_SRC@
+3 PAGE Fictional register 11
+1 DEAT
+2 DATE 09 JAN 2020
+2 PLAC Emberfall, Ohio, USA
+2 SOUR @A_SRC@
+3 PAGE Fictional register 12
+0 @A_BAD_DATE@ INDI
+1 NAME Bram /Frost/
+1 SEX M
+1 BIRT
+2 DATE 31 FEB 1965
+2 PLAC Frostmere, Nevada, USA
+0 @A_CONFLICT@ INDI
+1 NAME Ivo /Marsh/
+1 SEX M
+1 BIRT
+2 DATE 02 FEB 1960
+2 PLAC Marshlight, Kansas, USA
+1 BIRT
+2 DATE 02 FEB 1964
+2 PLAC Northglass, Ontario, Canada
+0 @A_DANGLING@ INDI
+1 NAME Delta /Reed/
+1 SEX X
+1 FAMC @AF_404@
+0 @A_ONEWAY@ INDI
+1 NAME Orla /Kite/
+1 SEX F
+1 FAMS @AF_ONEWAY@
+0 @A_OTHER@ INDI
+1 NAME Pax /River/
+1 SEX M
+0 @A_RECIP_WIFE@ INDI
+1 NAME Nera /Cove/
+1 SEX F
+0 @AF_ONEWAY@ FAM
+1 HUSB @A_OTHER@
+0 @AF_DANGLING@ FAM
+1 HUSB @A_GHOST@
+1 WIFE @A_RECIP_WIFE@
+0 @A_SRC@ SOUR
+1 TITL The Imaginary Emberfall Register
+1 AUTH Fictional Quality Laboratory
+1 _ARCHIVE Shelf Z

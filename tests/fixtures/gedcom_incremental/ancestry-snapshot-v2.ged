@@ -1,0 +1,112 @@
+0 HEAD
+1 SOUR Fictional Ancestry Snapshot
+2 VERS 2.0
+1 FILE ancestry-snapshot-v2.ged
+1 DATE 20 JUN 2026
+1 GEDC
+2 VERS 5.5.5
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+0 @AX-12@ INDI
+1 NAME Elara /Northwood/
+2 TYPE birth
+2 GIVN Elara
+2 SURN Northwood
+1 SEX F
+1 _UID NM-ELARA-001
+1 _APID ancestry-fictional-elara-v2
+1 BIRT
+2 DATE 12 Mar 1970
+2 PLAC Lakehaven, Vermont, United States of America
+2 SOUR @AZ-SRC-2@
+3 PAGE Birth ledger, p. 14
+2 SOUR @AZ-SRC-2@
+3 PAGE Birth index image 42
+1 BIRT
+2 DATE MAR 1970
+2 PLAC Lakehaven, Vermont, USA
+2 SOUR @AZ-SRC-2@
+3 PAGE Month-only index entry
+1 RESI
+2 DATE 2005
+2 PLAC Lakehaven, USA
+1 NOTE @AX-NOTE-8@
+1 OBJE @AX-OBJ-8@
+1 FAMS @AX-FAM-1@
+1 _TREE Ancestry fictional tree alpha refreshed
+0 @AX-13@ INDI
+1 NAME Rowan /Vale/
+2 GIVN Rowan
+2 SURN Vale
+1 SEX M
+1 _UID NM-ROWAN-002
+1 BIRT
+2 DATE 4 JUL 1968
+2 PLAC Cedar Bay, Vermont, USA
+1 OCCU Cartographer
+1 FAMS @AX-FAM-1@
+0 @AX-14@ INDI
+1 NAME Mira /Vale/
+2 GIVN Mira
+2 SURN Vale
+1 SEX F
+1 _UID NM-MIRA-003
+1 BIRT
+2 DATE 9 SEP 1995
+2 PLAC Lakehaven, Vermont, United States
+1 FAMC @AX-FAM-1@
+1 FAMS @AX-FAM-2@
+0 @AX-15@ INDI
+1 NAME Ilyan /Shore/
+2 GIVN Ilyan
+2 SURN Shore
+1 SEX M
+1 _UID NM-ILYAN-004
+1 BIRT
+2 DATE 7 NOV 1994
+2 PLAC Pineglass, Maine, USA
+1 FAMS @AX-FAM-2@
+1 _ORIGIN fictional-new-person
+0 @AX-16@ INDI
+1 NAME Sable /Shore/
+2 GIVN Sable
+2 SURN Shore
+1 SEX F
+1 _UID NM-SABLE-005
+1 BIRT
+2 DATE 2 FEB 2022
+2 PLAC Lakehaven, Vermont, USA
+1 FAMC @AX-FAM-2@
+1 _ORIGIN fictional-new-person
+0 @AX-FAM-1@ FAM
+1 HUSB @AX-13@
+1 WIFE @AX-12@
+1 CHIL @AX-14@
+1 MARR
+2 DATE 18 AUG 1992
+2 PLAC Lakehaven, Vermont, United States of America
+0 @AX-FAM-2@ FAM
+1 HUSB @AX-15@
+1 WIFE @AX-14@
+1 CHIL @AX-16@
+1 MARR
+2 DATE 5 MAY 2020
+2 PLAC Pineglass, Maine, USA
+1 _FAMILY_FIXTURE newly-added-family
+0 @AZ-SRC-2@ SOUR
+1 TITL Lakehaven Civil Registry
+1 AUTH Lakehaven Office of Imaginary Records
+1 REPO @AZ-REPO-2@
+0 @AZ-REPO-2@ REPO
+1 NAME Lakehaven Fictional Archive
+1 ADDR 10 Archive Lane
+2 CITY Lakehaven
+2 STAE Vermont
+2 CTRY United States
+0 @AX-NOTE-8@ NOTE
+1 CONC Fictional refreshed Ancestry note for Elara.
+0 @AX-OBJ-8@ OBJE
+1 FILE media/ancestry-elara-portrait-v2.jpg
+2 FORM image/jpeg
+2 TITL Fictional refreshed Ancestry portrait
+0 TRLR

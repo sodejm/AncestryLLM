@@ -1,0 +1,151 @@
+0 HEAD
+1 SOUR Fictional Quality Laboratory B
+2 VERS 2.0
+1 FILE quality-source-b.ged
+1 SUBM @B_SUBMITTER@
+1 GEDC
+2 VERS 5.5.5
+1 CHAR UTF-8
+1 _FIXTURE Duplicate trailers surround a note record
+0 @B_SUBMITTER@ SUBM
+1 NAME Fictional Fixture Curator
+0 @B_ROOT@ INDI
+1 NAME Maren /Hollow/
+2 TYPE maiden
+1 NAME Maren /Vale/
+2 TYPE married
+1 SEX F
+1 BIRT
+2 DATE 05 MAY 1930
+2 PLAC Larkspur, Vermont, USA
+2 SOUR @B_SRC@
+3 PAGE Fictional register 30
+1 DEAT
+2 DATE 18 OCT 2012
+2 PLAC Bellweather, Maine, USA
+1 OCCU Cartographer
+2 DATE 1960
+1 RESI
+2 DATE 1970
+2 PLAC Bellweather, Maine, USA
+1 FAMC @BF_PARENTS@
+1 FAMS @BF_FIRST@
+1 FAMS @BF_SECOND@
+1 _PROFILE Rich duplicate of the sparse source-A root
+0 @B_FIRST@ INDI
+1 NAME Oren /Vale/
+1 SEX M
+1 BIRT
+2 DATE 1928
+2 PLAC Northstar, Vermont, USA
+1 DEAT
+2 DATE 1968
+2 PLAC Larkspur, Vermont, USA
+1 FAMS @BF_FIRST@
+0 @B_CHILD@ INDI
+1 NAME Juniper /Vale/
+1 NAME June /Vale/
+2 TYPE aka
+1 SEX F
+1 BIRT
+2 DATE 20 AUG 1959
+2 PLAC Larkspur, Vermont, USA
+1 FAMC @BF_FIRST@
+2 PEDI adopted
+0 @B_SECOND@ INDI
+1 NAME Kellan /Pike/
+1 SEX M
+1 BIRT
+2 DATE 1926
+2 PLAC Bellweather, Maine, USA
+1 FAMS @BF_SECOND@
+0 @B_SIBLING@ INDI
+1 NAME Sol /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 1934
+2 PLAC Larkspur, Vermont, USA
+1 FAMC @BF_PARENTS@
+1 FAMS @BF_COUSIN@
+0 @B_SIBLING_SPOUSE@ INDI
+1 NAME Tavi /North/
+1 SEX F
+1 BIRT
+2 DATE 1935
+2 PLAC Bellweather, Maine, USA
+1 FAMS @BF_COUSIN@
+0 @B_COUSIN@ INDI
+1 NAME Cato /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 14 SEP 1961
+2 PLAC Bellweather, Maine, USA
+1 FAMC @BF_COUSIN@
+0 @B_FATHER@ INDI
+1 NAME Dorian /Hollow/
+1 SEX M
+1 BIRT
+2 DATE 1902
+2 PLAC Larkspur, Vermont, USA
+1 FAMS @BF_PARENTS@
+0 @B_MOTHER@ INDI
+1 NAME Edda /Reed/
+1 SEX F
+1 BIRT
+2 DATE 1905
+2 PLAC Bellweather, Maine, USA
+1 FAMS @BF_PARENTS@
+0 @BF_PARENTS@ FAM
+1 HUSB @B_FATHER@
+1 WIFE @B_MOTHER@
+1 CHIL @B_ROOT@
+1 CHIL @B_SIBLING@
+1 MARR
+2 DATE 1925
+2 PLAC Larkspur, Vermont, USA
+0 @BF_FIRST@ FAM
+1 HUSB @B_FIRST@
+1 WIFE @B_ROOT@
+1 CHIL @B_CHILD@
+1 MARR
+2 DATE 12 JUN 1954
+2 PLAC Larkspur, Vermont, USA
+0 @BF_SECOND@ FAM
+1 HUSB @B_SECOND@
+1 WIFE @B_ROOT@
+1 MARR
+2 DATE 03 MAR 1972
+2 PLAC Bellweather, Maine, USA
+1 DIV
+2 DATE 1978
+0 @BF_COUSIN@ FAM
+1 HUSB @B_SIBLING@
+1 WIFE @B_SIBLING_SPOUSE@
+1 CHIL @B_COUSIN@
+1 MARR
+2 DATE 1958
+2 PLAC Bellweather, Maine, USA
+0 @B_NAME_NEGATIVE@ INDI
+1 NAME Vela /Pond/
+2 TYPE maiden
+1 NAME Vela /Shore/
+2 TYPE married
+1 NAME Vee /Pond/
+2 TYPE aka
+1 SEX F
+1 BIRT
+2 DATE 08 AUG 1948
+2 PLAC Shoreham, Delaware, USA
+0 @B_NO_TYPED_PAIR@ INDI
+1 NAME Remi /Cloud/
+1 NAME Remy /Cloud/
+2 TYPE aka
+1 SEX X
+0 @B_SRC@ SOUR
+1 TITL The Imaginary Larkspur Register
+1 AUTH Fictional Quality Laboratory
+1 _ARCHIVE Shelf Q
+0 TRLR
+0 @B_TRAILER_NOTE@ NOTE
+1 CONT This fictional note deliberately appears between duplicate trailers.
+0 TRLR

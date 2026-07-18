@@ -241,6 +241,28 @@ This installs project language servers (Python, Bash, YAML, Dockerfile, JSON,
 SQL) from [`package.json`](package.json) and applies recommended VS Code
 extensions when the `code` CLI is available.
 
+## GEDCOM merge and quality reports
+
+The GEDCOM merge utility is separate from the RootsMagic read-only query stack.
+It can combine transfer files, export one connected family tree, and produce a
+Markdown quality report without opening or changing a `.rmtree` database.
+
+- [GEDCOM Merge Quickstart](tools/GEDCOM_MERGE_QUICKSTART.md)
+- [Complete CLI, privacy, and provider reference](tools/README.md)
+- [Safe offline fixture demo](scripts/gedcom_merge_quickstart.sh)
+
+Use `--ai-backend none` for deterministic offline processing. Remote merge
+adjudication is opt-in through backend selection, and AI review of quality
+findings is separately opt-in with `--quality-ai`; either remote path can send
+bounded genealogy summaries to the configured provider. Quality reports also
+contain genealogy data and should be protected like GEDCOM files.
+
+For recurring exports from Ancestry, Geni, or MyHeritage, use the
+[offline incremental update workflow](tools/GEDCOM_MERGE_QUICKSTART.md#keep-a-master-current-with-website-exports).
+It preserves a checksum-matched master and private provenance manifest, writes
+immutable generation bundles with rollback metadata, and consolidates repeated
+facts without discarding their distinct GEDCOM citations.
+
 ## Configuration Reference
 
 All settings are read from environment variables (see [`.env.example`](.env.example)):

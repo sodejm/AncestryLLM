@@ -1,0 +1,76 @@
+0 HEAD
+1 SOUR Fictional MyHeritage Snapshot
+2 VERS 1.0
+1 FILE myheritage-snapshot-v1.ged
+1 DATE 3 FEB 2025
+1 GEDC
+2 VERS 5.5.5
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+0 @MH-440@ INDI
+1 NAME Elara /Northwood/
+2 TYPE birth
+2 GIVN Elara
+2 SURN Northwood
+1 SEX F
+1 _UID NM-ELARA-001
+1 _MHID myheritage-fictional-elara-v1
+1 BIRT
+2 DATE 12 MAR 1970
+2 PLAC Lakehaven, Vermont, United States
+2 SOUR @MH-SRC-9@
+3 PAGE Family Bible, leaf 3
+2 SOUR @MH-SRC-9@
+3 PAGE Family Bible, leaf 3
+2 SOUR @MH-SRC-9@
+3 PAGE Family Bible, leaf 4
+1 EDUC Lakehaven College
+1 RESI
+2 DATE 2005
+2 PLAC Lakehaven, Vermont, United States
+1 NOTE @MH-NOTE-3@
+1 FAMS @MH-FAM-31@
+1 _TREE MyHeritage fictional tree beta
+0 @MH-441@ INDI
+1 NAME Rowan /Vale/
+2 GIVN Rowan
+2 SURN Vale
+1 SEX M
+1 _UID NM-ROWAN-002
+1 BIRT
+2 DATE 04 JUL 1968
+2 PLAC Cedar Bay, Vermont, USA
+1 FAMS @MH-FAM-31@
+0 @MH-442@ INDI
+1 NAME Mira /Vale/
+2 GIVN Mira
+2 SURN Vale
+1 SEX F
+1 _UID NM-MIRA-003
+1 BIRT
+2 DATE 09 SEP 1995
+2 PLAC Lakehaven, Vermont, USA
+1 FAMC @MH-FAM-31@
+0 @MH-FAM-31@ FAM
+1 HUSB @MH-441@
+1 WIFE @MH-440@
+1 CHIL @MH-442@
+1 MARR
+2 DATE 18 AUG 1992
+2 PLAC Lakehaven, Vermont, USA
+0 @MH-SRC-9@ SOUR
+1 TITL Northwood Family Bible
+1 AUTH Fictional Northwood Family
+0 @MH-SRC-CIVIL@ SOUR
+1 TITL Lakehaven Civil Registry
+1 AUTH Lakehaven Office of Imaginary Records
+1 REPO @MH-REPO-7@
+0 @MH-REPO-7@ REPO
+1 NAME Lakehaven Fictional Archive
+1 ADDR 10 Archive Lane
+2 CITY Lakehaven
+2 STAE Vermont
+2 CTRY United States
+0 @MH-NOTE-3@ NOTE
+1 CONC Fictional MyHeritage note linked to Elara.
+0 TRLR
