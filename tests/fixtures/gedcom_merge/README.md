@@ -9,8 +9,9 @@ child, a sibling, the sibling's spouse, and one cousin. The source family
 records remain separate, so the rooted output retains four families from each
 quality source.
 
-The two `quality-source-*.ged` files are line-parseable by
-`tools/gedcom_merge.py`. Together they intentionally exercise:
+The two fixture files, `quality-source-a.ged` and `quality-source-b.ged`, are
+line-parseable by `tools/gedcom_merge.py`. Together they intentionally
+exercise:
 
 - sparse `@A_ROOT@` versus rich `@B_ROOT@`, including missing `SEX` on the
   source-A person used as `WIFE`, missing dates/places, aliases, two spouses,

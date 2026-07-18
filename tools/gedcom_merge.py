@@ -1839,11 +1839,18 @@ def assess_similarity(a: IndividualRecord, b: IndividualRecord) -> MatchAssessme
         name for name in (b.full_name, *b.alternate_names) if name
     )
     if left_names and right_names:
+        name_score = _collection_similarity(
+            left_names,
+            right_names,
+            _text_similarity,
+        )
         add(
             "name",
-            _collection_similarity(left_names, right_names, _text_similarity),
+            name_score,
             30.0,
         )
+        if name_score < 55.0:
+            conflicts.append("name")
 
     event_components = (
         (
