@@ -58,14 +58,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          python scripts/validate_wiki_docs.py --source docs
-
-          # The wiki is a flat page namespace.  Validation rejects duplicate
-          # basenames before this copy, and the source is deliberately limited
-          # to Markdown pages (including Home.md and _Sidebar.md).
-          find "$WIKI_WORKTREE" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          find docs -type f -name '*.md' -exec cp {} "$WIKI_WORKTREE" \
-            \;
+          python scripts/sync_wiki_docs.py \
+            --source docs \
+            --destination "$WIKI_WORKTREE"
 
       - name: Commit and push wiki changes
         env:
@@ -75,14 +70,14 @@ jobs:
           set -euo pipefail
           cd "$WIKI_WORKTREE"
 
-          if git diff --quiet; then
+          git add --all
+          if git diff --cached --quiet; then
             echo "Wiki is already synchronized."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
           git commit -m "docs: synchronize from ${SOURCE_SHA}"
           authorization="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 --wrap=0)"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \

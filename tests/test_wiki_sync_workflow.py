@@ -10,8 +10,10 @@ def test_sync_workflow_commits_only_changed_wiki_content() -> None:
         encoding="utf-8"
     )
 
-    assert "python scripts/validate_wiki_docs.py --source docs" in workflow
-    assert "if git diff --quiet; then" in workflow
+    assert "python scripts/sync_wiki_docs.py" in workflow
+    assert "--source docs" in workflow
+    assert '--destination "$WIKI_WORKTREE"' in workflow
+    assert workflow.index("git add --all") < workflow.index("if git diff --cached --quiet; then")
     assert 'git config user.name "github-actions[bot]"' in workflow
     assert (
         'git config user.email "41898282+github-actions[bot]@users.noreply.github.com"' in workflow
