@@ -11,6 +11,5 @@
 - [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
 - [Wiki synchronization](WIKI_SYNC.md)
 - [Wiki operations and recovery](WIKI_OPERATIONS.md)
-- [Temporary Wiki sync E2E probe](WIKI_SYNC_E2E_PROBE.md)
 - [Security response checklist](SECURITY_RESPONSE.md)
 - [Data-flow threat model and control matrix](THREAT_MODEL.md)
