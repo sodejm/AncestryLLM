@@ -29,7 +29,7 @@ def _write_source(source: Path) -> None:
     nested = source / "guides"
     nested.mkdir(parents=True)
     (source / "Home.md").write_text("# Home\n", encoding="utf-8")
-    (source / "_Sidebar.md").write_text("[[Guide]]\n", encoding="utf-8")
+    (source / "_Sidebar.md").write_text("[Guide](Guide.md)\n", encoding="utf-8")
     (nested / "Guide.md").write_text("# Guide\n", encoding="utf-8")
     (nested / "ignored.txt").write_text("not a wiki page\n", encoding="utf-8")
 
@@ -50,7 +50,7 @@ def test_sync_flattens_markdown_and_removes_only_stale_managed_pages(tmp_path: P
     assert result.returncode == 0, result.stderr
     assert (destination / "Home.md").read_text(encoding="utf-8") == "# Home\n"
     assert (destination / "Guide.md").read_text(encoding="utf-8") == "# Guide\n"
-    assert (destination / "_Sidebar.md").read_text(encoding="utf-8") == "[[Guide]]\n"
+    assert (destination / "_Sidebar.md").read_text(encoding="utf-8") == "[Guide](Guide)\n"
     assert not (destination / "Stale.md").exists()
     assert not (destination / "ignored.txt").exists()
     assert (destination / ".git" / "preserved").read_text(encoding="utf-8") == "git metadata\n"

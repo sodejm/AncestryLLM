@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from rewrite_wiki_links import rewrite_wiki_links
 from validate_wiki_docs import validate_wiki_source
 
 
@@ -31,7 +32,10 @@ class WikiSyncError(ValueError):
 
 def _source_pages(source: Path) -> dict[str, bytes]:
     pages = sorted(source.rglob("*.md"), key=lambda path: path.relative_to(source).as_posix())
-    return {page.name: page.read_bytes() for page in pages}
+    return {
+        page.name: rewrite_wiki_links(page.read_text(encoding="utf-8")).encode("utf-8")
+        for page in pages
+    }
 
 
 def _validate_destination(destination: Path, pages: Mapping[str, bytes]) -> None:

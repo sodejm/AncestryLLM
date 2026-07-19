@@ -12,8 +12,9 @@ controls, providers, GEDCOM interoperability, backups, and security practices.
 
 Documentation links use relative Markdown filenames (for example,
 `[Console guide](CONSOLE.md)`). This keeps links valid from this `docs/`
-directory in the repository and after the same files are mirrored to the GitHub
-Wiki, whose pages use the same Markdown filenames.
+directory in the repository. During synchronization, local `.md` targets are
+published as extensionless GitHub Wiki page links so navigation remains in the
+Wiki UI.
 
 Use the sidebar to navigate the complete published documentation set.
 
