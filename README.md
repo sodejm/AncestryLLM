@@ -15,6 +15,18 @@ python3 -m venv .venv
 .venv/bin/ancestry --help
 ```
 
+The install command uses the `pip` executable inside `.venv`, so the project and
+its dependencies stay isolated from the system Python installation. `install`
+adds the package and its dependencies to that virtual environment. The
+`--editable` option installs the project from its source checkout instead of
+copying its Python files into the environment, so changes under `src/` are used
+the next time the application runs without reinstalling the package. The `.`
+selects the project in the current directory, while `[all-llm,dev]` requests the
+optional dependency groups for every supported LLM provider and for development
+and testing tools. The quotes prevent the shell from interpreting the brackets.
+Rerun the command after changing project metadata or dependencies; editable mode
+only makes source-code changes immediately available.
+
 Run `.venv/bin/ancestry` with no arguments for the interactive console. The
 canonical command reference, examples, offline defaults, and privacy rules are
 in [the CLI guide](docs/CLI.md); see [the console guide](docs/CONSOLE.md) for
