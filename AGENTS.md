@@ -47,4 +47,4 @@ service; environment injection is headless/CI fallback only. Do not auto-load
 ## Commit Messaged
 1. Minimum 1 sentence of what was changed
 2. If multiple changes, list the major changes in bullets.
-
+3. When a commit or PR resolves a GitHub issue, include the appropriate closing keyword (for example, `Fixes #123`) so GitHub links and closes that issue when the work is merged.
