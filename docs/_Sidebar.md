@@ -9,5 +9,6 @@
 - [Privacy and consent](PRIVACY_AND_CONSENT.md)
 - [Provider guide](PROVIDERS.md)
 - [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
+- [Wiki synchronization](WIKI_SYNC.md)
 - [Security response checklist](SECURITY_RESPONSE.md)
 - [Data-flow threat model and control matrix](THREAT_MODEL.md)

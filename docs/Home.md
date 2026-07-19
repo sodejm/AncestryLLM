@@ -16,3 +16,6 @@ directory in the repository and after the same files are mirrored to the GitHub
 Wiki, whose pages use the same Markdown filenames.
 
 Use the sidebar to navigate the complete published documentation set.
+
+Maintainers can reproduce the deterministic publishing step locally with the
+[wiki synchronization guide](WIKI_SYNC.md).

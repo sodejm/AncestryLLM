@@ -55,7 +55,9 @@ def _markdown_files(source: Path) -> list[Path]:
 
 
 def _page_name(path: Path, source: Path) -> str:
-    return _relative_display(path.with_suffix(""), source)
+    # GitHub wikis use a flat page namespace even when the canonical source is
+    # organized into subdirectories.
+    return path.stem
 
 
 def _source_errors(source: Path, pages: Sequence[Path]) -> list[ValidationError]:
