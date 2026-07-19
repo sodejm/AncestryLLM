@@ -2,8 +2,8 @@
 
 Adapters are available for `none`, Ollama, OpenAI, Anthropic, Gemini, and
 OpenRouter. Install only needed extras, for example `pip install '.[anthropic]'`.
-Create credentials with `ancestry secrets set`; secret values are never command
-arguments. Then create a provider profile and a narrowly scoped consent profile.
+The canonical commands for secrets, profiles, consent, and revocation are in
+[the CLI reference](CLI.md#providers-and-secrets).
 
 Remote endpoints must use HTTPS. Ollama may use HTTP only on a loopback address.
 Models, modules, purposes, data classes, cost limits, token limits, timeouts, and

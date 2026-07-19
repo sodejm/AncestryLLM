@@ -12,27 +12,13 @@ Python 3.12 through 3.14 and a working OS credential store are required.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install --editable '.[all-llm,dev]'
-.venv/bin/ancestry                 # interactive console
-.venv/bin/ancestry --help          # one-shot commands
+.venv/bin/ancestry --help
 ```
 
-The first command that uses the research workspace creates an encrypted
-SQLCipher database. Its random 256-bit key is stored only in macOS Keychain,
-Windows Credential Locker, or Linux Secret Service. Non-secret settings live in
-the platform-specific `config.toml`.
-
-```bash
-ancestry secrets set openai.api_key   # value is requested without echo
-ancestry providers create personal-openai --provider openai --model gpt-5-mini
-ancestry modules list
-ancestry rootsmagic list
-ancestry gedcom quality tree.ged --output quality.md --root-person "Ada Lovelace"
-```
-
-No provider is inferred from an installed key. `none` is the default and makes
-no network requests. Cloud providers require an explicit provider profile and a
-matching, active consent profile before genealogy data is rendered into a
-request. Living and possibly living people are denied by default.
+Run `.venv/bin/ancestry` with no arguments for the interactive console. The
+canonical command reference, examples, offline defaults, and privacy rules are
+in [the CLI guide](docs/CLI.md); see [the console guide](docs/CONSOLE.md) for
+interactive use.
 
 ## Included modules
 
@@ -43,10 +29,6 @@ request. Living and possibly living people are denied by default.
 - `providers`: explicit Ollama, OpenAI, Anthropic, Gemini, and OpenRouter profiles.
 - `ocr`: schema-validated extraction through the same provider boundary.
 - `secrets`: no-echo OS-keyring management; values never appear in status output.
-
-In the console, use `modules`, `use`, `info`, `show actions`, `show options`,
-`set`, `unset`, `run`, and `back`. Shell execution, Python execution, scripts,
-editing shortcuts, and redirection are disabled.
 
 ## Development
 
@@ -62,7 +44,7 @@ make sbom
 The dependency graph is locked in `uv.lock`. Never commit real family trees,
 GEDCOM exports, databases, logs, reports, secrets, or research-person data.
 
-Read [the architecture](ARCHITECTURE.md), [privacy and consent](docs/PRIVACY_AND_CONSENT.md),
+Read [the architecture](ARCHITECTURE.md), [CLI guide](docs/CLI.md), [privacy and consent](docs/PRIVACY_AND_CONSENT.md),
 [provider guide](docs/PROVIDERS.md), [GEDCOM compatibility](docs/GEDCOM_COMPATIBILITY.md),
 [encrypted backups](docs/ENCRYPTED_BACKUPS.md), and [threat model](docs/THREAT_MODEL.md).
 

@@ -1,7 +1,7 @@
 # GEDCOM compatibility and release checks
 
-Public commands are `ancestry gedcom merge`, `subtree`, `quality`, and
-`sync update|rebase`. RootsMagic export supports portable and preservation
+The supported GEDCOM and RootsMagic command syntax is maintained in
+[the CLI reference](CLI.md#rootsmagic-and-gedcom). RootsMagic export supports portable and preservation
 profiles, connected/ancestor/descendant scopes, optional generation limits, and
 GEDCOM 5.5.5 with a deliberate 5.5.1 fallback.
 
