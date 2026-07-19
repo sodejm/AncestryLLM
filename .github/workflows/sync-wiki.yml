@@ -27,6 +27,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Clone initialized wiki repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          wiki_directory="$(mktemp -d "${RUNNER_TEMP}/ancestryllm-wiki.XXXXXX")"
+          git_config="$(mktemp "${RUNNER_TEMP}/ancestryllm-git-config.XXXXXX")"
+          chmod 600 "$git_config"
+          export GIT_CONFIG_GLOBAL="$git_config"
+
+          cleanup_credentials() {
+            git config --global --unset-all http.https://github.com/.extraheader || true
+            rm -f "$git_config"
+          }
+          trap cleanup_credentials EXIT
+
+          # Keep credentials in a temporary Git configuration rather than in
+          # the clone URL or repository configuration. The configuration is
+          # removed immediately after the authenticated clone.
+          authorization="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 --wrap=0)"
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $authorization"
+          git clone --depth=1 https://github.com/sodejm/AncestryLLM.wiki.git "$wiki_directory"
+          git config --global --unset-all http.https://github.com/.extraheader
+
+          echo "WIKI_WORKTREE=$wiki_directory" >> "$GITHUB_ENV"
+
       # Publishing is intentionally added by the next workflow increment after
       # authenticated wiki cloning and deterministic mirroring are available.
       - name: Confirm synchronization is not implemented yet
