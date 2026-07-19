@@ -62,23 +62,26 @@ jobs:
             --source docs \
             --destination "$WIKI_WORKTREE"
 
-      - name: Commit and push wiki changes
+      - name: Commit wiki changes
+        id: wiki_commit
         env:
           SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          python scripts/commit_wiki_changes.py \
+            --repository "$WIKI_WORKTREE" \
+            --source-sha "$SOURCE_SHA" \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Push wiki changes
+        if: steps.wiki_commit.outputs.committed == 'true'
+        env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cd "$WIKI_WORKTREE"
 
-          git add --all
-          if git diff --cached --quiet; then
-            echo "Wiki is already synchronized."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs: synchronize from ${SOURCE_SHA}"
           authorization="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 --wrap=0)"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \
+          git -C "$WIKI_WORKTREE" \
+            -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \
             push origin HEAD:master
