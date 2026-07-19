@@ -19,4 +19,6 @@ Wiki UI.
 Use the sidebar to navigate the complete published documentation set.
 
 Maintainers can reproduce the deterministic publishing step locally with the
-[wiki synchronization guide](WIKI_SYNC.md).
+[wiki synchronization guide](WIKI_SYNC.md). The
+[Wiki operations and recovery runbook](WIKI_OPERATIONS.md) covers dispatch,
+verification, troubleshooting, rollback, and reinitialization.
