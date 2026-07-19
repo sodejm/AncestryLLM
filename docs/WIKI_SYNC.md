@@ -28,5 +28,18 @@ scope and remain untouched.
 
 The synchronizer writes only pages whose bytes differ. Repeating the command
 with unchanged documentation therefore leaves the wiki checkout with an empty
-Git diff. The workflow stages the result before checking for changes so new,
-modified, and deleted pages are all detected.
+Git diff.
+
+## Bot commit and push
+
+The workflow passes the synchronized checkout to `commit_wiki_changes.py`. The
+script stages the complete wiki worktree, exits successfully without a commit
+when the staged diff is empty, and commits additions, modifications, and
+deletions with the standard `github-actions[bot]` author and committer identity.
+Its commit message includes the source repository SHA as
+`docs: synchronize from <source-sha>`.
+
+The commit step exposes only a `committed` workflow output. The separate push
+step runs only when that value is `true`. The job-scoped token is limited to the
+authenticated clone and push steps; it is never written to the wiki checkout or
+passed to the local commit script.
