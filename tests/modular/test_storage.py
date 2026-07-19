@@ -8,6 +8,7 @@ import pytest
 from ancestryllm.core.errors import StorageError
 from ancestryllm.core.secrets import MemorySecretStore
 from ancestryllm.storage.database import DATABASE_SECRET, SQLITE_HEADER, Database
+from ancestryllm.storage.diagnostics import diagnose_storage
 
 
 def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
@@ -59,3 +60,31 @@ def test_backup_remains_encrypted(tmp_path: Path) -> None:
     assert backup.read_bytes()[: len(SQLITE_HEADER)] != SQLITE_HEADER
     restored = Database(backup, secrets)
     restored.initialize()
+
+
+def test_storage_diagnostics_are_read_only_and_serializable(tmp_path: Path) -> None:
+    path = tmp_path / "workspace.db"
+
+    diagnostics = diagnose_storage(path, MemorySecretStore({}))
+
+    assert path.exists() is False
+    assert {item["code"] for item in diagnostics} >= {"SQLCIPHER_READY", "KEYRING_READY"}
+
+
+def test_storage_diagnostics_report_keyring_failures_without_secret_values(tmp_path: Path) -> None:
+    class BrokenSecretStore:
+        def get(self, name: str) -> str | None:
+            raise StorageError("KEYRING_READ_FAILED", "credential backend unavailable")
+
+        def set(self, name: str, value: str) -> None:
+            raise AssertionError("diagnostics must not write")
+
+        def delete(self, name: str) -> None:
+            raise AssertionError("diagnostics must not delete")
+
+        def present(self, name: str) -> bool:
+            return self.get(name) is not None
+
+    diagnostics = diagnose_storage(tmp_path / "workspace.db", BrokenSecretStore())
+
+    assert {item["code"] for item in diagnostics} >= {"KEYRING_READ_FAILED"}

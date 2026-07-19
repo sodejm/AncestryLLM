@@ -6,10 +6,11 @@ import argparse
 import getpass
 import json
 import sys
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import Any, Sequence
 
+from ancestryllm.console.presentation import PresentationAdapter
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -169,36 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     db_actions = database.add_subparsers(dest="action", required=True)
     backup = db_actions.add_parser("backup")
     backup.add_argument("destination", type=Path)
+    db_actions.add_parser("diagnose", help="Run read-only SQLCipher and credential-store checks")
     return parser
 
 
-def _plain(value: Any) -> Any:
-    if is_dataclass(value):
-        return {key: _plain(item) for key, item in asdict(cast(Any, value)).items()}
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_plain(item) for item in value]
-    if hasattr(value, "__table__"):
-        return {
-            column.name: _plain(getattr(value, column.name)) for column in value.__table__.columns
-        }
-    return value
-
-
 def _emit(value: Any, json_output: bool = False) -> None:
-    plain = _plain(value)
-    if json_output:
-        print(json.dumps(plain, indent=2, sort_keys=True))
-    elif isinstance(plain, str):
-        print(plain)
-    elif isinstance(plain, list):
-        for item in plain:
-            print(item if isinstance(item, str) else json.dumps(item, sort_keys=True))
-    else:
-        print(json.dumps(plain, indent=2, sort_keys=True))
+    PresentationAdapter().render(value, json_output=json_output)
 
 
 def _consent(context: AppContext, name: str | None) -> ConsentGrant | None:
@@ -420,6 +397,11 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
         return 0
 
     if args.command == "database":
+        if args.action == "diagnose":
+            from ancestryllm.storage.diagnostics import diagnose_storage
+
+            _emit(diagnose_storage(context.database.path, context.secrets), json_output)
+            return 0
         context.database.backup(args.destination.expanduser().resolve())
         _emit(f"Encrypted backup created: {args.destination}", json_output)
         return 0
@@ -447,7 +429,7 @@ def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -
         )
         return dispatch(args, selected_context)
     except AncestryError as exc:
-        print(exc.render(), file=sys.stderr)
+        PresentationAdapter.for_file(sys.stderr).render_error(exc)
         return exc.exit_code
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"[INPUT_ERROR] {exc}", file=sys.stderr)
