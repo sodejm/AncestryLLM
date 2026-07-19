@@ -45,3 +45,9 @@ def test_disabled_modules_are_not_imported(app_context: AppContext, monkeypatch)
     loaded = ModuleRegistry(app_context).load()
     assert len(loaded) == 1
     assert imported == ["ancestryllm.console.gedcom"]
+
+
+def test_database_diagnostics_are_available_as_json(app_context: AppContext, capsys) -> None:
+    assert main(["--json", "database", "diagnose"], app_context) == 0
+
+    assert '"code": "SQLCIPHER_READY"' in capsys.readouterr().out
