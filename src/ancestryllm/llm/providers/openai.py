@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from ancestryllm.core.errors import ProviderError
+import httpx
+
+from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.policy import validate_endpoint
 from ancestryllm.llm.validation import validate_structured_output
@@ -39,12 +41,17 @@ class OpenAIProvider:
             zero_data_retention=self.zero_data_retention,
         )
 
-    def _client(self) -> Any:
+    def _client(self, timeout_seconds: float) -> Any:
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise ProviderError("PROVIDER_NOT_INSTALLED", "Install ancestryllm[openai].") from exc
-        return OpenAI(api_key=self.api_key, base_url=self.base_url)
+        return OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=httpx.Timeout(timeout_seconds),
+            max_retries=0,
+        )
 
     def _response_format(self, request: GenerationRequest) -> dict[str, object] | None:
         if request.response_schema is None:
@@ -64,21 +71,19 @@ class OpenAIProvider:
             "messages": [message.model_dump() for message in request.messages],
             "max_completion_tokens": request.max_output_tokens,
             "temperature": request.temperature,
+            "timeout": httpx.Timeout(request.timeout_seconds),
         }
         response_format = self._response_format(request)
         if response_format:
             kwargs["response_format"] = response_format
         try:
-            response = self._client().chat.completions.create(**kwargs)
-            text = response.choices[0].message.content or ""
+            with self._client(request.timeout_seconds) as client:
+                response = client.chat.completions.create(**kwargs)
+                text = response.choices[0].message.content or ""
         except ProviderError:
             raise
         except Exception as exc:
-            raise ProviderError(
-                "PROVIDER_REQUEST_FAILED",
-                f"The {self.provider_id} request failed.",
-                details={"error_type": type(exc).__name__},
-            ) from exc
+            raise normalize_provider_error(exc, self.provider_id) from exc
         usage = response.usage
         return GenerationResult(
             provider_id=self.provider_id,
@@ -91,18 +96,30 @@ class OpenAIProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        stream_started = False
         try:
-            stream = self._client().chat.completions.create(
-                model=request.model,
-                messages=[message.model_dump() for message in request.messages],
-                max_completion_tokens=request.max_output_tokens,
-                stream=True,
-            )
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
+            with self._client(request.timeout_seconds) as client:
+                stream = client.chat.completions.create(
+                    model=request.model,
+                    messages=[message.model_dump() for message in request.messages],
+                    max_completion_tokens=request.max_output_tokens,
+                    temperature=request.temperature,
+                    response_format=self._response_format(request),
+                    stream=True,
+                    timeout=httpx.Timeout(request.timeout_seconds),
+                )
+                with stream:
+                    for chunk in stream:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            stream_started = True
+                            yield content
+        except ProviderError:
+            raise
         except Exception as exc:
-            raise ProviderError(
-                "PROVIDER_REQUEST_FAILED", f"The {self.provider_id} stream failed."
+            raise normalize_provider_error(
+                exc,
+                self.provider_id,
+                streaming=True,
+                stream_started=stream_started,
             ) from exc

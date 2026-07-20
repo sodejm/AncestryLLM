@@ -39,6 +39,7 @@ class GenerationRequest(BaseModel):
     max_output_tokens: int = Field(default=1_024, ge=1, le=32_768)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
+    max_safe_retries: int = Field(default=0, ge=0, le=2)
 
 
 class ProviderCapabilities(BaseModel):
