@@ -19,6 +19,7 @@ import dataclasses
 import datetime as dt
 import difflib
 import hashlib
+import heapq
 import json
 import logging
 import os
@@ -74,6 +75,17 @@ QUALITY_DUPLICATE_THRESHOLD = 90
 QUALITY_AI_LIMIT = 25
 AI_CONFIDENCE_AUTO_ACCEPT = 0.85
 MAX_AI_TEXT = 2_000
+DEFAULT_DUPLICATE_MAX_BUCKET_SIZE = 128
+DEFAULT_DUPLICATE_MAX_PAIRS_PER_PERSON = 32
+DEFAULT_DUPLICATE_MAX_SCORED_PAIRS = 50_000
+DEFAULT_DUPLICATE_MAX_CANDIDATES = 50_000
+DEFAULT_DUPLICATE_MAX_ADJUDICATIONS_PER_PERSON = 4
+DEFAULT_DUPLICATE_MAX_ADJUDICATIONS = 250
+MAX_DUPLICATE_RELATIVES_PER_ROLE = 16
+# Content-free dry-run ceiling: two MAX_AI_TEXT summaries plus instructions,
+# conservatively estimated at up to one token per character.
+MAX_DEDUP_PROMPT_TOKENS = MAX_AI_TEXT * 2 + 1_000
+DETERMINISTIC_HARD_CONFLICTS = frozenset({"sex", "birth country", "death country"})
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
 REMOTE_CREDIT_POLICIES = ("required", "best-effort", "off")
@@ -1042,6 +1054,50 @@ class MergeDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class DuplicateSearchLimits:
+    """Hard bounds for duplicate candidate generation and adjudication.
+
+    Oversized blocking buckets are not expanded pairwise.  More-specific
+    deterministic keys remain eligible, while candidate work is capped per
+    person and per job.  This can retain an ambiguous common-name group for
+    manual research instead of risking an unbounded or weakly supported merge.
+    """
+
+    max_bucket_size: int = DEFAULT_DUPLICATE_MAX_BUCKET_SIZE
+    max_pairs_per_person: int = DEFAULT_DUPLICATE_MAX_PAIRS_PER_PERSON
+    max_scored_pairs: int = DEFAULT_DUPLICATE_MAX_SCORED_PAIRS
+    max_candidates: int = DEFAULT_DUPLICATE_MAX_CANDIDATES
+    max_adjudications_per_person: int = DEFAULT_DUPLICATE_MAX_ADJUDICATIONS_PER_PERSON
+    max_adjudications: int = DEFAULT_DUPLICATE_MAX_ADJUDICATIONS
+
+    def __post_init__(self) -> None:
+        """Reject limits that would silently disable conservative safeguards."""
+        for field_definition in dataclasses.fields(self):
+            if int(getattr(self, field_definition.name)) <= 0:
+                raise ValueError(f"{field_definition.name} must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateSearchPlan:
+    """Serializable, content-free estimate for a future dry-run API."""
+
+    record_count: int
+    blocking_key_count: int
+    bounded_bucket_count: int
+    oversized_bucket_count: int
+    raw_pair_upper_bound: int
+    scored_pair_upper_bound: int
+    candidate_count_upper_bound: int
+    adjudication_count_range: tuple[int, int]
+    prompt_token_range: tuple[int, int]
+    oversized_bucket_policy: str
+
+    def to_dict(self) -> dict[str, object]:
+        """Return JSON-compatible metrics without names, pointers, or paths."""
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class QualityFinding:
     """One deterministic, advisory tree-quality recommendation.
 
@@ -1985,113 +2041,280 @@ def similarity_score(a: IndividualRecord, b: IndividualRecord) -> float:
     return assess_similarity(a, b).score
 
 
-def _blocking_keys(record: IndividualRecord) -> set[tuple[str, ...]]:
-    """Create inexpensive person, event, and family candidate keys.
+def _normalised_key_text(value: str, limit: int = 0) -> str:
+    """Return one reusable ASCII comparison key, optionally length-bounded."""
+    normalised = re.sub(r"[^a-z0-9]", "", value.casefold())
+    return normalised[:limit] if limit else normalised
 
-    Broad initial keys protect spelling variants and sparse records.  Relative
-    keys allow a person with no life dates to be found through a documented
-    partner, parent, or child.  Dated/placed event keys allow unnamed but
-    documented people to be compared without placing every anonymous record in
-    one quadratic bucket.
-    """
+
+@dataclass(frozen=True, slots=True)
+class _DuplicateProfile:
+    """Cached normalized evidence used only by the blocking planner."""
+
+    source_file: str
+    blocking_keys: tuple[tuple[str, ...], ...]
+
+
+def _duplicate_profile(record: IndividualRecord) -> _DuplicateProfile:
+    """Normalize person, event, place, and relationship keys exactly once."""
     year = record.birth_year
-    buckets = {year // 5} if year is not None else {"?"}
+    year_bucket = str(year // 5) if year is not None else "?"
+    gender = _normalised_key_text(record.gender) or "?"
     keys: set[tuple[str, ...]] = set()
-    names = [record.full_name, *record.alternate_names]
+    names = tuple(name for name in (record.full_name, *record.alternate_names) if name)
+    normalized_name_parts: list[tuple[str, str, str]] = []
     for display_name in names:
-        if not display_name:
-            continue
         given_name, surname = _name_parts(display_name)
-        normalised_surname = re.sub(
-            r"[^a-z0-9]",
-            "",
-            surname.casefold(),
-        )
-        normalised_given = re.sub(
-            r"[^a-z0-9]",
-            "",
-            given_name.casefold(),
+        normalised_surname = _normalised_key_text(surname)
+        normalised_given = _normalised_key_text(given_name)
+        normalised_full = normalised_given + normalised_surname
+        normalized_name_parts.append(
+            (
+                normalised_given,
+                normalised_surname,
+                normalised_full,
+            )
         )
         surname_initial = normalised_surname[:1] or "?"
         given_initial = normalised_given[:1] or "?"
-        for bucket in buckets:
-            keys.add(
-                (
-                    "sn",
-                    surname_initial,
-                    "gn",
-                    given_initial,
-                    "y",
-                    str(bucket),
-                )
-            )
-            keys.add(("sn", surname_initial, "y", str(bucket)))
-            keys.add(("gn", given_initial, "y", str(bucket)))
+        # Broad keys retain recall for spelling variants when their observed
+        # frequency is safe.  Exact and compound keys refine common buckets.
+        keys.add(("sn", surname_initial, "gn", given_initial, "y", year_bucket))
+        keys.add(("sn", surname_initial, "y", year_bucket))
+        keys.add(("gn", given_initial, "y", year_bucket))
         keys.add(("name", surname_initial, given_initial))
+        if normalised_full:
+            keys.add(("name-exact", normalised_full))
+        if normalised_surname and year is not None:
+            keys.add(("name-birth", normalised_surname[:8], str(year), gender))
 
+    event_keys: dict[str, tuple[str, str, tuple[str, ...]]] = {}
     for label, date_value, place, countries in (
-        (
-            "birth",
-            record.birth_date,
-            record.birth_place,
-            record.birth_countries,
-        ),
-        (
-            "death",
-            record.death_date,
-            record.death_place,
-            record.death_countries,
-        ),
+        ("birth", record.birth_date, record.birth_place, record.birth_countries),
+        ("death", record.death_date, record.death_place, record.death_countries),
     ):
         event_year = _extract_year(date_value)
-        normalised_place = re.sub(r"[^a-z0-9]", "", place.casefold())[:18]
+        normalised_place = _normalised_key_text(place, 18)
+        normalized_countries = tuple(_normalised_key_text(country) for country in countries)
+        event_keys[label] = (
+            str(event_year) if event_year is not None else "",
+            normalised_place,
+            normalized_countries,
+        )
         if event_year is not None:
             keys.add((label, "year", str(event_year)))
-            for country in countries:
+            for country in normalized_countries:
                 keys.add((label, "year-country", str(event_year), country))
         if normalised_place:
             keys.add((label, "place", normalised_place))
+
+    birth_year, birth_place, birth_countries = event_keys["birth"]
+    death_year, death_place, death_countries = event_keys["death"]
+    if birth_year and death_year:
+        keys.add(("life", birth_year, death_year, gender))
+    if birth_year and birth_countries:
+        keys.add(("birth-refined", birth_year, birth_countries[0], gender))
+    if death_year and death_countries:
+        keys.add(("death-refined", death_year, death_countries[0], gender))
+    if birth_place and normalized_name_parts:
+        keys.add(("birth-place-name", birth_place, normalized_name_parts[0][1][:8]))
+    if death_place and normalized_name_parts:
+        keys.add(("death-place-name", death_place, normalized_name_parts[0][1][:8]))
 
     for role, relatives in (
         ("partner", record.partners),
         ("parent", record.parents),
         ("child", record.children),
     ):
-        for relative in relatives:
-            relative_name = re.sub(
-                r"[^a-z0-9]",
-                "",
-                relative.name.casefold(),
-            )
+        # Relationship context is corroborating evidence, not permission for
+        # one unusually large family to grow the index without a hard bound.
+        for relative in relatives[:MAX_DUPLICATE_RELATIVES_PER_ROLE]:
+            relative_name = _normalised_key_text(relative.name, 18)
             if relative_name:
-                keys.add((role, relative_name[:18]))
+                keys.add((role, relative_name))
                 relative_year = _extract_year(relative.birth_date)
                 if relative_year is not None:
                     keys.add((role, relative_name[:12], str(relative_year)))
-    return keys
+    return _DuplicateProfile(
+        source_file=record.source_file,
+        blocking_keys=tuple(sorted(keys)),
+    )
+
+
+def _blocking_keys(record: IndividualRecord) -> set[tuple[str, ...]]:
+    """Return cached-profile keys for compatibility with quality helpers."""
+    return set(_duplicate_profile(record).blocking_keys)
+
+
+def _blocking_frequencies(
+    profiles: Sequence[_DuplicateProfile],
+) -> dict[tuple[str, ...], int]:
+    """Count each normalized key without retaining another person index."""
+    frequencies: dict[tuple[str, ...], int] = defaultdict(int)
+    for profile in profiles:
+        for key in profile.blocking_keys:
+            frequencies[key] += 1
+    return dict(frequencies)
+
+
+def _bounded_blocking_buckets(
+    profiles: Sequence[_DuplicateProfile],
+    frequencies: Mapping[tuple[str, ...], int],
+    limits: DuplicateSearchLimits,
+) -> dict[tuple[str, ...], list[int]]:
+    """Index only buckets whose observed frequency is safe to expand.
+
+    Broad initial/year buckets are useful only while small.  Exact names,
+    combined life years, countries, places, and relationships provide refined
+    routes around an oversized broad bucket.  If every available key remains
+    oversized, no pair is inferred from weak evidence alone.
+    """
+    buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for index, profile in enumerate(profiles):
+        for key in profile.blocking_keys:
+            if frequencies[key] <= limits.max_bucket_size:
+                buckets[key].append(index)
+    return dict(buckets)
+
+
+def _raw_pair_upper_bound(
+    profiles: Sequence[_DuplicateProfile],
+    cross_source_only: bool,
+) -> int:
+    """Return a content-free upper bound before overlapping-key deduplication."""
+    totals: dict[tuple[str, ...], int] = defaultdict(int)
+    source_totals: dict[tuple[str, ...], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for profile in profiles:
+        for key in profile.blocking_keys:
+            totals[key] += 1
+            source_totals[key][profile.source_file] += 1
+    result = 0
+    for key, total in totals.items():
+        pairs = total * (total - 1) // 2
+        if cross_source_only:
+            pairs -= sum(count * (count - 1) // 2 for count in source_totals[key].values())
+        result += pairs
+    return result
+
+
+def estimate_duplicate_search(
+    records: Sequence[IndividualRecord],
+    limits: Optional[DuplicateSearchLimits] = None,
+    *,
+    cross_source_only: bool = True,
+) -> DuplicateSearchPlan:
+    """Estimate bounded duplicate work without scoring or exposing genealogy."""
+    effective_limits = limits or DuplicateSearchLimits()
+    profiles = tuple(_duplicate_profile(record) for record in records)
+    frequencies = _blocking_frequencies(profiles)
+    raw_pairs = _raw_pair_upper_bound(profiles, cross_source_only)
+    per_person_pair_bound = len(records) * effective_limits.max_pairs_per_person // 2
+    scored_upper = min(raw_pairs, effective_limits.max_scored_pairs, per_person_pair_bound)
+    candidate_upper = min(scored_upper, effective_limits.max_candidates)
+    per_person_adjudication_bound = (
+        len(records) * effective_limits.max_adjudications_per_person // 2
+    )
+    adjudication_upper = min(
+        candidate_upper,
+        effective_limits.max_adjudications,
+        per_person_adjudication_bound,
+    )
+    return DuplicateSearchPlan(
+        record_count=len(records),
+        blocking_key_count=len(frequencies),
+        bounded_bucket_count=sum(
+            frequency <= effective_limits.max_bucket_size for frequency in frequencies.values()
+        ),
+        oversized_bucket_count=sum(
+            frequency > effective_limits.max_bucket_size for frequency in frequencies.values()
+        ),
+        raw_pair_upper_bound=raw_pairs,
+        scored_pair_upper_bound=scored_upper,
+        candidate_count_upper_bound=candidate_upper,
+        adjudication_count_range=(0, adjudication_upper),
+        prompt_token_range=(0, adjudication_upper * MAX_DEDUP_PROMPT_TOKENS),
+        oversized_bucket_policy=(
+            "skip pairwise expansion; use bounded exact life event place and relationship keys"
+        ),
+    )
+
+
+def _bounded_candidate_pairs(
+    profiles: Sequence[_DuplicateProfile],
+    limits: DuplicateSearchLimits,
+    *,
+    cross_source_only: bool,
+) -> Iterator[tuple[int, int]]:
+    """Yield strongest deterministic pairs without a global pair set.
+
+    Buckets are processed rarest first, so exact and compound keys across the
+    complete job receive priority over common initials.  A pair is emitted only
+    by its single rarest shared key; this removes overlap without materializing
+    every pair globally.
+    """
+    frequencies = _blocking_frequencies(profiles)
+    buckets = _bounded_blocking_buckets(profiles, frequencies, limits)
+    eligible_keys = tuple(
+        frozenset(key for key in profile.blocking_keys if key in buckets) for profile in profiles
+    )
+    pair_counts = [0] * len(profiles)
+    scored_pairs = 0
+    for key in sorted(buckets, key=lambda candidate: (frequencies[candidate], candidate)):
+        indexes = buckets[key]
+        for position, left in enumerate(indexes):
+            if pair_counts[left] >= limits.max_pairs_per_person:
+                continue
+            for right in indexes[position + 1 :]:
+                if scored_pairs >= limits.max_scored_pairs:
+                    return
+                if pair_counts[left] >= limits.max_pairs_per_person:
+                    break
+                if pair_counts[right] >= limits.max_pairs_per_person:
+                    continue
+                if cross_source_only and profiles[left].source_file == profiles[right].source_file:
+                    continue
+                owner = min(
+                    eligible_keys[left].intersection(eligible_keys[right]),
+                    key=lambda candidate: (frequencies[candidate], candidate),
+                )
+                if owner != key:
+                    continue
+                pair_counts[left] += 1
+                pair_counts[right] += 1
+                scored_pairs += 1
+                yield left, right
 
 
 def find_duplicate_candidates(
     records: list[IndividualRecord],
     threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
+    *,
+    limits: Optional[DuplicateSearchLimits] = None,
 ) -> list[tuple[int, int, float]]:
-    """Find cross-file candidates using blocking before fuzzy comparison."""
-    buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
-    for index, record in enumerate(records):
-        for key in _blocking_keys(record):
-            buckets[key].append(index)
-    pairs: set[tuple[int, int]] = set()
-    for indexes in buckets.values():
-        for position, left in enumerate(indexes):
-            for right in indexes[position + 1 :]:
-                if records[left].source_file != records[right].source_file:
-                    pairs.add((min(left, right), max(left, right)))
-    candidates: list[tuple[int, int, float]] = []
-    for left, right in pairs:
+    """Find cross-file candidates with bounded frequency-aware blocking."""
+    if not 0 <= threshold <= 100:
+        raise ValueError("similarity threshold must be between 0 and 100")
+    effective_limits = limits or DuplicateSearchLimits()
+    profiles = tuple(_duplicate_profile(record) for record in records)
+    candidates: list[tuple[float, int, int]] = []
+    for left, right in _bounded_candidate_pairs(
+        profiles,
+        effective_limits,
+        cross_source_only=True,
+    ):
         score = similarity_score(records[left], records[right])
         if score >= threshold:
-            candidates.append((left, right, score))
-    return sorted(candidates, key=lambda item: item[2], reverse=True)
+            ranked_candidate = (score, -left, -right)
+            if len(candidates) < effective_limits.max_candidates:
+                heapq.heappush(candidates, ranked_candidate)
+            elif ranked_candidate > candidates[0]:
+                heapq.heapreplace(candidates, ranked_candidate)
+    return [
+        (-left, -right, score)
+        for score, left, right in sorted(
+            candidates, key=lambda item: (-item[0], -item[1], -item[2])
+        )
+    ]
 
 
 def _build_dedup_prompt(a: IndividualRecord, b: IndividualRecord) -> str:
@@ -2866,6 +3089,7 @@ def merge_records(
     ai_kwargs: Optional[dict[str, object]] = None,
     pointer_map: Optional[dict[str, str]] = None,
     decisions: Optional[list[MergeDecision]] = None,
+    duplicate_limits: Optional[DuplicateSearchLimits] = None,
 ) -> list[IndividualRecord]:
     """Merge candidate people while retaining every source fact and family edge.
 
@@ -2884,6 +3108,8 @@ def merge_records(
         pointer_map: Optional mutable map populated with survivor pointers.
         decisions: Optional mutable audit sink.  Entries describe considered
             pairs but do not affect merge behavior.
+        duplicate_limits: Candidate and adjudication budgets.  Defaults are
+            deliberately bounded for production-sized common-name groups.
 
     Returns:
         Canonical people in stable source order.
@@ -2893,10 +3119,13 @@ def merge_records(
     """
     if not 0 <= threshold <= 100:
         raise ValueError("similarity threshold must be between 0 and 100")
+    limits = duplicate_limits or DuplicateSearchLimits()
     kwargs = ai_kwargs or {}
     by_pointer = {record.pointer: record for record in all_records}
     parent = {record.pointer: record.pointer for record in all_records}
     cluster_members = {record.pointer: [record] for record in all_records}
+    adjudications_by_root: dict[str, int] = defaultdict(int)
+    adjudication_count = 0
 
     def find(pointer: str) -> str:
         while parent[pointer] != pointer:
@@ -2904,7 +3133,7 @@ def merge_records(
             pointer = parent[pointer]
         return pointer
 
-    candidates = find_duplicate_candidates(all_records, threshold)
+    candidates = find_duplicate_candidates(all_records, threshold, limits=limits)
     log.info("Found %d candidate pairs", len(candidates))
     for left, right, score in candidates:
         root_left = find(all_records[left].pointer)
@@ -2944,6 +3173,31 @@ def merge_records(
         first, second = by_pointer[root_left], by_pointer[root_right]
         verdict: dict[str, object]
         assessment = assess_similarity(first, second)
+        hard_conflicts = tuple(
+            conflict
+            for conflict in assessment.conflicts
+            if conflict in DETERMINISTIC_HARD_CONFLICTS
+        )
+        if hard_conflicts:
+            log.info(
+                "Retaining candidate %s/%s due to deterministic conflicts: %s",
+                root_left,
+                root_right,
+                ", ".join(hard_conflicts),
+            )
+            if decisions is not None:
+                decisions.append(
+                    MergeDecision(
+                        left_pointer=root_left,
+                        right_pointer=root_right,
+                        score=score,
+                        compared_fields=assessment.compared_fields,
+                        conflicts=hard_conflicts,
+                        disposition="retained-hard-conflict",
+                        reasoning="Deterministic identity evidence conflicts.",
+                    )
+                )
+            continue
         if assessment.automatic_merge_safe:
             verdict = {
                 "is_duplicate": True,
@@ -2954,13 +3208,32 @@ def merge_records(
                 "preferred_values": {},
             }
         else:
-            if assessment.conflicts:
+            if (
+                adjudication_count >= limits.max_adjudications
+                or adjudications_by_root[root_left] >= limits.max_adjudications_per_person
+                or adjudications_by_root[root_right] >= limits.max_adjudications_per_person
+            ):
                 log.info(
-                    "Candidate %s/%s requires review; conflicts: %s",
+                    "Retaining candidate %s/%s because the adjudication budget is exhausted",
                     root_left,
                     root_right,
-                    ", ".join(assessment.conflicts),
                 )
+                if decisions is not None:
+                    decisions.append(
+                        MergeDecision(
+                            left_pointer=root_left,
+                            right_pointer=root_right,
+                            score=score,
+                            compared_fields=assessment.compared_fields,
+                            conflicts=(),
+                            disposition="retained-adjudication-budget",
+                            reasoning="Bounded adjudication budget exhausted.",
+                        )
+                    )
+                continue
+            adjudication_count += 1
+            adjudications_by_root[root_left] += 1
+            adjudications_by_root[root_right] += 1
             verdict = _get_ai_verdict(first, second, ai_backend, kwargs)
             if verdict.get("_provider"):
                 log.info(
@@ -2994,6 +3267,7 @@ def merge_records(
             parent[root_right] = root_left
             by_pointer[root_left] = merged
             cluster_members[root_left].extend(cluster_members.pop(root_right))
+            adjudications_by_root[root_left] += adjudications_by_root.pop(root_right, 0)
             log.info(
                 "Merged %s <- %s (score %.1f)",
                 root_left,
@@ -3251,17 +3525,15 @@ def _valid_quality_date(value: str) -> bool:
 def _quality_duplicate_pairs(
     people: Sequence[IndividualRecord],
 ) -> list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]]:
-    """Find report-only same-source and cross-source pairs scoring at least 90."""
-    buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
-    for index, person in enumerate(people):
-        for key in _blocking_keys(person):
-            buckets[key].append(index)
-    pairs: set[tuple[int, int]] = set()
-    for indexes in buckets.values():
-        for offset, left in enumerate(indexes):
-            pairs.update((min(left, right), max(left, right)) for right in indexes[offset + 1 :])
+    """Find bounded report-only same-source and cross-source duplicate pairs."""
+    profiles = tuple(_duplicate_profile(person) for person in people)
+    limits = DuplicateSearchLimits()
     results: list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]] = []
-    for left, right in sorted(pairs):
+    for left, right in _bounded_candidate_pairs(
+        profiles,
+        limits,
+        cross_source_only=False,
+    ):
         assessment = assess_similarity(people[left], people[right])
         if assessment.score >= QUALITY_DUPLICATE_THRESHOLD:
             results.append((people[left], people[right], assessment))
