@@ -38,11 +38,11 @@ untrusted GEDCOM / RootsMagic -> bounded parsers -> application services
 | LLM01 Prompt Injection | Imported text is untrusted data; models receive no tools; generated SQL is parsed and authorizer-enforced. |
 | LLM02 Sensitive Information Disclosure | Pre-render consent, minimal fields, living-person denial, OS keyring, encrypted optional retention. |
 | LLM03 Supply Chain | Provider SDKs are optional and locked; dependency/SBOM/security scans gate release. |
-| LLM04 Data and Model Poisoning | No training/RAG/embeddings in v1; model output is advisory and provenance is preserved. |
+| LLM04 Data and Model Poisoning | Retrieval is not implemented. Any future local index must fingerprint sources, preserve provenance, treat retrieved text as untrusted context, and detect stale/conflicting material before display or generation. |
 | LLM05 Improper Output Handling | JSON Schema validation and length caps; output is never executable. |
 | LLM06 Excessive Agency | No autonomous agents, tool calls, shell, write-capable SQL, or automatic destructive decisions. |
 | LLM07 System Prompt Leakage | Prompts contain no credentials; templates and untrusted content are separated; disclosure is treated as possible. |
-| LLM08 Vector and Embedding Weaknesses | Not applicable; embeddings/vector stores are out of scope. |
+| LLM08 Vector and Embedding Weaknesses | Embeddings/vector stores remain unimplemented. A future feature requires SQLCipher-local storage by default, workspace and consent partitioning, restricted-data exclusion, versioned invalidation, bounded retrieval, and explicit cloud-retention consent. |
 | LLM09 Misinformation | Deterministic evidence remains authoritative; LLM adjudication is optional and cannot delete conflicts. |
 | LLM10 Unbounded Consumption | Token, output, timeout, cost, model, purpose, and row caps are enforced. |
 
