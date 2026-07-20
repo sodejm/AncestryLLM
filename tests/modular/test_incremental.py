@@ -5,9 +5,25 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from ancestryllm.gedcom import engine, incremental
 from ancestryllm.gedcom.sync import run_sync
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+def test_incremental_argument_errors_use_stable_typed_contract() -> None:
+    parser = incremental.PlainEnglishArgumentParser(prog="ancestry gedcom update")
+    with pytest.raises(incremental.SyncError) as raised:
+        parser.error("missing --master")
+    assert raised.value.code == "SYNC_CONFIGURATION"
+    assert raised.value.exit_code == 2
+
+
+def test_incremental_normalization_boundary_returns_strings() -> None:
+    assert incremental._normal_value("DATE", "July 15, 1850", engine) == "15 JUL 1850"
+    assert incremental._normal_value("CTRY", "USA", engine) == "united states"
 
 
 def _snapshot(name: str, vendor: str, version: int) -> str:

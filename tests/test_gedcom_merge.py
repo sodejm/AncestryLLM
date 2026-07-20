@@ -84,6 +84,9 @@ class TestNormaliseGedcomDate:
         # Day should be zero-padded to two digits.
         assert gm.normalise_gedcom_date("1850-01-05") == "05 JAN 1850"
 
+    def test_invalid_calendar_date_is_preserved(self):
+        assert gm.normalise_gedcom_date("31 FEB 1850") == "31 FEB 1850"
+
 
 # ---------------------------------------------------------------------------
 # IndividualRecord helpers
@@ -998,6 +1001,47 @@ class TestParseAiResponse:
         result = gm._parse_ai_response("I have no idea what you are asking")
         assert result["is_duplicate"] is False
         assert result["confidence"] == 0.0
+
+
+class TestTypedAiDispatch:
+    """Characterize typed provider dispatch without making network requests."""
+
+    def test_none_backend_does_not_call_configured_providers(self):
+        a = _make_record(pointer="@I1@", source_file="/a.ged")
+        b = _make_record(pointer="@I2@", source_file="/b.ged")
+        with (
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "unused", "GEMINI_API_KEY": "unused"},
+            ),
+            patch.object(gm, "ai_resolve_openai") as openai_resolver,
+            patch.object(gm, "ai_resolve_gemini") as gemini_resolver,
+            patch.object(gm, "ai_resolve_openrouter") as openrouter_resolver,
+            patch.object(gm, "ai_resolve_ollama") as ollama_resolver,
+        ):
+            verdict = gm.ai_resolve(a, b, backend="none")
+        assert verdict["is_duplicate"] is False
+        assert verdict["reasoning"] == "AI disabled"
+        openai_resolver.assert_not_called()
+        gemini_resolver.assert_not_called()
+        openrouter_resolver.assert_not_called()
+        ollama_resolver.assert_not_called()
+
+    def test_provider_dispatch_forwards_validated_options(self):
+        a = _make_record(pointer="@I1@", source_file="/a.ged")
+        b = _make_record(pointer="@I2@", source_file="/b.ged")
+        expected = {"is_duplicate": True, "confidence": 0.9}
+        with patch.object(gm, "ai_resolve_openai", return_value=expected) as resolver:
+            verdict = gm.ai_resolve(a, b, backend="openai", model="test-model")
+        assert verdict == expected
+        resolver.assert_called_once_with(a, b, model="test-model")
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(0.875, 0.875), ("0.75", 0.75), ({"unexpected": "shape"}, 0.0)],
+    )
+    def test_confidence_accepts_only_scalar_values(self, value, expected):
+        assert gm._confidence_value({"confidence": value}) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
