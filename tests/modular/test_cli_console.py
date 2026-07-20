@@ -317,6 +317,10 @@ def test_one_shot_and_repl_return_identical_dtos_for_every_action(
         "ancestryllm.cli.getpass.getpass",
         Mock(side_effect=[secret_value, secret_value, secret_value, secret_value]),
     )
+    monkeypatch.setattr(
+        "ancestryllm.console.app.prompt",
+        Mock(side_effect=[secret_value, secret_value]),
+    )
 
     assert main(["--json", *case.tokens], app_context) == 0
     console = AncestryConsole(app_context)
@@ -520,7 +524,7 @@ def test_secret_values_never_reach_options_output_history_or_completion(
     assert console.module_options == {}
 
     monkeypatch.setattr(
-        "ancestryllm.cli.getpass.getpass", Mock(side_effect=[secret_value, secret_value])
+        "ancestryllm.console.app.prompt", Mock(side_effect=[secret_value, secret_value])
     )
     console.onecmd_plus_hooks("secrets set openai.api_key")
     assert app_context.secrets.get("openai.api_key") == secret_value
