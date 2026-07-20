@@ -6,7 +6,6 @@ import argparse
 import getpass
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,164 +13,95 @@ from ancestryllm.console.presentation import PresentationAdapter
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.modules import BUILTIN_MODULES, ModuleRegistry
+from ancestryllm.core.modules import (
+    COMMAND_SPECIFICATIONS,
+    GLOBAL_ARGUMENTS,
+    ActionSpec,
+    ArgumentAction,
+    ArgumentCardinality,
+    ArgumentSpec,
+    ArgumentType,
+    ModuleDescriptor,
+    ModuleRegistry,
+)
 from ancestryllm.domain.models import LivingStatus
 from ancestryllm.llm.contracts import DataClass
 from ancestryllm.llm.policy import ConsentGrant
 
+_ARGUMENT_TYPES: dict[ArgumentType, type[str] | type[int] | type[float] | type[Path]] = {
+    ArgumentType.STRING: str,
+    ArgumentType.INTEGER: int,
+    ArgumentType.NUMBER: float,
+    ArgumentType.PATH: Path,
+}
+
+_ARGUMENT_CARDINALITIES: dict[ArgumentCardinality, str] = {
+    ArgumentCardinality.OPTIONAL: "?",
+    ArgumentCardinality.ONE_OR_MORE: "+",
+    ArgumentCardinality.REMAINDER: argparse.REMAINDER,
+}
+
+
+def _add_argument(target: Any, specification: ArgumentSpec) -> None:
+    names = specification.flags or (specification.name,)
+    options: dict[str, Any] = {"help": specification.help}
+    if specification.action is not ArgumentAction.STORE:
+        options["action"] = specification.action.value
+    else:
+        options["type"] = _ARGUMENT_TYPES[specification.value_type]
+    if specification.required and specification.flags:
+        options["required"] = True
+    if specification.default is not None or specification.action is ArgumentAction.STORE_TRUE:
+        options["default"] = (
+            list(specification.default)
+            if isinstance(specification.default, tuple)
+            else specification.default
+        )
+    if specification.choices:
+        options["choices"] = specification.choices
+    if specification.cardinality is not None:
+        options["nargs"] = _ARGUMENT_CARDINALITIES[specification.cardinality]
+    if specification.metavar is not None:
+        options["metavar"] = specification.metavar
+    target.add_argument(*names, **options)
+
+
+def _add_action_arguments(parser: argparse.ArgumentParser, specification: ActionSpec) -> None:
+    grouped_arguments: dict[str, Any] = {}
+    for group in specification.exclusive_groups:
+        target = parser.add_mutually_exclusive_group(required=group.required)
+        for argument_name in group.arguments:
+            grouped_arguments[argument_name] = target
+    for argument in specification.arguments:
+        _add_argument(grouped_arguments.get(argument.name, parser), argument)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ancestry", description=__doc__)
-    parser.add_argument("--config", type=Path, help="Explicit non-secret config.toml path")
-    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    for argument in GLOBAL_ARGUMENTS:
+        _add_argument(parser, argument)
     commands = parser.add_subparsers(dest="command", required=True)
-
-    modules = commands.add_parser("modules", help="List or configure built-in modules")
-    module_actions = modules.add_subparsers(dest="action", required=True)
-    module_actions.add_parser("list")
-    for action in ("enable", "disable"):
-        child = module_actions.add_parser(action)
-        child.add_argument("module_id", choices=sorted(BUILTIN_MODULES))
-
-    rootsmagic = commands.add_parser("rootsmagic", help="Immutable RootsMagic operations")
-    rm_actions = rootsmagic.add_subparsers(dest="action", required=True)
-    rm_actions.add_parser("list")
-    rm_query = rm_actions.add_parser("query")
-    rm_query.add_argument("--tree", required=True)
-    query_mode = rm_query.add_mutually_exclusive_group(required=True)
-    query_mode.add_argument("--sql")
-    query_mode.add_argument("--question")
-    rm_query.add_argument("--provider", default="none")
-    rm_query.add_argument("--model", default="")
-    rm_query.add_argument("--consent")
-    rm_export = rm_actions.add_parser("export")
-    rm_export.add_argument("--tree", required=True)
-    rm_export.add_argument("--output", required=True, type=Path)
-    rm_export.add_argument("--profile", choices=("portable", "preservation"), default="portable")
-    rm_export.add_argument("--gedcom-version", choices=("5.5.5", "5.5.1"), default="5.5.5")
-    rm_export.add_argument(
-        "--destination", choices=("generic", "ancestry", "geni", "myheritage"), default="generic"
-    )
-    rm_export.add_argument("--root-person-id")
-    rm_export.add_argument(
-        "--scope", choices=("connected", "ancestors", "descendants"), default="connected"
-    )
-    rm_export.add_argument("--generations", type=int)
-    rm_export.add_argument("--living", choices=("exclude", "redact", "include"), default="exclude")
-    rm_export.add_argument("--report", type=Path)
-
-    gedcom = commands.add_parser("gedcom", help="GEDCOM operations")
-    gedcom_actions = gedcom.add_subparsers(dest="action", required=True)
-    merge = gedcom_actions.add_parser("merge")
-    merge.add_argument("inputs", nargs="+", type=Path)
-    merge.add_argument("--output", "-o", required=True, type=Path)
-    merge.add_argument("--root-person")
-    merge.add_argument("--quality-report", type=Path)
-    merge.add_argument("--gedcom-version", choices=("5.5.5", "5.5.1"), default="5.5.5")
-    merge.add_argument("--provider", default="none")
-    merge.add_argument("--model", default="")
-    merge.add_argument("--consent")
-    merge.add_argument("--similarity-threshold", type=int, default=78)
-    subtree = gedcom_actions.add_parser("subtree")
-    subtree.add_argument("input", type=Path)
-    subtree.add_argument("--output", "-o", required=True, type=Path)
-    subtree.add_argument("--root-person", required=True)
-    subtree.add_argument(
-        "--scope", choices=("connected", "ancestors", "descendants"), default="connected"
-    )
-    subtree.add_argument("--generations", type=int)
-    subtree.add_argument("--gedcom-version", choices=("5.5.5", "5.5.1"), default="5.5.5")
-    quality = gedcom_actions.add_parser("quality")
-    quality.add_argument("input", type=Path)
-    quality.add_argument("--output", "-o", required=True, type=Path)
-    quality.add_argument("--root-person", required=True)
-    sync = gedcom_actions.add_parser("sync")
-    sync.add_argument("sync_command", choices=("update", "rebase"))
-    sync.add_argument("sync_args", nargs=argparse.REMAINDER)
-
-    prompts = commands.add_parser("prompts", help="Versioned saved prompts")
-    prompt_actions = prompts.add_subparsers(dest="action", required=True)
-    prompt_actions.add_parser("list")
-    prompt_save = prompt_actions.add_parser("save")
-    prompt_save.add_argument("name")
-    prompt_save.add_argument("--purpose", required=True)
-    body = prompt_save.add_mutually_exclusive_group(required=True)
-    body.add_argument("--body")
-    body.add_argument("--body-file", type=Path)
-    prompt_save.add_argument("--variable", action="append", default=[])
-    prompt_save.add_argument("--schema-file", type=Path)
-    prompt_save.add_argument("--tag", action="append", default=[])
-    prompt_show = prompt_actions.add_parser("show")
-    prompt_show.add_argument("name")
-    prompt_show.add_argument("--version", type=int)
-    prompt_render = prompt_actions.add_parser("render")
-    prompt_render.add_argument("name")
-    prompt_render.add_argument("--version", type=int)
-    prompt_render.add_argument("--value", action="append", default=[], metavar="NAME=VALUE")
-
-    people = commands.add_parser("people", help="Encrypted research workspace")
-    people_actions = people.add_subparsers(dest="action", required=True)
-    people_list = people_actions.add_parser("list")
-    people_list.add_argument("--workspace", default="default")
-    people_add = people_actions.add_parser("add")
-    people_add.add_argument("display_name")
-    people_add.add_argument(
-        "--living-status", choices=tuple(item.value for item in LivingStatus), default="unknown"
-    )
-    people_add.add_argument("--notes", default="")
-    people_add.add_argument("--workspace", default="default")
-
-    providers = commands.add_parser("providers", help="Provider and consent profiles")
-    provider_actions = providers.add_subparsers(dest="action", required=True)
-    provider_actions.add_parser("list")
-    profile = provider_actions.add_parser("create")
-    profile.add_argument("name")
-    profile.add_argument(
-        "--provider",
-        required=True,
-        choices=("ollama", "openai", "anthropic", "gemini", "openrouter"),
-    )
-    profile.add_argument("--model", required=True)
-    consent = provider_actions.add_parser("consent")
-    consent.add_argument("name")
-    consent.add_argument("--profile", required=True)
-    consent.add_argument("--module", action="append", required=True)
-    consent.add_argument("--purpose", action="append", required=True)
-    consent.add_argument(
-        "--data-class",
-        action="append",
-        choices=tuple(item.value for item in DataClass),
-        required=True,
-    )
-    consent.add_argument("--model", action="append", required=True)
-    consent.add_argument("--max-cost-usd", type=float)
-    consent.add_argument("--retain-payloads", action="store_true")
-    revoke = provider_actions.add_parser("revoke")
-    revoke.add_argument("name")
-
-    secrets_parser = commands.add_parser("secrets", help="OS-keyring secret references")
-    secret_actions = secrets_parser.add_subparsers(dest="action", required=True)
-    secret_set = secret_actions.add_parser("set")
-    secret_set.add_argument("name")
-    secret_delete = secret_actions.add_parser("delete")
-    secret_delete.add_argument("name")
-    secret_status = secret_actions.add_parser("status")
-    secret_status.add_argument("name", nargs="?")
-
-    ocr = commands.add_parser("ocr", help="Structured OCR extraction")
-    ocr_actions = ocr.add_subparsers(dest="action", required=True)
-    extract = ocr_actions.add_parser("extract")
-    extract.add_argument("--input", required=True, type=Path)
-    extract.add_argument("--provider", required=True)
-    extract.add_argument("--model", required=True)
-    extract.add_argument("--consent")
-
-    database = commands.add_parser("database", help="Encrypted workspace maintenance")
-    db_actions = database.add_subparsers(dest="action", required=True)
-    backup = db_actions.add_parser("backup")
-    backup.add_argument("destination", type=Path)
-    db_actions.add_parser("diagnose", help="Run read-only SQLCipher and credential-store checks")
+    for command in COMMAND_SPECIFICATIONS.values():
+        command_parser = commands.add_parser(command.name, help=command.help)
+        actions = command_parser.add_subparsers(dest="action", required=True)
+        for action in command.actions:
+            action_parser = actions.add_parser(action.name, help=action.help)
+            _add_action_arguments(action_parser, action)
     return parser
+
+
+def _descriptor_payload(descriptor: ModuleDescriptor) -> dict[str, Any]:
+    """Preserve the established modules-list JSON contract."""
+
+    return {
+        "module_id": descriptor.module_id,
+        "name": descriptor.name,
+        "summary": descriptor.summary,
+        "actions": descriptor.actions,
+        "implementation": descriptor.implementation,
+        "configuration": descriptor.configuration,
+        "required_services": descriptor.required_services,
+    }
 
 
 def _emit(value: Any, json_output: bool = False) -> None:
@@ -197,7 +127,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
     if args.command == "modules":
         registry = ModuleRegistry(context)
         if args.action == "list":
-            _emit([asdict(item) for item in registry.descriptors()], json_output)
+            _emit([_descriptor_payload(item) for item in registry.descriptors()], json_output)
         elif args.action == "enable":
             registry.enable(args.module_id)
             _emit(f"Enabled module: {args.module_id}", json_output)
