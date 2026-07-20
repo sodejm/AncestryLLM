@@ -2,7 +2,9 @@
 
 This document is the architectural source of truth for the repository. It
 describes the system that exists now, the invariants new work must preserve,
-and the boundaries that are intentionally not implemented. It should be read
+and the boundaries that are intentionally not implemented. The target REPL
+layers and migration compatibility contract are specified in
+[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
 with the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
@@ -202,7 +204,9 @@ must first exist here so one-shot and interactive behavior cannot drift.
 
 ### Interactive console
 
-`console/app.py` is a `cmd2` shell over `run_tokens()`:
+The current `console/app.py` is a `cmd2` shell over `run_tokens()`. It is the
+legacy implementation retained during the migration described in
+[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md):
 
 - command sets are explicit built-ins loaded only when enabled;
 - `use`, `info`, `show`, `set`, `unset`, `run`, and `back` maintain local
@@ -213,6 +217,13 @@ must first exist here so one-shot and interactive behavior cannot drift.
   `getpass` through the secrets command;
 - history is stored under the private data directory with owner-only mode where
   supported.
+
+The target replacement is a `prompt_toolkit` input adapter with a UI-neutral
+session router, typed command executors, structured progress, and Rich
+presentation. It must remain a sibling adapter over the same application
+services. One-shot CLI grammar, JSON serialization, stable coded errors,
+consent authorization, and network-free `provider=none` behavior are
+compatibility contracts during and after the migration.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
