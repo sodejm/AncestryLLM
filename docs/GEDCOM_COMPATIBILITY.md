@@ -23,7 +23,12 @@ The safe offline fixture demo uses `quality-source-a.ged`,
 scripts/gedcom_merge_quickstart.sh --skip-install
 ```
 
-Before claiming a release interoperable, record automated validation and manual
-imports into current Ancestry, Geni, and MyHeritage products for both 5.5.5 and
-any advertised 5.5.1 fallback. Verify root selection, people/family counts,
-citations, names, dates, living-person behavior, and custom-tag loss reports.
+Automated validation does not establish product interoperability. Before
+claiming a release interoperable, complete the dated vendor evidence matrix in
+[`release-evidence/issue-10-import-smoke-tests.md`](release-evidence/issue-10-import-smoke-tests.md)
+for current Ancestry, Geni, and MyHeritage products. The matrix covers both
+5.5.5 and any advertised 5.5.1 fallback and must identify each vendor result as
+verified, failed, unavailable, or unverified. Verify root selection,
+people/family counts, citations, names, dates, living-person behavior, and
+custom-tag loss reports using fictional fixtures only. A blank or pending row
+is an evidence gap, not a passing interoperability result.
