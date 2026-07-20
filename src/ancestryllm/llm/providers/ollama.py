@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from ancestryllm.core.errors import ProviderError
+import httpx
+
+from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.policy import validate_endpoint
 from ancestryllm.llm.validation import validate_structured_output
@@ -22,34 +24,31 @@ class OllamaProvider:
             provider_id="ollama", remote=False, structured_output=True, streaming=True
         )
 
-    def _client(self) -> Any:
+    def _client(self, timeout_seconds: float) -> Any:
         try:
             from ollama import Client
         except ImportError as exc:
             raise ProviderError("PROVIDER_NOT_INSTALLED", "Install ancestryllm[ollama].") from exc
-        return Client(host=self.base_url)
+        return Client(host=self.base_url, timeout=httpx.Timeout(timeout_seconds))
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         try:
-            response = self._client().chat(
-                model=request.model,
-                messages=[message.model_dump() for message in request.messages],
-                format=request.response_schema or "",
-                options={
-                    "temperature": request.temperature,
-                    "num_predict": request.max_output_tokens,
-                },
-                stream=False,
-            )
-            text = str(response["message"]["content"])
+            with self._client(request.timeout_seconds) as client:
+                response = client.chat(
+                    model=request.model,
+                    messages=[message.model_dump() for message in request.messages],
+                    format=request.response_schema or "",
+                    options={
+                        "temperature": request.temperature,
+                        "num_predict": request.max_output_tokens,
+                    },
+                    stream=False,
+                )
+                text = str(response["message"]["content"])
         except ProviderError:
             raise
         except Exception as exc:
-            raise ProviderError(
-                "PROVIDER_REQUEST_FAILED",
-                "The local Ollama request failed.",
-                details={"error_type": type(exc).__name__},
-            ) from exc
+            raise normalize_provider_error(exc, "ollama") from exc
         return GenerationResult(
             provider_id="ollama",
             model=request.model,
@@ -60,14 +59,29 @@ class OllamaProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        stream_started = False
         try:
-            for chunk in self._client().chat(
-                model=request.model,
-                messages=[message.model_dump() for message in request.messages],
-                stream=True,
-            ):
-                yield str(chunk["message"]["content"])
+            with self._client(request.timeout_seconds) as client:
+                for chunk in client.chat(
+                    model=request.model,
+                    messages=[message.model_dump() for message in request.messages],
+                    format=request.response_schema or "",
+                    options={
+                        "temperature": request.temperature,
+                        "num_predict": request.max_output_tokens,
+                    },
+                    stream=True,
+                ):
+                    text = str(chunk["message"]["content"])
+                    if text:
+                        stream_started = True
+                        yield text
+        except ProviderError:
+            raise
         except Exception as exc:
-            raise ProviderError(
-                "PROVIDER_REQUEST_FAILED", "The local Ollama stream failed."
+            raise normalize_provider_error(
+                exc,
+                "ollama",
+                streaming=True,
+                stream_started=stream_started,
             ) from exc
