@@ -27,7 +27,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Never, Optional, Sequence
 
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -69,7 +69,7 @@ EXIT_CODES = {
 class PlainEnglishArgumentParser(argparse.ArgumentParser):
     """Convert argparse failures into the updater's stable error contract."""
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> Never:
         """Raise a remediable configuration error instead of exiting abruptly."""
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -197,9 +197,9 @@ def _normal_value(tag: str, value: str, core: ModuleType) -> str:
     """Return a conservative comparison value while preserving source output."""
     value = _normal_space(value)
     if tag == "DATE":
-        return core.normalise_gedcom_date(value).upper()
+        return str(core.normalise_gedcom_date(value)).upper()
     if tag == "CTRY":
-        return core._normalise_country(value)
+        return str(core._normalise_country(value))
     if tag == "PLAC":
         return _normal_place(value, core)
     if tag in CONTROLLED_TAGS:
@@ -619,7 +619,7 @@ def _header_export_date(path: Path, core: ModuleType) -> Optional[str]:
     for block in core._top_level_blocks(first.lines):
         line = core.parse_gedcom_line(block[0])
         if line.tag == "DATE" and line.value.strip():
-            return core.normalise_gedcom_date(line.value.strip())
+            return str(core.normalise_gedcom_date(line.value.strip()))
     return None
 
 
@@ -1140,17 +1140,17 @@ def _reconcile_person_blocks(
         order: list[str] = []
         current_master_keys: set[str] = set()
         person_registry = block_registry.setdefault(target, {})
-        for spec, record in origin_records:
+        for origin_spec, record in origin_records:
             rewritten = _replace_header_pointer(
                 _rewrite_lines(record.lines, pointer_map, core), target, core
             )
             for block in core._top_level_blocks(rewritten):
                 key = _block_key(block, core)
                 tag = core.parse_gedcom_line(block[0]).tag
-                if spec is not None and (target, key) in tombstones:
+                if origin_spec is not None and (target, key) in tombstones:
                     stats.conflicts.append(
                         f"{target}:{tag}:{key[:12]} was present in "
-                        f"{spec.source_id} but retained as an intentional "
+                        f"{origin_spec.source_id} but retained as an intentional "
                         "manual deletion"
                     )
                     continue
@@ -1170,13 +1170,13 @@ def _reconcile_person_blocks(
                         "first_seen_generation": manifest.get("generation", 0) + 1,
                     },
                 )
-                if spec is None:
+                if origin_spec is None:
                     current_master_keys.add(key)
                     if initialize and "baseline" not in entry["protected"]:
                         entry["protected"].append("baseline")
-                elif spec.snapshot_id not in entry["observations"]:
-                    entry["observations"].append(spec.snapshot_id)
-                    stats.added_facts.append(f"{target}:{tag}:{spec.source_id}:{key[:12]}")
+                elif origin_spec.snapshot_id not in entry["observations"]:
+                    entry["observations"].append(origin_spec.snapshot_id)
+                    stats.added_facts.append(f"{target}:{tag}:{origin_spec.source_id}:{key[:12]}")
                 entry["last_seen_generation"] = manifest.get("generation", 0) + 1
         retained_order: list[str] = []
         for key in order:

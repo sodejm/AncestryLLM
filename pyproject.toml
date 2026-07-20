@@ -82,8 +82,8 @@ source = ["ancestryllm"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-# Ratchet from the characterized legacy engine baseline; raise as facades gain tests.
-fail_under = 65
+# Ratchet from the characterized GEDCOM engine baseline; raise with focused tests.
+fail_under = 75
 
 [tool.ruff]
 target-version = "py312"
@@ -107,9 +107,5 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["ancestryllm.gedcom.engine", "ancestryllm.gedcom.incremental"]
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = ["sqlcipher3", "gedcom.*", "jsonschema"]
+module = ["sqlcipher3", "gedcom.*", "google.generativeai", "jsonschema", "openrouter"]
 ignore_missing_imports = true

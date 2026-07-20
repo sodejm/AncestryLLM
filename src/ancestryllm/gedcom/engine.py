@@ -30,8 +30,10 @@ import urllib.request
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
+from types import ModuleType
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence, TypedDict, cast
 
+_rapidfuzz: ModuleType | None
 try:
     from rapidfuzz import fuzz as _rapidfuzz
 except ImportError:  # pragma: no cover - exercised in minimal installations
@@ -830,12 +832,16 @@ def normalise_gedcom_date(raw_date: str) -> str:
         return f"{qualifier} {result}".strip()
     full_match = re.fullmatch(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{3,4})", original)
     if full_match and full_match.group(2).upper() in GEDCOM_MONTHS:
-        day, month, year = full_match.groups()
+        day_text, month_text, year_text = full_match.groups()
         try:
-            dt.date(int(year), GEDCOM_MONTHS.index(month.upper()) + 1, int(day))
+            dt.date(
+                int(year_text),
+                GEDCOM_MONTHS.index(month_text.upper()) + 1,
+                int(day_text),
+            )
         except ValueError:
             return raw_date
-        result = f"{int(day):02d} {month.upper()} {year}"
+        result = f"{int(day_text):02d} {month_text.upper()} {year_text}"
         return f"{qualifier} {result}".strip()
     month_year = re.fullmatch(r"([A-Za-z]{3})\s+(\d{3,4})", original)
     if month_year and month_year.group(1).upper() in GEDCOM_MONTHS:
@@ -1612,12 +1618,12 @@ def enrich_relationship_context(
                 for child in known_children
             )
             marriages[person.pointer].extend(family_facts)
-        for child in known_children:
+        for relationship_child in known_children:
             pedigree = pedigree_by_person_family.get(
-                (child.pointer, family.pointer),
+                (relationship_child.pointer, family.pointer),
                 "",
             )
-            parents[child.pointer].extend(
+            parents[relationship_child.pointer].extend(
                 _relative_identity(parent, pedigree) for parent in known_partners
             )
 
@@ -1942,24 +1948,47 @@ def assess_similarity(a: IndividualRecord, b: IndividualRecord) -> MatchAssessme
         if not gender_match:
             conflicts.append("sex")
 
-    collection_components = (
+    fact_collection_components = (
         ("occupation", a.occupations, b.occupations, _fact_similarity, 5.0),
         ("residence", a.residences, b.residences, _fact_similarity, 7.0),
         ("family events", a.marriages, b.marriages, _fact_similarity, 8.0),
+    )
+    relative_collection_components = (
         ("partners", a.partners, b.partners, _relative_similarity, 12.0),
         ("parents", a.parents, b.parents, _relative_similarity, 10.0),
         ("children", a.children, b.children, _relative_similarity, 8.0),
     )
     collection_scores: dict[str, float] = {}
-    for label, left_values, right_values, comparator, weight in collection_components:
-        if left_values and right_values:
+    for (
+        fact_label,
+        left_facts,
+        right_facts,
+        fact_comparator,
+        fact_weight,
+    ) in fact_collection_components:
+        if left_facts and right_facts:
             collection_score = _collection_similarity(
-                left_values,
-                right_values,
-                comparator,
+                left_facts,
+                right_facts,
+                fact_comparator,
             )
-            collection_scores[label] = collection_score
-            add(label, collection_score, weight)
+            collection_scores[fact_label] = collection_score
+            add(fact_label, collection_score, fact_weight)
+    for (
+        relative_label,
+        left_relatives,
+        right_relatives,
+        relative_comparator,
+        relative_weight,
+    ) in relative_collection_components:
+        if left_relatives and right_relatives:
+            collection_score = _collection_similarity(
+                left_relatives,
+                right_relatives,
+                relative_comparator,
+            )
+            collection_scores[relative_label] = collection_score
+            add(relative_label, collection_score, relative_weight)
 
     other_fact_score = _other_fact_similarity(a, b)
     if other_fact_score is not None:
@@ -2646,7 +2675,7 @@ def ai_resolve_openai(
         }
         if reasoning_effort != "none":
             request["reasoning"] = {"effort": reasoning_effort}
-        response = client.responses.create(**request)
+        response = client.responses.create(**request)  # type: ignore[call-overload]
         verdict = _parse_ai_response(response.output_text)
         verdict.update(
             {
@@ -2678,6 +2707,7 @@ def ai_resolve_gemini(
         policy=credit_policy,
         minimum_credit_usd=minimum_credit_usd,
     )
+    google_genai: Any
     try:
         from google import genai as google_genai
     except ImportError:
@@ -2849,7 +2879,7 @@ def ai_resolve_auto(
     inference request is attempted, errors are not retried at another remote
     provider; that avoids sending the same genealogy data to multiple parties.
     """
-    candidates: list[tuple[str, Any]] = []
+    candidates: list[tuple[str, Callable[[], dict[str, object]]]] = []
     if os.environ.get("OPENROUTER_API_KEY"):
         candidates.append(
             (
@@ -2930,22 +2960,31 @@ def ai_resolve(
         if not callable(resolver):
             raise ValueError("The modular AI backend requires a resolver callable")
         return dict(resolver(a, b))
-    if backend == "ollama":
-        return ai_resolve_ollama(a, b, **kwargs)
-    if backend == "openai":
-        return ai_resolve_openai(a, b, **kwargs)
-    if backend == "gemini":
-        return ai_resolve_gemini(a, b, **kwargs)
-    if backend == "openrouter":
-        return ai_resolve_openrouter(a, b, **kwargs)
-    if backend == "auto":
-        return ai_resolve_auto(a, b, **kwargs)
-    raise ValueError(f"Unknown AI backend: {backend}")
+    resolvers: dict[str, Callable[..., dict[str, object]]] = {
+        "ollama": ai_resolve_ollama,
+        "openai": ai_resolve_openai,
+        "gemini": ai_resolve_gemini,
+        "openrouter": ai_resolve_openrouter,
+        "auto": ai_resolve_auto,
+    }
+    try:
+        resolver = resolvers[backend]
+    except KeyError as exc:
+        raise ValueError(f"Unknown AI backend: {backend}") from exc
+    return resolver(a, b, **kwargs)
 
 
 def _field_value(record: IndividualRecord, field_name: str) -> str:
     """Read a mergeable summary field by name."""
     return str(getattr(record, field_name, ""))
+
+
+def _confidence_value(verdict: Mapping[str, object]) -> float:
+    """Return a numeric confidence while rejecting non-scalar provider data."""
+    value = verdict.get("confidence", 0.0)
+    if isinstance(value, (str, int, float)):
+        return float(value)
+    return 0.0
 
 
 def merge_two_records(
@@ -2988,14 +3027,14 @@ def merge_two_records(
         return first
 
     merged_extra = {tag: list(values) for tag, values in primary.extra_fields.items()}
-    for tag, values in secondary.extra_fields.items():
+    for tag, extra_values in secondary.extra_fields.items():
         target = merged_extra.setdefault(tag, [])
-        target.extend(value for value in values if value not in target)
+        target.extend(value for value in extra_values if value not in target)
     merged_facts: dict[str, tuple[GenealogicalFact, ...]] = {
         tag: tuple(values) for tag, values in primary.facts.items()
     }
-    for tag, values in secondary.facts.items():
-        merged_facts[tag] = tuple(dict.fromkeys(merged_facts.get(tag, ()) + tuple(values)))
+    for tag, fact_values in secondary.facts.items():
+        merged_facts[tag] = tuple(dict.fromkeys(merged_facts.get(tag, ()) + tuple(fact_values)))
     first_lines = primary.raw_lines or _record_to_gedcom_lines(primary).rstrip("\n").splitlines()
     second_lines = (
         secondary.raw_lines or _record_to_gedcom_lines(secondary).rstrip("\n").splitlines()
@@ -3241,7 +3280,7 @@ def merge_records(
                     verdict.get("_provider"),
                     verdict.get("_model", "unknown"),
                 )
-            confidence = float(verdict.get("confidence", 0.0))
+            confidence = _confidence_value(verdict)
             if not auto and confidence < AI_CONFIDENCE_AUTO_ACCEPT:
                 verdict = dict(verdict)
                 verdict["is_duplicate"] = prompt_operator(first, second)
@@ -3283,7 +3322,7 @@ def merge_records(
                         compared_fields=assessment.compared_fields,
                         conflicts=assessment.conflicts,
                         disposition="merged",
-                        confidence=float(verdict.get("confidence", 0.0)),
+                        confidence=_confidence_value(verdict),
                         provider=str(verdict.get("_provider", "deterministic")),
                         model=str(verdict.get("_model", "")),
                         reasoning=str(verdict.get("reasoning", "")),
@@ -3298,7 +3337,7 @@ def merge_records(
                     compared_fields=assessment.compared_fields,
                     conflicts=assessment.conflicts,
                     disposition="retained-operator",
-                    confidence=float(verdict.get("confidence", 0.0)),
+                    confidence=_confidence_value(verdict),
                     provider=str(verdict.get("_provider", ai_backend)),
                     model=str(verdict.get("_model", "")),
                     reasoning=str(verdict.get("reasoning", "")),
@@ -3338,6 +3377,14 @@ def _stable_finding_id(
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
     return f"{code.lower().replace('_', '-')}-{digest}"
+
+
+class _QualityFindingContext(TypedDict):
+    """Shared typed keyword arguments for one person's quality findings."""
+
+    people: Sequence[str]
+    source_files: Sequence[str]
+    generations: Mapping[str, int]
 
 
 def _quality_finding(
@@ -3490,7 +3537,7 @@ def ancestor_generations(
     parents, _, _, _ = _family_graph(source_records, mapping)
     generations = {root_pointer: 0}
     cycles: set[str] = set()
-    pending = deque([(root_pointer, (root_pointer,))])
+    pending: deque[tuple[str, tuple[str, ...]]] = deque([(root_pointer, (root_pointer,))])
     while pending:
         child, path = pending.popleft()
         next_generation = generations[child] + 1
@@ -3915,7 +3962,7 @@ def analyze_quality(
     current_year = dt.date.today().year
     for person in people:
         person_files = _record_source_files(person)
-        common = {
+        common: _QualityFindingContext = {
             "people": (person.pointer,),
             "source_files": person_files,
             "generations": generations,
@@ -4160,11 +4207,11 @@ def analyze_quality(
         for role in ("HUSB", "WIFE", "CHIL"):
             expected_tag = "FAMC" if role == "CHIL" else "FAMS"
             for person_pointer in roles.get(role, ()):
-                person = by_pointer.get(person_pointer)
-                if person is None:
+                linked_person = by_pointer.get(person_pointer)
+                if linked_person is None:
                     continue
                 linked_families = {
-                    family for tag, family in person.family_references if tag == expected_tag
+                    family for tag, family in linked_person.family_references if tag == expected_tag
                 }
                 if family_pointer not in linked_families:
                     findings.append(
@@ -4179,7 +4226,7 @@ def analyze_quality(
                             people=(person_pointer,),
                             families=(family_pointer,),
                             evidence=(role, expected_tag),
-                            source_files=family_source + _record_source_files(person),
+                            source_files=family_source + _record_source_files(linked_person),
                             generations=generations,
                         )
                     )
@@ -4251,11 +4298,11 @@ def analyze_quality(
                         )
     for person in people:
         for tag, family_pointer in person.family_references:
-            roles = families.get(family_pointer)
-            if roles is None:
+            linked_roles = families.get(family_pointer)
+            if linked_roles is None:
                 continue
             expected_roles = ("CHIL",) if tag == "FAMC" else ("HUSB", "WIFE")
-            listed = any(person.pointer in roles.get(role, ()) for role in expected_roles)
+            listed = any(person.pointer in linked_roles.get(role, ()) for role in expected_roles)
             if not listed:
                 findings.append(
                     _quality_finding(
@@ -4430,7 +4477,7 @@ def render_quality_report(report: QualityReport) -> str:
     Mutation guarantees:
         The report and its findings are not changed.
     """
-    counts = defaultdict(int)
+    counts: defaultdict[str, int] = defaultdict(int)
     for finding in report.findings:
         counts[finding.severity] += 1
     lines = [
@@ -4732,7 +4779,9 @@ def ai_refine_quality_openai(
     if reasoning_effort != "none":
         request["reasoning"] = {"effort": reasoning_effort}
     try:
-        response = OpenAI(api_key=key).responses.create(**request)
+        response = OpenAI(api_key=key).responses.create(  # type: ignore[call-overload]
+            **request
+        )
     except Exception as exc:
         raise RuntimeError(f"OpenAI quality request failed: {exc}") from exc
     allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
@@ -4888,6 +4937,7 @@ def refine_quality_report_with_ai(
         "gemini": ai_refine_quality_gemini,
         "openrouter": ai_refine_quality_openrouter,
     }
+    resolver: QualityResolver
     try:
         if backend == "auto":
             # Reuse the same future-facing preference order as identity
@@ -4925,7 +4975,7 @@ def refine_quality_report_with_ai(
                 }
         else:
             resolver = resolvers[backend]
-        annotations, provider, model = resolver(report, **kwargs)
+        annotations, provider, model = cast(QualityResolver, resolver)(report, **kwargs)
         if not annotations:
             return report
         findings = tuple(
@@ -5101,31 +5151,31 @@ def write_gedcom(
         # Reorder the standard root records into the conventional sequence:
         # HEAD, SUBM, INDI, FAM, then NOTE/OBJE/REPO/SOUR/etc.  This is more
         # interoperable with older importers while preserving every line.
-        subm_lines = []
-        family_lines = []
-        other_lines = []
+        subm_lines: list[str] = []
+        family_lines: list[str] = []
+        other_lines: list[str] = []
         subm_lines.extend(synthetic_submitter)
-        for record in ordered_records:
+        for source_record in ordered_records:
             if (
-                record.tag == "FAM"
+                source_record.tag == "FAM"
                 and include_families is not None
-                and record.pointer not in include_families
+                and source_record.pointer not in include_families
             ):
                 continue
             target = (
                 subm_lines
-                if record.tag == "SUBM"
+                if source_record.tag == "SUBM"
                 else family_lines
-                if record.tag == "FAM"
+                if source_record.tag == "FAM"
                 else other_lines
             )
-            target.extend(_rewrite_xrefs(line, pointer_map or {}) for line in record.lines)
+            target.extend(_rewrite_xrefs(line, pointer_map or {}) for line in source_record.lines)
         lines = lines[: len(header_lines)] + subm_lines + person_lines + family_lines + other_lines
     elif source_parsers:
         # Compatibility path for callers of the previous DOM-based API.
         # New CLI calls use source_documents so unknown lines are retained.
         header_records: list[GedcomRecord] = []
-        other_lines: list[str] = []
+        legacy_other_lines: list[str] = []
         for parser in source_parsers:
             for element in parser.get_root_child_elements():
                 tag = element.get_tag()
@@ -5134,12 +5184,12 @@ def write_gedcom(
                 if tag == "HEAD" and not header_records:
                     header_records.append(GedcomRecord(record_lines, "", 0))
                 elif tag not in {"HEAD", "TRLR", "INDI"}:
-                    other_lines.extend(record_lines)
+                    legacy_other_lines.extend(record_lines)
         header_lines = _normalise_header_lines(header_records, gedcom_version)
         synthetic_submitter = _ensure_submitter_record(header_lines, [])
         lines.extend(header_lines)
         lines.extend(synthetic_submitter)
-        lines.extend(other_lines)
+        lines.extend(legacy_other_lines)
         for record in records:
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
