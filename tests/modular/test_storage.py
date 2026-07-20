@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import builtins
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,3 +91,69 @@ def test_storage_diagnostics_report_keyring_failures_without_secret_values(tmp_p
     diagnostics = diagnose_storage(tmp_path / "workspace.db", BrokenSecretStore())
 
     assert {item["code"] for item in diagnostics} >= {"KEYRING_READ_FAILED"}
+    assert all(
+        "credential backend unavailable" not in (item.get("remediation") or "")
+        for item in diagnostics
+    )
+
+
+def test_storage_diagnostics_report_missing_sqlcipher(monkeypatch, tmp_path: Path) -> None:
+    real_import = builtins.__import__
+
+    def missing_sqlcipher(name, *args, **kwargs):
+        if name == "sqlcipher3":
+            raise ImportError("fictional SQLCipher missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_sqlcipher)
+
+    diagnostics = diagnose_storage(tmp_path / "workspace.db", MemorySecretStore({}))
+
+    sqlcipher = next(item for item in diagnostics if item["code"] == "SQLCIPHER_UNAVAILABLE")
+    assert sqlcipher["status"] == "error"
+    assert "plaintext" in sqlcipher["remediation"]
+
+
+def test_storage_diagnostics_report_non_encrypting_sqlite_binding(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class FakeConnection:
+        def execute(self, _query):
+            return self
+
+        def fetchone(self):
+            return (None,)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "sqlcipher3", SimpleNamespace(connect=lambda _path: FakeConnection())
+    )
+
+    diagnostics = diagnose_storage(tmp_path / "workspace.db", MemorySecretStore({}))
+
+    sqlcipher = next(item for item in diagnostics if item["code"] == "SQLCIPHER_UNAVAILABLE")
+    assert "does not report SQLCipher" in sqlcipher["message"]
+
+
+def test_storage_diagnostics_report_missing_directory_without_writing(tmp_path: Path) -> None:
+    path = tmp_path / "missing" / "workspace.db"
+
+    diagnostics = diagnose_storage(path, MemorySecretStore({}))
+
+    directory = next(item for item in diagnostics if item["code"] == "DATABASE_DIRECTORY_MISSING")
+    assert directory["status"] == "warning"
+    assert path.exists() is False
+
+
+@pytest.mark.skipif(not hasattr(Path, "chmod"), reason="path permissions unavailable")
+def test_storage_diagnostics_report_weak_workspace_permissions(tmp_path: Path) -> None:
+    path = tmp_path / "workspace.db"
+    path.write_bytes(b"encrypted-looking")
+    path.chmod(0o644)
+
+    diagnostics = diagnose_storage(path, MemorySecretStore({}))
+
+    permissions = next(item for item in diagnostics if item["code"] == "DATABASE_PERMISSIONS_WEAK")
+    assert permissions["status"] == "warning"
