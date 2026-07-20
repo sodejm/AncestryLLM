@@ -9,6 +9,7 @@
 - [Privacy and consent](PRIVACY_AND_CONSENT.md)
 - [Provider guide](PROVIDERS.md)
 - [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
+- [Local-first retrieval evaluation](LOCAL_RETRIEVAL_EVALUATION.md)
 - [Wiki synchronization](WIKI_SYNC.md)
 - [Wiki operations and recovery](WIKI_OPERATIONS.md)
 - [Security response checklist](SECURITY_RESPONSE.md)
