@@ -27,7 +27,8 @@ and testing tools. The quotes prevent the shell from interpreting the brackets.
 Rerun the command after changing project metadata or dependencies; editable mode
 only makes source-code changes immediately available.
 
-Run `.venv/bin/ancestry` with no arguments for the interactive console. The
+Run `.venv/bin/ancestry` with no arguments for the prompt-toolkit/Rich
+interactive console. It is the only supported interactive console; the
 canonical command reference, examples, offline defaults, and privacy rules are
 in [the CLI guide](docs/CLI.md); see [the console guide](docs/CONSOLE.md) for
 interactive use.
