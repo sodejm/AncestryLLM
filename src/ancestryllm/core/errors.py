@@ -6,8 +6,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
 
 @dataclass(slots=True)
 class AncestryError(Exception):
@@ -89,8 +87,15 @@ def normalize_provider_error(
             details=details,
         )
 
-    timeout_names = {"APITimeoutError", "ReadTimeout", "WriteTimeout", "ConnectTimeout"}
-    if isinstance(exc, (TimeoutError, httpx.TimeoutException)) or error_type in timeout_names:
+    exception_types = {item.__name__ for item in type(exc).__mro__}
+    timeout_names = {
+        "APITimeoutError",
+        "TimeoutException",
+        "ReadTimeout",
+        "WriteTimeout",
+        "ConnectTimeout",
+    }
+    if isinstance(exc, TimeoutError) or exception_types.intersection(timeout_names):
         if streaming and stream_started:
             return ProviderError(
                 "PROVIDER_STREAM_TIMEOUT",
@@ -120,8 +125,8 @@ def normalize_provider_error(
         "ServiceUnavailable",
     }
     if (
-        isinstance(exc, (ConnectionError, httpx.NetworkError))
-        or error_type in transient_names
+        isinstance(exc, ConnectionError)
+        or exception_types.intersection(transient_names | {"NetworkError"})
         or (isinstance(status_code, int) and (status_code in {408, 409, 425} or status_code >= 500))
     ):
         return ProviderError(
