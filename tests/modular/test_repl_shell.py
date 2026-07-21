@@ -1,0 +1,240 @@
+"""Black-box tests for the default prompt_toolkit shell."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import io
+import sys
+import threading
+import types
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+
+import pytest
+from prompt_toolkit.completion import DummyCompleter
+from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from ancestryllm.console.router import RouteKind, RouteResult
+from ancestryllm.core.context import AppContext
+from ancestryllm.core.errors import AncestryError
+
+
+@dataclass(frozen=True)
+class _FakeCompletionSnapshot:
+    profiles: tuple[str, ...] = ()
+    consents: tuple[str, ...] = ()
+
+
+@contextmanager
+def _completion_fallback(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Supply the concurrent completion seam only while it does not exist yet."""
+
+    try:
+        importlib.import_module("ancestryllm.console.completion")
+    except ModuleNotFoundError as exc:
+        if exc.name != "ancestryllm.console.completion":
+            raise
+        module = types.ModuleType("ancestryllm.console.completion")
+        module.CompletionSnapshot = _FakeCompletionSnapshot
+        module.create_completer = lambda *_args, **_kwargs: DummyCompleter()
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    yield
+
+
+@pytest.fixture
+def shell_module(monkeypatch: pytest.MonkeyPatch):
+    with _completion_fallback(monkeypatch):
+        sys.modules.pop("ancestryllm.console.shell", None)
+        module = importlib.import_module("ancestryllm.console.shell")
+    monkeypatch.setattr(module, "create_completer", lambda *_args, **_kwargs: DummyCompleter())
+    monkeypatch.setattr(module, "build_completion_snapshot", lambda _context: _FakeCompletionSnapshot())
+    return module
+
+
+def _application(shell_module, app_context: AppContext, pipe) -> tuple[object, io.StringIO, io.StringIO]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    application = shell_module.ReplApplication(
+        app_context,
+        input=pipe,
+        output=DummyOutput(),
+        stdout=stdout,
+        stderr=stderr,
+    )
+    return application, stdout, stderr
+
+
+@pytest.mark.parametrize("command", ("exit", "quit"))
+def test_default_shell_accepts_exit_commands_from_prompt_toolkit_pipe(
+    shell_module, app_context: AppContext, command: str
+) -> None:
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        pipe.send_text(f"{command}\n")
+
+        assert asyncio.run(application.run_async()) == 0
+
+
+def test_default_shell_returns_cleanly_at_pipe_eof(shell_module, app_context: AppContext) -> None:
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        pipe.close()
+
+        assert asyncio.run(application.run_async()) == 0
+
+
+def test_default_shell_recovers_from_interrupt_then_accepts_exit(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        prompts = iter((KeyboardInterrupt(), "exit"))
+
+        async def next_prompt(_prompt: str) -> str:
+            result = next(prompts)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        monkeypatch.setattr(application.session, "prompt_async", next_prompt)
+
+        assert asyncio.run(application.run_async()) == 0
+
+
+def test_secret_entry_is_no_echo_confirmed_stored_and_never_persisted(
+    shell_module, app_context: AppContext
+) -> None:
+    fictional_secret = "fictional-secret-value"
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        prompts: list[tuple[str, bool]] = []
+        values = iter((fictional_secret, fictional_secret))
+
+        async def secret_prompt(prompt: str, *, is_password: bool) -> str:
+            prompts.append((prompt, is_password))
+            return next(values)
+
+        application.secret_session.prompt_async = secret_prompt
+        asyncio.run(application.execute_line("secrets set openai.api_key"))
+        application.history.store_string(f"secrets set openai.api_key {fictional_secret}")
+
+    assert app_context.secrets.get("openai.api_key") == fictional_secret
+    assert prompts == [
+        ("Secret value for openai.api_key: ", True),
+        ("Confirm secret value: ", True),
+    ]
+    assert fictional_secret not in stdout.getvalue() + stderr.getvalue()
+    assert list(application.history.load_history_strings()) == []
+    assert fictional_secret not in application.history.path.read_text(encoding="utf-8")
+
+
+def test_secret_mismatch_is_redacted_not_stored_and_not_persisted(
+    shell_module, app_context: AppContext
+) -> None:
+    entered = iter(("fictional-first-secret", "fictional-other-secret"))
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+
+        async def secret_prompt(_prompt: str, *, is_password: bool) -> str:
+            assert is_password is True
+            return next(entered)
+
+        application.secret_session.prompt_async = secret_prompt
+        asyncio.run(application.execute_line("secrets set anthropic.api_key"))
+        application.history.store_string("secrets set anthropic.api_key fictional-first-secret")
+
+    assert app_context.secrets.get("anthropic.api_key") is None
+    rendered = stdout.getvalue() + stderr.getvalue()
+    assert "SECRET_CONFIRMATION_FAILED" in rendered
+    assert "fictional-first-secret" not in rendered
+    assert "fictional-other-secret" not in rendered
+    assert list(application.history.load_history_strings()) == []
+
+
+def test_shell_redacts_route_results_and_errors(shell_module, app_context: AppContext, monkeypatch) -> None:
+    fictional_secret = "fictional-registered-secret"
+    app_context.secrets.register_sensitive(fictional_secret)
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(
+            type(application.router),
+            "route",
+            lambda _router, _command: RouteResult(
+                RouteKind.OUTPUT, {"result": fictional_secret}
+            ),
+        )
+        asyncio.run(application.execute_line("fictional output"))
+        monkeypatch.setattr(
+            type(application.router),
+            "route",
+            lambda _router, _command: (_ for _ in ()).throw(
+                AncestryError("FICTIONAL_FAILURE", f"provider returned {fictional_secret}")
+            ),
+        )
+        asyncio.run(application.execute_line("fictional error"))
+
+    rendered = stdout.getvalue() + stderr.getvalue()
+    assert fictional_secret not in rendered
+    assert '"result": "[REDACTED]"' in rendered
+    assert "[FICTIONAL_FAILURE] provider returned [REDACTED]" in rendered
+
+
+def test_shell_dispatches_direct_commands_off_the_event_loop(
+    shell_module, app_context: AppContext, monkeypatch
+) -> None:
+    invocation = types.SimpleNamespace(namespace=argparse.Namespace(command="modules", action="list"))
+    worker_identifiers: list[int] = []
+
+    def fake_dispatch(namespace: argparse.Namespace, context: AppContext) -> int:
+        assert namespace.command == "modules"
+        assert context is app_context
+        worker_identifiers.append(threading.get_ident())
+        return 0
+
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(
+            type(application.router),
+            "route",
+            lambda _router, _command: RouteResult(RouteKind.EXECUTE, invocation=invocation),
+        )
+        monkeypatch.setattr(shell_module, "dispatch", fake_dispatch)
+        loop_identifier = threading.get_ident()
+
+        asyncio.run(application.execute_line("modules list"))
+
+    assert worker_identifiers
+    assert worker_identifiers[0] != loop_identifier
+
+
+def test_main_uses_default_shell_legacy_console_and_preserves_one_shot_dispatch(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ancestryllm.cli as cli
+    from ancestryllm.console.app import AncestryConsole
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        shell_module,
+        "run_repl",
+        lambda context: calls.append(f"repl:{context is app_context}") or 17,
+    )
+    monkeypatch.setattr(AncestryConsole, "cmdloop", lambda _self: calls.append("legacy"))
+
+    def one_shot(namespace: argparse.Namespace, context: AppContext) -> int:
+        assert namespace.command == "modules"
+        assert namespace.action == "list"
+        assert context is app_context
+        calls.append("one-shot")
+        return 29
+
+    monkeypatch.setattr(cli, "dispatch", one_shot)
+
+    assert cli.main([], app_context) == 17
+    assert cli.main(["--legacy-console"], app_context) == 0
+    assert cli.main(["modules", "list"], app_context) == 29
+    assert calls == ["repl:True", "legacy", "one-shot"]
