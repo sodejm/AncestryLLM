@@ -159,6 +159,46 @@ def test_secret_mismatch_is_redacted_not_stored_and_not_persisted(
     assert list(application.history.load_history_strings()) == []
 
 
+@pytest.mark.parametrize("cancelled", (EOFError(), KeyboardInterrupt()))
+def test_secret_entry_cancellation_is_clean_and_stores_nothing(
+    shell_module, app_context: AppContext, cancelled: BaseException
+) -> None:
+    with create_pipe_input() as pipe:
+        application, _stdout, stderr = _application(shell_module, app_context, pipe)
+
+        async def cancelled_prompt(_prompt: str, *, is_password: bool) -> str:
+            assert is_password is True
+            raise cancelled
+
+        application.secret_session.prompt_async = cancelled_prompt
+        asyncio.run(application.execute_line("secrets set gemini.api_key"))
+
+    assert app_context.secrets.get("gemini.api_key") is None
+    assert "SECRET_ENTRY_CANCELLED" in stderr.getvalue()
+
+
+def test_unexpected_command_failures_are_sanitized(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fictional_secret = "fictional-sensitive-exception"
+    app_context.secrets.register_sensitive(fictional_secret)
+    with create_pipe_input() as pipe:
+        application, _stdout, stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(
+            type(application.router),
+            "route",
+            lambda _router, _command: (_ for _ in ()).throw(
+                RuntimeError(f"backend leaked {fictional_secret}")
+            ),
+        )
+
+        asyncio.run(application.execute_line("fictional failure"))
+
+    rendered = stderr.getvalue()
+    assert fictional_secret not in rendered
+    assert "REPL_COMMAND_FAILED" in rendered
+
+
 def test_shell_redacts_route_results_and_errors(
     shell_module, app_context: AppContext, monkeypatch
 ) -> None:

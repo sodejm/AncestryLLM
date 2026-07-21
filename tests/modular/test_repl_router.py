@@ -199,6 +199,7 @@ def test_router_direct_module_commands_and_parser_failures_use_shared_contract(
     assert result.invocation.namespace == build_parser().parse_args(list(result.invocation.tokens))
     assert _error_code(router.route, "gedcom fictional-action") == "REPL_USAGE_ERROR"
     assert _error_code(router.route, "exit now") == "REPL_USAGE_ERROR"
+    assert _error_code(router.route, "help gedcom extra") == "REPL_USAGE_ERROR"
 
 
 def test_router_import_does_not_load_terminal_ui_dependencies() -> None:
