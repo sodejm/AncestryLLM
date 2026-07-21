@@ -81,8 +81,8 @@ def history_is_sensitive(command: str, active_module: str | None = None) -> bool
 
     if tokens[0].casefold() == "set" and active_module and len(tokens) > 2:
         name = tokens[1].replace("-", "_").lstrip("_")
-        for action in COMMAND_SPECIFICATIONS[active_module].actions:
-            for argument in action.arguments:
+        for candidate_action in COMMAND_SPECIFICATIONS[active_module].actions:
+            for argument in candidate_action.arguments:
                 flags = {flag.lstrip("-").replace("-", "_") for flag in argument.flags}
                 if argument.sensitive and (name == argument.name or name in flags):
                     return True

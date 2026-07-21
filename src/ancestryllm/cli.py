@@ -346,11 +346,15 @@ def run_tokens(context: AppContext, tokens: Sequence[str]) -> int:
 
 def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if not arguments:
+    if arguments == ["--legacy-console"]:
         from ancestryllm.console.app import AncestryConsole
 
         AncestryConsole(context or AppContext.build()).cmdloop()
         return 0
+    if not arguments:
+        from ancestryllm.console.shell import run_repl
+
+        return run_repl(context)
     parser = build_parser()
     try:
         args = parser.parse_args(arguments)

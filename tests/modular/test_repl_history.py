@@ -41,7 +41,9 @@ def test_secure_history_refuses_a_symlink_path(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == '"modules"\n'
 
 
-def test_secure_history_recovers_from_malformed_records_and_obeys_load_limit(tmp_path: Path) -> None:
+def test_secure_history_recovers_from_malformed_records_and_obeys_load_limit(
+    tmp_path: Path,
+) -> None:
     history_path = tmp_path / "state" / "repl_history"
     history_path.parent.mkdir()
     history_path.write_text(

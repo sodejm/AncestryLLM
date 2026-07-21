@@ -241,6 +241,8 @@ class SessionRouter:
         )
 
     def _help(self, tokens: tuple[str, ...]) -> str:
+        if len(tokens) > 1:
+            raise AncestryError("REPL_USAGE_ERROR", "Usage: help [COMMAND]", exit_code=2)
         if not tokens:
             return (
                 "Root commands: modules, use MODULE, help [COMMAND], exit, quit. "

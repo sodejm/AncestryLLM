@@ -51,11 +51,15 @@ def shell_module(monkeypatch: pytest.MonkeyPatch):
         sys.modules.pop("ancestryllm.console.shell", None)
         module = importlib.import_module("ancestryllm.console.shell")
     monkeypatch.setattr(module, "create_completer", lambda *_args, **_kwargs: DummyCompleter())
-    monkeypatch.setattr(module, "build_completion_snapshot", lambda _context: _FakeCompletionSnapshot())
+    monkeypatch.setattr(
+        module, "build_completion_snapshot", lambda _context: _FakeCompletionSnapshot()
+    )
     return module
 
 
-def _application(shell_module, app_context: AppContext, pipe) -> tuple[object, io.StringIO, io.StringIO]:
+def _application(
+    shell_module, app_context: AppContext, pipe
+) -> tuple[object, io.StringIO, io.StringIO]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     application = shell_module.ReplApplication(
@@ -155,7 +159,9 @@ def test_secret_mismatch_is_redacted_not_stored_and_not_persisted(
     assert list(application.history.load_history_strings()) == []
 
 
-def test_shell_redacts_route_results_and_errors(shell_module, app_context: AppContext, monkeypatch) -> None:
+def test_shell_redacts_route_results_and_errors(
+    shell_module, app_context: AppContext, monkeypatch
+) -> None:
     fictional_secret = "fictional-registered-secret"
     app_context.secrets.register_sensitive(fictional_secret)
     with create_pipe_input() as pipe:
@@ -163,9 +169,7 @@ def test_shell_redacts_route_results_and_errors(shell_module, app_context: AppCo
         monkeypatch.setattr(
             type(application.router),
             "route",
-            lambda _router, _command: RouteResult(
-                RouteKind.OUTPUT, {"result": fictional_secret}
-            ),
+            lambda _router, _command: RouteResult(RouteKind.OUTPUT, {"result": fictional_secret}),
         )
         asyncio.run(application.execute_line("fictional output"))
         monkeypatch.setattr(
@@ -186,7 +190,9 @@ def test_shell_redacts_route_results_and_errors(shell_module, app_context: AppCo
 def test_shell_dispatches_direct_commands_off_the_event_loop(
     shell_module, app_context: AppContext, monkeypatch
 ) -> None:
-    invocation = types.SimpleNamespace(namespace=argparse.Namespace(command="modules", action="list"))
+    invocation = types.SimpleNamespace(
+        namespace=argparse.Namespace(command="modules", action="list")
+    )
     worker_identifiers: list[int] = []
 
     def fake_dispatch(namespace: argparse.Namespace, context: AppContext) -> int:
