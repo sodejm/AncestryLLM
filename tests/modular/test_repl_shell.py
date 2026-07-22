@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import importlib
 import io
+import json
 import sys
 import threading
 import types
@@ -299,3 +300,24 @@ def test_main_rejects_legacy_console_like_unknown_or_unsupported_options(
     assert legacy_raised.value.code == unsupported_raised.value.code == 2
     assert "the following arguments are required: command" in legacy_error
     assert legacy_error == unsupported_error.replace("--unsupported-option", "--legacy-console")
+
+
+def test_prompt_toolkit_repl_preserves_modules_list_json_schema(
+    shell_module, app_context: AppContext
+) -> None:
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(application.execute_line("modules list --json"))
+
+    modules = json.loads(stdout.getvalue())
+    gedcom = next(module for module in modules if module["module_id"] == "gedcom")
+    assert set(gedcom) == {
+        "module_id",
+        "name",
+        "summary",
+        "actions",
+        "implementation",
+        "configuration",
+        "required_services",
+    }
+    assert gedcom["actions"] == ["merge", "subtree", "quality", "sync"]
