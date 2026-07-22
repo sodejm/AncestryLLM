@@ -4,7 +4,8 @@
 
 Sensitive assets are genealogy records, living-person status, notes, provider
 credentials, SQLCipher keys, prompts/responses, consent grants, and RootsMagic
-source files. Data crosses boundaries at console input, GEDCOM/RootsMagic parsing,
+source files. Data crosses boundaries at prompt-toolkit/Rich REPL input,
+one-shot CLI input, GEDCOM/RootsMagic parsing,
 the OS keyring, encrypted database, configured provider endpoints, and exported
 files. The local operator is trusted to choose data and consent; imported
 genealogy content and every model response are untrusted.
@@ -21,11 +22,11 @@ untrusted GEDCOM / RootsMagic -> bounded parsers -> application services
 | Risk | Applicability and controls | Verification |
 |---|---|---|
 | A01 Broken Access Control | Single-user local v1; paths are scoped, module registry is explicit, RootsMagic is immutable. Future API must add authentication/authorization. | Path traversal and disabled-module tests. |
-| A02 Security Misconfiguration | Secure defaults, no network provider by default, no shell/redirection, restrictive permissions, bounded limits. | Clean-install and console tests. |
+| A02 Security Misconfiguration | Secure defaults, no network provider by default, prompt-toolkit/Rich REPL as the only interactive console, no shell/redirection, restrictive permissions, bounded limits. | Clean-install and console tests. |
 | A03 Software Supply Chain Failures | Locked dependencies, optional provider extras, Dependabot, audit, SBOM, pinned CI actions. | `uv lock`, `pip-audit`, CycloneDX. |
 | A04 Cryptographic Failures | SQLCipher required; 256-bit random key in OS keyring; plaintext and wrong keys rejected; encrypted backups. | Header, wrong-key, integrity, backup tests. |
-| A05 Injection | SQL AST validation, allowlisted schema, SQLite authorizer; no generated command/code execution; prompt content delimited as data. | SQL/prompt injection tests and Semgrep. |
-| A06 Insecure Design | Separate adapters/services, explicit consent, data minimization, conservative deletions, threat review. | Architecture and invariant tests. |
+| A05 Injection | SQL AST validation, allowlisted schema, SQLite authorizer; no generated command/code execution; prompt content delimited as data; REPL parsing is strict and transport-neutral. | SQL/prompt/console injection tests and Semgrep. |
+| A06 Insecure Design | Separate adapters/services, explicit consent, explicit module registry and command specifications, data minimization, conservative deletions, threat review. | Architecture and invariant tests. |
 | A07 Authentication Failures | Not applicable to the single-user local adapter; OS keyring supplies platform authentication. API remains out of scope. | Future-API release blocker. |
 | A08 Software or Data Integrity Failures | Source hashes, SQLCipher integrity, validated structured output, immutable prompt revisions, atomic writes. | Hash, schema, round-trip, rollback tests. |
 | A09 Security Logging and Alerting Failures | Stable error codes and privacy-minimal run metadata; payload logging off; secret redaction. Local v1 has no remote alerting. | Error/redaction tests; documented limitation. |
@@ -40,7 +41,7 @@ untrusted GEDCOM / RootsMagic -> bounded parsers -> application services
 | LLM03 Supply Chain | Provider SDKs are optional and locked; dependency/SBOM/security scans gate release. |
 | LLM04 Data and Model Poisoning | Retrieval is not implemented. Any future local index must fingerprint sources, preserve provenance, treat retrieved text as untrusted context, and detect stale/conflicting material before display or generation. |
 | LLM05 Improper Output Handling | JSON Schema validation and length caps; output is never executable. |
-| LLM06 Excessive Agency | No autonomous agents, tool calls, shell, write-capable SQL, or automatic destructive decisions. |
+| LLM06 Excessive Agency | No autonomous agents, tool calls, shell, interactive-console escape hatch, write-capable SQL, or automatic destructive decisions. |
 | LLM07 System Prompt Leakage | Prompts contain no credentials; templates and untrusted content are separated; disclosure is treated as possible. |
 | LLM08 Vector and Embedding Weaknesses | Embeddings/vector stores remain unimplemented. A future feature requires SQLCipher-local storage by default, workspace and consent partitioning, restricted-data exclusion, versioned invalidation, bounded retrieval, and explicit cloud-retention consent. |
 | LLM09 Misinformation | Deterministic evidence remains authoritative; LLM adjudication is optional and cannot delete conflicts. |
