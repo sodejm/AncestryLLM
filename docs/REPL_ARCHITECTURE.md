@@ -2,23 +2,23 @@
 
 The interactive console is a local UI over the same application services used
 by the one-shot CLI. The consolidated Issues #46–#49 implementation makes the
-asynchronous `prompt_toolkit` REPL, installed by the main package, the default
-no-argument interface while preserving the one-shot interface and a temporary
-legacy fallback.
+asynchronous prompt-toolkit/Rich REPL, installed by the main package, the only
+supported no-argument interactive interface while preserving the one-shot
+interface.
 
 ## Decision record
 
-**Status:** Implemented for the default shell and context-aware completion;
-background jobs/cooperative cancellation and final `cmd2` removal remain
-future migration work.
+**Status:** Implemented for the prompt-toolkit/Rich REPL and context-aware
+completion. Interactive console consolidation is complete; remaining future
+work is limited to features such as structured background jobs and cooperative
+cancellation.
 
 The application uses transport-neutral command specifications and
 invocation/result contracts between input adapters and application services.
 `ancestry MODULE ACTION ...` remains the one-shot compatibility authority. A
-no-argument `ancestry` invocation starts the asynchronous `prompt_toolkit`
-REPL, while `ancestry --legacy-console` starts the temporary `cmd2` fallback.
-No API, WebUI, multi-user server, autonomous agent, Python execution, or LLM
-tool-execution capability is part of this decision.
+no-argument `ancestry` invocation starts the asynchronous prompt-toolkit/Rich
+REPL. No API, WebUI, multi-user server, autonomous agent, Python execution, or
+LLM tool-execution capability is part of this decision.
 
 ## Target layers
 
@@ -83,10 +83,9 @@ dependency.
   history, and interactive history is stored with owner-only permissions.
 - Provider selection and consent stay explicit. `provider=none` remains
   network-free even when keys or provider SDKs are installed.
-- Background jobs, progress management, and cooperative cancellation are not
-  yet part of the completed migration. Final removal of `cmd2` is also future
-  work; the `--legacy-console` switch remains until parity and security gates
-  are satisfied.
+- Structured background jobs, progress management, and cooperative cancellation
+  are not part of the completed console consolidation. They require their own
+  lifecycle and shutdown design before implementation.
 
 ## Migration status
 
@@ -94,23 +93,34 @@ dependency.
 |---|---|---|
 | Shared command specifications and typed invocation contracts | Implemented | One-shot and REPL use the same command metadata |
 | Session routing and root/active-module controls | Implemented | State is non-secret and UI-independent |
-| Default asynchronous `prompt_toolkit` REPL | Implemented | Starts with no arguments and is installed by the main package |
+| Asynchronous prompt-toolkit/Rich REPL | Implemented | Starts with no arguments and is installed by the main package |
 | Context-aware completion | Implemented | Static/snapshot-driven, privacy-filtered, CWD-bounded |
 | Secure history and no-echo secret entry | Implemented | Owner-only history; secrets excluded and redacted |
 | Background jobs and cooperative cancellation | Future work | Requires structured job lifecycle and atomic shutdown behavior |
-| Final `cmd2` removal | Future work | Retain `ancestry --legacy-console` until parity/security validation |
 
 ## Compatibility paths
 
 ```text
 ancestry MODULE ACTION ...       -> unchanged one-shot parser and dispatcher
-ancestry                          -> asynchronous prompt_toolkit REPL
-ancestry --legacy-console         -> temporary cmd2 compatibility console
+ancestry                          -> asynchronous prompt-toolkit/Rich REPL
 ```
 
-The fallback is an explicit migration aid, not a second application service
-path. All supported adapters must preserve one-shot semantics, provider policy,
+The REPL and one-shot CLI are sibling adapters, not separate application service
+paths. All supported adapters must preserve one-shot semantics, provider policy,
 stable errors, and source-file safety guarantees.
+
+## Command registration model
+
+Built-in commands are declared once in the explicit module registry. Each
+module has a `ModuleDescriptor` for identity and implementation location plus a
+transport-neutral `CommandSpec` containing its actions and typed arguments. The
+one-shot CLI parser, REPL router, help output, active-module `run` command, and
+completion all consume that metadata.
+
+Module implementations stay thin: they receive parsed, typed invocation data,
+delegate to application services, and return serializable DTOs or stable coded
+errors. They do not own terminal input, Rich rendering, storage, provider
+selection, consent policy, or secret retrieval.
 
 ## Explicitly rejected shortcuts
 
@@ -130,11 +140,12 @@ stable errors, and source-file safety guarantees.
 ## Allowed dependencies
 
 `prompt-toolkit` is a main-package dependency and supplies the asynchronous
-prompt, completion primitives, history support, and terminal editing. The
-project-specific completion adapter composes those public primitives with the
-existing command specifications and privacy policy; it does not introduce a
-second completion library or a new runtime framework dependency.
+prompt, completion primitives, history support, and terminal editing. Rich is
+used only by presentation adapters for terminal rendering. The project-specific
+completion adapter composes prompt-toolkit public primitives with the existing
+command specifications and privacy policy; it does not introduce a second
+completion library or a new runtime framework dependency.
 
 The one-shot CLI and REPL are sibling adapters over the same execution and
-service contracts. Any implementation that makes services depend on `cmd2`,
-`prompt_toolkit`, or Rich remains outside the target architecture.
+service contracts. Any implementation that makes services depend on
+`prompt_toolkit` or Rich remains outside the target architecture.
