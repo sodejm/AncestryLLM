@@ -110,6 +110,111 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
         assert asyncio.run(application.run_async()) == 0
 
 
+def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdown(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    question = "Compare both records.\n\n- Explain the conflict\n- Cite the stronger source"
+    captured: list[argparse.Namespace] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+
+        async def multiline_prompt(prompt: str, **kwargs: object) -> str:
+            assert prompt.startswith("Natural-language question")
+            assert kwargs == {"multiline": True, "prompt_continuation": "... "}
+            return question
+
+        application.multiline_session.prompt_async = multiline_prompt
+        monkeypatch.setattr(
+            shell_module,
+            "dispatch",
+            lambda namespace, _context: captured.append(namespace) or 0,
+        )
+        asyncio.run(
+            application.execute_line(
+                "rootsmagic query --tree fictional --provider none --model offline"
+            )
+        )
+
+    assert len(captured) == 1
+    assert captured[0].question == question
+    assert list(application.history.load_history_strings()) == []
+
+
+def test_missing_prompt_body_uses_multiline_editor_in_module_context(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = "Research $person.\n\nReturn **Markdown**."
+    captured: list[argparse.Namespace] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        application.router.route("use prompts")
+
+        async def multiline_prompt(_prompt: str, **_kwargs: object) -> str:
+            return body
+
+        application.multiline_session.prompt_async = multiline_prompt
+        monkeypatch.setattr(
+            shell_module,
+            "dispatch",
+            lambda namespace, _context: captured.append(namespace) or 0,
+        )
+        asyncio.run(
+            application.execute_line("run save research-plan --purpose research --variable person")
+        )
+
+    assert len(captured) == 1
+    assert captured[0].body == body
+
+
+@pytest.mark.parametrize(
+    ("value", "error_code"),
+    (("", "MULTILINE_INPUT_EMPTY"), ("x" * 100_001, "MULTILINE_INPUT_TOO_LARGE")),
+)
+def test_multiline_editor_rejects_empty_and_oversized_input(
+    shell_module,
+    app_context: AppContext,
+    value: str,
+    error_code: str,
+) -> None:
+    with create_pipe_input() as pipe:
+        application, _stdout, stderr = _application(shell_module, app_context, pipe)
+
+        async def multiline_prompt(_prompt: str, **_kwargs: object) -> str:
+            return value
+
+        application.multiline_session.prompt_async = multiline_prompt
+        asyncio.run(application.execute_line("rootsmagic query --tree fictional"))
+
+    assert error_code in stderr.getvalue()
+
+
+@pytest.mark.parametrize("cancelled", (EOFError(), KeyboardInterrupt()))
+def test_multiline_editor_cancellation_does_not_dispatch(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+    cancelled: BaseException,
+) -> None:
+    dispatched = False
+    with create_pipe_input() as pipe:
+        application, _stdout, stderr = _application(shell_module, app_context, pipe)
+
+        async def multiline_prompt(_prompt: str, **_kwargs: object) -> str:
+            raise cancelled
+
+        def dispatch(_namespace: argparse.Namespace, _context: AppContext) -> int:
+            nonlocal dispatched
+            dispatched = True
+            return 0
+
+        application.multiline_session.prompt_async = multiline_prompt
+        monkeypatch.setattr(shell_module, "dispatch", dispatch)
+        asyncio.run(application.execute_line("rootsmagic query --tree fictional"))
+
+    assert not dispatched
+    assert "MULTILINE_INPUT_CANCELLED" in stderr.getvalue()
+
+
 def test_secret_entry_is_no_echo_confirmed_stored_and_never_persisted(
     shell_module, app_context: AppContext
 ) -> None:

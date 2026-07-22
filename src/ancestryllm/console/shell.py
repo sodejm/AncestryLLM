@@ -17,8 +17,10 @@ from prompt_toolkit.output import Output
 from ancestryllm.cli import dispatch
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
+from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
+from ancestryllm.console.parser import split_repl_input
 from ancestryllm.console.presentation import PresentationAdapter
-from ancestryllm.console.router import RouteKind, SessionRouter
+from ancestryllm.console.router import RouteKind, RouteResult, SessionRouter
 from ancestryllm.console.security import (
     RedactingTextIO,
     credential_values,
@@ -96,6 +98,13 @@ class ReplApplication:
             input=input,
             output=output,
         )
+        self.multiline_session: PromptSession[str] = PromptSession(
+            history=DummyHistory(),
+            complete_while_typing=False,
+            input=input,
+            output=output,
+        )
+        self.multiline_editor = MultilineEditor(cast(AsyncPrompt, self.multiline_session))
 
     async def run_async(self) -> int:
         if not self.history.persistent:
@@ -116,7 +125,7 @@ class ReplApplication:
         for value in credential_values(command):
             self.context.secrets.register_sensitive(value)
         try:
-            result = self.router.route(command)
+            result = await self._route(command)
             if result.kind is RouteKind.EXIT:
                 return True
             if result.kind is RouteKind.EMPTY:
@@ -154,6 +163,47 @@ class ReplApplication:
                 )
             )
         return False
+
+    async def _route(self, command: str) -> RouteResult:
+        tokens = split_repl_input(command)
+        target = self._multiline_target(tokens)
+        if target is None:
+            return self.router.route(command)
+        option, prompt = target
+        value = await self.multiline_editor.read(prompt)
+        return self.router.route_tokens((*tokens, option, value))
+
+    def _multiline_target(self, tokens: tuple[str, ...]) -> tuple[str, str] | None:
+        if not tokens:
+            return None
+        module: str | None = None
+        action: str | None = None
+        supplied = tokens
+        if len(tokens) >= 2 and tokens[0] in {"rootsmagic", "prompts"}:
+            module, action = tokens[:2]
+        elif self.router.active_module in {"rootsmagic", "prompts"} and tokens[0] == "run":
+            module = self.router.active_module
+            action = tokens[1] if len(tokens) >= 2 else self.router.module_options.get("action")
+
+        if module == "rootsmagic" and action == "query":
+            configured = self.router.module_options
+            if (
+                "--sql" not in supplied
+                and "--question" not in supplied
+                and "sql" not in configured
+                and "question" not in configured
+            ):
+                return "--question", "Natural-language question (Esc+Enter to submit):\n"
+        if module == "prompts" and action == "save":
+            configured = self.router.module_options
+            if (
+                "--body" not in supplied
+                and "--body-file" not in supplied
+                and "body" not in configured
+                and "body_file" not in configured
+            ):
+                return "--body", "Prompt body (Esc+Enter to submit):\n"
+        return None
 
     def _dispatch(self, namespace: argparse.Namespace) -> int:
         with (

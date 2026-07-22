@@ -36,6 +36,33 @@ The session controls are:
   actions may also be entered at the root prompt, such as `providers list`.
 - `exit`, `quit`, or EOF leaves the REPL.
 
+## Multiline free text
+
+In the interactive console, omit `--question` from `rootsmagic query` or omit
+both `--body` and `--body-file` from `prompts save` to open the multiline
+editor. The editor preserves newlines and Markdown exactly and passes the whole
+value as one argument; it never parses entered prose as a command. Press
+Esc+Enter to submit or Ctrl-C to cancel. Empty input is rejected, input is
+limited to 100,000 characters, and multiline content is never written to REPL
+history.
+
+```text
+ancestry > rootsmagic query --tree family --provider ollama --model llama3
+Natural-language question (Esc+Enter to submit):
+> Compare the two candidate birth records.
+>
+> Explain the evidence as a Markdown list.
+
+ancestry > prompts save research-plan --purpose research --variable person
+Prompt body (Esc+Enter to submit):
+> Build a research plan for $person.
+>
+> Include sources and unresolved conflicts.
+```
+
+One-shot commands remain intentionally non-interactive: they require
+`--question`, `--body`, or `--body-file` explicitly.
+
 Secret-like option names are rejected by `set`. Use the dedicated `secrets`
 commands and their no-echo prompts for secret operations; secret values are
 never stored in session options.
