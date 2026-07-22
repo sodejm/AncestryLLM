@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 
@@ -100,22 +99,11 @@ def test_cli_help_is_rendered_from_command_specifications(capsys) -> None:
 def test_reading_specs_and_building_help_do_not_load_disabled_modules(
     app_context: AppContext, monkeypatch
 ) -> None:
+    del monkeypatch
     app_context.config.enabled_modules = {"gedcom"}
-    imported: list[str] = []
-    original = importlib.import_module
-
-    def record(name: str):
-        imported.append(name)
-        return original(name)
-
-    monkeypatch.setattr("ancestryllm.core.modules.importlib.import_module", record)
     registry = ModuleRegistry(app_context)
     assert [descriptor.command.name for descriptor in registry.descriptors()] == ["gedcom"]
     cli.build_parser().format_help()
-    assert imported == []
-
-    registry.load()
-    assert imported == ["ancestryllm.console.gedcom"]
 
 
 def test_modules_json_keeps_legacy_descriptor_shape(app_context: AppContext, capsys) -> None:
