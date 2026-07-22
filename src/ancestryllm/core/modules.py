@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Protocol
 
 from ancestryllm.core.context import AppContext
 
@@ -139,7 +138,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "rootsmagic",
         "RootsMagic",
         "Immutable RootsMagic discovery, query, and GEDCOM export.",
-        "ancestryllm.console.rootsmagic:RootsMagicModule",
+        "ancestryllm.cli:run_tokens",
         ("storage.family_tree_dirs", "limits.max_query_rows", "limits.query_timeout_seconds"),
         ("rootsmagic", "llm"),
     ),
@@ -147,7 +146,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "gedcom",
         "GEDCOM",
         "Loss-minimizing merge, subtree, quality, update, and rebase.",
-        "ancestryllm.console.gedcom:GedcomModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("gedcom", "llm"),
     ),
@@ -155,7 +154,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "ocr",
         "OCR",
         "Schema-validated genealogy extraction from OCR text.",
-        "ancestryllm.console.ocr:OcrModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("llm",),
     ),
@@ -163,7 +162,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "prompts",
         "Prompts",
         "Versioned prompt templates and safe rendering.",
-        "ancestryllm.console.prompts:PromptsModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("prompts", "database"),
     ),
@@ -171,7 +170,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "people",
         "People",
         "Curated encrypted research-person workspace.",
-        "ancestryllm.console.people:PeopleModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("research", "database"),
     ),
@@ -179,7 +178,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "providers",
         "Providers",
         "Explicit LLM provider profiles and consent status.",
-        "ancestryllm.console.providers:ProvidersModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("provider_profiles",),
     ),
@@ -187,7 +186,7 @@ BUILTIN_MODULES: dict[str, ModuleDescriptor] = {
         "secrets",
         "Secrets",
         "No-echo OS-keyring credential management.",
-        "ancestryllm.console.secrets:SecretsModule",
+        "ancestryllm.cli:run_tokens",
         (),
         ("secrets",),
     ),
@@ -911,13 +910,10 @@ class ModuleRegistry:
             if name in BUILTIN_MODULES
         ]
 
-    def load(self) -> list[Any]:
-        loaded: list[Any] = []
-        for descriptor in self.descriptors():
-            module_name, class_name = descriptor.implementation.split(":", 1)
-            implementation = getattr(importlib.import_module(module_name), class_name)
-            loaded.append(implementation(self.context, descriptor))
-        return loaded
+    def load(self) -> list[ModuleDescriptor]:
+        """Return enabled descriptors without importing obsolete console adapters."""
+
+        return self.descriptors()
 
     def enable(self, module_id: str) -> None:
         if module_id not in BUILTIN_MODULES:
