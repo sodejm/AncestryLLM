@@ -65,6 +65,22 @@ def test_parser_namespace_matches_one_shot_for_quoted_paths_and_repeated_flags()
     assert repl_namespace.generations == 3
 
 
+def test_router_preserves_pre_tokenized_multiline_prose_as_one_argument(
+    app_context: AppContext,
+) -> None:
+    router = SessionRouter(app_context)
+    question = "Compare both records.\n\n- Explain the conflict\n- Cite the stronger source"
+
+    result = router.route_tokens(
+        ("rootsmagic", "query", "--tree", "fictional", "--question", question)
+    )
+
+    assert result.kind is RouteKind.EXECUTE
+    assert result.invocation is not None
+    assert result.invocation.namespace.question == question
+    assert result.invocation.tokens[-1] == question
+
+
 @pytest.mark.parametrize(
     "command",
     (
