@@ -7,7 +7,7 @@ import getpass
 import json
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from ancestryllm.console.presentation import PresentationAdapter
 from ancestryllm.core.config import AppConfig
@@ -122,18 +122,23 @@ def _key_values(values: list[str]) -> dict[str, str]:
     return result
 
 
-def dispatch(args: argparse.Namespace, context: AppContext) -> int:
+def dispatch(
+    args: argparse.Namespace,
+    context: AppContext,
+    *,
+    emit: Callable[[Any, bool], None] = _emit,
+) -> int:
     json_output = bool(args.json)
     if args.command == "modules":
         registry = ModuleRegistry(context)
         if args.action == "list":
-            _emit([_descriptor_payload(item) for item in registry.descriptors()], json_output)
+            emit([_descriptor_payload(item) for item in registry.descriptors()], json_output)
         elif args.action == "enable":
             registry.enable(args.module_id)
-            _emit(f"Enabled module: {args.module_id}", json_output)
+            emit(f"Enabled module: {args.module_id}", json_output)
         else:
             registry.disable(args.module_id)
-            _emit(f"Disabled module: {args.module_id}", json_output)
+            emit(f"Disabled module: {args.module_id}", json_output)
         return 0
 
     if args.command == "rootsmagic":
@@ -141,7 +146,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
 
         rootsmagic_service = RootsMagicService(context.config, context.llm)
         if args.action == "list":
-            _emit(rootsmagic_service.list_trees(), json_output)
+            emit(rootsmagic_service.list_trees(), json_output)
         elif args.action == "query":
             query_result = (
                 rootsmagic_service.query_sql(args.tree, args.sql)
@@ -154,7 +159,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                     consent=_consent(context, args.consent),
                 )
             )
-            _emit(query_result, json_output)
+            emit(query_result, json_output)
         else:
             export_result = rootsmagic_service.export(
                 args.tree,
@@ -168,7 +173,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                 living=args.living,
                 report_path=args.report,
             )
-            _emit(export_result, json_output)
+            emit(export_result, json_output)
         return 0
 
     if args.command == "gedcom":
@@ -187,9 +192,9 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                 consent=_consent(context, args.consent),
                 threshold=args.similarity_threshold,
             )
-            _emit(gedcom_result, json_output)
+            emit(gedcom_result, json_output)
         elif args.action == "subtree":
-            _emit(
+            emit(
                 gedcom_service.subtree(
                     args.input,
                     args.output,
@@ -201,7 +206,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                 json_output,
             )
         elif args.action == "quality":
-            _emit(
+            emit(
                 gedcom_service.quality(args.input, args.output, root_person=args.root_person),
                 json_output,
             )
@@ -211,7 +216,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
 
     if args.command == "prompts":
         if args.action == "list":
-            _emit(context.prompts.list(), json_output)
+            emit(context.prompts.list(), json_output)
         elif args.action == "save":
             body = (
                 args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
@@ -221,16 +226,16 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                 if args.schema_file
                 else None
             )
-            _emit(
+            emit(
                 context.prompts.save(
                     args.name, args.purpose, body, args.variable, schema, args.tag
                 ),
                 json_output,
             )
         elif args.action == "show":
-            _emit(context.prompts.get(args.name, args.version), json_output)
+            emit(context.prompts.get(args.name, args.version), json_output)
         else:
-            _emit(
+            emit(
                 context.prompts.render(args.name, _key_values(args.value), args.version),
                 json_output,
             )
@@ -238,9 +243,9 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
 
     if args.command == "people":
         if args.action == "list":
-            _emit(context.research.list_people(args.workspace), json_output)
+            emit(context.research.list_people(args.workspace), json_output)
         else:
-            _emit(
+            emit(
                 context.research.add_person(
                     args.display_name,
                     LivingStatus(args.living_status),
@@ -253,7 +258,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
 
     if args.command == "providers":
         if args.action == "list":
-            _emit(
+            emit(
                 {
                     "profiles": context.provider_profiles.list_profiles(),
                     "consents": context.provider_profiles.list_consents(),
@@ -261,12 +266,12 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
                 json_output,
             )
         elif args.action == "create":
-            _emit(
+            emit(
                 context.provider_profiles.create_profile(args.name, args.provider, args.model),
                 json_output,
             )
         elif args.action == "consent":
-            _emit(
+            emit(
                 context.provider_profiles.create_consent(
                     args.name,
                     args.profile,
@@ -281,7 +286,7 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
             )
         else:
             context.provider_profiles.revoke_consent(args.name)
-            _emit(f"Revoked consent: {args.name}", json_output)
+            emit(f"Revoked consent: {args.name}", json_output)
         return 0
 
     if args.command == "secrets":
@@ -303,12 +308,12 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
             if value != confirmation:
                 raise AncestryError("SECRET_CONFIRMATION_FAILED", "Secret values did not match.")
             context.secrets.set(args.name, value)
-            _emit(f"Stored secret reference: {args.name}", json_output)
+            emit(f"Stored secret reference: {args.name}", json_output)
         elif args.action == "delete":
             context.secrets.delete(args.name)
-            _emit(f"Deleted secret reference: {args.name}", json_output)
+            emit(f"Deleted secret reference: {args.name}", json_output)
         else:
-            _emit({name: context.secrets.present(name) for name in names}, json_output)
+            emit({name: context.secrets.present(name) for name in names}, json_output)
         return 0
 
     if args.command == "ocr":
@@ -323,17 +328,17 @@ def dispatch(args: argparse.Namespace, context: AppContext) -> int:
             model=args.model,
             consent=_consent(context, args.consent),
         )
-        _emit(ocr_result, json_output)
+        emit(ocr_result, json_output)
         return 0
 
     if args.command == "database":
         if args.action == "diagnose":
             from ancestryllm.storage.diagnostics import diagnose_storage
 
-            _emit(diagnose_storage(context.database.path, context.secrets), json_output)
+            emit(diagnose_storage(context.database.path, context.secrets), json_output)
             return 0
         context.database.backup(args.destination.expanduser().resolve())
-        _emit(f"Encrypted backup created: {args.destination}", json_output)
+        emit(f"Encrypted backup created: {args.destination}", json_output)
         return 0
     raise AncestryError("COMMAND_UNKNOWN", "Unknown command.")
 

@@ -124,16 +124,25 @@ def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdow
             return question
 
         application.multiline_session.prompt_async = multiline_prompt
-        monkeypatch.setattr(
-            shell_module,
-            "dispatch",
-            lambda namespace, _context: captured.append(namespace) or 0,
-        )
+
+        def dispatch(
+            namespace: argparse.Namespace,
+            _context: AppContext,
+            *,
+            emit,
+        ) -> int:
+            del emit
+            captured.append(namespace)
+            return 0
+
+        monkeypatch.setattr(shell_module, "dispatch", dispatch)
         asyncio.run(
             application.execute_line(
                 "rootsmagic query --tree fictional --provider none --model offline"
             )
         )
+        application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
 
     assert len(captured) == 1
     assert captured[0].question == question
@@ -360,6 +369,52 @@ def test_shell_dispatches_direct_commands_off_the_event_loop(
         asyncio.run(application.execute_line("modules list"))
 
     assert worker_identifiers
+    assert worker_identifiers[0] != loop_identifier
+
+
+def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    worker_identifiers: list[int] = []
+
+    def fake_dispatch(
+        namespace: argparse.Namespace,
+        context: AppContext,
+        *,
+        emit,
+    ) -> int:
+        assert namespace.command == "rootsmagic"
+        assert namespace.action == "query"
+        assert context is app_context
+        worker_identifiers.append(threading.get_ident())
+        started.set()
+        assert release.wait(2)
+        emit({"rows": 1}, False)
+        return 0
+
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(shell_module, "dispatch", fake_dispatch)
+        loop_identifier = threading.get_ident()
+
+        asyncio.run(
+            application.execute_line("rootsmagic query --tree fictional --question 'Who is Ada?'")
+        )
+        assert started.wait(2)
+        job = application.jobs.list()[0]
+        assert job.state.value == "running"
+        assert "j000001" in stdout.getvalue()
+
+        asyncio.run(application.execute_line("jobs show j000001"))
+        release.set()
+        completed = application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
+
+    assert completed.state.value == "completed"
+    assert completed.result == {"exit_code": 0, "output": [{"rows": 1}]}
+    assert worker_identifiers == [worker_identifiers[0]]
     assert worker_identifiers[0] != loop_identifier
 
 
