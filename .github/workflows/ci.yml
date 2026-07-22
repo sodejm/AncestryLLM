@@ -22,6 +22,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - name: Cache uv downloads and builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ matrix.python }}-
       - name: Install locked environment
         run: |
           python -m pip install --disable-pip-version-check uv
@@ -40,9 +47,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Scan commits for secrets
+        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        with:
+          version: 3.95.9
+          extra_args: --results=verified,unknown --fail-on-scan-errors
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
+      - name: Cache uv downloads and builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-3.12-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-3.12-
       - name: Install locked environment
         run: |
           python -m pip install --disable-pip-version-check uv
