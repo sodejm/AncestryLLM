@@ -1,21 +1,15 @@
 # Console guide
 
-Running `ancestry` with no arguments starts the default asynchronous
-`prompt_toolkit` REPL installed by the main package. The REPL is an input and
-presentation adapter over the same command specifications and application
-services used by one-shot execution. One-shot usage is unchanged:
-`ancestry MODULE ACTION ...` continues to parse and dispatch the documented
-CLI grammar.
+Running `ancestry` with no arguments starts the supported interactive console.
+The console is the asynchronous prompt-toolkit/Rich REPL installed by the main
+package. It is the only interactive console surface; one-shot usage is
+unchanged: `ancestry MODULE ACTION ...` continues to parse and dispatch the
+documented CLI grammar.
 
-The legacy `cmd2` console remains available temporarily with:
-
-```text
-ancestry --legacy-console
-```
-
-This switch is a compatibility fallback during the migration. It does not
-change one-shot behavior, and final removal of the `cmd2` implementation is
-future work after parity and security validation.
+The REPL is an input and presentation adapter over the same transport-neutral
+command specifications and application services used by one-shot execution. It
+does not provide a shell, Python evaluator, plugin loader, or separate business
+logic path.
 
 ## Navigation and controls
 
@@ -59,6 +53,20 @@ The REPL is not a shell or scripting engine. It rejects shell and Python
 execution, script loading, aliases/macros, command substitution or other
 expansion, pipes, redirects, and related shell syntax. There is no command
 path that evaluates user input as Python or generated code.
+
+## Command registration
+
+Built-in modules are registered in the explicit module registry as
+`ModuleDescriptor` entries with matching transport-neutral `CommandSpec`
+metadata. The same command metadata drives one-shot argparse wiring, REPL
+routing, help text, completion, and validation. Interactive commands are
+therefore not authored as terminal-specific command classes; they are exposed
+through descriptors, action specifications, argument specifications, and thin
+service dispatchers that return serializable DTOs or stable coded errors.
+
+A module can be disabled through configuration only when it is present in the
+registry. Disabled modules are not available through direct root commands,
+module context navigation, or completion.
 
 ## Tab completion
 
