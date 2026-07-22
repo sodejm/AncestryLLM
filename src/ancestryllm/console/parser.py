@@ -66,12 +66,16 @@ def parse_repl_invocation(tokens: Sequence[str]) -> ParsedInvocation:
 
     from ancestryllm.cli import build_parser
 
+    normalized_tokens = list(tokens)
+    if "--json" in normalized_tokens[1:]:
+        normalized_tokens.remove("--json")
+        normalized_tokens.insert(0, "--json")
     parser = build_parser()
     stdout = io.StringIO()
     stderr = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            namespace = parser.parse_args(list(tokens))
+            namespace = parser.parse_args(normalized_tokens)
     except SystemExit as exc:
         rendered = (stderr.getvalue() or stdout.getvalue()).strip()
         detail = rendered.splitlines()[-1] if rendered else "Invalid command arguments."
@@ -81,4 +85,4 @@ def parse_repl_invocation(tokens: Sequence[str]) -> ParsedInvocation:
             "Use `help` or inspect the one-shot command help for the accepted arguments.",
             exit_code=2 if exc.code else 0,
         ) from exc
-    return ParsedInvocation(tuple(tokens), namespace)
+    return ParsedInvocation(tuple(normalized_tokens), namespace)
