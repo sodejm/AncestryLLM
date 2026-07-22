@@ -257,11 +257,10 @@ def test_shell_dispatches_direct_commands_off_the_event_loop(
     assert worker_identifiers[0] != loop_identifier
 
 
-def test_main_uses_default_shell_legacy_console_and_preserves_one_shot_dispatch(
+def test_main_uses_default_shell_and_preserves_one_shot_dispatch(
     shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import ancestryllm.cli as cli
-    from ancestryllm.console.app import AncestryConsole
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -269,7 +268,6 @@ def test_main_uses_default_shell_legacy_console_and_preserves_one_shot_dispatch(
         "run_repl",
         lambda context: calls.append(f"repl:{context is app_context}") or 17,
     )
-    monkeypatch.setattr(AncestryConsole, "cmdloop", lambda _self: calls.append("legacy"))
 
     def one_shot(namespace: argparse.Namespace, context: AppContext) -> int:
         assert namespace.command == "modules"
@@ -281,6 +279,23 @@ def test_main_uses_default_shell_legacy_console_and_preserves_one_shot_dispatch(
     monkeypatch.setattr(cli, "dispatch", one_shot)
 
     assert cli.main([], app_context) == 17
-    assert cli.main(["--legacy-console"], app_context) == 0
     assert cli.main(["modules", "list"], app_context) == 29
-    assert calls == ["repl:True", "legacy", "one-shot"]
+    assert calls == ["repl:True", "one-shot"]
+
+
+def test_main_rejects_legacy_console_like_unknown_or_unsupported_options(
+    app_context: AppContext, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import ancestryllm.cli as cli
+
+    with pytest.raises(SystemExit) as legacy_raised:
+        cli.main(["--legacy-console"], app_context)
+    legacy_error = capsys.readouterr().err
+
+    with pytest.raises(SystemExit) as unsupported_raised:
+        cli.main(["--unsupported-option"], app_context)
+    unsupported_error = capsys.readouterr().err
+
+    assert legacy_raised.value.code == unsupported_raised.value.code == 2
+    assert "the following arguments are required: command" in legacy_error
+    assert legacy_error == unsupported_error.replace("--unsupported-option", "--legacy-console")
