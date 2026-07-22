@@ -34,7 +34,18 @@ The session controls are:
   saved options and `unset NAME` removes one.
 - `run ACTION ...` runs an action using the saved options. Direct module
   actions may also be entered at the root prompt, such as `providers list`.
+- `jobs` or `jobs list` shows background work; `jobs show JOB_ID` shows one
+  job's timestamps, result, or stable failure code.
 - `exit`, `quit`, or EOF leaves the REPL.
+
+Long-running RootsMagic queries/exports, GEDCOM operations, OCR extraction, and
+database backups run in a bounded background worker pool so the prompt remains
+responsive. The start response includes a stable job ID. Jobs move through
+`queued`, `running`, `completed`, `failed`, and (when cancellation is
+requested) `cancelled` states. Mutating jobs that target the same output,
+manifest, or database resource are serialized; independent targets may run in
+parallel. The queue rejects new work with `JOB_QUEUE_FULL` at its configured
+64-job safety limit.
 
 ## Multiline free text
 

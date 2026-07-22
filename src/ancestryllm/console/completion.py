@@ -25,8 +25,19 @@ from ancestryllm.core.secrets import ENVIRONMENT_NAMES
 __all__ = ["CompletionSnapshot", "create_completer"]
 
 _MAX_FILE_COMPLETIONS = 64
-_ROOT_CONTROLS = ("exit", "help", "quit", "use")
-_ACTIVE_CONTROLS = ("back", "exit", "help", "info", "quit", "run", "set", "show", "unset")
+_ROOT_CONTROLS = ("exit", "help", "jobs", "quit", "use")
+_ACTIVE_CONTROLS = (
+    "back",
+    "exit",
+    "help",
+    "info",
+    "jobs",
+    "quit",
+    "run",
+    "set",
+    "show",
+    "unset",
+)
 _DYNAMIC_SENSITIVE_KINDS = frozenset(
     {
         CompletionKind.MODEL,
