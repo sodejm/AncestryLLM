@@ -35,7 +35,8 @@ The session controls are:
 - `run ACTION ...` runs an action using the saved options. Direct module
   actions may also be entered at the root prompt, such as `providers list`.
 - `jobs` or `jobs list` shows background work; `jobs show JOB_ID` shows one
-  job's timestamps, result, or stable failure code.
+  job's timestamps, latest structured progress, result, or stable failure
+  code. `help jobs` summarizes these controls.
 - `exit`, `quit`, or EOF leaves the REPL.
 
 Long-running RootsMagic queries/exports, GEDCOM operations, OCR extraction, and
@@ -46,6 +47,19 @@ requested) `cancelled` states. Mutating jobs that target the same output,
 manifest, or database resource are serialized; independent targets may run in
 parallel. The queue rejects new work with `JOB_QUEUE_FULL` at its configured
 64-job safety limit.
+
+Active jobs render above the prompt through Rich `Live` while prompt-toolkit's
+supported stdout patch keeps asynchronous updates from overwriting input.
+Unknown-duration operations show a spinner and current operation. Structured
+events with completed/total units render a determinate progress bar. Completion,
+failure, and cancellation stop the live display, print one final sanitized
+status line, and leave a clean prompt; full results remain available through
+`jobs show JOB_ID`.
+
+Progress operation text passes through the same secret-redaction boundary as
+job failures. Live rendering is interactive-only: one-shot commands and
+`--json` output preserve their existing non-animated, machine-readable
+contracts.
 
 ## Multiline free text
 

@@ -13,6 +13,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import DummyHistory
 from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from ancestryllm.cli import dispatch
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
@@ -20,6 +21,7 @@ from ancestryllm.console.history import SecureHistory
 from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
 from ancestryllm.console.parser import split_repl_input
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
+from ancestryllm.console.progress import JobProgressDisplay
 from ancestryllm.console.router import RouteKind, RouteResult, SessionRouter
 from ancestryllm.console.security import (
     RedactingTextIO,
@@ -29,7 +31,7 @@ from ancestryllm.console.security import (
 )
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.jobs import JobManager
+from ancestryllm.core.jobs import JobManager, JobReporter
 
 _BACKGROUND_ACTIONS = frozenset(
     {
@@ -91,7 +93,9 @@ class ReplApplication:
         self.stderr = RedactingTextIO(stderr or sys.stderr, context)
         self.presenter = PresentationAdapter.for_file(cast(TextIO, self.stdout))
         self.error_presenter = PresentationAdapter.for_file(cast(TextIO, self.stderr))
+        self.progress_display = JobProgressDisplay(self.presenter.console)
         self.jobs = jobs or JobManager(redact=context.secrets.redact)
+        self._unsubscribe_progress = self.jobs.subscribe(self.progress_display.handle)
         self.history = SecureHistory(
             context.config.data_dir / "repl_history",
             is_sensitive=lambda command: history_is_sensitive(command, self.router.active_module),
@@ -139,6 +143,8 @@ class ReplApplication:
                     return 0
         finally:
             await asyncio.to_thread(self.jobs.shutdown, wait=True)
+            self._unsubscribe_progress()
+            self.progress_display.close()
 
     async def execute_line(self, command: str) -> bool:
         for value in credential_values(command):
@@ -160,9 +166,9 @@ class ReplApplication:
             if namespace.command == "secrets" and namespace.action == "set":
                 await self._set_secret(namespace.name)
             elif self._should_background(namespace):
-                snapshot = self.jobs.submit(
+                snapshot = self.jobs.submit_with_progress(
                     f"{namespace.command} {namespace.action}",
-                    lambda: self._dispatch_job(namespace),
+                    lambda reporter: self._dispatch_job(namespace, reporter),
                     resource_keys=self._resource_keys(namespace),
                 )
                 self.presenter.render(
@@ -218,8 +224,13 @@ class ReplApplication:
     def _should_background(namespace: argparse.Namespace) -> bool:
         return (namespace.command, namespace.action) in _BACKGROUND_ACTIONS
 
-    def _dispatch_job(self, namespace: argparse.Namespace) -> dict[str, object]:
+    def _dispatch_job(
+        self,
+        namespace: argparse.Namespace,
+        reporter: JobReporter,
+    ) -> dict[str, object]:
         output: list[object] = []
+        reporter.update(f"{namespace.command} {namespace.action}")
 
         def capture(value: object, _json_output: bool = False) -> None:
             plain = to_plain(value)
@@ -329,4 +340,8 @@ class ReplApplication:
 def run_repl(context: AppContext | None = None) -> int:
     """Run the asynchronous shell from the synchronous console entry point."""
 
-    return asyncio.run(ReplApplication(context or AppContext.build()).run_async())
+    async def run() -> int:
+        with patch_stdout(raw=True):
+            return await ReplApplication(context or AppContext.build()).run_async()
+
+    return asyncio.run(run())

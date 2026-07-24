@@ -29,7 +29,10 @@ only makes source-code changes immediately available.
 
 Run `.venv/bin/ancestry` with no arguments for the prompt-toolkit/Rich
 interactive console. It is the only supported interactive console; the
-canonical command reference, examples, offline defaults, and privacy rules are
+prompt stays responsive while background operations render live, sanitized
+spinner or completed-unit progress above it. One-shot and JSON output never
+emit terminal animation. The canonical command reference, examples, offline
+defaults, and privacy rules are
 in [the CLI guide](docs/CLI.md); see [the console guide](docs/CONSOLE.md) for
 interactive use.
 

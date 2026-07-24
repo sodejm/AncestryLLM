@@ -9,9 +9,17 @@ both one-shot CLI execution and the prompt-toolkit/Rich REPL.
 Module authors should add or update the command specification first, then wire
 the action to a thin dispatcher that delegates to an application service. The
 dispatch layer must not open storage directly, read secrets, call providers, or
-implement business rules. Services return serializable DTOs, progress events,
-or stable `AncestryError` instances so terminal, JSON, and future adapters can
-present the same result contract.
+implement business rules. Services return serializable DTOs or stable
+`AncestryError` instances so terminal, JSON, and future adapters can present the
+same result contract.
+
+Long-running REPL actions are submitted through the UI-independent job manager.
+Its `JobReporter` accepts a current operation and, when known, validated
+completed/total units. The latest redacted progress event becomes part of the
+serializable job snapshot; the Rich presentation adapter decides whether to
+render it as a spinner or progress bar. Module and service code must never
+construct Rich objects, write terminal control sequences, or depend on
+prompt-toolkit. One-shot dispatch does not create a reporter or emit animation.
 
 Interactive behavior is derived from the shared metadata:
 

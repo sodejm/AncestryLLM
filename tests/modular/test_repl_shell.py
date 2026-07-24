@@ -92,6 +92,28 @@ def test_default_shell_returns_cleanly_at_pipe_eof(shell_module, app_context: Ap
         assert asyncio.run(application.run_async()) == 0
 
 
+def test_default_shell_shutdown_unsubscribes_and_closes_progress(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[bool] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(
+            application.progress_display,
+            "close",
+            lambda: closed.append(True),
+        )
+        pipe.send_text("exit\n")
+
+        assert asyncio.run(application.run_async()) == 0
+
+    application._unsubscribe_progress()
+    assert closed == [True]
+    assert application.jobs._listeners == []
+
+
 def test_default_shell_recovers_from_interrupt_then_accepts_exit(
     shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -408,6 +430,9 @@ def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt
         assert "j000001" in stdout.getvalue()
 
         asyncio.run(application.execute_line("jobs show j000001"))
+        status_output = stdout.getvalue()
+        assert '"progress": {' in status_output
+        assert '"operation": "rootsmagic query"' in status_output
         release.set()
         completed = application.jobs.wait("j000001", timeout=2)
         application.jobs.shutdown()
@@ -442,6 +467,27 @@ def test_main_uses_default_shell_and_preserves_one_shot_dispatch(
     assert cli.main([], app_context) == 17
     assert cli.main(["modules", "list"], app_context) == 29
     assert calls == ["repl:True", "one-shot"]
+
+
+def test_run_repl_uses_prompt_toolkit_stdout_patching(
+    shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered: list[tuple[bool, bool]] = []
+
+    @contextmanager
+    def stdout_patch(*, raw: bool):
+        entered.append((raw, asyncio.get_running_loop().is_running()))
+        yield
+
+    class FakeApplication:
+        async def run_async(self) -> int:
+            return 23
+
+    monkeypatch.setattr(shell_module, "patch_stdout", stdout_patch)
+    monkeypatch.setattr(shell_module, "ReplApplication", lambda _context: FakeApplication())
+
+    assert shell_module.run_repl(app_context) == 23
+    assert entered == [(True, True)]
 
 
 def test_main_rejects_legacy_console_like_unknown_or_unsupported_options(
