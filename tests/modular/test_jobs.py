@@ -5,7 +5,7 @@ import threading
 import pytest
 
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.jobs import JobManager, JobState
+from ancestryllm.core.jobs import JobManager, JobReporter, JobSnapshot, JobState
 
 
 def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> None:
@@ -105,6 +105,8 @@ def test_queued_cancellation_is_visible_in_job_snapshots() -> None:
     manager = JobManager(max_workers=1, max_pending=2)
     started = threading.Event()
     release = threading.Event()
+    observed: list[JobSnapshot] = []
+    unsubscribe = manager.subscribe(observed.append)
 
     def blocking() -> None:
         started.set()
@@ -121,8 +123,14 @@ def test_queued_cancellation_is_visible_in_job_snapshots() -> None:
         release.set()
         manager.wait(running.job_id, timeout=2)
     finally:
+        unsubscribe()
         release.set()
         manager.shutdown()
+
+    assert any(
+        snapshot.job_id == queued.job_id and snapshot.state is JobState.CANCELLED
+        for snapshot in observed
+    )
 
 
 def test_job_lookup_uses_stable_error() -> None:
@@ -133,3 +141,115 @@ def test_job_lookup_uses_stable_error() -> None:
     finally:
         manager.shutdown()
     assert raised.value.code == "JOB_NOT_FOUND"
+
+
+def test_jobs_publish_indeterminate_and_determinate_progress_events() -> None:
+    secret = "fictional-progress-secret"
+    manager = JobManager(
+        max_workers=1,
+        max_pending=2,
+        redact=lambda text: text.replace(secret, "[REDACTED]"),
+    )
+    observed: list[JobSnapshot] = []
+    unsubscribe = manager.subscribe(observed.append)
+
+    def work(reporter: JobReporter) -> str:
+        reporter.update(f"Connecting with {secret}")
+        reporter.update("Scanning rows", completed=3, total=7)
+        return "done"
+
+    try:
+        job = manager.submit_with_progress("progress", work)
+        completed = manager.wait(job.job_id, timeout=2)
+    finally:
+        unsubscribe()
+        manager.shutdown()
+
+    progress = [snapshot.progress for snapshot in observed if snapshot.progress is not None]
+    assert [snapshot.state for snapshot in observed] == [
+        JobState.QUEUED,
+        JobState.RUNNING,
+        JobState.RUNNING,
+        JobState.RUNNING,
+        JobState.COMPLETED,
+    ]
+    assert progress[0] is not None
+    assert progress[0].operation == "Connecting with [REDACTED]"
+    assert progress[0].timestamp
+    assert progress[0].total is None
+    assert progress[1] is not None and progress[1].completed == 3
+    assert progress[1].total == 7
+    assert completed.progress == progress[-1]
+    assert secret not in repr(observed)
+
+
+@pytest.mark.parametrize(
+    ("operation", "completed", "total"),
+    (
+        (" ", None, None),
+        ("Working", 1, None),
+        ("Working", None, 1),
+        ("Working", -1, 2),
+        ("Working", 3, 2),
+        ("Working", 0, 0),
+    ),
+)
+def test_job_reporter_rejects_invalid_progress(
+    operation: str,
+    completed: int | None,
+    total: int | None,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    reporter = JobReporter(manager, "j999999")
+    try:
+        with pytest.raises(ValueError):
+            reporter.update(operation, completed=completed, total=total)
+    finally:
+        manager.shutdown()
+
+
+def test_job_listeners_run_outside_locks_and_failures_are_isolated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=2)
+    observed: list[JobSnapshot] = []
+
+    def broken_listener(_snapshot: JobSnapshot) -> None:
+        raise RuntimeError("private listener detail")
+
+    def inspecting_listener(snapshot: JobSnapshot) -> None:
+        inspected = threading.Event()
+
+        def inspect_from_another_thread() -> None:
+            manager.list()
+            inspected.set()
+
+        thread = threading.Thread(target=inspect_from_another_thread)
+        thread.start()
+        assert inspected.wait(1)
+        thread.join()
+        observed.append(snapshot)
+
+    unsubscribe_broken = manager.subscribe(broken_listener)
+    unsubscribe_observer = manager.subscribe(inspecting_listener)
+    try:
+        job = manager.submit("observable", lambda: "done")
+        assert manager.wait(job.job_id, timeout=2).state is JobState.COMPLETED
+        unsubscribe_broken()
+        unsubscribe_broken()
+        unsubscribe_observer()
+        unsubscribe_observer()
+        observed_count = len(observed)
+        second = manager.submit("after unsubscribe", lambda: "done")
+        manager.wait(second.job_id, timeout=2)
+    finally:
+        manager.shutdown()
+
+    assert [snapshot.state for snapshot in observed] == [
+        JobState.QUEUED,
+        JobState.RUNNING,
+        JobState.COMPLETED,
+    ]
+    assert len(observed) == observed_count
+    assert "Job listener failed: RuntimeError" in caplog.text
+    assert "private listener detail" not in caplog.text

@@ -262,6 +262,12 @@ class SessionRouter:
             specification = COMMAND_SPECIFICATIONS[command]
             actions = ", ".join(action.name for action in specification.actions)
             return f"{specification.name}: {specification.help}\nActions: {actions}"
+        if command == "jobs":
+            return (
+                "jobs [list|show JOB_ID]: inspect background job state, timestamps, "
+                "latest progress, results, and stable failures. Active jobs also render "
+                "live above the prompt."
+            )
         if self.active_module and command in {"info", "show", "set", "unset", "run", "back"}:
             return "Module commands: info, show [actions|options], set NAME VALUE, unset NAME, run [ACTION], back."
         raise AncestryError(

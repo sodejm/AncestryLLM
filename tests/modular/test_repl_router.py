@@ -218,6 +218,14 @@ def test_router_direct_module_commands_and_parser_failures_use_shared_contract(
     assert _error_code(router.route, "help gedcom extra") == "REPL_USAGE_ERROR"
 
 
+def test_router_help_documents_live_job_progress(app_context: AppContext) -> None:
+    help_text = SessionRouter(app_context).route("help jobs").value
+
+    assert "jobs [list|show JOB_ID]" in help_text
+    assert "latest progress" in help_text
+    assert "live above the prompt" in help_text
+
+
 def test_router_import_does_not_load_terminal_ui_dependencies() -> None:
     script = "\n".join(
         (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from typing import Any, Callable
 
 from ancestryllm.core.errors import AncestryError
 
+logger = logging.getLogger(__name__)
+
 
 class JobState(str, Enum):
     QUEUED = "queued"
@@ -18,6 +21,14 @@ class JobState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressEvent:
+    operation: str
+    timestamp: str
+    completed: int | None = None
+    total: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +43,7 @@ class JobSnapshot:
     result: Any = None
     error_code: str | None = None
     error_message: str | None = None
+    progress: ProgressEvent | None = None
 
 
 @dataclass(slots=True)
@@ -42,6 +54,33 @@ class _JobRecord:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@dataclass(frozen=True, slots=True)
+class JobReporter:
+    """Publish structured progress for the currently executing job."""
+
+    _manager: JobManager
+    job_id: str
+
+    def update(
+        self,
+        operation: str,
+        *,
+        completed: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        if not operation.strip():
+            raise ValueError("Progress operation must not be empty.")
+        if (completed is None) is not (total is None):
+            raise ValueError("Determinate progress requires both completed and total values.")
+        if completed is not None and total is not None:
+            if completed < 0 or total < 1 or completed > total:
+                raise ValueError("Progress values require 0 <= completed <= total and total >= 1.")
+        self._manager._report_progress(
+            self.job_id,
+            ProgressEvent(operation, _timestamp(), completed, total),
+        )
 
 
 class JobManager:
@@ -67,6 +106,7 @@ class JobManager:
         self._lock = threading.RLock()
         self._records: dict[str, _JobRecord] = {}
         self._resource_locks: dict[str, threading.Lock] = {}
+        self._listeners: list[Callable[[JobSnapshot], None]] = []
         self._next_id = 1
         self._closed = False
 
@@ -76,6 +116,28 @@ class JobManager:
         function: Callable[[], Any],
         *,
         resource_keys: tuple[str, ...] = (),
+    ) -> JobSnapshot:
+        return self._submit(
+            name,
+            lambda _reporter: function(),
+            resource_keys=resource_keys,
+        )
+
+    def submit_with_progress(
+        self,
+        name: str,
+        function: Callable[[JobReporter], Any],
+        *,
+        resource_keys: tuple[str, ...] = (),
+    ) -> JobSnapshot:
+        return self._submit(name, function, resource_keys=resource_keys)
+
+    def _submit(
+        self,
+        name: str,
+        function: Callable[[JobReporter], Any],
+        *,
+        resource_keys: tuple[str, ...],
     ) -> JobSnapshot:
         with self._lock:
             if self._closed:
@@ -101,23 +163,27 @@ class JobManager:
             )
             record = _JobRecord(snapshot)
             self._records[job_id] = record
-            try:
-                record.future = self._executor.submit(
-                    self._execute,
-                    job_id,
-                    function,
-                    normalized_keys,
-                )
-            except BaseException:
+        self._notify(snapshot)
+        try:
+            future = self._executor.submit(
+                self._execute,
+                job_id,
+                function,
+                normalized_keys,
+            )
+        except BaseException:
+            with self._lock:
                 self._records.pop(job_id, None)
-                self._capacity.release()
-                raise
-            return snapshot
+            self._capacity.release()
+            raise
+        with self._lock:
+            record.future = future
+        return snapshot
 
     def _execute(
         self,
         job_id: str,
-        function: Callable[[], Any],
+        function: Callable[[JobReporter], Any],
         resource_keys: tuple[str, ...],
     ) -> None:
         locks = [self._resource_lock(key) for key in resource_keys]
@@ -126,7 +192,7 @@ class JobManager:
                 lock.acquire()
             self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
             try:
-                result = function()
+                result = function(JobReporter(self, job_id))
             except BaseException as exc:  # noqa: BLE001 - job boundary normalizes failures
                 if isinstance(exc, AncestryError):
                     code = exc.code
@@ -172,9 +238,49 @@ class JobManager:
                 "result": current.result,
                 "error_code": current.error_code,
                 "error_message": current.error_message,
+                "progress": current.progress,
             }
             values.update(changes)
             record.snapshot = JobSnapshot(**values)
+            snapshot = record.snapshot
+        self._notify(snapshot)
+
+    def _report_progress(self, job_id: str, event: ProgressEvent) -> None:
+        with self._lock:
+            record = self._records[job_id]
+            state = record.snapshot.state
+        if state not in {JobState.QUEUED, JobState.RUNNING}:
+            return
+        self._transition(
+            job_id,
+            state,
+            progress=ProgressEvent(
+                operation=self._redact(event.operation),
+                timestamp=event.timestamp,
+                completed=event.completed,
+                total=event.total,
+            ),
+        )
+
+    def subscribe(self, listener: Callable[[JobSnapshot], None]) -> Callable[[], None]:
+        with self._lock:
+            self._listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+
+        return unsubscribe
+
+    def _notify(self, snapshot: JobSnapshot) -> None:
+        with self._lock:
+            listeners = tuple(self._listeners)
+        for listener in listeners:
+            try:
+                listener(snapshot)
+            except Exception as exc:  # noqa: BLE001 - listeners cannot break job execution
+                logger.warning("Job listener failed: %s", type(exc).__name__)
 
     def get(self, job_id: str) -> JobSnapshot:
         with self._lock:
@@ -229,9 +335,12 @@ class JobManager:
                 resource_keys=current.resource_keys,
                 error_code="JOB_CANCELLED",
                 error_message="The queued background job was cancelled.",
+                progress=current.progress,
             )
             self._capacity.release()
-            return record.snapshot
+            snapshot = record.snapshot
+        self._notify(snapshot)
+        return snapshot
 
     def shutdown(self, *, wait: bool = True) -> None:
         with self._lock:

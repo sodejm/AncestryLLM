@@ -47,9 +47,13 @@ flowchart LR
    policy, immutable source handling, and provider `none` offline behavior.
    They do not import UI libraries.
 5. **Background jobs** run long operations in bounded worker threads, expose
-   serializable lifecycle snapshots, and serialize mutations by target resource.
-6. **Presentation** renders DTOs, progress, and coded errors. Rich objects
-   stay in this layer; JSON is a serialization of the same result contract.
+   serializable lifecycle snapshots and validated progress events, notify
+   presentation subscribers outside execution locks, and serialize mutations
+   by target resource.
+6. **Presentation** maps structured job progress to Rich Live spinners or
+   determinate bars and renders DTOs and coded errors. prompt-toolkit stdout
+   patching coordinates asynchronous output with the active prompt. Rich
+   objects stay in this layer; JSON is a serialization of the same contracts.
 
 The dependency direction is one-way: `input -> routing -> execution ->
 services`. Presentation consumes execution results and is not a service
@@ -100,6 +104,7 @@ dependency.
 | Context-aware completion | Implemented | Static/snapshot-driven, privacy-filtered, CWD-bounded |
 | Secure history and no-echo secret entry | Implemented | Owner-only history; secrets excluded and redacted |
 | Bounded background jobs | Implemented | Serializable states/results; per-resource mutation serialization |
+| Rich Live job progress | Implemented | Spinner or determinate units; stdout-patched prompt coordination |
 | Cooperative cancellation | Future work | Extends the job lifecycle around atomic sections and shutdown |
 
 ## Compatibility paths
