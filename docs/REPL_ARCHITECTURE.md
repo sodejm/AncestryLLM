@@ -8,10 +8,9 @@ interface.
 
 ## Decision record
 
-**Status:** Implemented for the prompt-toolkit/Rich REPL and context-aware
-completion. Interactive console consolidation is complete; remaining future
-work is limited to features such as structured background jobs and cooperative
-cancellation.
+**Status:** Implemented for the prompt-toolkit/Rich REPL, context-aware
+completion, multiline input, and bounded background jobs. Cooperative
+cancellation and live progress presentation build on the job lifecycle.
 
 The application uses transport-neutral command specifications and
 invocation/result contracts between input adapters and application services.
@@ -27,9 +26,11 @@ flowchart LR
     Input["prompt_toolkit input\ncommands, completion, multiline, history"]
     Router["Session router\nmodule context, safe options"]
     Executor["Command executors\ntyped invocation and results"]
+    Jobs["Bounded job manager\nstate, results, resource locks"]
     Services["Application services\npolicy and use cases"]
     Presentation["Presentation adapters\nRich, text, JSON"]
     Input --> Router --> Executor --> Services
+    Executor --> Jobs --> Services
     Executor --> Presentation
 ```
 
@@ -45,7 +46,9 @@ flowchart LR
 4. **Application services** own use cases and enforce consent, endpoint
    policy, immutable source handling, and provider `none` offline behavior.
    They do not import UI libraries.
-5. **Presentation** renders DTOs, progress, and coded errors. Rich objects
+5. **Background jobs** run long operations in bounded worker threads, expose
+   serializable lifecycle snapshots, and serialize mutations by target resource.
+6. **Presentation** renders DTOs, progress, and coded errors. Rich objects
    stay in this layer; JSON is a serialization of the same result contract.
 
 The dependency direction is one-way: `input -> routing -> execution ->
@@ -83,9 +86,9 @@ dependency.
   history, and interactive history is stored with owner-only permissions.
 - Provider selection and consent stay explicit. `provider=none` remains
   network-free even when keys or provider SDKs are installed.
-- Structured background jobs, progress management, and cooperative cancellation
-  are not part of the completed console consolidation. They require their own
-  lifecycle and shutdown design before implementation.
+- Background jobs expose queued, running, completed, failed, and cancelled
+  states. Progress presentation and cooperative cancellation extend this
+  lifecycle without moving policy or mutation safety into the UI.
 
 ## Migration status
 
@@ -96,7 +99,8 @@ dependency.
 | Asynchronous prompt-toolkit/Rich REPL | Implemented | Starts with no arguments and is installed by the main package |
 | Context-aware completion | Implemented | Static/snapshot-driven, privacy-filtered, CWD-bounded |
 | Secure history and no-echo secret entry | Implemented | Owner-only history; secrets excluded and redacted |
-| Background jobs and cooperative cancellation | Future work | Requires structured job lifecycle and atomic shutdown behavior |
+| Bounded background jobs | Implemented | Serializable states/results; per-resource mutation serialization |
+| Cooperative cancellation | Future work | Extends the job lifecycle around atomic sections and shutdown |
 
 ## Compatibility paths
 

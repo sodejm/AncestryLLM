@@ -17,8 +17,10 @@ from prompt_toolkit.output import Output
 from ancestryllm.cli import dispatch
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
-from ancestryllm.console.presentation import PresentationAdapter
-from ancestryllm.console.router import RouteKind, SessionRouter
+from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
+from ancestryllm.console.parser import split_repl_input
+from ancestryllm.console.presentation import PresentationAdapter, to_plain
+from ancestryllm.console.router import RouteKind, RouteResult, SessionRouter
 from ancestryllm.console.security import (
     RedactingTextIO,
     credential_values,
@@ -27,6 +29,20 @@ from ancestryllm.console.security import (
 )
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.jobs import JobManager
+
+_BACKGROUND_ACTIONS = frozenset(
+    {
+        ("rootsmagic", "query"),
+        ("rootsmagic", "export"),
+        ("gedcom", "merge"),
+        ("gedcom", "subtree"),
+        ("gedcom", "quality"),
+        ("gedcom", "sync"),
+        ("ocr", "extract"),
+        ("database", "backup"),
+    }
+)
 
 
 def _item_name(value: object) -> str:
@@ -66,6 +82,7 @@ class ReplApplication:
         output: Output | None = None,
         stdout: TextIO | None = None,
         stderr: TextIO | None = None,
+        jobs: JobManager | None = None,
     ) -> None:
         self.context = context
         self.router = SessionRouter(context)
@@ -74,6 +91,7 @@ class ReplApplication:
         self.stderr = RedactingTextIO(stderr or sys.stderr, context)
         self.presenter = PresentationAdapter.for_file(cast(TextIO, self.stdout))
         self.error_presenter = PresentationAdapter.for_file(cast(TextIO, self.stderr))
+        self.jobs = jobs or JobManager(redact=context.secrets.redact)
         self.history = SecureHistory(
             context.config.data_dir / "repl_history",
             is_sensitive=lambda command: history_is_sensitive(command, self.router.active_module),
@@ -96,27 +114,39 @@ class ReplApplication:
             input=input,
             output=output,
         )
+        self.multiline_session: PromptSession[str] = PromptSession(
+            history=DummyHistory(),
+            complete_while_typing=False,
+            input=input,
+            output=output,
+        )
+        self.multiline_editor = MultilineEditor(cast(AsyncPrompt, self.multiline_session))
 
     async def run_async(self) -> int:
-        if not self.history.persistent:
-            self.error_presenter.render(
-                "Persistent history is disabled because owner-only permissions could not be guaranteed."
-            )
-        while True:
-            try:
-                command = await self.session.prompt_async(self.router.prompt)
-            except EOFError:
-                return 0
-            except KeyboardInterrupt:
-                continue
-            if await self.execute_line(command):
-                return 0
+        try:
+            if not self.history.persistent:
+                self.error_presenter.render(
+                    "Persistent history is disabled because owner-only permissions could not be guaranteed."
+                )
+            while True:
+                try:
+                    command = await self.session.prompt_async(self.router.prompt)
+                except EOFError:
+                    return 0
+                except KeyboardInterrupt:
+                    continue
+                if await self.execute_line(command):
+                    return 0
+        finally:
+            await asyncio.to_thread(self.jobs.shutdown, wait=True)
 
     async def execute_line(self, command: str) -> bool:
         for value in credential_values(command):
             self.context.secrets.register_sensitive(value)
         try:
-            result = self.router.route(command)
+            if self._handle_job_control(command):
+                return False
+            result = await self._route(command)
             if result.kind is RouteKind.EXIT:
                 return True
             if result.kind is RouteKind.EMPTY:
@@ -129,6 +159,19 @@ class ReplApplication:
             namespace = result.invocation.namespace
             if namespace.command == "secrets" and namespace.action == "set":
                 await self._set_secret(namespace.name)
+            elif self._should_background(namespace):
+                snapshot = self.jobs.submit(
+                    f"{namespace.command} {namespace.action}",
+                    lambda: self._dispatch_job(namespace),
+                    resource_keys=self._resource_keys(namespace),
+                )
+                self.presenter.render(
+                    {
+                        "job_id": snapshot.job_id,
+                        "name": snapshot.name,
+                        "state": snapshot.state,
+                    }
+                )
             else:
                 await asyncio.to_thread(self._dispatch, namespace)
         except AncestryError as exc:
@@ -154,6 +197,104 @@ class ReplApplication:
                 )
             )
         return False
+
+    def _handle_job_control(self, command: str) -> bool:
+        tokens = split_repl_input(command)
+        if not tokens or tokens[0].casefold() != "jobs":
+            return False
+        if len(tokens) == 1 or tokens == ("jobs", "list"):
+            self.presenter.render(self.jobs.list())
+            return True
+        if len(tokens) == 3 and tokens[1].casefold() == "show":
+            self.presenter.render(self.jobs.get(tokens[2]))
+            return True
+        raise AncestryError(
+            "REPL_USAGE_ERROR",
+            "Usage: jobs [list|show JOB_ID]",
+            exit_code=2,
+        )
+
+    @staticmethod
+    def _should_background(namespace: argparse.Namespace) -> bool:
+        return (namespace.command, namespace.action) in _BACKGROUND_ACTIONS
+
+    def _dispatch_job(self, namespace: argparse.Namespace) -> dict[str, object]:
+        output: list[object] = []
+
+        def capture(value: object, _json_output: bool = False) -> None:
+            plain = to_plain(value)
+            output.append(redact_object(plain, self.context.secrets.redact))
+
+        exit_code = dispatch(namespace, self.context, emit=capture)
+        return {"exit_code": exit_code, "output": output}
+
+    def _resource_keys(self, namespace: argparse.Namespace) -> tuple[str, ...]:
+        values: list[object] = []
+        action = (namespace.command, namespace.action)
+        if action in {
+            ("rootsmagic", "export"),
+            ("gedcom", "merge"),
+            ("gedcom", "subtree"),
+            ("gedcom", "quality"),
+        }:
+            values.append(namespace.output)
+        elif action == ("database", "backup"):
+            values.extend((self.context.database.path, namespace.destination))
+        elif action == ("gedcom", "sync"):
+            forwarded = list(namespace.sync_args)
+            for index, token in enumerate(forwarded[:-1]):
+                if token in {"--manifest", "--output", "--master"}:
+                    values.append(forwarded[index + 1])
+        return tuple(
+            sorted(
+                {
+                    str(Path(value).expanduser().resolve())
+                    for value in values
+                    if isinstance(value, (str, Path))
+                }
+            )
+        )
+
+    async def _route(self, command: str) -> RouteResult:
+        tokens = split_repl_input(command)
+        target = self._multiline_target(tokens)
+        if target is None:
+            return self.router.route(command)
+        option, prompt = target
+        value = await self.multiline_editor.read(prompt)
+        return self.router.route_tokens((*tokens, option, value))
+
+    def _multiline_target(self, tokens: tuple[str, ...]) -> tuple[str, str] | None:
+        if not tokens:
+            return None
+        module: str | None = None
+        action: str | None = None
+        supplied = tokens
+        if len(tokens) >= 2 and tokens[0] in {"rootsmagic", "prompts"}:
+            module, action = tokens[:2]
+        elif self.router.active_module in {"rootsmagic", "prompts"} and tokens[0] == "run":
+            module = self.router.active_module
+            action = tokens[1] if len(tokens) >= 2 else self.router.module_options.get("action")
+
+        if module == "rootsmagic" and action == "query":
+            configured = self.router.module_options
+            if (
+                "--sql" not in supplied
+                and "--question" not in supplied
+                and "sql" not in configured
+                and "question" not in configured
+            ):
+                return "--question", "Natural-language question (Esc+Enter to submit):\n"
+        if module == "prompts" and action == "save":
+            configured = self.router.module_options
+            if (
+                "--body" not in supplied
+                and "--body-file" not in supplied
+                and "body" not in configured
+                and "body_file" not in configured
+            ):
+                return "--body", "Prompt body (Esc+Enter to submit):\n"
+        return None
 
     def _dispatch(self, namespace: argparse.Namespace) -> int:
         with (

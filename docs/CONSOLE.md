@@ -34,7 +34,45 @@ The session controls are:
   saved options and `unset NAME` removes one.
 - `run ACTION ...` runs an action using the saved options. Direct module
   actions may also be entered at the root prompt, such as `providers list`.
+- `jobs` or `jobs list` shows background work; `jobs show JOB_ID` shows one
+  job's timestamps, result, or stable failure code.
 - `exit`, `quit`, or EOF leaves the REPL.
+
+Long-running RootsMagic queries/exports, GEDCOM operations, OCR extraction, and
+database backups run in a bounded background worker pool so the prompt remains
+responsive. The start response includes a stable job ID. Jobs move through
+`queued`, `running`, `completed`, `failed`, and (when cancellation is
+requested) `cancelled` states. Mutating jobs that target the same output,
+manifest, or database resource are serialized; independent targets may run in
+parallel. The queue rejects new work with `JOB_QUEUE_FULL` at its configured
+64-job safety limit.
+
+## Multiline free text
+
+In the interactive console, omit `--question` from `rootsmagic query` or omit
+both `--body` and `--body-file` from `prompts save` to open the multiline
+editor. The editor preserves newlines and Markdown exactly and passes the whole
+value as one argument; it never parses entered prose as a command. Press
+Esc+Enter to submit or Ctrl-C to cancel. Empty input is rejected, input is
+limited to 100,000 characters, and multiline content is never written to REPL
+history.
+
+```text
+ancestry > rootsmagic query --tree family --provider ollama --model llama3
+Natural-language question (Esc+Enter to submit):
+> Compare the two candidate birth records.
+>
+> Explain the evidence as a Markdown list.
+
+ancestry > prompts save research-plan --purpose research --variable person
+Prompt body (Esc+Enter to submit):
+> Build a research plan for $person.
+>
+> Include sources and unresolved conflicts.
+```
+
+One-shot commands remain intentionally non-interactive: they require
+`--question`, `--body`, or `--body-file` explicitly.
 
 Secret-like option names are rejected by `set`. Use the dedicated `secrets`
 commands and their no-echo prompts for secret operations; secret values are

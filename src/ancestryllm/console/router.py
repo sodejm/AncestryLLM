@@ -51,7 +51,15 @@ class SessionRouter:
         return tuple(item.module_id for item in ModuleRegistry(self.context).descriptors())
 
     def route(self, command: str) -> RouteResult:
-        tokens = split_repl_input(command)
+        return self.route_tokens(split_repl_input(command))
+
+    def route_tokens(self, tokens: tuple[str, ...]) -> RouteResult:
+        """Route pre-tokenized input such as an injected multiline value.
+
+        Interactive prose is passed as one token by the input adapter so embedded
+        newlines and Markdown are never interpreted as command syntax.
+        """
+
         if not tokens:
             return RouteResult(RouteKind.EMPTY)
 
@@ -245,7 +253,8 @@ class SessionRouter:
             raise AncestryError("REPL_USAGE_ERROR", "Usage: help [COMMAND]", exit_code=2)
         if not tokens:
             return (
-                "Root commands: modules, use MODULE, help [COMMAND], exit, quit. "
+                "Root commands: modules, use MODULE, jobs [list|show ID], "
+                "help [COMMAND], exit, quit. "
                 "Enabled module commands can also be run directly."
             )
         command = tokens[0]

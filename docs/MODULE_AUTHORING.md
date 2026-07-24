@@ -21,6 +21,13 @@ Interactive behavior is derived from the shared metadata:
 - help text, action listings, and option validation; and
 - privacy-filtered completion.
 
+Free-text prompting is also an input-adapter concern. The REPL may collect a
+missing natural-language question or saved-prompt body through its reusable
+multiline editor, then inject the preserved text as one validated argument.
+Command specifications and services continue to receive ordinary strings and
+must not import or invoke prompt-toolkit themselves. One-shot commands never
+open the editor.
+
 Do not author terminal-specific command classes for new modules. A module
 should not depend on prompt-toolkit, Rich, or any console input framework. Rich
 rendering belongs in presentation adapters only, and JSON output must remain a
