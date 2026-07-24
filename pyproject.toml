@@ -13,7 +13,7 @@ authors = [{name = "Justin Soderberg"}]
 dependencies = [
     "alembic>=1.18,<2",
     "httpx>=0.28,<1",
-    "jsonschema>=4.25.1,<4.26",
+    "jsonschema>=4.25.1,<4.27",
     "keyring>=25.7,<26",
     "platformdirs>=4.5,<5",
     "prompt-toolkit>=3.0.52,<4",
@@ -24,7 +24,7 @@ dependencies = [
     "rich>=15,<16",
     "sqlalchemy>=2.0,<3",
     "sqlcipher3>=0.6.2,<0.7",
-    "sqlglot>=28,<29",
+    "sqlglot>=28,<31",
     "tomli-w>=1.2,<2",
 ]
 
@@ -44,7 +44,7 @@ dev = [
     "click>=8.3.3,<9",
     "cyclonedx-bom>=7.2,<8",
     "coverage[toml]>=7.12,<8",
-    "mypy>=1.19,<2",
+    "mypy>=1.19,<3",
     "pip-audit>=2.10,<3",
     "pre-commit>=4.5,<5",
     "pytest>=9,<10",
