@@ -1,15 +1,30 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ancestryllm"
 version = "0.2.0"
-description = "Local-first, privacy-preserving genealogy research tools with modular LLM providers."
+description = "Local-first, privacy-preserving genealogy CLI with modular LLM providers."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = "MIT"
 authors = [{name = "Justin Soderberg"}]
+keywords = ["cli", "gedcom", "genealogy", "rootsmagic", "privacy", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Sociology :: Genealogy",
+]
 dependencies = [
     "alembic>=1.18,<2",
     "httpx>=0.28,<1",
@@ -41,18 +56,33 @@ all-llm = [
     "openai>=2.45,<3",
 ]
 dev = [
+    "build>=1.3,<2",
+    "check-wheel-contents>=0.6.1,<1",
     "click>=8.3.3,<9",
     "cyclonedx-bom>=7.2,<8",
     "coverage[toml]>=7.12,<8",
     "mypy>=1.19,<3",
+    "packaging>=25,<27",
     "pip-audit>=2.10,<3",
     "pre-commit>=4.5,<5",
     "pytest>=9,<10",
     "pytest-cov>=7,<8",
     "pytest-mock>=3.15,<4",
     "ruff>=0.15,<1",
+    "setuptools>=83,<84",
+    "twine>=6.2,<7",
     "types-python-dateutil>=2.9,<3",
+    "wheel>=0.45,<1",
+    "zizmor==1.28.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sodejm/AncestryLLM"
+Documentation = "https://github.com/sodejm/AncestryLLM/wiki"
+Repository = "https://github.com/sodejm/AncestryLLM"
+Issues = "https://github.com/sodejm/AncestryLLM/issues"
+Changelog = "https://github.com/sodejm/AncestryLLM/blob/main/CHANGELOG.md"
+Security = "https://github.com/sodejm/AncestryLLM/security/policy"
 
 [project.scripts]
 ancestry = "ancestryllm.cli:main"
@@ -87,7 +117,7 @@ fail_under = 75
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF"]

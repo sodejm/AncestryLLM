@@ -7,10 +7,7 @@ on:
       - "docs/**"
   workflow_dispatch:
 
-# The follow-up clone and publish steps use the job-scoped token.  Keep the
-# workflow limited to repository contents and avoid granting unrelated scopes.
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: sync-wiki-${{ github.repository }}
@@ -21,6 +18,8 @@ jobs:
     name: Validate and synchronize wiki
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write # required to authenticate the wiki Git push
     steps:
       - name: Check out documentation source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -2,10 +2,10 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 
-.PHONY: help setup console test lint typecheck security sbom hooks
+.PHONY: help setup console test lint typecheck security sbom package workflow-audit hooks
 
 help:
-	@echo "Available targets: setup console test lint typecheck security sbom hooks"
+	@echo "Available targets: setup console test lint typecheck security sbom package workflow-audit hooks"
 
 setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
@@ -19,8 +19,8 @@ test:
 	@$(VENV_PYTHON) -m pytest --verbose
 
 lint:
-	@$(VENV_DIR)/bin/ruff check src tests
-	@$(VENV_DIR)/bin/ruff format --check src tests
+	@$(VENV_DIR)/bin/ruff check src tests scripts
+	@$(VENV_DIR)/bin/ruff format --check src tests scripts
 	@./scripts/check_repository_safety.sh
 
 typecheck:
@@ -32,6 +32,12 @@ security:
 
 sbom:
 	@$(VENV_DIR)/bin/cyclonedx-py environment --output-file sbom.json $(VENV_PYTHON)
+
+package:
+	@$(VENV_PYTHON) scripts/build_release.py --output-dir dist
+
+workflow-audit:
+	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows
 
 hooks:
 	@$(VENV_DIR)/bin/pre-commit install

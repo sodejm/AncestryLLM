@@ -8,16 +8,24 @@ on:
   schedule:
     - cron: "17 4 * * 1"
 
-permissions:
-  actions: read
-  contents: read
-  security-events: write
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
+    name: analyze Python
     runs-on: ubuntu-latest
+    permissions:
+      actions: read # required by CodeQL for workflow metadata
+      contents: read # required to analyze repository contents
+      security-events: write # required to upload CodeQL results
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
         with:
           languages: python
