@@ -12,7 +12,8 @@ import threading
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 import pytest
 from prompt_toolkit.completion import DummyCompleter
@@ -362,6 +363,32 @@ def test_shell_redacts_route_results_and_errors(
     assert fictional_secret not in rendered
     assert '"result": "[REDACTED]"' in rendered
     assert "[FICTIONAL_FAILURE] provider returned [REDACTED]" in rendered
+
+
+def test_repl_preserves_bounded_file_error_code_without_path_or_payload(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "private prompt body.txt"
+    source.write_text("fictional private payload", encoding="utf-8")
+    current = app_context.config.file_ingress
+    app_context.config.file_ingress = replace(
+        current,
+        prompt_body=replace(current.prompt_body, max_bytes=4),
+    )
+    with create_pipe_input() as pipe:
+        application, _stdout, stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(
+            application.execute_line(f'prompts save fixture --purpose local --body-file "{source}"')
+        )
+        application.jobs.shutdown()
+
+    rendered = stderr.getvalue()
+    assert "[FILE_INPUT_TOO_LARGE]" in rendered
+    assert str(source) not in rendered
+    assert "fictional private payload" not in rendered
+    assert app_context.prompts.list() == []
 
 
 def test_shell_dispatches_direct_commands_off_the_event_loop(

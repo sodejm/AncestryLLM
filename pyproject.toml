@@ -34,7 +34,6 @@ dependencies = [
     "prompt-toolkit>=3.0.52,<4",
     "pydantic>=2.12,<3",
     "python-dateutil>=2.9,<3",
-    "python-gedcom==1.1.0",
     "rapidfuzz>=3.14,<4",
     "rich>=15,<16",
     "sqlalchemy>=2.0,<3",

@@ -1,0 +1,635 @@
+"""Bounded, typed, race-aware reads for every public file-ingress boundary."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import stat
+from collections.abc import Iterator, Mapping
+from dataclasses import asdict, dataclass, fields
+from enum import Enum
+from pathlib import Path
+from typing import BinaryIO
+
+from ancestryllm.core.errors import ConfigurationError, FileIngressError
+
+_ARCHIVE_SIGNATURES = (
+    b"PK\x03\x04",  # ZIP
+    b"\x1f\x8b",  # gzip
+    b"BZh",  # bzip2
+    b"\xfd7zXZ\x00",  # xz
+    b"7z\xbc\xaf\x27\x1c",
+    b"Rar!\x1a\x07",
+)
+_READ_CHUNK_BYTES = 1024 * 1024
+
+
+class FileKind(str, Enum):
+    """Supported public input classes."""
+
+    CONFIG = "config"
+    GEDCOM = "gedcom"
+    ROOTSMAGIC = "rootsmagic"
+    OCR = "ocr"
+    MANIFEST = "manifest"
+    JSON_SCHEMA = "json_schema"
+    PROMPT_BODY = "prompt_body"
+
+
+@dataclass(frozen=True, slots=True)
+class FileLimit:
+    """Resource budgets for one input class."""
+
+    max_bytes: int
+    max_line_bytes: int | None = None
+    max_records: int | None = None
+    max_record_bytes: int | None = None
+    max_nesting: int | None = None
+    max_collection_items: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileIngressLimits:
+    """All file limits, configurable only through ``config.toml``."""
+
+    config: FileLimit = FileLimit(
+        max_bytes=1_048_576,
+        max_line_bytes=65_536,
+        max_records=20_000,
+        max_nesting=16,
+        max_collection_items=20_000,
+    )
+    gedcom: FileLimit = FileLimit(
+        max_bytes=536_870_912,
+        max_line_bytes=1_048_576,
+        max_records=5_000_000,
+        max_record_bytes=16_777_216,
+        max_nesting=99,
+        max_collection_items=250_000,
+    )
+    rootsmagic: FileLimit = FileLimit(
+        max_bytes=8_589_934_592,
+        max_records=5_000_000,
+        max_collection_items=50_000,
+    )
+    ocr: FileLimit = FileLimit(
+        max_bytes=5_000_000,
+        max_line_bytes=1_048_576,
+        max_records=100_000,
+    )
+    manifest: FileLimit = FileLimit(
+        max_bytes=33_554_432,
+        max_line_bytes=1_048_576,
+        max_records=500_000,
+        max_nesting=64,
+        max_collection_items=2_000_000,
+    )
+    json_schema: FileLimit = FileLimit(
+        max_bytes=2_097_152,
+        max_line_bytes=262_144,
+        max_records=50_000,
+        max_nesting=64,
+        max_collection_items=100_000,
+    )
+    prompt_body: FileLimit = FileLimit(
+        max_bytes=1_048_576,
+        max_line_bytes=262_144,
+        max_records=50_000,
+    )
+
+    @classmethod
+    def from_mapping(cls, value: object) -> FileIngressLimits:
+        """Parse strict per-kind overrides from the normal configuration boundary."""
+
+        if value is None:
+            return cls()
+        if not isinstance(value, Mapping):
+            raise ConfigurationError(
+                "CONFIG_INVALID",
+                "The file_ingress configuration must contain per-format tables.",
+                exit_code=2,
+            )
+        defaults = cls()
+        known_kinds = {item.name for item in fields(cls)}
+        unknown_kinds = sorted(str(key) for key in value if key not in known_kinds)
+        if unknown_kinds:
+            raise ConfigurationError(
+                "CONFIG_INVALID",
+                "The file_ingress configuration contains an unknown input class.",
+                exit_code=2,
+                details={"unknown": unknown_kinds},
+            )
+        selected: dict[str, FileLimit] = {}
+        for kind in fields(cls):
+            default = getattr(defaults, kind.name)
+            raw = value.get(kind.name, {})
+            if not isinstance(raw, Mapping):
+                raise ConfigurationError(
+                    "CONFIG_INVALID",
+                    f"The {kind.name} file-ingress limits must be a table.",
+                    exit_code=2,
+                )
+            known_limits = {item.name for item in fields(FileLimit)}
+            unknown_limits = sorted(str(key) for key in raw if key not in known_limits)
+            if unknown_limits:
+                raise ConfigurationError(
+                    "CONFIG_INVALID",
+                    f"The {kind.name} file-ingress table contains an unknown limit.",
+                    exit_code=2,
+                    details={"unknown": unknown_limits},
+                )
+            overrides: dict[str, int | None] = {}
+            for limit_field in fields(FileLimit):
+                item = raw.get(limit_field.name, getattr(default, limit_field.name))
+                if item is not None and (
+                    isinstance(item, bool) or not isinstance(item, int) or item < 1
+                ):
+                    raise ConfigurationError(
+                        "CONFIG_INVALID",
+                        f"The {kind.name}.{limit_field.name} file-ingress limit must be a positive integer.",
+                        exit_code=2,
+                    )
+                overrides[limit_field.name] = item
+            maximum_bytes = overrides["max_bytes"]
+            assert isinstance(maximum_bytes, int)
+            selected[kind.name] = FileLimit(
+                max_bytes=maximum_bytes,
+                max_line_bytes=overrides["max_line_bytes"],
+                max_records=overrides["max_records"],
+                max_record_bytes=overrides["max_record_bytes"],
+                max_nesting=overrides["max_nesting"],
+                max_collection_items=overrides["max_collection_items"],
+            )
+        return cls(**selected)
+
+    def to_mapping(self) -> dict[str, dict[str, int]]:
+        """Return TOML-serializable limits without null entries."""
+
+        return {
+            kind.name: {
+                key: int(value)
+                for key, value in asdict(getattr(self, kind.name)).items()
+                if value is not None
+            }
+            for kind in fields(self)
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FileSnapshot:
+    """Identity captured before a file is consumed."""
+
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+
+    @classmethod
+    def from_stat(cls, value: os.stat_result) -> FileSnapshot:
+        return cls(value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+
+
+@dataclass(frozen=True, slots=True)
+class TextLine:
+    """One decoded physical line and its source-encoding byte length."""
+
+    text: str
+    byte_count: int
+
+
+class FileIngressPolicy:
+    """Apply deterministic file limits without exposing file paths or payloads."""
+
+    def __init__(self, limits: FileIngressLimits | None = None) -> None:
+        self.limits = limits or FileIngressLimits()
+
+    def limit(self, kind: FileKind) -> FileLimit:
+        return {
+            FileKind.CONFIG: self.limits.config,
+            FileKind.GEDCOM: self.limits.gedcom,
+            FileKind.ROOTSMAGIC: self.limits.rootsmagic,
+            FileKind.OCR: self.limits.ocr,
+            FileKind.MANIFEST: self.limits.manifest,
+            FileKind.JSON_SCHEMA: self.limits.json_schema,
+            FileKind.PROMPT_BODY: self.limits.prompt_body,
+        }[kind]
+
+    @staticmethod
+    def _error(
+        code: str,
+        message: str,
+        kind: FileKind,
+        *,
+        limit_name: str | None = None,
+        limit: int | None = None,
+        error_type: str | None = None,
+    ) -> FileIngressError:
+        details: dict[str, object] = {"input_class": kind.value}
+        if limit_name is not None:
+            details["limit_name"] = limit_name
+        if limit is not None:
+            details["limit"] = limit
+        if error_type is not None:
+            details["error_type"] = error_type
+        return FileIngressError(code, message, details=details)
+
+    def _validate_stat(self, value: os.stat_result, kind: FileKind) -> FileSnapshot:
+        if not stat.S_ISREG(value.st_mode):
+            raise self._error(
+                "FILE_INPUT_NOT_REGULAR",
+                f"The {kind.value} input must be a regular file.",
+                kind,
+            )
+        maximum = self.limit(kind).max_bytes
+        if value.st_size > maximum:
+            raise self._error(
+                "FILE_INPUT_TOO_LARGE",
+                f"The {kind.value} input exceeds the configured byte limit ({maximum}).",
+                kind,
+                limit_name="max_bytes",
+                limit=maximum,
+            )
+        return FileSnapshot.from_stat(value)
+
+    def _open_descriptor(
+        self,
+        path: Path,
+        kind: FileKind,
+        *,
+        expected: FileSnapshot | None = None,
+    ) -> tuple[int, FileSnapshot]:
+        try:
+            preflight = self._validate_stat(os.lstat(path), kind)
+        except FileIngressError:
+            raise
+        except OSError as exc:
+            raise self._error(
+                "FILE_INPUT_UNREADABLE",
+                f"The {kind.value} input could not be opened safely.",
+                kind,
+                error_type=type(exc).__name__,
+            ) from exc
+        if expected is not None and preflight != expected:
+            raise self._error(
+                "FILE_INPUT_CHANGED",
+                f"The {kind.value} input changed before it could be consumed.",
+                kind,
+            )
+        flags = os.O_RDONLY
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise self._error(
+                "FILE_INPUT_UNREADABLE",
+                f"The {kind.value} input could not be opened safely.",
+                kind,
+                error_type=type(exc).__name__,
+            ) from exc
+        try:
+            snapshot = self._validate_stat(os.fstat(descriptor), kind)
+            if snapshot != preflight:
+                raise self._error(
+                    "FILE_INPUT_CHANGED",
+                    f"The {kind.value} input changed before it could be consumed.",
+                    kind,
+                )
+            if expected is not None and snapshot != expected:
+                raise self._error(
+                    "FILE_INPUT_CHANGED",
+                    f"The {kind.value} input changed before it could be consumed.",
+                    kind,
+                )
+            try:
+                prefix = os.read(descriptor, 16)
+                os.lseek(descriptor, 0, os.SEEK_SET)
+            except OSError as exc:
+                raise self._error(
+                    "FILE_INPUT_IO",
+                    f"The {kind.value} input could not be read completely.",
+                    kind,
+                    error_type=type(exc).__name__,
+                ) from exc
+            if any(prefix.startswith(signature) for signature in _ARCHIVE_SIGNATURES):
+                raise self._error(
+                    "FILE_ARCHIVE_UNSUPPORTED",
+                    f"Compressed or archived {kind.value} input is not supported.",
+                    kind,
+                )
+            if kind is FileKind.ROOTSMAGIC and not prefix.startswith(b"SQLite format 3\x00"):
+                raise self._error(
+                    "FILE_FORMAT_INVALID",
+                    "The rootsmagic input is not a supported SQLite database.",
+                    kind,
+                )
+            return descriptor, snapshot
+        except Exception:
+            os.close(descriptor)
+            raise
+
+    def inspect(self, path: str | Path, kind: FileKind) -> FileSnapshot:
+        """Run the cheapest safe bound before decoding or opening SQLite."""
+
+        selected = Path(path).expanduser()
+        descriptor, snapshot = self._open_descriptor(selected, kind)
+        os.close(descriptor)
+        return snapshot
+
+    def assert_unchanged(self, path: str | Path, kind: FileKind, expected: FileSnapshot) -> None:
+        """Reject replacement, growth, truncation, or in-place modification."""
+
+        selected = Path(path).expanduser()
+        try:
+            current = FileSnapshot.from_stat(os.lstat(selected))
+        except OSError as exc:
+            raise self._error(
+                "FILE_INPUT_CHANGED",
+                f"The {kind.value} input changed while it was being consumed.",
+                kind,
+                error_type=type(exc).__name__,
+            ) from exc
+        if current != expected:
+            raise self._error(
+                "FILE_INPUT_CHANGED",
+                f"The {kind.value} input changed while it was being consumed.",
+                kind,
+            )
+
+    @staticmethod
+    def _line_encoding(prefix: bytes) -> tuple[str, str]:
+        if prefix.startswith(b"\xff\xfe"):
+            return "utf-16", "utf-16-le"
+        if prefix.startswith(b"\xfe\xff"):
+            return "utf-16", "utf-16-be"
+        return "utf-8-sig", "utf-8"
+
+    def iter_text_line_items(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        count_lines_as_records: bool = True,
+    ) -> Iterator[TextLine]:
+        """Yield decoded lines and source byte sizes while enforcing budgets."""
+
+        selected = Path(path).expanduser()
+        expected = self.inspect(selected, kind)
+        descriptor, opened = self._open_descriptor(selected, kind, expected=expected)
+        binary: BinaryIO = os.fdopen(descriptor, "rb", closefd=True)
+        try:
+            prefix = binary.read(4)
+            binary.seek(0)
+            text_encoding, byte_encoding = self._line_encoding(prefix)
+            text = io.TextIOWrapper(binary, encoding=text_encoding, errors="strict", newline="")
+            maximum_line = self.limit(kind).max_line_bytes
+            maximum_records = self.limit(kind).max_records
+            record_count = 0
+            read_limit = (maximum_line + 2) if maximum_line is not None else -1
+            try:
+                while True:
+                    raw_line = text.readline(read_limit)
+                    if not raw_line:
+                        break
+                    line_bytes = len(raw_line.encode(byte_encoding))
+                    if maximum_line is not None:
+                        if line_bytes > maximum_line:
+                            raise self._error(
+                                "FILE_LINE_TOO_LONG",
+                                f"A physical line in the {kind.value} input exceeds the configured byte limit ({maximum_line}).",
+                                kind,
+                                limit_name="max_line_bytes",
+                                limit=maximum_line,
+                            )
+                        if len(raw_line) == read_limit and not raw_line.endswith(("\n", "\r")):
+                            raise self._error(
+                                "FILE_LINE_TOO_LONG",
+                                f"A physical line in the {kind.value} input exceeds the configured byte limit ({maximum_line}).",
+                                kind,
+                                limit_name="max_line_bytes",
+                                limit=maximum_line,
+                            )
+                    if count_lines_as_records:
+                        record_count += 1
+                        if maximum_records is not None and record_count > maximum_records:
+                            raise self._error(
+                                "FILE_RECORD_LIMIT_EXCEEDED",
+                                f"The {kind.value} input exceeds the configured record limit ({maximum_records}).",
+                                kind,
+                                limit_name="max_records",
+                                limit=maximum_records,
+                            )
+                    yield TextLine(raw_line, line_bytes)
+                current = FileSnapshot.from_stat(os.fstat(text.buffer.fileno()))
+                if current != opened:
+                    raise self._error(
+                        "FILE_INPUT_CHANGED",
+                        f"The {kind.value} input changed while it was being consumed.",
+                        kind,
+                    )
+                self.assert_unchanged(selected, kind, opened)
+            except UnicodeError as exc:
+                raise self._error(
+                    "FILE_ENCODING_INVALID",
+                    f"The {kind.value} input is not valid supported Unicode text.",
+                    kind,
+                    error_type=type(exc).__name__,
+                ) from exc
+            except OSError as exc:
+                raise self._error(
+                    "FILE_INPUT_IO",
+                    f"The {kind.value} input could not be read completely.",
+                    kind,
+                    error_type=type(exc).__name__,
+                ) from exc
+            finally:
+                text.close()
+        finally:
+            if not binary.closed:
+                binary.close()
+
+    def iter_text_lines(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        count_lines_as_records: bool = True,
+    ) -> Iterator[str]:
+        """Yield decoded physical lines while enforcing byte and line budgets."""
+
+        for item in self.iter_text_line_items(
+            path, kind, count_lines_as_records=count_lines_as_records
+        ):
+            yield item.text
+
+    def validate_record(
+        self,
+        kind: FileKind,
+        *,
+        count: int,
+        byte_count: int,
+        nesting: int,
+        collection_items: int,
+    ) -> None:
+        """Check a parsed record against count, size, nesting, and item budgets."""
+
+        limit = self.limit(kind)
+        if limit.max_records is not None and count > limit.max_records:
+            raise self._error(
+                "FILE_RECORD_LIMIT_EXCEEDED",
+                f"The {kind.value} input exceeds the configured record limit ({limit.max_records}).",
+                kind,
+                limit_name="max_records",
+                limit=limit.max_records,
+            )
+        if limit.max_record_bytes is not None and byte_count > limit.max_record_bytes:
+            raise self._error(
+                "FILE_RECORD_TOO_LARGE",
+                f"A logical record in the {kind.value} input exceeds the configured byte limit ({limit.max_record_bytes}).",
+                kind,
+                limit_name="max_record_bytes",
+                limit=limit.max_record_bytes,
+            )
+        if limit.max_nesting is not None and nesting > limit.max_nesting:
+            raise self._error(
+                "FILE_NESTING_LIMIT_EXCEEDED",
+                f"The {kind.value} input exceeds the configured nesting limit ({limit.max_nesting}).",
+                kind,
+                limit_name="max_nesting",
+                limit=limit.max_nesting,
+            )
+        if limit.max_collection_items is not None and collection_items > limit.max_collection_items:
+            raise self._error(
+                "FILE_COLLECTION_LIMIT_EXCEEDED",
+                f"A logical record in the {kind.value} input exceeds the configured collection limit ({limit.max_collection_items}).",
+                kind,
+                limit_name="max_collection_items",
+                limit=limit.max_collection_items,
+            )
+
+    def read_text(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        allow_empty: bool = True,
+    ) -> str:
+        value = "".join(self.iter_text_lines(path, kind))
+        if not allow_empty and not value:
+            raise self._error(
+                "FILE_INPUT_EMPTY",
+                f"The {kind.value} input must not be empty.",
+                kind,
+            )
+        return value
+
+    def read_json(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        require_object: bool = False,
+    ) -> object:
+        """Read and bound a JSON document without including parser payloads in errors."""
+
+        try:
+            value = json.loads(self.read_text(path, kind, allow_empty=False))
+        except json.JSONDecodeError as exc:
+            raise self._error(
+                "FILE_JSON_INVALID",
+                f"The {kind.value} input is not valid JSON.",
+                kind,
+                error_type=type(exc).__name__,
+            ) from exc
+        if require_object and not isinstance(value, dict):
+            raise self._error(
+                "FILE_JSON_TYPE_INVALID",
+                f"The {kind.value} input must contain one JSON object.",
+                kind,
+            )
+        self.validate_structure(value, kind)
+        return value
+
+    def validate_structure(self, value: object, kind: FileKind) -> None:
+        """Bound nesting and aggregate collection members in parsed data."""
+
+        limit = self.limit(kind)
+        pending: list[tuple[object, int]] = [(value, 1)]
+        collection_items = 0
+        while pending:
+            item, depth = pending.pop()
+            if limit.max_nesting is not None and depth > limit.max_nesting:
+                raise self._error(
+                    "FILE_NESTING_LIMIT_EXCEEDED",
+                    f"The {kind.value} input exceeds the configured nesting limit ({limit.max_nesting}).",
+                    kind,
+                    limit_name="max_nesting",
+                    limit=limit.max_nesting,
+                )
+            if isinstance(item, dict):
+                collection_items += len(item)
+                pending.extend((child, depth + 1) for child in item.values())
+            elif isinstance(item, list):
+                collection_items += len(item)
+                pending.extend((child, depth + 1) for child in item)
+            if (
+                limit.max_collection_items is not None
+                and collection_items > limit.max_collection_items
+            ):
+                raise self._error(
+                    "FILE_COLLECTION_LIMIT_EXCEEDED",
+                    f"The {kind.value} input exceeds the configured collection limit ({limit.max_collection_items}).",
+                    kind,
+                    limit_name="max_collection_items",
+                    limit=limit.max_collection_items,
+                )
+
+    def sha256(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        expected: FileSnapshot | None = None,
+    ) -> tuple[str, FileSnapshot]:
+        """Hash a bounded file and reject any replacement or in-place change."""
+
+        selected = Path(path).expanduser()
+        before = expected or self.inspect(selected, kind)
+        descriptor, opened = self._open_descriptor(selected, kind, expected=before)
+        digest = hashlib.sha256()
+        try:
+            with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                while chunk := handle.read(_READ_CHUNK_BYTES):
+                    digest.update(chunk)
+                current = FileSnapshot.from_stat(os.fstat(handle.fileno()))
+            if current != opened:
+                raise self._error(
+                    "FILE_INPUT_CHANGED",
+                    f"The {kind.value} input changed while it was being consumed.",
+                    kind,
+                )
+            self.assert_unchanged(selected, kind, opened)
+        except FileIngressError:
+            raise
+        except OSError as exc:
+            raise self._error(
+                "FILE_INPUT_IO",
+                f"The {kind.value} input could not be read completely.",
+                kind,
+                error_type=type(exc).__name__,
+            ) from exc
+        return digest.hexdigest(), opened
+
+
+__all__ = [
+    "FileIngressLimits",
+    "FileIngressPolicy",
+    "FileKind",
+    "FileLimit",
+    "FileSnapshot",
+    "TextLine",
+]

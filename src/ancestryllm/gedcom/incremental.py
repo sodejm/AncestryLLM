@@ -30,9 +30,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping, Never, Optional, Sequence
 
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, FileIngressError
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.gedcom.contracts import IdentityResolver
-
 
 MANIFEST_SCHEMA_VERSION = 1
 SOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -163,8 +163,15 @@ class SyncError(RuntimeError):
         return "\n".join(lines) + "\n"
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256_file(
+    path: Path,
+    ingress: FileIngressPolicy | None = None,
+    kind: FileKind = FileKind.GEDCOM,
+) -> str:
     """Hash a file in bounded chunks."""
+    if ingress is not None:
+        bounded_digest, _ = ingress.sha256(path, kind)
+        return bounded_digest
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -610,13 +617,13 @@ def _parse_snapshot_argument(value: str) -> tuple[str, str, Path]:
             "Vendor metadata controls reporting and future compatibility profiles.",
             [f"Choose one of: {', '.join(SUPPORTED_VENDORS)}."],
         )
-    return source_id, vendor, Path(raw_path).expanduser().resolve()
+    return source_id, vendor, Path(raw_path).expanduser().absolute()
 
 
-def _header_export_date(path: Path, core: ModuleType) -> Optional[str]:
+def _header_export_date(path: Path, core: ModuleType, ingress: FileIngressPolicy) -> Optional[str]:
     """Read a usable HEAD.DATE without treating it as genealogical evidence."""
     try:
-        first = next(core.iter_gedcom_records(path))
+        first = next(core.iter_gedcom_records(path, ingress))
     except (StopIteration, OSError, ValueError):
         return None
     if first.tag != "HEAD":
@@ -628,7 +635,9 @@ def _header_export_date(path: Path, core: ModuleType) -> Optional[str]:
     return None
 
 
-def _snapshot_specs(args: argparse.Namespace, core: ModuleType) -> list[SnapshotSpec]:
+def _snapshot_specs(
+    args: argparse.Namespace, core: ModuleType, ingress: FileIngressPolicy
+) -> list[SnapshotSpec]:
     """Validate repeated snapshot arguments and derive export timestamps."""
     explicit_dates: dict[str, str] = {}
     for value in args.exported_at or []:
@@ -662,25 +671,18 @@ def _snapshot_specs(args: argparse.Namespace, core: ModuleType) -> list[Snapshot
                 ["Keep one --snapshot entry for each source ID."],
             )
         seen.add(source_id)
-        if not path.is_file():
-            raise SyncError(
-                "SYNC_CONFIGURATION",
-                f"Snapshot file does not exist: {path}",
-                "No comparison can be performed without the exported GEDCOM.",
-                ["Correct the path and confirm that the file is readable."],
-                details=(f"Source ID: {source_id}",),
-            )
+        snapshot = ingress.inspect(path, FileKind.GEDCOM)
         if source_id in explicit_dates:
             exported_at = explicit_dates[source_id]
             basis = "operator"
         else:
-            header_date = _header_export_date(path, core)
+            header_date = _header_export_date(path, core, ingress)
             if header_date:
                 exported_at = header_date
                 basis = "HEAD.DATE"
             else:
                 exported_at = dt.datetime.fromtimestamp(
-                    path.stat().st_mtime, tz=dt.timezone.utc
+                    snapshot.modified_ns / 1_000_000_000, tz=dt.timezone.utc
                 ).isoformat()
                 basis = "file-mtime"
         specs.append(
@@ -690,7 +692,7 @@ def _snapshot_specs(args: argparse.Namespace, core: ModuleType) -> list[Snapshot
                 path=path,
                 exported_at=exported_at,
                 date_basis=basis,
-                sha256=_sha256_file(path),
+                sha256=_sha256_file(path, ingress),
             )
         )
     unknown_dates = sorted(set(explicit_dates) - seen)
@@ -705,7 +707,7 @@ def _snapshot_specs(args: argparse.Namespace, core: ModuleType) -> list[Snapshot
     return specs
 
 
-def _new_manifest(master: Path, release_root: Path) -> dict[str, Any]:
+def _new_manifest(master: Path, release_root: Path, ingress: FileIngressPolicy) -> dict[str, Any]:
     """Create an empty schema-v1 manifest for protected baseline seeding."""
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -713,7 +715,7 @@ def _new_manifest(master: Path, release_root: Path) -> dict[str, Any]:
         "generation": 0,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "master": {"path": str(master), "sha256": _sha256_file(master)},
+        "master": {"path": str(master), "sha256": _sha256_file(master, ingress)},
         "parent_release": None,
         "release_root": str(release_root),
         "active_snapshots": {},
@@ -728,21 +730,10 @@ def _new_manifest(master: Path, release_root: Path) -> dict[str, Any]:
     }
 
 
-def _load_manifest(path: Path, master: Path) -> dict[str, Any]:
+def _load_manifest(path: Path, master: Path, ingress: FileIngressPolicy) -> dict[str, Any]:
     """Load and validate a manifest before using any provenance decisions."""
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SyncError(
-            "MANIFEST_INVALID",
-            f"The manifest could not be read as JSON: {path}",
-            "Continuing without trustworthy provenance could delete or duplicate data.",
-            [
-                "Restore manifest.json from the same release as the master GEDCOM.",
-                "Do not hand-edit the manifest unless you also validate its schema.",
-            ],
-            details=(str(exc),),
-        ) from exc
+    value = ingress.read_json(path, FileKind.MANIFEST, require_object=True)
+    assert isinstance(value, dict)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise SyncError(
             "MANIFEST_INVALID",
@@ -752,7 +743,7 @@ def _load_manifest(path: Path, master: Path) -> dict[str, Any]:
             details=(f"Found schema_version: {value.get('schema_version')!r}",),
         )
     expected = str(value.get("master", {}).get("sha256", ""))
-    actual = _sha256_file(master)
+    actual = _sha256_file(master, ingress)
     if expected != actual:
         raise SyncError(
             "MANIFEST_MASTER_MISMATCH",
@@ -1336,18 +1327,13 @@ def _safe_exception_detail(exc: BaseException) -> str:
 def _perform_update(
     args: argparse.Namespace,
     core: ModuleType,
+    ingress: FileIngressPolicy,
     identity_resolver: IdentityResolver | None = None,
 ) -> int:
     """Execute one offline-first update and publish an atomic generation bundle."""
-    master = Path(args.master).expanduser().resolve()
+    master = Path(args.master).expanduser().absolute()
     release_root = Path(args.release_root).expanduser().resolve()
-    if not master.is_file():
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            f"Master GEDCOM does not exist: {master}",
-            "The updater needs an immutable starting generation.",
-            ["Select the master.ged file from the current release bundle."],
-        )
+    ingress.inspect(master, FileKind.GEDCOM)
     if args.initialize_manifest and args.manifest:
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -1375,11 +1361,11 @@ def _perform_update(
                 "Or add --no-quality-report.",
             ],
         )
-    specs = _snapshot_specs(args, core)
+    specs = _snapshot_specs(args, core, ingress)
     manifest = (
-        _new_manifest(master, release_root)
+        _new_manifest(master, release_root, ingress)
         if args.initialize_manifest
-        else _load_manifest(Path(args.manifest).expanduser().resolve(), master)
+        else _load_manifest(Path(args.manifest).expanduser().absolute(), master, ingress)
     )
     if all(
         manifest.get("active_snapshots", {}).get(spec.source_id) == spec.snapshot_id
@@ -1391,7 +1377,7 @@ def _perform_update(
         )
         return 0
     try:
-        sources = core.load_sources([master, *(spec.path for spec in specs)])
+        sources = core.load_sources([master, *(spec.path for spec in specs)], ingress)
     except (OSError, ValueError) as exc:
         raise SyncError(
             "SYNC_PARSE",
@@ -1478,10 +1464,12 @@ def _perform_update(
         master_sha = _sha256_file(staged_master)
         parent_master = copy.deepcopy(manifest.get("master"))
         parent_manifest_path = (
-            str(Path(args.manifest).expanduser().resolve()) if args.manifest else None
+            str(Path(args.manifest).expanduser().absolute()) if args.manifest else None
         )
         parent_manifest_sha = (
-            _sha256_file(Path(parent_manifest_path)) if parent_manifest_path else None
+            _sha256_file(Path(parent_manifest_path), ingress, FileKind.MANIFEST)
+            if parent_manifest_path
+            else None
         )
         manifest["parent_release"] = {
             "generation": next_generation - 1,
@@ -1557,10 +1545,12 @@ def _perform_update(
     return 0
 
 
-def _master_block_index(path: Path, core: ModuleType) -> dict[str, dict[str, str]]:
+def _master_block_index(
+    path: Path, core: ModuleType, ingress: FileIngressPolicy
+) -> dict[str, dict[str, str]]:
     """Index person blocks by pointer for explicit manual rebase comparison."""
     result: dict[str, dict[str, str]] = defaultdict(dict)
-    for record in core.iter_gedcom_records(path):
+    for record in core.iter_gedcom_records(path, ingress):
         if record.tag != "INDI":
             continue
         for block in core._top_level_blocks(record.lines):
@@ -1568,39 +1558,18 @@ def _master_block_index(path: Path, core: ModuleType) -> dict[str, dict[str, str
     return result
 
 
-def _perform_rebase(args: argparse.Namespace, core: ModuleType) -> int:
+def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIngressPolicy) -> int:
     """Adopt external edits explicitly as protected manual provenance."""
-    master = Path(args.master).expanduser().resolve()
-    manifest_path = Path(args.manifest).expanduser().resolve()
+    master = Path(args.master).expanduser().absolute()
+    manifest_path = Path(args.manifest).expanduser().absolute()
     release_root = Path(args.release_root).expanduser().resolve()
-    if not master.is_file() or not manifest_path.is_file():
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            "The edited master or previous manifest does not exist.",
-            "Rebase needs both sides to identify intentional manual changes.",
-            ["Correct --master and --manifest, then retry."],
-        )
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SyncError(
-            "MANIFEST_INVALID",
-            "The previous manifest is not valid JSON.",
-            "Manual edits cannot be protected without trustworthy prior provenance.",
-            ["Restore manifest.json from the prior release."],
-            details=(str(exc),),
-        ) from exc
+    ingress.inspect(master, FileKind.GEDCOM)
+    manifest = ingress.read_json(manifest_path, FileKind.MANIFEST, require_object=True)
+    assert isinstance(manifest, dict)
     previous_path = Path(str(manifest.get("master", {}).get("path", "")))
-    if not previous_path.is_file():
-        raise SyncError(
-            "MANIFEST_INVALID",
-            "The manifest's previous master file is no longer available.",
-            "A rebase must compare manual edits with the exact prior generation.",
-            ["Restore the prior release directory or use its intact backup."],
-            details=(f"Expected previous master: {previous_path}",),
-        )
-    previous = _master_block_index(previous_path, core)
-    current = _master_block_index(master, core)
+    ingress.inspect(previous_path, FileKind.GEDCOM)
+    previous = _master_block_index(previous_path, core, ingress)
+    current = _master_block_index(master, core, ingress)
     additions = {
         pointer: set(hashes) - set(previous.get(pointer, {}))
         for pointer, hashes in current.items()
@@ -1678,7 +1647,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType) -> int:
             "generation": next_generation - 1,
             "master": prior,
             "manifest_path": str(manifest_path),
-            "manifest_sha256": _sha256_file(manifest_path),
+            "manifest_sha256": _sha256_file(manifest_path, ingress, FileKind.MANIFEST),
         }
         manifest["master"] = {
             "path": str(final_dir / "master.ged"),
@@ -1717,12 +1686,14 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType) -> int:
 def main(
     argv: Sequence[str],
     core: ModuleType,
+    ingress: FileIngressPolicy | None = None,
     *,
     resolver_factory: ResolverFactory | None = None,
 ) -> int:
     """Dispatch ``update`` or ``rebase`` and render transparent failures."""
     command = argv[0] if argv else ""
     release_root = Path(".").resolve()
+    policy = ingress or FileIngressPolicy()
     try:
         if command == "update":
             args = _build_update_parser().parse_args(list(argv[1:]))
@@ -1739,17 +1710,20 @@ def main(
                     args.model,
                     args.consent,
                 )
-            return _perform_update(args, core, identity_resolver)
+            return _perform_update(args, core, policy, identity_resolver)
         if command == "rebase":
             args = _build_rebase_parser().parse_args(list(argv[1:]))
             release_root = Path(args.release_root).expanduser().resolve()
-            return _perform_rebase(args, core)
+            return _perform_rebase(args, core, policy)
         raise SyncError(
             "SYNC_CONFIGURATION",
             f"Unknown incremental command: {command or '(missing)'}",
             "Only update and rebase have defined provenance behavior.",
             ["Use gedcom_merge.py update --help or rebase --help."],
         )
+    except FileIngressError as exc:
+        print(exc.render(), end="\n", file=__import__("sys").stderr)
+        return exc.exit_code
     except SyncError as exc:
         print(exc.render(), end="", file=__import__("sys").stderr)
         _failure_report(release_root, exc)

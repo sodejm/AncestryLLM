@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import sqlite3
 import time
@@ -14,6 +13,7 @@ from typing import Any, Iterator
 from sqlglot import exp, parse
 
 from ancestryllm.core.errors import AncestryError, SecurityPolicyError
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 
 DENIED_ACTIONS = {
     sqlite3.SQLITE_INSERT,
@@ -58,11 +58,8 @@ FORBIDDEN_EXPRESSIONS = (
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    digest, _ = FileIngressPolicy().sha256(path, FileKind.ROOTSMAGIC)
+    return digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,19 +74,36 @@ class RootsMagicReader:
     """Open a configured RootsMagic file only through SQLite read-only mode."""
 
     def __init__(
-        self, allowed_directories: list[Path], max_rows: int = 100, timeout_seconds: float = 10.0
+        self,
+        allowed_directories: list[Path],
+        max_rows: int = 100,
+        timeout_seconds: float = 10.0,
+        ingress: FileIngressPolicy | None = None,
     ) -> None:
         self.allowed_directories = [path.expanduser().resolve() for path in allowed_directories]
         self.max_rows = max_rows
         self.timeout_seconds = timeout_seconds
+        self.ingress = ingress or FileIngressPolicy()
 
     def list_trees(self) -> list[Path]:
         results: set[Path] = set()
         for directory in self.allowed_directories:
             if directory.is_dir():
-                results.update(
-                    path.resolve() for path in directory.glob("*.rmtree") if path.is_file()
-                )
+                for path in directory.glob("*.rmtree"):
+                    try:
+                        self.ingress.inspect(path, FileKind.ROOTSMAGIC)
+                    except AncestryError as exc:
+                        if exc.code == "FILE_INPUT_UNREADABLE" and not path.exists():
+                            continue
+                        raise
+                    results.add(path.absolute())
+                    self.ingress.validate_record(
+                        FileKind.ROOTSMAGIC,
+                        count=1,
+                        byte_count=0,
+                        nesting=0,
+                        collection_items=len(results),
+                    )
         return sorted(results)
 
     def resolve_tree(self, name_or_path: str | Path) -> Path:
@@ -101,14 +115,22 @@ class RootsMagicReader:
             name = requested if requested.suffix == ".rmtree" else requested.with_suffix(".rmtree")
             candidates = [directory / name for directory in self.allowed_directories]
         for candidate in candidates:
+            absolute = candidate.absolute()
             resolved = candidate.resolve(strict=False)
             if not any(
                 os.path.commonpath([str(directory), str(resolved)]) == str(directory)
                 for directory in self.allowed_directories
             ):
                 continue
-            if resolved.is_file() and resolved.suffix.casefold() == ".rmtree":
-                return resolved
+            if absolute.suffix.casefold() != ".rmtree":
+                continue
+            try:
+                self.ingress.inspect(absolute, FileKind.ROOTSMAGIC)
+            except AncestryError as exc:
+                if exc.code == "FILE_INPUT_UNREADABLE" and not os.path.lexists(absolute):
+                    continue
+                raise
+            return absolute
         raise AncestryError(
             "ROOTSMAGIC_TREE_NOT_FOUND",
             f"No configured RootsMagic database matches {str(name_or_path)!r}.",
@@ -130,6 +152,7 @@ class RootsMagicReader:
 
     @contextmanager
     def connection(self, path: Path) -> Iterator[sqlite3.Connection]:
+        snapshot = self.ingress.inspect(path, FileKind.ROOTSMAGIC)
         uri = f"file:{path.as_posix()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=min(self.timeout_seconds, 30.0))
         try:
@@ -143,28 +166,50 @@ class RootsMagicReader:
         finally:
             connection.set_progress_handler(None, 0)
             connection.close()
+            self.ingress.assert_unchanged(path, FileKind.ROOTSMAGIC, snapshot)
 
     def schema(self, path: Path) -> dict[str, tuple[str, ...]]:
-        with self.connection(path) as connection:
-            rows = connection.execute(
-                "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            ).fetchall()
-            result: dict[str, tuple[str, ...]] = {}
-            # PRAGMA is denied after the authorizer is installed, so parse declared CREATE TABLE SQL.
-            for table_name, create_sql in rows:
-                try:
-                    parsed = parse(str(create_sql), read="sqlite")[0]
-                    if parsed is None:
-                        raise ValueError("empty CREATE TABLE expression")
-                    columns = tuple(
-                        column.this.name
-                        for column in parsed.find_all(exp.ColumnDef)
-                        if getattr(column.this, "name", None)
+        try:
+            with self.connection(path) as connection:
+                cursor = connection.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+                maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_collection_items
+                rows = cursor.fetchmany(maximum + 1) if maximum is not None else cursor.fetchall()
+                if maximum is not None and len(rows) > maximum:
+                    self.ingress.validate_record(
+                        FileKind.ROOTSMAGIC,
+                        count=1,
+                        byte_count=0,
+                        nesting=0,
+                        collection_items=len(rows),
                     )
-                except Exception:  # noqa: BLE001 - vendor schemas can be unusual
-                    columns = ()
-                result[str(table_name)] = columns
-            return result
+                result: dict[str, tuple[str, ...]] = {}
+                # PRAGMA is denied after the authorizer is installed, so parse
+                # declared CREATE TABLE SQL.
+                for table_name, create_sql in rows:
+                    try:
+                        parsed = parse(str(create_sql), read="sqlite")[0]
+                        if parsed is None:
+                            raise ValueError("empty CREATE TABLE expression")
+                        columns = tuple(
+                            column.this.name
+                            for column in parsed.find_all(exp.ColumnDef)
+                            if getattr(column.this, "name", None)
+                        )
+                    except Exception:  # noqa: BLE001 - vendor schemas can be unusual
+                        columns = ()
+                    result[str(table_name)] = columns
+                return result
+        except AncestryError:
+            raise
+        except sqlite3.Error as exc:
+            raise AncestryError(
+                "ROOTSMAGIC_INPUT_INVALID",
+                "The RootsMagic input could not be inspected as a SQLite database.",
+                details={"error_type": type(exc).__name__},
+            ) from exc
 
     def validate_sql(self, sql: str, allowed_schema: dict[str, tuple[str, ...]]) -> str:
         if not sql.strip() or "\x00" in sql:
@@ -194,8 +239,40 @@ class RootsMagicReader:
         statement = statement.limit(self.max_rows + 1)
         return statement.sql(dialect="sqlite")
 
+    def validate_row_limits(self, path: Path, schema: dict[str, tuple[str, ...]]) -> None:
+        """Bound source rows before queries, exports, or provider schema use."""
+
+        maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_records
+        if maximum is None:
+            return
+        try:
+            with self.connection(path) as connection:
+                for table_name in schema:
+                    quoted = table_name.replace('"', '""')
+                    row = connection.execute(
+                        f'SELECT COUNT(*) FROM (SELECT 1 FROM "{quoted}" LIMIT ?)',  # noqa: S608
+                        (maximum + 1,),
+                    ).fetchone()
+                    count = int(row[0]) if row is not None else 0
+                    self.ingress.validate_record(
+                        FileKind.ROOTSMAGIC,
+                        count=count,
+                        byte_count=0,
+                        nesting=0,
+                        collection_items=1,
+                    )
+        except AncestryError:
+            raise
+        except sqlite3.Error as exc:
+            raise AncestryError(
+                "ROOTSMAGIC_ROW_LIMIT_UNVERIFIED",
+                "The RootsMagic row limit could not be verified safely.",
+                details={"error_type": type(exc).__name__},
+            ) from exc
+
     def query(self, path: Path, sql: str) -> QueryResult:
         schema = self.schema(path)
+        self.validate_row_limits(path, schema)
         validated = self.validate_sql(sql, schema)
         before = sha256_file(path)
         try:
@@ -232,8 +309,27 @@ class RootsMagicReader:
         if actual is None:
             return []
         quoted = actual.replace('"', '""')
-        with self.connection(path) as connection:
-            connection.row_factory = sqlite3.Row
-            # The identifier is selected from the inspected schema and quoted above.
-            rows = connection.execute(f'SELECT * FROM "{quoted}"').fetchall()  # noqa: S608
+        try:
+            with self.connection(path) as connection:
+                connection.row_factory = sqlite3.Row
+                # The identifier is selected from the inspected schema and quoted above.
+                cursor = connection.execute(f'SELECT * FROM "{quoted}"')  # noqa: S608
+                maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_records
+                rows = cursor.fetchmany(maximum + 1) if maximum is not None else cursor.fetchall()
+                if maximum is not None and len(rows) > maximum:
+                    self.ingress.validate_record(
+                        FileKind.ROOTSMAGIC,
+                        count=len(rows),
+                        byte_count=0,
+                        nesting=0,
+                        collection_items=1,
+                    )
+        except AncestryError:
+            raise
+        except sqlite3.Error as exc:
+            raise AncestryError(
+                "ROOTSMAGIC_READ_FAILED",
+                "The RootsMagic table could not be read safely.",
+                details={"error_type": type(exc).__name__},
+            ) from exc
         return [dict(row) for row in rows]

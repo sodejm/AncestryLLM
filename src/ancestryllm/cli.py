@@ -14,6 +14,7 @@ from ancestryllm.console.presentation import PresentationAdapter
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.core.modules import (
     COMMAND_SPECIFICATIONS,
     GLOBAL_ARGUMENTS,
@@ -131,6 +132,7 @@ def dispatch(
     emit: Callable[[Any, bool], None] = _emit,
 ) -> int:
     json_output = bool(args.json)
+    ingress = FileIngressPolicy(context.config.file_ingress)
     if args.command == "modules":
         registry = ModuleRegistry(context)
         if args.action == "list":
@@ -183,6 +185,7 @@ def dispatch(
 
         gedcom_service = GedcomService(
             context.llm,
+            ingress=ingress,
             consent_lookup=context.provider_profiles.consent_grant,
             provider_timeout_seconds=context.config.provider_timeout_seconds,
         )
@@ -232,13 +235,17 @@ def dispatch(
             emit(context.prompts.list(), json_output)
         elif args.action == "save":
             body = (
-                args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
+                args.body
+                if args.body is not None
+                else ingress.read_text(args.body_file, FileKind.PROMPT_BODY)
             )
             schema = (
-                json.loads(args.schema_file.read_text(encoding="utf-8"))
+                ingress.read_json(args.schema_file, FileKind.JSON_SCHEMA, require_object=True)
                 if args.schema_file
                 else None
             )
+            if schema is not None:
+                assert isinstance(schema, dict)
             emit(
                 context.prompts.save(
                     args.name, args.purpose, body, args.variable, schema, args.tag
@@ -337,9 +344,7 @@ def dispatch(
     if args.command == "ocr":
         from ancestryllm.ocr.service import OcrService
 
-        if args.input.stat().st_size > 5_000_000:
-            raise AncestryError("OCR_INPUT_TOO_LARGE", "OCR input exceeds the 5 MB local limit.")
-        text = args.input.read_text(encoding="utf-8")
+        text = ingress.read_text(args.input, FileKind.OCR)
         ocr_result = OcrService(context.llm).extract(
             text,
             provider_id=args.provider,

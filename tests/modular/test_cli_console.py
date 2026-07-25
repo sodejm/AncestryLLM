@@ -381,7 +381,7 @@ def test_invalid_values_missing_files_and_json_parser_failures_are_sanitized(
         == 2
     )
     missing_error = capsys.readouterr().err
-    assert "[INPUT_ERROR]" in missing_error
+    assert "[FILE_INPUT_UNREADABLE]" in missing_error
     assert "Traceback" not in missing_error
 
     invalid_schema = tmp_path / "invalid-schema.json"
@@ -403,7 +403,7 @@ def test_invalid_values_missing_files_and_json_parser_failures_are_sanitized(
         )
         == 2
     )
-    assert "[INPUT_ERROR]" in capsys.readouterr().err
+    assert "[FILE_JSON_INVALID]" in capsys.readouterr().err
 
 
 def test_disabled_modules_are_not_imported(app_context: AppContext) -> None:

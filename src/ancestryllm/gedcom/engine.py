@@ -45,6 +45,9 @@ from typing import (
 if TYPE_CHECKING:
     from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolver
 
+from ancestryllm.core.errors import FileIngressError
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+
 _rapidfuzz: ModuleType | None
 try:
     from rapidfuzz import fuzz as _rapidfuzz
@@ -301,7 +304,9 @@ class GedcomRecord:
         return self.header.tag
 
 
-def iter_gedcom_records(path: str | Path) -> Iterator[GedcomRecord]:
+def iter_gedcom_records(
+    path: str | Path, ingress: FileIngressPolicy | None = None
+) -> Iterator[GedcomRecord]:
     """Yield level-zero GEDCOM records one at a time.
 
     Only one record is accumulated at a time.  This avoids the common mistake
@@ -320,28 +325,41 @@ def iter_gedcom_records(path: str | Path) -> Iterator[GedcomRecord]:
         UnicodeError: The declared/sensed text cannot be decoded strictly.
         GedcomParseError: A nonblank input line is structurally invalid.
     """
-    file_path = Path(path).resolve()
+    file_path = Path(path).expanduser().absolute()
+    policy = ingress or FileIngressPolicy()
     current: list[str] = []
     sequence = 0
-    with file_path.open("rb") as binary_handle:
-        prefix = binary_handle.read(4)
-    if prefix.startswith((b"\xff\xfe", b"\xfe\xff")):
-        encoding = "utf-16"
-    else:
-        encoding = "utf-8-sig"
-    with file_path.open("r", encoding=encoding, errors="strict") as handle:
-        for line_number, raw_line in enumerate(handle, 1):
-            line = raw_line.rstrip("\r\n")
-            if not line.strip():
-                continue
-            parsed = parse_gedcom_line(line, line_number)
-            if parsed.level == 0 and current:
-                yield GedcomRecord(current, str(file_path), sequence)
-                sequence += 1
-                current = []
-            current.append(line)
-        if current:
+    record_bytes = 0
+    record_lines = 0
+    record_nesting = 0
+    for line_number, item in enumerate(
+        policy.iter_text_line_items(file_path, FileKind.GEDCOM, count_lines_as_records=False),
+        1,
+    ):
+        line = item.text.rstrip("\r\n")
+        if not line.strip():
+            continue
+        parsed = parse_gedcom_line(line, line_number)
+        if parsed.level == 0 and current:
             yield GedcomRecord(current, str(file_path), sequence)
+            sequence += 1
+            current = []
+            record_bytes = 0
+            record_lines = 0
+            record_nesting = 0
+        record_bytes += item.byte_count
+        record_lines += 1
+        record_nesting = max(record_nesting, parsed.level)
+        policy.validate_record(
+            FileKind.GEDCOM,
+            count=sequence + 1,
+            byte_count=record_bytes,
+            nesting=record_nesting,
+            collection_items=record_lines,
+        )
+        current.append(line)
+    if current:
+        yield GedcomRecord(current, str(file_path), sequence)
 
 
 @dataclass
@@ -704,26 +722,9 @@ def connected_tree_pointers(
     return keep_people, keep_families
 
 
-def _load_python_gedcom(path: Path) -> None:
-    """Run python-gedcom's parser as an additional standards-aware check.
-
-    The raw parser remains authoritative for unknown-tag preservation.  This
-    optional check provides useful warnings and exercises the trusted parser
-    without making a fragile DOM the serialization source.
-    """
-    try:
-        from gedcom.parser import Parser
-    except ImportError:
-        log.debug("python-gedcom is not installed; using lossless line parser")
-        return
-    try:
-        parser = Parser()
-        parser.parse_file(str(path), strict=False)
-    except Exception as exc:
-        log.warning("python-gedcom validation warning for %s: %s", path, exc)
-
-
-def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
+def load_sources(
+    paths: Sequence[str | Path], ingress: FileIngressPolicy | None = None
+) -> list[ParsedSource]:
     """Load sources after allocating collision-free global xrefs.
 
     Undefined references are namespaced as well as declared records.  This
@@ -743,13 +744,11 @@ def load_sources(paths: Sequence[str | Path]) -> list[ParsedSource]:
     """
     used: set[str] = set()
     sources: list[ParsedSource] = []
+    policy = ingress or FileIngressPolicy()
     for source_number, raw_path in enumerate(paths, 1):
-        path = Path(raw_path).resolve()
-        if not path.is_file():
-            raise FileNotFoundError(f"GEDCOM file not found: {path}")
-        _load_python_gedcom(path)
+        path = Path(raw_path).expanduser().absolute()
         try:
-            original_records = list(iter_gedcom_records(path))
+            original_records = list(iter_gedcom_records(path, policy))
         except GedcomParseError as exc:
             raise GedcomParseError(f"{path}: {exc}") from exc
         pointer_map: dict[str, str] = {}
@@ -4444,7 +4443,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    paths = [Path(path).resolve() for path in args.input_files]
+    paths = [Path(path).expanduser().absolute() for path in args.input_files]
     output = Path(args.output).resolve()
     quality_enabled = not args.no_quality_report
     quality_path = (
@@ -4539,6 +4538,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         if quality_report is not None:
             print(f"Quality report: {quality_path}")
         return 0
+    except FileIngressError as exc:
+        log.error("%s", exc.render())
+        return 1
     except GedcomParseError as exc:
         if quality_enabled:
             source_path = next(

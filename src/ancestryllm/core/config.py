@@ -13,6 +13,7 @@ import tomli_w
 from platformdirs import user_config_path, user_data_path
 
 from ancestryllm.core.errors import ConfigurationError
+from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
 
 APP_NAME = "ancestryllm"
 DEFAULT_MODULES = ("gedcom", "rootsmagic", "ocr", "prompts", "people", "providers", "secrets")
@@ -40,6 +41,7 @@ class AppConfig:
     max_output_chars: int = 100_000
     query_timeout_seconds: float = 10.0
     provider_timeout_seconds: float = 60.0
+    file_ingress: FileIngressLimits = field(default_factory=FileIngressLimits)
 
     @property
     def database_path(self) -> Path:
@@ -65,12 +67,17 @@ class AppConfig:
         if not config_path.exists():
             return cls(config_path=config_path, data_dir=data_dir)
         try:
-            payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
+            config_text = FileIngressPolicy().read_text(
+                config_path, FileKind.CONFIG, allow_empty=True
+            )
+            payload = tomllib.loads(config_text)
+            FileIngressPolicy().validate_structure(payload, FileKind.CONFIG)
+        except tomllib.TOMLDecodeError as exc:
             raise ConfigurationError(
                 "CONFIG_INVALID",
-                f"Configuration could not be read: {config_path}",
+                "Configuration is not valid TOML.",
                 "Correct the TOML syntax or restore a known-good configuration file.",
+                exit_code=2,
                 details={"error_type": type(exc).__name__},
             ) from exc
         storage = payload.get("storage", {})
@@ -105,6 +112,7 @@ class AppConfig:
                 1.0,
                 min(float(payload.get("limits", {}).get("provider_timeout_seconds", 60.0)), 600.0),
             ),
+            file_ingress=FileIngressLimits.from_mapping(payload.get("file_ingress")),
         )
 
     def save(self) -> None:
@@ -122,6 +130,7 @@ class AppConfig:
                 "query_timeout_seconds": self.query_timeout_seconds,
                 "provider_timeout_seconds": self.provider_timeout_seconds,
             },
+            "file_ingress": self.file_ingress.to_mapping(),
         }
         encoded = tomli_w.dumps(payload).encode("utf-8")
         fd, temporary_name = tempfile.mkstemp(prefix=".config-", dir=self.config_path.parent)

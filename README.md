@@ -30,7 +30,9 @@ emit terminal animation. The canonical command reference, examples, offline
 defaults, and privacy rules are
 in [the CLI guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CLI.md);
 see [the console guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CONSOLE.md)
-for interactive use.
+for interactive use and
+[the file-ingress policy](https://github.com/sodejm/AncestryLLM/blob/main/docs/FILE_INGRESS.md)
+for per-format input limits and stable rejection codes.
 
 ## Included modules
 
@@ -70,6 +72,7 @@ Read [the architecture](https://github.com/sodejm/AncestryLLM/blob/main/ARCHITEC
 [provider guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/PROVIDERS.md),
 [GEDCOM compatibility](https://github.com/sodejm/AncestryLLM/blob/main/docs/GEDCOM_COMPATIBILITY.md),
 [encrypted backups](https://github.com/sodejm/AncestryLLM/blob/main/docs/ENCRYPTED_BACKUPS.md),
+[bounded file ingress](https://github.com/sodejm/AncestryLLM/blob/main/docs/FILE_INGRESS.md),
 and [threat model](https://github.com/sodejm/AncestryLLM/blob/main/docs/THREAT_MODEL.md).
 
 Versioning follows [Semantic Versioning 2.0.0](https://semver.org/). The

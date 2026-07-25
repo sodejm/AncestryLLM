@@ -4,6 +4,9 @@ This is the canonical reference for the supported `ancestry` command line.
 Run `ancestry --help` or append `--help` to a command family for the exact
 parser help for the installed version. Use `--config PATH` to select a
 non-secret `config.toml`, and `--json` when a script needs serializable output.
+All user-selected inputs use the documented
+[bounded file-ingress policy](FILE_INGRESS.md); one-shot and interactive
+commands return the same stable file error codes.
 
 Run `ancestry` with no arguments to open the interactive console; see
 [the console guide](CONSOLE.md). The console and one-shot commands use the same
@@ -107,11 +110,11 @@ person also accepts `--living-status` and `--notes`. `database backup
 DESTINATION` writes an encrypted backup. Keep backups and all genealogy data
 outside version control.
 
-`ocr extract --input FILE --provider PROFILE` reads UTF-8 text and rejects
-inputs over 5 MB. A built-in provider selected without a named profile also
-requires `--model MODEL`. Because OCR sends source material to a provider, a
-remote profile requires its exact matching consent unless policy denies the
-request first.
+`ocr extract --input FILE --provider PROFILE` reads bounded UTF-8 text and
+rejects inputs over 5,000,000 bytes by default. A built-in provider selected
+without a named profile also requires `--model MODEL`. Because OCR sends source
+material to a provider, a remote profile requires its exact matching consent
+unless policy denies the request first.
 
 ### Providers and secrets
 

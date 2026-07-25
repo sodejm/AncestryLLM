@@ -189,6 +189,7 @@ class RootsMagicExporter:
             )
         before = sha256_file(tree)
         schema = self.reader.schema(tree)
+        self.reader.validate_row_limits(tree, schema)
         people_rows = self.reader.read_table(tree, "PersonTable")
         name_rows = self.reader.read_table(tree, "NameTable")
         family_rows = self.reader.read_table(tree, "FamilyTable")

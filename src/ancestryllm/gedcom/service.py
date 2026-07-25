@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ancestryllm.core.errors import AncestryError, ProviderError
+from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.gedcom import engine
 from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolution, QualityResolver
 from ancestryllm.gedcom.graph import scoped_tree_pointers
@@ -29,19 +30,21 @@ class GedcomService:
     def __init__(
         self,
         llm: LLMService | None = None,
+        ingress: FileIngressPolicy | None = None,
         *,
         consent_lookup: Callable[[str], ConsentGrant] | None = None,
         provider_timeout_seconds: float = 60.0,
     ) -> None:
         self.llm = llm
+        self.ingress = ingress or FileIngressPolicy()
         self.consent_lookup = consent_lookup
         self.provider_timeout_seconds = provider_timeout_seconds
 
-    @staticmethod
     def _people_and_sources(
+        self,
         paths: list[Path],
     ) -> tuple[list[Any], list[engine.GedcomRecord], list[engine.IndividualRecord]]:
-        sources = engine.load_sources(paths)
+        sources = engine.load_sources(paths, self.ingress)
         source_records = [record for source in sources for record in source.records]
         people = [
             engine._individual_from_record(record)
@@ -205,7 +208,7 @@ class GedcomService:
             raise AncestryError(
                 "GEDCOM_INPUT_REQUIRED", "Merge requires at least two GEDCOM files."
             )
-        resolved_inputs = [path.expanduser().resolve() for path in input_files]
+        resolved_inputs = [path.expanduser().absolute() for path in input_files]
         resolved_output = output.expanduser().resolve()
         if resolved_output in resolved_inputs:
             raise AncestryError(
@@ -278,7 +281,7 @@ class GedcomService:
         generations: int | None = None,
         gedcom_version: str = "5.5.5",
     ) -> GedcomOperationResult:
-        source_path = input_file.expanduser().resolve()
+        source_path = input_file.expanduser().absolute()
         output_path = output.expanduser().resolve()
         if source_path == output_path:
             raise AncestryError(
@@ -310,7 +313,7 @@ class GedcomService:
         consent: ConsentGrant | None = None,
     ) -> Path:
         sources, source_records, people = self._people_and_sources(
-            [input_file.expanduser().resolve()]
+            [input_file.expanduser().absolute()]
         )
         root_pointer = engine.resolve_root_person(root_person, people, [sources[0].pointer_map], {})
         report = engine.analyze_quality(
@@ -326,4 +329,8 @@ class GedcomService:
         return output_path
 
     def sync(self, arguments: list[str]) -> int:
-        return run_sync(arguments, resolver_factory=self._sync_identity_resolver)
+        return run_sync(
+            arguments,
+            self.ingress,
+            resolver_factory=self._sync_identity_resolver,
+        )

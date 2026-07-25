@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
@@ -25,8 +26,12 @@ class RootsMagicService:
     def __init__(self, config: AppConfig, llm: LLMService | None = None) -> None:
         self.config = config
         self.llm = llm
+        ingress = FileIngressPolicy(config.file_ingress)
         self.reader = RootsMagicReader(
-            config.family_tree_dirs, config.max_query_rows, config.query_timeout_seconds
+            config.family_tree_dirs,
+            config.max_query_rows,
+            config.query_timeout_seconds,
+            ingress,
         )
         self.exporter = RootsMagicExporter(self.reader)
 
@@ -55,6 +60,7 @@ class RootsMagicService:
             raise AncestryError("LLM_SERVICE_UNAVAILABLE", "No LLM service is configured.")
         path = self.reader.resolve_tree(tree)
         schema = self.reader.schema(path)
+        self.reader.validate_row_limits(path, schema)
         schema_text = json.dumps(schema, sort_keys=True)
         request = GenerationRequest(
             provider_id=provider_id,
