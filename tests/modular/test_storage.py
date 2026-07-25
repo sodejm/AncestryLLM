@@ -9,7 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from ancestryllm.core.errors import StorageError
-from ancestryllm.core.secrets import MemorySecretStore
+from ancestryllm.core.secrets import (
+    REDACTED_VALUE,
+    KeyringSecretStore,
+    MemorySecretStore,
+)
 from ancestryllm.storage.database import DATABASE_SECRET, SQLITE_HEADER, Database
 from ancestryllm.storage.diagnostics import diagnose_storage
 
@@ -95,6 +99,41 @@ def test_storage_diagnostics_report_keyring_failures_without_secret_values(tmp_p
         "credential backend unavailable" not in (item.get("remediation") or "")
         for item in diagnostics
     )
+
+
+def test_headless_environment_fallback_is_read_only_and_redacted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret_value = "fictional-ci-database-key"
+
+    class UnavailableKeyring:
+        @staticmethod
+        def get_password(_service_name: str, _name: str) -> str | None:
+            raise RuntimeError("fictional headless backend")
+
+        @staticmethod
+        def set_password(_service_name: str, _name: str, _value: str) -> None:
+            raise AssertionError("environment fallback must not write to the keyring")
+
+        @staticmethod
+        def delete_password(_service_name: str, _name: str) -> None:
+            raise AssertionError("environment fallback must not delete from the keyring")
+
+    monkeypatch.setitem(sys.modules, "keyring", UnavailableKeyring())
+    monkeypatch.setenv("ANCESTRYLLM_DATABASE_KEY", secret_value)
+    secret_store = KeyringSecretStore()
+
+    diagnostics = diagnose_storage(tmp_path / "workspace.db", secret_store)
+
+    assert {item["code"] for item in diagnostics} >= {"KEYRING_READY"}
+    assert secret_value not in repr(diagnostics)
+    assert secret_store.redact(f"database-key={secret_value}") == (
+        f"database-key={REDACTED_VALUE}"
+    )
+    captured = capsys.readouterr()
+    assert secret_value not in captured.out
+    assert secret_value not in captured.err
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_storage_diagnostics_report_missing_sqlcipher(monkeypatch, tmp_path: Path) -> None:

@@ -39,8 +39,11 @@ and failed integrity checks.
   for the desktop session.  Ensure the workspace directory is owned by the
   current user.
 - Headless CI: use the documented environment-injection fallback only for
-  ephemeral test secrets.  Do not write secrets into configuration files,
-  command arguments, logs, or repository artifacts.
+  ephemeral test secrets. Inject `ANCESTRYLLM_DATABASE_KEY` through the CI
+  platform's protected secret mechanism. The fallback is read-only: it does not
+  copy the value into a keyring, configuration file, or log. AncestryLLM never
+  loads `.env`; do not place the value in configuration, command arguments,
+  shell history, logs, or repository artifacts.
 
 `PLAINTEXT_DATABASE_REJECTED`, `DATABASE_INTEGRITY_FAILED`, and
 `DATABASE_KEY_MISSING` are fail-closed protections.  Stop using the affected
