@@ -192,19 +192,19 @@ jobs:
           if-no-files-found: error
 
   install:
-    name: release install (${{ matrix.os }}, ${{ matrix.python }})
+    name: release install (${{ matrix.artifact }}, ${{ matrix.os }}, ${{ matrix.python }})
     needs: [validate, package]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.12", "3.13", "3.14"]
+        artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python }}
-          cache: pip
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-distributions
@@ -213,10 +213,17 @@ jobs:
         shell: bash
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          ARTIFACT_KIND: ${{ matrix.artifact }}
           ANCESTRYLLM_CONFIG_DIR: ${{ runner.temp }}/ancestryllm/config
           ANCESTRYLLM_DATA_DIR: ${{ runner.temp }}/ancestryllm/data
         run: |
-          python -m pip install --disable-pip-version-check dist/*.whl
+          if test "$ARTIFACT_KIND" = "wheel"; then
+            artifact=(dist/*.whl)
+          else
+            artifact=(dist/*.tar.gz)
+          fi
+          test "${#artifact[@]}" -eq 1
+          python -m pip install --disable-pip-version-check "${artifact[0]}"
           test "$(ancestry --version)" = "ancestry $EXPECTED_VERSION"
           ancestry --json modules list > modules.json
           python -c 'import json; assert json.load(open("modules.json", encoding="utf-8"))'
