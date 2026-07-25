@@ -14,6 +14,38 @@ GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures
 must be synthetic and source files must remain hash-identical after tests.
 
+## Secure desktop development
+
+Desktop work is governed by
+[`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
+and [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). Treat the renderer,
+loopback clients, imported files, model output, plugins, packages, and updates
+as untrusted. Preserve the network-free `provider=none` contract.
+
+Before implementation, map the change to its threat/control and abuse-case IDs,
+OWASP Top 10:2025 category, applicable versioned OWASP ASVS 5.0.0 requirements,
+and NIST SP 800-218 (`PO`, `PS`, `PW`, or `RV`) outcomes. Add positive,
+boundary, and negative regression tests before or with the behavior. A scanner
+result alone does not close a control.
+
+Use the dedicated issue branch/worktree and remain within its exclusive path
+ownership. Do not edit shared lockfiles, generated contracts, workflows,
+architecture/security documents, or another issue's subtree opportunistically.
+Wait for every hard dependency to merge before branching from updated `main`.
+
+Renderer code has no Node types/imports, direct filesystem/network/keyring/
+provider/database access, generic IPC, raw HTML, remote assets, or secrets in
+Vite environment values. Privileged IPC, sidecar routes, file grants, secrets,
+events, plugins, and update paths must use strict versioned DTOs, size limits,
+deny-by-default behavior, and the negative tests named by the threat ledger.
+
+Desktop pull requests run all applicable Python and desktop format, lint,
+strict type, unit, contract, integration, and packaged tests plus Semgrep,
+CodeQL, secret scanning, dependency audit, lockfile review, and SBOM
+generation. Record findings as fixed, evidence-backed false positives, or
+permitted time-bounded residual risks. Never waive a finding silently; expired
+exceptions and untriaged Critical/High findings fail the gate.
+
 ## Documentation and wiki publishing
 
 The Markdown files under `docs/` are the authoritative source for documentation

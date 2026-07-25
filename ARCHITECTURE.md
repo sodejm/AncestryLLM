@@ -5,15 +5,19 @@ describes the system that exists now, the invariants new work must preserve,
 and the boundaries that are intentionally not implemented. The target REPL
 layers and migration compatibility contract are specified in
 [`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
-with the operator-focused guides under `docs/`, especially the threat model,
+with the accepted desktop decision in
+[`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
+and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
 AncestryLLM 0.2 is a single-user, local-first Python application for genealogy
 research. It combines deterministic RootsMagic and GEDCOM workflows with
-optional LLM assistance. There is no supported server, browser, or multi-user
-runtime. The one-shot CLI and interactive console are sibling adapters over the
-same application services so that a future API can reuse those services without
-depending on terminal code.
+optional LLM assistance. The current release has no supported HTTP, desktop,
+browser, or multi-user runtime. ADR-0025 accepts a future local Electron desktop
+adapter and private FastAPI sidecar; it does not accept a public/LAN API,
+browser client, or multi-user server. The one-shot CLI, interactive console, and
+future desktop API are sibling adapters over the same application services and
+must not depend on each other's presentation code.
 
 ## Architectural priorities
 
@@ -28,7 +32,8 @@ earlier priority.
    selection is explicit, and `none` is a real offline provider.
 4. **Fail closed at trust boundaries.** Plaintext databases, unknown cloud
    endpoints, write-capable SQL, mismatched manifests, malformed structured
-   output, and unsafe deletions are rejected.
+   output, untrusted renderer requests, unauthenticated loopback clients, and
+   unsafe deletions are rejected.
 5. **Preserve genealogy evidence.** GEDCOM processing is loss-minimizing:
    citations, custom/vendor structures, relationships, conflicts, and unknown
    records are retained whenever they can be represented safely.
@@ -101,6 +106,8 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
+| `src/ancestryllm/api/` | Future internal FastAPI adapter with authenticated, versioned DTO routes; no console imports or public binding. |
+| `desktop/` | Future Electron main, preload, sandboxed renderer, generated contracts, mock bridge, and desktop tests governed by ADR-0025. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Repository safety, local benchmark, GEDCOM demo, and deterministic Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
@@ -144,6 +151,33 @@ The intended dependency rules are:
 - Future interfaces may depend on services and contracts. They must not import
   the console or bypass configuration, consent, storage, or file-safety
   factories.
+
+### Accepted desktop adapter
+
+The desktop target is governed by
+[`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md).
+It is accepted architecture but is not part of the current release until its
+dependency and assurance gates pass.
+
+- The sandboxed renderer is untrusted presentation and input. It receives no
+  Node.js, Electron, filesystem, network, keyring, provider, database, shell, or
+  unrestricted path capability.
+- A static typed preload bridge calls an Electron main-process
+  backend-for-frontend. Main validates the sender/frame/origin, mediates opaque
+  file grants, supervises the sidecar, and proxies only declared endpoints.
+- A loopback-only FastAPI sidecar authenticates every request before body
+  parsing and adapts versioned DTOs to application services. It does not import
+  CLI or console presentation and is not a public API.
+- Python services remain the policy authority. Bounded workers handle
+  genealogy parsing and publication; source RootsMagic and GEDCOM invariants
+  do not move into the renderer or main process.
+- Offline-first behavior remains mandatory: `provider=none` opens no network
+  socket even when provider credentials and SDKs exist.
+
+The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
+5.0.0 requirements and NIST SP 800-218 SSDF practices. The control IDs, STRIDE
+ledger, abuse cases, evidence-backed residual-risk policy, and assurance gates
+are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 The large GEDCOM engine and incremental synchronizer predate the full modular
 split. Thin façade modules (`parser.py`, `identity.py`, `quality.py`,
@@ -604,13 +638,16 @@ installed local hooks.
 | Incremental update | Publicly wired; initialization and idempotency are tested offline. | Multi-generation, rebase, tombstone, and non-person paths need deeper coverage. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Web/API/multi-user runtime | Not implemented. | Authentication, authorization, CSRF, tenant isolation, and server operations are future design work. |
+| Electron/internal API runtime | Accepted by ADR-0025 but not implemented. | #98 must merge before the isolated desktop workspace, authenticated sidecar, and hardened bridge/runtime issues begin. |
+| Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts
 
 The current release intentionally excludes:
 
-- an HTTP API, WebUI, browser authentication, or multi-user authorization;
+- a public/LAN HTTP API, WebUI, browser authentication, or multi-user
+  authorization; the accepted `/api/v1` is private, authenticated, loopback
+  only, and main-process mediated;
 - autonomous agents, LLM tool execution, generated shell/Python execution, or
   write-capable generated SQL;
 - third-party module/provider discovery or runtime plugin installation;
@@ -658,6 +695,8 @@ Architecture review should answer:
 7. Which deterministic and offline regression tests enforce the invariant?
 8. Does the threat model, privacy guide, compatibility guide, or release
    evidence need to change?
+9. Which OWASP Top 10:2025, applicable OWASP ASVS 5.0.0, and NIST SP 800-218
+   requirements apply, and where is their negative-test evidence?
 
 If the code and this document disagree, treat the discrepancy as a defect:
 verify the implementation, then update either the code or architecture in a

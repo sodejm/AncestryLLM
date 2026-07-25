@@ -2,8 +2,10 @@
 
 AncestryLLM is a local-first platform for genealogy research tools. It combines
 deterministic RootsMagic and GEDCOM workflows with optional, explicitly selected
-LLM providers. There is no supported web runtime yet; application services are
-kept independent of the console so a future API and WebUI can reuse them.
+LLM providers. There is no supported desktop or web runtime yet; application
+services are kept independent of presentation so the accepted local Electron
+and private FastAPI desktop adapters can reuse them without creating a public
+API.
 
 ## Install and start
 
@@ -60,7 +62,7 @@ make sbom
 The dependency graph is locked in `uv.lock`. Never commit real family trees,
 GEDCOM exports, databases, logs, reports, secrets, or research-person data.
 
-Read [the architecture](ARCHITECTURE.md), [CLI guide](docs/CLI.md), [privacy and consent](docs/PRIVACY_AND_CONSENT.md),
+Read [the architecture](ARCHITECTURE.md), [desktop ADR](docs/ADR-0025-electron-fastapi-desktop.md), [CLI guide](docs/CLI.md), [privacy and consent](docs/PRIVACY_AND_CONSENT.md),
 [provider guide](docs/PROVIDERS.md), [GEDCOM compatibility](docs/GEDCOM_COMPATIBILITY.md),
 [encrypted backups](docs/ENCRYPTED_BACKUPS.md), and [threat model](docs/THREAT_MODEL.md).
 

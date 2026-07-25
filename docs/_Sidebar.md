@@ -13,4 +13,5 @@
 - [Wiki synchronization](WIKI_SYNC.md)
 - [Wiki operations and recovery](WIKI_OPERATIONS.md)
 - [Security response checklist](SECURITY_RESPONSE.md)
+- [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md)
 - [Data-flow threat model and control matrix](THREAT_MODEL.md)
