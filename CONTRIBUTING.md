@@ -5,10 +5,15 @@ logic in services, not console adapters. New providers implement the common
 contract and mocked timeout/malformed-output/consent/offline tests. New modules
 must be explicit built-ins with one-shot and console parity.
 
-Before a pull request run `make test lint typecheck security sbom`. Describe
+Before a pull request run
+`make test lint typecheck security sbom package workflow-audit`. Describe
 scope, privacy impact, threat-model changes, migration impact, and exact test
 evidence. Do not commit real GEDCOM, RootsMagic, database, backup, report, log,
 prompt/response, secrets, or person details; use clearly fictional fixtures.
+
+Releases follow [the release runbook](docs/RELEASING.md). Never publish from a
+workstation, use a long-lived package-index token, move a published tag, or
+bypass required checks.
 
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures

@@ -1,0 +1,259 @@
+name: Release readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact main commit to approve
+        required: true
+        type: string
+      version:
+        description: Stable SemVer package version
+        required: true
+        type: string
+      lifecycle_cleanup_confirmed:
+        description: Confirm merged release branches and worktrees were safely removed
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ inputs.commit_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required to verify the candidate commit
+      issues: read # required to verify milestone closure
+    outputs:
+      version: ${{ steps.candidate.outputs.version }}
+      commit: ${{ steps.candidate.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: candidate
+        name: Verify exact main commit and version
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          LIFECYCLE_CLEANUP_CONFIRMED: ${{ inputs.lifecycle_cleanup_confirmed }}
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+          python - "$EXPECTED_VERSION" <<'PY'
+          import re
+          import sys
+          import tomllib
+
+          expected = sys.argv[1]
+          if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", expected):
+              raise SystemExit("version is not stable SemVer")
+          with open("pyproject.toml", "rb") as handle:
+              actual = str(tomllib.load(handle)["project"]["version"])
+          if actual != expected:
+              raise SystemExit(f"project version {actual!r} != requested {expected!r}")
+          PY
+          test "$LIFECYCLE_CLEANUP_CONFIRMED" = "true"
+          milestone_json="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100")"
+          milestone_number="$(
+            jq -r --arg title "$EXPECTED_VERSION CLI" \
+              '[.[] | select(.title == $title)][0].number // empty' <<<"$milestone_json"
+          )"
+          test -n "$milestone_number"
+          open_items="$(
+            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100"
+          )"
+          if test "$(jq 'length' <<<"$open_items")" -ne 0; then
+            jq -r '.[] | "release item still open: #\(.number) \(.title)"' <<<"$open_items"
+            exit 1
+          fi
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: quality (${{ matrix.python }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install locked environment
+        run: |
+          python -m pip install --disable-pip-version-check uv
+          uv sync --locked --all-extras
+      - name: Test with coverage
+        run: uv run pytest --verbose --cov --cov-report=term-missing
+      - name: Static quality gates
+        if: matrix.python == '3.12'
+        run: |
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+          uv run mypy src/ancestryllm
+          ./scripts/check_repository_safety.sh
+          uv run zizmor --persona=pedantic .github/workflows
+
+  security:
+    name: security evidence
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan commits for secrets
+        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        with:
+          version: 3.95.9
+          extra_args: --results=verified,unknown --fail-on-scan-errors
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dependency and static analysis
+        run: |
+          python -m pip install --disable-pip-version-check uv
+          uv sync --locked --all-extras
+          uv run pip-audit
+          uvx semgrep scan --error --config p/python --config p/secrets src
+      - name: Generate CycloneDX SBOM
+        run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: sbom.json
+          if-no-files-found: error
+
+  codeql:
+    name: CodeQL evidence
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # required by CodeQL for workflow metadata
+      contents: read # required to analyze repository contents
+      security-events: write # required to upload CodeQL results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          languages: python
+          queries: security-extended
+      - uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          upload: never
+
+  package:
+    name: release package
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build deterministic distributions
+        run: |
+          python -m pip install --disable-pip-version-check uv
+          uv sync --locked --all-extras
+          uv run python scripts/build_release.py --output-dir dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-distributions
+          path: dist/
+          if-no-files-found: error
+
+  install:
+    name: release install (${{ matrix.os }}, ${{ matrix.python }})
+    needs: [validate, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: dist
+      - name: Install and smoke-test
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          ANCESTRYLLM_CONFIG_DIR: ${{ runner.temp }}/ancestryllm/config
+          ANCESTRYLLM_DATA_DIR: ${{ runner.temp }}/ancestryllm/data
+        run: |
+          python -m pip install --disable-pip-version-check dist/*.whl
+          test "$(ancestry --version)" = "ancestry $EXPECTED_VERSION"
+          ancestry --json modules list > modules.json
+          python -c 'import json; assert json.load(open("modules.json", encoding="utf-8"))'
+
+  evidence:
+    name: release evidence
+    needs: [validate, quality, security, codeql, package, install]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: evidence/artifacts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sbom
+          path: evidence
+      - name: Create evidence manifest
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python scripts/create_release_evidence.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --run-url "$RUN_URL" \
+            --artifacts evidence/artifacts \
+            --output evidence/release-evidence.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 90

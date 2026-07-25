@@ -4,13 +4,19 @@ on:
   issues:
     types: [opened]
 
-permissions:
-  contents: read
-  issues: write
+permissions: {}
+
+concurrency:
+  group: issue-labeler-${{ github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   label:
+    name: label new issue
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # required to read the labeler configuration
+      issues: write # required to apply repository issue labels
     steps:
       - name: Label issue from work type
         uses: github/issue-labeler@c1b0f9f52a63158c4adc09425e858e87b32e9685 # v3.4

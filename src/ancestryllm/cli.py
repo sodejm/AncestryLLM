@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from ancestryllm import __version__
 from ancestryllm.console.presentation import PresentationAdapter
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
@@ -78,6 +79,7 @@ def _add_action_arguments(parser: argparse.ArgumentParser, specification: Action
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ancestry", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     for argument in GLOBAL_ARGUMENTS:
         _add_argument(parser, argument)
     commands = parser.add_subparsers(dest="command", required=True)

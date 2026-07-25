@@ -1,12 +1,13 @@
 # AncestryLLM documentation
 
-AncestryLLM is a local-first platform for genealogy research tools. It combines
-deterministic RootsMagic and GEDCOM workflows with optional, explicitly selected
-LLM providers.
+AncestryLLM is a local-first command-line tool for genealogy research. It
+combines deterministic RootsMagic and GEDCOM workflows with optional,
+explicitly selected LLM providers.
 
-Start with the [Console and CLI guide](CONSOLE.md) for interactive and one-shot
-command usage. The pages below cover the application's architecture, privacy
-controls, providers, GEDCOM interoperability, backups, and security practices.
+Start with the [CLI reference](CLI.md) for one-shot commands or the
+[interactive console guide](CONSOLE.md). The pages below cover versioning,
+privacy controls, providers, GEDCOM interoperability, backups, release
+operations, and security practices.
 
 ## Documentation links
 

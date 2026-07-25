@@ -1,6 +1,12 @@
 """AncestryLLM modular genealogy research platform."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 from ancestryllm.core.errors import AncestryError
 
-__all__ = ["AncestryError"]
-__version__ = "0.2.0"
+try:
+    __version__ = version("ancestryllm")
+except PackageNotFoundError:  # pragma: no cover - only an uninstalled source tree
+    __version__ = "unknown"
+
+__all__ = ["AncestryError", "__version__"]

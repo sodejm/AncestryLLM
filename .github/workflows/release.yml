@@ -1,0 +1,325 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate signed release tag
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # required to locate and download release-readiness evidence
+      contents: read # required to verify the tag and release commit
+      issues: read # required to recheck milestone closure
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      readiness_run: ${{ steps.release.outputs.readiness_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        name: Verify SemVer, package, tag signature, main, and readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_COMMIT: ${{ github.sha }}
+        run: |
+          version="${TAG_NAME#v}"
+          python - "$version" <<'PY'
+          import re
+          import sys
+          import tomllib
+
+          expected = sys.argv[1]
+          if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", expected):
+              raise SystemExit("release tag is not stable SemVer")
+          with open("pyproject.toml", "rb") as handle:
+              actual = str(tomllib.load(handle)["project"]["version"])
+          if actual != expected:
+              raise SystemExit(f"project version {actual!r} != tag version {expected!r}")
+          PY
+          milestone_json="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100")"
+          milestone_number="$(
+            jq -r --arg title "$version CLI" \
+              '[.[] | select(.title == $title)][0].number // empty' <<<"$milestone_json"
+          )"
+          test -n "$milestone_number"
+          test "$(
+            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" \
+              --jq 'length'
+          )" -eq 0
+          git fetch --no-tags origin main
+          test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$TAG_COMMIT"
+          test "$(git rev-parse origin/main)" = "$TAG_COMMIT"
+          ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME")"
+          test "$(jq -r '.object.type' <<<"$ref_json")" = "tag"
+          tag_object="$(jq -r '.object.sha' <<<"$ref_json")"
+          tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object")"
+          test "$(jq -r '.verification.verified' <<<"$tag_json")" = "true"
+          test "$(jq -r '.object.sha' <<<"$tag_json")" = "$TAG_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          readiness_run="$(
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-readiness.yml/runs?event=workflow_dispatch&status=success&head_sha=$TAG_COMMIT&per_page=10" \
+              --jq '.workflow_runs[0].id'
+          )"
+          test -n "$readiness_run"
+          mkdir approved
+          gh run download "$readiness_run" --repo "$GITHUB_REPOSITORY" \
+            --name release-evidence --dir approved
+          grep -F -- "- Version: \`$version\`" approved/release-evidence.md
+          grep -F -- "- Commit: \`$TAG_COMMIT\`" approved/release-evidence.md
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build release once
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Build deterministic artifacts and SBOM
+        run: |
+          python -m pip install --disable-pip-version-check uv
+          uv sync --locked --all-extras
+          uv run pytest --verbose --cov --cov-report=term-missing
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+          uv run mypy src/ancestryllm
+          ./scripts/check_repository_safety.sh
+          uv run pip-audit
+          uvx semgrep scan --error --config p/python --config p/secrets src
+          uv run python scripts/build_release.py --output-dir dist
+          uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
+      - name: Create final evidence manifest
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python scripts/create_release_evidence.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --run-url "$RUN_URL" \
+            --artifacts dist \
+            --output dist/release-evidence.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-distributions
+          path: dist/
+          if-no-files-found: error
+
+  attest:
+    name: attest release artifacts
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write # required to persist build provenance
+      contents: read # required to associate attestations with the repository
+      id-token: write # required to sign build provenance
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: dist
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/sbom.json
+
+  draft-github-release:
+    name: prepare draft GitHub Release
+    needs: [validate, build, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create and attach assets to the draft release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: dist
+      - name: Create or refresh draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "AncestryLLM $VERSION" \
+              --notes-file dist/release-evidence.md
+          fi
+          gh release upload "$TAG_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  publish-testpypi:
+    name: publish TestPyPI
+    needs: [validate, build, attest]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/ancestryllm
+    permissions:
+      id-token: write # required for TestPyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: release
+      - name: Select Python distributions
+        run: |
+          mkdir dist
+          cp release/*.whl release/*.tar.gz dist/
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  verify-testpypi:
+    name: verify TestPyPI
+    needs: [validate, build, publish-testpypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: release
+      - name: Download exact TestPyPI files and verify hashes
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          for attempt in {1..12}; do
+            if python scripts/verify_index_artifacts.py \
+              --index https://test.pypi.org \
+              --version "$VERSION" \
+              --checksums release/SHA256SUMS \
+              --output downloaded; then
+              break
+            fi
+            test "$attempt" -lt 12
+            sleep 10
+          done
+
+  publish-pypi:
+    name: publish PyPI
+    needs: [validate, build, draft-github-release, verify-testpypi]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ancestryllm
+    permissions:
+      id-token: write # required for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: release
+      - name: Select Python distributions
+        run: |
+          mkdir dist
+          cp release/*.whl release/*.tar.gz dist/
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+
+  verify-pypi-hashes:
+    name: verify PyPI artifact hashes
+    needs: [validate, build, publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: release
+      - name: Download exact PyPI files and verify hashes
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          for attempt in {1..12}; do
+            if python scripts/verify_index_artifacts.py \
+              --index https://pypi.org \
+              --version "$VERSION" \
+              --checksums release/SHA256SUMS \
+              --output downloaded; then
+              break
+            fi
+            test "$attempt" -lt 12
+            sleep 10
+          done
+
+  verify-pypi-install:
+    name: verify PyPI install (${{ matrix.os }}, ${{ matrix.python }})
+    needs: [validate, publish-pypi]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install from PyPI and smoke-test offline CLI
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          ANCESTRYLLM_CONFIG_DIR: ${{ runner.temp }}/ancestryllm/config
+          ANCESTRYLLM_DATA_DIR: ${{ runner.temp }}/ancestryllm/data
+        run: |
+          for attempt in {1..12}; do
+            if python -m pip install --disable-pip-version-check "ancestryllm==$VERSION"; then
+              break
+            fi
+            test "$attempt" -lt 12
+            sleep 10
+          done
+          test "$(ancestry --version)" = "ancestry $VERSION"
+          ancestry --json modules list > modules.json
+          python -c 'import json; assert json.load(open("modules.json", encoding="utf-8"))'
+
+  publish-github-release:
+    name: publish immutable GitHub Release
+    needs: [validate, draft-github-release, verify-pypi-hashes, verify-pypi-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to publish the prepared GitHub Release
+    steps:
+      - name: Publish prepared draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --latest

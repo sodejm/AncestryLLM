@@ -1,7 +1,10 @@
 ## AncestryLLM documentation
 
 - [Home](Home.md)
-- [Console and CLI guide](CONSOLE.md)
+- [CLI reference](CLI.md)
+- [Interactive console guide](CONSOLE.md)
+- [Versioning and compatibility](VERSIONING.md)
+- [Release runbook](RELEASING.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md)
 - [GEDCOM compatibility and release checks](GEDCOM_COMPATIBILITY.md)

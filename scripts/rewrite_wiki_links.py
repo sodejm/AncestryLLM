@@ -26,11 +26,7 @@ def _rewrite_destination(destination: str) -> str:
 
     target = match.group("target")
     path, separator, fragment = target.partition("#")
-    if (
-        not path.endswith(".md")
-        or "://" in path
-        or path.startswith(("/", "mailto:", "tel:"))
-    ):
+    if not path.endswith(".md") or "://" in path or path.startswith(("/", "mailto:", "tel:")):
         return destination
 
     wiki_target = path.removesuffix(".md")
