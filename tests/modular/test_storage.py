@@ -127,9 +127,7 @@ def test_headless_environment_fallback_is_read_only_and_redacted(
 
     assert {item["code"] for item in diagnostics} >= {"KEYRING_READY"}
     assert secret_value not in repr(diagnostics)
-    assert secret_store.redact(f"database-key={secret_value}") == (
-        f"database-key={REDACTED_VALUE}"
-    )
+    assert secret_store.redact(f"database-key={secret_value}") == (f"database-key={REDACTED_VALUE}")
     captured = capsys.readouterr()
     assert secret_value not in captured.out
     assert secret_value not in captured.err
