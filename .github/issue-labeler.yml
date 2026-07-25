@@ -1,0 +1,14 @@
+# Match the exact GitHub issue-form response instead of guessing from keywords.
+# The workflow runs only when an issue is opened, so later edits cannot remove or
+# accumulate classification labels.
+bug:
+  - '### Work type\s+Bug(?:\s|$)'
+
+enhancement:
+  - '### Work type\s+Feature or improvement(?:\s|$)'
+
+documentation:
+  - '### Work type\s+Documentation(?:\s|$)'
+
+question:
+  - '### Work type\s+Question or design decision(?:\s|$)'

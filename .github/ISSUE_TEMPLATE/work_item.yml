@@ -1,0 +1,156 @@
+name: Work item
+description: Plan a scoped, implementation-ready AncestryLLM change
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for work that needs explicit scope, dependencies, safety
+        constraints, acceptance criteria, and validation. Report security
+        vulnerabilities privately through the link on the template chooser.
+
+  - type: dropdown
+    id: work-type
+    attributes:
+      label: Work type
+      description: This selection is used by the issue labeler.
+      options:
+        - Bug
+        - Feature or improvement
+        - Documentation
+        - Question or design decision
+    validations:
+      required: true
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Core objective
+      description: State the outcome this issue should deliver in one or two sentences.
+      placeholder: Make it possible to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain the current behavior, user need, or evidence behind the request.
+      placeholder: |
+        Current behavior:
+        Why this matters:
+        Relevant evidence or prior decisions:
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Define what is included and explicitly excluded.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and relationships
+      description: Use issue numbers or links. Write "None" where a category is empty.
+      placeholder: |
+        Blocks:
+        Depends on:
+        Relates to:
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Describe visible behavior, public interfaces, and underlying changes as applicable.
+      placeholder: |
+        User experience:
+        - ...
+
+        Public interfaces or contracts:
+        - ...
+
+        Underlying application changes:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable conditions required to close the issue.
+      placeholder: |
+        - [ ] ...
+        - [ ] Documentation is updated where behavior or operator guidance changes.
+        - [ ] Obsolete code and configuration made unnecessary by this work are removed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security, privacy, and data safety
+      description: |
+        Cover credentials, provider consent, network behavior, private genealogy
+        data, immutable RootsMagic inputs, and loss-minimal GEDCOM handling as relevant.
+      placeholder: |
+        Risks and mitigations:
+        Rejected unsafe approaches:
+        Threat-model controls:
+    validations:
+      required: true
+
+  - type: textarea
+    id: ownership
+    attributes:
+      label: Workspace and ownership
+      description: Identify owned paths, shared files, branch prerequisites, or coordination needs.
+      placeholder: |
+        Exclusive paths:
+        Shared-file coordination:
+        Base or branch prerequisites:
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Include the relevant repository gates and focused regression tests.
+      placeholder: |
+        - Focused regression tests:
+        - make test
+        - make lint
+        - make typecheck
+        - make security
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add mockups, logs with sensitive data removed, references, or implementation notes.
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness checklist
+      options:
+        - label: I searched open and closed issues for duplicates.
+          required: true
+        - label: I did not include credentials, private genealogy records, databases, backups, logs, or prompt/response payloads.
+          required: true
+        - label: I will use a dedicated branch or worktree and will not implement this directly on `main`.
+          required: true
