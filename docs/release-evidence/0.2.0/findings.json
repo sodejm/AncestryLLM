@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "release": "0.2.0",
+  "reviewed_at": "2026-07-24",
+  "reviewed_by": "sodejm",
+  "inventory_complete": true,
+  "sources": [
+    "codeql",
+    "dependency-audit",
+    "repository-safety",
+    "secret-scan",
+    "semgrep"
+  ],
+  "findings": []
+}

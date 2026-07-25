@@ -25,17 +25,23 @@ def _sha256(path: Path) -> str:
 
 def read_checksums(path: Path) -> dict[str, str]:
     expected: dict[str, str] = {}
+    seen: set[str] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         digest, separator, name = line.partition("  ")
         if (
             not separator
             or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
-            or not name.endswith((".whl", ".tar.gz"))
             or Path(name).name != name
+            or "\n" in name
+            or "\r" in name
         ):
             raise ValueError(f"invalid release checksum line: {line!r}")
-        expected[name] = digest
+        if name in seen:
+            raise ValueError(f"duplicate release checksum entry: {name!r}")
+        seen.add(name)
+        if name.endswith((".whl", ".tar.gz")):
+            expected[name] = digest
     if not expected:
         raise ValueError("release checksum file contains no Python distributions")
     return expected
@@ -72,11 +78,19 @@ def verify_index(
 ) -> None:
     expected = read_checksums(checksums)
     payload = _request_json(f"{index.rstrip('/')}/pypi/{project}/{version}/json")
-    published = {
-        str(item["filename"]): item
-        for item in payload.get("urls", [])
-        if str(item.get("filename", "")) in expected
-    }
+    urls = payload.get("urls")
+    if not isinstance(urls, list):
+        raise RuntimeError("index response does not contain a release file list")
+    published: dict[str, dict[str, Any]] = {}
+    for item in urls:
+        if not isinstance(item, dict):
+            raise RuntimeError("index response contains an invalid release file")
+        name = str(item.get("filename", ""))
+        if not name or Path(name).name != name:
+            raise RuntimeError(f"index response contains an unsafe release filename: {name!r}")
+        if name in published:
+            raise RuntimeError(f"index response contains a duplicate release file: {name!r}")
+        published[name] = item
     if set(published) != set(expected):
         raise RuntimeError(
             f"index files differ from the release: "
@@ -99,6 +113,14 @@ def verify_index(
             destination.write_bytes(response.read())
         if _sha256(destination) != expected_digest:
             raise RuntimeError(f"downloaded hash differs for {name}")
+
+    checksum_path = output / "SHA256SUMS"
+    temporary_checksum_path = output / ".SHA256SUMS.tmp"
+    temporary_checksum_path.write_text(
+        "".join(f"{digest}  {name}\n" for name, digest in sorted(expected.items())),
+        encoding="utf-8",
+    )
+    temporary_checksum_path.replace(checksum_path)
 
 
 def main() -> int:

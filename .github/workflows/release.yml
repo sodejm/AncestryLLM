@@ -80,6 +80,9 @@ jobs:
             --name release-evidence --dir approved
           grep -F -- "- Version: \`$version\`" approved/release-evidence.md
           grep -F -- "- Commit: \`$TAG_COMMIT\`" approved/release-evidence.md
+          test "$(jq -r '.release' approved/gates.json)" = "$version"
+          test "$(jq -r '.commit' approved/gates.json)" = "$TAG_COMMIT"
+          test "$(jq -r '[.gates[].status == "verified"] | all' approved/gates.json)" = "true"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
           echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
@@ -88,6 +91,9 @@ jobs:
     name: build release once
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      actions: read # required to compare the approved readiness distributions
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,6 +115,25 @@ jobs:
           uvx semgrep scan --error --config p/python --config p/secrets src
           uv run python scripts/build_release.py --output-dir dist
           uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
+      - name: Compare approved readiness artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          mkdir approved
+          gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name release-evidence --dir approved
+          cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS
+          cmp "docs/release-evidence/$VERSION/findings.json" \
+            approved/findings-dispositions.json
+          cmp "docs/release-evidence/$VERSION/interoperability.json" \
+            approved/interoperability.json
+          cp approved/gates.json dist/gates.json
+          cp approved/findings-dispositions.json dist/findings-dispositions.json
+          cp approved/interoperability.json dist/interoperability.json
+          cp approved/release-evidence.md dist/readiness-evidence.md
+          cp "docs/release-notes/$VERSION.md" dist/release-notes.md
       - name: Create final evidence manifest
         env:
           VERSION: ${{ needs.validate.outputs.version }}
@@ -120,7 +145,11 @@ jobs:
             --commit "$COMMIT_SHA" \
             --run-url "$RUN_URL" \
             --artifacts dist \
+            --gates dist/gates.json \
+            --findings dist/findings-dispositions.json \
+            --interoperability dist/interoperability.json \
             --output dist/release-evidence.md
+          python scripts/generate_release_checksums.py --directory dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-distributions
@@ -142,11 +171,7 @@ jobs:
           path: dist
       - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/SHA256SUMS
-            dist/sbom.json
+          subject-path: dist/*
 
   draft-github-release:
     name: prepare draft GitHub Release
@@ -155,26 +180,44 @@ jobs:
     permissions:
       contents: write # required to create and attach assets to the draft release
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-distributions
           path: dist
-      - name: Create or refresh draft release
+      - name: Create or verify draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Reusing an existing, exact draft without modifying it."
+          else
             gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
               --draft --verify-tag --title "AncestryLLM $VERSION" \
-              --notes-file dist/release-evidence.md
+              --notes-file dist/release-notes.md
+            gh release upload "$TAG_NAME" dist/* --repo "$GITHUB_REPOSITORY"
           fi
-          gh release upload "$TAG_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          release_json="$(
+            gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,name,body
+          )"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = "true"
+          test "$(jq -r '.name' <<<"$release_json")" = "AncestryLLM $VERSION"
+          test "$(jq -r '.body' <<<"$release_json")" = "$(cat dist/release-notes.md)"
+          mkdir downloaded
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir downloaded
+          python scripts/verify_release_assets.py \
+            --expected dist \
+            --actual downloaded
 
   publish-testpypi:
     name: publish TestPyPI
-    needs: [validate, build, attest]
+    needs: [validate, build, attest, draft-github-release]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -277,49 +320,95 @@ jobs:
             test "$attempt" -lt 12
             sleep 10
           done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-pypi-distributions
+          path: downloaded/
+          if-no-files-found: error
 
   verify-pypi-install:
-    name: verify PyPI install (${{ matrix.os }}, ${{ matrix.python }})
-    needs: [validate, publish-pypi]
+    name: verify PyPI ${{ matrix.artifact }} install (${{ matrix.os }}, ${{ matrix.python }})
+    needs: [validate, verify-pypi-hashes]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.12", "3.13", "3.14"]
+        artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Install from PyPI and smoke-test offline CLI
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-pypi-distributions
+          path: downloaded
+      - name: Install verified PyPI artifact and smoke-test offline CLI
         shell: bash
         env:
+          ARTIFACT: ${{ matrix.artifact }}
           VERSION: ${{ needs.validate.outputs.version }}
           ANCESTRYLLM_CONFIG_DIR: ${{ runner.temp }}/ancestryllm/config
           ANCESTRYLLM_DATA_DIR: ${{ runner.temp }}/ancestryllm/data
         run: |
-          for attempt in {1..12}; do
-            if python -m pip install --disable-pip-version-check "ancestryllm==$VERSION"; then
-              break
-            fi
-            test "$attempt" -lt 12
-            sleep 10
-          done
+          python scripts/verify_release_assets.py \
+            --expected downloaded \
+            --actual downloaded
+          if test "$ARTIFACT" = "wheel"; then
+            packages=(downloaded/*.whl)
+          else
+            packages=(downloaded/*.tar.gz)
+          fi
+          test "${#packages[@]}" -eq 1
+          python -m pip install --disable-pip-version-check "${packages[0]}"
           test "$(ancestry --version)" = "ancestry $VERSION"
           ancestry --json modules list > modules.json
           python -c 'import json; assert json.load(open("modules.json", encoding="utf-8"))'
 
   publish-github-release:
     name: publish immutable GitHub Release
-    needs: [validate, draft-github-release, verify-pypi-hashes, verify-pypi-install]
+    needs: [validate, build, draft-github-release, verify-pypi-hashes, verify-pypi-install]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to publish the prepared GitHub Release
     steps:
-      - name: Publish prepared draft
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: expected
+      - name: Verify and publish prepared draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          release_json="$(
+            gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,name,body
+          )"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = "true"
+          test "$(jq -r '.name' <<<"$release_json")" = "AncestryLLM $VERSION"
+          test "$(jq -r '.body' <<<"$release_json")" = "$(cat expected/release-notes.md)"
+          mkdir downloaded
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir downloaded
+          python scripts/verify_release_assets.py \
+            --expected expected \
+            --actual downloaded
+          release_json="$(
+            gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,name,body
+          )"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = "true"
+          test "$(jq -r '.name' <<<"$release_json")" = "AncestryLLM $VERSION"
+          test "$(jq -r '.body' <<<"$release_json")" = "$(cat expected/release-notes.md)"
           gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
             --draft=false --latest

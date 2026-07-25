@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "release": "0.2.0",
+  "reviewed_at": "2026-07-24",
+  "reviewed_by": "sodejm",
+  "vendors": [
+    {
+      "vendor": "RootsMagic",
+      "status": "unverified",
+      "assessed_at": "2026-07-24",
+      "application_version": "11",
+      "fictional_data": false,
+      "fixture_ids": [],
+      "evidence_urls": [
+        "https://github.com/sodejm/AncestryLLM/issues/19"
+      ],
+      "notes": "The importer is available locally, but a dated fictional-data manual import has not yet been recorded."
+    },
+    {
+      "vendor": "Ancestry",
+      "status": "unverified",
+      "assessed_at": "2026-07-24",
+      "fictional_data": false,
+      "fixture_ids": [],
+      "evidence_urls": [
+        "https://github.com/sodejm/AncestryLLM/issues/19"
+      ],
+      "notes": "No dated fictional-data manual import evidence is recorded."
+    },
+    {
+      "vendor": "Geni",
+      "status": "unverified",
+      "assessed_at": "2026-07-24",
+      "fictional_data": false,
+      "fixture_ids": [],
+      "evidence_urls": [
+        "https://github.com/sodejm/AncestryLLM/issues/19"
+      ],
+      "notes": "No dated fictional-data manual import evidence is recorded."
+    },
+    {
+      "vendor": "MyHeritage",
+      "status": "unverified",
+      "assessed_at": "2026-07-24",
+      "fictional_data": false,
+      "fixture_ids": [],
+      "evidence_urls": [
+        "https://github.com/sodejm/AncestryLLM/issues/19"
+      ],
+      "notes": "No dated fictional-data manual import evidence is recorded."
+    }
+  ]
+}
