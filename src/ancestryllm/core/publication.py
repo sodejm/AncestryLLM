@@ -1751,6 +1751,10 @@ def _open_verified_install_candidate(
         flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         flags |= os.O_NONBLOCK
+    if hasattr(os, "O_NOATIME"):
+        # This candidate was created privately by this process, so Linux can
+        # suppress access-time changes during the two digest verifications.
+        flags |= os.O_NOATIME
     if _PLATFORM == "win32":
         descriptor = _windows_open_shared_descriptor(candidate.path)
     else:

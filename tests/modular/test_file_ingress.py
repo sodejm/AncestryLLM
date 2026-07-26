@@ -3077,6 +3077,43 @@ def test_rollback_prefers_backup_metadata_over_read_mutated_displacement(
     assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
+def test_private_candidate_digest_verification_requests_noatime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "output.ged"
+    staged = _staged_bytes(target, b"new\n")
+    original_open = publication_module.os.open
+    noatime = getattr(publication_module.os, "O_NOATIME", 1 << 29)
+    observed_flags: list[int] = []
+    monkeypatch.setattr(publication_module.os, "O_NOATIME", noatime, raising=False)
+
+    def record_candidate_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        selected = Path(path)
+        if (
+            selected.name == "owned"
+            and selected.parent.name.startswith(".ancestry-publish-quarantine-")
+            and flags & os.O_ACCMODE == os.O_RDONLY
+        ):
+            observed_flags.append(flags)
+        return original_open(path, flags & ~noatime, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(publication_module.os, "open", record_candidate_open)
+
+    publish_staged_bundle(((staged, target),), replace=os.replace)
+
+    assert observed_flags
+    assert all(flags & noatime for flags in observed_flags)
+    assert target.read_bytes() == b"new\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
 def test_backup_destination_close_failure_removes_the_untracked_copy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
