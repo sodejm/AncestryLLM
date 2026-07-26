@@ -124,8 +124,8 @@ select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF"]
 ignore = ["E501", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/ancestryllm/gedcom/engine.py" = ["BLE001", "E741", "I001", "RUF005", "RUF059", "S310", "S603", "S607"]
-"src/ancestryllm/gedcom/incremental.py" = ["BLE001", "I001", "RUF005", "RUF059", "S603", "S607"]
+"src/ancestryllm/gedcom/engine.py" = ["BLE001", "E741", "I001", "RUF005", "RUF059"]
+"src/ancestryllm/gedcom/incremental.py" = ["BLE001", "I001", "RUF005", "RUF059"]
 "tests/**" = ["RUF003", "RUF059", "S105", "S106", "S108", "S603", "S607"]
 
 [tool.mypy]
@@ -136,5 +136,5 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["sqlcipher3", "gedcom.*", "google.generativeai", "jsonschema", "openrouter"]
+module = ["sqlcipher3", "gedcom.*", "jsonschema"]
 ignore_missing_imports = true

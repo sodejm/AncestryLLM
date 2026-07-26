@@ -25,6 +25,12 @@ class AppContext:
     prompts: PromptService
     research: ResearchService
 
+    def close(self) -> None:
+        """Release shared provider clients before closing encrypted storage."""
+
+        self.llm.close()
+        self.database.close()
+
     @classmethod
     def build(
         cls, config: AppConfig | None = None, secrets_store: SecretStore | None = None
@@ -33,13 +39,14 @@ class AppContext:
         selected_secrets = secrets_store or KeyringSecretStore()
         database = Database(selected_config.database_path, selected_secrets)
         providers = ProviderRegistry(selected_secrets)
+        provider_profiles = ProviderProfileService(database)
         return cls(
             config=selected_config,
             secrets=selected_secrets,
             database=database,
             providers=providers,
-            provider_profiles=ProviderProfileService(database),
-            llm=LLMService(providers, database),
+            provider_profiles=provider_profiles,
+            llm=LLMService(providers, database, profiles=provider_profiles),
             prompts=PromptService(database),
             research=ResearchService(database),
         )

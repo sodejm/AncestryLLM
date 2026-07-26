@@ -535,6 +535,26 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                         sensitive=True,
                         completion=CompletionKind.PERSON,
                     ),
+                    ArgumentSpec(
+                        "provider",
+                        "Provider profile or built-in provider identifier",
+                        ("--provider",),
+                        default="none",
+                        completion=CompletionKind.PROVIDER,
+                    ),
+                    ArgumentSpec(
+                        "model",
+                        "Model for a direct provider; profiles use their configured model",
+                        ("--model",),
+                        default="",
+                        completion=CompletionKind.MODEL,
+                    ),
+                    ArgumentSpec(
+                        "consent",
+                        "Consent grant name",
+                        ("--consent",),
+                        completion=CompletionKind.CONSENT,
+                    ),
                 ),
             ),
             ActionSpec(
@@ -718,6 +738,13 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                         required=True,
                         completion=CompletionKind.MODEL,
                     ),
+                    ArgumentSpec(
+                        "setting",
+                        "Operational profile setting as NAME=JSON_VALUE",
+                        ("--setting",),
+                        default=(),
+                        action=ArgumentAction.APPEND,
+                    ),
                 ),
             ),
             ActionSpec(
@@ -861,9 +888,9 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                     ),
                     ArgumentSpec(
                         "model",
-                        "Provider model identifier",
+                        "Model for a direct provider; profiles use their configured model",
                         ("--model",),
-                        required=True,
+                        default="",
                         completion=CompletionKind.MODEL,
                     ),
                     ArgumentSpec(

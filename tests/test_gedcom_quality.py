@@ -5,11 +5,12 @@ from __future__ import annotations
 import dataclasses
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from ancestryllm.core.errors import ProviderError
 from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom.contracts import QualityResolution
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_merge"
 SOURCE_A = FIXTURES / "quality-source-a.ged"
@@ -35,7 +36,6 @@ def _loaded_fixture_tree() -> tuple[
     decisions: list[gm.MergeDecision] = []
     merged = gm.merge_records(
         people,
-        ai_backend="none",
         auto=True,
         pointer_map=pointer_map,
         decisions=decisions,
@@ -372,42 +372,46 @@ class TestMarkdownAndCli:
 
 
 class TestQualityAiRefinement:
-    """Mock every provider route so tests never make network requests."""
+    """Exercise the provider-neutral advisory resolver."""
 
-    @pytest.mark.parametrize(
-        ("backend", "target"),
-        [
-            ("ollama", "ai_refine_quality_ollama"),
-            ("openai", "ai_refine_quality_openai"),
-            ("gemini", "ai_refine_quality_gemini"),
-            ("openrouter", "ai_refine_quality_openrouter"),
-        ],
-    )
-    def test_provider_refinement_is_bounded_and_advisory(self, backend: str, target: str) -> None:
+    def test_provider_refinement_is_bounded_and_advisory(self) -> None:
         report = _fixture_report()
         finding = report.findings[0]
-        response = (
-            {finding.finding_id: ("Useful context", ("Check records",))},
-            backend,
-            "mock-model",
+        resolution = QualityResolution(
+            annotations={finding.finding_id: ("Useful context", ("Check records",))},
+            provider_id="ollama",
+            model="mock-model",
+            remote=False,
         )
-        with patch.object(gm, target, return_value=response) as resolver:
-            refined = gm.refine_quality_report_with_ai(report, backend, {})
-        resolver.assert_called_once()
+
+        refined = gm.refine_quality_report_with_ai(report, lambda _report: resolution)
+
         assert refined.findings[0].severity == finding.severity
         assert refined.findings[0].evidence == finding.evidence
         assert refined.findings[0].ai_why == "Useful context"
         assert refined.ai_refined is True
 
-    def test_provider_failure_returns_original_report(self) -> None:
+    def test_provider_failure_propagates_as_stable_error(self) -> None:
         report = _fixture_report()
-        with patch.object(gm, "ai_refine_quality_openai", side_effect=gm.RemoteCreditError("no")):
-            assert gm.refine_quality_report_with_ai(report, "openai", {}) is report
+
+        def fail(_report: gm.QualityReport) -> QualityResolution:
+            raise ProviderError("PROVIDER_TIMEOUT", "The provider request timed out.")
+
+        with pytest.raises(ProviderError) as raised:
+            gm.refine_quality_report_with_ai(report, fail)
+        assert raised.value.code == "PROVIDER_TIMEOUT"
 
     def test_unknown_model_finding_ids_are_ignored(self) -> None:
-        parsed = gm._parse_quality_ai_response(
-            '{"annotations":[{"finding_id":"invented",'
-            '"why_this_matters":"x","research_suggestions":[]}]}',
+        parsed = gm._quality_annotations_from_payload(
+            {
+                "annotations": [
+                    {
+                        "finding_id": "invented",
+                        "why_this_matters": "x",
+                        "research_suggestions": [],
+                    }
+                ]
+            },
             {"known"},
         )
         assert parsed == {}
@@ -416,19 +420,20 @@ class TestQualityAiRefinement:
 class TestDocumentationContract:
     """Keep executable examples, fixtures, and documented flags synchronized."""
 
-    def test_new_quality_flags_appear_in_both_guides(self) -> None:
+    def test_quality_and_provider_flags_are_documented(self) -> None:
         repository = Path(__file__).parents[1]
-        documents = [
-            (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(encoding="utf-8"),
-            (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(encoding="utf-8"),
-        ]
+        compatibility = (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(
+            encoding="utf-8"
+        )
+        cli = (repository / "docs" / "CLI.md").read_text(encoding="utf-8")
         for flag in (
             "--quality-report",
             "--no-quality-report",
             "--quality-root-person",
-            "--quality-ai",
         ):
-            assert all(flag in document for document in documents)
+            assert flag in compatibility
+        for flag in ("--provider", "--model", "--consent"):
+            assert flag in cli
 
     def test_fixture_names_and_root_are_synchronized(self) -> None:
         repository = Path(__file__).parents[1]

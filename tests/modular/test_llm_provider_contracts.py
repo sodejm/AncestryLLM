@@ -19,6 +19,7 @@ from ancestryllm.llm.contracts import (
     ProviderCapabilities,
 )
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy, validate_endpoint
+from ancestryllm.llm.providers.ollama import OllamaProvider
 from ancestryllm.llm.providers.openai import OpenAIProvider
 from ancestryllm.llm.registry import ProviderRegistry
 from ancestryllm.llm.validation import validate_structured_output
@@ -241,6 +242,11 @@ def test_remote_http_and_unlisted_https_endpoints_are_rejected(provider_id: str)
 )
 def test_ollama_allows_loopback_http_or_non_loopback_https(endpoint: str) -> None:
     validate_endpoint("ollama", endpoint)
+
+
+def test_non_loopback_ollama_is_classified_as_remote() -> None:
+    assert not OllamaProvider("http://127.0.0.1:11434").capabilities.remote
+    assert OllamaProvider("https://ollama.example.test").capabilities.remote
 
 
 def test_ollama_rejects_non_loopback_http() -> None:

@@ -1,8 +1,8 @@
 """Offline incremental synchronization for :mod:`ancestryllm.gedcom.engine`.
 
-This module deliberately receives the merge module as a runtime dependency.
-The engine is injected explicitly so synchronization remains testable and
-strictly offline when ``ai_backend`` is ``none``.
+This module deliberately receives the merge module and any optional identity
+resolver as runtime dependencies. Synchronization remains deterministic and
+strictly offline when ``provider`` is ``none``.
 
 Website snapshots are data origins, not evidence sources.  Snapshot ownership
 therefore lives only in the private JSON manifest; standard GEDCOM ``SOUR``
@@ -17,6 +17,7 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -27,7 +28,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Mapping, Never, Optional, Sequence
+from typing import Any, Callable, Mapping, Never, Optional, Sequence
+
+from ancestryllm.core.errors import AncestryError
+from ancestryllm.gedcom.contracts import IdentityResolver
 
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -64,6 +68,7 @@ EXIT_CODES = {
     "SYNC_UNSAFE_REMOVAL": 6,
     "SYNC_OUTPUT": 7,
 }
+ResolverFactory = Callable[[str, str, str | None], IdentityResolver]
 
 
 class PlainEnglishArgumentParser(argparse.ArgumentParser):
@@ -797,34 +802,12 @@ def _build_update_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-quality-report", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
-        "--ai-backend",
-        choices=("none", "ollama", "openai", "gemini", "openrouter", "auto"),
+        "--provider",
         default="none",
+        help="Explicit provider profile or built-in provider; none keeps update network-free.",
     )
-    parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL", "llama3.1"))
-    parser.add_argument(
-        "--ollama-url",
-        default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-    )
-    parser.add_argument("--openai-model", default=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
-    parser.add_argument(
-        "--gemini-model",
-        default=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-    )
-    parser.add_argument(
-        "--openrouter-model",
-        default=os.getenv("OPENROUTER_MODEL", "openrouter/auto"),
-    )
-    parser.add_argument(
-        "--credit-check",
-        choices=("required", "best-effort", "disabled"),
-        default=os.getenv("REMOTE_CREDIT_CHECK", "required"),
-    )
-    parser.add_argument(
-        "--minimum-credit-usd",
-        type=float,
-        default=float(os.getenv("MINIMUM_REMOTE_CREDIT_USD", "0.01")),
-    )
+    parser.add_argument("--model", default="")
+    parser.add_argument("--consent")
     parser.add_argument("--gedcom-version", choices=("5.5.5", "5.5.1"), default="5.5.5")
     parser.add_argument("--auto", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -852,6 +835,17 @@ def _person_from_record(record: Any, core: ModuleType) -> Any:
     return core._individual_from_record(record)
 
 
+def _verdict_confidence(value: object) -> float:
+    """Return a scalar confidence while treating malformed resolver data as zero."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return 0.0
+    try:
+        confidence = float(value)
+    except (OverflowError, ValueError):
+        return 0.0
+    return confidence if math.isfinite(confidence) and 0.0 <= confidence <= 1.0 else 0.0
+
+
 def _match_people(
     sources: Sequence[Any],
     specs: Sequence[SnapshotSpec],
@@ -859,8 +853,8 @@ def _match_people(
     core: ModuleType,
     stats: SyncStats,
     *,
-    ai_backend: str = "none",
-    ai_kwargs: Optional[dict[str, object]] = None,
+    provider_id: str = "none",
+    identity_resolver: IdentityResolver | None = None,
 ) -> tuple[dict[str, str], dict[str, dict[str, str]], list[Any]]:
     """Map snapshot people to stable master pointers conservatively."""
     people_by_source: list[list[Any]] = []
@@ -935,35 +929,28 @@ def _match_people(
                     stats.mapped_people.append(
                         f"{spec.source_id}:{original} -> {target} (score {safe_scored[0][0]:.2f})"
                     )
-                elif ai_backend != "none" and scored:
+                elif identity_resolver is not None and scored:
                     best_score, best_pointer, assessment = max(
                         scored, key=lambda item: (item[0], item[1])
                     )
                     target = ""
                     if not assessment.conflicts:
-                        try:
-                            verdict = core.ai_resolve(
+                        verdict = dict(
+                            identity_resolver(
                                 by_pointer[best_pointer],
                                 incoming,
-                                backend=ai_backend,
-                                **(ai_kwargs or {}),
                             )
-                            if (
-                                bool(verdict.get("is_duplicate"))
-                                and float(verdict.get("confidence", 0.0)) >= 0.90
-                            ):
-                                target = best_pointer
-                                stats.mapped_people.append(
-                                    f"{spec.source_id}:{original} -> {target} "
-                                    f"(AI {verdict.get('_provider', ai_backend)}/"
-                                    f"{verdict.get('_model', 'provider default')}, "
-                                    f"score {best_score:.2f})"
-                                )
-                        except Exception as exc:
-                            stats.conflicts.append(
-                                f"AI left {spec.source_id}:{original} unresolved: "
-                                f"{type(exc).__name__}: "
-                                f"{_normal_space(str(exc))[:240]}"
+                        )
+                        if (
+                            bool(verdict.get("is_duplicate"))
+                            and _verdict_confidence(verdict.get("confidence")) >= 0.90
+                        ):
+                            target = best_pointer
+                            stats.mapped_people.append(
+                                f"{spec.source_id}:{original} -> {target} "
+                                f"(LLM {verdict.get('_provider', provider_id)}/"
+                                f"{verdict.get('_model', 'provider default')}, "
+                                f"score {best_score:.2f})"
                             )
                     if not target:
                         target = _next_pointer("INDI", used, counters)
@@ -1246,7 +1233,7 @@ def _render_update_report(
     stats: SyncStats,
     master_sha256: str,
     *,
-    ai_backend: str,
+    provider_id: str,
     dry_run: bool,
 ) -> str:
     """Render the complete transparent incremental change report."""
@@ -1257,8 +1244,8 @@ def _render_update_report(
         f"- Generation: {manifest['generation']}",
         f"- Mode: {'dry run; no files written' if dry_run else 'atomic release'}",
         f"- Master SHA-256: `{master_sha256}`",
-        f"- AI backend: `{ai_backend}`"
-        + (" (offline deterministic)" if ai_backend == "none" else " (opt-in)"),
+        f"- LLM provider: `{provider_id}`"
+        + (" (offline deterministic)" if provider_id == "none" else " (explicit opt-in)"),
         "",
         "## Snapshot inputs",
         "",
@@ -1339,32 +1326,6 @@ def _quality_report(
     )
 
 
-def _ai_kwargs(args: argparse.Namespace) -> dict[str, object]:
-    """Translate update options into the existing provider-neutral AI contract."""
-    shared: dict[str, object] = {
-        "credit_policy": args.credit_check,
-        "minimum_credit_usd": args.minimum_credit_usd,
-    }
-    if args.ai_backend == "ollama":
-        return {"model": args.ollama_model, "base_url": args.ollama_url}
-    if args.ai_backend == "openai":
-        return {"model": args.openai_model, **shared}
-    if args.ai_backend == "gemini":
-        return {"model": args.gemini_model, **shared}
-    if args.ai_backend == "openrouter":
-        return {"model": args.openrouter_model, **shared}
-    if args.ai_backend == "auto":
-        return {
-            "openai_model": args.openai_model,
-            "gemini_model": args.gemini_model,
-            "openrouter_model": args.openrouter_model,
-            "ollama_model": args.ollama_model,
-            "ollama_url": args.ollama_url,
-            **shared,
-        }
-    return {}
-
-
 def _safe_exception_detail(exc: BaseException) -> str:
     """Remove quoted GEDCOM payload text while retaining path and line context."""
     detail = _normal_space(str(exc))
@@ -1372,8 +1333,12 @@ def _safe_exception_detail(exc: BaseException) -> str:
     return detail[:500]
 
 
-def _perform_update(args: argparse.Namespace, core: ModuleType) -> int:
-    """Execute one offline update and publish an atomic generation bundle."""
+def _perform_update(
+    args: argparse.Namespace,
+    core: ModuleType,
+    identity_resolver: IdentityResolver | None = None,
+) -> int:
+    """Execute one offline-first update and publish an atomic generation bundle."""
     master = Path(args.master).expanduser().resolve()
     release_root = Path(args.release_root).expanduser().resolve()
     if not master.is_file():
@@ -1442,8 +1407,8 @@ def _perform_update(args: argparse.Namespace, core: ModuleType) -> int:
         manifest,
         core,
         stats,
-        ai_backend=args.ai_backend,
-        ai_kwargs=_ai_kwargs(args),
+        provider_id=args.provider,
+        identity_resolver=identity_resolver,
     )
     pointer_map, nonpeople = _map_nonpeople(sources, pointer_map, manifest, core, stats)
     people, block_registry = _reconcile_person_blocks(
@@ -1486,7 +1451,7 @@ def _perform_update(args: argparse.Namespace, core: ModuleType) -> int:
             specs,
             stats,
             "not-written-dry-run",
-            ai_backend=args.ai_backend,
+            provider_id=args.provider,
             dry_run=True,
         )
         print(report, end="")
@@ -1541,7 +1506,7 @@ def _perform_update(args: argparse.Namespace, core: ModuleType) -> int:
             specs,
             stats,
             master_sha,
-            ai_backend=args.ai_backend,
+            provider_id=args.provider,
             dry_run=False,
         )
         _write_bytes(staging / "update.md", report_text.encode("utf-8"))
@@ -1749,7 +1714,12 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType) -> int:
     return 0
 
 
-def main(argv: Sequence[str], core: ModuleType) -> int:
+def main(
+    argv: Sequence[str],
+    core: ModuleType,
+    *,
+    resolver_factory: ResolverFactory | None = None,
+) -> int:
     """Dispatch ``update`` or ``rebase`` and render transparent failures."""
     command = argv[0] if argv else ""
     release_root = Path(".").resolve()
@@ -1757,7 +1727,19 @@ def main(argv: Sequence[str], core: ModuleType) -> int:
         if command == "update":
             args = _build_update_parser().parse_args(list(argv[1:]))
             release_root = Path(args.release_root).expanduser().resolve()
-            return _perform_update(args, core)
+            identity_resolver: IdentityResolver | None = None
+            if args.provider != "none":
+                if resolver_factory is None:
+                    raise AncestryError(
+                        "LLM_SERVICE_UNAVAILABLE",
+                        "Incremental LLM assistance requires the modular application service.",
+                    )
+                identity_resolver = resolver_factory(
+                    args.provider,
+                    args.model,
+                    args.consent,
+                )
+            return _perform_update(args, core, identity_resolver)
         if command == "rebase":
             args = _build_rebase_parser().parse_args(list(argv[1:]))
             release_root = Path(args.release_root).expanduser().resolve()
@@ -1772,6 +1754,8 @@ def main(argv: Sequence[str], core: ModuleType) -> int:
         print(exc.render(), end="", file=__import__("sys").stderr)
         _failure_report(release_root, exc)
         return exc.exit_code
+    except AncestryError:
+        raise
     except Exception as exc:
         error = SyncError(
             "SYNC_OUTPUT",

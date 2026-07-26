@@ -48,7 +48,7 @@ def is_provider_cancellation(exc: BaseException) -> bool:
 
     return isinstance(exc, (asyncio.CancelledError, GeneratorExit, KeyboardInterrupt)) or type(
         exc
-    ).__name__ in {"CancelledError", "CanceledError"}
+    ).__name__ in {"CancelledError", "CanceledError", "CancellationError"}
 
 
 def normalize_provider_error(

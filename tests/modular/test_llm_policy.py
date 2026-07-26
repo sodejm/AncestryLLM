@@ -4,7 +4,13 @@ import pytest
 
 from ancestryllm.core.errors import ProviderError, SecurityPolicyError
 from ancestryllm.core.secrets import MemorySecretStore
-from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message, ProviderCapabilities
+from ancestryllm.llm.contracts import (
+    DataClass,
+    GenerationRequest,
+    Message,
+    ProviderCapabilities,
+    ProviderExecution,
+)
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy, validate_endpoint
 from ancestryllm.llm.registry import ProviderRegistry
 
@@ -26,6 +32,30 @@ def test_remote_provider_requires_matching_consent() -> None:
     )
     with pytest.raises(SecurityPolicyError, match="consent"):
         ConsentPolicy().authorize(request(), capabilities, None)
+
+
+def test_local_retention_consent_must_match_the_exact_profile_and_scope() -> None:
+    capabilities = ProviderCapabilities(
+        provider_id="ollama", remote=False, structured_output=True, streaming=True
+    )
+    local_request = request("ollama").model_copy(
+        update={"execution": ProviderExecution(profile_name="local-one")}
+    )
+    wrong_grant = ConsentGrant(
+        "wrong-consent",
+        "ollama",
+        frozenset({"gedcom"}),
+        frozenset({"identity_adjudication"}),
+        frozenset({DataClass.DECEASED_PERSON}),
+        ("test-*",),
+        retain_payloads=True,
+        provider_profile_name="local-two",
+    )
+
+    with pytest.raises(SecurityPolicyError) as raised:
+        ConsentPolicy().authorize(local_request, capabilities, wrong_grant)
+
+    assert raised.value.code == "CONSENT_PROFILE_MISMATCH"
 
 
 def test_consent_denies_living_data_by_default() -> None:

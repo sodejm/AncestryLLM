@@ -18,6 +18,7 @@ from ancestryllm.llm.contracts import (
     GenerationResult,
     Message,
     ProviderCapabilities,
+    ProviderExecution,
 )
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.providers.anthropic import AnthropicProvider
@@ -82,6 +83,21 @@ class RaisingStream:
     @property
     def text_stream(self) -> RaisingStream:
         return self
+
+
+class CompletionStream:
+    def __init__(self, chunks: list[Any]) -> None:
+        self.chunks = chunks
+        self.closed = False
+
+    def __enter__(self) -> CompletionStream:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.closed = True
+
+    def __iter__(self) -> Iterator[Any]:
+        yield from self.chunks
 
 
 def test_openai_client_configures_all_timeout_phases_and_disables_retries(
@@ -200,6 +216,97 @@ def test_openai_generate_passes_request_timeout_and_closes_client(
     assert captured["max_completion_tokens"] == 23
 
 
+@pytest.mark.parametrize(
+    ("provider_id", "zero_data_retention", "expects_enforcement"),
+    [
+        ("openrouter", True, True),
+        ("openrouter", False, False),
+        ("openai", True, False),
+    ],
+)
+def test_openrouter_generate_enforces_zdr_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_id: str,
+    zero_data_retention: bool,
+    expects_enforcement: bool,
+) -> None:
+    client = ContextClient()
+    captured: dict[str, Any] = {}
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(
+            id="response-id",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))],
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=1),
+        )
+
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))  # type: ignore[attr-defined]
+    provider = OpenAIProvider(
+        "key",
+        provider_id=provider_id,
+        base_url=(
+            "https://openrouter.ai/api/v1"
+            if provider_id == "openrouter"
+            else "https://api.openai.com/v1"
+        ),
+        zero_data_retention=zero_data_retention,
+    )
+    monkeypatch.setattr(provider, "_client", lambda timeout: client)
+
+    assert provider.generate(request(provider_id)).text == "answer"
+
+    expected = {
+        "provider": {
+            "data_collection": "deny",
+            "require_parameters": True,
+            "zdr": True,
+        }
+    }
+    if expects_enforcement:
+        assert captured["extra_body"] == expected
+    else:
+        assert "extra_body" not in captured
+    assert provider.capabilities.retention_known is expects_enforcement
+    assert provider.capabilities.zero_data_retention is expects_enforcement
+
+
+def test_openrouter_stream_enforces_zdr_per_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = CompletionStream(
+        [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="answer"))])]
+    )
+    client = ContextClient()
+    captured: dict[str, Any] = {}
+
+    def create(**kwargs: Any) -> CompletionStream:
+        captured.update(kwargs)
+        return stream
+
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))  # type: ignore[attr-defined]
+    provider = OpenAIProvider(
+        "key",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        zero_data_retention=True,
+    )
+    monkeypatch.setattr(provider, "_client", lambda timeout: client)
+
+    assert list(provider.stream(request("openrouter"))) == ["answer"]
+
+    assert captured["extra_body"] == {
+        "provider": {
+            "data_collection": "deny",
+            "require_parameters": True,
+            "zdr": True,
+        }
+    }
+    assert captured["stream"] is True
+    assert stream.closed
+    assert client.closed
+
+
 def test_anthropic_generate_passes_request_timeout_and_closes_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -247,7 +354,7 @@ def test_gemini_generate_passes_request_timeout_and_closes_client(
     assert captured["config"].max_output_tokens == 23
 
 
-def test_ollama_generate_uses_timed_client_and_closes_it(
+def test_ollama_generate_reuses_timed_client_until_provider_shutdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = ContextClient()
@@ -274,8 +381,11 @@ def test_ollama_generate_uses_timed_client_and_closes_it(
     assert provider.generate(request("ollama")).text == "answer"
 
     assert received_timeout == [12.5]
-    assert client.closed
+    assert not client.closed
     assert captured["options"]["num_predict"] == 23
+    provider._clients[12.5] = client
+    provider.close()
+    assert client.closed
 
 
 @pytest.mark.parametrize("timeout_seconds", [1.0, 600.0])
@@ -413,7 +523,13 @@ def test_provider_streams_normalize_timeouts_and_close_resources(
 
     assert raised.value.code == expected_code
     assert stream.closed is (provider_id in {"openai", "anthropic"})
-    assert client.closed
+    if provider_id == "ollama":
+        assert not client.closed
+        provider._clients[12.5] = client
+        provider.close()
+        assert client.closed
+    else:
+        assert client.closed
     if provider_id in {"openai", "anthropic"}:
         assert_all_phase_timeout(captured["timeout"], 12.5)
     if provider_id == "gemini":
@@ -688,7 +804,7 @@ def test_service_generate_uses_bounded_backoff_for_opted_in_safe_retries(
     )
     llm, database = service(provider)
     delays: list[float] = []
-    monkeypatch.setattr("ancestryllm.llm.service.time.sleep", delays.append)
+    monkeypatch.setattr(llm, "_wait_for_retry", delays.append)
     retriable = request("test").model_copy(update={"max_safe_retries": 2})
 
     result = llm.generate(retriable)
@@ -698,3 +814,94 @@ def test_service_generate_uses_bounded_backoff_for_opted_in_safe_retries(
     assert delays == [0.25, 1.0]
     assert len(database.rows) == 1
     assert database.rows[0].status == "succeeded"
+
+
+def test_retry_backoff_is_cancellation_aware_and_audited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = RetryingProvider(
+        [
+            ProviderError(
+                "PROVIDER_RATE_LIMITED",
+                "limited",
+                details={"retry_after_seconds": 60.0},
+            )
+        ]
+    )
+    database = AuditDatabase()
+    cancelled = False
+
+    def cancellation_check() -> None:
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def cancel_during_wait(_delay: float) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    llm = LLMService(
+        StaticRegistry(provider),  # type: ignore[arg-type]
+        database,  # type: ignore[arg-type]
+        cancellation_check=cancellation_check,
+    )
+    monkeypatch.setattr("ancestryllm.llm.service.time.sleep", cancel_during_wait)
+    retriable = request("test").model_copy(update={"max_safe_retries": 1})
+
+    with pytest.raises(ProviderError) as raised:
+        llm.generate(retriable)
+
+    assert raised.value.code == "PROVIDER_CANCELLED"
+    assert provider.generate_calls == 1
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+
+
+def test_cache_hit_does_not_duplicate_explicitly_retained_payloads() -> None:
+    class CacheProvider(LifecycleProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.generate_calls = 0
+
+        def generate(self, request: GenerationRequest) -> GenerationResult:
+            self.generate_calls += 1
+            return GenerationResult(
+                provider_id="test",
+                model=request.model,
+                text='{"answer":"complete"}',
+                parsed={"answer": "complete"},
+                input_tokens=12,
+                output_tokens=3,
+                cost_usd=0.004,
+            )
+
+    provider = CacheProvider()
+    llm, database = service(provider)
+    cached_request = request("test").model_copy(
+        update={
+            "temperature": 0,
+            "response_schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+            "execution": ProviderExecution(cache_ttl_seconds=60),
+        }
+    )
+
+    llm.generate(cached_request, retention_consent())
+    llm.generate(cached_request, retention_consent())
+
+    assert provider.generate_calls == 1
+    assert [row.status for row in database.rows] == ["succeeded", "cache_hit"]
+    assert database.rows[0].input_payload is not None
+    assert database.rows[0].output_payload == '{"answer":"complete"}'
+    assert database.rows[0].input_tokens == 12
+    assert database.rows[0].output_tokens == 3
+    assert database.rows[0].cost_usd == 0.004
+    assert database.rows[1].input_payload is None
+    assert database.rows[1].output_payload is None
+    assert database.rows[1].input_tokens is None
+    assert database.rows[1].output_tokens is None
+    assert database.rows[1].cost_usd is None

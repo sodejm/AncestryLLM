@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 from ancestryllm.core.errors import SecurityPolicyError
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, ProviderCapabilities
 
-REMOTE_PROVIDERS = frozenset({"openai", "anthropic", "gemini", "openrouter"})
 REMOTE_ENDPOINTS = {
     "openai": frozenset({"api.openai.com"}),
     "anthropic": frozenset({"api.anthropic.com"}),
@@ -30,6 +29,22 @@ class ConsentGrant:
     max_cost_usd: float | None = None
     retain_payloads: bool = False
     active: bool = True
+    provider_profile_name: str | None = None
+
+
+def endpoint_is_loopback(endpoint: str) -> bool:
+    """Return whether an endpoint names an explicit loopback host."""
+
+    hostname = urlparse(endpoint).hostname
+    if not hostname:
+        return False
+    normalized = hostname.casefold()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def validate_endpoint(provider_id: str, endpoint: str) -> None:
@@ -37,14 +52,8 @@ def validate_endpoint(provider_id: str, endpoint: str) -> None:
     if provider_id == "ollama":
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise SecurityPolicyError("ENDPOINT_REJECTED", "The Ollama endpoint is invalid.")
-        hostname = parsed.hostname.casefold()
-        if hostname == "localhost":
+        if endpoint_is_loopback(endpoint):
             return
-        try:
-            if ipaddress.ip_address(hostname).is_loopback:
-                return
-        except ValueError:
-            pass
         if parsed.scheme != "https":
             raise SecurityPolicyError(
                 "ENDPOINT_REJECTED",
@@ -77,17 +86,28 @@ class ConsentPolicy:
             raise SecurityPolicyError(
                 "PROVIDER_MISMATCH", "The selected provider does not match the request."
             )
-        if not capabilities.remote:
+        if not capabilities.remote and consent is None:
             return
-        if consent is None or not consent.active:
+        if consent is None:
             raise SecurityPolicyError(
                 "CLOUD_CONSENT_REQUIRED",
                 "An active consent profile is required before genealogy data can reach a cloud provider.",
                 "Create or select a provider-specific consent profile.",
             )
+        if not consent.active:
+            raise SecurityPolicyError(
+                "CONSENT_INACTIVE",
+                "The selected consent profile is revoked or inactive.",
+                "Create or select an active consent profile.",
+            )
         if consent.provider_id != request.provider_id:
             raise SecurityPolicyError(
                 "CONSENT_PROVIDER_MISMATCH", "Consent is for a different provider."
+            )
+        if consent.provider_profile_name != request.execution.profile_name:
+            raise SecurityPolicyError(
+                "CONSENT_PROFILE_MISMATCH",
+                "Consent is for a different provider profile or endpoint.",
             )
         if request.module_id not in consent.allowed_modules:
             raise SecurityPolicyError(
