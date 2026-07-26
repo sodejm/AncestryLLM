@@ -31,7 +31,12 @@ from types import ModuleType
 from typing import Any, Callable, Mapping, Never, Optional, Sequence
 
 from ancestryllm.core.errors import AncestryError, FileIngressError
-from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+from ancestryllm.core.ingress import (
+    FileFingerprint,
+    FileIngressPolicy,
+    FileKind,
+    FileSnapshot,
+)
 from ancestryllm.gedcom.contracts import IdentityResolver
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -94,6 +99,7 @@ class SnapshotSpec:
     exported_at: str
     date_basis: str
     sha256: str
+    fingerprint: FileFingerprint
 
     @property
     def snapshot_id(self) -> str:
@@ -165,13 +171,8 @@ class SyncError(RuntimeError):
 
 def _sha256_file(
     path: Path,
-    ingress: FileIngressPolicy | None = None,
-    kind: FileKind = FileKind.GEDCOM,
 ) -> str:
     """Hash a file in bounded chunks."""
-    if ingress is not None:
-        bounded_digest, _ = ingress.sha256(path, kind)
-        return bounded_digest
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -620,10 +621,15 @@ def _parse_snapshot_argument(value: str) -> tuple[str, str, Path]:
     return source_id, vendor, Path(raw_path).expanduser().absolute()
 
 
-def _header_export_date(path: Path, core: ModuleType, ingress: FileIngressPolicy) -> Optional[str]:
+def _header_export_date(
+    path: Path,
+    core: ModuleType,
+    ingress: FileIngressPolicy,
+    expected: FileSnapshot,
+) -> Optional[str]:
     """Read a usable HEAD.DATE without treating it as genealogical evidence."""
     try:
-        first = next(core.iter_gedcom_records(path, ingress))
+        first = next(core.iter_gedcom_records(path, ingress, expected))
     except (StopIteration, OSError, ValueError):
         return None
     if first.tag != "HEAD":
@@ -676,7 +682,7 @@ def _snapshot_specs(
             exported_at = explicit_dates[source_id]
             basis = "operator"
         else:
-            header_date = _header_export_date(path, core, ingress)
+            header_date = _header_export_date(path, core, ingress, snapshot)
             if header_date:
                 exported_at = header_date
                 basis = "HEAD.DATE"
@@ -685,6 +691,11 @@ def _snapshot_specs(
                     snapshot.modified_ns / 1_000_000_000, tz=dt.timezone.utc
                 ).isoformat()
                 basis = "file-mtime"
+        fingerprint = ingress.fingerprint(
+            path,
+            FileKind.GEDCOM,
+            expected=snapshot,
+        )
         specs.append(
             SnapshotSpec(
                 source_id=source_id,
@@ -692,7 +703,8 @@ def _snapshot_specs(
                 path=path,
                 exported_at=exported_at,
                 date_basis=basis,
-                sha256=_sha256_file(path, ingress),
+                sha256=fingerprint.sha256,
+                fingerprint=fingerprint,
             )
         )
     unknown_dates = sorted(set(explicit_dates) - seen)
@@ -707,7 +719,11 @@ def _snapshot_specs(
     return specs
 
 
-def _new_manifest(master: Path, release_root: Path, ingress: FileIngressPolicy) -> dict[str, Any]:
+def _new_manifest(
+    master: Path,
+    release_root: Path,
+    master_fingerprint: FileFingerprint,
+) -> dict[str, Any]:
     """Create an empty schema-v1 manifest for protected baseline seeding."""
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -715,7 +731,7 @@ def _new_manifest(master: Path, release_root: Path, ingress: FileIngressPolicy) 
         "generation": 0,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "master": {"path": str(master), "sha256": _sha256_file(master, ingress)},
+        "master": {"path": str(master), "sha256": master_fingerprint.sha256},
         "parent_release": None,
         "release_root": str(release_root),
         "active_snapshots": {},
@@ -730,9 +746,19 @@ def _new_manifest(master: Path, release_root: Path, ingress: FileIngressPolicy) 
     }
 
 
-def _load_manifest(path: Path, master: Path, ingress: FileIngressPolicy) -> dict[str, Any]:
+def _load_manifest(
+    path: Path,
+    ingress: FileIngressPolicy,
+    manifest_fingerprint: FileFingerprint,
+    master_fingerprint: FileFingerprint,
+) -> dict[str, Any]:
     """Load and validate a manifest before using any provenance decisions."""
-    value = ingress.read_json(path, FileKind.MANIFEST, require_object=True)
+    value = ingress.read_json(
+        path,
+        FileKind.MANIFEST,
+        require_object=True,
+        expected=manifest_fingerprint.snapshot,
+    )
     assert isinstance(value, dict)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise SyncError(
@@ -743,7 +769,7 @@ def _load_manifest(path: Path, master: Path, ingress: FileIngressPolicy) -> dict
             details=(f"Found schema_version: {value.get('schema_version')!r}",),
         )
     expected = str(value.get("master", {}).get("sha256", ""))
-    actual = _sha256_file(master, ingress)
+    actual = master_fingerprint.sha256
     if expected != actual:
         raise SyncError(
             "MANIFEST_MASTER_MISMATCH",
@@ -1333,7 +1359,7 @@ def _perform_update(
     """Execute one offline-first update and publish an atomic generation bundle."""
     master = Path(args.master).expanduser().absolute()
     release_root = Path(args.release_root).expanduser().resolve()
-    ingress.inspect(master, FileKind.GEDCOM)
+    master_fingerprint = ingress.fingerprint(master, FileKind.GEDCOM)
     if args.initialize_manifest and args.manifest:
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -1362,22 +1388,52 @@ def _perform_update(
             ],
         )
     specs = _snapshot_specs(args, core, ingress)
-    manifest = (
-        _new_manifest(master, release_root, ingress)
-        if args.initialize_manifest
-        else _load_manifest(Path(args.manifest).expanduser().absolute(), master, ingress)
+    manifest_path = Path(args.manifest).expanduser().absolute() if args.manifest else None
+    manifest_fingerprint = (
+        ingress.fingerprint(manifest_path, FileKind.MANIFEST) if manifest_path is not None else None
     )
+    if args.initialize_manifest:
+        manifest = _new_manifest(master, release_root, master_fingerprint)
+    else:
+        assert manifest_path is not None
+        assert manifest_fingerprint is not None
+        manifest = _load_manifest(
+            manifest_path,
+            ingress,
+            manifest_fingerprint,
+            master_fingerprint,
+        )
+
+    def verify_inputs() -> None:
+        ingress.verify(master, FileKind.GEDCOM, master_fingerprint)
+        for spec in specs:
+            ingress.verify(spec.path, FileKind.GEDCOM, spec.fingerprint)
+        if manifest_path is not None and manifest_fingerprint is not None:
+            ingress.verify(
+                manifest_path,
+                FileKind.MANIFEST,
+                manifest_fingerprint,
+            )
+
     if all(
         manifest.get("active_snapshots", {}).get(spec.source_id) == spec.snapshot_id
         for spec in specs
     ):
+        verify_inputs()
         print(
             "No update was needed: every supplied snapshot is already active "
             "with the same SHA-256 checksum. No release files were changed."
         )
         return 0
     try:
-        sources = core.load_sources([master, *(spec.path for spec in specs)], ingress)
+        sources = core.load_sources(
+            [master, *(spec.path for spec in specs)],
+            ingress,
+            {
+                master: master_fingerprint.snapshot,
+                **{spec.path: spec.fingerprint.snapshot for spec in specs},
+            },
+        )
     except (OSError, ValueError) as exc:
         raise SyncError(
             "SYNC_PARSE",
@@ -1440,6 +1496,7 @@ def _perform_update(
             provider_id=args.provider,
             dry_run=True,
         )
+        verify_inputs()
         print(report, end="")
         return 0
     release_root.mkdir(parents=True, exist_ok=True)
@@ -1463,13 +1520,9 @@ def _perform_update(
         )
         master_sha = _sha256_file(staged_master)
         parent_master = copy.deepcopy(manifest.get("master"))
-        parent_manifest_path = (
-            str(Path(args.manifest).expanduser().absolute()) if args.manifest else None
-        )
+        parent_manifest_path = str(manifest_path) if manifest_path is not None else None
         parent_manifest_sha = (
-            _sha256_file(Path(parent_manifest_path), ingress, FileKind.MANIFEST)
-            if parent_manifest_path
-            else None
+            manifest_fingerprint.sha256 if manifest_fingerprint is not None else None
         )
         manifest["parent_release"] = {
             "generation": next_generation - 1,
@@ -1534,6 +1587,7 @@ def _perform_update(
         }
         manifest_payload = _json_bytes(manifest)
         _write_bytes(staging / "manifest.json", manifest_payload)
+        verify_inputs()
         os.replace(staging, final_dir)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1546,11 +1600,14 @@ def _perform_update(
 
 
 def _master_block_index(
-    path: Path, core: ModuleType, ingress: FileIngressPolicy
+    path: Path,
+    core: ModuleType,
+    ingress: FileIngressPolicy,
+    expected: FileSnapshot,
 ) -> dict[str, dict[str, str]]:
     """Index person blocks by pointer for explicit manual rebase comparison."""
     result: dict[str, dict[str, str]] = defaultdict(dict)
-    for record in core.iter_gedcom_records(path, ingress):
+    for record in core.iter_gedcom_records(path, ingress, expected):
         if record.tag != "INDI":
             continue
         for block in core._top_level_blocks(record.lines):
@@ -1563,13 +1620,29 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
     master = Path(args.master).expanduser().absolute()
     manifest_path = Path(args.manifest).expanduser().absolute()
     release_root = Path(args.release_root).expanduser().resolve()
-    ingress.inspect(master, FileKind.GEDCOM)
-    manifest = ingress.read_json(manifest_path, FileKind.MANIFEST, require_object=True)
+    master_fingerprint = ingress.fingerprint(master, FileKind.GEDCOM)
+    manifest_fingerprint = ingress.fingerprint(manifest_path, FileKind.MANIFEST)
+    manifest = ingress.read_json(
+        manifest_path,
+        FileKind.MANIFEST,
+        require_object=True,
+        expected=manifest_fingerprint.snapshot,
+    )
     assert isinstance(manifest, dict)
     previous_path = Path(str(manifest.get("master", {}).get("path", "")))
-    ingress.inspect(previous_path, FileKind.GEDCOM)
-    previous = _master_block_index(previous_path, core, ingress)
-    current = _master_block_index(master, core, ingress)
+    previous_fingerprint = ingress.fingerprint(previous_path, FileKind.GEDCOM)
+    previous = _master_block_index(
+        previous_path,
+        core,
+        ingress,
+        previous_fingerprint.snapshot,
+    )
+    current = _master_block_index(
+        master,
+        core,
+        ingress,
+        master_fingerprint.snapshot,
+    )
     additions = {
         pointer: set(hashes) - set(previous.get(pointer, {}))
         for pointer, hashes in current.items()
@@ -1631,6 +1704,13 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         "- No website snapshots were processed.\n"
     )
     if args.dry_run:
+        ingress.verify(master, FileKind.GEDCOM, master_fingerprint)
+        ingress.verify(previous_path, FileKind.GEDCOM, previous_fingerprint)
+        ingress.verify(
+            manifest_path,
+            FileKind.MANIFEST,
+            manifest_fingerprint,
+        )
         print(summary, end="")
         return 0
     release_root.mkdir(parents=True, exist_ok=True)
@@ -1638,7 +1718,12 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
     final_dir = release_root / f"g{next_generation:04d}-{timestamp}"
     staging = Path(tempfile.mkdtemp(prefix=".gedcom-rebase-", dir=release_root))
     try:
-        shutil.copy2(master, staging / "master.ged")
+        ingress.copy_to(
+            master,
+            staging / "master.ged",
+            FileKind.GEDCOM,
+            expected=master_fingerprint,
+        )
         master_sha = _sha256_file(staging / "master.ged")
         prior = copy.deepcopy(manifest.get("master"))
         manifest["generation"] = next_generation
@@ -1647,7 +1732,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             "generation": next_generation - 1,
             "master": prior,
             "manifest_path": str(manifest_path),
-            "manifest_sha256": _sha256_file(manifest_path, ingress, FileKind.MANIFEST),
+            "manifest_sha256": manifest_fingerprint.sha256,
         }
         manifest["master"] = {
             "path": str(final_dir / "master.ged"),
@@ -1675,6 +1760,13 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         }
         _write_bytes(staging / "rollback.json", _json_bytes(rollback))
         _write_bytes(staging / "manifest.json", _json_bytes(manifest))
+        ingress.verify(master, FileKind.GEDCOM, master_fingerprint)
+        ingress.verify(previous_path, FileKind.GEDCOM, previous_fingerprint)
+        ingress.verify(
+            manifest_path,
+            FileKind.MANIFEST,
+            manifest_fingerprint,
+        )
         os.replace(staging, final_dir)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)

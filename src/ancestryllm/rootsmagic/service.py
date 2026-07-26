@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.ingress import FileIngressPolicy
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
@@ -59,8 +59,10 @@ class RootsMagicService:
         if self.llm is None:
             raise AncestryError("LLM_SERVICE_UNAVAILABLE", "No LLM service is configured.")
         path = self.reader.resolve_tree(tree)
-        schema = self.reader.schema(path)
-        self.reader.validate_row_limits(path, schema)
+        fingerprint = self.reader.ingress.fingerprint(path, FileKind.ROOTSMAGIC)
+        schema = self.reader.schema(path, fingerprint.snapshot)
+        self.reader.validate_row_limits(path, schema, fingerprint.snapshot)
+        self.reader.ingress.verify(path, FileKind.ROOTSMAGIC, fingerprint)
         schema_text = json.dumps(schema, sort_keys=True)
         request = GenerationRequest(
             provider_id=provider_id,
@@ -88,7 +90,12 @@ class RootsMagicService:
             raise AncestryError(
                 "SQL_GENERATION_INVALID", "The provider did not return a SQL query."
             )
-        return self.reader.query(path, result.parsed["sql"])
+        return self.reader.query(
+            path,
+            result.parsed["sql"],
+            expected=fingerprint,
+            schema=schema,
+        )
 
     def export(
         self,

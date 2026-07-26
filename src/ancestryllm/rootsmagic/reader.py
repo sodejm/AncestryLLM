@@ -6,6 +6,7 @@ import os
 import sqlite3
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -13,7 +14,12 @@ from typing import Any, Iterator
 from sqlglot import exp, parse
 
 from ancestryllm.core.errors import AncestryError, SecurityPolicyError
-from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+from ancestryllm.core.ingress import (
+    FileFingerprint,
+    FileIngressPolicy,
+    FileKind,
+    FileSnapshot,
+)
 
 DENIED_ACTIONS = {
     sqlite3.SQLITE_INSERT,
@@ -84,6 +90,30 @@ class RootsMagicReader:
         self.max_rows = max_rows
         self.timeout_seconds = timeout_seconds
         self.ingress = ingress or FileIngressPolicy()
+        self._operation_snapshot: ContextVar[FileSnapshot | None] = ContextVar(
+            f"rootsmagic_operation_snapshot_{id(self)}",
+            default=None,
+        )
+        self._operation_schema: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar(
+            f"rootsmagic_operation_schema_{id(self)}",
+            default=None,
+        )
+
+    @contextmanager
+    def operation(
+        self,
+        snapshot: FileSnapshot,
+        schema: dict[str, tuple[str, ...]],
+    ) -> Iterator[None]:
+        """Carry one verified database identity through a multi-pass operation."""
+
+        snapshot_token = self._operation_snapshot.set(snapshot)
+        schema_token = self._operation_schema.set(schema)
+        try:
+            yield
+        finally:
+            self._operation_schema.reset(schema_token)
+            self._operation_snapshot.reset(snapshot_token)
 
     def list_trees(self) -> list[Path]:
         results: set[Path] = set()
@@ -106,6 +136,15 @@ class RootsMagicReader:
                     )
         return sorted(results)
 
+    def _within_allowed_directory(self, candidate: Path) -> bool:
+        for directory in self.allowed_directories:
+            try:
+                if os.path.commonpath((str(directory), str(candidate))) == str(directory):
+                    return True
+            except ValueError:
+                continue
+        return False
+
     def resolve_tree(self, name_or_path: str | Path) -> Path:
         requested = Path(name_or_path).expanduser()
         candidates: list[Path]
@@ -117,10 +156,7 @@ class RootsMagicReader:
         for candidate in candidates:
             absolute = candidate.absolute()
             resolved = candidate.resolve(strict=False)
-            if not any(
-                os.path.commonpath([str(directory), str(resolved)]) == str(directory)
-                for directory in self.allowed_directories
-            ):
+            if not self._within_allowed_directory(resolved):
                 continue
             if absolute.suffix.casefold() != ".rmtree":
                 continue
@@ -151,11 +187,24 @@ class RootsMagicReader:
         return sqlite3.SQLITE_OK
 
     @contextmanager
-    def connection(self, path: Path) -> Iterator[sqlite3.Connection]:
+    def connection(
+        self,
+        path: Path,
+        expected: FileSnapshot | None = None,
+    ) -> Iterator[sqlite3.Connection]:
+        selected_expected = expected or self._operation_snapshot.get()
         snapshot = self.ingress.inspect(path, FileKind.ROOTSMAGIC)
+        if selected_expected is not None and snapshot != selected_expected:
+            self.ingress.assert_unchanged(path, FileKind.ROOTSMAGIC, selected_expected)
         uri = f"file:{path.as_posix()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=min(self.timeout_seconds, 30.0))
         try:
+            if selected_expected is not None:
+                self.ingress.assert_unchanged(
+                    path,
+                    FileKind.ROOTSMAGIC,
+                    selected_expected,
+                )
             connection.execute("PRAGMA query_only = ON")
             connection.execute("PRAGMA trusted_schema = OFF")
             connection.enable_load_extension(False)
@@ -168,9 +217,13 @@ class RootsMagicReader:
             connection.close()
             self.ingress.assert_unchanged(path, FileKind.ROOTSMAGIC, snapshot)
 
-    def schema(self, path: Path) -> dict[str, tuple[str, ...]]:
+    def schema(
+        self,
+        path: Path,
+        expected: FileSnapshot | None = None,
+    ) -> dict[str, tuple[str, ...]]:
         try:
-            with self.connection(path) as connection:
+            with self.connection(path, expected) as connection:
                 cursor = connection.execute(
                     "SELECT name, sql FROM sqlite_master WHERE type='table' "
                     "AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -239,14 +292,20 @@ class RootsMagicReader:
         statement = statement.limit(self.max_rows + 1)
         return statement.sql(dialect="sqlite")
 
-    def validate_row_limits(self, path: Path, schema: dict[str, tuple[str, ...]]) -> None:
+    def validate_row_limits(
+        self,
+        path: Path,
+        schema: dict[str, tuple[str, ...]],
+        expected: FileSnapshot | None = None,
+    ) -> None:
         """Bound source rows before queries, exports, or provider schema use."""
 
         maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_records
         if maximum is None:
             return
         try:
-            with self.connection(path) as connection:
+            aggregate = 0
+            with self.connection(path, expected) as connection:
                 for table_name in schema:
                     quoted = table_name.replace('"', '""')
                     row = connection.execute(
@@ -254,9 +313,17 @@ class RootsMagicReader:
                         (maximum + 1,),
                     ).fetchone()
                     count = int(row[0]) if row is not None else 0
+                    aggregate += count
                     self.ingress.validate_record(
                         FileKind.ROOTSMAGIC,
                         count=count,
+                        byte_count=0,
+                        nesting=0,
+                        collection_items=1,
+                    )
+                    self.ingress.validate_record(
+                        FileKind.ROOTSMAGIC,
+                        count=aggregate,
                         byte_count=0,
                         nesting=0,
                         collection_items=1,
@@ -270,13 +337,22 @@ class RootsMagicReader:
                 details={"error_type": type(exc).__name__},
             ) from exc
 
-    def query(self, path: Path, sql: str) -> QueryResult:
-        schema = self.schema(path)
-        self.validate_row_limits(path, schema)
-        validated = self.validate_sql(sql, schema)
-        before = sha256_file(path)
+    def query(
+        self,
+        path: Path,
+        sql: str,
+        *,
+        expected: FileFingerprint | None = None,
+        schema: dict[str, tuple[str, ...]] | None = None,
+    ) -> QueryResult:
+        fingerprint = expected or self.ingress.fingerprint(path, FileKind.ROOTSMAGIC)
+        if expected is not None:
+            self.ingress.verify(path, FileKind.ROOTSMAGIC, fingerprint)
+        selected_schema = schema or self.schema(path, fingerprint.snapshot)
+        self.validate_row_limits(path, selected_schema, fingerprint.snapshot)
+        validated = self.validate_sql(sql, selected_schema)
         try:
-            with self.connection(path) as connection:
+            with self.connection(path, fingerprint.snapshot) as connection:
                 cursor = connection.execute(validated)
                 columns = tuple(description[0] for description in cursor.description or ())
                 raw_rows = cursor.fetchmany(self.max_rows + 1)
@@ -291,26 +367,32 @@ class RootsMagicReader:
                 "The read-only RootsMagic query failed.",
                 details={"error_type": type(exc).__name__},
             ) from exc
-        after = sha256_file(path)
-        if before != after:
-            raise SecurityPolicyError(
-                "ROOTSMAGIC_FILE_CHANGED",
-                "The RootsMagic file changed while it was being queried.",
-                "Close RootsMagic and use a stable backup copy before retrying.",
-            )
+        self.ingress.verify(path, FileKind.ROOTSMAGIC, fingerprint)
         truncated = len(raw_rows) > self.max_rows
         return QueryResult(
             columns, tuple(tuple(row) for row in raw_rows[: self.max_rows]), validated, truncated
         )
 
-    def read_table(self, path: Path, table_name: str) -> list[dict[str, Any]]:
-        schema = self.schema(path)
-        actual = next((name for name in schema if name.casefold() == table_name.casefold()), None)
+    def read_table(
+        self,
+        path: Path,
+        table_name: str,
+        expected: FileSnapshot | None = None,
+        schema: dict[str, tuple[str, ...]] | None = None,
+    ) -> list[dict[str, Any]]:
+        selected_expected = expected or self._operation_snapshot.get()
+        selected_schema = schema or self._operation_schema.get()
+        if selected_schema is None:
+            selected_schema = self.schema(path, selected_expected)
+        actual = next(
+            (name for name in selected_schema if name.casefold() == table_name.casefold()),
+            None,
+        )
         if actual is None:
             return []
         quoted = actual.replace('"', '""')
         try:
-            with self.connection(path) as connection:
+            with self.connection(path, selected_expected) as connection:
                 connection.row_factory = sqlite3.Row
                 # The identifier is selected from the inspected schema and quoted above.
                 cursor = connection.execute(f'SELECT * FROM "{quoted}"')  # noqa: S608

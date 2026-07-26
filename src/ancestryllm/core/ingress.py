@@ -185,10 +185,25 @@ class FileSnapshot:
     inode: int
     size: int
     modified_ns: int
+    changed_ns: int
 
     @classmethod
     def from_stat(cls, value: os.stat_result) -> FileSnapshot:
-        return cls(value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+        return cls(
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FileFingerprint:
+    """One verified file identity and its content digest."""
+
+    snapshot: FileSnapshot
+    sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,12 +389,13 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         count_lines_as_records: bool = True,
+        expected: FileSnapshot | None = None,
     ) -> Iterator[TextLine]:
         """Yield decoded lines and source byte sizes while enforcing budgets."""
 
         selected = Path(path).expanduser()
-        expected = self.inspect(selected, kind)
-        descriptor, opened = self._open_descriptor(selected, kind, expected=expected)
+        before = expected or self.inspect(selected, kind)
+        descriptor, opened = self._open_descriptor(selected, kind, expected=before)
         binary: BinaryIO = os.fdopen(descriptor, "rb", closefd=True)
         try:
             prefix = binary.read(4)
@@ -458,11 +474,15 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         count_lines_as_records: bool = True,
+        expected: FileSnapshot | None = None,
     ) -> Iterator[str]:
         """Yield decoded physical lines while enforcing byte and line budgets."""
 
         for item in self.iter_text_line_items(
-            path, kind, count_lines_as_records=count_lines_as_records
+            path,
+            kind,
+            count_lines_as_records=count_lines_as_records,
+            expected=expected,
         ):
             yield item.text
 
@@ -517,8 +537,9 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         allow_empty: bool = True,
+        expected: FileSnapshot | None = None,
     ) -> str:
-        value = "".join(self.iter_text_lines(path, kind))
+        value = "".join(self.iter_text_lines(path, kind, expected=expected))
         if not allow_empty and not value:
             raise self._error(
                 "FILE_INPUT_EMPTY",
@@ -533,17 +554,29 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         require_object: bool = False,
+        expected: FileSnapshot | None = None,
     ) -> object:
         """Read and bound a JSON document without including parser payloads in errors."""
 
+        text = self.read_text(path, kind, allow_empty=False, expected=expected)
+        self._validate_json_nesting(text, kind)
         try:
-            value = json.loads(self.read_text(path, kind, allow_empty=False))
+            value = json.loads(text)
         except json.JSONDecodeError as exc:
             raise self._error(
                 "FILE_JSON_INVALID",
                 f"The {kind.value} input is not valid JSON.",
                 kind,
                 error_type=type(exc).__name__,
+            ) from exc
+        except RecursionError as exc:
+            maximum = self.limit(kind).max_nesting
+            raise self._error(
+                "FILE_NESTING_LIMIT_EXCEEDED",
+                f"The {kind.value} input exceeds the configured nesting limit ({maximum}).",
+                kind,
+                limit_name="max_nesting",
+                limit=maximum,
             ) from exc
         if require_object and not isinstance(value, dict):
             raise self._error(
@@ -553,6 +586,102 @@ class FileIngressPolicy:
             )
         self.validate_structure(value, kind)
         return value
+
+    def _validate_json_nesting(self, text: str, kind: FileKind) -> None:
+        """Reject excessive JSON container depth before recursive parser work."""
+
+        maximum = self.limit(kind).max_nesting
+        if maximum is None:
+            return
+        depth = 0
+        in_string = False
+        escaped = False
+        for character in text:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character in "[{":
+                depth += 1
+                if depth > maximum:
+                    raise self._error(
+                        "FILE_NESTING_LIMIT_EXCEEDED",
+                        f"The {kind.value} input exceeds the configured nesting limit ({maximum}).",
+                        kind,
+                        limit_name="max_nesting",
+                        limit=maximum,
+                    )
+            elif character in "]}":
+                depth = max(0, depth - 1)
+
+    def validate_toml_nesting(self, text: str, kind: FileKind = FileKind.CONFIG) -> None:
+        """Reject excessive TOML array/inline-table depth before parser work."""
+
+        maximum = self.limit(kind).max_nesting
+        if maximum is None:
+            return
+        depth = 0
+        index = 0
+        quote: str | None = None
+        escaped = False
+        comment = False
+        while index < len(text):
+            character = text[index]
+            if comment:
+                if character in "\r\n":
+                    comment = False
+                index += 1
+                continue
+            if quote is not None:
+                delimiter = quote[-1]
+                multiline = len(quote) == 3
+                if delimiter == '"' and escaped:
+                    escaped = False
+                    index += 1
+                    continue
+                if delimiter == '"' and character == "\\":
+                    escaped = True
+                    index += 1
+                    continue
+                if multiline and text.startswith(quote, index):
+                    quote = None
+                    index += 3
+                    continue
+                if not multiline and character == delimiter:
+                    quote = None
+                index += 1
+                continue
+            if text.startswith('"""', index):
+                quote = '"""'
+                index += 3
+                continue
+            if text.startswith("'''", index):
+                quote = "'''"
+                index += 3
+                continue
+            if character in "\"'":
+                quote = character
+            elif character == "#":
+                comment = True
+            elif character in "[{":
+                depth += 1
+                if depth > maximum:
+                    raise self._error(
+                        "FILE_NESTING_LIMIT_EXCEEDED",
+                        f"The {kind.value} input exceeds the configured nesting limit ({maximum}).",
+                        kind,
+                        limit_name="max_nesting",
+                        limit=maximum,
+                    )
+            elif character in "]}":
+                depth = max(0, depth - 1)
+            index += 1
 
     def validate_structure(self, value: object, kind: FileKind) -> None:
         """Bound nesting and aggregate collection members in parsed data."""
@@ -624,8 +753,85 @@ class FileIngressPolicy:
             ) from exc
         return digest.hexdigest(), opened
 
+    def fingerprint(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        expected: FileSnapshot | None = None,
+    ) -> FileFingerprint:
+        """Return a digest tied to the exact identity consumed."""
+
+        digest, snapshot = self.sha256(path, kind, expected=expected)
+        return FileFingerprint(snapshot=snapshot, sha256=digest)
+
+    def verify(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        expected: FileFingerprint,
+    ) -> None:
+        """Re-read a file and require both identity and content to match."""
+
+        current = self.fingerprint(path, kind, expected=expected.snapshot)
+        if current.sha256 != expected.sha256:
+            raise self._error(
+                "FILE_INPUT_CHANGED",
+                f"The {kind.value} input changed while it was being consumed.",
+                kind,
+            )
+
+    def copy_to(
+        self,
+        path: str | Path,
+        destination: str | Path,
+        kind: FileKind,
+        *,
+        expected: FileFingerprint,
+    ) -> None:
+        """Copy only the verified source identity and reject mid-copy changes."""
+
+        selected = Path(path).expanduser()
+        target = Path(destination)
+        descriptor, opened = self._open_descriptor(
+            selected,
+            kind,
+            expected=expected.snapshot,
+        )
+        digest = hashlib.sha256()
+        created_target_identity: tuple[int, int] | None = None
+        try:
+            with os.fdopen(descriptor, "rb", closefd=True) as source:
+                with target.open("xb") as output:
+                    target_stat = os.fstat(output.fileno())
+                    created_target_identity = (target_stat.st_dev, target_stat.st_ino)
+                    while chunk := source.read(_READ_CHUNK_BYTES):
+                        digest.update(chunk)
+                        output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                    current = FileSnapshot.from_stat(os.fstat(source.fileno()))
+            if current != opened or digest.hexdigest() != expected.sha256:
+                raise self._error(
+                    "FILE_INPUT_CHANGED",
+                    f"The {kind.value} input changed while it was being consumed.",
+                    kind,
+                )
+            self.assert_unchanged(selected, kind, opened)
+        except Exception:
+            if created_target_identity is not None:
+                try:
+                    target_stat = os.lstat(target)
+                    current_target_identity = (target_stat.st_dev, target_stat.st_ino)
+                    if current_target_identity == created_target_identity:
+                        target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
+
 
 __all__ = [
+    "FileFingerprint",
     "FileIngressLimits",
     "FileIngressPolicy",
     "FileKind",

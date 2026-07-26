@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolver
 
 from ancestryllm.core.errors import FileIngressError
-from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind, FileSnapshot
 
 _rapidfuzz: ModuleType | None
 try:
@@ -305,7 +305,9 @@ class GedcomRecord:
 
 
 def iter_gedcom_records(
-    path: str | Path, ingress: FileIngressPolicy | None = None
+    path: str | Path,
+    ingress: FileIngressPolicy | None = None,
+    expected: FileSnapshot | None = None,
 ) -> Iterator[GedcomRecord]:
     """Yield level-zero GEDCOM records one at a time.
 
@@ -333,7 +335,12 @@ def iter_gedcom_records(
     record_lines = 0
     record_nesting = 0
     for line_number, item in enumerate(
-        policy.iter_text_line_items(file_path, FileKind.GEDCOM, count_lines_as_records=False),
+        policy.iter_text_line_items(
+            file_path,
+            FileKind.GEDCOM,
+            count_lines_as_records=False,
+            expected=expected,
+        ),
         1,
     ):
         line = item.text.rstrip("\r\n")
@@ -723,7 +730,9 @@ def connected_tree_pointers(
 
 
 def load_sources(
-    paths: Sequence[str | Path], ingress: FileIngressPolicy | None = None
+    paths: Sequence[str | Path],
+    ingress: FileIngressPolicy | None = None,
+    expected: Mapping[Path, FileSnapshot] | None = None,
 ) -> list[ParsedSource]:
     """Load sources after allocating collision-free global xrefs.
 
@@ -748,7 +757,7 @@ def load_sources(
     for source_number, raw_path in enumerate(paths, 1):
         path = Path(raw_path).expanduser().absolute()
         try:
-            original_records = list(iter_gedcom_records(path, policy))
+            original_records = list(iter_gedcom_records(path, policy, (expected or {}).get(path)))
         except GedcomParseError as exc:
             raise GedcomParseError(f"{path}: {exc}") from exc
         pointer_map: dict[str, str] = {}

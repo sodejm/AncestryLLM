@@ -9,16 +9,17 @@ input path nor its contents, and leave existing outputs unchanged.
 ## Default limits
 
 All sizes are source bytes, not decoded character counts. A physical-line limit
-includes its newline bytes. `records` means level-zero records for GEDCOM,
-rows per table for RootsMagic export, and physical lines for other text
-formats. `items` is the aggregate number of JSON/TOML collection members, or
-lines in one GEDCOM logical record.
+includes its newline bytes. `records` means level-zero records for GEDCOM, the
+aggregate rows across all inspected RootsMagic tables (with the same limit
+also applied to each table), and physical lines for other text formats.
+`items` is the aggregate number of JSON/TOML collection members, or lines in
+one GEDCOM logical record.
 
 | Input class | Total bytes | Physical line bytes | Records/rows | Logical record bytes | Nesting | Collection items |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `config` | 1,048,576 | 65,536 | 20,000 | — | 16 | 20,000 |
 | `gedcom` | 536,870,912 | 1,048,576 | 5,000,000 | 16,777,216 | 99 | 250,000 |
-| `rootsmagic` | 8,589,934,592 | — | 5,000,000 per table | — | — | 50,000 |
+| `rootsmagic` | 8,589,934,592 | — | 5,000,000 aggregate and per table | — | — | 50,000 |
 | `ocr` | 5,000,000 | 1,048,576 | 100,000 | — | — | — |
 | `manifest` | 33,554,432 | 1,048,576 | 500,000 | — | 64 | 2,000,000 |
 | `json_schema` | 2,097,152 | 262,144 | 50,000 | — | 64 | 100,000 |
@@ -28,7 +29,17 @@ GEDCOM remains a streaming input: only one logical record is accumulated by
 the parser at a time. RootsMagic is opened read-only only after its regular-file
 and byte checks pass; table reads stop at the configured row limit plus one.
 JSON and TOML documents are byte- and line-bounded before parsing, then checked
-iteratively for nesting and collection size.
+for nesting and collection size. JSON containers and TOML arrays/inline tables
+are also scanned before recursive parser work, and parser recursion is mapped
+to the same stable nesting-limit failure.
+
+Multi-pass GEDCOM synchronization and RootsMagic query/export bind every parse,
+hash, database read, provider preflight, and copy to the identity first
+verified for that operation. The identity includes device, inode, size,
+modification time, and filesystem change time; a SHA-256 fingerprint is carried
+through publication. Replacing a file with a same-size file, restoring its
+modification time, or changing it between validation and a later pass is
+therefore rejected.
 
 ## Configuration
 
@@ -64,9 +75,17 @@ cannot raise its own read budget.
 The policy rejects missing or unreadable inputs, directories, symbolic links,
 FIFOs, devices, known compressed/archive containers, invalid Unicode, invalid
 JSON, and any exceeded byte, line, record, row, nesting, or collection limit.
-It captures device, inode, size, and modification time before consumption and
-checks them again after the read, so replacement, growth, truncation, or
-in-place modification fails as `FILE_INPUT_CHANGED`.
+It captures device, inode, size, modification time, and filesystem change time
+before consumption and checks them again after the read, so replacement,
+growth, truncation, or in-place modification fails as `FILE_INPUT_CHANGED`.
+
+Every report destination is checked against immutable inputs and its primary
+output by canonical path and filesystem identity. Symlink, hard-link, and
+alternate-spelling aliases are rejected before publication. Related primary
+and report artifacts are staged together; existing targets remain recoverable
+until every rename and final source-fingerprint check succeeds. Any second
+artifact or late validation failure restores both prior targets and removes
+publication temporaries.
 
 Stable file-ingress codes are:
 

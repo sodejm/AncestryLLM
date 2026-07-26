@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 import os
 import socket
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from ancestryllm.core.errors import ProviderError
+from ancestryllm.core.ingress import (
+    FileIngressPolicy,
+    FileKind,
+    FileSnapshot,
+    TextLine,
+)
 from ancestryllm.gedcom import engine, incremental
 from ancestryllm.gedcom.sync import run_sync
 
@@ -86,6 +93,207 @@ def _write_ambiguous_person(path: Path, *, surname: str, birth: str) -> None:
         "0 TRLR\n",
         encoding="utf-8",
     )
+
+
+class _ReplaceAfterHashPolicy(FileIngressPolicy):
+    def __init__(self, target: Path, replacement: Path) -> None:
+        super().__init__()
+        self.target = target.absolute()
+        self.replacement = replacement
+        self.replaced = False
+
+    def sha256(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        expected: FileSnapshot | None = None,
+    ) -> tuple[str, FileSnapshot]:
+        result = super().sha256(path, kind, expected=expected)
+        if Path(path).absolute() == self.target and not self.replaced:
+            os.replace(self.replacement, self.target)
+            self.replaced = True
+        return result
+
+
+class _ReplaceAfterJsonPolicy(FileIngressPolicy):
+    def __init__(self, target: Path, replacement: Path) -> None:
+        super().__init__()
+        self.target = target.absolute()
+        self.replacement = replacement
+        self.replaced = False
+
+    def read_json(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        require_object: bool = False,
+        expected: FileSnapshot | None = None,
+    ) -> object:
+        value = super().read_json(
+            path,
+            kind,
+            require_object=require_object,
+            expected=expected,
+        )
+        if Path(path).absolute() == self.target and not self.replaced:
+            os.replace(self.replacement, self.target)
+            self.replaced = True
+        return value
+
+
+class _ReplaceAfterTextReadPolicy(FileIngressPolicy):
+    def __init__(self, target: Path, replacement: Path) -> None:
+        super().__init__()
+        self.target = target.absolute()
+        self.replacement = replacement
+        self.replaced = False
+
+    def iter_text_line_items(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        *,
+        count_lines_as_records: bool = True,
+        expected: FileSnapshot | None = None,
+    ) -> Iterator[TextLine]:
+        yield from super().iter_text_line_items(
+            path,
+            kind,
+            count_lines_as_records=count_lines_as_records,
+            expected=expected,
+        )
+        if Path(path).absolute() == self.target and not self.replaced:
+            os.replace(self.replacement, self.target)
+            self.replaced = True
+
+
+def _replace_copy(path: Path, old: bytes, new: bytes) -> Path:
+    replacement = path.with_name(path.name + ".replacement")
+    payload = path.read_bytes()
+    assert len(old) == len(new)
+    assert old in payload
+    replacement.write_bytes(payload.replace(old, new, 1))
+    assert replacement.stat().st_size == path.stat().st_size
+    return replacement
+
+
+def test_update_rejects_snapshot_replaced_after_verified_hash(tmp_path: Path) -> None:
+    master = tmp_path / "master.ged"
+    master.write_bytes((FIXTURES / "baseline-master.ged").read_bytes())
+    snapshot = tmp_path / "snapshot.ged"
+    snapshot.write_bytes((FIXTURES / "ancestry-snapshot-v1.ged").read_bytes())
+    replacement = _replace_copy(snapshot, b"Mira", b"Zira")
+    releases = tmp_path / "releases"
+    policy = _ReplaceAfterHashPolicy(snapshot, replacement)
+
+    status = run_sync(
+        [
+            "update",
+            "--master",
+            str(master),
+            "--initialize-manifest",
+            "--snapshot",
+            f"fictional:other={snapshot}",
+            "--release-root",
+            str(releases),
+            "--no-quality-report",
+        ],
+        policy,
+    )
+
+    assert status == 2
+    assert not list(releases.glob("g*-*"))
+    assert not list(releases.glob(".gedcom-sync-*"))
+
+
+def test_update_rejects_master_replaced_after_verified_hash(tmp_path: Path) -> None:
+    master = tmp_path / "master.ged"
+    master.write_bytes((FIXTURES / "baseline-master.ged").read_bytes())
+    replacement = _replace_copy(master, b"Mira", b"Zira")
+    releases = tmp_path / "releases"
+    policy = _ReplaceAfterHashPolicy(master, replacement)
+
+    status = run_sync(
+        [
+            "update",
+            "--master",
+            str(master),
+            "--initialize-manifest",
+            "--snapshot",
+            _snapshot("ancestry-main", "ancestry", 1),
+            "--release-root",
+            str(releases),
+            "--no-quality-report",
+        ],
+        policy,
+    )
+
+    assert status == 2
+    assert not list(releases.glob("g*-*"))
+
+
+@pytest.mark.parametrize("operation", ("update", "rebase"))
+def test_sync_rejects_manifest_replaced_after_parse(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    manifest = first / "manifest.json"
+    replacement = _replace_copy(manifest, b'"generation": 1', b'"generation": 9')
+    policy = _ReplaceAfterJsonPolicy(manifest, replacement)
+    if operation == "update":
+        arguments = _update_args(
+            releases,
+            first,
+            _snapshot("ancestry-main", "ancestry", 2),
+        )
+    else:
+        edited = tmp_path / "edited.ged"
+        edited.write_bytes((first / "master.ged").read_bytes())
+        arguments = [
+            "rebase",
+            "--master",
+            str(edited),
+            "--manifest",
+            str(manifest),
+            "--release-root",
+            str(releases),
+            "--reason",
+            "Fictional manifest race regression",
+        ]
+
+    assert run_sync(arguments, policy) == 2
+    assert len(list(releases.glob("g*-*"))) == 1
+
+
+def test_rebase_rejects_master_replaced_after_parse_before_copy(tmp_path: Path) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    edited = tmp_path / "edited.ged"
+    edited.write_bytes((first / "master.ged").read_bytes())
+    replacement = _replace_copy(edited, b"Mira", b"Zira")
+    policy = _ReplaceAfterTextReadPolicy(edited, replacement)
+
+    status = run_sync(
+        [
+            "rebase",
+            "--master",
+            str(edited),
+            "--manifest",
+            str(first / "manifest.json"),
+            "--release-root",
+            str(releases),
+            "--reason",
+            "Fictional master race regression",
+        ],
+        policy,
+    )
+
+    assert status == 2
+    assert len(list(releases.glob("g*-*"))) == 1
 
 
 def test_incremental_initialization_is_offline_and_publishes_atomic_bundle(tmp_path: Path) -> None:

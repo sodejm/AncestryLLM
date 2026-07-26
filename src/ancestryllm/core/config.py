@@ -12,7 +12,7 @@ from typing import Any
 import tomli_w
 from platformdirs import user_config_path, user_data_path
 
-from ancestryllm.core.errors import ConfigurationError
+from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
 
 APP_NAME = "ancestryllm"
@@ -64,14 +64,25 @@ class AppConfig:
             else user_data_path(APP_NAME)
         )
         config_path = path or config_dir / "config.toml"
-        if not config_path.exists():
+        if not os.path.lexists(config_path):
             return cls(config_path=config_path, data_dir=data_dir)
+        ingress = FileIngressPolicy()
         try:
-            config_text = FileIngressPolicy().read_text(
-                config_path, FileKind.CONFIG, allow_empty=True
-            )
+            config_text = ingress.read_text(config_path, FileKind.CONFIG, allow_empty=True)
+            ingress.validate_toml_nesting(config_text)
             payload = tomllib.loads(config_text)
-            FileIngressPolicy().validate_structure(payload, FileKind.CONFIG)
+            ingress.validate_structure(payload, FileKind.CONFIG)
+        except RecursionError as exc:
+            maximum = ingress.limit(FileKind.CONFIG).max_nesting
+            raise FileIngressError(
+                "FILE_NESTING_LIMIT_EXCEEDED",
+                f"The config input exceeds the configured nesting limit ({maximum}).",
+                details={
+                    "input_class": FileKind.CONFIG.value,
+                    "limit_name": "max_nesting",
+                    "limit": maximum,
+                },
+            ) from exc
         except tomllib.TOMLDecodeError as exc:
             raise ConfigurationError(
                 "CONFIG_INVALID",

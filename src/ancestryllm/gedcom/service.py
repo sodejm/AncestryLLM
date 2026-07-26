@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 
 from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.core.ingress import FileIngressPolicy
+from ancestryllm.core.publication import paths_alias, publish_staged_bundle, staging_path
 from ancestryllm.gedcom import engine
 from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolution, QualityResolver
 from ancestryllm.gedcom.graph import scoped_tree_pointers
@@ -210,9 +212,18 @@ class GedcomService:
             )
         resolved_inputs = [path.expanduser().absolute() for path in input_files]
         resolved_output = output.expanduser().resolve()
-        if resolved_output in resolved_inputs:
+        if any(paths_alias(resolved_output, item) for item in resolved_inputs):
             raise AncestryError(
                 "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite an input GEDCOM."
+            )
+        report_path = quality_path.expanduser().resolve() if quality_path is not None else None
+        if report_path is not None and (
+            paths_alias(report_path, resolved_output)
+            or any(paths_alias(report_path, item) for item in resolved_inputs)
+        ):
+            raise AncestryError(
+                "GEDCOM_REPORT_ALIAS",
+                "The quality report must not alias an input GEDCOM or the primary output.",
             )
         sources, source_records, people = self._people_and_sources(resolved_inputs)
         pointer_map: dict[str, str] = {}
@@ -238,17 +249,7 @@ class GedcomService:
             include_people, include_families = engine.connected_tree_pointers(
                 root_pointer, merged, source_records, pointer_map
             )
-        engine.write_gedcom(
-            merged,
-            resolved_output,
-            source_documents=sources,
-            pointer_map=pointer_map,
-            include_individuals=include_people,
-            include_families=include_families,
-            gedcom_version=gedcom_version,
-        )
-        report_path = None
-        if quality_path is not None:
+        if report_path is not None:
             if root_pointer is None:
                 raise AncestryError(
                     "QUALITY_ROOT_REQUIRED", "Quality reporting requires a root person."
@@ -262,8 +263,44 @@ class GedcomService:
                 merge_decisions=decisions,
                 output_file=str(resolved_output),
             )
-            report_path = quality_path.expanduser().resolve()
-            engine.write_quality_report(report, report_path)
+            staged_output: Path | None = None
+            staged_report: Path | None = None
+            try:
+                staged_output = staging_path(resolved_output)
+                staged_report = staging_path(report_path)
+                engine.write_gedcom(
+                    merged,
+                    staged_output,
+                    source_documents=sources,
+                    pointer_map=pointer_map,
+                    include_individuals=include_people,
+                    include_families=include_families,
+                    gedcom_version=gedcom_version,
+                )
+                engine.write_quality_report(report, staged_report)
+                publish_staged_bundle(
+                    (
+                        (staged_output, resolved_output),
+                        (staged_report, report_path),
+                    ),
+                    replace=os.replace,
+                )
+            except Exception:
+                if staged_output is not None:
+                    staged_output.unlink(missing_ok=True)
+                if staged_report is not None:
+                    staged_report.unlink(missing_ok=True)
+                raise
+        else:
+            engine.write_gedcom(
+                merged,
+                resolved_output,
+                source_documents=sources,
+                pointer_map=pointer_map,
+                include_individuals=include_people,
+                include_families=include_families,
+                gedcom_version=gedcom_version,
+            )
         return GedcomOperationResult(
             resolved_output,
             len(people),
@@ -283,7 +320,7 @@ class GedcomService:
     ) -> GedcomOperationResult:
         source_path = input_file.expanduser().absolute()
         output_path = output.expanduser().resolve()
-        if source_path == output_path:
+        if paths_alias(source_path, output_path):
             raise AncestryError(
                 "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite the input GEDCOM."
             )
@@ -312,19 +349,23 @@ class GedcomService:
         model: str = "",
         consent: ConsentGrant | None = None,
     ) -> Path:
-        sources, source_records, people = self._people_and_sources(
-            [input_file.expanduser().absolute()]
-        )
+        source_path = input_file.expanduser().absolute()
+        output_path = output.expanduser().resolve()
+        if paths_alias(source_path, output_path):
+            raise AncestryError(
+                "GEDCOM_REPORT_ALIAS",
+                "The quality report must not alias the immutable input GEDCOM.",
+            )
+        sources, source_records, people = self._people_and_sources([source_path])
         root_pointer = engine.resolve_root_person(root_person, people, [sources[0].pointer_map], {})
         report = engine.analyze_quality(
-            people, source_records, sources, root_pointer, output_file=str(input_file)
+            people, source_records, sources, root_pointer, output_file=str(source_path)
         )
         if provider_id != "none":
             report = engine.refine_quality_report_with_ai(
                 report,
                 self._quality_resolver(provider_id, model, consent),
             )
-        output_path = output.expanduser().resolve()
         engine.write_quality_report(report, output_path)
         return output_path
 
