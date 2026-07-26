@@ -2258,7 +2258,10 @@ def _restore_original(artifact: _Artifact) -> OSError | None:
         return OSError(
             "A concurrent replacement was preserved; the prior target remains in recovery storage."
         )
-    candidates = tuple(item for item in (artifact.displaced, artifact.backup) if item is not None)
+    # The sealed backup retains metadata captured before its source was read.
+    # Prefer it because reading the original can advance the displaced inode's
+    # access time on Linux; the displaced copy remains a verified fallback.
+    candidates = tuple(item for item in (artifact.backup, artifact.displaced) if item is not None)
     for candidate in candidates:
         try:
             _assert_pristine(candidate.path, candidate.identity)

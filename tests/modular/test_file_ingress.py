@@ -3018,6 +3018,65 @@ def test_portable_rollback_preserves_mode_and_timestamps_under_restrictive_umask
     assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
+def test_rollback_prefers_backup_metadata_over_read_mutated_displacement(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "output.ged"
+    source_path = tmp_path / "staged.ged"
+    backup_path = tmp_path / ".ancestry-publish-backup-fictional"
+    displaced_path = tmp_path / ".ancestry-publish-displaced-fictional"
+    old_payload = b"old\n"
+    new_payload = b"new\n"
+    source_path.write_bytes(new_payload)
+    backup_path.write_bytes(old_payload)
+    displaced_path.write_bytes(old_payload)
+    backup_path.chmod(0o755)
+    displaced_path.chmod(0o755)
+    original_timestamp_ns = 1_600_000_000_123_456_789
+    read_mutated_timestamp_ns = 1_700_000_000_123_456_789
+    os.utime(
+        backup_path,
+        ns=(original_timestamp_ns, original_timestamp_ns),
+    )
+    os.utime(
+        displaced_path,
+        ns=(read_mutated_timestamp_ns, original_timestamp_ns),
+    )
+    old_digest = hashlib.sha256(old_payload).digest()
+    artifact = publication_module._Artifact(
+        source=publication_module._OwnedPath(
+            source_path,
+            publication_module._identity(source_path),
+            hashlib.sha256(new_payload).digest(),
+        ),
+        target=target,
+        original_target=publication_module._identity(displaced_path),
+        backup=publication_module._OwnedPath(
+            backup_path,
+            publication_module._identity(backup_path),
+            old_digest,
+        ),
+        displaced=publication_module._OwnedPath(
+            displaced_path,
+            publication_module._identity(displaced_path),
+            old_digest,
+        ),
+        displacement_attempted=True,
+    )
+
+    assert publication_module._rollback_bundle([artifact]) is None
+
+    restored = target.stat()
+    assert restored.st_mode & 0o777 == 0o755
+    assert restored.st_atime_ns == original_timestamp_ns
+    assert restored.st_mtime_ns == original_timestamp_ns
+    assert target.read_bytes() == old_payload
+    assert not source_path.exists()
+    assert not backup_path.exists()
+    assert not displaced_path.exists()
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
 def test_backup_destination_close_failure_removes_the_untracked_copy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
