@@ -7,6 +7,8 @@ import asyncio
 import importlib
 import io
 import json
+import shlex
+import sqlite3
 import sys
 import threading
 import types
@@ -14,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from prompt_toolkit.completion import DummyCompleter
@@ -23,6 +26,8 @@ from prompt_toolkit.output import DummyOutput
 from ancestryllm.console.router import RouteKind, RouteResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.ingress import FileKind
+from ancestryllm.core.jobs import JobSnapshot
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,64 @@ def _application(
         stderr=stderr,
     )
     return application, stdout, stderr
+
+
+def _set_file_limit(
+    context: AppContext,
+    kind: FileKind,
+    **changes: int | None,
+) -> None:
+    current = context.config.file_ingress
+    selected = replace(getattr(current, kind.value), **changes)
+    context.config.file_ingress = replace(current, **{kind.value: selected})
+
+
+def _background_failure(
+    shell_module,
+    context: AppContext,
+    command: str,
+) -> tuple[JobSnapshot, str]:
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, context, pipe)
+        asyncio.run(application.execute_line(command))
+        failed = application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
+    rendered = stdout.getvalue() + stderr.getvalue() + (failed.error_message or "")
+    return failed, rendered
+
+
+def _write_repl_rootsmagic_tree(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE PersonTable (
+            PersonID INTEGER PRIMARY KEY,
+            Sex TEXT,
+            Living INTEGER DEFAULT 0
+        );
+        CREATE TABLE NameTable (
+            NameID INTEGER PRIMARY KEY,
+            OwnerID INTEGER,
+            Given TEXT,
+            Surname TEXT,
+            IsPrimary INTEGER
+        );
+        CREATE TABLE FamilyTable (
+            FamilyID INTEGER PRIMARY KEY,
+            FatherID INTEGER,
+            MotherID INTEGER
+        );
+        CREATE TABLE ChildTable (
+            ChildID INTEGER,
+            FamilyID INTEGER
+        );
+        INSERT INTO PersonTable(PersonID, Sex, Living) VALUES (1, 'U', 0);
+        INSERT INTO NameTable(NameID, OwnerID, Given, Surname, IsPrimary)
+            VALUES (1, 1, 'Ada', 'Example', 1);
+        """
+    )
+    connection.commit()
+    connection.close()
 
 
 @pytest.mark.parametrize("command", ("exit", "quit"))
@@ -391,6 +454,318 @@ def test_repl_preserves_bounded_file_error_code_without_path_or_payload(
     assert app_context.prompts.list() == []
 
 
+@pytest.mark.parametrize("operation", ("merge", "subtree", "quality", "rootsmagic"))
+def test_repl_path_normalization_matches_the_one_shot_sanitized_error(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    suffix = "rmtree" if operation == "rootsmagic" else "ged"
+    private_input = Path(f"~PRIVATE-NONEXISTENT/tree.{suffix}")
+    private_detail = "PRIVATE path normalization failure"
+    original_expanduser = Path.expanduser
+
+    def reject_private_user(path: Path) -> Path:
+        if path == private_input:
+            raise RuntimeError(private_detail)
+        return original_expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", reject_private_user)
+    provider_call = Mock()
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+    output = tmp_path / "existing.out"
+    output.write_bytes(b"sentinel\n")
+    if operation == "rootsmagic":
+        command = f"rootsmagic query --tree {shlex.quote(str(private_input))} --sql 'SELECT 1'"
+    else:
+        second = tmp_path / "second.ged"
+        second.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        command = f"gedcom {operation} {shlex.quote(str(private_input))}"
+        if operation == "merge":
+            command += f" {shlex.quote(str(second))}"
+        command += f" --output {shlex.quote(str(output))}"
+        if operation != "merge":
+            command += " --root-person 'Fictional Example'"
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert str(private_input) not in rendered
+    assert private_detail not in rendered
+    assert output.read_bytes() == b"sentinel\n"
+    provider_call.assert_not_called()
+
+
+@pytest.mark.parametrize("invalid_target", ("output", "report"))
+def test_repl_rootsmagic_export_output_paths_share_stable_sanitized_error(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_target: str,
+) -> None:
+    tree = tmp_path / "fictional.rmtree"
+    _write_repl_rootsmagic_tree(tree)
+    app_context.config.family_tree_dirs = [tmp_path]
+    invalid = Path(f"~PRIVATE-NONEXISTENT/{invalid_target}.ged")
+    private_detail = "PRIVATE RootsMagic export normalization failure"
+    original_expanduser = Path.expanduser
+
+    def reject_private_user(path: Path) -> Path:
+        if path == invalid:
+            raise RuntimeError(private_detail)
+        return original_expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", reject_private_user)
+    provider_call = Mock()
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+    output = tmp_path / "existing.ged"
+    report = tmp_path / "existing.md"
+    output.write_bytes(b"output sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    selected_output = invalid if invalid_target == "output" else output
+    selected_report = invalid if invalid_target == "report" else report
+
+    failed, rendered = _background_failure(
+        shell_module,
+        app_context,
+        f"rootsmagic export --tree {shlex.quote(str(tree))} "
+        f"--output {shlex.quote(str(selected_output))} "
+        f"--report {shlex.quote(str(selected_report))}",
+    )
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert str(invalid) not in rendered
+    assert private_detail not in rendered
+    assert output.read_bytes() == b"output sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+    provider_call.assert_not_called()
+
+
+def test_repl_json_schema_ingress_failure_preserves_prompt_storage(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    schema = tmp_path / "private-schema.json"
+    private_payload = '{"private": "fictional payload"}'
+    schema.write_text(private_payload, encoding="utf-8")
+    _set_file_limit(app_context, FileKind.JSON_SCHEMA, max_bytes=4)
+
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(
+            application.execute_line(
+                "prompts save fixture --purpose local --body safe "
+                f"--schema-file {shlex.quote(str(schema))}"
+            )
+        )
+        application.jobs.shutdown()
+
+    rendered = stdout.getvalue() + stderr.getvalue()
+    assert "[FILE_INPUT_TOO_LARGE]" in rendered
+    assert str(schema) not in rendered
+    assert private_payload not in rendered
+    assert app_context.prompts.list() == []
+
+
+@pytest.mark.parametrize("action", ("subtree", "quality"))
+def test_repl_gedcom_ingress_failure_preserves_subtree_and_quality_outputs(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    action: str,
+) -> None:
+    source = tmp_path / f"private-{action}.ged"
+    private_payload = "PRIVATE-PAYLOAD fictional genealogy"
+    source.write_text(
+        f"0 HEAD\n1 NOTE {private_payload}\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / f"{action}.out"
+    output.write_bytes(b"sentinel\n")
+    _set_file_limit(app_context, FileKind.GEDCOM, max_bytes=8)
+
+    failed, rendered = _background_failure(
+        shell_module,
+        app_context,
+        f"gedcom {action} {shlex.quote(str(source))} "
+        f"--output {shlex.quote(str(output))} --root-person @I1@",
+    )
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert str(source) not in rendered
+    assert private_payload not in rendered
+    assert output.read_bytes() == b"sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def test_repl_unresolved_gedcom_root_preserves_coded_sanitized_error(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fictional-tree.ged"
+    source.write_text(
+        "0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "quality.md"
+    output.write_bytes(b"sentinel\n")
+    requested = "PRIVATE-PAYLOAD fictional root person"
+
+    failed, rendered = _background_failure(
+        shell_module,
+        app_context,
+        "gedcom quality "
+        f"{shlex.quote(str(source))} --output {shlex.quote(str(output))} "
+        f"--root-person {shlex.quote(requested)}",
+    )
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "GEDCOM_ROOT_PERSON_UNRESOLVED"
+    assert failed.error_message == (
+        "The requested GEDCOM root person was not found or is not unique."
+    )
+    assert requested not in rendered
+    assert "ValueError" not in rendered
+    assert output.read_bytes() == b"sentinel\n"
+
+
+@pytest.mark.parametrize("operation", ("update", "rebase"))
+def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    master = tmp_path / f"private-{operation}-master.ged"
+    private_payload = "PRIVATE-PAYLOAD fictional sync input"
+    master.write_text(
+        f"0 HEAD\n1 NOTE {private_payload}\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    snapshot = tmp_path / "snapshot.ged"
+    snapshot.write_text(
+        "0 HEAD\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    release_root = tmp_path / "releases"
+    _set_file_limit(app_context, FileKind.GEDCOM, max_bytes=8)
+
+    if operation == "update":
+        command = (
+            "gedcom sync update "
+            f"--master {shlex.quote(str(master))} "
+            "--initialize-manifest "
+            f"--snapshot fictional:other={shlex.quote(str(snapshot))} "
+            f"--release-root {shlex.quote(str(release_root))} "
+            "--no-quality-report"
+        )
+    else:
+        command = (
+            "gedcom sync rebase "
+            f"--master {shlex.quote(str(master))} "
+            f"--manifest {shlex.quote(str(manifest))} "
+            f"--release-root {shlex.quote(str(release_root))} "
+            "--reason fictional-regression"
+        )
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert str(master) not in rendered
+    assert private_payload not in rendered
+    assert not release_root.exists()
+    assert not list(tmp_path.glob(".gedcom-*"))
+    assert not list(tmp_path.glob("failed-update-*"))
+
+
+@pytest.mark.parametrize("operation", ("list", "query", "export"))
+def test_repl_rootsmagic_entry_points_share_real_ingress_and_preserve_outputs(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    tree = tmp_path / "private-fictional.rmtree"
+    _write_repl_rootsmagic_tree(tree)
+    tree_before = tree.read_bytes()
+    output = tmp_path / "existing.ged"
+    report = tmp_path / "existing.md"
+    output.write_bytes(b"output sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    app_context.config.family_tree_dirs = [tmp_path]
+    _set_file_limit(
+        app_context,
+        FileKind.ROOTSMAGIC,
+        max_bytes=tree.stat().st_size - 1,
+    )
+
+    if operation == "list":
+        with create_pipe_input() as pipe:
+            application, stdout, stderr = _application(shell_module, app_context, pipe)
+            asyncio.run(application.execute_line("rootsmagic list"))
+            application.jobs.shutdown()
+        rendered = stdout.getvalue() + stderr.getvalue()
+        assert "[FILE_INPUT_TOO_LARGE]" in rendered
+    else:
+        query_sql = " ".join(("SELECT", "PersonID", "FROM", "PersonTable"))
+        command = (
+            f"rootsmagic query --tree {shlex.quote(str(tree))} --sql {shlex.quote(query_sql)}"
+            if operation == "query"
+            else (
+                f"rootsmagic export --tree {shlex.quote(str(tree))} "
+                f"--output {shlex.quote(str(output))} "
+                f"--report {shlex.quote(str(report))}"
+            )
+        )
+        failed, rendered = _background_failure(shell_module, app_context, command)
+        assert failed.state.value == "failed"
+        assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+
+    assert str(tree) not in rendered
+    assert tree.read_bytes() == tree_before
+    assert output.read_bytes() == b"output sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def test_repl_ocr_ingress_failure_is_offline_and_payload_safe(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "private-ocr.txt"
+    private_payload = "PRIVATE-PAYLOAD fictional OCR text"
+    source.write_text(private_payload, encoding="utf-8")
+    _set_file_limit(app_context, FileKind.OCR, max_bytes=4)
+    provider_call = Mock()
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+
+    failed, rendered = _background_failure(
+        shell_module,
+        app_context,
+        f"ocr extract --input {shlex.quote(str(source))} --provider none --model offline",
+    )
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert str(source) not in rendered
+    assert private_payload not in rendered
+    provider_call.assert_not_called()
+
+
 def test_shell_dispatches_direct_commands_off_the_event_loop(
     shell_module, app_context: AppContext, monkeypatch
 ) -> None:
@@ -468,6 +843,171 @@ def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt
     assert completed.result == {"exit_code": 0, "output": [{"rows": 1}]}
     assert worker_identifiers == [worker_identifiers[0]]
     assert worker_identifiers[0] != loop_identifier
+
+
+def test_malformed_gedcom_background_job_fails_with_sanitized_coded_error(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    malformed = tmp_path / "private-malformed.ged"
+    private_line = "PRIVATE-PAYLOAD malformed genealogy"
+    malformed.write_text(f"0 HEAD\n{private_line}\n0 TRLR\n", encoding="utf-8")
+    valid = tmp_path / "valid.ged"
+    valid.write_text(
+        "0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output.ged"
+    output.write_bytes(b"sentinel\n")
+
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(
+            application.execute_line(
+                "gedcom merge "
+                f"{shlex.quote(str(malformed))} {shlex.quote(str(valid))} "
+                f"--output {shlex.quote(str(output))}"
+            )
+        )
+        failed = application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "GEDCOM_PARSE_INVALID"
+    assert output.read_bytes() == b"sentinel\n"
+    rendered = stdout.getvalue() + stderr.getvalue() + (failed.error_message or "")
+    assert private_line not in rendered
+    assert str(malformed) not in rendered
+
+
+def test_sync_service_error_marks_repl_job_failed(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_manifest(
+        namespace: argparse.Namespace,
+        _context: AppContext,
+        *,
+        emit,
+    ) -> int:
+        del emit
+        assert (namespace.command, namespace.action) == ("gedcom", "sync")
+        raise AncestryError(
+            "MANIFEST_INVALID",
+            "The manifest has an unsupported structure.",
+            exit_code=2,
+        )
+
+    monkeypatch.setattr(shell_module, "dispatch", fail_manifest)
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(application.execute_line("gedcom sync update --manifest private-manifest.json"))
+        failed = application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "MANIFEST_INVALID"
+
+
+@pytest.mark.parametrize("joined", (False, True))
+def test_sync_resource_lock_uses_only_release_root(
+    shell_module,
+    tmp_path: Path,
+    joined: bool,
+) -> None:
+    release_root = tmp_path / "releases"
+    private_master = "~PRIVATE-NONEXISTENT/master.ged"
+    release_argument = (
+        [f"--release-root={release_root}"] if joined else ["--release-root", str(release_root)]
+    )
+    namespace = argparse.Namespace(
+        command="gedcom",
+        action="sync",
+        sync_args=["update", "--master", private_master, *release_argument],
+    )
+
+    keys = shell_module.ReplApplication._resource_keys(object(), namespace)
+
+    assert keys == (str(release_root.resolve()),)
+
+
+def test_repl_sync_path_normalization_reaches_typed_ingress(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_master = Path("~PRIVATE-NONEXISTENT/master.ged")
+    private_detail = "PRIVATE sync normalization failure"
+    original_expanduser = Path.expanduser
+
+    def reject_private_user(path: Path) -> Path:
+        if path == private_master:
+            raise RuntimeError(private_detail)
+        return original_expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", reject_private_user)
+    provider_call = Mock()
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+    release_root = tmp_path / "releases"
+    snapshot = tmp_path / "snapshot.ged"
+    snapshot.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    command = (
+        "gedcom sync update "
+        f"--master {shlex.quote(str(private_master))} "
+        "--initialize-manifest "
+        f"--snapshot fictional:other={shlex.quote(str(snapshot))} "
+        f"--release-root={shlex.quote(str(release_root))} "
+        "--no-quality-report"
+    )
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert str(private_master) not in rendered
+    assert private_detail not in rendered
+    assert not release_root.exists()
+    provider_call.assert_not_called()
+
+
+def test_repl_sync_release_root_normalization_reaches_typed_ingress(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_release_root = Path("~PRIVATE-NONEXISTENT/releases")
+    private_detail = "PRIVATE release-root normalization failure"
+    original_expanduser = Path.expanduser
+
+    def reject_private_user(path: Path) -> Path:
+        if path == private_release_root:
+            raise RuntimeError(private_detail)
+        return original_expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", reject_private_user)
+    master = tmp_path / "master.ged"
+    snapshot = tmp_path / "snapshot.ged"
+    master.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    snapshot.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    command = (
+        "gedcom sync update "
+        f"--master {shlex.quote(str(master))} "
+        "--initialize-manifest "
+        f"--snapshot fictional:other={shlex.quote(str(snapshot))} "
+        f"--release-root {shlex.quote(str(private_release_root))} "
+        "--no-quality-report"
+    )
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert str(private_release_root) not in rendered
+    assert private_detail not in rendered
 
 
 def test_main_uses_default_shell_and_preserves_one_shot_dispatch(

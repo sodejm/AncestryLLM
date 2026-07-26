@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+from unittest.mock import Mock
 
 import pytest
 
 import ancestryllm.rootsmagic.exporter as exporter_module
+import ancestryllm.rootsmagic.reader as reader_module
 from ancestryllm.core.config import AppConfig
-from ancestryllm.core.errors import AncestryError, SecurityPolicyError
+from ancestryllm.core.errors import AncestryError, FileIngressError, SecurityPolicyError
+from ancestryllm.core.ingress import FileFingerprint, FileKind, FileSnapshot
 from ancestryllm.gedcom.engine import validate_gedcom_555
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
@@ -23,6 +28,39 @@ def _create_tree(path: Path, script: str) -> Path:
     connection.commit()
     connection.close()
     return path
+
+
+def _replace_directory_with_symlink(directory: Path, target: Path) -> Path:
+    parked = directory.with_name(f"{directory.name}-parked")
+    directory.rename(parked)
+    try:
+        os.symlink(target, directory, target_is_directory=True)
+    except OSError as exc:
+        parked.rename(directory)
+        pytest.skip(f"Directory symlinks are unavailable: {type(exc).__name__}")
+    return parked
+
+
+def test_header_only_sqlite_input_fails_stably_across_query_and_export(
+    tmp_path: Path,
+) -> None:
+    tree = tmp_path / "private-corrupt.rmtree"
+    tree.write_bytes(b"SQLite format 3\x00" + (b"\x00" * 256))
+    output = tmp_path / "existing.ged"
+    output.write_bytes(b"sentinel\n")
+    reader = RootsMagicReader([tmp_path])
+
+    with pytest.raises(AncestryError) as query_error:
+        reader.query(tree, "SELECT 1")
+    with pytest.raises(AncestryError) as export_error:
+        RootsMagicExporter(reader).export(tree, output)
+
+    assert query_error.value.code == "ROOTSMAGIC_INPUT_INVALID"
+    assert export_error.value.code == "ROOTSMAGIC_INPUT_INVALID"
+    assert str(tree) not in query_error.value.render()
+    assert str(tree) not in export_error.value.render()
+    assert output.read_bytes() == b"sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
 @pytest.fixture
@@ -73,6 +111,127 @@ def export_tree(tmp_path: Path) -> Path:
 
 def _exporter(tmp_path: Path) -> RootsMagicExporter:
     return RootsMagicExporter(RootsMagicReader([tmp_path]))
+
+
+@pytest.mark.parametrize("sidecar_suffix", ("-wal", "-shm", "-journal"))
+def test_transaction_sidecar_preflight_blocks_fingerprint_copy_and_sqlite_open(
+    export_tree: Path,
+    tmp_path: Path,
+    sidecar_suffix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Path(f"{export_tree}{sidecar_suffix}").write_bytes(b"fictional transaction sidecar")
+    output = tmp_path / "existing.ged"
+    output.write_bytes(b"sentinel\n")
+    reader = RootsMagicReader([tmp_path])
+    fingerprint = Mock(side_effect=AssertionError("active database must not be fingerprinted"))
+    copy_to = Mock(side_effect=AssertionError("active database must not be copied"))
+    connect = Mock(side_effect=AssertionError("active database must not be opened"))
+    monkeypatch.setattr(reader.ingress, "fingerprint", fingerprint)
+    monkeypatch.setattr(reader.ingress, "copy_to", copy_to)
+    monkeypatch.setattr(reader_module.sqlite3, "connect", connect)
+
+    with pytest.raises(AncestryError) as query_error:
+        reader.query(export_tree, "SELECT PersonID FROM PersonTable")
+    with pytest.raises(AncestryError) as export_error:
+        RootsMagicExporter(reader).export(export_tree, output)
+
+    assert query_error.value.code == "ROOTSMAGIC_WAL_ACTIVE"
+    assert export_error.value.code == "ROOTSMAGIC_WAL_ACTIVE"
+    fingerprint.assert_not_called()
+    copy_to.assert_not_called()
+    connect.assert_not_called()
+    assert output.read_bytes() == b"sentinel\n"
+
+
+@pytest.mark.parametrize("sidecar_suffix", ("-wal", "-shm", "-journal"))
+def test_hardlink_alias_sidecars_fail_before_fingerprint_provider_or_output(
+    export_tree: Path,
+    tmp_path: Path,
+    sidecar_suffix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alias = tmp_path / "hidden-alias.rmtree"
+    alias.hardlink_to(export_tree)
+    Path(f"{alias}{sidecar_suffix}").write_bytes(b"fictional hidden transaction sidecar")
+    output = tmp_path / "existing.ged"
+    output.write_bytes(b"sentinel\n")
+    llm = CapturingLlm("SELECT PersonID FROM PersonTable")
+    service = _service(tmp_path, llm)
+    fingerprint = Mock(side_effect=AssertionError("aliased database must not be fingerprinted"))
+    copy_to = Mock(side_effect=AssertionError("aliased database must not be copied"))
+    connect = Mock(side_effect=AssertionError("aliased database must not be opened"))
+    monkeypatch.setattr(service.reader.ingress, "fingerprint", fingerprint)
+    monkeypatch.setattr(service.reader.ingress, "copy_to", copy_to)
+    monkeypatch.setattr(reader_module.sqlite3, "connect", connect)
+
+    with pytest.raises(FileIngressError) as query_error:
+        service.query_question(
+            export_tree,
+            "Who is present?",
+            provider_id="fictional",
+            model="fixture",
+        )
+    with pytest.raises(FileIngressError) as export_error:
+        service.export(export_tree, output)
+
+    assert query_error.value.code == "FILE_INPUT_CHANGED"
+    assert export_error.value.code == "FILE_INPUT_CHANGED"
+    assert str(export_tree) not in query_error.value.render()
+    assert str(alias) not in query_error.value.render()
+    fingerprint.assert_not_called()
+    copy_to.assert_not_called()
+    connect.assert_not_called()
+    assert llm.requests == []
+    assert output.read_bytes() == b"sentinel\n"
+
+
+def test_rootsmagic_snapshot_binds_link_count(
+    export_tree: Path,
+    tmp_path: Path,
+) -> None:
+    reader = RootsMagicReader([tmp_path])
+    fingerprint = reader.fingerprint_source(export_tree)
+    alias = tmp_path / "later-alias.rmtree"
+    alias.hardlink_to(export_tree)
+
+    with pytest.raises(FileIngressError) as raised:
+        reader.ingress.assert_unchanged(
+            export_tree,
+            FileKind.ROOTSMAGIC,
+            fingerprint.snapshot,
+        )
+
+    assert fingerprint.snapshot.link_count == 1
+    assert raised.value.code == "FILE_INPUT_CHANGED"
+
+
+def test_rollback_journal_created_after_snapshot_copy_blocks_sqlite_open(
+    export_tree: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = RootsMagicReader([tmp_path])
+    copy_to = reader._copy_bound_to
+    journal = Path(f"{export_tree}-journal")
+    connect = Mock(side_effect=AssertionError("unstable snapshot must not be opened"))
+
+    def copy_then_create_journal(
+        source: Path,
+        destination: Path,
+        expected: FileFingerprint,
+    ) -> None:
+        copy_to(source, destination, expected)
+        journal.write_bytes(b"fictional rollback journal")
+
+    monkeypatch.setattr(reader, "_copy_bound_to", copy_then_create_journal)
+    monkeypatch.setattr(reader_module.sqlite3, "connect", connect)
+
+    with pytest.raises(AncestryError) as raised:
+        reader.schema(export_tree)
+
+    assert raised.value.code == "FILE_INPUT_CHANGED"
+    connect.assert_not_called()
 
 
 def _individual_names(path: Path) -> list[str]:
@@ -234,6 +393,33 @@ def test_missing_or_malformed_person_schema_is_rejected_without_output(tmp_path:
     assert not output.exists()
 
 
+@pytest.mark.parametrize("missing_parent", ("output", "report"))
+def test_export_never_creates_missing_output_parent_trees(
+    export_tree: Path,
+    tmp_path: Path,
+    missing_parent: str,
+) -> None:
+    output_parent = tmp_path if missing_parent == "report" else tmp_path / "missing-output"
+    report_parent = tmp_path if missing_parent == "output" else tmp_path / "missing-report"
+    output = output_parent / "tree.ged"
+    report = report_parent / "tree.md"
+
+    with pytest.raises(AncestryError) as raised:
+        _exporter(tmp_path).export(export_tree, output, report_path=report)
+
+    assert raised.value.code == "EXPORT_OUTPUT_DIRECTORY_INVALID"
+    assert raised.value.exit_code == 2
+    assert str(output_parent) not in raised.value.render()
+    assert str(report_parent) not in raised.value.render()
+    assert not output.exists()
+    assert not report.exists()
+    if missing_parent == "output":
+        assert not output_parent.exists()
+    else:
+        assert not report_parent.exists()
+    assert not list(tmp_path.rglob(".ancestry-publish-*"))
+
+
 def test_failed_atomic_output_replacement_keeps_prior_output_and_source_unchanged(
     export_tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -311,6 +497,295 @@ def _service(tmp_path: Path, llm: CapturingLlm | None = None) -> RootsMagicServi
         ),
         llm,  # type: ignore[arg-type]  # Minimal fake preserves the service boundary contract.
     )
+
+
+def _create_containment_tree(path: Path, label: str) -> Path:
+    tree = _create_tree(
+        path,
+        """
+        CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY, Sex TEXT, Living INTEGER);
+        CREATE TABLE NameTable(
+            NameID INTEGER PRIMARY KEY, OwnerID INTEGER, Surname TEXT, Given TEXT, IsPrimary INTEGER
+        );
+        CREATE TABLE FamilyTable(FamilyID INTEGER PRIMARY KEY, FatherID INTEGER, MotherID INTEGER);
+        CREATE TABLE ChildTable(FamilyID INTEGER, ChildID INTEGER);
+        CREATE TABLE Evidence(Value TEXT);
+        """,
+    )
+    connection = sqlite3.connect(tree)
+    connection.execute("INSERT INTO PersonTable VALUES (1, 'U', 0)")
+    connection.execute("INSERT INTO NameTable VALUES (1, 1, 'Fixture', ?, 1)", (label,))
+    connection.execute("INSERT INTO Evidence VALUES (?)", (label,))
+    connection.commit()
+    connection.close()
+    return tree
+
+
+@pytest.mark.parametrize("operation", ("query", "export", "provider"))
+def test_parent_symlink_swap_cannot_escape_configured_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    allowed = tmp_path / "allowed"
+    nested = allowed / "nested"
+    outside = tmp_path / "outside"
+    nested.mkdir(parents=True)
+    outside.mkdir()
+    tree = _create_containment_tree(nested / "tree.rmtree", "inside")
+    outside_tree = _create_containment_tree(outside / "tree.rmtree", "PRIVATE-OUTSIDE")
+    inside_before = tree.read_bytes()
+    outside_before = outside_tree.read_bytes()
+    output = tmp_path / "existing.ged"
+    report = tmp_path / "existing.md"
+    output.write_bytes(b"output sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    llm = CapturingLlm("SELECT Value FROM Evidence")
+    service = RootsMagicService(
+        AppConfig(
+            config_path=tmp_path / "config.toml",
+            data_dir=tmp_path / "data",
+            family_tree_dirs=[allowed],
+        ),
+        llm,  # type: ignore[arg-type]
+    )
+    resolve_tree = service.reader.resolve_tree
+    parked: Path | None = None
+
+    def resolve_then_swap(requested: str | Path) -> Path:
+        nonlocal parked
+        selected = resolve_tree(requested)
+        if parked is None:
+            parked = _replace_directory_with_symlink(nested, outside)
+        return selected
+
+    monkeypatch.setattr(service.reader, "resolve_tree", resolve_then_swap)
+
+    with pytest.raises(AncestryError) as raised:
+        if operation == "query":
+            service.query_sql(tree, "SELECT Value FROM Evidence")
+        elif operation == "export":
+            service.export(tree, output, report_path=report)
+        else:
+            service.query_question(
+                tree,
+                "Read the evidence table.",
+                provider_id="fictional",
+                model="fixture",
+            )
+
+    assert raised.value.code == (
+        "ROOTSMAGIC_FILE_CHANGED" if operation == "export" else "FILE_INPUT_CHANGED"
+    )
+    assert raised.value.exit_code == 2
+    assert str(tree) not in raised.value.render()
+    assert str(outside_tree) not in raised.value.render()
+    assert parked is not None
+    assert (parked / tree.name).read_bytes() == inside_before
+    assert outside_tree.read_bytes() == outside_before
+    assert output.read_bytes() == b"output sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert llm.requests == []
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+@pytest.mark.parametrize("invalid_target", ("output", "report"))
+def test_export_service_normalizes_output_paths_to_stable_typed_error(
+    export_tree: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_target: str,
+) -> None:
+    invalid = Path(f"~PRIVATE-NONEXISTENT/{invalid_target}.ged")
+    private_detail = "PRIVATE RootsMagic export normalization failure"
+    original_expanduser = Path.expanduser
+
+    def reject_private_user(path: Path) -> Path:
+        if path == invalid:
+            raise RuntimeError(private_detail)
+        return original_expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", reject_private_user)
+    output = tmp_path / "existing.ged"
+    report = tmp_path / "existing.md"
+    output.write_bytes(b"output sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    llm = CapturingLlm("SELECT PersonID FROM PersonTable")
+    service = _service(tmp_path, llm)
+
+    with pytest.raises(FileIngressError) as raised:
+        service.export(
+            export_tree,
+            invalid if invalid_target == "output" else output,
+            report_path=invalid if invalid_target == "report" else report,
+        )
+
+    assert raised.value.code == "FILE_INPUT_UNREADABLE"
+    assert raised.value.exit_code == 2
+    assert str(invalid) not in raised.value.render()
+    assert private_detail not in raised.value.render()
+    assert output.read_bytes() == b"output sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert llm.requests == []
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def test_rollback_journal_created_during_provider_call_fails_closed(
+    export_tree: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = CapturingLlm("SELECT PersonID FROM PersonTable")
+    generate = llm.generate
+    journal = Path(f"{export_tree}-journal")
+
+    def generate_then_create_journal(
+        request: GenerationRequest,
+        consent: object | None = None,
+    ) -> GenerationResult:
+        result = generate(request, consent)
+        journal.write_bytes(b"fictional rollback journal")
+        return result
+
+    monkeypatch.setattr(llm, "generate", generate_then_create_journal)
+    service = _service(tmp_path, llm)
+
+    with pytest.raises(AncestryError) as raised:
+        service.query_question(
+            export_tree,
+            "Who is present?",
+            provider_id="fictional",
+            model="fixture",
+        )
+
+    assert raised.value.code == "FILE_INPUT_CHANGED"
+    assert len(llm.requests) == 1
+
+
+@pytest.mark.parametrize("sidecar_suffix", ("-wal", "-shm", "-journal"))
+def test_sidecar_created_inside_final_pre_provider_verify_blocks_provider(
+    export_tree: Path,
+    tmp_path: Path,
+    sidecar_suffix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = CapturingLlm("SELECT PersonID FROM PersonTable")
+    service = _service(tmp_path, llm)
+    original_operation = service.reader.operation
+    original_fingerprint = service.reader._fingerprint_bound
+    arm_sidecar = False
+
+    @contextmanager
+    def operation_then_arm(
+        path: Path,
+        expected: FileFingerprint | None = None,
+    ) -> Iterator[dict[str, tuple[str, ...]]]:
+        nonlocal arm_sidecar
+        with original_operation(path, expected) as schema:
+            arm_sidecar = True
+            yield schema
+
+    def fingerprint_then_create_sidecar(
+        path: Path,
+        expected: FileSnapshot | None = None,
+    ) -> FileFingerprint:
+        nonlocal arm_sidecar
+        result = original_fingerprint(path, expected)
+        if arm_sidecar:
+            Path(f"{export_tree}{sidecar_suffix}").write_bytes(
+                b"fictional post-hash transaction sidecar"
+            )
+            arm_sidecar = False
+        return result
+
+    monkeypatch.setattr(service.reader, "operation", operation_then_arm)
+    monkeypatch.setattr(
+        service.reader,
+        "_fingerprint_bound",
+        fingerprint_then_create_sidecar,
+    )
+
+    with pytest.raises(FileIngressError) as raised:
+        service.query_question(
+            export_tree,
+            "Who is present?",
+            provider_id="fictional",
+            model="fixture",
+        )
+
+    assert raised.value.code == "FILE_INPUT_CHANGED"
+    assert llm.requests == []
+
+
+def test_final_post_verify_link_lookup_failure_blocks_provider(
+    export_tree: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = CapturingLlm("SELECT PersonID FROM PersonTable")
+    service = _service(tmp_path, llm)
+    original_operation = service.reader.operation
+    original_fingerprint = service.reader._fingerprint_bound
+    original_bound_lstat = service.reader._bound_lstat
+    arm_lookup_failure = False
+    fail_lookup = False
+    private_error = "private fictional bound lookup failure"
+
+    @contextmanager
+    def operation_then_arm(
+        path: Path,
+        expected: FileFingerprint | None = None,
+    ) -> Iterator[dict[str, tuple[str, ...]]]:
+        nonlocal arm_lookup_failure
+        with original_operation(path, expected) as schema:
+            arm_lookup_failure = True
+            yield schema
+
+    def fingerprint_then_arm_lookup_failure(
+        path: Path,
+        expected: FileSnapshot | None = None,
+    ) -> FileFingerprint:
+        nonlocal arm_lookup_failure, fail_lookup
+        result = original_fingerprint(path, expected)
+        if arm_lookup_failure:
+            fail_lookup = True
+            arm_lookup_failure = False
+        return result
+
+    def fail_final_bound_lookup(path: str | Path) -> os.stat_result | None:
+        nonlocal fail_lookup
+        if fail_lookup:
+            fail_lookup = False
+            raise FileIngressError(
+                "FILE_INPUT_CHANGED",
+                "The rootsmagic input changed while it was being consumed.",
+                details={
+                    "input_class": FileKind.ROOTSMAGIC.value,
+                    "error_type": type(OSError(private_error)).__name__,
+                },
+            )
+        return original_bound_lstat(path)
+
+    monkeypatch.setattr(service.reader, "operation", operation_then_arm)
+    monkeypatch.setattr(
+        service.reader,
+        "_fingerprint_bound",
+        fingerprint_then_arm_lookup_failure,
+    )
+    monkeypatch.setattr(service.reader, "_bound_lstat", fail_final_bound_lookup)
+
+    with pytest.raises(FileIngressError) as raised:
+        service.query_question(
+            export_tree,
+            "Who is present?",
+            provider_id="fictional",
+            model="fixture",
+        )
+
+    assert raised.value.code == "FILE_INPUT_CHANGED"
+    assert private_error not in raised.value.render()
+    assert str(export_tree) not in raised.value.render()
+    assert llm.requests == []
 
 
 def test_query_service_enforces_row_limits_and_requires_explicit_provider(

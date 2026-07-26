@@ -1,6 +1,7 @@
 """Internal loss-minimizing GEDCOM engine.
 
-The CLI reads two or more GEDCOM files and atomically writes one master file.
+The CLI reads two or more GEDCOM files and transactionally publishes one
+master file.
 Source fact blocks remain the data-fidelity authority, although xrefs, dates,
 headers, ordering, and line wrapping may be normalized.  A rooted export
 intentionally omits people outside the selected connected component.
@@ -25,7 +26,6 @@ import logging
 import math
 import os
 import re
-import tempfile
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +47,15 @@ if TYPE_CHECKING:
 
 from ancestryllm.core.errors import FileIngressError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind, FileSnapshot
+from ancestryllm.core.publication import (
+    StagedFileToken,
+    claim_staged_path,
+    cleanup_staged_path,
+    is_staging_path,
+    publish_staged_bundle,
+    staging_path,
+    write_staged_text,
+)
 
 _rapidfuzz: ModuleType | None
 try:
@@ -334,6 +343,7 @@ def iter_gedcom_records(
     record_bytes = 0
     record_lines = 0
     record_nesting = 0
+    saw_content = False
     for line_number, item in enumerate(
         policy.iter_text_line_items(
             file_path,
@@ -346,6 +356,7 @@ def iter_gedcom_records(
         line = item.text.rstrip("\r\n")
         if not line.strip():
             continue
+        saw_content = True
         parsed = parse_gedcom_line(line, line_number)
         if parsed.level == 0 and current:
             yield GedcomRecord(current, str(file_path), sequence)
@@ -367,6 +378,12 @@ def iter_gedcom_records(
         current.append(line)
     if current:
         yield GedcomRecord(current, str(file_path), sequence)
+    if not saw_content:
+        raise FileIngressError(
+            "FILE_INPUT_EMPTY",
+            "The gedcom input must contain at least one record.",
+            details={"input_class": FileKind.GEDCOM.value},
+        )
 
 
 @dataclass
@@ -3982,7 +3999,26 @@ def render_quality_report(report: QualityReport) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_quality_report(report: QualityReport, output_path: str | Path) -> None:
+def _atomic_write_text(path: Path, payload: str) -> StagedFileToken:
+    """Write through a publication-owned reservation without clobbering it."""
+
+    if is_staging_path(path):
+        return write_staged_text(path, payload)
+    staged = staging_path(path)
+    try:
+        token = write_staged_text(staged, payload)
+        claim_staged_path(staged, token)
+        publish_staged_bundle(((staged, path),), replace=os.replace)
+        return token
+    except BaseException:
+        cleanup_staged_path(staged)
+        raise
+
+
+def write_quality_report(
+    report: QualityReport,
+    output_path: str | Path,
+) -> StagedFileToken:
     """Atomically write a quality report without modifying genealogy data.
 
     Raises:
@@ -3992,16 +4028,7 @@ def write_quality_report(report: QualityReport, output_path: str | Path) -> None
     if not path.parent.is_dir():
         raise OSError(f"Quality report directory does not exist: {path.parent}")
     payload = render_quality_report(report)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        temporary = Path(handle.name)
-        handle.write(payload)
-    try:
-        os.replace(temporary, path)
-    except OSError:
-        temporary.unlink(missing_ok=True)
-        raise
+    return _atomic_write_text(path, payload)
 
 
 def write_quality_diagnostic(
@@ -4030,16 +4057,7 @@ def write_quality_diagnostic(
     path = Path(output_path).resolve()
     if not path.parent.is_dir():
         raise OSError(f"Quality report directory does not exist: {path.parent}")
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        temporary = Path(handle.name)
-        handle.write(payload)
-    try:
-        os.replace(temporary, path)
-    except OSError:
-        temporary.unlink(missing_ok=True)
-        raise
+    _atomic_write_text(path, payload)
 
 
 def _quality_response_schema() -> dict[str, object]:
@@ -4241,8 +4259,8 @@ def write_gedcom(
     include_individuals: Optional[set[str]] = None,
     include_families: Optional[set[str]] = None,
     gedcom_version: str = "5.5.5",
-) -> None:
-    """Write an atomic master file while preserving source fact blocks.
+) -> StagedFileToken:
+    """Stage a master file for transactional publication.
 
     Xrefs, headers, order, dates, and line wrapping may be normalized.  Rooted
     exports intentionally omit unrelated people and families.  The older
@@ -4261,7 +4279,7 @@ def write_gedcom(
 
     Raises:
         ValueError: The requested version is unsupported.
-        OSError: The destination directory or atomic replacement fails.
+        OSError: The destination directory or transactional publication fails.
         GedcomParseError: Emitted 5.5.5 structure fails validation.
     """
     if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
@@ -4359,17 +4377,9 @@ def write_gedcom(
     if gedcom_version == "5.5.5":
         validate_gedcom_555(lines)
     payload = "\n".join(lines) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=out_path.parent, delete=False
-    ) as handle:
-        temporary = Path(handle.name)
-        handle.write(payload)
-    try:
-        os.replace(temporary, out_path)
-    except OSError:
-        temporary.unlink(missing_ok=True)
-        raise
+    token = _atomic_write_text(out_path, payload)
     log.info("Wrote %d individuals to %s", len(records), out_path)
+    return token
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -4433,9 +4443,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     """Run the merge command and return a shell exit code.
 
-    The command writes the merged GEDCOM atomically, then writes the advisory
-    Markdown report atomically.  A syntax failure writes only a diagnostic
-    report. Provider operations are available only through
+    The command transactionally publishes the merged GEDCOM and advisory
+    Markdown report. A syntax failure writes only a diagnostic report.
+    Provider operations are available only through
     :class:`ancestryllm.gedcom.service.GedcomService`.
 
     Args:

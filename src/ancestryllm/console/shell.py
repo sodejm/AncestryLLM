@@ -192,7 +192,12 @@ class ReplApplication:
             )
         except (OSError, ValueError) as exc:
             self.error_presenter.render_error(
-                AncestryError("INPUT_ERROR", self.context.secrets.redact(str(exc)), exit_code=2)
+                AncestryError(
+                    "INPUT_ERROR",
+                    "The command input could not be processed safely.",
+                    exit_code=2,
+                    details={"error_type": type(exc).__name__},
+                )
             )
         except Exception as exc:  # noqa: BLE001 - terminal boundary must sanitize failures
             self.error_presenter.render_error(
@@ -240,6 +245,14 @@ class ReplApplication:
         return {"exit_code": exit_code, "output": output}
 
     def _resource_keys(self, namespace: argparse.Namespace) -> tuple[str, ...]:
+        def resource_key(value: str | Path) -> str:
+            try:
+                return str(Path(value).expanduser().resolve())
+            except (OSError, RuntimeError, UnicodeError, ValueError):
+                # Dispatch owns stable typed path errors. A malformed path must
+                # not fail early merely because the job lock is best-effort.
+                return str(value)
+
         values: list[object] = []
         action = (namespace.command, namespace.action)
         if action in {
@@ -253,17 +266,13 @@ class ReplApplication:
             values.extend((self.context.database.path, namespace.destination))
         elif action == ("gedcom", "sync"):
             forwarded = list(namespace.sync_args)
-            for index, token in enumerate(forwarded[:-1]):
-                if token in {"--manifest", "--output", "--master"}:
+            for index, argument in enumerate(forwarded):
+                if argument == "--release-root" and index + 1 < len(forwarded):
                     values.append(forwarded[index + 1])
+                elif argument.startswith("--release-root="):
+                    values.append(argument.partition("=")[2])
         return tuple(
-            sorted(
-                {
-                    str(Path(value).expanduser().resolve())
-                    for value in values
-                    if isinstance(value, (str, Path))
-                }
-            )
+            sorted({resource_key(value) for value in values if isinstance(value, (str, Path))})
         )
 
     async def _route(self, command: str) -> RouteResult:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -18,6 +19,22 @@ STABLE_SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 def _project() -> dict:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)["project"]
+
+
+def _literal_string_set(path: Path, assignment_name: str) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == assignment_name for target in node.targets
+        ):
+            continue
+        value = ast.literal_eval(node.value)
+        assert isinstance(value, set)
+        assert all(isinstance(item, str) for item in value)
+        return value
+    raise AssertionError(f"{assignment_name} was not defined in {path}")
 
 
 def test_package_version_is_one_stable_semver_value() -> None:
@@ -77,6 +94,49 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "every release asset except the checksum file itself" in releasing
     assert "prune tests" in manifest
     assert "prune family_trees" in manifest
+    assert "include docs/FILE_INGRESS.md" in manifest
+
+
+def test_release_sdist_closes_shipped_cli_document_links() -> None:
+    manifest_includes = {
+        line.removeprefix("include ").strip()
+        for line in (ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+        if line.startswith("include ")
+    }
+    build_script = ROOT / "scripts/build_release.py"
+    allowed = _literal_string_set(build_script, "ALLOWED_SDIST_FILES")
+    required = _literal_string_set(build_script, "REQUIRED_SDIST_PATHS")
+    shipped_cli_docs = {
+        "docs/CLI.md",
+        "docs/CONSOLE.md",
+        "docs/FILE_INGRESS.md",
+        "docs/GEDCOM_COMPATIBILITY.md",
+        "docs/PROVIDERS.md",
+    }
+
+    pending = list(shipped_cli_docs)
+    closed_docs: set[str] = set()
+    while pending:
+        document = pending.pop()
+        if document in closed_docs:
+            continue
+        document_path = ROOT / document
+        assert document_path.is_file()
+        closed_docs.add(document)
+        for target in re.findall(
+            r"\]\((?![a-z]+://|#)([^)#?]+\.md)(?:#[^)]+)?\)",
+            document_path.read_text(encoding="utf-8"),
+        ):
+            linked = (document_path.parent / target).resolve()
+            assert linked.is_relative_to(ROOT)
+            relative = linked.relative_to(ROOT).as_posix()
+            assert linked.is_file()
+            pending.append(relative)
+
+    assert "docs/release-evidence/issue-10-import-smoke-tests.md" in closed_docs
+    assert closed_docs <= manifest_includes
+    assert closed_docs <= allowed
+    assert closed_docs <= required
 
 
 def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> None:

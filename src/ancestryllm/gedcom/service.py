@@ -9,8 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from ancestryllm.core.errors import AncestryError, ProviderError
-from ancestryllm.core.ingress import FileIngressPolicy
-from ancestryllm.core.publication import paths_alias, publish_staged_bundle, staging_path
+from ancestryllm.core.ingress import FileFingerprint, FileIngressPolicy, FileKind
+from ancestryllm.core.publication import (
+    claim_staged_path,
+    cleanup_staged_path,
+    paths_alias,
+    publish_staged_bundle,
+    staging_path,
+)
 from ancestryllm.gedcom import engine
 from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolution, QualityResolver
 from ancestryllm.gedcom.graph import scoped_tree_pointers
@@ -45,15 +51,71 @@ class GedcomService:
     def _people_and_sources(
         self,
         paths: list[Path],
-    ) -> tuple[list[Any], list[engine.GedcomRecord], list[engine.IndividualRecord]]:
-        sources = engine.load_sources(paths, self.ingress)
+    ) -> tuple[
+        list[Any],
+        list[engine.GedcomRecord],
+        list[engine.IndividualRecord],
+        dict[Path, FileFingerprint],
+    ]:
+        fingerprints = {path: self.ingress.fingerprint(path, FileKind.GEDCOM) for path in paths}
+        try:
+            sources = engine.load_sources(
+                paths,
+                self.ingress,
+                {path: fingerprint.snapshot for path, fingerprint in fingerprints.items()},
+            )
+        except engine.GedcomParseError as exc:
+            raise AncestryError(
+                "GEDCOM_PARSE_INVALID",
+                "A GEDCOM input contains invalid syntax.",
+                "Correct the malformed GEDCOM structure and try again.",
+                exit_code=2,
+                details={"error_type": type(exc).__name__},
+            ) from exc
+        self._verify_sources(fingerprints)
         source_records = [record for source in sources for record in source.records]
         people = [
             engine._individual_from_record(record)
             for record in source_records
             if record.tag == "INDI"
         ]
-        return sources, source_records, engine.enrich_relationship_context(people, source_records)
+        return (
+            sources,
+            source_records,
+            engine.enrich_relationship_context(people, source_records),
+            fingerprints,
+        )
+
+    def _verify_sources(self, fingerprints: dict[Path, FileFingerprint]) -> None:
+        for path, fingerprint in fingerprints.items():
+            self.ingress.verify(path, FileKind.GEDCOM, fingerprint)
+
+    @staticmethod
+    def _resolve_root_person(
+        requested: str,
+        records: list[engine.IndividualRecord],
+        source_pointer_maps: list[dict[str, str]],
+        merged_pointer_map: dict[str, str],
+    ) -> str:
+        """Resolve a root without exposing the requested genealogy value."""
+
+        try:
+            resolved = engine.resolve_root_person(
+                requested,
+                records,
+                source_pointer_maps,
+                merged_pointer_map,
+            )
+        except ValueError:
+            resolved = None
+        if resolved is None:
+            raise AncestryError(
+                "GEDCOM_ROOT_PERSON_UNRESOLVED",
+                "The requested GEDCOM root person was not found or is not unique.",
+                "Use an existing unique GEDCOM pointer or exact unique full name.",
+                exit_code=2,
+            )
+        return resolved
 
     def _require_provider(self, provider_id: str) -> LLMService:
         if provider_id == "none":
@@ -70,10 +132,13 @@ class GedcomService:
         provider_id: str,
         model: str,
         consent: ConsentGrant | None,
+        verify_inputs: Callable[[], None] | None = None,
     ) -> IdentityResolver:
         llm = self._require_provider(provider_id)
 
         def resolve(left: Any, right: Any) -> dict[str, object]:
+            if verify_inputs is not None:
+                verify_inputs()
             schema: dict[str, object] = engine._dedup_response_schema()
             request = GenerationRequest(
                 provider_id=provider_id,
@@ -100,6 +165,8 @@ class GedcomService:
                 timeout_seconds=self.provider_timeout_seconds,
             )
             result = llm.generate(request, consent)
+            if verify_inputs is not None:
+                verify_inputs()
             if not isinstance(result.parsed, dict):
                 raise ProviderError(
                     "PROVIDER_OUTPUT_INVALID",
@@ -119,10 +186,13 @@ class GedcomService:
         provider_id: str,
         model: str,
         consent: ConsentGrant | None,
+        verify_inputs: Callable[[], None] | None = None,
     ) -> QualityResolver:
         llm = self._require_provider(provider_id)
 
         def resolve(report: engine.QualityReport) -> QualityResolution:
+            if verify_inputs is not None:
+                verify_inputs()
             request = GenerationRequest(
                 provider_id=provider_id,
                 model=model,
@@ -151,6 +221,8 @@ class GedcomService:
                 timeout_seconds=self.provider_timeout_seconds,
             )
             result = llm.generate(request, consent)
+            if verify_inputs is not None:
+                verify_inputs()
             if not isinstance(result.parsed, dict):
                 raise ProviderError(
                     "PROVIDER_OUTPUT_INVALID",
@@ -210,13 +282,28 @@ class GedcomService:
             raise AncestryError(
                 "GEDCOM_INPUT_REQUIRED", "Merge requires at least two GEDCOM files."
             )
-        resolved_inputs = [path.expanduser().absolute() for path in input_files]
-        resolved_output = output.expanduser().resolve()
+        resolved_inputs = [
+            self.ingress.normalize_path(path, FileKind.GEDCOM, absolute=True)
+            for path in input_files
+        ]
+        resolved_output = self.ingress.normalize_path(
+            output,
+            FileKind.GEDCOM,
+            resolve=True,
+        )
         if any(paths_alias(resolved_output, item) for item in resolved_inputs):
             raise AncestryError(
                 "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite an input GEDCOM."
             )
-        report_path = quality_path.expanduser().resolve() if quality_path is not None else None
+        report_path = (
+            self.ingress.normalize_path(
+                quality_path,
+                FileKind.GEDCOM,
+                resolve=True,
+            )
+            if quality_path is not None
+            else None
+        )
         if report_path is not None and (
             paths_alias(report_path, resolved_output)
             or any(paths_alias(report_path, item) for item in resolved_inputs)
@@ -225,12 +312,21 @@ class GedcomService:
                 "GEDCOM_REPORT_ALIAS",
                 "The quality report must not alias an input GEDCOM or the primary output.",
             )
-        sources, source_records, people = self._people_and_sources(resolved_inputs)
+        sources, source_records, people, fingerprints = self._people_and_sources(resolved_inputs)
+
+        def verify_inputs() -> None:
+            self._verify_sources(fingerprints)
+
         pointer_map: dict[str, str] = {}
         decisions: list[engine.MergeDecision] = []
         resolver: IdentityResolver | None = None
         if provider_id != "none":
-            resolver = self._identity_resolver(provider_id, model, consent)
+            resolver = self._identity_resolver(
+                provider_id,
+                model,
+                consent,
+                verify_inputs,
+            )
         merged = engine.merge_records(
             people,
             threshold=threshold,
@@ -243,64 +339,56 @@ class GedcomService:
         include_families: set[str] | None = None
         root_pointer: str | None = None
         if root_person:
-            root_pointer = engine.resolve_root_person(
+            root_pointer = self._resolve_root_person(
                 root_person, merged, [source.pointer_map for source in sources], pointer_map
             )
             include_people, include_families = engine.connected_tree_pointers(
                 root_pointer, merged, source_records, pointer_map
             )
-        if report_path is not None:
-            if root_pointer is None:
-                raise AncestryError(
-                    "QUALITY_ROOT_REQUIRED", "Quality reporting requires a root person."
-                )
-            report = engine.analyze_quality(
+        staged_output: Path | None = None
+        staged_report: Path | None = None
+        try:
+            staged_output = staging_path(resolved_output)
+            output_token = engine.write_gedcom(
                 merged,
-                source_records,
-                sources,
-                root_pointer,
-                pointer_map=pointer_map,
-                merge_decisions=decisions,
-                output_file=str(resolved_output),
-            )
-            staged_output: Path | None = None
-            staged_report: Path | None = None
-            try:
-                staged_output = staging_path(resolved_output)
-                staged_report = staging_path(report_path)
-                engine.write_gedcom(
-                    merged,
-                    staged_output,
-                    source_documents=sources,
-                    pointer_map=pointer_map,
-                    include_individuals=include_people,
-                    include_families=include_families,
-                    gedcom_version=gedcom_version,
-                )
-                engine.write_quality_report(report, staged_report)
-                publish_staged_bundle(
-                    (
-                        (staged_output, resolved_output),
-                        (staged_report, report_path),
-                    ),
-                    replace=os.replace,
-                )
-            except Exception:
-                if staged_output is not None:
-                    staged_output.unlink(missing_ok=True)
-                if staged_report is not None:
-                    staged_report.unlink(missing_ok=True)
-                raise
-        else:
-            engine.write_gedcom(
-                merged,
-                resolved_output,
+                staged_output,
                 source_documents=sources,
                 pointer_map=pointer_map,
                 include_individuals=include_people,
                 include_families=include_families,
                 gedcom_version=gedcom_version,
             )
+            claim_staged_path(staged_output, output_token)
+            artifacts = [(staged_output, resolved_output)]
+            if report_path is not None:
+                if root_pointer is None:
+                    raise AncestryError(
+                        "QUALITY_ROOT_REQUIRED", "Quality reporting requires a root person."
+                    )
+                report = engine.analyze_quality(
+                    merged,
+                    source_records,
+                    sources,
+                    root_pointer,
+                    pointer_map=pointer_map,
+                    merge_decisions=decisions,
+                    output_file=str(resolved_output),
+                )
+                staged_report = staging_path(report_path)
+                report_token = engine.write_quality_report(report, staged_report)
+                claim_staged_path(staged_report, report_token)
+                artifacts.append((staged_report, report_path))
+            publish_staged_bundle(
+                artifacts,
+                replace=os.replace,
+                validate_after=verify_inputs,
+            )
+        except BaseException:
+            if staged_output is not None:
+                cleanup_staged_path(staged_output)
+            if staged_report is not None:
+                cleanup_staged_path(staged_report)
+            raise
         return GedcomOperationResult(
             resolved_output,
             len(people),
@@ -318,25 +406,49 @@ class GedcomService:
         generations: int | None = None,
         gedcom_version: str = "5.5.5",
     ) -> GedcomOperationResult:
-        source_path = input_file.expanduser().absolute()
-        output_path = output.expanduser().resolve()
+        source_path = self.ingress.normalize_path(
+            input_file,
+            FileKind.GEDCOM,
+            absolute=True,
+        )
+        output_path = self.ingress.normalize_path(
+            output,
+            FileKind.GEDCOM,
+            resolve=True,
+        )
         if paths_alias(source_path, output_path):
             raise AncestryError(
                 "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite the input GEDCOM."
             )
-        sources, source_records, people = self._people_and_sources([source_path])
-        root_pointer = engine.resolve_root_person(root_person, people, [sources[0].pointer_map], {})
+        sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        root_pointer = self._resolve_root_person(
+            root_person,
+            people,
+            [sources[0].pointer_map],
+            {},
+        )
         keep_people, keep_families = scoped_tree_pointers(
             root_pointer, people, source_records, scope, generations
         )
-        engine.write_gedcom(
-            people,
-            output_path,
-            source_documents=sources,
-            include_individuals=keep_people,
-            include_families=keep_families,
-            gedcom_version=gedcom_version,
-        )
+        staged_output = staging_path(output_path)
+        try:
+            output_token = engine.write_gedcom(
+                people,
+                staged_output,
+                source_documents=sources,
+                include_individuals=keep_people,
+                include_families=keep_families,
+                gedcom_version=gedcom_version,
+            )
+            claim_staged_path(staged_output, output_token)
+            publish_staged_bundle(
+                ((staged_output, output_path),),
+                replace=os.replace,
+                validate_after=lambda: self._verify_sources(fingerprints),
+            )
+        except BaseException:
+            cleanup_staged_path(staged_output)
+            raise
         return GedcomOperationResult(output_path, len(people), len(keep_people))
 
     def quality(
@@ -349,24 +461,57 @@ class GedcomService:
         model: str = "",
         consent: ConsentGrant | None = None,
     ) -> Path:
-        source_path = input_file.expanduser().absolute()
-        output_path = output.expanduser().resolve()
+        source_path = self.ingress.normalize_path(
+            input_file,
+            FileKind.GEDCOM,
+            absolute=True,
+        )
+        output_path = self.ingress.normalize_path(
+            output,
+            FileKind.GEDCOM,
+            resolve=True,
+        )
         if paths_alias(source_path, output_path):
             raise AncestryError(
                 "GEDCOM_REPORT_ALIAS",
                 "The quality report must not alias the immutable input GEDCOM.",
             )
-        sources, source_records, people = self._people_and_sources([source_path])
-        root_pointer = engine.resolve_root_person(root_person, people, [sources[0].pointer_map], {})
+        sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+
+        def verify_inputs() -> None:
+            self._verify_sources(fingerprints)
+
+        root_pointer = self._resolve_root_person(
+            root_person,
+            people,
+            [sources[0].pointer_map],
+            {},
+        )
         report = engine.analyze_quality(
             people, source_records, sources, root_pointer, output_file=str(source_path)
         )
         if provider_id != "none":
             report = engine.refine_quality_report_with_ai(
                 report,
-                self._quality_resolver(provider_id, model, consent),
+                self._quality_resolver(
+                    provider_id,
+                    model,
+                    consent,
+                    verify_inputs,
+                ),
             )
-        engine.write_quality_report(report, output_path)
+        staged_output = staging_path(output_path)
+        try:
+            output_token = engine.write_quality_report(report, staged_output)
+            claim_staged_path(staged_output, output_token)
+            publish_staged_bundle(
+                ((staged_output, output_path),),
+                replace=os.replace,
+                validate_after=verify_inputs,
+            )
+        except BaseException:
+            cleanup_staged_path(staged_output)
+            raise
         return output_path
 
     def sync(self, arguments: list[str]) -> int:
@@ -374,4 +519,5 @@ class GedcomService:
             arguments,
             self.ingress,
             resolver_factory=self._sync_identity_resolver,
+            raise_errors=True,
         )

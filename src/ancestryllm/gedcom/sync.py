@@ -14,6 +14,7 @@ def run_sync(
     ingress: FileIngressPolicy | None = None,
     *,
     resolver_factory: ResolverFactory | None = None,
+    raise_errors: bool = False,
 ) -> int:
     """Run an offline-first update or rebase through the migrated engine."""
     return incremental.main(
@@ -21,6 +22,7 @@ def run_sync(
         engine,
         ingress,
         resolver_factory=resolver_factory,
+        raise_errors=raise_errors,
     )
 
 

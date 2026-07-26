@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
+import unicodedata
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +12,15 @@ from typing import Any
 
 from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.core.ingress import FileKind
-from ancestryllm.core.publication import paths_alias, publish_staged_bundle, staging_path
+from ancestryllm.core.publication import (
+    StagedFileToken,
+    claim_staged_path,
+    cleanup_staged_path,
+    paths_alias,
+    publish_staged_bundle,
+    staging_path,
+    write_staged_text,
+)
 from ancestryllm.gedcom.engine import validate_gedcom_555
 from ancestryllm.rootsmagic.reader import RootsMagicReader
 
@@ -34,6 +42,25 @@ def _clean_text(value: Any) -> str:
 def _tag_name(column: str) -> str:
     clean = re.sub(r"[^A-Za-z0-9_]", "_", column).upper()
     return ("_RM_" + clean)[:31]
+
+
+def _paths_nested(left: Path, right: Path) -> bool:
+    """Fail closed when either output pathname is an ancestor of the other."""
+
+    try:
+        left_parts = tuple(
+            unicodedata.normalize("NFC", part).casefold()
+            for part in left.resolve(strict=False).parts
+        )
+        right_parts = tuple(
+            unicodedata.normalize("NFC", part).casefold()
+            for part in right.resolve(strict=False).parts
+        )
+    except (OSError, RuntimeError, UnicodeError, ValueError):
+        return True
+    return (
+        len(left_parts) < len(right_parts) and right_parts[: len(left_parts)] == left_parts
+    ) or (len(right_parts) < len(left_parts) and left_parts[: len(right_parts)] == right_parts)
 
 
 @dataclass(slots=True)
@@ -91,20 +118,17 @@ class RootsMagicExporter:
         self.reader = reader
 
     @staticmethod
-    def _atomic_write(path: Path, payload: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, delete=False
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.replace(temporary, path)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
+    def _source_changed(exc: FileIngressError) -> AncestryError:
+        return AncestryError(
+            "ROOTSMAGIC_FILE_CHANGED",
+            "The RootsMagic database changed during export; outputs were discarded.",
+            "Close RootsMagic and export again from a stable backup.",
+            exit_code=2,
+        )
+
+    @staticmethod
+    def _atomic_write(path: Path, payload: str) -> StagedFileToken:
+        return write_staged_text(path, payload)
 
     @staticmethod
     def _scope_people(
@@ -184,30 +208,52 @@ class RootsMagicExporter:
             raise AncestryError(
                 "EXPORT_LIVING_INVALID", "Living policy must be exclude, redact, or include."
             )
-        source_tree = tree.expanduser().absolute()
-        resolved_output = output.expanduser().resolve()
-        resolved_report = (
-            (report_path or resolved_output.with_suffix(".export.md")).expanduser().resolve()
+        source_tree = self.reader.ingress.normalize_path(
+            tree,
+            FileKind.ROOTSMAGIC,
+            absolute=True,
+        )
+        resolved_output = self.reader.ingress.normalize_path(
+            output,
+            FileKind.ROOTSMAGIC,
+            resolve=True,
+        )
+        resolved_report = self.reader.ingress.normalize_path(
+            report_path or resolved_output.with_suffix(".export.md"),
+            FileKind.ROOTSMAGIC,
+            resolve=True,
         )
         if paths_alias(source_tree, resolved_output):
             raise AncestryError(
                 "EXPORT_OVERWRITE_INPUT", "Output must not overwrite RootsMagic data."
             )
-        if paths_alias(resolved_report, source_tree) or paths_alias(
-            resolved_report, resolved_output
+        if (
+            paths_alias(resolved_report, source_tree)
+            or paths_alias(resolved_report, resolved_output)
+            or _paths_nested(resolved_report, resolved_output)
         ):
             raise AncestryError(
                 "EXPORT_REPORT_ALIAS",
                 "The export report must not alias the source database or primary output.",
             )
-        fingerprint = self.reader.ingress.fingerprint(source_tree, FileKind.ROOTSMAGIC)
-        schema = self.reader.schema(source_tree, fingerprint.snapshot)
-        self.reader.validate_row_limits(source_tree, schema, fingerprint.snapshot)
-        with self.reader.operation(fingerprint.snapshot, schema):
-            people_rows = self.reader.read_table(source_tree, "PersonTable")
-            name_rows = self.reader.read_table(source_tree, "NameTable")
-            family_rows = self.reader.read_table(source_tree, "FamilyTable")
-            child_rows = self.reader.read_table(source_tree, "ChildTable")
+        if not resolved_output.parent.is_dir() or not resolved_report.parent.is_dir():
+            raise AncestryError(
+                "EXPORT_OUTPUT_DIRECTORY_INVALID",
+                "Export output and report parent directories must already exist.",
+                "Create both local parent directories, then retry the export.",
+                exit_code=2,
+            )
+        try:
+            fingerprint = self.reader.fingerprint_source(source_tree)
+            with self.reader.operation(source_tree, fingerprint) as schema:
+                people_rows = self.reader.read_table(source_tree, "PersonTable")
+                name_rows = self.reader.read_table(source_tree, "NameTable")
+                family_rows = self.reader.read_table(source_tree, "FamilyTable")
+                child_rows = self.reader.read_table(source_tree, "ChildTable")
+        except FileIngressError as exc:
+            if exc.code != "FILE_INPUT_CHANGED":
+                raise
+            raise self._source_changed(exc) from exc
         if not people_rows:
             raise AncestryError(
                 "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
@@ -331,32 +377,24 @@ class RootsMagicExporter:
             if unmapped_person_columns
             else {},
         )
-        resolved_output.parent.mkdir(parents=True, exist_ok=True)
-        resolved_report.parent.mkdir(parents=True, exist_ok=True)
         staged_output: Path | None = None
         staged_report: Path | None = None
         try:
             staged_output = staging_path(resolved_output)
             staged_report = staging_path(resolved_report)
-            self._atomic_write(staged_output, "\n".join(lines) + "\n")
-            self._atomic_write(
+            output_token = self._atomic_write(staged_output, "\n".join(lines) + "\n")
+            claim_staged_path(staged_output, output_token)
+            report_token = self._atomic_write(
                 staged_report,
                 report.markdown(source_tree, resolved_output),
             )
+            claim_staged_path(staged_report, report_token)
 
             def validate_source() -> None:
                 try:
-                    self.reader.ingress.verify(
-                        source_tree,
-                        FileKind.ROOTSMAGIC,
-                        fingerprint,
-                    )
+                    self.reader.verify_source(source_tree, fingerprint)
                 except FileIngressError as exc:
-                    raise AncestryError(
-                        "ROOTSMAGIC_FILE_CHANGED",
-                        "The RootsMagic database changed during export; outputs were discarded.",
-                        "Close RootsMagic and export again from a stable backup.",
-                    ) from exc
+                    raise self._source_changed(exc) from exc
 
             publish_staged_bundle(
                 (
@@ -366,10 +404,10 @@ class RootsMagicExporter:
                 replace=os.replace,
                 validate_after=validate_source,
             )
-        except Exception:
+        except BaseException:
             if staged_output is not None:
-                staged_output.unlink(missing_ok=True)
+                cleanup_staged_path(staged_output)
             if staged_report is not None:
-                staged_report.unlink(missing_ok=True)
+                cleanup_staged_path(staged_report)
             raise
         return RootsMagicExportResult(resolved_output, resolved_report, report)

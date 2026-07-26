@@ -375,14 +375,26 @@ def run_tokens(context: AppContext, tokens: Sequence[str]) -> int:
 def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
-        from ancestryllm.console.shell import run_repl
-
-        return run_repl(context)
+        repl_options: argparse.Namespace | None = argparse.Namespace(config=None, json=False)
+    else:
+        repl_parser = argparse.ArgumentParser(add_help=False)
+        repl_parser.add_argument("--config", type=Path)
+        repl_parser.add_argument("--json", action="store_true")
+        candidate, remaining = repl_parser.parse_known_args(arguments)
+        repl_options = candidate if not remaining else None
     parser = build_parser()
     selected_context: AppContext | None = None
     owns_context = False
+    result = 2
+    unhandled_error = False
     try:
-        args = parser.parse_args(arguments)
+        args = repl_options or parser.parse_args(arguments)
+        if repl_options is not None and args.json:
+            raise AncestryError(
+                "ARGUMENT_INVALID",
+                "--json requires a one-shot command.",
+                exit_code=2,
+            )
         if context is None:
             selected_context = AppContext.build(
                 AppConfig.load(args.config) if args.config else None
@@ -390,13 +402,41 @@ def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -
             owns_context = True
         else:
             selected_context = context
-        return dispatch(args, selected_context)
+        if repl_options is not None:
+            from ancestryllm.console.shell import run_repl
+
+            result = run_repl(selected_context)
+        else:
+            result = dispatch(args, selected_context)
     except AncestryError as exc:
         PresentationAdapter.for_file(sys.stderr).render_error(exc)
-        return exc.exit_code
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(f"[INPUT_ERROR] {exc}", file=sys.stderr)
-        return 2
+        result = exc.exit_code
+    except (OSError, OverflowError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        PresentationAdapter.for_file(sys.stderr).render_error(
+            AncestryError(
+                "INPUT_ERROR",
+                "The command input could not be processed safely.",
+                exit_code=2,
+                details={"error_type": type(exc).__name__},
+            )
+        )
+        result = 2
+    except BaseException:
+        unhandled_error = True
+        raise
     finally:
         if owns_context and selected_context is not None:
-            selected_context.close()
+            try:
+                selected_context.close()
+            except Exception as exc:  # noqa: BLE001 - terminal boundary must sanitize cleanup
+                if not unhandled_error:
+                    PresentationAdapter.for_file(sys.stderr).render_error(
+                        AncestryError(
+                            "INPUT_ERROR",
+                            "The application could not shut down cleanly.",
+                            exit_code=2,
+                            details={"error_type": type(exc).__name__},
+                        )
+                    )
+                    result = 2
+    return result
