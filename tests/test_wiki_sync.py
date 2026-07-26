@@ -77,6 +77,8 @@ def test_second_sync_leaves_an_empty_git_diff(tmp_path: Path) -> None:
             "user.name=Wiki Sync Test",
             "-c",
             "user.email=wiki-sync@example.test",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "--quiet",
             "-m",
