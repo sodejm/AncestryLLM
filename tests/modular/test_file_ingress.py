@@ -3081,12 +3081,20 @@ def test_private_candidate_digest_verification_requests_noatime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = tmp_path / "output.ged"
-    staged = _staged_bytes(target, b"new\n")
+    candidate_path = tmp_path / "owned"
+    payload = b"new\n"
+    candidate_path.write_bytes(payload)
+    candidate = publication_module._OwnedPath(
+        candidate_path,
+        publication_module._identity(candidate_path),
+        hashlib.sha256(payload).digest(),
+    )
+    prepared = publication_module._PreparedRegularInstall(tmp_path / "output.ged")
     original_open = publication_module.os.open
     noatime = getattr(publication_module.os, "O_NOATIME", 1 << 29)
     observed_flags: list[int] = []
     monkeypatch.setattr(publication_module.os, "O_NOATIME", noatime, raising=False)
+    monkeypatch.setattr(publication_module, "_PLATFORM", "linux")
 
     def record_candidate_open(
         path: str | os.PathLike[str],
@@ -3096,22 +3104,20 @@ def test_private_candidate_digest_verification_requests_noatime(
         dir_fd: int | None = None,
     ) -> int:
         selected = Path(path)
-        if (
-            selected.name == "owned"
-            and selected.parent.name.startswith(".ancestry-publish-quarantine-")
-            and flags & os.O_ACCMODE == os.O_RDONLY
-        ):
+        if selected == candidate_path and flags & os.O_ACCMODE == os.O_RDONLY:
             observed_flags.append(flags)
         return original_open(path, flags & ~noatime, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(publication_module.os, "open", record_candidate_open)
 
-    publish_staged_bundle(((staged, target),), replace=os.replace)
+    publication_module._open_verified_install_candidate(candidate, prepared)
 
-    assert observed_flags
-    assert all(flags & noatime for flags in observed_flags)
-    assert target.read_bytes() == b"new\n"
-    assert not list(tmp_path.glob(".ancestry-publish-*"))
+    try:
+        assert observed_flags
+        assert all(flags & noatime for flags in observed_flags)
+    finally:
+        assert prepared.descriptor is not None
+        os.close(prepared.descriptor)
 
 
 def test_backup_destination_close_failure_removes_the_untracked_copy(
