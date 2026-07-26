@@ -6,8 +6,10 @@ parser help for the installed version. Use `--config PATH` to select a
 non-secret `config.toml`, and `--json` when a script needs serializable output.
 
 Run `ancestry` with no arguments to open the interactive console; see
-[the console guide](CONSOLE.md). The console and one-shot commands use the same
-dispatcher, so command syntax and coded errors are the same.
+[the console guide](CONSOLE.md). The console and one-shot commands share action
+dispatch and stable application-error codes. Parser presentation intentionally
+differs: one-shot usage errors use the standard command-line parser, while the
+console keeps running and renders a safe REPL usage error.
 
 ## Command families
 

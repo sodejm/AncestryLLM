@@ -96,8 +96,8 @@ class SessionRouter:
         if command_name in BUILTIN_MODULES and command_name not in self.enabled_modules:
             raise AncestryError(
                 "MODULE_DISABLED",
-                f"Module is not enabled: {command_name}",
-                "Enable the module explicitly before using it in the interactive console.",
+                f"Module is not enabled: {command_name}.",
+                "Enable it with `ancestry modules enable MODULE` before running an action.",
                 exit_code=2,
             )
         invocation = parse_repl_invocation(tokens)
@@ -128,7 +128,10 @@ class SessionRouter:
         module_id = tokens[1]
         if module_id not in self.enabled_modules or module_id not in BUILTIN_MODULES:
             raise AncestryError(
-                "MODULE_DISABLED", f"Module is not enabled: {module_id}", exit_code=2
+                "MODULE_DISABLED",
+                f"Module is not enabled: {module_id}.",
+                "Enable it with `ancestry modules enable MODULE` before running an action.",
+                exit_code=2,
             )
         self.active_module = module_id
         self.module_options.clear()

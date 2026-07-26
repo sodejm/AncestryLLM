@@ -16,6 +16,7 @@ import pytest
 
 from ancestryllm.cli import main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
+from ancestryllm.console.router import RouteKind, SessionRouter
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import BUILTIN_MODULES, ModuleRegistry
@@ -324,6 +325,36 @@ def test_one_shot_returns_expected_dtos_for_every_action(
     assert secret_value not in json.dumps(rendered, ensure_ascii=False)
 
 
+def test_every_action_serializes_json_and_repl_routes_direct_and_module_context(
+    command_cases: tuple[CommandCase, ...],
+    app_context: AppContext,
+    mocked_action_services: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Action parity stops at routing; prompt-loop responsiveness is issue #59."""
+    del mocked_action_services
+    secret_value = "fictional-secret-value"
+    monkeypatch.setattr("ancestryllm.cli.getpass.getpass", Mock(side_effect=[secret_value] * 16))
+    for case in command_cases:
+        assert main(["--json", *case.tokens], app_context) == 0
+        stdout, stderr = capsys.readouterr()
+        if case.expected is None:
+            assert stdout == ""
+        else:
+            assert json.loads(stdout) == to_plain(case.expected)
+        assert stderr == ""
+        router = SessionRouter(app_context)
+        direct = router.route_tokens(tuple(case.tokens))
+        assert direct.kind is RouteKind.EXECUTE
+        assert direct.invocation is not None
+        assert router.route_tokens(("use", case.module)).kind is RouteKind.OUTPUT
+        contextual = router.route_tokens(("run", case.action, *case.arguments))
+        assert contextual.kind is RouteKind.EXECUTE
+        assert contextual.invocation is not None
+        assert contextual.invocation.namespace == direct.invocation.namespace
+
+
 def test_one_shot_lists_enabled_modules(app_context: AppContext, capsys) -> None:
     assert main(["--json", "modules", "list"], app_context) == 0
     output = capsys.readouterr().out
@@ -431,6 +462,27 @@ def test_disabled_modules_are_not_imported_or_dispatched(
         == 2
     )
     assert "[MODULE_DISABLED] Module is not enabled: ocr." in capsys.readouterr().err
+
+
+def test_disabled_module_has_matching_repl_code_exit_and_message(
+    app_context: AppContext, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app_context.config.enabled_modules = {"gedcom"}
+    assert (
+        main(
+            ["ocr", "extract", "--input", "fictional.txt", "--provider", "none", "--model", "x"],
+            app_context,
+        )
+        == 2
+    )
+    one_shot = capsys.readouterr().err
+    with pytest.raises(AncestryError) as raised:
+        SessionRouter(app_context).route(
+            "ocr extract --input fictional.txt --provider none --model x"
+        )
+    assert raised.value.code == "MODULE_DISABLED"
+    assert raised.value.exit_code == 2
+    assert raised.value.message in one_shot
 
 
 def test_secret_values_never_reach_one_shot_status_output(
