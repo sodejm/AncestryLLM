@@ -32,13 +32,14 @@ class OpenAIProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        zdr_enforced = self.provider_id == "openrouter" and self.zero_data_retention
         return ProviderCapabilities(
             provider_id=self.provider_id,
             remote=True,
             structured_output=True,
             streaming=True,
-            retention_known=self.provider_id == "openrouter" and self.zero_data_retention,
-            zero_data_retention=self.zero_data_retention,
+            retention_known=zdr_enforced,
+            zero_data_retention=zdr_enforced,
         )
 
     def _client(self, timeout_seconds: float) -> Any:
@@ -65,6 +66,17 @@ class OpenAIProvider:
             },
         }
 
+    def _routing_preferences(self) -> dict[str, object] | None:
+        if self.provider_id != "openrouter" or not self.zero_data_retention:
+            return None
+        return {
+            "provider": {
+                "data_collection": "deny",
+                "require_parameters": True,
+                "zdr": True,
+            }
+        }
+
     def generate(self, request: GenerationRequest) -> GenerationResult:
         kwargs: dict[str, object] = {
             "model": request.model,
@@ -76,6 +88,9 @@ class OpenAIProvider:
         response_format = self._response_format(request)
         if response_format:
             kwargs["response_format"] = response_format
+        routing_preferences = self._routing_preferences()
+        if routing_preferences:
+            kwargs["extra_body"] = routing_preferences
         try:
             with self._client(request.timeout_seconds) as client:
                 response = client.chat.completions.create(**kwargs)
@@ -97,17 +112,23 @@ class OpenAIProvider:
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
         stream_started = False
+        kwargs: dict[str, object] = {
+            "model": request.model,
+            "messages": [message.model_dump() for message in request.messages],
+            "max_completion_tokens": request.max_output_tokens,
+            "temperature": request.temperature,
+            "stream": True,
+            "timeout": httpx.Timeout(request.timeout_seconds),
+        }
+        response_format = self._response_format(request)
+        if response_format:
+            kwargs["response_format"] = response_format
+        routing_preferences = self._routing_preferences()
+        if routing_preferences:
+            kwargs["extra_body"] = routing_preferences
         try:
             with self._client(request.timeout_seconds) as client:
-                stream = client.chat.completions.create(
-                    model=request.model,
-                    messages=[message.model_dump() for message in request.messages],
-                    max_completion_tokens=request.max_output_tokens,
-                    temperature=request.temperature,
-                    response_format=self._response_format(request),
-                    stream=True,
-                    timeout=httpx.Timeout(request.timeout_seconds),
-                )
+                stream = client.chat.completions.create(**kwargs)
                 with stream:
                     for chunk in stream:
                         content = chunk.choices[0].delta.content

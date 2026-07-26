@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import hmac
+import importlib
+import secrets
 import time
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import (
     ProviderError,
@@ -13,10 +17,19 @@ from ancestryllm.core.errors import (
     normalize_provider_error,
 )
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
+from ancestryllm.llm.execution import (
+    CancellationCheck,
+    ExactResultCache,
+    ProviderExecutionCoordinator,
+)
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy
 from ancestryllm.llm.registry import ProviderRegistry
+from ancestryllm.llm.validation import validate_structured_output
 from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import LlmRunModel
+
+if TYPE_CHECKING:
+    from ancestryllm.llm.profiles import ProviderProfileService
 
 SAFE_RETRY_ERROR_CODES = frozenset({"PROVIDER_RATE_LIMITED", "PROVIDER_TRANSIENT"})
 MAX_RETRY_DELAY_SECONDS = 60.0
@@ -24,17 +37,91 @@ MAX_RETRY_DELAY_SECONDS = 60.0
 
 class LLMService:
     def __init__(
-        self, registry: ProviderRegistry, database: Database, policy: ConsentPolicy | None = None
+        self,
+        registry: ProviderRegistry,
+        database: Database,
+        policy: ConsentPolicy | None = None,
+        profiles: ProviderProfileService | None = None,
+        *,
+        execution: ProviderExecutionCoordinator | None = None,
+        cache: ExactResultCache | None = None,
+        cancellation_check: CancellationCheck | None = None,
     ) -> None:
         self.registry = registry
         self.database = database
         self.policy = policy or ConsentPolicy()
+        self.profiles = profiles
+        self.execution = execution or ProviderExecutionCoordinator()
+        self.cache = cache or ExactResultCache()
+        self._cache_key = secrets.token_bytes(32)
+        self._explicit_cancellation_check = cancellation_check
 
     @staticmethod
     def _request_metadata(request: GenerationRequest) -> tuple[str, str]:
         canonical = request.model_dump_json()
         request_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return canonical, request_hash
+
+    @staticmethod
+    def _ambient_cancellation_check() -> None:
+        """Use the job token when the cooperative-cancellation module is installed."""
+
+        try:
+            module = importlib.import_module("ancestryllm.core.cancellation")
+        except ModuleNotFoundError as exc:
+            if exc.name == "ancestryllm.core.cancellation":
+                return
+            raise
+        checkpoint = getattr(module, "cancellation_checkpoint", None)
+        if checkpoint is not None:
+            checkpoint()
+
+    def _check_cancellation(self) -> None:
+        callback = self._explicit_cancellation_check or self._ambient_cancellation_check
+        callback()
+
+    def _resolve_request(
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None,
+    ) -> GenerationRequest:
+        if self.profiles is None:
+            return request
+        return self.profiles.resolve_request(request, consent)
+
+    def _provider(self, request: GenerationRequest) -> LLMProvider:
+        execution = request.execution
+        if (
+            execution.base_url is None
+            and execution.profile_name is None
+            and execution.zero_data_retention
+        ):
+            return self.registry.create(request.provider_id)
+        return self.registry.create(
+            request.provider_id,
+            base_url=execution.base_url,
+            zero_data_retention=execution.zero_data_retention,
+            profile_name=execution.profile_name,
+        )
+
+    @staticmethod
+    def _execution_key(request: GenerationRequest) -> tuple[str, ...]:
+        execution = request.execution
+        return (
+            request.provider_id,
+            execution.profile_name or "direct",
+            execution.base_url or "default",
+            request.model,
+        )
+
+    def _exact_cache_key(
+        self,
+        canonical: str,
+        consent: ConsentGrant | None,
+    ) -> str:
+        scope = consent.consent_id if consent is not None else "local-workspace"
+        payload = f"ancestryllm-exact-v1\0{scope}\0{canonical}".encode()
+        return hmac.new(self._cache_key, payload, hashlib.sha256).hexdigest()
 
     def _record_run(
         self,
@@ -78,51 +165,113 @@ class LLMService:
     def generate(
         self, request: GenerationRequest, consent: ConsentGrant | None = None
     ) -> GenerationResult:
-        provider = self.registry.create(request.provider_id)
-        self.policy.authorize(request, provider.capabilities, consent)
-        canonical, request_hash = self._request_metadata(request)
+        planned_request = self._resolve_request(request, consent)
+        self._check_cancellation()
+        provider = self._provider(planned_request)
+        self.policy.authorize(planned_request, provider.capabilities, consent)
+        canonical, request_hash = self._request_metadata(planned_request)
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         retain = bool(consent and consent.retain_payloads)
+        cache_hit = False
+        try:
+            with self.execution.admission(
+                self._execution_key(planned_request),
+                max_pending=planned_request.execution.max_pending,
+            ):
+                if self._cache_eligible(planned_request):
+                    result, cache_hit = self.cache.get_or_execute(
+                        self._exact_cache_key(canonical, consent),
+                        lambda: self._generate_uncached(planned_request, provider),
+                        ttl_seconds=planned_request.execution.cache_ttl_seconds,
+                        max_entries=planned_request.execution.cache_max_entries,
+                        timeout_seconds=planned_request.timeout_seconds,
+                        cancellation_check=self._check_cancellation,
+                        cache_when=lambda item: self._cache_result_valid(planned_request, item),
+                    )
+                else:
+                    result = self._generate_uncached(planned_request, provider)
+        except BaseException as exc:
+            if not isinstance(exc, Exception) and not is_provider_cancellation(exc):
+                raise
+            error = normalize_provider_error(exc, planned_request.provider_id)
+            self._record_run(
+                planned_request,
+                consent,
+                request_hash=request_hash,
+                started_at=started,
+                status="aborted" if error.code == "PROVIDER_CANCELLED" else "failed",
+                input_payload=canonical if retain else None,
+                error_code=error.code,
+            )
+            if error is exc:
+                raise
+            raise error from exc
+        self._record_run(
+            planned_request,
+            consent,
+            request_hash=request_hash,
+            started_at=started,
+            status="cache_hit" if cache_hit else "succeeded",
+            provider_id=result.provider_id,
+            response_hash=hashlib.sha256(result.text.encode("utf-8")).hexdigest(),
+            input_payload=canonical if retain and not cache_hit else None,
+            output_payload=result.text if retain and not cache_hit else None,
+            input_tokens=None if cache_hit else result.input_tokens,
+            output_tokens=None if cache_hit else result.output_tokens,
+            cost_usd=None if cache_hit else result.cost_usd,
+        )
+        return result
+
+    @staticmethod
+    def _cache_eligible(request: GenerationRequest) -> bool:
+        return (
+            request.execution.cache_ttl_seconds > 0
+            and request.temperature == 0
+            and request.response_schema is not None
+        )
+
+    @staticmethod
+    def _cache_result_valid(
+        request: GenerationRequest,
+        result: GenerationResult,
+    ) -> bool:
+        if result.parsed is None or request.response_schema is None:
+            return False
+        try:
+            parsed = validate_structured_output(result.text, request.response_schema)
+        except ProviderError:
+            return False
+        return bool(parsed == result.parsed)
+
+    def _generate_uncached(
+        self,
+        request: GenerationRequest,
+        provider: LLMProvider,
+    ) -> GenerationResult:
         retry_attempt = 0
         while True:
             try:
-                result = provider.generate(request)
-                break
+                self._check_cancellation()
+                with self.execution.capacity(
+                    self._execution_key(request),
+                    max_concurrency=request.execution.max_concurrency,
+                    timeout_seconds=request.timeout_seconds,
+                    cancellation_check=self._check_cancellation,
+                ):
+                    result = provider.generate(request)
+                self._check_cancellation()
+                return result.model_copy(update={"remote": provider.capabilities.remote})
             except BaseException as exc:
                 if not isinstance(exc, Exception) and not is_provider_cancellation(exc):
                     raise
                 error = normalize_provider_error(exc, request.provider_id)
-                if self._should_retry(request, error, retry_attempt):
-                    time.sleep(self._retry_delay(error, retry_attempt))
-                    retry_attempt += 1
-                    continue
-                self._record_run(
-                    request,
-                    consent,
-                    request_hash=request_hash,
-                    started_at=started,
-                    status="aborted" if error.code == "PROVIDER_CANCELLED" else "failed",
-                    input_payload=canonical if retain else None,
-                    error_code=error.code,
-                )
-                if error is exc:
-                    raise
-                raise error from exc
-        self._record_run(
-            request,
-            consent,
-            request_hash=request_hash,
-            started_at=started,
-            status="succeeded",
-            provider_id=result.provider_id,
-            response_hash=hashlib.sha256(result.text.encode("utf-8")).hexdigest(),
-            input_payload=canonical if retain else None,
-            output_payload=result.text if retain else None,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cost_usd=result.cost_usd,
-        )
-        return result
+                if not self._should_retry(request, error, retry_attempt):
+                    if error is exc:
+                        raise
+                    raise error from exc
+                self._check_cancellation()
+                self._wait_for_retry(self._retry_delay(error, retry_attempt))
+                retry_attempt += 1
 
     @staticmethod
     def _should_retry(request: GenerationRequest, error: ProviderError, retry_attempt: int) -> bool:
@@ -137,18 +286,31 @@ class LLMService:
         backoff_seconds: float = 0.5 * (2.0**retry_attempt)
         return min(backoff_seconds, MAX_RETRY_DELAY_SECONDS)
 
+    def _wait_for_retry(self, delay_seconds: float) -> None:
+        """Wait in short intervals so cancellation can interrupt provider backoff."""
+
+        deadline = time.monotonic() + delay_seconds
+        while True:
+            self._check_cancellation()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.05))
+
     def stream(
         self, request: GenerationRequest, consent: ConsentGrant | None = None
     ) -> Iterator[str]:
         """Authorize and audit a provider stream without retaining partial output by default."""
 
-        provider = self.registry.create(request.provider_id)
-        self.policy.authorize(request, provider.capabilities, consent)
-        canonical, request_hash = self._request_metadata(request)
+        planned_request = self._resolve_request(request, consent)
+        self._check_cancellation()
+        provider = self._provider(planned_request)
+        self.policy.authorize(planned_request, provider.capabilities, consent)
+        canonical, request_hash = self._request_metadata(planned_request)
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         retain = bool(consent and consent.retain_payloads)
         return self._stream_lifecycle(
-            request,
+            planned_request,
             consent,
             provider,
             canonical=canonical,
@@ -174,14 +336,24 @@ class LLMService:
         failure: BaseException | None = None
         iterator: Iterator[str] | None = None
         try:
-            iterator = iter(provider.stream(request))
-            for chunk in iterator:
-                stream_started = True
-                encoded = chunk.encode("utf-8")
-                response_hasher.update(encoded)
-                if retained_chunks is not None:
-                    retained_chunks.append(chunk)
-                yield chunk
+            with self.execution.lease(
+                self._execution_key(request),
+                max_concurrency=request.execution.max_concurrency,
+                max_pending=request.execution.max_pending,
+                timeout_seconds=request.timeout_seconds,
+                cancellation_check=self._check_cancellation,
+            ):
+                self._check_cancellation()
+                iterator = iter(provider.stream(request))
+                for chunk in iterator:
+                    self._check_cancellation()
+                    stream_started = True
+                    encoded = chunk.encode("utf-8")
+                    response_hasher.update(encoded)
+                    if retained_chunks is not None:
+                        retained_chunks.append(chunk)
+                    yield chunk
+                self._check_cancellation()
         except BaseException as exc:  # noqa: BLE001 - cancellation is outside Exception
             failure = exc
         finally:
@@ -233,3 +405,12 @@ class LLMService:
             input_payload=canonical if retain else None,
             output_payload="".join(retained_chunks) if retained_chunks is not None else None,
         )
+
+    def close(self) -> None:
+        """Stop queued work, discard in-memory results, and close shared clients."""
+
+        self.execution.close()
+        self.cache.close()
+        close = getattr(self.registry, "close", None)
+        if close is not None:
+            close()

@@ -56,7 +56,7 @@ flowchart LR
     Keyring["OS credential store"]
     RM["RootsMagic .rmtree\nread-only input"]
     GED["GEDCOM files and\nrelease bundles"]
-    LocalLLM["Loopback Ollama"]
+    LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
 
     Operator --> CLI
@@ -195,8 +195,10 @@ calls the same function.
 - Without arguments, it constructs `AncestryConsole` and starts the local
   interactive shell.
 - `AppContext.build()` is the composition root. It creates the configuration,
-  secret store, lazy database object, provider registry, and shared application
-  services.
+  secret store, lazy database object, operational profile service, provider
+  registry, bounded execution/cache services, and shared application services.
+- Context shutdown first stops provider admission, discards process-local cache
+  entries, and closes shared SDK clients, then closes encrypted storage.
 - Feature services such as GEDCOM, RootsMagic, and OCR are imported by dispatch
   only when their command is used.
 
@@ -339,17 +341,21 @@ revision. There is not yet a public in-place migration command.
 sequenceDiagram
     participant M as Module service
     participant L as LLMService
+    participant C as Profile and execution policy
     participant R as ProviderRegistry
     participant P as ConsentPolicy
     participant A as Provider adapter
     participant D as SQLCipher audit
 
     M->>L: GenerationRequest + optional ConsentGrant
-    L->>R: create(explicit provider_id)
+    L->>C: resolve explicit profile and bounded settings
+    C-->>L: immutable provider/model/endpoint plan
+    L->>R: get shared adapter for plan
     R-->>L: adapter + capabilities
     L->>P: authorize(request, capabilities, grant)
     P-->>L: allow or coded denial
-    L->>A: generate(request)
+    L->>C: cache/single-flight lookup and bounded admission
+    C->>A: generate(request)
     A-->>L: validated GenerationResult or coded failure
     L->>D: hashes, metadata, optional encrypted payloads
     L-->>M: result
@@ -362,7 +368,7 @@ only when selected.
 
 Before a remote call, `ConsentPolicy` verifies:
 
-- provider identity and an active provider-specific consent grant;
+- provider identity and an active grant for the exact selected profile/endpoint;
 - allowed module and purpose;
 - requested data classes as a subset of the grant;
 - model name against the grant's allowlist patterns.
@@ -382,21 +388,33 @@ both success and failure. Full canonical requests and response text are stored
 only when the selected consent grant explicitly enables payload retention; the
 database is encrypted in either case.
 
-Current limitations that new work must not hide:
+Named profiles are operational request plans. Their validated settings control
+the stored model, approved endpoint, provider options, tighter request bounds,
+per-profile/model concurrency and pending limits, and an optional bounded
+process-local exact-result cache. Ollama adapters and timed SDK clients are
+shared per endpoint/profile until context shutdown. Deterministic structured
+cache entries use process-random HMAC keys, consent/workspace scope, TTL/LRU
+bounds, and single-flight; only successful schema-valid results enter the
+cache, and no cache payload is persisted. The total pending limit includes
+single-flight waiters, and cancellation interrupts queue, cache, and retry
+backoff waits. Profile retries are an explicit bounded opt-in for safe,
+pre-output failures rather than an ambient provider default.
 
-- provider profile `settings_json` is persisted but is not yet used by the CLI
-  to construct provider adapters;
-- `max_cost_usd` is persisted in consent but is not yet enforced by
-  `ConsentPolicy` or `LLMService`;
-- timeout and cost fields exist in contracts, but consistent SDK-level timeout
-  and preflight enforcement across every modular adapter remains incomplete;
-- the GEDCOM legacy kernel still contains older direct AI adapters and
-  environment-based model settings. Normal modular merge uses `LLMService`,
-  while incremental sync defaults to `--ai-backend none` but can still enter
-  the legacy path when explicitly requested.
+Only explicit loopback Ollama endpoints are classified as local. A non-loopback
+HTTPS Ollama profile is a remote route and must pass the same exact
+profile-bound consent checks as a cloud adapter.
+
+`max_cost_usd` remains persisted in consent but is not yet enforced by
+`ConsentPolicy` or `LLMService`; provider-side spending limits remain required.
 
 These are tracked architectural gaps, not permission to bypass explicit
 provider selection or cloud consent in new service code.
+
+Provider adapters under `llm/providers/` are the only application modules that
+initiate LLM network requests. GEDCOM merge, incremental update, and quality
+refinement all construct the shared request contract through `GedcomService`;
+the kernel receives only narrow provider-neutral resolver callbacks. Ambient
+keys and installed SDKs never select one of those callbacks.
 
 ## RootsMagic subsystem
 
@@ -461,8 +479,9 @@ The smaller modules define stable seams:
 - `quality.py` exposes deterministic findings and Markdown reports;
 - `serialization.py` exposes supported versions and the writer;
 - `service.py` provides merge, subtree, quality, and sync use cases;
-- `sync.py` injects the engine into the incremental synchronizer and forces the
-  update default to `--ai-backend none`.
+- `sync.py` injects the engine and an optional modular identity-resolver
+  factory into the incremental synchronizer; updates default to
+  `--provider none`, and rebase never invokes a provider.
 
 ### Merge and serialization flow
 
@@ -553,8 +572,8 @@ The current OCR module does not perform image recognition. It accepts bounded
 UTF-8 text that has already been transcribed, normalizes it, marks it as
 untrusted document data, and asks an explicitly selected provider for a small
 genealogy JSON schema. `OcrService` uses the common LLM/consent/audit boundary.
-`legacy_gemini.py` retains normalization and an older direct helper for
-compatibility tests; the unified CLI uses the modular service.
+Normalization is deterministic local code; all provider traffic remains in the
+built-in adapter package.
 
 ## Operational tooling and documentation
 

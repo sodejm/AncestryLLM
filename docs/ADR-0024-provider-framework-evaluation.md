@@ -49,8 +49,9 @@ feature counts.
 ## Consequences
 
 The project keeps a smaller trusted runtime surface and direct control over
-provider behavior. Caching, batching, and future scheduling features remain
-project-owned work, but can be introduced behind typed contracts without
-committing to a framework. The evaluation does not prohibit optional research
-experiments; it prohibits adding these frameworks as runtime requirements based
-only on this comparison.
+provider behavior. Operational profiles, bounded scheduling, shared Ollama
+clients, and process-local exact-result caching are implemented behind the
+native typed contracts; future batching or persistent-cache work remains
+project-owned. The evaluation does not prohibit optional research experiments;
+it prohibits adding these frameworks as runtime requirements based only on this
+comparison.

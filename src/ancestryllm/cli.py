@@ -114,7 +114,7 @@ def _consent(context: AppContext, name: str | None) -> ConsentGrant | None:
     return context.provider_profiles.consent_grant(name) if name else None
 
 
-def _key_values(values: list[str]) -> dict[str, str]:
+def _key_values(values: Sequence[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for raw in values:
         if "=" not in raw:
@@ -181,7 +181,11 @@ def dispatch(
     if args.command == "gedcom":
         from ancestryllm.gedcom.service import GedcomService
 
-        gedcom_service = GedcomService(context.llm)
+        gedcom_service = GedcomService(
+            context.llm,
+            consent_lookup=context.provider_profiles.consent_grant,
+            provider_timeout_seconds=context.config.provider_timeout_seconds,
+        )
         if args.action == "merge":
             gedcom_result = gedcom_service.merge(
                 args.inputs,
@@ -209,7 +213,14 @@ def dispatch(
             )
         elif args.action == "quality":
             emit(
-                gedcom_service.quality(args.input, args.output, root_person=args.root_person),
+                gedcom_service.quality(
+                    args.input,
+                    args.output,
+                    root_person=args.root_person,
+                    provider_id=args.provider,
+                    model=args.model,
+                    consent=_consent(context, args.consent),
+                ),
                 json_output,
             )
         else:
@@ -269,7 +280,12 @@ def dispatch(
             )
         elif args.action == "create":
             emit(
-                context.provider_profiles.create_profile(args.name, args.provider, args.model),
+                context.provider_profiles.create_profile(
+                    args.name,
+                    args.provider,
+                    args.model,
+                    _key_values(args.setting),
+                ),
                 json_output,
             )
         elif args.action == "consent":
@@ -358,11 +374,17 @@ def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -
 
         return run_repl(context)
     parser = build_parser()
+    selected_context: AppContext | None = None
+    owns_context = False
     try:
         args = parser.parse_args(arguments)
-        selected_context = context or AppContext.build(
-            AppConfig.load(args.config) if args.config else None
-        )
+        if context is None:
+            selected_context = AppContext.build(
+                AppConfig.load(args.config) if args.config else None
+            )
+            owns_context = True
+        else:
+            selected_context = context
         return dispatch(args, selected_context)
     except AncestryError as exc:
         PresentationAdapter.for_file(sys.stderr).render_error(exc)
@@ -370,3 +392,6 @@ def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"[INPUT_ERROR] {exc}", file=sys.stderr)
         return 2
+    finally:
+        if owns_context and selected_context is not None:
+            selected_context.close()

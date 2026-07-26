@@ -341,7 +341,12 @@ def run_repl(context: AppContext | None = None) -> int:
     """Run the asynchronous shell from the synchronous console entry point."""
 
     async def run() -> int:
-        with patch_stdout(raw=True):
-            return await ReplApplication(context or AppContext.build()).run_async()
+        selected_context = context or AppContext.build()
+        try:
+            with patch_stdout(raw=True):
+                return await ReplApplication(selected_context).run_async()
+        finally:
+            if context is None:
+                selected_context.close()
 
     return asyncio.run(run())

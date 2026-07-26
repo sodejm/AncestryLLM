@@ -5,11 +5,31 @@ Cloud disclosure and portable sharing are denied unless an active consent
 profile explicitly permits the required data classes. Prefer excluding living
 people; redaction is available where a workflow must preserve graph shape.
 
-Consent is provider-specific and revocable. It restricts modules, purposes,
-models, data classes, retention, and budget. The cloud policy runs before prompt
-rendering, minimizes fields, labels untrusted genealogy text, and refuses a
-request that exceeds the grant. LLM run metadata is stored by default; full
-input/output is stored only with explicit retention consent in SQLCipher.
+Consent is profile/endpoint-specific and revocable. It restricts providers,
+modules, purposes, models, data classes, retention, and budget. The cloud policy
+runs before adapter or SDK use, minimizes fields, labels untrusted genealogy
+text, and refuses a request that exceeds the grant. LLM run metadata is stored
+by default; full input/output is stored only with explicit retention consent in
+SQLCipher.
+
+An operational profile may opt deterministic structured requests into a
+bounded exact-result cache. Cache content remains in process memory only, is
+partitioned by workspace process and consent ID using a process-random HMAC
+key, and is removed by TTL/LRU expiry or application shutdown. Cache hits add
+privacy-minimal audit metadata but do not persist an additional prompt or
+response payload.
+
+An Ollama endpoint is local only when it explicitly names loopback. Any
+non-loopback Ollama endpoint requires HTTPS and the same exact profile-bound
+consent as another remote route. Supplying a retention consent to a local route
+also validates the profile, module, purpose, data classes, and model before any
+payload may be retained.
+
+GEDCOM identity adjudication always declares
+`possibly_living_person`, even when both candidate people have recorded death
+dates. Its bounded comparison context can include partners, parents, and
+children whose living status is unknown, so deceased-person consent alone can
+never authorize that remote disclosure.
 
 The research workspace is curated supporting data, not the authoritative family
 tree. Store provenance and RootsMagic/GEDCOM identifiers so claims can be traced
@@ -40,9 +60,10 @@ bootstrap material.
 
 `provider=none` remains network-free even when environment credentials or SDKs
 exist. Remote UI state cannot grant consent or select a provider by itself;
-Python policy verifies the provider, model, purpose, data classes, retention,
-and current consent before any disclosure. Model output and Markdown remain
-untrusted display data and cannot gain tools or renderer privileges.
+Python policy verifies the exact profile/endpoint, provider, model, purpose,
+data classes, retention, and current consent before any disclosure. Model
+output and Markdown remain untrusted display data and cannot gain tools or
+renderer privileges.
 
 
 ## Interactive console privacy

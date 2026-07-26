@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -970,206 +970,51 @@ class TestDependentPreservation:
 # ---------------------------------------------------------------------------
 
 
-class TestParseAiResponse:
-    def test_valid_json_is_duplicate_true(self):
-        raw = '{"is_duplicate": true, "confidence": 0.95, "reasoning": "same person"}'
-        result = gm._parse_ai_response(raw)
-        assert result["is_duplicate"] is True
-        assert result["confidence"] == pytest.approx(0.95)
-        assert result["reasoning"] == "same person"
+class TestInjectedIdentityResolver:
+    """Characterize the provider-neutral resolver boundary."""
 
-    def test_valid_json_is_duplicate_false(self):
-        raw = '{"is_duplicate": false, "confidence": 0.1, "reasoning": "different"}'
-        result = gm._parse_ai_response(raw)
-        assert result["is_duplicate"] is False
-
-    def test_markdown_fenced_json(self):
-        raw = '```json\n{"is_duplicate": true, "confidence": 0.9, "reasoning": "ok"}\n```'
-        result = gm._parse_ai_response(raw)
-        assert result["is_duplicate"] is True
-
-    def test_json_embedded_in_prose(self):
-        raw = (
-            "After careful analysis I believe these are the same person.\n"
-            '{"is_duplicate": true, "confidence": 0.8, "reasoning": "names match"}\n'
-            "Hope that helps!"
-        )
-        result = gm._parse_ai_response(raw)
-        assert result["is_duplicate"] is True
-
-    def test_unparseable_response_returns_safe_default(self):
-        result = gm._parse_ai_response("I have no idea what you are asking")
-        assert result["is_duplicate"] is False
-        assert result["confidence"] == 0.0
-
-
-class TestTypedAiDispatch:
-    """Characterize typed provider dispatch without making network requests."""
-
-    def test_none_backend_does_not_call_configured_providers(self):
+    def test_none_does_not_call_a_resolver(self):
         a = _make_record(pointer="@I1@", source_file="/a.ged")
         b = _make_record(pointer="@I2@", source_file="/b.ged")
-        with (
-            patch.dict(
-                "os.environ",
-                {"OPENAI_API_KEY": "unused", "GEMINI_API_KEY": "unused"},
-            ),
-            patch.object(gm, "ai_resolve_openai") as openai_resolver,
-            patch.object(gm, "ai_resolve_gemini") as gemini_resolver,
-            patch.object(gm, "ai_resolve_openrouter") as openrouter_resolver,
-            patch.object(gm, "ai_resolve_ollama") as ollama_resolver,
-        ):
-            verdict = gm.ai_resolve(a, b, backend="none")
-        assert verdict["is_duplicate"] is False
-        assert verdict["reasoning"] == "AI disabled"
-        openai_resolver.assert_not_called()
-        gemini_resolver.assert_not_called()
-        openrouter_resolver.assert_not_called()
-        ollama_resolver.assert_not_called()
 
-    def test_provider_dispatch_forwards_validated_options(self):
+        verdict = gm.ai_resolve(a, b)
+
+        assert verdict["is_duplicate"] is False
+        assert verdict["reasoning"] == "LLM adjudication disabled"
+        assert verdict["_provider"] == "none"
+
+    def test_injected_resolver_receives_only_the_bounded_pair(self):
         a = _make_record(pointer="@I1@", source_file="/a.ged")
         b = _make_record(pointer="@I2@", source_file="/b.ged")
         expected = {"is_duplicate": True, "confidence": 0.9}
-        with patch.object(gm, "ai_resolve_openai", return_value=expected) as resolver:
-            verdict = gm.ai_resolve(a, b, backend="openai", model="test-model")
-        assert verdict == expected
-        resolver.assert_called_once_with(a, b, model="test-model")
+        calls: list[tuple[gm.IndividualRecord, gm.IndividualRecord]] = []
+
+        def resolver(left: gm.IndividualRecord, right: gm.IndividualRecord) -> dict[str, object]:
+            calls.append((left, right))
+            return expected
+
+        assert gm.ai_resolve(a, b, resolver=resolver) == expected
+        assert calls == [(a, b)]
 
     @pytest.mark.parametrize(
         ("value", "expected"),
-        [(0.875, 0.875), ("0.75", 0.75), ({"unexpected": "shape"}, 0.0)],
+        [
+            (0.875, 0.875),
+            ("0.75", 0.75),
+            (float("nan"), 0.0),
+            (float("inf"), 0.0),
+            (-0.1, 0.0),
+            (1.1, 0.0),
+            pytest.param(10**10_000, 0.0, id="overflowing-integer"),
+            ({"unexpected": "shape"}, 0.0),
+        ],
     )
     def test_confidence_accepts_only_scalar_values(self, value, expected):
         assert gm._confidence_value({"confidence": value}) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
-# Remote credit gate (unit - no network)
-# ---------------------------------------------------------------------------
 
-
-class TestRemoteCreditGate:
-    """Verify that no decision data can bypass the strict remote gate."""
-
-    def test_direct_openai_is_blocked_under_required_policy(self):
-        with pytest.raises(gm.RemoteCreditError, match="Cannot verify openai"):
-            gm.ensure_remote_credit(
-                "openai",
-                api_key="fake-key",
-                policy="required",
-            )
-
-    def test_direct_provider_can_be_explicitly_best_effort(self):
-        status = gm.ensure_remote_credit(
-            "gemini",
-            api_key="fake-key",
-            policy="best-effort",
-        )
-        assert status.checked is False
-        assert status.remaining_usd is None
-
-    def test_openrouter_management_balance_passes(self):
-        payload = {
-            "data": {"total_credits": 10.0, "total_usage": 2.5},
-        }
-        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
-            status = gm.ensure_remote_credit(
-                "openrouter",
-                api_key="inference-key",
-                management_key="management-key",
-                policy="required",
-                minimum_credit_usd=1.0,
-            )
-        assert status.checked is True
-        assert status.remaining_usd == pytest.approx(7.5)
-
-    def test_openrouter_key_limit_is_not_account_balance(self):
-        payload = {"data": {"limit_remaining": 5.0}}
-        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
-            with pytest.raises(gm.RemoteCreditError, match="not the account"):
-                gm.ensure_remote_credit(
-                    "openrouter",
-                    api_key="inference-key",
-                    policy="required",
-                )
-
-    def test_openrouter_insufficient_balance_is_blocked(self):
-        payload = {
-            "data": {"total_credits": 10.0, "total_usage": 9.995},
-        }
-        with patch("ancestryllm.gedcom.engine._get_remote_json", return_value=payload):
-            with pytest.raises(gm.RemoteCreditError, match="at least"):
-                gm.ensure_remote_credit(
-                    "openrouter",
-                    api_key="inference-key",
-                    management_key="management-key",
-                    policy="required",
-                    minimum_credit_usd=0.01,
-                )
-
-
-# ---------------------------------------------------------------------------
-# Gemini AI resolver (unit – no network)
-# ---------------------------------------------------------------------------
-
-
-class TestAiResolveGemini:
-    def test_raises_when_api_key_missing(self):
-        a = _make_record(pointer="@I1@", source_file="/a.ged")
-        b = _make_record(pointer="@I2@", source_file="/b.ged")
-        # Patch google.generativeai into sys.modules to avoid ModuleNotFoundError
-        # when the optional google-generativeai package is not installed.
-        import types
-
-        fake_genai = types.ModuleType("google.generativeai")
-        fake_google = types.ModuleType("google")
-        fake_google.generativeai = fake_genai  # type: ignore[attr-defined]
-        with (
-            patch.dict(
-                "sys.modules",
-                {"google": fake_google, "google.generativeai": fake_genai},
-            ),
-            patch.dict("os.environ", {}, clear=True),
-        ):
-            with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-                gm.ai_resolve_gemini(a, b, api_key=None)
-
-    def test_returns_parsed_verdict(self):
-        a = _make_record(pointer="@I1@", source_file="/a.ged")
-        b = _make_record(pointer="@I2@", source_file="/b.ged")
-
-        fake_response = MagicMock()
-        fake_response.text = '{"is_duplicate": true, "confidence": 0.92, "reasoning": "same"}'
-
-        fake_model = MagicMock()
-        fake_model.generate_content.return_value = fake_response
-
-        import types
-
-        fake_genai = MagicMock()
-        fake_genai.GenerativeModel.return_value = fake_model
-        fake_google = types.ModuleType("google")
-        fake_google.generativeai = fake_genai  # type: ignore[attr-defined]
-
-        with (
-            patch.dict(
-                "sys.modules",
-                {"google": fake_google, "google.generativeai": fake_genai},
-            ),
-            patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}),
-        ):
-            result = gm.ai_resolve_gemini(
-                a,
-                b,
-                credit_policy="best-effort",
-            )
-
-        assert result["is_duplicate"] is True
-        assert result["confidence"] == pytest.approx(0.92)
-
-
-# ---------------------------------------------------------------------------
 # Merge orchestration (unit – AI mocked)
 # ---------------------------------------------------------------------------
 
@@ -1220,16 +1065,19 @@ class TestMergeRecords:
             source_file="/b.ged",
         )
 
-        def fake_ai_resolve(rec_a, rec_b, backend="ollama", **kwargs):
+        def fake_ai_resolve(rec_a, rec_b):
             return {"is_duplicate": True, "confidence": 0.9, "reasoning": "same"}
 
-        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=fake_ai_resolve):
-            result = gm.merge_records([a, b], threshold=70, auto=True)
+        result = gm.merge_records(
+            [a, b],
+            threshold=70,
+            auto=True,
+            identity_resolver=fake_ai_resolve,
+        )
 
         assert len(result) == 1
 
-    def test_ai_error_falls_back_without_merge(self):
-        # When AI raises, the pair should NOT be merged (safe default).
+    def test_resolver_error_propagates_to_the_application_boundary(self):
         a = _make_record(
             pointer="@I1@",
             given_name="John",
@@ -1245,14 +1093,16 @@ class TestMergeRecords:
             source_file="/b.ged",
         )
 
-        def fail_ai(rec_a, rec_b, backend="ollama", **kwargs):
+        def fail_ai(rec_a, rec_b):
             raise RuntimeError("Ollama offline")
 
-        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=fail_ai):
-            # auto=True so operator prompt is bypassed; AI error → no merge.
-            result = gm.merge_records([a, b], threshold=70, auto=True)
-
-        assert len(result) == 2
+        with pytest.raises(RuntimeError, match="Ollama offline"):
+            gm.merge_records(
+                [a, b],
+                threshold=70,
+                auto=True,
+                identity_resolver=fail_ai,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1329,25 +1179,16 @@ class TestBuildArgParser:
         args = ap.parse_args(["a.ged", "b.ged", "-o", "master.ged"])
         assert args.output == "master.ged"
 
-    def test_ai_backend_default_is_ollama(self):
+    def test_internal_cli_defaults_to_offline_only(self):
         ap = gm._build_arg_parser()
         args = ap.parse_args(["a.ged", "b.ged"])
-        assert args.ai_backend == "ollama"
+        assert args.ai_backend == "none"
 
-    def test_ai_backend_gemini(self):
+    @pytest.mark.parametrize("backend", ["ollama", "openai", "gemini", "openrouter", "auto"])
+    def test_internal_cli_rejects_direct_provider_backends(self, backend: str):
         ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged", "--ai-backend", "gemini"])
-        assert args.ai_backend == "gemini"
-
-    def test_ai_backend_openrouter(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged", "--ai-backend", "openrouter"])
-        assert args.ai_backend == "openrouter"
-
-    def test_credit_check_defaults_to_required(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged"])
-        assert args.credit_check == "required"
+        with pytest.raises(SystemExit):
+            ap.parse_args(["a.ged", "b.ged", "--ai-backend", backend])
 
     def test_auto_flag(self):
         ap = gm._build_arg_parser()

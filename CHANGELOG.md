@@ -10,6 +10,26 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 - Release automation and evidence gates for future CLI releases.
 
+### Changed
+
+- Routed GEDCOM merge, incremental update, and quality assistance exclusively
+  through the modular provider service, including operational named profiles,
+  shared Ollama clients, bounded scheduling, exact-result single-flight
+  caching, and privacy-minimal audit telemetry.
+
+### Security
+
+- Removed legacy direct GEDCOM/OCR provider paths and environment-based
+  selection. Provider `none` remains socket-free with credentials, SDKs, and
+  profiles configured; cloud consent is bound to the exact profile/endpoint.
+- Classified non-loopback Ollama endpoints as remote, bounded single-flight
+  admissions, made retry backoff cancellation-aware, prevented duplicate
+  retained cache payloads, and rejected non-finite or low-confidence automatic
+  identity merges.
+- Required possibly-living-person consent for every remote identity prompt
+  because bounded relative context can include people whose living status is
+  unknown.
+
 ## [0.2.0] - Unreleased
 
 ### Added

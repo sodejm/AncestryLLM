@@ -5,16 +5,27 @@ The supported GEDCOM and RootsMagic command syntax is maintained in
 profiles, connected/ancestor/descendant scopes, optional generation limits, and
 GEDCOM 5.5.5 with a deliberate 5.5.1 fallback.
 
-The internal characterization CLI still recognizes `--quality-report`,
-`--no-quality-report`, `--quality-root-person`, and `--quality-ai`; application
-callers should use the service and unified command options documented by
-`ancestry --help`.
+The internal characterization CLI recognizes `--quality-report`,
+`--no-quality-report`, `--quality-root-person`, and the compatibility spelling
+`--ai-backend none`. It is deliberately offline-only. Identity adjudication,
+incremental matching, and quality refinement use the unified application
+service and explicit `--provider`, `--model`, and `--consent` options documented
+by `ancestry --help`. `--provider PROFILE` uses the profile's model, endpoint,
+execution limits, shared client, and exact-cache policy; direct built-in
+selection requires `--model`.
 
 The merge engine preserves custom/vendor structures, citations, conflicting
 facts, family links, and stable pointers whenever representable. Optional LLM
 adjudication may identify likely duplicates but cannot delete conflicting
 evidence. Incremental sync never automatically deletes people, relationships,
 cited facts, protected baseline/manual content, families, or sources.
+Optional provider output reaches the deterministic engine only through narrow
+resolver contracts. A timeout, cancellation, consent denial, malformed
+response, or provider failure aborts the operation with a stable coded error;
+it cannot publish a partial synchronization bundle or weaken preservation
+rules. Identity confidence must be finite and between zero and one. An
+automatic merge accepts a provider duplicate decision only at or above the
+conservative confidence floor; lower-confidence pairs remain separate.
 
 The safe offline fixture demo uses `quality-source-a.ged`,
 `quality-source-b.ged`, and root `Maren Hollow`:

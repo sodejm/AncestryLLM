@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.gedcom import engine
+from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolution, QualityResolver
 from ancestryllm.gedcom.graph import scoped_tree_pointers
 from ancestryllm.gedcom.sync import run_sync
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
@@ -25,8 +26,16 @@ class GedcomOperationResult:
 
 
 class GedcomService:
-    def __init__(self, llm: LLMService | None = None) -> None:
+    def __init__(
+        self,
+        llm: LLMService | None = None,
+        *,
+        consent_lookup: Callable[[str], ConsentGrant] | None = None,
+        provider_timeout_seconds: float = 60.0,
+    ) -> None:
         self.llm = llm
+        self.consent_lookup = consent_lookup
+        self.provider_timeout_seconds = provider_timeout_seconds
 
     @staticmethod
     def _people_and_sources(
@@ -41,23 +50,26 @@ class GedcomService:
         ]
         return sources, source_records, engine.enrich_relationship_context(people, source_records)
 
-    def _resolver(
+    def _require_provider(self, provider_id: str) -> LLMService:
+        if provider_id == "none":
+            raise AncestryError(
+                "PROVIDER_REQUIRED",
+                "This operation requires an explicitly selected provider.",
+            )
+        if self.llm is None:
+            raise AncestryError("LLM_SERVICE_UNAVAILABLE", "No modular LLM service is configured.")
+        return self.llm
+
+    def _identity_resolver(
         self,
         provider_id: str,
         model: str,
         consent: ConsentGrant | None,
-    ) -> Callable[[Any, Any], dict[str, object]]:
-        if self.llm is None:
-            raise AncestryError("LLM_SERVICE_UNAVAILABLE", "No modular LLM service is configured.")
-        llm = self.llm
+    ) -> IdentityResolver:
+        llm = self._require_provider(provider_id)
 
         def resolve(left: Any, right: Any) -> dict[str, object]:
             schema: dict[str, object] = engine._dedup_response_schema()
-            data_class = (
-                DataClass.DECEASED_PERSON
-                if getattr(left, "death_date", "") and getattr(right, "death_date", "")
-                else DataClass.POSSIBLY_LIVING_PERSON
-            )
             request = GenerationRequest(
                 provider_id=provider_id,
                 model=model,
@@ -78,16 +90,103 @@ class GedcomService:
                     ),
                 ),
                 response_schema=schema,
-                data_classes=frozenset({data_class}),
+                data_classes=frozenset({DataClass.POSSIBLY_LIVING_PERSON}),
                 max_output_tokens=1_000,
+                timeout_seconds=self.provider_timeout_seconds,
             )
             result = llm.generate(request, consent)
-            verdict = result.parsed if isinstance(result.parsed, dict) else {}
-            verdict["_provider"] = provider_id
-            verdict["_model"] = model
+            if not isinstance(result.parsed, dict):
+                raise ProviderError(
+                    "PROVIDER_OUTPUT_INVALID",
+                    "The model returned an invalid identity decision.",
+                    "Retry with a model that supports the required structured output.",
+                    details={"result_type": type(result.parsed).__name__},
+                )
+            verdict = dict(result.parsed)
+            verdict["_provider"] = result.provider_id
+            verdict["_model"] = result.model
             return verdict
 
         return resolve
+
+    def _quality_resolver(
+        self,
+        provider_id: str,
+        model: str,
+        consent: ConsentGrant | None,
+    ) -> QualityResolver:
+        llm = self._require_provider(provider_id)
+
+        def resolve(report: engine.QualityReport) -> QualityResolution:
+            request = GenerationRequest(
+                provider_id=provider_id,
+                model=model,
+                module_id="gedcom",
+                purpose="quality_refinement",
+                messages=(
+                    Message(
+                        role="system",
+                        content=(
+                            "Explain deterministic quality findings only. "
+                            "Never alter genealogy evidence or assert new facts."
+                        ),
+                    ),
+                    Message(
+                        role="user",
+                        content=(
+                            "<untrusted_genealogy_findings>\n"
+                            + engine._build_quality_prompt(report)
+                            + "\n</untrusted_genealogy_findings>"
+                        ),
+                    ),
+                ),
+                response_schema=engine._quality_response_schema(),
+                data_classes=frozenset({DataClass.POSSIBLY_LIVING_PERSON}),
+                max_output_tokens=2_000,
+                timeout_seconds=self.provider_timeout_seconds,
+            )
+            result = llm.generate(request, consent)
+            if not isinstance(result.parsed, dict):
+                raise ProviderError(
+                    "PROVIDER_OUTPUT_INVALID",
+                    "The model returned invalid quality annotations.",
+                    "Retry with a model that supports the required structured output.",
+                    details={"result_type": type(result.parsed).__name__},
+                )
+            allowed = {finding.finding_id for finding in report.findings[: engine.QUALITY_AI_LIMIT]}
+            try:
+                annotations = engine._quality_annotations_from_payload(result.parsed, allowed)
+            except (TypeError, ValueError) as exc:
+                raise ProviderError(
+                    "PROVIDER_OUTPUT_INVALID",
+                    "The model returned invalid quality annotations.",
+                    "Retry with a model that supports the required structured output.",
+                    details={"error_type": type(exc).__name__},
+                ) from exc
+            return QualityResolution(
+                annotations=annotations,
+                provider_id=result.provider_id,
+                model=result.model,
+                remote=result.remote,
+            )
+
+        return resolve
+
+    def _sync_identity_resolver(
+        self,
+        provider_id: str,
+        model: str,
+        consent_name: str | None,
+    ) -> IdentityResolver:
+        consent: ConsentGrant | None = None
+        if consent_name:
+            if self.consent_lookup is None:
+                raise AncestryError(
+                    "CONSENT_SERVICE_UNAVAILABLE",
+                    "The configured consent profile cannot be resolved.",
+                )
+            consent = self.consent_lookup(consent_name)
+        return self._identity_resolver(provider_id, model, consent)
 
     def merge(
         self,
@@ -115,23 +214,16 @@ class GedcomService:
         sources, source_records, people = self._people_and_sources(resolved_inputs)
         pointer_map: dict[str, str] = {}
         decisions: list[engine.MergeDecision] = []
-        backend = "none"
-        ai_kwargs: dict[str, object] = {}
+        resolver: IdentityResolver | None = None
         if provider_id != "none":
-            if not model:
-                raise AncestryError(
-                    "PROVIDER_MODEL_REQUIRED", "A model is required when AI is enabled."
-                )
-            backend = "modular"
-            ai_kwargs["resolver"] = self._resolver(provider_id, model, consent)
+            resolver = self._identity_resolver(provider_id, model, consent)
         merged = engine.merge_records(
             people,
-            threshold,
-            backend,
-            True,
-            ai_kwargs,
-            pointer_map,
-            decisions,
+            threshold=threshold,
+            auto=True,
+            identity_resolver=resolver,
+            pointer_map=pointer_map,
+            decisions=decisions,
         )
         include_people: set[str] | None = None
         include_families: set[str] | None = None
@@ -207,7 +299,16 @@ class GedcomService:
         )
         return GedcomOperationResult(output_path, len(people), len(keep_people))
 
-    def quality(self, input_file: Path, output: Path, *, root_person: str) -> Path:
+    def quality(
+        self,
+        input_file: Path,
+        output: Path,
+        *,
+        root_person: str,
+        provider_id: str = "none",
+        model: str = "",
+        consent: ConsentGrant | None = None,
+    ) -> Path:
         sources, source_records, people = self._people_and_sources(
             [input_file.expanduser().resolve()]
         )
@@ -215,9 +316,14 @@ class GedcomService:
         report = engine.analyze_quality(
             people, source_records, sources, root_pointer, output_file=str(input_file)
         )
+        if provider_id != "none":
+            report = engine.refine_quality_report_with_ai(
+                report,
+                self._quality_resolver(provider_id, model, consent),
+            )
         output_path = output.expanduser().resolve()
         engine.write_quality_report(report, output_path)
         return output_path
 
     def sync(self, arguments: list[str]) -> int:
-        return run_sync(arguments)
+        return run_sync(arguments, resolver_factory=self._sync_identity_resolver)

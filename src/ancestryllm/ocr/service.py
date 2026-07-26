@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
-from ancestryllm.ocr.legacy_gemini import normalize_transcription
 
 GENEALOGY_SCHEMA = {
     "type": "object",
@@ -28,6 +29,23 @@ GENEALOGY_SCHEMA = {
     "required": ["people"],
     "additionalProperties": False,
 }
+
+
+def normalize_transcription(text: str) -> str:
+    """Normalize OCR text deterministically before it reaches a provider adapter."""
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    cleaned_lines: list[str] = []
+    seen_lines: set[str] = set()
+    for raw_line in ascii_text.splitlines():
+        line = " ".join(raw_line.split())
+        if not line or line in seen_lines:
+            continue
+        seen_lines.add(line)
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
 
 
 class OcrService:
