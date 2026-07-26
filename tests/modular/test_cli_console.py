@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -297,7 +298,9 @@ def test_action_matrix_covers_every_shipped_module_action(
     assert covered == shipped
 
 
-@pytest.mark.parametrize("case_index", range(21))
+@pytest.mark.parametrize(
+    "case_index", range(sum(len(descriptor.actions) for descriptor in BUILTIN_MODULES.values()))
+)
 def test_one_shot_returns_expected_dtos_for_every_action(
     case_index: int,
     command_cases: tuple[CommandCase, ...],
@@ -406,9 +409,28 @@ def test_invalid_values_missing_files_and_json_parser_failures_are_sanitized(
     assert "[INPUT_ERROR]" in capsys.readouterr().err
 
 
-def test_disabled_modules_are_not_imported(app_context: AppContext) -> None:
+def test_disabled_modules_are_not_imported_or_dispatched(
+    app_context: AppContext, capsys: pytest.CaptureFixture[str]
+) -> None:
     app_context.config.enabled_modules = {"gedcom"}
     assert [item.module_id for item in ModuleRegistry(app_context).descriptors()] == ["gedcom"]
+    assert (
+        main(
+            [
+                "ocr",
+                "extract",
+                "--input",
+                "missing-fictional-input.txt",
+                "--provider",
+                "none",
+                "--model",
+                "offline",
+            ],
+            app_context,
+        )
+        == 2
+    )
+    assert "[MODULE_DISABLED] Module is not enabled: ocr." in capsys.readouterr().err
 
 
 def test_secret_values_never_reach_one_shot_status_output(
@@ -433,19 +455,61 @@ def test_database_diagnostics_are_available_as_json(app_context: AppContext, cap
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert (3, 12) <= sys.version_info[:2] < (3, 15)
     repository = Path(__file__).resolve().parents[2]
-    environment = tmp_path / "clean-install" / "site-packages"
-    shutil.copytree(
-        repository / "src" / "ancestryllm",
-        environment / "ancestryllm",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    wheelhouse = tmp_path / "wheelhouse"
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required by the locked build workflow"
+    build = subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(wheelhouse)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=repository,
     )
-    ancestry = tmp_path / "clean-install" / "bin" / "ancestry"
-    ancestry.parent.mkdir()
-    ancestry.write_text(
-        f"#!{sys.executable}\nfrom ancestryllm.cli import main\nraise SystemExit(main())\n",
-        encoding="utf-8",
+    assert build.returncode == 0, build.stderr
+    wheel = next(wheelhouse.glob("ancestryllm-*.whl"))
+
+    environment = tmp_path / "clean-install"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    scripts = environment / ("Scripts" if os.name == "nt" else "bin")
+    python = scripts / ("python.exe" if os.name == "nt" else "python")
+    requirements = tmp_path / "requirements.txt"
+    export = subprocess.run(
+        [
+            uv,
+            "export",
+            "--locked",
+            "--no-emit-project",
+            "--no-hashes",
+            "--output-file",
+            str(requirements),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=repository,
     )
-    ancestry.chmod(0o755)
+    assert export.returncode == 0, export.stderr
+    install = subprocess.run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--requirement",
+            str(requirements),
+            "--no-deps",
+            str(wheel),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert install.returncode == 0, install.stderr
+
     isolated_home = tmp_path / "fictional-home"
     isolated_home.mkdir()
     child_environment = {
@@ -453,12 +517,25 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         "HOME": str(isolated_home),
         "XDG_CONFIG_HOME": str(isolated_home / "config"),
         "XDG_DATA_HOME": str(isolated_home / "data"),
-        "PYTHONPATH": str(environment),
     }
+    child_environment.pop("PYTHONPATH", None)
+
+    location = subprocess.run(
+        [str(python), "-I", "-c", "import ancestryllm; print(ancestryllm.__file__)"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=child_environment,
+        cwd=isolated_home,
+        timeout=30,
+    )
+    assert location.returncode == 0, location.stderr
+    assert str(environment) in location.stdout
+    assert str(repository) not in location.stdout
 
     for command in (
-        [str(ancestry), "--json", "modules", "list"],
-        [sys.executable, "-m", "ancestryllm", "--json", "modules", "list"],
+        [str(scripts / "ancestry"), "--json", "modules", "list"],
+        [str(python), "-I", "-m", "ancestryllm", "--json", "modules", "list"],
     ):
         completed = subprocess.run(
             command,

@@ -15,6 +15,7 @@ from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import (
+    BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     GLOBAL_ARGUMENTS,
     ActionSpec,
@@ -142,6 +143,14 @@ def dispatch(
             registry.disable(args.module_id)
             emit(f"Disabled module: {args.module_id}", json_output)
         return 0
+
+    if args.command in BUILTIN_MODULES and args.command not in context.config.enabled_modules:
+        raise AncestryError(
+            "MODULE_DISABLED",
+            f"Module is not enabled: {args.command}.",
+            remediation="Enable it with `ancestry modules enable MODULE` before running an action.",
+            exit_code=2,
+        )
 
     if args.command == "rootsmagic":
         from ancestryllm.rootsmagic.service import RootsMagicService

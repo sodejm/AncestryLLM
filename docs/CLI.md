@@ -24,9 +24,19 @@ dispatcher, so command syntax and coded errors are the same.
 | `database` | `backup DESTINATION` | Create an encrypted workspace backup. |
 
 `modules` only enables or disables built-in modules. It never discovers or
-loads third-party code. The first command using the research workspace creates
+loads third-party code. Disabling a module prevents its actions from running in
+both one-shot and console use; re-enable it explicitly before use. The first
+command using the research workspace creates
 an encrypted SQLCipher database; its random key is stored only in the OS
 credential store.
+
+## Exit codes
+
+One-shot commands return `0` on success. A stable, bracketed application error
+returns its documented error exit code (normally `1`); parser, input, and local
+filesystem failures return `2`. The console keeps running after a failed
+command and renders the same stable error code without a traceback. `Ctrl-C`
+interrupts the current prompt and EOF exits the console cleanly.
 
 ## Common examples
 
