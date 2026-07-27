@@ -31,6 +31,26 @@ class ConfigurationError(AncestryError):
     """Invalid or unsafe application configuration."""
 
 
+class FileIngressError(AncestryError):
+    """A bounded file read failed without exposing a path or payload."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        remediation: str | None = None,
+        exit_code: int = 2,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            code,
+            message,
+            remediation,
+            exit_code,
+            details if details is not None else {},
+        )
+
+
 class SecurityPolicyError(AncestryError):
     """A requested operation violates an explicit security policy."""
 

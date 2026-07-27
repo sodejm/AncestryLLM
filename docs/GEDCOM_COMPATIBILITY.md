@@ -5,14 +5,14 @@ The supported GEDCOM and RootsMagic command syntax is maintained in
 profiles, connected/ancestor/descendant scopes, optional generation limits, and
 GEDCOM 5.5.5 with a deliberate 5.5.1 fallback.
 
-The internal characterization CLI recognizes `--quality-report`,
-`--no-quality-report`, `--quality-root-person`, and the compatibility spelling
-`--ai-backend none`. It is deliberately offline-only. Identity adjudication,
-incremental matching, and quality refinement use the unified application
-service and explicit `--provider`, `--model`, and `--consent` options documented
-by `ancestry --help`. `--provider PROFILE` uses the profile's model, endpoint,
-execution limits, shared client, and exact-cache policy; direct built-in
-selection requires `--model`.
+The supported merge command recognizes `--quality-report`, `--root-person`,
+`--provider`, `--model`, and `--consent` as documented by `ancestry gedcom merge
+--help`. The fixture quickstart uses this public modular command with
+`--provider none`; it does not invoke the internal characterization CLI.
+Identity adjudication, incremental matching, and quality refinement use the
+unified application service. `--provider PROFILE` uses the profile's model,
+endpoint, execution limits, shared client, and exact-cache policy; direct
+built-in selection requires `--model`.
 
 The merge engine preserves custom/vendor structures, citations, conflicting
 facts, family links, and stable pointers whenever representable. Optional LLM
@@ -33,6 +33,10 @@ The safe offline fixture demo uses `quality-source-a.ged`,
 ```bash
 scripts/gedcom_merge_quickstart.sh --skip-install
 ```
+
+Both CLI invocations isolate their non-secret configuration and data
+directories beneath the timestamped run directory. The demo does not create or
+modify the caller's normal AncestryLLM or XDG configuration/data directories.
 
 Automated validation does not establish product interoperability. Before
 claiming a release interoperable, complete the dated vendor evidence matrix in

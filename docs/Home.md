@@ -9,6 +9,10 @@ Start with the [CLI reference](CLI.md) for one-shot commands or the
 privacy controls, providers, GEDCOM interoperability, backups, release
 operations, and security practices.
 
+All user-selected files are governed by the shared
+[bounded file-ingress policy](FILE_INGRESS.md), including byte and record
+budgets, race detection, output alias rejection, and transactional publication.
+
 ## Documentation links
 
 Documentation links use relative Markdown filenames (for example,

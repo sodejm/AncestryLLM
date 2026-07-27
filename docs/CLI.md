@@ -4,6 +4,9 @@ This is the canonical reference for the supported `ancestry` command line.
 Run `ancestry --help` or append `--help` to a command family for the exact
 parser help for the installed version. Use `--config PATH` to select a
 non-secret `config.toml`, and `--json` when a script needs serializable output.
+All user-selected inputs use the documented
+[bounded file-ingress policy](FILE_INGRESS.md); one-shot and interactive
+commands return the same stable file error codes.
 
 Run `ancestry` with no arguments to open the interactive console; see
 [the console guide](CONSOLE.md). The console and one-shot commands share action
@@ -82,7 +85,19 @@ profile and matching consent when its provider is not `none`.
 
 `rootsmagic export` requires `--tree` and `--output`; select `portable` or
 `preservation` output, GEDCOM `5.5.5` or `5.5.1`, destination, scope, generation
-limit, living-person handling, and an optional loss report as needed.
+limit, living-person handling, and an optional loss report as needed. The output
+and optional report parent directories must already exist; a rejected export
+does not create parent directory trees.
+Close RootsMagic before querying or exporting: the CLI rejects databases with
+an existing SQLite `-wal`, `-shm`, or rollback `-journal` sidecar before it
+hashes, copies, opens, or sends schema information to a provider.
+It also rejects hard-linked database aliases because SQLite sidecars are named
+for one pathname; use a standalone stable backup with a link count of one.
+Configured family-tree directories are identity-bound for each command. A
+parent-directory symbolic-link or junction swap fails before rows, schema, or
+export content can be consumed, and malformed export/report path expansion
+uses the same sanitized `FILE_INPUT_UNREADABLE` code in one-shot and
+interactive use.
 
 `gedcom merge INPUT... --output OUTPUT` accepts optional root-person, quality
 report, GEDCOM version, duplicate-similarity threshold, and explicit
@@ -98,6 +113,16 @@ preservation and interoperability rules.
 the incremental-sync CLI. Use `ancestry gedcom sync update --help` or
 `ancestry gedcom sync rebase --help` before operating on a master or manifest;
 these workflows preserve protected and manually curated material by default.
+The release root itself may be new, but its parent directory must already exist;
+a rejected synchronization does not create ancestor directory trees.
+On a failed or cancelled POSIX publication, AncestryLLM fails closed rather
+than issuing a name-bound directory deletion that could remove a concurrent
+replacement. An empty app-owned `.gedcom-*` or
+`.ancestryllm-release-root-*` directory can therefore remain for manual
+inspection and removal; it contains no committed release. A
+`SYNC_PUBLICATION_INCOMPLETE` error (exit `7`) instead means a generation
+directory with an ownership marker may remain. Do not use or rename that
+generation as a release; follow the coded remediation before retrying.
 Update defaults to `--provider none`. Optional identity adjudication accepts
 either `--provider PROFILE` (the profile supplies its model and settings) or a
 built-in `--provider PROVIDER --model MODEL`. A direct remote selection also
@@ -119,11 +144,13 @@ person also accepts `--living-status` and `--notes`. `database backup
 DESTINATION` writes an encrypted backup. Keep backups and all genealogy data
 outside version control.
 
-`ocr extract --input FILE --provider PROFILE` reads UTF-8 text and rejects
-inputs over 5 MB. A built-in provider selected without a named profile also
-requires `--model MODEL`. Because OCR sends source material to a provider, a
-remote profile requires its exact matching consent unless policy denies the
-request first.
+`ocr extract --input FILE --provider PROFILE` reads bounded UTF-8 text and
+rejects inputs over 5,000,000 bytes by default. Config, JSON manifest/schema,
+OCR, and prompt-body inputs are UTF-8; GEDCOM additionally accepts BOM-declared
+UTF-16. A built-in provider selected without a named profile also requires
+`--model MODEL`. Because OCR sends source material to a provider, a remote
+profile requires its exact matching consent unless policy denies the request
+first.
 
 ### Providers and secrets
 
