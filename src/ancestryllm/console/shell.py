@@ -85,8 +85,11 @@ class ReplApplication:
         stdout: TextIO | None = None,
         stderr: TextIO | None = None,
         jobs: JobManager | None = None,
+        owns_context: bool = False,
     ) -> None:
         self.context = context
+        self._owns_context = owns_context
+        self._owned_context_closed = False
         self.router = SessionRouter(context)
         self.safe_root = (safe_root or Path.cwd()).resolve()
         self.stdout = RedactingTextIO(stdout or sys.stdout, context)
@@ -136,15 +139,60 @@ class ReplApplication:
                 try:
                     command = await self.session.prompt_async(self.router.prompt)
                 except EOFError:
-                    return 0
+                    if await self._confirm_exit("EOF"):
+                        return 0
+                    continue
                 except KeyboardInterrupt:
+                    self._cancel_foreground()
                     continue
                 if await self.execute_line(command):
                     return 0
         finally:
-            await asyncio.to_thread(self.jobs.shutdown, wait=True)
-            self._unsubscribe_progress()
-            self.progress_display.close()
+            await self._shutdown()
+
+    async def _shutdown(self) -> None:
+        """Drain workers before closing resources, even if this task is cancelled."""
+
+        shutdown_task = asyncio.create_task(asyncio.to_thread(self.jobs.shutdown, wait=True))
+        pending_cancellation: asyncio.CancelledError | None = None
+        while not shutdown_task.done():
+            try:
+                await asyncio.shield(shutdown_task)
+            except asyncio.CancelledError as exc:
+                if pending_cancellation is None:
+                    pending_cancellation = exc
+            except BaseException:  # noqa: BLE001 - re-raised after resource closure
+                break
+
+        shutdown_error: BaseException | None = None
+        try:
+            shutdown_task.result()
+        except BaseException as exc:  # noqa: BLE001 - later resources must still close
+            shutdown_error = exc
+
+        close_error: BaseException | None = None
+        close_callbacks = [self._unsubscribe_progress, self.progress_display.close]
+        if self._owns_context:
+            close_callbacks.append(self._close_owned_context)
+        for close in close_callbacks:
+            try:
+                close()
+            except BaseException as exc:  # noqa: BLE001 - later resources must still close
+                if close_error is None:
+                    close_error = exc
+
+        if pending_cancellation is not None:
+            raise pending_cancellation
+        if shutdown_error is not None:
+            raise shutdown_error
+        if close_error is not None:
+            raise close_error
+
+    def _close_owned_context(self) -> None:
+        if self._owned_context_closed:
+            return
+        self._owned_context_closed = True
+        self.context.close()
 
     async def execute_line(self, command: str) -> bool:
         for value in credential_values(command):
@@ -154,7 +202,7 @@ class ReplApplication:
                 return False
             result = await self._route(command)
             if result.kind is RouteKind.EXIT:
-                return True
+                return await self._confirm_exit(str(result.value or "exit"))
             if result.kind is RouteKind.EMPTY:
                 return False
             if result.kind is RouteKind.OUTPUT:
@@ -219,11 +267,75 @@ class ReplApplication:
         if len(tokens) == 3 and tokens[1].casefold() == "show":
             self.presenter.render(self.jobs.get(tokens[2]))
             return True
+        if len(tokens) == 3 and tokens[1].casefold() == "cancel":
+            snapshot = self.jobs.cancel(tokens[2])
+            self.presenter.render(
+                {
+                    "job_id": snapshot.job_id,
+                    "state": snapshot.state,
+                    "cancellation_requested": snapshot.cancellation_requested_at is not None,
+                    "cancellation_pending": snapshot.cancellation_pending,
+                }
+            )
+            return True
         raise AncestryError(
             "REPL_USAGE_ERROR",
-            "Usage: jobs [list|show JOB_ID]",
+            "Usage: jobs [list|show JOB_ID|cancel JOB_ID]",
             exit_code=2,
         )
+
+    def _cancel_foreground(self) -> None:
+        snapshot = self.jobs.cancel_foreground()
+        if snapshot is None:
+            return
+        self.presenter.render(
+            {
+                "job_id": snapshot.job_id,
+                "state": snapshot.state,
+                "cancellation_requested": True,
+                "cancellation_pending": snapshot.cancellation_pending,
+            }
+        )
+
+    async def _confirm_exit(self, trigger: str) -> bool:
+        active = self.jobs.active()
+        if not active:
+            return True
+        job_ids = ", ".join(snapshot.job_id for snapshot in active)
+        prompt = f"{len(active)} active job(s) ({job_ids}). Choose wait, cancel, or stay [w/c/s]: "
+        while True:
+            try:
+                answer = (await self.session.prompt_async(prompt)).strip().casefold()
+            except KeyboardInterrupt:
+                self.presenter.render("Exit cancelled; active jobs are still running.")
+                return False
+            except EOFError:
+                self.presenter.render(
+                    "Input closed with active jobs; waiting for safe shutdown before exit."
+                )
+                return True
+            if answer in {"w", "wait"}:
+                self.presenter.render("Waiting for active jobs before exit.")
+                return True
+            if answer in {"c", "cancel"}:
+                cancelled = self.jobs.cancel_all()
+                self.presenter.render(
+                    {
+                        "exit": trigger,
+                        "cancellation_requested": [item.job_id for item in cancelled],
+                    }
+                )
+                return True
+            if answer in {"s", "stay"}:
+                self.presenter.render("Exit cancelled; active jobs are still running.")
+                return False
+            self.error_presenter.render_error(
+                AncestryError(
+                    "REPL_EXIT_DECISION_REQUIRED",
+                    "Choose wait, cancel, or stay before exiting with active jobs.",
+                    exit_code=2,
+                )
+            )
 
     @staticmethod
     def _should_background(namespace: argparse.Namespace) -> bool:
@@ -238,10 +350,12 @@ class ReplApplication:
         reporter.update(f"{namespace.command} {namespace.action}")
 
         def capture(value: object, _json_output: bool = False) -> None:
+            reporter.check_cancelled()
             plain = to_plain(value)
             output.append(redact_object(plain, self.context.secrets.redact))
 
         exit_code = dispatch(namespace, self.context, emit=capture)
+        reporter.check_cancelled()
         return {"exit_code": exit_code, "output": output}
 
     def _resource_keys(self, namespace: argparse.Namespace) -> tuple[str, ...]:
@@ -351,11 +465,10 @@ def run_repl(context: AppContext | None = None) -> int:
 
     async def run() -> int:
         selected_context = context or AppContext.build()
-        try:
-            with patch_stdout(raw=True):
-                return await ReplApplication(selected_context).run_async()
-        finally:
-            if context is None:
-                selected_context.close()
+        with patch_stdout(raw=True):
+            return await ReplApplication(
+                selected_context,
+                owns_context=context is None,
+            ).run_async()
 
     return asyncio.run(run())

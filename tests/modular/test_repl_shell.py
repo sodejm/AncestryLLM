@@ -24,6 +24,7 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from ancestryllm.console.router import RouteKind, RouteResult
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileKind
@@ -194,6 +195,118 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
         monkeypatch.setattr(application.session, "prompt_async", next_prompt)
 
         assert asyncio.run(application.run_async()) == 0
+
+
+def test_ctrl_c_requests_foreground_cancellation_without_terminating_repl(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+
+    def fake_dispatch(
+        _namespace: argparse.Namespace,
+        _context: AppContext,
+        *,
+        emit,
+    ) -> int:
+        del emit
+        started.set()
+        for _ in range(300):
+            cancellation_checkpoint()
+            threading.Event().wait(0.01)
+        return 0
+
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(shell_module, "dispatch", fake_dispatch)
+        prompts = 0
+
+        async def next_prompt(_prompt: str) -> str:
+            nonlocal prompts
+            prompts += 1
+            if prompts == 1:
+                return "rootsmagic query --tree fictional --question 'Who is Ada?'"
+            if prompts == 2:
+                assert await asyncio.to_thread(started.wait, 2)
+                raise KeyboardInterrupt
+            job = application.jobs.list()[0]
+            await asyncio.to_thread(application.jobs.wait, job.job_id, 2)
+            return "exit"
+
+        monkeypatch.setattr(application.session, "prompt_async", next_prompt)
+        assert asyncio.run(application.run_async()) == 0
+
+    snapshot = application.jobs.list()[0]
+    assert prompts == 3
+    assert snapshot.state.value == "cancelled"
+    assert snapshot.error_code == "JOB_CANCELLED"
+    assert snapshot.cancellation_requested_at is not None
+    assert '"cancellation_requested": true' in stdout.getvalue()
+
+
+def test_jobs_cancel_requests_cooperative_cancellation(
+    shell_module,
+    app_context: AppContext,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def work(reporter) -> None:
+        started.set()
+        assert release.wait(2)
+        reporter.check_cancelled()
+
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        job = application.jobs.submit_with_progress("fictional active job", work)
+        assert started.wait(2)
+        assert asyncio.run(application.execute_line(f"jobs cancel {job.job_id}")) is False
+        release.set()
+        cancelled = application.jobs.wait(job.job_id, timeout=2)
+        application.jobs.shutdown()
+
+    assert cancelled.state.value == "cancelled"
+    assert '"cancellation_requested": true' in stdout.getvalue()
+
+
+def test_exit_with_active_jobs_requires_explicit_cancel_wait_or_stay_decision(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def cancellable(reporter) -> None:
+        started.set()
+        while not release.is_set():
+            reporter.check_cancelled()
+            threading.Event().wait(0.01)
+
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        job = application.jobs.submit_with_progress("fictional active job", cancellable)
+        try:
+            assert started.wait(2)
+            answers = iter(("invalid", "stay", "cancel"))
+
+            async def answer_exit(_prompt: str) -> str:
+                return next(answers)
+
+            monkeypatch.setattr(application.session, "prompt_async", answer_exit)
+            assert asyncio.run(application.execute_line("exit")) is False
+            assert application.jobs.get(job.job_id).state.value == "running"
+            assert asyncio.run(application.execute_line("quit")) is True
+            cancelled = application.jobs.wait(job.job_id, timeout=2)
+        finally:
+            release.set()
+            application.jobs.shutdown()
+
+    assert cancelled.state.value == "cancelled"
+    assert "REPL_EXIT_DECISION_REQUIRED" in stderr.getvalue()
+    assert "Exit cancelled" in stdout.getvalue()
+    assert '"cancellation_requested": [' in stdout.getvalue()
 
 
 def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdown(
@@ -1051,7 +1164,11 @@ def test_run_repl_uses_prompt_toolkit_stdout_patching(
             return 23
 
     monkeypatch.setattr(shell_module, "patch_stdout", stdout_patch)
-    monkeypatch.setattr(shell_module, "ReplApplication", lambda _context: FakeApplication())
+    monkeypatch.setattr(
+        shell_module,
+        "ReplApplication",
+        lambda _context, **_kwargs: FakeApplication(),
+    )
 
     assert shell_module.run_repl(app_context) == 23
     assert entered == [(True, True)]
