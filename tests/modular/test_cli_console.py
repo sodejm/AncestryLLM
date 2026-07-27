@@ -381,7 +381,7 @@ def test_invalid_values_missing_files_and_json_parser_failures_are_sanitized(
         == 2
     )
     missing_error = capsys.readouterr().err
-    assert "[INPUT_ERROR]" in missing_error
+    assert "[FILE_INPUT_UNREADABLE]" in missing_error
     assert "Traceback" not in missing_error
 
     invalid_schema = tmp_path / "invalid-schema.json"
@@ -403,7 +403,261 @@ def test_invalid_values_missing_files_and_json_parser_failures_are_sanitized(
         )
         == 2
     )
-    assert "[INPUT_ERROR]" in capsys.readouterr().err
+    assert "[FILE_JSON_INVALID]" in capsys.readouterr().err
+
+
+def test_explicit_config_launches_repl_and_json_alone_is_rejected(
+    tmp_path: Path,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    import ancestryllm.cli as cli
+    import ancestryllm.console.shell as shell
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[storage]\ndata_dir = "{tmp_path / "data"}"\n',
+        encoding="utf-8",
+    )
+    loaded = []
+    closed: list[bool] = []
+
+    class FakeContext:
+        def close(self) -> None:
+            closed.append(True)
+
+    fake_context = FakeContext()
+
+    def build_context(config):
+        loaded.append(config)
+        return fake_context
+
+    monkeypatch.setattr(cli.AppContext, "build", build_context)
+    monkeypatch.setattr(shell, "run_repl", lambda context: 17 if context is fake_context else 99)
+
+    assert main(["--config", str(config_path)]) == 17
+    assert main([f"--config={config_path}"]) == 17
+    assert [item.config_path for item in loaded] == [config_path, config_path]
+    assert closed == [True, True]
+
+    assert main(["--json"], app_context) == 2
+    assert "[ARGUMENT_INVALID]" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code", "expected_exit"),
+    (
+        (
+            AncestryError("REPL_START_FAILED", "Fictional startup failure.", exit_code=7),
+            "REPL_START_FAILED",
+            7,
+        ),
+        (OSError("PRIVATE raw startup failure"), "INPUT_ERROR", 2),
+    ),
+)
+def test_bare_repl_startup_failures_use_the_cli_error_boundary(
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    failure: Exception,
+    expected_code: str,
+    expected_exit: int,
+) -> None:
+    import ancestryllm.console.shell as shell
+
+    def fail_repl(_context: object) -> int:
+        raise failure
+
+    monkeypatch.setattr(shell, "run_repl", fail_repl)
+
+    assert main([], app_context) == expected_exit
+    rendered = capsys.readouterr().err
+    assert f"[{expected_code}]" in rendered
+    assert "PRIVATE" not in rendered
+
+
+def test_owned_context_cleanup_failure_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    import ancestryllm.cli as cli
+    import ancestryllm.console.shell as shell
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[storage]\ndata_dir = "{tmp_path / "data"}"\n',
+        encoding="utf-8",
+    )
+
+    class FakeContext:
+        def close(self) -> None:
+            raise OSError("PRIVATE cleanup failure")
+
+    monkeypatch.setattr(cli.AppContext, "build", lambda _config: FakeContext())
+    monkeypatch.setattr(shell, "run_repl", lambda _context: 17)
+
+    assert main(["--config", str(config_path)]) == 2
+    rendered = capsys.readouterr().err
+    assert "[INPUT_ERROR]" in rendered
+    assert "PRIVATE" not in rendered
+
+
+def test_missing_explicit_config_never_starts_repl_or_creates_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    import ancestryllm.console.shell as shell
+
+    missing = tmp_path / "private-missing-repl-config.toml"
+    data_dir = tmp_path / "must-not-exist"
+    repl_contexts: list[object] = []
+    monkeypatch.setenv("ANCESTRYLLM_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(
+        shell,
+        "run_repl",
+        lambda context: repl_contexts.append(context) or 0,
+    )
+
+    assert main(["--config", str(missing)]) == 2
+
+    rendered = capsys.readouterr().err
+    assert "[FILE_INPUT_UNREADABLE]" in rendered
+    assert str(missing) not in rendered
+    assert repl_contexts == []
+    assert not data_dir.exists()
+
+
+@pytest.mark.parametrize("failure", ("nul-data-dir", "family-tree-resolution"))
+def test_config_only_repl_normalizes_invalid_configured_paths_before_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    failure: str,
+) -> None:
+    import ancestryllm.console.shell as shell
+
+    configured = tmp_path / "private-unresolvable"
+    config_path = tmp_path / "config.toml"
+    if failure == "nul-data-dir":
+        payload = '[storage]\ndata_dir = "\\u0000private-data"\n'
+    else:
+        payload = f'[storage]\nfamily_tree_dirs = ["{configured}"]\n'
+        original_resolve = Path.resolve
+
+        def reject_configured_path(
+            path: Path,
+            *args: object,
+            **kwargs: object,
+        ) -> Path:
+            if path == configured:
+                raise OSError("private path resolution failure")
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", reject_configured_path)
+    config_path.write_text(payload, encoding="utf-8")
+    data_dir = tmp_path / "must-not-exist"
+    monkeypatch.setenv("ANCESTRYLLM_DATA_DIR", str(data_dir))
+    run_repl = Mock(return_value=0)
+    monkeypatch.setattr(shell, "run_repl", run_repl)
+
+    assert main(["--config", str(config_path)]) == 2
+
+    rendered = capsys.readouterr().err
+    expected_code = "FILE_NUL_BYTE_UNSUPPORTED" if failure == "nul-data-dir" else "CONFIG_INVALID"
+    assert f"[{expected_code}]" in rendered
+    assert "private-data" not in rendered
+    assert str(configured) not in rendered
+    assert "private path resolution failure" not in rendered
+    assert not data_dir.exists()
+    run_repl.assert_not_called()
+
+
+def test_explicit_missing_config_and_malformed_gedcom_are_sanitized(
+    tmp_path: Path,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    missing = tmp_path / "private-missing-config.toml"
+    data_dir = tmp_path / "must-not-exist"
+    monkeypatch.setenv("ANCESTRYLLM_DATA_DIR", str(data_dir))
+
+    assert main(["--config", str(missing), "modules", "list"]) == 2
+    config_error = capsys.readouterr().err
+    assert "[FILE_INPUT_UNREADABLE]" in config_error
+    assert str(missing) not in config_error
+    assert not data_dir.exists()
+
+    malformed = tmp_path / "private-malformed.ged"
+    private_line = "PRIVATE-PAYLOAD malformed genealogy"
+    malformed.write_text(f"0 HEAD\n{private_line}\n0 TRLR\n", encoding="utf-8")
+    valid = tmp_path / "valid.ged"
+    valid.write_text(
+        "0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output.ged"
+    output.write_bytes(b"sentinel\n")
+
+    assert (
+        main(
+            [
+                "gedcom",
+                "merge",
+                str(malformed),
+                str(valid),
+                "--output",
+                str(output),
+            ],
+            app_context,
+        )
+        == 2
+    )
+    gedcom_error = capsys.readouterr().err
+    assert "[GEDCOM_PARSE_INVALID]" in gedcom_error
+    assert private_line not in gedcom_error
+    assert str(malformed) not in gedcom_error
+    assert output.read_bytes() == b"sentinel\n"
+
+
+def test_one_shot_unresolved_gedcom_root_preserves_coded_sanitized_error(
+    tmp_path: Path,
+    app_context: AppContext,
+    capsys,
+) -> None:
+    source = tmp_path / "fictional-tree.ged"
+    source.write_text(
+        "0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "subtree.ged"
+    output.write_bytes(b"sentinel\n")
+    requested = "PRIVATE-PAYLOAD fictional root person"
+
+    assert (
+        main(
+            [
+                "gedcom",
+                "subtree",
+                str(source),
+                "--output",
+                str(output),
+                "--root-person",
+                requested,
+            ],
+            app_context,
+        )
+        == 2
+    )
+
+    rendered = capsys.readouterr().err
+    assert "[GEDCOM_ROOT_PERSON_UNRESOLVED]" in rendered
+    assert requested not in rendered
+    assert "ValueError" not in rendered
+    assert output.read_bytes() == b"sentinel\n"
 
 
 def test_disabled_modules_are_not_imported(app_context: AppContext) -> None:

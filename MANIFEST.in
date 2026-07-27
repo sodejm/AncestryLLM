@@ -5,10 +5,14 @@ include pyproject.toml
 prune docs
 include docs/CLI.md
 include docs/CONSOLE.md
+include docs/FILE_INGRESS.md
+include docs/GEDCOM_COMPATIBILITY.md
+include docs/PROVIDERS.md
 include docs/RELEASING.md
 include docs/SETUP_DIAGNOSTICS.md
 include docs/VERSIONING.md
 include docs/release-evidence/README.md
+include docs/release-evidence/issue-10-import-smoke-tests.md
 prune family_trees
 prune scripts
 prune tests

@@ -3,6 +3,7 @@
 - [Home](Home.md)
 - [CLI reference](CLI.md)
 - [Interactive console guide](CONSOLE.md)
+- [Bounded file ingress](FILE_INGRESS.md)
 - [Versioning and compatibility](VERSIONING.md)
 - [Release runbook](RELEASING.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)

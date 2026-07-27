@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from ancestryllm.core.errors import ProviderError
+from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.gedcom import engine as gm
 from ancestryllm.gedcom.contracts import QualityResolution
+from ancestryllm.gedcom.service import GedcomService
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_merge"
 SOURCE_A = FIXTURES / "quality-source-a.ged"
@@ -246,6 +249,50 @@ class TestAncestryAndDataQuality:
         assert first.findings[0].severity in {"critical", "high"}
 
 
+class TestGedcomServiceRootErrors:
+    """Keep root-resolution failures coded and free of genealogy values."""
+
+    @pytest.mark.parametrize("operation", ("merge", "subtree", "quality"))
+    def test_unresolved_root_is_a_sanitized_service_error(
+        self,
+        tmp_path: Path,
+        operation: str,
+    ) -> None:
+        requested = "PRIVATE-PAYLOAD fictional root person"
+        output = tmp_path / f"{operation}.out"
+        output.write_bytes(b"sentinel\n")
+        service = GedcomService()
+
+        with pytest.raises(AncestryError) as raised:
+            if operation == "merge":
+                service.merge(
+                    [SOURCE_A, SOURCE_B],
+                    output,
+                    root_person=requested,
+                )
+            elif operation == "subtree":
+                service.subtree(
+                    SOURCE_A,
+                    output,
+                    root_person=requested,
+                )
+            else:
+                service.quality(
+                    SOURCE_A,
+                    output,
+                    root_person=requested,
+                )
+
+        error = raised.value
+        assert error.code == "GEDCOM_ROOT_PERSON_UNRESOLVED"
+        assert error.exit_code == 2
+        assert error.details == {}
+        assert error.__context__ is None
+        assert requested not in error.render()
+        assert requested not in repr(error)
+        assert output.read_bytes() == b"sentinel\n"
+
+
 class TestMarkdownAndCli:
     """Verify atomic output, root semantics, defaults, and rejected syntax."""
 
@@ -426,11 +473,7 @@ class TestDocumentationContract:
             encoding="utf-8"
         )
         cli = (repository / "docs" / "CLI.md").read_text(encoding="utf-8")
-        for flag in (
-            "--quality-report",
-            "--no-quality-report",
-            "--quality-root-person",
-        ):
+        for flag in ("--quality-report", "--root-person", "--provider"):
             assert flag in compatibility
         for flag in ("--provider", "--model", "--consent"):
             assert flag in cli
@@ -452,12 +495,30 @@ class TestDocumentationContract:
 
     def test_documented_offline_demo_smoke(self, tmp_path: Path) -> None:
         script = Path(__file__).parents[1] / "scripts" / "gedcom_merge_quickstart.sh"
+        caller_config = tmp_path / "caller-config"
+        caller_data = tmp_path / "caller-data"
         result = subprocess.run(
             [str(script), "--skip-install", "--output-dir", str(tmp_path)],
             check=False,
             capture_output=True,
             text=True,
             timeout=30,
+            env={
+                **os.environ,
+                "ANCESTRYLLM_PYTHON": sys.executable,
+                "ANCESTRYLLM_CONFIG_DIR": str(caller_config),
+                "ANCESTRYLLM_DATA_DIR": str(caller_data),
+                "XDG_CONFIG_HOME": str(tmp_path / "caller-xdg-config"),
+                "XDG_DATA_HOME": str(tmp_path / "caller-xdg-data"),
+            },
         )
         assert result.returncode == 0, result.stderr
         assert "GEDCOM merge demo passed" in result.stdout
+        assert not caller_config.exists()
+        assert not caller_data.exists()
+        assert not (tmp_path / "caller-xdg-config").exists()
+        assert not (tmp_path / "caller-xdg-data").exists()
+        runs = list(tmp_path.glob("gedcom-merge-*"))
+        assert len(runs) == 1
+        assert (runs[0] / ".ancestryllm" / "config").is_dir()
+        assert (runs[0] / ".ancestryllm" / "data").is_dir()

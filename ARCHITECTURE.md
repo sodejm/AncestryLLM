@@ -431,12 +431,15 @@ ATTACH/transactions, and a progress deadline.
 Queries are parsed with `sqlglot`. Exactly one SELECT, CTE, or set operation is
 allowed; forbidden AST nodes and tables outside the inspected schema are
 rejected. The reader applies `LIMIT max_rows + 1`, returns a truncation flag,
-and compares before/after SHA-256 hashes to detect concurrent source changes.
+and binds schema inspection, row validation, and query execution to one
+filesystem identity and SHA-256 fingerprint to detect concurrent source
+changes.
 
 Natural-language questions are a two-stage operation: an explicitly selected
 provider returns one schema-validated SQL string, then the same deterministic
-AST validation and SQLite authorizer run it. The model cannot execute SQL
-directly and cannot weaken the read-only connection.
+AST validation and SQLite authorizer run it. File limits and the source
+fingerprint are verified before provider use and carried into the query. The
+model cannot execute SQL directly and cannot weaken the read-only connection.
 
 ### GEDCOM export
 
@@ -454,8 +457,9 @@ Preservation mode retains safely attributable scalar person columns as
 `_RM_*` custom tags. Binary values and unattached/unsupported records remain
 report-only. The current exporter is intentionally schema-adaptive but narrow;
 it does not claim complete coverage of every RootsMagic version or table.
-Output and report files are atomic, and both are discarded if the source hash
-changes during export.
+Output and report files are published as a rollback-capable bundle. Existing
+targets are restored if either publication step or the final source
+fingerprint check fails.
 
 Destination selection does not prove interoperability. Current Ancestry, Geni,
 and MyHeritage imports require recorded manual smoke tests for every release.
@@ -468,8 +472,8 @@ and MyHeritage imports require recorded manual smoke tests for every release.
 parsing, pointer allocation, date normalization, identity comparison, optional
 adjudication, merge decisions, quality analysis, report rendering, validation,
 and serialization. Its raw line/record representation is authoritative so
-unknown tags and nested structures survive; `python-gedcom` is an additional
-best-effort parser check, not the serialization source.
+unknown tags and nested structures survive. Validation uses the same bounded
+streaming representation; there is no legacy secondary parser path.
 
 The smaller modules define stable seams:
 
