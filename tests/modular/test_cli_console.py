@@ -5,19 +5,23 @@ import os
 import shutil
 import subprocess
 import sys
+import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import Mock
 
 import pytest
 
-from ancestryllm.cli import main
+from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
+from ancestryllm.console.router import RouteKind, SessionRouter
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.modules import BUILTIN_MODULES, ModuleRegistry
+from ancestryllm.core.modules import BUILTIN_MODULES, COMMAND_SPECIFICATIONS, ModuleRegistry
+from ancestryllm.gedcom.service import GedcomSyncResult
+from ancestryllm.storage.diagnostics import diagnose_storage
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +29,7 @@ class CommandCase:
     module: str
     action: str
     arguments: tuple[str, ...]
-    expected: Any
+    expected: Any | Callable[[AppContext], Any]
 
     @property
     def tokens(self) -> list[str]:
@@ -49,6 +53,7 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
+        "backup": tmp_path / "fictional-backup.db",
     }
 
 
@@ -59,6 +64,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
     report = str(fictional_files["report"])
     ocr = str(fictional_files["ocr"])
     schema = str(fictional_files["schema"])
+    backup = str(fictional_files["backup"])
     return (
         CommandCase("rootsmagic", "list", (), {"module": "rootsmagic", "action": "list"}),
         CommandCase(
@@ -104,7 +110,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "gedcom",
             "sync",
             ("update", "--manifest", "fictional-private-manifest.json", "--dry-run"),
-            None,
+            GedcomSyncResult(exit_code=0, output=""),
         ),
         CommandCase(
             "ocr",
@@ -210,6 +216,23 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "Deleted secret reference: openai.api_key",
         ),
         CommandCase("secrets", "status", ("openai.api_key",), {"openai.api_key": False}),
+        CommandCase(
+            "modules",
+            "list",
+            (),
+            lambda context: [
+                _descriptor_payload(item) for item in ModuleRegistry(context).descriptors()
+            ],
+        ),
+        CommandCase("modules", "disable", ("ocr",), "Disabled module: ocr"),
+        CommandCase("modules", "enable", ("ocr",), "Enabled module: ocr"),
+        CommandCase("database", "backup", (backup,), f"Encrypted backup created: {backup}"),
+        CommandCase(
+            "database",
+            "diagnose",
+            (),
+            lambda context: diagnose_storage(context.database.path, context.secrets),
+        ),
     )
 
 
@@ -247,7 +270,9 @@ def mocked_action_services(app_context: AppContext, monkeypatch: pytest.MonkeyPa
         "quality",
         lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "quality"},
     )
-    monkeypatch.setattr(GedcomService, "sync", lambda _self, _args: 0)
+    monkeypatch.setattr(
+        GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
+    )
     monkeypatch.setattr(
         OcrService,
         "extract",
@@ -285,19 +310,26 @@ def _record_rendered_values(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     return rendered
 
 
+def _expected_value(case: CommandCase, context: AppContext) -> Any:
+    return case.expected(context) if callable(case.expected) else case.expected
+
+
 def test_action_matrix_covers_every_shipped_module_action(
     command_cases: tuple[CommandCase, ...],
 ) -> None:
     covered = {(case.module, case.action) for case in command_cases}
     shipped = {
-        (module_id, action)
-        for module_id, descriptor in BUILTIN_MODULES.items()
-        for action in descriptor.actions
+        (module_id, action.name)
+        for module_id, specification in COMMAND_SPECIFICATIONS.items()
+        for action in specification.actions
     }
     assert covered == shipped
 
 
-@pytest.mark.parametrize("case_index", range(21))
+@pytest.mark.parametrize(
+    "case_index",
+    range(sum(len(specification.actions) for specification in COMMAND_SPECIFICATIONS.values())),
+)
 def test_one_shot_returns_expected_dtos_for_every_action(
     case_index: int,
     command_cases: tuple[CommandCase, ...],
@@ -316,9 +348,37 @@ def test_one_shot_returns_expected_dtos_for_every_action(
 
     assert main(["--json", *case.tokens], app_context) == 0
 
-    expected = [] if case.expected is None else [case.expected]
+    expected = [to_plain(_expected_value(case, app_context))]
     assert rendered == expected
     assert secret_value not in json.dumps(rendered, ensure_ascii=False)
+
+
+def test_every_action_serializes_json_and_repl_routes_direct_and_module_context(
+    command_cases: tuple[CommandCase, ...],
+    app_context: AppContext,
+    mocked_action_services: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Action parity stops at routing; prompt-loop responsiveness is issue #59."""
+    del mocked_action_services
+    secret_value = "fictional-secret-value"
+    monkeypatch.setattr("ancestryllm.cli.getpass.getpass", Mock(side_effect=[secret_value] * 16))
+    for case in command_cases:
+        assert main(["--json", *case.tokens], app_context) == 0
+        stdout, stderr = capsys.readouterr()
+        assert json.loads(stdout) == to_plain(_expected_value(case, app_context))
+        assert stderr == ""
+        router = SessionRouter(app_context)
+        direct = router.route_tokens(tuple(case.tokens))
+        assert direct.kind is RouteKind.EXECUTE
+        assert direct.invocation is not None
+        if case.module in BUILTIN_MODULES:
+            assert router.route_tokens(("use", case.module)).kind is RouteKind.OUTPUT
+            contextual = router.route_tokens(("run", case.action, *case.arguments))
+            assert contextual.kind is RouteKind.EXECUTE
+            assert contextual.invocation is not None
+            assert contextual.invocation.namespace == direct.invocation.namespace
 
 
 def test_one_shot_lists_enabled_modules(app_context: AppContext, capsys) -> None:
@@ -660,9 +720,49 @@ def test_one_shot_unresolved_gedcom_root_preserves_coded_sanitized_error(
     assert output.read_bytes() == b"sentinel\n"
 
 
-def test_disabled_modules_are_not_imported(app_context: AppContext) -> None:
+def test_disabled_modules_are_not_imported_or_dispatched(
+    app_context: AppContext, capsys: pytest.CaptureFixture[str]
+) -> None:
     app_context.config.enabled_modules = {"gedcom"}
     assert [item.module_id for item in ModuleRegistry(app_context).descriptors()] == ["gedcom"]
+    assert (
+        main(
+            [
+                "ocr",
+                "extract",
+                "--input",
+                "missing-fictional-input.txt",
+                "--provider",
+                "none",
+                "--model",
+                "offline",
+            ],
+            app_context,
+        )
+        == 2
+    )
+    assert "[MODULE_DISABLED] Module is not enabled: ocr." in capsys.readouterr().err
+
+
+def test_disabled_module_has_matching_repl_code_exit_and_message(
+    app_context: AppContext, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app_context.config.enabled_modules = {"gedcom"}
+    assert (
+        main(
+            ["ocr", "extract", "--input", "fictional.txt", "--provider", "none", "--model", "x"],
+            app_context,
+        )
+        == 2
+    )
+    one_shot = capsys.readouterr().err
+    with pytest.raises(AncestryError) as raised:
+        SessionRouter(app_context).route(
+            "ocr extract --input fictional.txt --provider none --model x"
+        )
+    assert raised.value.code == "MODULE_DISABLED"
+    assert raised.value.exit_code == 2
+    assert raised.value.message in one_shot
 
 
 def test_secret_values_never_reach_one_shot_status_output(
@@ -687,19 +787,70 @@ def test_database_diagnostics_are_available_as_json(app_context: AppContext, cap
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert (3, 12) <= sys.version_info[:2] < (3, 15)
     repository = Path(__file__).resolve().parents[2]
-    environment = tmp_path / "clean-install" / "site-packages"
-    shutil.copytree(
-        repository / "src" / "ancestryllm",
-        environment / "ancestryllm",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    wheelhouse = tmp_path / "wheelhouse"
+    venv_bin = Path(sys.executable).parent
+    uv_name = "uv.exe" if os.name == "nt" else "uv"
+    uv = venv_bin / uv_name
+    if not uv.is_file():
+        resolved = shutil.which("uv")
+        assert resolved is not None, "uv is required by the locked build workflow"
+        uv = Path(resolved)
+    uv_environment = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")}
+    build = subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(wheelhouse)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=repository,
+        env=uv_environment,
     )
-    ancestry = tmp_path / "clean-install" / "bin" / "ancestry"
-    ancestry.parent.mkdir()
-    ancestry.write_text(
-        f"#!{sys.executable}\nfrom ancestryllm.cli import main\nraise SystemExit(main())\n",
-        encoding="utf-8",
+    assert build.returncode == 0, build.stderr
+    wheel = next(wheelhouse.glob("ancestryllm-*.whl"))
+
+    environment = tmp_path / "clean-install"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    scripts = environment / ("Scripts" if os.name == "nt" else "bin")
+    python = scripts / ("python.exe" if os.name == "nt" else "python")
+    requirements = tmp_path / "requirements.txt"
+    export = subprocess.run(
+        [
+            uv,
+            "export",
+            "--locked",
+            "--no-emit-project",
+            "--no-hashes",
+            "--output-file",
+            str(requirements),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=repository,
+        env=uv_environment,
     )
-    ancestry.chmod(0o755)
+    assert export.returncode == 0, export.stderr
+    install = subprocess.run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--requirement",
+            str(requirements),
+            "--no-deps",
+            str(wheel),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=uv_environment,
+    )
+    assert install.returncode == 0, install.stderr
+
     isolated_home = tmp_path / "fictional-home"
     isolated_home.mkdir()
     child_environment = {
@@ -707,12 +858,25 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         "HOME": str(isolated_home),
         "XDG_CONFIG_HOME": str(isolated_home / "config"),
         "XDG_DATA_HOME": str(isolated_home / "data"),
-        "PYTHONPATH": str(environment),
     }
+    child_environment.pop("PYTHONPATH", None)
+
+    location = subprocess.run(
+        [str(python), "-I", "-c", "import ancestryllm; print(ancestryllm.__file__)"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=child_environment,
+        cwd=isolated_home,
+        timeout=30,
+    )
+    assert location.returncode == 0, location.stderr
+    assert str(environment) in location.stdout
+    assert str(repository) not in location.stdout
 
     for command in (
-        [str(ancestry), "--json", "modules", "list"],
-        [sys.executable, "-m", "ancestryllm", "--json", "modules", "list"],
+        [str(scripts / "ancestry"), "--json", "modules", "list"],
+        [str(python), "-I", "-m", "ancestryllm", "--json", "modules", "list"],
     ):
         completed = subprocess.run(
             command,

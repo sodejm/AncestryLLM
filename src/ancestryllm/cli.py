@@ -16,6 +16,7 @@ from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.core.modules import (
+    BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     GLOBAL_ARGUMENTS,
     ActionSpec,
@@ -145,6 +146,14 @@ def dispatch(
             emit(f"Disabled module: {args.module_id}", json_output)
         return 0
 
+    if args.command in BUILTIN_MODULES and args.command not in context.config.enabled_modules:
+        raise AncestryError(
+            "MODULE_DISABLED",
+            f"Module is not enabled: {args.command}.",
+            remediation="Enable it with `ancestry modules enable MODULE` before running an action.",
+            exit_code=2,
+        )
+
     if args.command == "rootsmagic":
         from ancestryllm.rootsmagic.service import RootsMagicService
 
@@ -227,7 +236,12 @@ def dispatch(
                 json_output,
             )
         else:
-            return gedcom_service.sync([args.sync_command, *args.sync_args])
+            sync_result = gedcom_service.sync([args.sync_command, *args.sync_args])
+            if json_output:
+                emit(sync_result, json_output)
+            else:
+                sys.stdout.write(sync_result.output)
+            return sync_result.exit_code
         return 0
 
     if args.command == "prompts":

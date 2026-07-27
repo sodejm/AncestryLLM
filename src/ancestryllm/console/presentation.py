@@ -43,7 +43,8 @@ class PresentationAdapter:
     def render(self, value: Any, *, json_output: bool = False) -> None:
         plain = to_plain(value)
         if json_output:
-            self.console.print(json.dumps(plain, indent=2, sort_keys=True))
+            self.console.file.write(json.dumps(plain, indent=2, sort_keys=True))
+            self.console.file.write("\n")
         elif isinstance(plain, str):
             self.console.print(plain)
         elif isinstance(plain, list):
