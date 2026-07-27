@@ -18,6 +18,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from ancestryllm.core.cancellation import cancellation_checkpoint, non_interruptible_section
+
 
 @dataclass(frozen=True, slots=True)
 class _PathIdentity:
@@ -844,6 +846,52 @@ def staged_file_token(descriptor: int) -> StagedFileToken:
     if identity.inode <= 0:
         raise OSError("The filesystem does not expose reliable publication identities.")
     return StagedFileToken(identity, _descriptor_digest(descriptor))
+
+
+def seal_staged_path(path: Path) -> StagedFileToken:
+    """Seal a reservation written by a trusted path-based native library.
+
+    The reserved inode must remain the same object throughout the external
+    write and this verification pass. This exists for libraries such as
+    SQLCipher whose backup API accepts only a pathname.
+    """
+
+    key = _path_key(path)
+    with _STAGING_LOCK:
+        reservation = _STAGING_IDENTITIES.get(key)
+    if reservation is None:
+        raise OSError("The publication staging pathname was not reserved by this process.")
+    if reservation.sealed:
+        raise OSError("The publication staging pathname is already sealed.")
+
+    flags = os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        before = _PathIdentity.from_stat(os.fstat(descriptor))
+        at_path = _identity(path)
+        if not reservation.identity.same_file_id(before) or not before.pristine(at_path):
+            raise OSError("The publication staging reservation changed while it was written.")
+        os.fsync(descriptor)
+        digest = _descriptor_digest(descriptor)
+        after = _PathIdentity.from_stat(os.fstat(descriptor))
+        final_at_path = _identity(path)
+        if not before.pristine(after) or not after.pristine(final_at_path):
+            raise OSError("The publication staging payload changed while it was sealed.")
+        with _STAGING_LOCK:
+            if _STAGING_IDENTITIES.get(key) != reservation:
+                raise OSError("The publication staging ownership record changed while sealing.")
+            _STAGING_IDENTITIES[key] = _StagingReservation(
+                after,
+                sealed=True,
+                digest=digest,
+            )
+        return StagedFileToken(after, digest)
+    finally:
+        os.close(descriptor)
 
 
 def cleanup_staged_token(path: Path, token: StagedFileToken) -> bool:
@@ -2400,48 +2448,50 @@ def publish_staged_bundle(
     handles, so namespace crash durability cannot be strengthened there.
     """
 
+    cancellation_checkpoint()
     selected = [(Path(source), Path(target)) for source, target in artifacts]
     for index, (_source, target) in enumerate(selected):
         for _other_source, other_target in selected[index + 1 :]:
             if paths_alias(target, other_target):
                 raise OSError("Publication bundle targets must not alias each other.")
 
-    prepared = [
-        _Artifact(
-            source=_claim_for_publication(source),
-            target=target,
-            original_target=_identity_or_none(target),
-        )
-        for source, target in selected
-    ]
-    for artifact in prepared:
-        if artifact.original_target is not None and artifact.original_target.file_type not in {
-            stat.S_IFREG,
-            stat.S_IFLNK,
-        }:
-            raise OSError("Publication targets must be regular files or symbolic links.")
+    with non_interruptible_section("publishing output bundle"):
+        prepared = [
+            _Artifact(
+                source=_claim_for_publication(source),
+                target=target,
+                original_target=_identity_or_none(target),
+            )
+            for source, target in selected
+        ]
+        for artifact in prepared:
+            if artifact.original_target is not None and artifact.original_target.file_type not in {
+                stat.S_IFREG,
+                stat.S_IFLNK,
+            }:
+                raise OSError("Publication targets must be regular files or symbolic links.")
 
-    try:
-        for artifact in prepared:
-            if artifact.original_target is not None:
-                _backup_target(artifact)
-        for artifact in prepared:
-            _publish_artifact(artifact, replace)
-        if validate_after is not None:
-            validate_after()
-        for artifact in prepared:
-            assert artifact.published is not None
-            _assert_pristine(artifact.target, artifact.published.identity)
-    except BaseException as publish_error:
-        rollback_error = _rollback_bundle(prepared)
-        if rollback_error is not None:
-            raise rollback_error from publish_error
-        raise
-    else:
         try:
-            _cleanup_committed_bundle(prepared)
-        except BaseException:  # noqa: BLE001, S110 - validated commit is authoritative
-            pass
+            for artifact in prepared:
+                if artifact.original_target is not None:
+                    _backup_target(artifact)
+            for artifact in prepared:
+                _publish_artifact(artifact, replace)
+            if validate_after is not None:
+                validate_after()
+            for artifact in prepared:
+                assert artifact.published is not None
+                _assert_pristine(artifact.target, artifact.published.identity)
+        except BaseException as publish_error:
+            rollback_error = _rollback_bundle(prepared)
+            if rollback_error is not None:
+                raise rollback_error from publish_error
+            raise
+        else:
+            try:
+                _cleanup_committed_bundle(prepared)
+            except BaseException:  # noqa: BLE001, S110 - validated commit is authoritative
+                pass
 
 
 __all__ = [
@@ -2453,6 +2503,7 @@ __all__ = [
     "is_staging_path",
     "paths_alias",
     "publish_staged_bundle",
+    "seal_staged_path",
     "staged_file_token",
     "staging_path",
     "write_staged_bytes",

@@ -121,7 +121,7 @@ class CancellationToken:
         for listener in listeners:
             try:
                 listener(state)
-            except Exception as exc:  # noqa: BLE001 - observers cannot break cancellation
+            except BaseException as exc:  # noqa: BLE001 - observers cannot break cancellation
                 logger.warning("Cancellation listener failed: %s", type(exc).__name__)
 
 

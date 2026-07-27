@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
+import threading
 from collections.abc import Iterator
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from ancestryllm.core.errors import ProviderError, SecurityPolicyError, normalize_provider_error
+from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.llm.contracts import (
     DataClass,
     GenerationRequest,
@@ -662,6 +664,51 @@ class RetryingProvider(LifecycleProvider):
         return super().generate(request)
 
 
+class BlockingProvider(LifecycleProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def generate(self, request: GenerationRequest) -> GenerationResult:
+        self.started.set()
+        assert self.release.wait(2)
+        return super().generate(request)
+
+
+class BlockingStreamProvider(LifecycleProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        self.stream_called = True
+        try:
+            self.started.set()
+            assert self.release.wait(2)
+            yield "must not be consumed"
+        finally:
+            self.closed = True
+
+
+class PartialBlockingStreamProvider(LifecycleProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        self.stream_called = True
+        try:
+            yield "partial"
+            self.started.set()
+            assert self.release.wait(2)
+            yield "must not be consumed"
+        finally:
+            self.closed = True
+
+
 def service(provider: LifecycleProvider) -> tuple[LLMService, AuditDatabase]:
     database = AuditDatabase()
     return LLMService(StaticRegistry(provider), database), database  # type: ignore[arg-type]
@@ -814,6 +861,111 @@ def test_service_generate_uses_bounded_backoff_for_opted_in_safe_retries(
     assert delays == [0.25, 1.0]
     assert len(database.rows) == 1
     assert database.rows[0].status == "succeeded"
+
+
+def test_job_cancellation_interrupts_provider_retry_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = RetryingProvider(
+        [
+            ProviderError(
+                "PROVIDER_RATE_LIMITED",
+                "limited",
+                details={"retry_after_seconds": 60.0},
+            )
+        ]
+    )
+    llm, database = service(provider)
+    backoff_started = threading.Event()
+    original_retry_delay = llm._retry_delay
+
+    def observed_retry_delay(error: ProviderError, retry_attempt: int) -> float:
+        backoff_started.set()
+        return original_retry_delay(error, retry_attempt)
+
+    monkeypatch.setattr(llm, "_retry_delay", observed_retry_delay)
+    retriable = request("test").model_copy(update={"max_safe_retries": 1})
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit("provider retry backoff", lambda: llm.generate(retriable))
+        assert backoff_started.wait(2)
+        manager.cancel(job.job_id)
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert provider.generate_calls == 1
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+
+
+def test_job_cancellation_aborts_provider_request_after_bounded_call_returns() -> None:
+    provider = BlockingProvider()
+    llm, database = service(provider)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit("provider request", lambda: llm.generate(request("test")))
+        assert provider.started.wait(2)
+        manager.cancel(job.job_id)
+        provider.release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        provider.release.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+
+
+def test_job_cancellation_closes_provider_stream_and_discards_next_chunk() -> None:
+    provider = BlockingStreamProvider()
+    llm, database = service(provider)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit("provider stream", lambda: list(llm.stream(request("test"))))
+        assert provider.started.wait(2)
+        manager.cancel(job.job_id)
+        provider.release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        provider.release.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert provider.closed is True
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+    assert database.rows[0].output_payload is None
+
+
+def test_job_cancellation_discards_explicitly_retained_partial_stream_payload() -> None:
+    provider = PartialBlockingStreamProvider()
+    llm, database = service(provider)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "retained provider stream",
+            lambda: list(llm.stream(request("test"), retention_consent())),
+        )
+        assert provider.started.wait(2)
+        manager.cancel(job.job_id)
+        provider.release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        provider.release.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert provider.closed is True
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+    assert database.rows[0].output_payload is None
 
 
 def test_retry_backoff_is_cancellation_aware_and_audited(

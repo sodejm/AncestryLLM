@@ -28,8 +28,15 @@ class AppContext:
     def close(self) -> None:
         """Release shared provider clients before closing encrypted storage."""
 
-        self.llm.close()
-        self.database.close()
+        first_failure: BaseException | None = None
+        for action in (self.llm.close, self.database.close):
+            try:
+                action()
+            except BaseException as exc:  # noqa: BLE001 - later resources must still close
+                if first_failure is None:
+                    first_failure = exc
+        if first_failure is not None:
+            raise first_failure
 
     @classmethod
     def build(

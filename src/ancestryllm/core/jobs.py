@@ -62,6 +62,7 @@ class _JobRecord:
     token: CancellationToken
     future: Future[Any] | None = None
     cancellation_was_deferred: bool = False
+    cancellation_accepted_at: str | None = None
 
 
 def _timestamp() -> str:
@@ -276,6 +277,16 @@ class JobManager:
         with self._lock:
             record = self._records[job_id]
             current = record.snapshot
+            if state is JobState.COMPLETED and record.cancellation_accepted_at is not None:
+                state = JobState.CANCELLED
+                changes.update(
+                    result=None,
+                    error_code="JOB_CANCELLED",
+                    error_message=self._cancellation_message(record.cancellation_was_deferred),
+                    cancellation_requested_at=record.cancellation_accepted_at,
+                    cancellation_pending=False,
+                    cancellation_deferred_by=None,
+                )
             values = {
                 "job_id": current.job_id,
                 "name": current.name,
@@ -333,21 +344,24 @@ class JobManager:
         state = self._token(job_id).state
         with self._lock:
             was_deferred = self._records[job_id].cancellation_was_deferred
-        message = (
-            "Cancellation was acknowledged after a protected operation reached a safe boundary."
-            if was_deferred
-            else "The background job acknowledged cancellation at a safe boundary."
-        )
         self._transition(
             job_id,
             JobState.CANCELLED,
             finished_at=_timestamp(),
             result=None,
             error_code="JOB_CANCELLED",
-            error_message=message,
+            error_message=self._cancellation_message(was_deferred),
             cancellation_requested_at=state.requested_at,
             cancellation_pending=False,
             cancellation_deferred_by=None,
+        )
+
+    @staticmethod
+    def _cancellation_message(was_deferred: bool) -> str:
+        return (
+            "Cancellation was acknowledged after a protected operation reached a safe boundary."
+            if was_deferred
+            else "The background job acknowledged cancellation at a safe boundary."
         )
 
     def _report_progress(self, job_id: str, event: ProgressEvent) -> None:
@@ -385,7 +399,7 @@ class JobManager:
         for listener in listeners:
             try:
                 listener(snapshot)
-            except Exception as exc:  # noqa: BLE001 - listeners cannot break job execution
+            except BaseException as exc:  # noqa: BLE001 - listeners cannot break job execution
                 logger.warning("Job listener failed: %s", type(exc).__name__)
 
     def get(self, job_id: str) -> JobSnapshot:
@@ -455,6 +469,8 @@ class JobManager:
             current = record.snapshot
             if current.state not in {JobState.QUEUED, JobState.RUNNING}:
                 return current
+            if record.cancellation_accepted_at is None:
+                record.cancellation_accepted_at = _timestamp()
             future = record.future
             if current.state is JobState.QUEUED and future is not None and future.cancel():
                 record.snapshot = replace(
@@ -464,13 +480,17 @@ class JobManager:
                     result=None,
                     error_code="JOB_CANCELLED",
                     error_message="The queued background job was cancelled.",
-                    cancellation_requested_at=_timestamp(),
+                    cancellation_requested_at=record.cancellation_accepted_at,
                     cancellation_pending=False,
                     cancellation_deferred_by=None,
                 )
                 self._capacity.release()
                 snapshot = record.snapshot
             else:
+                record.snapshot = replace(
+                    record.snapshot,
+                    cancellation_requested_at=record.cancellation_accepted_at,
+                )
                 snapshot = None
         record.token.request()
         if snapshot is not None:

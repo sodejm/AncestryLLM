@@ -43,6 +43,18 @@ All notable changes to AncestryLLM are recorded here. The project follows
   encrypted backups.
 - Stable coded errors, JSON output, secure history, multiline input, bounded
   background jobs, and sanitized progress reporting.
+- Cooperative background-job cancellation, including Ctrl-C foreground
+  cancellation, `jobs cancel JOB_ID`, cancellation state in job snapshots, and
+  the stable `JOB_CANCELLED` and `REPL_EXIT_DECISION_REQUIRED` codes.
+
+### Changed
+
+- Interactive exit now requires an explicit `wait`, `cancel`, or `stay`
+  decision while jobs are active; EOF waits rather than cancelling work.
+- Staged output publication and encrypted database backups defer cancellation
+  across the complete commit-or-rollback boundary, preventing partial output
+  bundles, and REPL shutdown drains workers before closing presentation,
+  provider, cache, and database resources.
 
 ### Security
 

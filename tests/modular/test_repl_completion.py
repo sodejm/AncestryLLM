@@ -68,6 +68,15 @@ def test_root_and_active_module_contexts_are_distinct_and_disabled_modules_hidde
     assert _values(completer, "run s") == ["subtree", "sync"]
 
 
+def test_job_control_completion_includes_cooperative_cancellation(
+    app_context: AppContext, tmp_path: Path
+) -> None:
+    _router, completer = _completion(app_context, tmp_path)
+
+    assert _values(completer, "jobs ") == ["cancel", "list", "show"]
+    assert _values(completer, "jobs c") == ["cancel"]
+
+
 def test_direct_and_run_invocations_complete_actions_unused_flags_and_enums(
     app_context: AppContext, tmp_path: Path
 ) -> None:

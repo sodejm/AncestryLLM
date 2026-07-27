@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +13,15 @@ from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool
 
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import StorageError
+from ancestryllm.core.publication import (
+    claim_staged_path,
+    cleanup_staged_path,
+    publish_staged_bundle,
+    seal_staged_path,
+    staging_path,
+)
 from ancestryllm.core.secrets import SecretStore
 from ancestryllm.storage.models import Base
 
@@ -197,24 +206,40 @@ class Database:
 
     def backup(self, destination: Path) -> None:
         """Create an encrypted backup using SQLCipher's online backup API."""
-        if destination.exists():
+        cancellation_checkpoint()
+        if os.path.lexists(destination):
             raise StorageError("BACKUP_EXISTS", f"Backup destination already exists: {destination}")
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        raw = self.engine.raw_connection()
+        staged = staging_path(destination)
         try:
-            import sqlcipher3
-
-            target = sqlcipher3.connect(str(destination))
+            raw = self.engine.raw_connection()
             try:
-                encoded = self.secret_store.get(DATABASE_SECRET)
-                if not encoded:
-                    raise StorageError("DATABASE_KEY_MISSING", "The database key is unavailable.")
-                target.execute(f"PRAGMA key = \"x'{_decode_key(encoded).hex()}'\"")
-                driver_connection = raw.driver_connection
-                assert driver_connection is not None
-                driver_connection.backup(target)
+                import sqlcipher3
+
+                target = sqlcipher3.connect(str(staged))
+                try:
+                    encoded = self.secret_store.get(DATABASE_SECRET)
+                    if not encoded:
+                        raise StorageError(
+                            "DATABASE_KEY_MISSING", "The database key is unavailable."
+                        )
+                    target.execute(f"PRAGMA key = \"x'{_decode_key(encoded).hex()}'\"")
+                    driver_connection = raw.driver_connection
+                    assert driver_connection is not None
+                    driver_connection.backup(
+                        target,
+                        pages=128,
+                        progress=lambda _status, _remaining, _total: cancellation_checkpoint(),
+                    )
+                finally:
+                    target.close()
             finally:
-                target.close()
-        finally:
-            raw.close()
-        destination.chmod(0o600)
+                raw.close()
+            cancellation_checkpoint()
+            token = seal_staged_path(staged)
+            claim_staged_path(staged, token)
+            publish_staged_bundle(((staged, destination),), replace=os.replace)
+            destination.chmod(0o600)
+        except BaseException:
+            cleanup_staged_path(staged)
+            raise

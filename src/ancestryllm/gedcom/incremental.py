@@ -33,6 +33,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping, Never, Optional, Sequence
 
+from ancestryllm.core.cancellation import (
+    CancellationError,
+    cancellation_checkpoint,
+    non_interruptible_section,
+)
 from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.core.ingress import (
     FileFingerprint,
@@ -253,6 +258,7 @@ def _sha256_file(
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            cancellation_checkpoint()
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -303,10 +309,14 @@ def _relative_lines(lines: Sequence[str], core: ModuleType) -> list[str]:
     """Reassemble continuations and normalize levels relative to the root."""
     if not lines:
         return []
-    parsed = [core.parse_gedcom_line(line) for line in lines]
+    parsed = []
+    for line in lines:
+        cancellation_checkpoint()
+        parsed.append(core.parse_gedcom_line(line))
     root_level = parsed[0].level
     output: list[tuple[int, str, str]] = []
     for item in parsed:
+        cancellation_checkpoint()
         level = item.level - root_level
         if item.tag in {"CONC", "CONT"} and output:
             previous_level, previous_tag, previous_value = output[-1]
@@ -318,9 +328,11 @@ def _relative_lines(lines: Sequence[str], core: ModuleType) -> list[str]:
             )
             continue
         output.append((level, item.tag, item.value))
-    return [
-        f"{level} {tag} {_normal_value(tag, value, core)}".rstrip() for level, tag, value in output
-    ]
+    normalized: list[str] = []
+    for level, tag, value in output:
+        cancellation_checkpoint()
+        normalized.append(f"{level} {tag} {_normal_value(tag, value, core)}".rstrip())
+    return normalized
 
 
 def _direct_blocks(
@@ -335,6 +347,7 @@ def _direct_blocks(
     blocks: list[list[str]] = []
     current: list[str] = []
     for line in lines[1:]:
+        cancellation_checkpoint()
         parsed = core.parse_gedcom_line(line)
         if parsed.level == child_level:
             if current:
@@ -358,6 +371,7 @@ def _block_parts(
     core_lines = [root]
     attachments: list[list[str]] = []
     for child in _direct_blocks(block, core):
+        cancellation_checkpoint()
         tag = core.parse_gedcom_line(child[0]).tag
         if tag in ATTACHMENT_TAGS:
             attachments.append(list(child))
@@ -382,6 +396,7 @@ def _citation_identity(lines: Sequence[str], core: ModuleType) -> tuple[str, ...
     first = core.parse_gedcom_line(lines[0])
     values = {"PAGE": "", "EVEN": "", "ROLE": ""}
     for line in lines[1:]:
+        cancellation_checkpoint()
         parsed = core.parse_gedcom_line(line)
         if parsed.tag in values and not values[parsed.tag]:
             values[parsed.tag] = _normal_value(parsed.tag, parsed.value, core)
@@ -400,6 +415,7 @@ def _singleton_values(
     """Return constrained citation values used to detect unsafe unions."""
     result: dict[str, set[str]] = defaultdict(set)
     for line in lines[1:]:
+        cancellation_checkpoint()
         parsed = core.parse_gedcom_line(line)
         if parsed.tag in {"DATE", "PAGE", "EVEN", "ROLE", "QUAY"}:
             result[parsed.tag].add(_normal_value(parsed.tag, parsed.value, core))
@@ -423,6 +439,7 @@ def _merge_citations(
     seen = {_structure_key(child, core) for child in _direct_blocks(left, core)}
     singleton_tags = {"DATA", "DATE", "EVEN", "PAGE", "QUAY", "ROLE"}
     for child in _direct_blocks(right, core):
+        cancellation_checkpoint()
         key = _structure_key(child, core)
         if key in seen:
             continue
@@ -483,6 +500,7 @@ def _merge_compatible_structure(
     seen = {_structure_key(child, core) for child in existing_blocks}
     singleton_tags = {"DATE"}
     for child in _direct_blocks(right, core):
+        cancellation_checkpoint()
         key = _structure_key(child, core)
         if key in seen:
             continue
@@ -514,6 +532,7 @@ def _merge_same_fact(
     attachments = [list(value) for value in left_attachments]
     exact = {_structure_key(value, core) for value in attachments}
     for candidate in right_attachments:
+        cancellation_checkpoint()
         candidate_key = _structure_key(candidate, core)
         if candidate_key in exact:
             if core.parse_gedcom_line(candidate[0]).tag == "SOUR":
@@ -548,7 +567,12 @@ def _rewrite_lines(
     core: ModuleType,
 ) -> list[str]:
     """Rewrite exact GEDCOM pointer fields using the core safety rules."""
-    return [core._rewrite_xrefs(line, dict(pointer_map)) for line in lines]
+    rewritten: list[str] = []
+    stable_pointer_map = dict(pointer_map)
+    for line in lines:
+        cancellation_checkpoint()
+        rewritten.append(core._rewrite_xrefs(line, stable_pointer_map))
+    return rewritten
 
 
 def _replace_header_pointer(
@@ -1162,8 +1186,10 @@ def _match_people(
     identity_resolver: IdentityResolver | None = None,
 ) -> tuple[dict[str, str], dict[str, dict[str, str]], list[Any]]:
     """Map snapshot people to stable master pointers conservatively."""
+    cancellation_checkpoint()
     people_by_source: list[list[Any]] = []
     for source in sources:
+        cancellation_checkpoint()
         people = [
             _person_from_record(record, core) for record in source.records if record.tag == "INDI"
         ]
@@ -1176,12 +1202,14 @@ def _match_people(
     fingerprint_index: dict[tuple[str, ...], set[str]] = defaultdict(set)
     by_pointer = {person.pointer: person for person in survivors}
     for person in survivors:
+        cancellation_checkpoint()
         for identifier in _identifier_values(person, core):
             identifier_index[identifier].add(person.pointer)
         fingerprint_index[_identity_fingerprint(person)].add(person.pointer)
     new_bindings: dict[str, dict[str, str]] = {}
     counters = manifest["next_ids"]
     for index, spec in enumerate(specs, 1):
+        cancellation_checkpoint()
         source = sources[index]
         previous_bindings = manifest.get("person_bindings", {}).get(spec.source_id, {})
         bindings: dict[str, str] = {}
@@ -1189,6 +1217,7 @@ def _match_people(
             global_pointer: original for original, global_pointer in source.pointer_map.items()
         }
         for incoming in people_by_source[index]:
+            cancellation_checkpoint()
             original = inverse_pointer_map.get(incoming.pointer, incoming.pointer)
             candidate_pointers: set[str] = set()
             previous = previous_bindings.get(original)
@@ -1203,6 +1232,7 @@ def _match_people(
             scored: list[tuple[float, str, Any]] = []
             incoming_keys = core._blocking_keys(incoming)
             for survivor in survivors:
+                cancellation_checkpoint()
                 if not incoming_keys.intersection(core._blocking_keys(survivor)):
                     continue
                 assessment = core.assess_similarity(survivor, incoming)
@@ -1293,6 +1323,7 @@ def _map_nonpeople(
     stats: SyncStats,
 ) -> tuple[dict[str, str], list[Any]]:
     """Consolidate semantic level-zero records and allocate stable new xrefs."""
+    cancellation_checkpoint()
     used = {record.pointer for source in sources for record in source.records if record.pointer}
     counters = manifest["next_ids"]
     representatives: dict[tuple[str, str], str] = {}
@@ -1313,6 +1344,7 @@ def _map_nonpeople(
     all_records = master_records + incoming_records
     for tag in ordered_tags:
         for record in (item for item in all_records if item.tag == tag):
+            cancellation_checkpoint()
             is_master = record.source_file == str(sources[0].path)
             if is_master:
                 pointer_map.setdefault(record.pointer, record.pointer)
@@ -1343,6 +1375,7 @@ def _map_nonpeople(
                     canonical_records[target], synthetic, target, core, stats
                 )
     for record in all_records:
+        cancellation_checkpoint()
         if record.tag in ordered_tags:
             continue
         if record.pointer:
@@ -1409,6 +1442,7 @@ def _reconcile_person_blocks(
     initialize: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Build one canonical person record per stable pointer with provenance."""
+    cancellation_checkpoint()
     active = dict(manifest.get("active_snapshots", {}))
     for spec in specs:
         active[spec.source_id] = spec.snapshot_id
@@ -1421,22 +1455,27 @@ def _reconcile_person_blocks(
         for item in manifest.get("manual_tombstones", ())
     }
     for source in sources:
+        cancellation_checkpoint()
         for record in source.records:
+            cancellation_checkpoint()
             if record.tag != "INDI":
                 continue
             target = pointer_map.get(record.pointer, record.pointer)
             grouped[target].append((source_spec_by_path.get(record.source_file), record))
     people: list[Any] = []
     for target, origin_records in grouped.items():
+        cancellation_checkpoint()
         accumulator: dict[str, list[str]] = {}
         order: list[str] = []
         current_master_keys: set[str] = set()
         person_registry = block_registry.setdefault(target, {})
         for origin_spec, record in origin_records:
+            cancellation_checkpoint()
             rewritten = _replace_header_pointer(
                 _rewrite_lines(record.lines, pointer_map, core), target, core
             )
             for block in core._top_level_blocks(rewritten):
+                cancellation_checkpoint()
                 key = _block_key(block, core)
                 tag = core.parse_gedcom_line(block[0]).tag
                 if origin_spec is not None and (target, key) in tombstones:
@@ -1472,6 +1511,7 @@ def _reconcile_person_blocks(
                 entry["last_seen_generation"] = manifest.get("generation", 0) + 1
         retained_order: list[str] = []
         for key in order:
+            cancellation_checkpoint()
             block = accumulator[key]
             entry = person_registry[key]
             active_observations = set(entry.get("observations", ())) & active_snapshot_ids
@@ -1506,6 +1546,7 @@ def _reconcile_person_blocks(
 def _seed_snapshot_history(manifest: dict[str, Any], specs: Sequence[SnapshotSpec]) -> None:
     """Record immutable snapshot metadata and replace active source pointers."""
     for spec in specs:
+        cancellation_checkpoint()
         manifest["snapshots"].setdefault(
             spec.snapshot_id,
             {
@@ -1591,8 +1632,10 @@ def _render_update_report(
 
 def _write_bytes(path: Path, payload: bytes) -> None:
     """Write a new artifact inside an unpublished staging directory."""
+    cancellation_checkpoint()
     with path.open("xb") as handle:
         handle.write(payload)
+    cancellation_checkpoint()
 
 
 def _exclusive_rename_directory(
@@ -3360,6 +3403,7 @@ def _perform_update(
     identity_resolver: IdentityResolver | None = None,
 ) -> int:
     """Execute one offline-first update and publish an atomic generation bundle."""
+    cancellation_checkpoint()
     master: Path = args.master
     release_root: Path = args.release_root
     master_fingerprint = ingress.fingerprint(master, FileKind.GEDCOM)
@@ -3459,6 +3503,7 @@ def _perform_update(
             ["Open the named file and repair the reported GEDCOM line, then retry."],
             details=(f"Error class: {type(exc).__name__}",),
         ) from exc
+    cancellation_checkpoint()
     stats = SyncStats()
     pointer_map, bindings, _ = _match_people(
         sources,
@@ -3469,7 +3514,9 @@ def _perform_update(
         provider_id=args.provider,
         identity_resolver=guarded_identity_resolver,
     )
+    cancellation_checkpoint()
     pointer_map, nonpeople = _map_nonpeople(sources, pointer_map, manifest, core, stats)
+    cancellation_checkpoint()
     people, block_registry = _reconcile_person_blocks(
         sources,
         specs,
@@ -3479,6 +3526,7 @@ def _perform_update(
         stats,
         initialize=args.initialize_manifest,
     )
+    cancellation_checkpoint()
     nonpeople = [
         core.GedcomRecord(
             _rewrite_lines(record.lines, pointer_map, core),
@@ -3536,6 +3584,7 @@ def _perform_update(
             staging_marker_descriptor,
             staging_marker_identity,
         ) = _create_staging_directory(release_root_capability, ".gedcom-sync-")
+        cancellation_checkpoint()
         staged_master = staging / "master.ged"
         core.write_gedcom(
             people,
@@ -3614,23 +3663,25 @@ def _perform_update(
         manifest_payload = _json_bytes(manifest)
         _write_bytes(staging / "manifest.json", manifest_payload)
         verify_inputs()
+        cancellation_checkpoint()
         assert staging_marker_descriptor is not None
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
         assert staging_identity is not None
         transaction = _PublicationTransactionState(staging_marker_descriptor)
-        finalization_error = _publish_and_finalize_directory(
-            staging_name,
-            release_name,
-            release_root_capability,
-            staging_descriptor,
-            staging_identity,
-            staging_marker_name,
-            staging_marker_identity,
-            transaction,
-        )
-        if finalization_error is not None:
-            raise finalization_error
+        with non_interruptible_section("publishing incremental release"):
+            finalization_error = _publish_and_finalize_directory(
+                staging_name,
+                release_name,
+                release_root_capability,
+                staging_descriptor,
+                staging_identity,
+                staging_marker_name,
+                staging_marker_identity,
+                transaction,
+            )
+            if finalization_error is not None:
+                raise finalization_error
         if not transaction.committed:
             raise SyncError(
                 "SYNC_OUTPUT",
@@ -3638,10 +3689,12 @@ def _perform_update(
                 "Publication stopped before the ownership marker was removed.",
                 ["Inspect the release root and retry with a new patch version."],
             )
-    except BaseException:
+    except BaseException as exc:
         if transaction is not None and transaction.committed:
             _close_descriptor_quietly(staging_descriptor)
             _close_capability_quietly(release_root_capability)
+            if isinstance(exc, CancellationError):
+                raise
             return 0
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
@@ -3687,15 +3740,18 @@ def _master_block_index(
     """Index person blocks by pointer for explicit manual rebase comparison."""
     result: dict[str, dict[str, str]] = defaultdict(dict)
     for record in core.iter_gedcom_records(path, ingress, expected):
+        cancellation_checkpoint()
         if record.tag != "INDI":
             continue
         for block in core._top_level_blocks(record.lines):
+            cancellation_checkpoint()
             result[record.pointer][_block_key(block, core)] = core.parse_gedcom_line(block[0]).tag
     return result
 
 
 def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIngressPolicy) -> int:
     """Adopt external edits explicitly as protected manual provenance."""
+    cancellation_checkpoint()
     master: Path = args.master
     manifest_path: Path = args.manifest
     release_root: Path = args.release_root
@@ -3742,6 +3798,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         ingress,
         master_fingerprint.snapshot,
     )
+    cancellation_checkpoint()
     additions = {
         pointer: set(hashes) - set(previous.get(pointer, {}))
         for pointer, hashes in current.items()
@@ -3770,8 +3827,10 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         )
     next_generation = int(manifest.get("generation", 0)) + 1
     for pointer, hashes in additions.items():
+        cancellation_checkpoint()
         registry = manifest.setdefault("blocks", {}).setdefault(pointer, {})
         for block_hash in hashes:
+            cancellation_checkpoint()
             entry = registry.setdefault(
                 block_hash,
                 {
@@ -3833,6 +3892,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             staging_marker_descriptor,
             staging_marker_identity,
         ) = _create_staging_directory(release_root_capability, ".gedcom-rebase-")
+        cancellation_checkpoint()
         ingress.copy_to(
             master,
             staging / "master.ged",
@@ -3882,23 +3942,25 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             FileKind.MANIFEST,
             manifest_fingerprint,
         )
+        cancellation_checkpoint()
         assert staging_marker_descriptor is not None
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
         assert staging_identity is not None
         transaction = _PublicationTransactionState(staging_marker_descriptor)
-        finalization_error = _publish_and_finalize_directory(
-            staging_name,
-            final_dir.name,
-            release_root_capability,
-            staging_descriptor,
-            staging_identity,
-            staging_marker_name,
-            staging_marker_identity,
-            transaction,
-        )
-        if finalization_error is not None:
-            raise finalization_error
+        with non_interruptible_section("publishing incremental release"):
+            finalization_error = _publish_and_finalize_directory(
+                staging_name,
+                final_dir.name,
+                release_root_capability,
+                staging_descriptor,
+                staging_identity,
+                staging_marker_name,
+                staging_marker_identity,
+                transaction,
+            )
+            if finalization_error is not None:
+                raise finalization_error
         if not transaction.committed:
             raise SyncError(
                 "SYNC_OUTPUT",
@@ -3906,10 +3968,12 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
                 "Publication stopped before the ownership marker was removed.",
                 ["Inspect the release root and retry with a new patch version."],
             )
-    except BaseException:
+    except BaseException as exc:
         if transaction is not None and transaction.committed:
             _close_descriptor_quietly(staging_descriptor)
             _close_capability_quietly(release_root_capability)
+            if isinstance(exc, CancellationError):
+                raise
             return 0
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor

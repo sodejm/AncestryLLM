@@ -163,6 +163,38 @@ def test_running_job_cooperatively_cancels_at_reporter_checkpoint() -> None:
     assert manager.cancel(job.job_id) == cancelled
 
 
+def test_accepted_cancellation_wins_race_with_completion_transition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    completion_transition_started = threading.Event()
+    release_completion = threading.Event()
+    original_transition = manager._transition
+
+    def blocked_transition(job_id: str, state: JobState, **changes: object) -> None:
+        if state is JobState.COMPLETED:
+            completion_transition_started.set()
+            assert release_completion.wait(2)
+        original_transition(job_id, state, **changes)
+
+    monkeypatch.setattr(manager, "_transition", blocked_transition)
+    try:
+        job = manager.submit("completion race", lambda: "must be discarded")
+        assert completion_transition_started.wait(2)
+        requested = manager.cancel(job.job_id)
+        assert requested.state is JobState.RUNNING
+        assert requested.cancellation_requested_at is not None
+        release_completion.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        release_completion.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert cancelled.error_code == "JOB_CANCELLED"
+    assert cancelled.result is None
+
+
 def test_cancellation_is_pending_until_atomic_section_finishes() -> None:
     manager = JobManager(max_workers=1, max_pending=1)
     entered = threading.Event()

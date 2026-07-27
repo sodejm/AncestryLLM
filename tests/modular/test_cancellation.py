@@ -50,6 +50,18 @@ def test_listener_failure_cannot_break_or_disclose_cancellation(
     assert "private cancellation listener detail" not in caplog.text
 
 
+def test_base_exception_listener_cannot_break_cancellation() -> None:
+    token = CancellationToken()
+    token.subscribe(
+        lambda _state: (_ for _ in ()).throw(
+            CancellationError("private observer cancellation detail")
+        )
+    )
+
+    assert token.request() is True
+    assert token.requested is True
+
+
 def test_nested_non_interruptible_sections_report_innermost_operation() -> None:
     token = CancellationToken()
     with bind_cancellation_token(token):

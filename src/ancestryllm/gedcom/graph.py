@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Iterable, Sequence
 
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.gedcom.engine import (
     XREF_RE,
     GedcomRecord,
@@ -24,8 +25,13 @@ def scoped_tree_pointers(
     generations: int | None = None,
 ) -> tuple[set[str], set[str]]:
     """Select connected, ancestor, or descendant records without inventing edges."""
-    records = list(source_records)
+    cancellation_checkpoint()
+    records: list[GedcomRecord] = []
+    for record in source_records:
+        cancellation_checkpoint()
+        records.append(record)
     if scope == "connected":
+        cancellation_checkpoint()
         return connected_tree_pointers(root_pointer, people, records)
     if scope not in {"ancestors", "descendants"}:
         raise ValueError("scope must be connected, ancestors, or descendants")
@@ -36,10 +42,12 @@ def scoped_tree_pointers(
     child_families: dict[str, set[str]] = defaultdict(set)
     spouse_families: dict[str, set[str]] = defaultdict(set)
     for record in records:
+        cancellation_checkpoint()
         if record.tag != "FAM" or not record.pointer:
             continue
         roles: dict[str, set[str]] = {"parents": set(), "children": set()}
         for block in _top_level_blocks(record.lines):
+            cancellation_checkpoint()
             first = parse_gedcom_line(block[0])
             pointers = set(XREF_RE.findall(first.value))
             if first.tag in {"HUSB", "WIFE"}:
@@ -48,14 +56,17 @@ def scoped_tree_pointers(
                 roles["children"].update(pointers)
         families[record.pointer] = roles
         for parent in roles["parents"]:
+            cancellation_checkpoint()
             spouse_families[parent].add(record.pointer)
         for child in roles["children"]:
+            cancellation_checkpoint()
             child_families[child].add(record.pointer)
 
     keep_people = {root_pointer}
     keep_families: set[str] = set()
     pending: deque[tuple[str, int]] = deque([(root_pointer, 0)])
     while pending:
+        cancellation_checkpoint()
         pointer, depth = pending.popleft()
         if generations is not None and depth >= generations:
             continue
@@ -65,6 +76,7 @@ def scoped_tree_pointers(
             else spouse_families.get(pointer, set())
         )
         for family_id in family_ids:
+            cancellation_checkpoint()
             keep_families.add(family_id)
             roles = families[family_id]
             if scope == "ancestors":
@@ -73,6 +85,7 @@ def scoped_tree_pointers(
                 keep_people.update(roles["parents"])
                 next_people = roles["children"]
             for related in next_people:
+                cancellation_checkpoint()
                 if related not in keep_people:
                     keep_people.add(related)
                     pending.append((related, depth + 1))

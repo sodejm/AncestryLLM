@@ -7,7 +7,9 @@ import hashlib
 import os
 import sqlite3
 import tempfile
+import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -16,6 +18,11 @@ from typing import Any, Iterator
 
 from sqlglot import exp, parse
 
+from ancestryllm.core.cancellation import (
+    CancellationError,
+    cancellation_checkpoint,
+    current_cancellation_token,
+)
 from ancestryllm.core.errors import AncestryError, FileIngressError, SecurityPolicyError
 from ancestryllm.core.ingress import (
     FileFingerprint,
@@ -723,10 +730,12 @@ class RootsMagicReader:
         digest = hashlib.sha256()
         try:
             while True:
+                cancellation_checkpoint()
                 chunk = os.read(descriptor, _READ_CHUNK_BYTES)
                 if not chunk:
                     break
                 digest.update(chunk)
+            cancellation_checkpoint()
             current = self.ingress._validate_stat(
                 os.fstat(descriptor),
                 FileKind.ROOTSMAGIC,
@@ -758,18 +767,22 @@ class RootsMagicReader:
         try:
             with destination.open("xb", buffering=0) as output:
                 while True:
+                    cancellation_checkpoint()
                     chunk = os.read(descriptor, _READ_CHUNK_BYTES)
                     if not chunk:
                         break
+                    cancellation_checkpoint()
                     digest.update(chunk)
                     remaining = memoryview(chunk)
                     while remaining:
+                        cancellation_checkpoint()
                         written = output.write(remaining)
                         if written is None or written <= 0:
                             raise OSError("The destination write made no progress.")
                         remaining = remaining[written:]
                 output.flush()
                 os.fsync(output.fileno())
+                cancellation_checkpoint()
                 current = self.ingress._validate_stat(
                     os.fstat(descriptor),
                     FileKind.ROOTSMAGIC,
@@ -781,15 +794,27 @@ class RootsMagicReader:
                 ):
                     raise self._changed_error()
         except FileIngressError:
-            destination.unlink(missing_ok=True)
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise
         except (OSError, RuntimeError, ValueError) as exc:
-            destination.unlink(missing_ok=True)
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise self._bound_error(
                 "FILE_INPUT_IO",
                 "The rootsmagic input could not be copied safely.",
                 error_type=type(exc).__name__,
             ) from exc
+        except CancellationError:
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         finally:
             os.close(descriptor)
 
@@ -853,6 +878,12 @@ class RootsMagicReader:
                 uri=True,
                 timeout=min(self.timeout_seconds, 30.0),
             )
+            interruption_reason: str | None = None
+            progress_interrupted = False
+            interruption_lock = threading.Lock()
+            progress_handler_installed = False
+            unsubscribe_cancellation: Callable[[], None] | None = None
+            operation_error: BaseException | None = None
             try:
                 connection.execute("PRAGMA query_only = ON")
                 connection.execute("PRAGMA trusted_schema = OFF")
@@ -860,12 +891,85 @@ class RootsMagicReader:
                 connection.enable_load_extension(False)
                 connection.set_authorizer(self._authorizer)
                 deadline = time.monotonic() + self.timeout_seconds
-                connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1_000)
+                token = current_cancellation_token()
+
+                def record_interruption(reason: str) -> str:
+                    nonlocal interruption_reason
+                    with interruption_lock:
+                        if interruption_reason is None:
+                            interruption_reason = reason
+                        return interruption_reason
+
+                if token is not None:
+
+                    def note_cancellation(_state: object) -> None:
+                        record_interruption(
+                            "timeout" if time.monotonic() > deadline else "cancelled"
+                        )
+
+                    unsubscribe_cancellation = token.subscribe(note_cancellation)
+
+                def interrupt_when_required() -> int:
+                    nonlocal progress_interrupted
+                    with interruption_lock:
+                        if interruption_reason is not None:
+                            progress_interrupted = True
+                            return 1
+                    if time.monotonic() > deadline:
+                        record_interruption("timeout")
+                        with interruption_lock:
+                            progress_interrupted = True
+                        return 1
+                    if token is not None and token.requested:
+                        record_interruption("cancelled")
+                        with interruption_lock:
+                            progress_interrupted = True
+                        return 1
+                    return 0
+
+                connection.set_progress_handler(interrupt_when_required, 1_000)
+                progress_handler_installed = True
                 yield connection
+            except sqlite3.Error as exc:
+                operation_error = exc
+                with interruption_lock:
+                    reason = interruption_reason if progress_interrupted else None
+                if reason == "timeout":
+                    raise AncestryError(
+                        "ROOTSMAGIC_QUERY_TIMEOUT",
+                        "The read-only RootsMagic operation exceeded its configured timeout.",
+                        "Reduce the query scope or increase query_timeout_seconds within the "
+                        "documented limit.",
+                        details={"timeout_seconds": self.timeout_seconds},
+                    ) from exc
+                if reason == "cancelled":
+                    cancellation_checkpoint()
+                raise
+            except BaseException as exc:
+                operation_error = exc
+                raise
             finally:
-                connection.set_progress_handler(None, 0)
-                connection.close()
-                self.verify_source(selected, fingerprint)
+                cleanup_error: BaseException | None = None
+                try:
+                    if unsubscribe_cancellation is not None:
+                        unsubscribe_cancellation()
+                except BaseException as exc:  # noqa: BLE001 - preserve the primary operation error
+                    cleanup_error = exc
+                try:
+                    if progress_handler_installed:
+                        connection.set_progress_handler(None, 0)
+                except BaseException as exc:  # noqa: BLE001 - continue ordered cleanup
+                    cleanup_error = cleanup_error or exc
+                try:
+                    connection.close()
+                except BaseException as exc:  # noqa: BLE001 - verification must still run
+                    cleanup_error = cleanup_error or exc
+                try:
+                    self.verify_source(selected, fingerprint)
+                except BaseException as exc:  # noqa: BLE001 - preserve the primary operation error
+                    cleanup_error = cleanup_error or exc
+                if operation_error is None and cleanup_error is not None:
+                    raise cleanup_error
 
     def schema(
         self,
@@ -906,6 +1010,7 @@ class RootsMagicReader:
         # PRAGMA is denied after the authorizer is installed, so parse declared
         # CREATE TABLE SQL.
         for table_name, create_sql in rows:
+            cancellation_checkpoint()
             try:
                 parsed = parse(str(create_sql), read="sqlite")[0]
                 if parsed is None:
@@ -921,6 +1026,7 @@ class RootsMagicReader:
         return result
 
     def validate_sql(self, sql: str, allowed_schema: dict[str, tuple[str, ...]]) -> str:
+        cancellation_checkpoint()
         if not sql.strip() or "\x00" in sql:
             raise SecurityPolicyError("SQL_REJECTED", "The generated SQL is empty or malformed.")
         try:
@@ -931,6 +1037,7 @@ class RootsMagicReader:
             ) from exc
         if len(statements) != 1:
             raise SecurityPolicyError("SQL_REJECTED", "Exactly one SQL statement is allowed.")
+        cancellation_checkpoint()
         statement = statements[0]
         if not isinstance(statement, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
             raise SecurityPolicyError("SQL_REJECTED", "Only SELECT or CTE queries are allowed.")
@@ -981,6 +1088,7 @@ class RootsMagicReader:
             return
         aggregate = 0
         for table_name in schema:
+            cancellation_checkpoint()
             quoted = table_name.replace('"', '""')
             row = connection.execute(
                 f'SELECT COUNT(*) FROM (SELECT 1 FROM "{quoted}" LIMIT ?)',  # noqa: S608
@@ -1039,7 +1147,10 @@ class RootsMagicReader:
             cursor = active.execute(validated)
             columns = tuple(description[0] for description in cursor.description or ())
             raw_rows = cursor.fetchmany(self.max_rows + 1)
+            cancellation_checkpoint()
         except sqlite3.Error as exc:
+            if "interrupted" in str(exc).casefold():
+                raise
             if "not authorized" in str(exc).casefold():
                 raise SecurityPolicyError(
                     "SQL_OPERATION_DENIED",
@@ -1052,9 +1163,11 @@ class RootsMagicReader:
             ) from exc
         self.verify_source(selected, operation_fingerprint)
         truncated = len(raw_rows) > self.max_rows
-        return QueryResult(
-            columns, tuple(tuple(row) for row in raw_rows[: self.max_rows]), validated, truncated
-        )
+        rows: list[tuple[Any, ...]] = []
+        for row in raw_rows[: self.max_rows]:
+            cancellation_checkpoint()
+            rows.append(tuple(row))
+        return QueryResult(columns, tuple(rows), validated, truncated)
 
     def read_table(
         self,
@@ -1115,9 +1228,15 @@ class RootsMagicReader:
         except AncestryError:
             raise
         except sqlite3.Error as exc:
+            if "interrupted" in str(exc).casefold():
+                raise
             raise AncestryError(
                 "ROOTSMAGIC_READ_FAILED",
                 "The RootsMagic table could not be read safely.",
                 details={"error_type": type(exc).__name__},
             ) from exc
-        return [dict(row) for row in rows]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            cancellation_checkpoint()
+            result.append(dict(row))
+        return result

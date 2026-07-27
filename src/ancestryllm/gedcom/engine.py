@@ -45,6 +45,7 @@ from typing import (
 if TYPE_CHECKING:
     from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolver
 
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import FileIngressError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind, FileSnapshot
 from ancestryllm.core.publication import (
@@ -353,6 +354,7 @@ def iter_gedcom_records(
         ),
         1,
     ):
+        cancellation_checkpoint()
         line = item.text.rstrip("\r\n")
         if not line.strip():
             continue
@@ -521,7 +523,10 @@ def validate_gedcom_555(lines: Sequence[str]) -> None:
     """
     if not lines:
         raise GedcomParseError("GEDCOM output is empty")
-    parsed_lines = [parse_gedcom_line(line, number) for number, line in enumerate(lines, 1)]
+    parsed_lines: list[GedcomLine] = []
+    for number, line in enumerate(lines, 1):
+        cancellation_checkpoint()
+        parsed_lines.append(parse_gedcom_line(line, number))
     if parsed_lines[0].level != 0 or parsed_lines[0].tag != "HEAD":
         raise GedcomParseError("GEDCOM must start with 0 HEAD")
     if parsed_lines[-1].level != 0 or parsed_lines[-1].tag != "TRLR":
@@ -536,6 +541,7 @@ def validate_gedcom_555(lines: Sequence[str]) -> None:
     head_charset = ""
     in_gedc = False
     for parsed in parsed_lines:
+        cancellation_checkpoint()
         if len(parsed.raw.encode("utf-8")) > 255:
             raise GedcomParseError("GEDCOM line exceeds the 255-byte limit")
         if len(parsed.tag) > 31:
@@ -600,6 +606,7 @@ def _wrap_long_gedcom_lines(lines: Sequence[str]) -> list[str]:
     """Wrap long text values using standard level+1 CONC continuations."""
     wrapped: list[str] = []
     for line in lines:
+        cancellation_checkpoint()
         parsed = parse_gedcom_line(line)
         canonical = _canonical_gedcom_line(line)
         if len(canonical.encode("utf-8")) <= 255 or not parsed.value:
@@ -615,6 +622,7 @@ def _wrap_long_gedcom_lines(lines: Sequence[str]) -> list[str]:
         continuation_prefix = f"{parsed.level + 1} CONC "
         continuation_limit = 255 - len(continuation_prefix.encode("utf-8"))
         while remaining:
+            cancellation_checkpoint()
             chunk, remaining = _take_utf8_prefix(remaining, continuation_limit)
             wrapped.append(continuation_prefix + chunk)
     return wrapped
@@ -727,6 +735,7 @@ def connected_tree_pointers(
         }
     person_to_families: dict[str, set[str]] = defaultdict(set)
     for family_pointer, members in family_members.items():
+        cancellation_checkpoint()
         for member in members:
             person_to_families[member].add(family_pointer)
     keep_people: set[str] = set()
@@ -734,6 +743,7 @@ def connected_tree_pointers(
     pending = [root_pointer]
     known_people = {person.pointer for person in people}
     while pending:
+        cancellation_checkpoint()
         pointer = pending.pop()
         if pointer in keep_people or pointer not in known_people:
             continue
@@ -772,6 +782,7 @@ def load_sources(
     sources: list[ParsedSource] = []
     policy = ingress or FileIngressPolicy()
     for source_number, raw_path in enumerate(paths, 1):
+        cancellation_checkpoint()
         path = Path(raw_path).expanduser().absolute()
         try:
             original_records = list(iter_gedcom_records(path, policy, (expected or {}).get(path)))
@@ -785,15 +796,18 @@ def load_sources(
             for xref in XREF_RE.findall(line)
         }
         for record in original_records:
+            cancellation_checkpoint()
             if record.pointer:
                 pointer_map[record.pointer] = _unique_pointer(record.pointer, used, source_number)
         # Namespace undefined references too.  Otherwise an undefined
         # @I99@ in source A could be accidentally rebound to a defined @I99@
         # in source B during the merge.
         for xref in sorted(all_xrefs - pointer_map.keys()):
+            cancellation_checkpoint()
             pointer_map[xref] = _unique_pointer(xref, used, source_number)
         rewritten: list[GedcomRecord] = []
         for record in original_records:
+            cancellation_checkpoint()
             lines = _normalise_record_dates(
                 [_rewrite_xrefs(line, pointer_map) for line in record.lines]
             )
@@ -1571,6 +1585,7 @@ def enrich_relationship_context(
     marriages: dict[str, list[GenealogicalFact]] = defaultdict(list)
     pedigree_by_person_family: dict[tuple[str, str], str] = {}
     for person in people:
+        cancellation_checkpoint()
         for block in _top_level_blocks(person.raw_lines):
             first = parse_gedcom_line(block[0])
             if first.tag != "FAMC" or not first.value.strip():
@@ -2095,6 +2110,7 @@ class _DuplicateProfile:
 
 def _duplicate_profile(record: IndividualRecord) -> _DuplicateProfile:
     """Normalize person, event, place, and relationship keys exactly once."""
+    cancellation_checkpoint()
     year = record.birth_year
     year_bucket = str(year // 5) if year is not None else "?"
     gender = _normalised_key_text(record.gender) or "?"
@@ -2190,6 +2206,7 @@ def _blocking_frequencies(
     """Count each normalized key without retaining another person index."""
     frequencies: dict[tuple[str, ...], int] = defaultdict(int)
     for profile in profiles:
+        cancellation_checkpoint()
         for key in profile.blocking_keys:
             frequencies[key] += 1
     return dict(frequencies)
@@ -2209,6 +2226,7 @@ def _bounded_blocking_buckets(
     """
     buckets: dict[tuple[str, ...], list[int]] = defaultdict(list)
     for index, profile in enumerate(profiles):
+        cancellation_checkpoint()
         for key in profile.blocking_keys:
             if frequencies[key] <= limits.max_bucket_size:
                 buckets[key].append(index)
@@ -2223,6 +2241,7 @@ def _raw_pair_upper_bound(
     totals: dict[tuple[str, ...], int] = defaultdict(int)
     source_totals: dict[tuple[str, ...], dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for profile in profiles:
+        cancellation_checkpoint()
         for key in profile.blocking_keys:
             totals[key] += 1
             source_totals[key][profile.source_file] += 1
@@ -2298,11 +2317,13 @@ def _bounded_candidate_pairs(
     pair_counts = [0] * len(profiles)
     scored_pairs = 0
     for key in sorted(buckets, key=lambda candidate: (frequencies[candidate], candidate)):
+        cancellation_checkpoint()
         indexes = buckets[key]
         for position, left in enumerate(indexes):
             if pair_counts[left] >= limits.max_pairs_per_person:
                 continue
             for right in indexes[position + 1 :]:
+                cancellation_checkpoint()
                 if scored_pairs >= limits.max_scored_pairs:
                     return
                 if pair_counts[left] >= limits.max_pairs_per_person:
@@ -2340,6 +2361,7 @@ def find_duplicate_candidates(
         effective_limits,
         cross_source_only=True,
     ):
+        cancellation_checkpoint()
         score = similarity_score(records[left], records[right])
         if score >= threshold:
             ranked_candidate = (score, -left, -right)
@@ -2613,6 +2635,7 @@ def merge_records(
     candidates = find_duplicate_candidates(all_records, threshold, limits=limits)
     log.info("Found %d candidate pairs", len(candidates))
     for left, right, score in candidates:
+        cancellation_checkpoint()
         root_left = find(all_records[left].pointer)
         root_right = find(all_records[right].pointer)
         if root_left == root_right:
@@ -3399,6 +3422,7 @@ def analyze_quality(
     findings: list[QualityFinding] = []
     current_year = dt.date.today().year
     for person in people:
+        cancellation_checkpoint()
         person_files = _record_source_files(person)
         common: _QualityFindingContext = {
             "people": (person.pointer,),
@@ -3599,6 +3623,7 @@ def analyze_quality(
             )
 
     for child_pointer, parent_pointers in parents.items():
+        cancellation_checkpoint()
         child = by_pointer.get(child_pointer)
         if child is None or child.birth_year is None:
             continue
@@ -3625,6 +3650,7 @@ def analyze_quality(
                 )
     source_by_family = {record.pointer: record for record in source_records if record.tag == "FAM"}
     for family_pointer, roles in families.items():
+        cancellation_checkpoint()
         members = set(roles.get("HUSB", ()) + roles.get("WIFE", ()) + roles.get("CHIL", ()))
         family_record = source_by_family.get(family_pointer)
         family_source = (family_record.source_file,) if family_record is not None else ()
@@ -4024,6 +4050,7 @@ def write_quality_report(
     Raises:
         OSError: The parent directory is absent or atomic replacement fails.
     """
+    cancellation_checkpoint()
     path = Path(output_path).resolve()
     if not path.parent.is_dir():
         raise OSError(f"Quality report directory does not exist: {path.parent}")
@@ -4037,6 +4064,7 @@ def write_quality_diagnostic(
     error: BaseException,
 ) -> None:
     """Atomically write a syntax-failure report when ancestry cannot begin."""
+    cancellation_checkpoint()
     message = str(error)
     line_match = re.search(r"(?:line|level)\s+(\d+)", message, re.IGNORECASE)
     line_number = line_match.group(1) if line_match else "unknown"
@@ -4282,6 +4310,7 @@ def write_gedcom(
         OSError: The destination directory or transactional publication fails.
         GedcomParseError: Emitted 5.5.5 structure fails validation.
     """
+    cancellation_checkpoint()
     if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
         raise ValueError(
             f"Unsupported GEDCOM version {gedcom_version}; choose from {SUPPORTED_GEDCOM_VERSIONS}"
@@ -4311,6 +4340,7 @@ def write_gedcom(
         }
         person_lines: list[str] = []
         for record in records:
+            cancellation_checkpoint()
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
             source_lines = survivor_lines.get(record.pointer) or (
@@ -4325,6 +4355,7 @@ def write_gedcom(
         other_lines: list[str] = []
         subm_lines.extend(synthetic_submitter)
         for source_record in ordered_records:
+            cancellation_checkpoint()
             if (
                 source_record.tag == "FAM"
                 and include_families is not None
@@ -4346,6 +4377,7 @@ def write_gedcom(
         header_records: list[GedcomRecord] = []
         legacy_other_lines: list[str] = []
         for parser in source_parsers:
+            cancellation_checkpoint()
             for element in parser.get_root_child_elements():
                 tag = element.get_tag()
                 text = element.to_gedcom_string(recursive=True)
@@ -4360,6 +4392,7 @@ def write_gedcom(
         lines.extend(synthetic_submitter)
         lines.extend(legacy_other_lines)
         for record in records:
+            cancellation_checkpoint()
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
             lines.extend(_record_to_gedcom_lines(record).rstrip("\n").splitlines())
@@ -4369,6 +4402,7 @@ def write_gedcom(
         lines.extend(header_lines)
         lines.extend(synthetic_submitter)
         for record in records:
+            cancellation_checkpoint()
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
             lines.extend(_record_to_gedcom_lines(record).rstrip("\n").splitlines())

@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import stat
+import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
     TextLine,
 )
+from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.gedcom import engine, incremental
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.gedcom.sync import run_sync
@@ -234,6 +236,64 @@ def _update_args(releases: Path, bundle: Path, *snapshots: str) -> list[str]:
         "--no-quality-report",
         *(item for snapshot in snapshots for item in ("--snapshot", snapshot)),
     ]
+
+
+def test_cancellation_during_incremental_publication_finishes_complete_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    publication_started = threading.Event()
+    allow_publication = threading.Event()
+    original_publish = incremental._publish_directory_no_clobber
+
+    def pause_release_publication(
+        staging_name: str,
+        destination_name: str,
+        release_root,
+    ) -> None:
+        if destination_name.startswith("g0002-"):
+            publication_started.set()
+            assert allow_publication.wait(2)
+        original_publish(staging_name, destination_name, release_root)
+
+    monkeypatch.setattr(
+        incremental,
+        "_publish_directory_no_clobber",
+        pause_release_publication,
+    )
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "incremental sync",
+            lambda: run_sync(
+                _update_args(
+                    releases,
+                    first,
+                    _snapshot("ancestry-main", "ancestry", 2),
+                )
+            ),
+        )
+        assert publication_started.wait(2)
+        pending = manager.cancel(job.job_id)
+        assert pending.cancellation_pending is True
+        allow_publication.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        allow_publication.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    second = next(releases.glob("g0002-*"))
+    assert {path.name for path in second.iterdir()} == {
+        "master.ged",
+        "manifest.json",
+        "update.md",
+        "quality.md",
+        "rollback.json",
+    }
+    assert not list(releases.glob(".gedcom-sync-*"))
 
 
 def _new_publication_args(tmp_path: Path, operation: str, release_root: Path) -> list[str]:

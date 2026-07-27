@@ -15,6 +15,9 @@ def _snapshot(
     name: str = "fictional operation",
     progress: ProgressEvent | None = None,
     error_code: str | None = None,
+    cancellation_requested_at: str | None = None,
+    cancellation_pending: bool = False,
+    cancellation_deferred_by: str | None = None,
 ) -> JobSnapshot:
     return JobSnapshot(
         job_id=job_id,
@@ -30,6 +33,9 @@ def _snapshot(
         resource_keys=(),
         error_code=error_code,
         progress=progress,
+        cancellation_requested_at=cancellation_requested_at,
+        cancellation_pending=cancellation_pending,
+        cancellation_deferred_by=cancellation_deferred_by,
     )
 
 
@@ -76,6 +82,34 @@ def test_live_display_stops_for_failure_and_cancellation() -> None:
     assert "failed (FICTIONAL_FAILURE)" in rendered
     assert "cancelled" in rendered
     assert not display.active
+
+
+def test_live_display_distinguishes_requested_and_deferred_cancellation() -> None:
+    console = Console(record=True, force_terminal=False, width=100)
+    display = JobProgressDisplay(console)
+    requested_at = "2026-07-22T00:00:02+00:00"
+
+    display.handle(
+        _snapshot(
+            JobState.RUNNING,
+            cancellation_requested_at=requested_at,
+        )
+    )
+    console.print(display.renderable)
+    display.handle(
+        _snapshot(
+            JobState.RUNNING,
+            cancellation_requested_at=requested_at,
+            cancellation_pending=True,
+            cancellation_deferred_by="publishing GEDCOM bundle",
+        )
+    )
+    console.print(display.renderable)
+    display.handle(_snapshot(JobState.CANCELLED))
+
+    rendered = console.export_text()
+    assert "cancelling" in rendered
+    assert "cancellation pending: publishing GEDCOM bundle" in rendered
 
 
 def test_live_display_configures_animation_without_double_stdout_patching(

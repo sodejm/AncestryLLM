@@ -375,7 +375,11 @@ class LLMService:
                 stream_started=stream_started,
             )
             partial_output = (
-                "".join(retained_chunks) if retained_chunks is not None and stream_started else None
+                "".join(retained_chunks)
+                if error.code != "PROVIDER_CANCELLED"
+                and retained_chunks is not None
+                and stream_started
+                else None
             )
             self._record_run(
                 request,
@@ -409,8 +413,16 @@ class LLMService:
     def close(self) -> None:
         """Stop queued work, discard in-memory results, and close shared clients."""
 
-        self.execution.close()
-        self.cache.close()
+        first_failure: BaseException | None = None
+        actions = [self.execution.close, self.cache.close]
         close = getattr(self.registry, "close", None)
         if close is not None:
-            close()
+            actions.append(close)
+        for action in actions:
+            try:
+                action()
+            except BaseException as exc:  # noqa: BLE001 - later resources must still close
+                if first_failure is None:
+                    first_failure = exc
+        if first_failure is not None:
+            raise first_failure

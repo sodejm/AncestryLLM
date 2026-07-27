@@ -66,7 +66,11 @@ def shell_module(monkeypatch: pytest.MonkeyPatch):
 
 
 def _application(
-    shell_module, app_context: AppContext, pipe
+    shell_module,
+    app_context: AppContext,
+    pipe,
+    *,
+    owns_context: bool = False,
 ) -> tuple[object, io.StringIO, io.StringIO]:
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -76,6 +80,7 @@ def _application(
         output=DummyOutput(),
         stdout=stdout,
         stderr=stderr,
+        owns_context=owns_context,
     )
     return application, stdout, stderr
 
@@ -307,6 +312,195 @@ def test_exit_with_active_jobs_requires_explicit_cancel_wait_or_stay_decision(
     assert "REPL_EXIT_DECISION_REQUIRED" in stderr.getvalue()
     assert "Exit cancelled" in stdout.getvalue()
     assert '"cancellation_requested": [' in stdout.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("answers", "expected_message"),
+    (
+        (("exit", "wait"), "Waiting for active jobs before exit."),
+        ((EOFError(), EOFError()), "Input closed with active jobs; waiting for safe shutdown"),
+    ),
+    ids=("explicit-wait", "eof-while-active"),
+)
+def test_active_job_exit_waits_for_worker_cleanup_before_closing_resources(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+    answers: tuple[object, object],
+    expected_message: str,
+) -> None:
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    shutdown_started = threading.Event()
+    order: list[str] = []
+
+    def worker() -> None:
+        worker_started.set()
+        try:
+            assert release_worker.wait(2)
+        finally:
+            order.append("session")
+
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(
+            shell_module,
+            app_context,
+            pipe,
+            owns_context=True,
+        )
+        application.jobs.submit("fictional active session", worker)
+        responses = iter(answers)
+
+        async def next_prompt(_prompt: str) -> str:
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            assert isinstance(response, str)
+            return response
+
+        shutdown = application.jobs.shutdown
+
+        def observed_shutdown(*, wait: bool) -> None:
+            shutdown_started.set()
+            shutdown(wait=wait)
+
+        monkeypatch.setattr(application.session, "prompt_async", next_prompt)
+        monkeypatch.setattr(application.jobs, "shutdown", observed_shutdown)
+        monkeypatch.setattr(
+            application.progress_display,
+            "close",
+            lambda: order.append("display"),
+        )
+        monkeypatch.setattr(
+            type(app_context),
+            "close",
+            lambda _context: order.append("context"),
+        )
+
+        async def exercise() -> int:
+            task = asyncio.create_task(application.run_async())
+            assert await asyncio.to_thread(worker_started.wait, 2)
+            assert await asyncio.to_thread(shutdown_started.wait, 2)
+            assert order == []
+            release_worker.set()
+            return await task
+
+        try:
+            assert asyncio.run(exercise()) == 0
+        finally:
+            release_worker.set()
+
+    assert order == ["session", "display", "context"]
+    assert expected_message in stdout.getvalue()
+
+
+def test_async_cancellation_during_shutdown_drains_before_close_and_is_reraised(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    shutdown_started = threading.Event()
+    order: list[str] = []
+
+    def worker() -> None:
+        worker_started.set()
+        try:
+            assert release_worker.wait(2)
+        finally:
+            order.append("provider-session")
+
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(
+            shell_module,
+            app_context,
+            pipe,
+            owns_context=True,
+        )
+        application.jobs.submit("fictional provider session", worker)
+        responses = iter(("exit", "wait"))
+
+        async def next_prompt(_prompt: str) -> str:
+            return next(responses)
+
+        shutdown = application.jobs.shutdown
+
+        def observed_shutdown(*, wait: bool) -> None:
+            shutdown_started.set()
+            shutdown(wait=wait)
+
+        monkeypatch.setattr(application.session, "prompt_async", next_prompt)
+        monkeypatch.setattr(application.jobs, "shutdown", observed_shutdown)
+        monkeypatch.setattr(
+            application.progress_display,
+            "close",
+            lambda: order.append("display"),
+        )
+        monkeypatch.setattr(
+            type(app_context),
+            "close",
+            lambda _context: order.append("context"),
+        )
+
+        async def exercise() -> None:
+            task = asyncio.create_task(application.run_async())
+            assert await asyncio.to_thread(worker_started.wait, 2)
+            assert await asyncio.to_thread(shutdown_started.wait, 2)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert order == []
+            assert task.done() is False
+            release_worker.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        try:
+            asyncio.run(exercise())
+        finally:
+            release_worker.set()
+
+    assert order == ["provider-session", "display", "context"]
+    assert application.jobs.active() == ()
+
+
+def test_shutdown_closes_display_and_context_even_when_worker_shutdown_raises(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(
+            shell_module,
+            app_context,
+            pipe,
+            owns_context=True,
+        )
+        monkeypatch.setattr(
+            application.jobs,
+            "shutdown",
+            lambda *, wait: (_ for _ in ()).throw(RuntimeError("fictional shutdown failure")),
+        )
+        monkeypatch.setattr(
+            application.progress_display,
+            "close",
+            lambda: closed.append("display"),
+        )
+        monkeypatch.setattr(
+            type(app_context),
+            "close",
+            lambda _context: closed.append("context"),
+        )
+        pipe.send_text("exit\n")
+
+        with pytest.raises(RuntimeError, match="fictional shutdown failure"):
+            asyncio.run(application.run_async())
+
+    assert closed == ["display", "context"]
+    assert application.jobs._listeners == []
 
 
 def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdown(

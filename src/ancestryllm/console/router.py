@@ -66,7 +66,7 @@ class SessionRouter:
         control = tokens[0].casefold()
         if control in {"exit", "quit"}:
             self._require_count(tokens, 1, control)
-            return RouteResult(RouteKind.EXIT)
+            return RouteResult(RouteKind.EXIT, control)
         if control == "help":
             return RouteResult(RouteKind.OUTPUT, self._help(tokens[1:]))
         if control == "modules" and len(tokens) == 1:
@@ -256,7 +256,7 @@ class SessionRouter:
             raise AncestryError("REPL_USAGE_ERROR", "Usage: help [COMMAND]", exit_code=2)
         if not tokens:
             return (
-                "Root commands: modules, use MODULE, jobs [list|show ID], "
+                "Root commands: modules, use MODULE, jobs [list|show ID|cancel ID], "
                 "help [COMMAND], exit, quit. "
                 "Enabled module commands can also be run directly."
             )
@@ -267,9 +267,10 @@ class SessionRouter:
             return f"{specification.name}: {specification.help}\nActions: {actions}"
         if command == "jobs":
             return (
-                "jobs [list|show JOB_ID]: inspect background job state, timestamps, "
-                "latest progress, results, and stable failures. Active jobs also render "
-                "live above the prompt."
+                "jobs [list|show JOB_ID|cancel JOB_ID]: inspect background job state, "
+                "timestamps, latest progress, results, and stable failures, or request "
+                "cooperative cancellation. Ctrl-C targets the newest active job. "
+                "Active jobs also render live above the prompt."
             )
         if self.active_module and command in {"info", "show", "set", "unset", "run", "back"}:
             return "Module commands: info, show [actions|options], set NAME VALUE, unset NAME, run [ACTION], back."
