@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from contextlib import redirect_stdout
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,14 @@ class GedcomOperationResult:
     people_read: int
     people_written: int
     quality_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomSyncResult:
+    """Serializable result for an incremental GEDCOM synchronization."""
+
+    exit_code: int
+    output: str
 
 
 class GedcomService:
@@ -514,10 +524,15 @@ class GedcomService:
             raise
         return output_path
 
-    def sync(self, arguments: list[str]) -> int:
-        return run_sync(
-            arguments,
-            self.ingress,
-            resolver_factory=self._sync_identity_resolver,
-            raise_errors=True,
-        )
+    def sync(self, arguments: list[str]) -> GedcomSyncResult:
+        """Run incremental sync and retain its transcript for each presentation surface."""
+
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = run_sync(
+                arguments,
+                self.ingress,
+                resolver_factory=self._sync_identity_resolver,
+                raise_errors=True,
+            )
+        return GedcomSyncResult(exit_code=exit_code, output=output.getvalue())

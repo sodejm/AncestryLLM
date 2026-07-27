@@ -290,7 +290,7 @@ def test_operational_ollama_profile_flows_through_merge_update_quality_and_cache
                 "--provider",
                 "fictional-local",
             ]
-        )
+        ).exit_code
         == 0
     )
     bundle = next(releases.glob("g0001-*"))
@@ -810,7 +810,7 @@ def test_provider_none_is_socket_free_with_every_credential_sdk_and_profile_pres
                 "--model",
                 "configured-but-ignored",
             ]
-        )
+        ).exit_code
         == 0
     )
     assert constructed == []

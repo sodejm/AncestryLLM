@@ -9,17 +9,19 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import Mock
 
 import pytest
 
-from ancestryllm.cli import main
+from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.console.router import RouteKind, SessionRouter
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.modules import BUILTIN_MODULES, ModuleRegistry
+from ancestryllm.core.modules import BUILTIN_MODULES, COMMAND_SPECIFICATIONS, ModuleRegistry
+from ancestryllm.gedcom.service import GedcomSyncResult
+from ancestryllm.storage.diagnostics import diagnose_storage
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +29,7 @@ class CommandCase:
     module: str
     action: str
     arguments: tuple[str, ...]
-    expected: Any
+    expected: Any | Callable[[AppContext], Any]
 
     @property
     def tokens(self) -> list[str]:
@@ -51,6 +53,7 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
+        "backup": tmp_path / "fictional-backup.db",
     }
 
 
@@ -61,6 +64,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
     report = str(fictional_files["report"])
     ocr = str(fictional_files["ocr"])
     schema = str(fictional_files["schema"])
+    backup = str(fictional_files["backup"])
     return (
         CommandCase("rootsmagic", "list", (), {"module": "rootsmagic", "action": "list"}),
         CommandCase(
@@ -106,7 +110,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "gedcom",
             "sync",
             ("update", "--manifest", "fictional-private-manifest.json", "--dry-run"),
-            None,
+            GedcomSyncResult(exit_code=0, output=""),
         ),
         CommandCase(
             "ocr",
@@ -212,6 +216,23 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "Deleted secret reference: openai.api_key",
         ),
         CommandCase("secrets", "status", ("openai.api_key",), {"openai.api_key": False}),
+        CommandCase(
+            "modules",
+            "list",
+            (),
+            lambda context: [
+                _descriptor_payload(item) for item in ModuleRegistry(context).descriptors()
+            ],
+        ),
+        CommandCase("modules", "disable", ("ocr",), "Disabled module: ocr"),
+        CommandCase("modules", "enable", ("ocr",), "Enabled module: ocr"),
+        CommandCase("database", "backup", (backup,), f"Encrypted backup created: {backup}"),
+        CommandCase(
+            "database",
+            "diagnose",
+            (),
+            lambda context: diagnose_storage(context.database.path, context.secrets),
+        ),
     )
 
 
@@ -249,7 +270,9 @@ def mocked_action_services(app_context: AppContext, monkeypatch: pytest.MonkeyPa
         "quality",
         lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "quality"},
     )
-    monkeypatch.setattr(GedcomService, "sync", lambda _self, _args: 0)
+    monkeypatch.setattr(
+        GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
+    )
     monkeypatch.setattr(
         OcrService,
         "extract",
@@ -287,20 +310,25 @@ def _record_rendered_values(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     return rendered
 
 
+def _expected_value(case: CommandCase, context: AppContext) -> Any:
+    return case.expected(context) if callable(case.expected) else case.expected
+
+
 def test_action_matrix_covers_every_shipped_module_action(
     command_cases: tuple[CommandCase, ...],
 ) -> None:
     covered = {(case.module, case.action) for case in command_cases}
     shipped = {
-        (module_id, action)
-        for module_id, descriptor in BUILTIN_MODULES.items()
-        for action in descriptor.actions
+        (module_id, action.name)
+        for module_id, specification in COMMAND_SPECIFICATIONS.items()
+        for action in specification.actions
     }
     assert covered == shipped
 
 
 @pytest.mark.parametrize(
-    "case_index", range(sum(len(descriptor.actions) for descriptor in BUILTIN_MODULES.values()))
+    "case_index",
+    range(sum(len(specification.actions) for specification in COMMAND_SPECIFICATIONS.values())),
 )
 def test_one_shot_returns_expected_dtos_for_every_action(
     case_index: int,
@@ -320,7 +348,7 @@ def test_one_shot_returns_expected_dtos_for_every_action(
 
     assert main(["--json", *case.tokens], app_context) == 0
 
-    expected = [] if case.expected is None else [case.expected]
+    expected = [to_plain(_expected_value(case, app_context))]
     assert rendered == expected
     assert secret_value not in json.dumps(rendered, ensure_ascii=False)
 
@@ -339,20 +367,18 @@ def test_every_action_serializes_json_and_repl_routes_direct_and_module_context(
     for case in command_cases:
         assert main(["--json", *case.tokens], app_context) == 0
         stdout, stderr = capsys.readouterr()
-        if case.expected is None:
-            assert stdout == ""
-        else:
-            assert json.loads(stdout) == to_plain(case.expected)
+        assert json.loads(stdout) == to_plain(_expected_value(case, app_context))
         assert stderr == ""
         router = SessionRouter(app_context)
         direct = router.route_tokens(tuple(case.tokens))
         assert direct.kind is RouteKind.EXECUTE
         assert direct.invocation is not None
-        assert router.route_tokens(("use", case.module)).kind is RouteKind.OUTPUT
-        contextual = router.route_tokens(("run", case.action, *case.arguments))
-        assert contextual.kind is RouteKind.EXECUTE
-        assert contextual.invocation is not None
-        assert contextual.invocation.namespace == direct.invocation.namespace
+        if case.module in BUILTIN_MODULES:
+            assert router.route_tokens(("use", case.module)).kind is RouteKind.OUTPUT
+            contextual = router.route_tokens(("run", case.action, *case.arguments))
+            assert contextual.kind is RouteKind.EXECUTE
+            assert contextual.invocation is not None
+            assert contextual.invocation.namespace == direct.invocation.namespace
 
 
 def test_one_shot_lists_enabled_modules(app_context: AppContext, capsys) -> None:
@@ -762,8 +788,14 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert (3, 12) <= sys.version_info[:2] < (3, 15)
     repository = Path(__file__).resolve().parents[2]
     wheelhouse = tmp_path / "wheelhouse"
-    uv = shutil.which("uv")
-    assert uv is not None, "uv is required by the locked build workflow"
+    venv_bin = Path(sys.executable).parent
+    uv_name = "uv.exe" if os.name == "nt" else "uv"
+    uv = venv_bin / uv_name
+    if not uv.is_file():
+        resolved = shutil.which("uv")
+        assert resolved is not None, "uv is required by the locked build workflow"
+        uv = Path(resolved)
+    uv_environment = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")}
     build = subprocess.run(
         [uv, "build", "--wheel", "--out-dir", str(wheelhouse)],
         check=False,
@@ -771,6 +803,7 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         text=True,
         timeout=60,
         cwd=repository,
+        env=uv_environment,
     )
     assert build.returncode == 0, build.stderr
     wheel = next(wheelhouse.glob("ancestryllm-*.whl"))
@@ -795,6 +828,7 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         text=True,
         timeout=30,
         cwd=repository,
+        env=uv_environment,
     )
     assert export.returncode == 0, export.stderr
     install = subprocess.run(
@@ -813,6 +847,7 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         timeout=60,
+        env=uv_environment,
     )
     assert install.returncode == 0, install.stderr
 

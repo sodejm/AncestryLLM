@@ -236,7 +236,12 @@ def dispatch(
                 json_output,
             )
         else:
-            return gedcom_service.sync([args.sync_command, *args.sync_args])
+            sync_result = gedcom_service.sync([args.sync_command, *args.sync_args])
+            if json_output:
+                emit(sync_result, json_output)
+            else:
+                sys.stdout.write(sync_result.output)
+            return sync_result.exit_code
         return 0
 
     if args.command == "prompts":
