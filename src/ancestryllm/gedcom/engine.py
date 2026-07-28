@@ -28,6 +28,7 @@ import os
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from itertools import chain
 from pathlib import Path
 from types import ModuleType
 from typing import (
@@ -115,6 +116,25 @@ MAX_DEDUP_PROMPT_TOKENS = MAX_AI_TEXT * 2 + 1_000
 DETERMINISTIC_HARD_CONFLICTS = frozenset({"sex", "birth country", "death country"})
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
+_POINTER_REFERENCE_TAGS = frozenset(
+    {
+        "ALIA",
+        "ASSO",
+        "CHIL",
+        "FAMC",
+        "FAMS",
+        "HUSB",
+        "WIFE",
+        "OBJE",
+        "NOTE",
+        "REPO",
+        "SOUR",
+        "SUBM",
+        "SNOTE",
+        "WITN",
+    }
+)
+_ROOTED_AUXILIARY_RECORD_TAGS = frozenset({"NOTE", "SOUR", "OBJE", "REPO", "SUBM"})
 QUALITY_SEVERITY_ORDER = {
     "critical": 0,
     "high": 1,
@@ -416,23 +436,7 @@ def _unique_pointer(original: str, used: set[str], source_number: int) -> str:
 def _rewrite_xrefs(line: str, pointer_map: dict[str, str]) -> str:
     """Rewrite exact reference fields, never arbitrary note text."""
     parsed = parse_gedcom_line(line)
-    reference_tags = {
-        "ALIA",
-        "ASSO",
-        "CHIL",
-        "FAMC",
-        "FAMS",
-        "HUSB",
-        "WIFE",
-        "OBJE",
-        "NOTE",
-        "REPO",
-        "SOUR",
-        "SUBM",
-        "SNOTE",
-        "WITN",
-    }
-    if not parsed.xref and parsed.tag not in reference_tags:
+    if not parsed.xref and parsed.tag not in _POINTER_REFERENCE_TAGS:
         return line
     if not parsed.xref and not XREF_RE.fullmatch(parsed.value.strip()):
         return line
@@ -440,6 +444,50 @@ def _rewrite_xrefs(line: str, pointer_map: dict[str, str]) -> str:
         lambda match: pointer_map.get(match.group(), match.group()),
         line,
     )
+
+
+def _exact_pointer_references(lines: Iterable[str]) -> set[str]:
+    """Return semantic, exact pointer references from already-rewritten lines."""
+    references: set[str] = set()
+    for line in lines:
+        cancellation_checkpoint()
+        parsed = parse_gedcom_line(line)
+        value = parsed.value.strip()
+        if not parsed.xref and parsed.tag in _POINTER_REFERENCE_TAGS and XREF_RE.fullmatch(value):
+            references.add(value)
+    return references
+
+
+def _rooted_auxiliary_pointer_closure(
+    seed_lines: Iterable[str],
+    source_records: Sequence[GedcomRecord],
+    pointer_map: dict[str, str],
+) -> set[str]:
+    """Find transitively referenced auxiliary records after xref rewriting."""
+    auxiliary_records: dict[str, GedcomRecord] = {}
+    for record in source_records:
+        cancellation_checkpoint()
+        if record.tag not in _ROOTED_AUXILIARY_RECORD_TAGS or not record.pointer:
+            continue
+        rewritten_header = parse_gedcom_line(_rewrite_xrefs(record.lines[0], pointer_map))
+        auxiliary_records[rewritten_header.xref] = record
+
+    retained: set[str] = set()
+    pending = deque(sorted(_exact_pointer_references(seed_lines)))
+    while pending:
+        cancellation_checkpoint()
+        pointer = pending.popleft()
+        if pointer in retained:
+            continue
+        record = auxiliary_records.get(pointer)
+        if record is None:
+            continue
+        retained.add(pointer)
+        rewritten_lines = (_rewrite_xrefs(line, pointer_map) for line in record.lines)
+        for referenced in sorted(_exact_pointer_references(rewritten_lines)):
+            if referenced not in retained:
+                pending.append(referenced)
+    return retained
 
 
 def _normalise_record_dates(lines: list[str]) -> list[str]:
@@ -4321,10 +4369,11 @@ def write_gedcom(
     lines: list[str] = []
     synthetic_submitter: list[str] = []
     if source_documents:
+        pointer_rewrites = pointer_map or {}
         all_source_records = [record for source in source_documents for record in source.records]
         heads = [record for record in all_source_records if record.tag == "HEAD"]
         header_lines = _normalise_header_lines(heads, gedcom_version)
-        header_lines = [_rewrite_xrefs(line, pointer_map or {}) for line in header_lines]
+        header_lines = [_rewrite_xrefs(line, pointer_rewrites) for line in header_lines]
         synthetic_submitter = _ensure_submitter_record(header_lines, all_source_records)
         lines.extend(header_lines)
         non_people = [
@@ -4346,7 +4395,26 @@ def write_gedcom(
             source_lines = survivor_lines.get(record.pointer) or (
                 _record_to_gedcom_lines(record).rstrip("\n").splitlines()
             )
-            person_lines.extend(_rewrite_xrefs(line, pointer_map or {}) for line in source_lines)
+            person_lines.extend(_rewrite_xrefs(line, pointer_rewrites) for line in source_lines)
+        rooted_export = include_individuals is not None or include_families is not None
+        family_dependency_lines: list[str] = []
+        if rooted_export:
+            for source_record in ordered_records:
+                cancellation_checkpoint()
+                if source_record.tag != "FAM":
+                    continue
+                if include_families is not None and source_record.pointer not in include_families:
+                    continue
+                family_dependency_lines.extend(
+                    _rewrite_xrefs(line, pointer_rewrites) for line in source_record.lines
+                )
+            retained_auxiliary = _rooted_auxiliary_pointer_closure(
+                chain(header_lines, person_lines, family_dependency_lines),
+                all_source_records,
+                pointer_rewrites,
+            )
+        else:
+            retained_auxiliary = set()
         # Reorder the standard root records into the conventional sequence:
         # HEAD, SUBM, INDI, FAM, then NOTE/OBJE/REPO/SOUR/etc.  This is more
         # interoperable with older importers while preserving every line.
@@ -4362,6 +4430,16 @@ def write_gedcom(
                 and source_record.pointer not in include_families
             ):
                 continue
+            rewritten_lines = [
+                _rewrite_xrefs(line, pointer_rewrites) for line in source_record.lines
+            ]
+            if rooted_export and source_record.tag != "FAM":
+                rewritten_pointer = parse_gedcom_line(rewritten_lines[0]).xref
+                if (
+                    source_record.tag not in _ROOTED_AUXILIARY_RECORD_TAGS
+                    or rewritten_pointer not in retained_auxiliary
+                ):
+                    continue
             target = (
                 subm_lines
                 if source_record.tag == "SUBM"
@@ -4369,7 +4447,7 @@ def write_gedcom(
                 if source_record.tag == "FAM"
                 else other_lines
             )
-            target.extend(_rewrite_xrefs(line, pointer_map or {}) for line in source_record.lines)
+            target.extend(rewritten_lines)
         lines = lines[: len(header_lines)] + subm_lines + person_lines + family_lines + other_lines
     elif source_parsers:
         # Compatibility path for callers of the previous DOM-based API.

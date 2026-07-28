@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "data_policy": "fictional-only",
+  "entries": [
+    {
+      "id": "minimal-555",
+      "source": {
+        "kind": "file",
+        "paths": [
+          "minimal-555.ged"
+        ]
+      },
+      "stage": "parser-round-trip",
+      "expected": "accepted",
+      "covers": [
+        "gedcom-5.5.5",
+        "utf-8",
+        "lf"
+      ]
+    },
+    {
+      "id": "minimal-551",
+      "source": {
+        "kind": "file",
+        "paths": [
+          "minimal-551.ged"
+        ]
+      },
+      "stage": "parser-round-trip",
+      "expected": "accepted",
+      "covers": [
+        "gedcom-5.5.1-input"
+      ]
+    },
+    {
+      "id": "preserve-extensions",
+      "source": {
+        "kind": "file",
+        "paths": [
+          "preserve-extensions.ged"
+        ]
+      },
+      "stage": "parser-round-trip",
+      "expected": "accepted-with-findings",
+      "covers": [
+        "unicode",
+        "alternative-names",
+        "alternative-birth-death-events",
+        "conc-cont",
+        "vendor-nesting",
+        "nested-note-source-object-citation",
+        "unicode-place-and-note",
+        "empty-values",
+        "malformed-date",
+        "dangling-xref"
+      ]
+    },
+    {
+      "id": "xref-collision-pair",
+      "source": {
+        "kind": "file-set",
+        "paths": [
+          "xref-source-a.ged",
+          "xref-source-b.ged"
+        ]
+      },
+      "stage": "xref-allocation",
+      "expected": "accepted-with-findings",
+      "covers": [
+        "definition-collision",
+        "dangling-xref-isolation",
+        "literal-xref-text"
+      ]
+    },
+    {
+      "id": "encoded-and-newline-inputs",
+      "source": {
+        "kind": "factory",
+        "factory": "encoded_input_variants"
+      },
+      "stage": "parser",
+      "expected": "accepted",
+      "covers": [
+        "utf-8-bom",
+        "utf-16le-bom",
+        "utf-16be-bom",
+        "crlf"
+      ]
+    },
+    {
+      "id": "malformed-line-grammar",
+      "source": {
+        "kind": "factory",
+        "factory": "malformed_line_variants"
+      },
+      "stage": "line-parser",
+      "expected": "rejected",
+      "covers": [
+        "negative-level",
+        "leading-zero-level",
+        "level-overflow",
+        "missing-tag",
+        "malformed-xref"
+      ]
+    },
+    {
+      "id": "malformed-byte-inputs",
+      "source": {
+        "kind": "factory",
+        "factory": "malformed_byte_variants"
+      },
+      "stage": "parser",
+      "expected": "rejected",
+      "covers": [
+        "invalid-utf-8",
+        "utf-16-without-bom",
+        "partial-bom"
+      ]
+    },
+    {
+      "id": "utf8-line-boundaries",
+      "source": {
+        "kind": "factory",
+        "factory": "utf8_line_boundary_variants"
+      },
+      "stage": "serializer-validator",
+      "expected": "accepted",
+      "covers": [
+        "254-bytes",
+        "255-bytes",
+        "conc-wrap",
+        "multibyte-boundary"
+      ]
+    },
+    {
+      "id": "invalid-output-structures",
+      "source": {
+        "kind": "factory",
+        "factory": "invalid_output_variants"
+      },
+      "stage": "5.5.5-validator",
+      "expected": "rejected",
+      "covers": [
+        "head-trailer-cardinality",
+        "duplicate-xref",
+        "unsupported-version",
+        "wrong-charset",
+        "lowercase-tag",
+        "tag-length",
+        "line-length",
+        "skipped-level"
+      ]
+    },
+    {
+      "id": "deterministic-semantic-property-corpus",
+      "source": {
+        "kind": "factory",
+        "factory": "semantic_property_variants"
+      },
+      "stage": "parser-round-trip",
+      "expected": "accepted-with-findings",
+      "covers": [
+        "serialize-reparse",
+        "semantic-comparer",
+        "unicode",
+        "long-values",
+        "unknown-blocks",
+        "xref-edges"
+      ]
+    },
+    {
+      "id": "deep-family-graph",
+      "source": {
+        "kind": "factory",
+        "factory": "deep_graph_variant"
+      },
+      "stage": "5.5.5-validator",
+      "expected": "accepted",
+      "covers": [
+        "deep-acyclic-graph",
+        "unique-xrefs"
+      ]
+    }
+  ]
+}

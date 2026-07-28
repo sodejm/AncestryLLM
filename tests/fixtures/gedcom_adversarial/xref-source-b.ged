@@ -1,0 +1,12 @@
+0 HEAD
+1 SOUR AdversarialFixtureB
+1 GEDC
+2 VERS 5.5.5
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Briar /Fiction/
+1 FAMS @F1@
+1 _TEXT literal @I1@
+0 @F1@ FAM
+1 HUSB @I1@
+0 TRLR
