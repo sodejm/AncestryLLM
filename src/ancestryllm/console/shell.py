@@ -131,24 +131,33 @@ class ReplApplication:
 
     async def run_async(self) -> int:
         try:
-            if not self.history.persistent:
-                self.error_presenter.render(
-                    "Persistent history is disabled because owner-only permissions could not be guaranteed."
-                )
-            while True:
-                try:
-                    command = await self.session.prompt_async(self.router.prompt)
-                except EOFError:
-                    if await self._confirm_exit("EOF"):
-                        return 0
-                    continue
-                except KeyboardInterrupt:
-                    self._cancel_foreground()
-                    continue
-                if await self.execute_line(command):
+            result = await self._run_prompt_loop()
+        except BaseException:
+            try:
+                await self._shutdown()
+            except BaseException:  # noqa: BLE001, S110 - preserve the prompt failure
+                pass
+            raise
+        await self._shutdown()
+        return result
+
+    async def _run_prompt_loop(self) -> int:
+        if not self.history.persistent:
+            self.error_presenter.render(
+                "Persistent history is disabled because owner-only permissions could not be guaranteed."
+            )
+        while True:
+            try:
+                command = await self.session.prompt_async(self.router.prompt)
+            except EOFError:
+                if await self._confirm_exit("EOF"):
                     return 0
-        finally:
-            await self._shutdown()
+                continue
+            except KeyboardInterrupt:
+                self._cancel_foreground()
+                continue
+            if await self.execute_line(command):
+                return 0
 
     async def _shutdown(self) -> None:
         """Drain workers before closing resources, even if this task is cancelled."""

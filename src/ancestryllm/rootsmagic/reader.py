@@ -30,6 +30,7 @@ from ancestryllm.core.ingress import (
     FileKind,
     FileSnapshot,
 )
+from ancestryllm.core.publication import cleanup_open_path
 
 DENIED_ACTIONS = {
     sqlite3.SQLITE_INSERT,
@@ -766,54 +767,46 @@ class RootsMagicReader:
         digest = hashlib.sha256()
         try:
             with destination.open("xb", buffering=0) as output:
-                while True:
-                    cancellation_checkpoint()
-                    chunk = os.read(descriptor, _READ_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    cancellation_checkpoint()
-                    digest.update(chunk)
-                    remaining = memoryview(chunk)
-                    while remaining:
+                try:
+                    while True:
                         cancellation_checkpoint()
-                        written = output.write(remaining)
-                        if written is None or written <= 0:
-                            raise OSError("The destination write made no progress.")
-                        remaining = remaining[written:]
-                output.flush()
-                os.fsync(output.fileno())
-                cancellation_checkpoint()
-                current = self.ingress._validate_stat(
-                    os.fstat(descriptor),
-                    FileKind.ROOTSMAGIC,
-                )
-                if (
-                    current != snapshot
-                    or current != expected.snapshot
-                    or digest.hexdigest() != expected.sha256
-                ):
-                    raise self._changed_error()
+                        chunk = os.read(descriptor, _READ_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        cancellation_checkpoint()
+                        digest.update(chunk)
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            cancellation_checkpoint()
+                            written = output.write(remaining)
+                            if written is None or written <= 0:
+                                raise OSError("The destination write made no progress.")
+                            remaining = remaining[written:]
+                    output.flush()
+                    os.fsync(output.fileno())
+                    cancellation_checkpoint()
+                    current = self.ingress._validate_stat(
+                        os.fstat(descriptor),
+                        FileKind.ROOTSMAGIC,
+                    )
+                    if (
+                        current != snapshot
+                        or current != expected.snapshot
+                        or digest.hexdigest() != expected.sha256
+                    ):
+                        raise self._changed_error()
+                except BaseException:
+                    cleanup_open_path(destination, output.fileno())
+                    raise
         except FileIngressError:
-            try:
-                destination.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise
         except (OSError, RuntimeError, ValueError) as exc:
-            try:
-                destination.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise self._bound_error(
                 "FILE_INPUT_IO",
                 "The rootsmagic input could not be copied safely.",
                 error_type=type(exc).__name__,
             ) from exc
         except CancellationError:
-            try:
-                destination.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise
         finally:
             os.close(descriptor)

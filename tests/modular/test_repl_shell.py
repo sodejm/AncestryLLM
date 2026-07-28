@@ -503,6 +503,47 @@ def test_shutdown_closes_display_and_context_even_when_worker_shutdown_raises(
     assert application.jobs._listeners == []
 
 
+def test_prompt_failure_survives_shutdown_failure_and_later_cleanup_runs(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(
+            shell_module,
+            app_context,
+            pipe,
+            owns_context=True,
+        )
+
+        async def fail_prompt(_prompt: str) -> str:
+            raise ValueError("fictional prompt failure")
+
+        monkeypatch.setattr(application.session, "prompt_async", fail_prompt)
+        monkeypatch.setattr(
+            application.jobs,
+            "shutdown",
+            lambda *, wait: (_ for _ in ()).throw(RuntimeError("fictional shutdown failure")),
+        )
+        monkeypatch.setattr(
+            application.progress_display,
+            "close",
+            lambda: closed.append("display"),
+        )
+        monkeypatch.setattr(
+            type(app_context),
+            "close",
+            lambda _context: closed.append("context"),
+        )
+
+        with pytest.raises(ValueError, match="fictional prompt failure"):
+            asyncio.run(application.run_async())
+
+    assert closed == ["display", "context"]
+    assert application.jobs._listeners == []
+
+
 def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdown(
     shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -12,6 +12,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.core.errors import ProviderError, SecurityPolicyError, normalize_provider_error
 from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.llm.contracts import (
@@ -709,6 +710,37 @@ class PartialBlockingStreamProvider(LifecycleProvider):
             self.closed = True
 
 
+class CloseFailureIterator:
+    def __init__(self) -> None:
+        self.yielded = False
+        self.closed = False
+
+    def __iter__(self) -> CloseFailureIterator:
+        return self
+
+    def __next__(self) -> str:
+        if not self.yielded:
+            self.yielded = True
+            return "partial"
+        raise TimeoutError("fictional primary stream timeout")
+
+    def close(self) -> None:
+        self.closed = True
+        raise CancellationError("fictional iterator close cancellation")
+
+
+class CloseFailureProvider(LifecycleProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.iterator = CloseFailureIterator()
+
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        del request
+        self.stream_called = True
+        self.stream_calls += 1
+        return self.iterator
+
+
 def service(provider: LifecycleProvider) -> tuple[LLMService, AuditDatabase]:
     database = AuditDatabase()
     return LLMService(StaticRegistry(provider), database), database  # type: ignore[arg-type]
@@ -767,6 +799,20 @@ def test_service_stream_does_not_retain_partial_payload_by_default() -> None:
     assert row.response_hash is None
     assert row.input_payload is None
     assert row.output_payload is None
+
+
+def test_service_stream_preserves_primary_failure_when_iterator_close_raises_baseexception() -> (
+    None
+):
+    provider = CloseFailureProvider()
+    llm, database = service(provider)
+
+    with pytest.raises(ProviderError) as raised:
+        list(llm.stream(request("test")))
+
+    assert raised.value.code == "PROVIDER_STREAM_TIMEOUT"
+    assert provider.iterator.closed is True
+    assert database.rows[0].error_code == "PROVIDER_STREAM_TIMEOUT"
 
 
 def test_service_never_retries_a_partially_consumed_stream() -> None:

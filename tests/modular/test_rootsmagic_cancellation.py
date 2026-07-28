@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,6 +26,74 @@ def _tree(path: Path) -> None:
     connection.execute("INSERT INTO PersonTable VALUES (1)")
     connection.commit()
     connection.close()
+
+
+class _RowsCursor:
+    description = (("PersonID", None, None, None, None, None, None),)
+
+    def __init__(self, rows: list[Any]) -> None:
+        self.rows = rows
+
+    def fetchall(self) -> list[Any]:
+        return self.rows
+
+    def fetchmany(self, _size: int) -> list[Any]:
+        return self.rows
+
+    def fetchone(self) -> Any:
+        return self.rows[0] if self.rows else None
+
+
+class _InterruptingConnection:
+    row_factory = None
+
+    def __init__(
+        self,
+        target: str,
+        interrupted: threading.Event,
+        allow_raise: threading.Event,
+    ) -> None:
+        self.target = target
+        self.interrupted = interrupted
+        self.allow_raise = allow_raise
+        self.progress_handler: Any = None
+
+    def execute(self, sql: str, *_args: object) -> _RowsCursor:
+        if self.target in sql and self.progress_handler is not None:
+            self.interrupted.set()
+            assert self.allow_raise.wait(2)
+            if self.progress_handler():
+                raise sqlite3.OperationalError("interrupted")
+        if "sqlite_master" in sql:
+            return _RowsCursor(
+                [("PersonTable", "CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY)")]
+            )
+        if "COUNT(*)" in sql:
+            return _RowsCursor([(1,)])
+        if sql.startswith("SELECT"):
+            return _RowsCursor([{"PersonID": 1}])
+        return _RowsCursor([])
+
+    def enable_load_extension(self, _enabled: bool) -> None:
+        return None
+
+    def set_authorizer(self, _authorizer: Any) -> None:
+        return None
+
+    def set_progress_handler(self, handler: Any, _steps: int) -> None:
+        self.progress_handler = handler
+
+    def close(self) -> None:
+        return None
+
+
+class _UnrelatedFailureConnection(_InterruptingConnection):
+    def execute(self, sql: str, *_args: object) -> _RowsCursor:
+        if self.target in sql and self.progress_handler is not None:
+            self.interrupted.set()
+            assert self.allow_raise.wait(2)
+            raise sqlite3.OperationalError("fictional corrupt query")
+        return super().execute(sql, *_args)
 
 
 def test_sqlite_progress_handler_translates_requested_cancellation(
@@ -91,7 +161,7 @@ def _run_fake_query(reader: RootsMagicReader, source: Path) -> None:
         connection.execute("SELECT fictional_long_query")
 
 
-@pytest.mark.parametrize("operation", ("query", "read_table"))
+@pytest.mark.parametrize("operation", ("schema", "query", "read_table"))
 def test_public_read_progress_interruption_becomes_job_cancellation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -102,59 +172,26 @@ def test_public_read_progress_interruption_becomes_job_cancellation(
     started = threading.Event()
     release = threading.Event()
 
-    class Cursor:
-        description = (("PersonID", None, None, None, None, None, None),)
-
-        def __init__(self, rows):
-            self.rows = rows
-
-        def fetchmany(self, _maximum: int):
-            return self.rows
-
-        def fetchall(self):
-            return self.rows
-
-        def fetchone(self):
-            return self.rows[0] if self.rows else None
-
-    class Connection:
-        row_factory = None
-
-        def __init__(self) -> None:
-            self.handler = None
-
-        def execute(self, sql: str, _parameters=()):
-            if "sqlite_master" in sql:
-                return Cursor(
-                    [("PersonTable", "CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY)")]
-                )
-            if "COUNT(*)" in sql:
-                return Cursor([(1,)])
-            if sql.startswith("SELECT"):
-                started.set()
-                assert release.wait(2)
-                assert self.handler is not None
-                if self.handler():
-                    raise sqlite3.OperationalError("interrupted")
-            return Cursor([(1,)])
-
-        def enable_load_extension(self, _enabled: bool) -> None:
-            return None
-
-        def set_authorizer(self, _authorizer) -> None:
-            return None
-
-        def set_progress_handler(self, handler, _steps: int) -> None:
-            self.handler = handler
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(reader_module.sqlite3, "connect", lambda *_args, **_kwargs: Connection())
+    targets = {
+        "schema": "sqlite_master",
+        "query": "PersonID FROM PersonTable",
+        "read_table": 'SELECT * FROM "PersonTable"',
+    }
+    monkeypatch.setattr(
+        reader_module.sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: _InterruptingConnection(
+            targets[operation],
+            started,
+            release,
+        ),
+    )
     reader = RootsMagicReader([tmp_path], timeout_seconds=30)
     manager = JobManager(max_workers=1, max_pending=1)
 
     def action():
+        if operation == "schema":
+            return reader.schema(source)
         if operation == "query":
             return reader.query(source, "SELECT PersonID FROM PersonTable")
         return reader.read_table(source, "PersonTable")
@@ -171,6 +208,80 @@ def test_public_read_progress_interruption_becomes_job_cancellation(
 
     assert result.state is JobState.CANCELLED
     assert result.error_code == "JOB_CANCELLED"
+
+
+def test_sqlite_timeout_wins_race_with_later_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "tree.rmtree"
+    _tree(source)
+    interrupted = threading.Event()
+    allow_raise = threading.Event()
+    monkeypatch.setattr(
+        reader_module.sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: _InterruptingConnection(
+            "PersonID FROM PersonTable",
+            interrupted,
+            allow_raise,
+        ),
+    )
+    reader = RootsMagicReader([tmp_path], timeout_seconds=-1.0)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "RootsMagic timed query",
+            lambda: reader.query(source, "SELECT PersonID FROM PersonTable"),
+        )
+        assert interrupted.wait(2)
+        manager.cancel(job.job_id)
+        allow_raise.set()
+        result = manager.wait(job.job_id, timeout=2)
+    finally:
+        allow_raise.set()
+        manager.shutdown()
+
+    assert result.state is JobState.FAILED
+    assert result.error_code == "ROOTSMAGIC_QUERY_TIMEOUT"
+    assert result.cancellation_requested_at is not None
+
+
+def test_unrelated_sqlite_failure_wins_race_with_later_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "tree.rmtree"
+    _tree(source)
+    failed_inside_sqlite = threading.Event()
+    allow_raise = threading.Event()
+    monkeypatch.setattr(
+        reader_module.sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: _UnrelatedFailureConnection(
+            "PersonID FROM PersonTable",
+            failed_inside_sqlite,
+            allow_raise,
+        ),
+    )
+    reader = RootsMagicReader([tmp_path])
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "RootsMagic failed query",
+            lambda: reader.query(source, "SELECT PersonID FROM PersonTable"),
+        )
+        assert failed_inside_sqlite.wait(2)
+        manager.cancel(job.job_id)
+        allow_raise.set()
+        result = manager.wait(job.job_id, timeout=2)
+    finally:
+        allow_raise.set()
+        manager.shutdown()
+
+    assert result.state is JobState.FAILED
+    assert result.error_code == "ROOTSMAGIC_QUERY_FAILED"
+    assert result.cancellation_requested_at is not None
 
 
 def test_bound_copy_cancellation_removes_partial_snapshot_and_preserves_source(
@@ -204,6 +315,39 @@ def test_bound_copy_cancellation_removes_partial_snapshot_and_preserves_source(
 
     assert source.read_bytes() == source_bytes
     assert not destination.exists()
+
+
+def test_bound_copy_cancellation_preserves_unrelated_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "tree.rmtree"
+    _tree(source)
+    source_bytes = source.read_bytes()
+    destination = tmp_path / "owned-snapshot.rmtree"
+    replacement = tmp_path / "replacement.rmtree"
+    sentinel = b"fictional replacement sentinel"
+    replacement.write_bytes(sentinel)
+    reader = RootsMagicReader([tmp_path])
+    expected = reader.fingerprint_source(source)
+    original_checkpoint = reader_module.cancellation_checkpoint
+    checkpoints = 0
+
+    def replace_then_cancel() -> None:
+        nonlocal checkpoints
+        checkpoints += 1
+        if checkpoints == 1:
+            os.replace(replacement, destination)
+            raise CancellationError("cancel after destination replacement")
+        original_checkpoint()
+
+    monkeypatch.setattr(reader_module, "cancellation_checkpoint", replace_then_cancel)
+
+    with pytest.raises(CancellationError, match="cancel after destination replacement"):
+        reader._copy_bound_to(source, destination, expected)
+
+    assert source.read_bytes() == source_bytes
+    assert destination.read_bytes() == sentinel
 
 
 def test_schema_row_traversal_checks_for_cancellation(

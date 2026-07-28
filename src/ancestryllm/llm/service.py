@@ -361,7 +361,7 @@ class LLMService:
             if close is not None:
                 try:
                     close()
-                except Exception as exc:  # noqa: BLE001 - adapters may expose arbitrary close errors
+                except BaseException as exc:  # noqa: BLE001 - cancellation is outside Exception
                     if failure is None:
                         failure = exc
 
