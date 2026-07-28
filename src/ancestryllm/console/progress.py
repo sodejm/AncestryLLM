@@ -68,8 +68,19 @@ class JobProgressDisplay:
         table.add_column("Progress")
         for snapshot in sorted(self._active.values(), key=lambda item: item.job_id):
             operation = snapshot.progress.operation if snapshot.progress else snapshot.name
-            if snapshot.state is JobState.QUEUED:
-                indicator: Spinner | Group = Spinner("dots", text="queued")
+            indicator: Spinner | Group
+            if snapshot.cancellation_pending:
+                indicator = Spinner(
+                    "dots",
+                    text=(
+                        "cancellation pending: "
+                        f"{snapshot.cancellation_deferred_by or 'protected operation'}"
+                    ),
+                )
+            elif snapshot.cancellation_requested_at is not None:
+                indicator = Spinner("dots", text="cancelling")
+            elif snapshot.state is JobState.QUEUED:
+                indicator = Spinner("dots", text="queued")
             elif snapshot.progress and snapshot.progress.total is not None:
                 completed = snapshot.progress.completed or 0
                 total = snapshot.progress.total

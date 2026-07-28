@@ -41,7 +41,10 @@ One-shot commands return `0` on success. A stable, bracketed application error
 returns its documented error exit code (normally `1`); parser, input, and local
 filesystem failures return `2`. The console keeps running after a failed
 command and renders the same stable error code without a traceback. `Ctrl-C`
-interrupts the current prompt and EOF exits the console cleanly.
+requests cancellation of the most recently submitted active job without
+exiting the console. With active jobs, `exit` or `quit` requires a `wait`,
+`cancel`, or `stay` decision; EOF fails safe by waiting and never implicitly
+cancels work.
 
 ## Common examples
 

@@ -221,7 +221,8 @@ def test_router_direct_module_commands_and_parser_failures_use_shared_contract(
 def test_router_help_documents_live_job_progress(app_context: AppContext) -> None:
     help_text = SessionRouter(app_context).route("help jobs").value
 
-    assert "jobs [list|show JOB_ID]" in help_text
+    assert "jobs [list|show JOB_ID|cancel JOB_ID]" in help_text
+    assert "Ctrl-C" in help_text
     assert "latest progress" in help_text
     assert "live above the prompt" in help_text
 

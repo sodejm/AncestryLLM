@@ -3,12 +3,14 @@ from __future__ import annotations
 import base64
 import builtins
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from ancestryllm.core.errors import StorageError
+from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.core.secrets import (
     REDACTED_VALUE,
     KeyringSecretStore,
@@ -67,6 +69,70 @@ def test_backup_remains_encrypted(tmp_path: Path) -> None:
     assert backup.read_bytes()[: len(SQLITE_HEADER)] != SQLITE_HEADER
     restored = Database(backup, secrets)
     restored.initialize()
+
+
+def test_backup_rejects_and_preserves_a_dangling_destination_symlink(tmp_path: Path) -> None:
+    destination = tmp_path / "backup.db"
+    try:
+        destination.symlink_to(tmp_path / "missing-target.db")
+    except OSError:
+        pytest.skip("Symbolic links are unavailable on this filesystem.")
+    link_target = destination.readlink()
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+
+    with pytest.raises(StorageError) as raised:
+        database.backup(destination)
+
+    assert raised.value.code == "BACKUP_EXISTS"
+    assert destination.is_symlink()
+    assert destination.readlink() == link_target
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def test_cancelled_backup_removes_unpublished_staging_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secrets = MemorySecretStore({})
+    database = Database(tmp_path / "workspace.db", secrets)
+    database.initialize()
+    started = threading.Event()
+    release = threading.Event()
+    closed: list[bool] = []
+
+    class FakeDriverConnection:
+        @staticmethod
+        def backup(target, *, pages, progress) -> None:
+            del target, pages
+            started.set()
+            assert release.wait(2)
+            progress(0, 1, 1)
+
+    class FakeRawConnection:
+        driver_connection = FakeDriverConnection()
+
+        @staticmethod
+        def close() -> None:
+            closed.append(True)
+
+    monkeypatch.setattr(database.engine, "raw_connection", lambda: FakeRawConnection())
+    manager = JobManager(max_workers=1, max_pending=1)
+    destination = tmp_path / "cancelled-backup.db"
+    try:
+        job = manager.submit("database backup", lambda: database.backup(destination))
+        assert started.wait(2)
+        manager.cancel(job.job_id)
+        release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        release.set()
+        manager.shutdown()
+        database.close()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert closed == [True]
+    assert destination.exists() is False
+    assert list(tmp_path.glob(".ancestry-publish-*")) == []
 
 
 def test_storage_diagnostics_are_read_only_and_serializable(tmp_path: Path) -> None:

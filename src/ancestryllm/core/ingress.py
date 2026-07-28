@@ -15,6 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.publication import cleanup_open_path
 
@@ -511,6 +512,7 @@ class FileIngressPolicy:
         maximum = self.limit(kind).max_bytes
         consumed = 0
         while consumed < maximum:
+            cancellation_checkpoint()
             if os.fstat(handle.fileno()).st_size > maximum:
                 raise self._too_large(kind)
             chunk = handle.read(min(_READ_CHUNK_BYTES, maximum - consumed))
@@ -569,6 +571,7 @@ class FileIngressPolicy:
             read_limit = (maximum_line + 2) if maximum_line is not None else -1
             try:
                 while True:
+                    cancellation_checkpoint()
                     raw_line = text.readline(read_limit)
                     if not raw_line:
                         break
@@ -760,6 +763,7 @@ class FileIngressPolicy:
             ) from exc
         pending = [value]
         while pending:
+            cancellation_checkpoint()
             item = pending.pop()
             if isinstance(item, float) and not math.isfinite(item):
                 raise self._error(
@@ -791,6 +795,7 @@ class FileIngressPolicy:
         in_string = False
         escaped = False
         for character in text:
+            cancellation_checkpoint()
             if in_string:
                 if escaped:
                     escaped = False
@@ -826,6 +831,7 @@ class FileIngressPolicy:
         escaped = False
         comment = False
         while index < len(text):
+            cancellation_checkpoint()
             character = text[index]
             if comment:
                 if character in "\r\n":
@@ -897,6 +903,7 @@ class FileIngressPolicy:
         pending: list[tuple[object, int]] = [(value, root_parent_depth)]
         collection_items = 0
         while pending:
+            cancellation_checkpoint()
             item, parent_depth = pending.pop()
             if isinstance(item, str):
                 if "\x00" in item:
@@ -1046,7 +1053,7 @@ class FileIngressPolicy:
                                 kind,
                             )
                         self.assert_unchanged(selected, kind, opened)
-                    except Exception:
+                    except BaseException:
                         cleanup_open_path(target, output.fileno())
                         raise
         except (FileExistsError, FileIngressError):

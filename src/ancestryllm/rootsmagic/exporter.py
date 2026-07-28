@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.core.ingress import FileKind
 from ancestryllm.core.publication import (
@@ -138,6 +139,7 @@ class RootsMagicExporter:
         families: list[dict[str, Any]],
         children: list[dict[str, Any]],
     ) -> set[str] | None:
+        cancellation_checkpoint()
         if root is None:
             return None
         parent_to_children: dict[str, set[str]] = defaultdict(set)
@@ -145,24 +147,30 @@ class RootsMagicExporter:
         family_members: dict[str, set[str]] = defaultdict(set)
         family_parents: dict[str, set[str]] = defaultdict(set)
         for family in families:
+            cancellation_checkpoint()
             family_id = str(_value(family, "FamilyID", "ID"))
             for parent in (_value(family, "FatherID"), _value(family, "MotherID")):
+                cancellation_checkpoint()
                 if str(parent) not in {"", "0", "None"}:
                     family_parents[family_id].add(str(parent))
                     family_members[family_id].add(str(parent))
         for child in children:
+            cancellation_checkpoint()
             family_id = str(_value(child, "FamilyID"))
             child_id = str(_value(child, "ChildID", "PersonID"))
             if child_id in {"", "0", "None"}:
                 continue
             family_members[family_id].add(child_id)
             for parent in family_parents.get(family_id, set()):
+                cancellation_checkpoint()
                 parent_to_children[parent].add(child_id)
                 child_to_parents[child_id].add(parent)
         if scope == "connected":
             adjacency: dict[str, set[str]] = defaultdict(set)
             for members in family_members.values():
+                cancellation_checkpoint()
                 for member in members:
+                    cancellation_checkpoint()
                     adjacency[member].update(members - {member})
         elif scope == "ancestors":
             adjacency = child_to_parents
@@ -173,10 +181,12 @@ class RootsMagicExporter:
         seen = {root}
         pending: deque[tuple[str, int]] = deque([(root, 0)])
         while pending:
+            cancellation_checkpoint()
             person, depth = pending.popleft()
             if generations is not None and depth >= generations:
                 continue
             for related in adjacency.get(person, set()):
+                cancellation_checkpoint()
                 if related not in seen:
                     seen.add(related)
                     pending.append((related, depth + 1))

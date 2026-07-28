@@ -36,8 +36,13 @@ The session controls are:
   actions may also be entered at the root prompt, such as `providers list`.
 - `jobs` or `jobs list` shows background work; `jobs show JOB_ID` shows one
   job's timestamps, latest structured progress, result, or stable failure
-  code. `help jobs` summarizes these controls.
-- `exit`, `quit`, or EOF leaves the REPL.
+  code. `jobs cancel JOB_ID` requests cooperative cancellation. `help jobs`
+  summarizes these controls.
+- Ctrl-C at the command prompt requests cancellation of the most recently
+  submitted active job and leaves the REPL usable.
+- `exit` or `quit` leaves the REPL when no jobs are active. With active jobs,
+  the console requires a `wait`, `cancel`, or `stay` decision. EOF follows the
+  fail-safe `wait` behavior and never implicitly cancels work.
 
 Long-running RootsMagic queries/exports, GEDCOM operations, OCR extraction, and
 database backups run in a bounded background worker pool so the prompt remains
@@ -47,6 +52,15 @@ requested) `cancelled` states. Mutating jobs that target the same output,
 manifest, or database resource are serialized; independent targets may run in
 parallel. The queue rejects new work with `JOB_QUEUE_FULL` at its configured
 64-job safety limit.
+
+`jobs list`, `jobs show JOB_ID`, and JSON job snapshots include
+`cancellation_requested_at`, `cancellation_pending`, and
+`cancellation_deferred_by`. The request timestamp is UTC.
+`cancellation_pending` is true when a request is waiting for a protected
+operation to reach a safe boundary; `cancellation_deferred_by` contains only a
+privacy-safe operation label. Repeated cancellation requests are idempotent.
+Acknowledged cancellation uses `JOB_CANCELLED`. An invalid exit response uses
+`REPL_EXIT_DECISION_REQUIRED` and keeps the session open.
 
 Active jobs render above the prompt through Rich `Live` while prompt-toolkit's
 supported stdout patch keeps asynchronous updates from overwriting input.
@@ -60,6 +74,37 @@ Progress operation text passes through the same secret-redaction boundary as
 job failures. Live rendering is interactive-only: one-shot commands and
 `--json` output preserve their existing non-animated, machine-readable
 contracts.
+
+## Cancellation and safe shutdown
+
+Cancellation is cooperative. Queued work can be cancelled before execution;
+running work checks for cancellation while waiting for resources and at
+bounded ingress, traversal, retry, streaming, and storage boundaries. A
+synchronous provider call that cannot be interrupted remains bounded by its
+configured provider timeout. Its cancellation request is acknowledged at the
+first safe boundary after the call returns or times out.
+
+Output publication is a protected atomic operation. A cancellation request
+before publication begins aborts the operation. A request during publication
+is reported as pending until the entire staged bundle commits or rolls back.
+This may leave a complete successfully published bundle after cancellation,
+but never a partial bundle. Encrypted database backups use the same owned
+staging and complete-or-rollback publication boundary. Publication or rollback
+failures remain failures and are not replaced by cancellation.
+
+When `exit` or `quit` reports active jobs, choose:
+
+- `wait` to let all active jobs reach a terminal state, then exit;
+- `cancel` to request cancellation for all active jobs, wait for them to reach
+  safe terminal states, then exit; or
+- `stay` to return to the prompt without changing the jobs.
+
+If input closes while this decision is pending, the console chooses `wait`.
+Shutdown is cancellation-resistant and ordered: it drains workers, unsubscribes
+and closes the live display, closes provider/execution/cache resources, and
+then closes database sessions. Later cleanup is still attempted if an earlier
+close fails; after cleanup, the original failure or outer cancellation is
+propagated.
 
 ## Multiline free text
 

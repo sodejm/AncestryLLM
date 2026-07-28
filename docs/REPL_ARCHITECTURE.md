@@ -9,8 +9,8 @@ interface.
 ## Decision record
 
 **Status:** Implemented for the prompt-toolkit/Rich REPL, context-aware
-completion, multiline input, and bounded background jobs. Cooperative
-cancellation and live progress presentation build on the job lifecycle.
+completion, multiline input, bounded background jobs, live progress, and
+cooperative cancellation with cancellation-resistant shutdown.
 
 The application uses transport-neutral command specifications and
 invocation/result contracts between input adapters and application services.
@@ -49,7 +49,8 @@ flowchart LR
 5. **Background jobs** run long operations in bounded worker threads, expose
    serializable lifecycle snapshots and validated progress events, notify
    presentation subscribers outside execution locks, and serialize mutations
-   by target resource.
+   by target resource. A context-local cancellation token provides checkpoints,
+   interruptible waits, listener notifications, and named protected sections.
 6. **Presentation** maps structured job progress to Rich Live spinners or
    determinate bars and renders DTOs and coded errors. prompt-toolkit stdout
    patching coordinates asynchronous output with the active prompt. Rich
@@ -91,8 +92,27 @@ dependency.
 - Provider selection and consent stay explicit. `provider=none` remains
   network-free even when keys or provider SDKs are installed.
 - Background jobs expose queued, running, completed, failed, and cancelled
-  states. Progress presentation and cooperative cancellation extend this
-  lifecycle without moving policy or mutation safety into the UI.
+  states. Their serialized snapshots expose `cancellation_requested_at`,
+  `cancellation_pending`, and `cancellation_deferred_by`; the last field is a
+  privacy-safe protected-operation label.
+- `jobs cancel JOB_ID` requests idempotent cooperative cancellation. Ctrl-C at
+  the prompt targets the most recently submitted active job without exiting
+  the REPL. Acknowledged cancellation uses the stable `JOB_CANCELLED` code.
+- `exit` and `quit` require `wait`, `cancel`, or `stay` while jobs are active.
+  Invalid decisions use `REPL_EXIT_DECISION_REQUIRED`; EOF fails safe by
+  waiting and never implicitly cancels active jobs.
+- Running work observes cancellation at bounded resource, ingress, traversal,
+  provider retry/stream, and storage boundaries. Synchronous provider calls
+  that cannot be interrupted remain bounded by their configured timeout and
+  acknowledge cancellation at the next safe boundary.
+- Staged publication is one protected transaction. A request before
+  publication aborts; a request during publication stays pending until the
+  complete bundle commits or rolls back. Publication or rollback failures win
+  over cancellation, and no partial destination is exposed.
+- Shutdown drains workers, unsubscribes and closes live presentation, closes
+  provider/execution/cache resources, and finally closes database sessions.
+  Each later cleanup is attempted after an earlier failure, then the original
+  failure or outer cancellation is propagated.
 
 ## Migration status
 
@@ -105,7 +125,7 @@ dependency.
 | Secure history and no-echo secret entry | Implemented | Owner-only history; secrets excluded and redacted |
 | Bounded background jobs | Implemented | Serializable states/results; per-resource mutation serialization |
 | Rich Live job progress | Implemented | Spinner or determinate units; stdout-patched prompt coordination |
-| Cooperative cancellation | Future work | Extends the job lifecycle around atomic sections and shutdown |
+| Cooperative cancellation | Implemented | Foreground/job controls, serialized state, safe-boundary checks, atomic publication, and ordered shutdown |
 
 ## Compatibility paths
 

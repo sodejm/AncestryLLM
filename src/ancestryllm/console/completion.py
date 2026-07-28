@@ -186,6 +186,8 @@ class _SpecCompleter(Completer):
             return self._enabled_modules() if len(completed) == 1 else ()
         if command == "help":
             return self._first_tokens() if len(completed) == 1 else ()
+        if command == "jobs":
+            return ("cancel", "list", "show") if len(completed) == 1 else ()
         if command == "show" and self._router.active_module:
             return ("actions", "options") if len(completed) == 1 else ()
         if command == "run" and self._router.active_module:

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Callable
 
+from ancestryllm.core.cancellation import (
+    CancellationError,
+    CancellationState,
+    CancellationToken,
+    bind_cancellation_token,
+)
 from ancestryllm.core.errors import AncestryError
 
 logger = logging.getLogger(__name__)
@@ -44,12 +51,18 @@ class JobSnapshot:
     error_code: str | None = None
     error_message: str | None = None
     progress: ProgressEvent | None = None
+    cancellation_requested_at: str | None = None
+    cancellation_pending: bool = False
+    cancellation_deferred_by: str | None = None
 
 
 @dataclass(slots=True)
 class _JobRecord:
     snapshot: JobSnapshot
+    token: CancellationToken
     future: Future[Any] | None = None
+    cancellation_was_deferred: bool = False
+    cancellation_accepted_at: str | None = None
 
 
 def _timestamp() -> str:
@@ -62,6 +75,24 @@ class JobReporter:
 
     _manager: JobManager
     job_id: str
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return self._manager._token(self.job_id).requested
+
+    @property
+    def cancellation_pending(self) -> bool:
+        return self._manager._token(self.job_id).state.pending
+
+    def check_cancelled(self) -> None:
+        """Stop at a safe cooperative boundary when cancellation was requested."""
+
+        self._manager._token(self.job_id).raise_if_cancelled()
+
+    def non_interruptible(self, operation: str) -> contextlib.AbstractContextManager[None]:
+        """Defer cancellation through an atomic operation."""
+
+        return self._manager._token(self.job_id).defer(operation)
 
     def update(
         self,
@@ -77,6 +108,7 @@ class JobReporter:
         if completed is not None and total is not None:
             if completed < 0 or total < 1 or completed > total:
                 raise ValueError("Progress values require 0 <= completed <= total and total >= 1.")
+        self.check_cancelled()
         self._manager._report_progress(
             self.job_id,
             ProgressEvent(operation, _timestamp(), completed, total),
@@ -161,8 +193,10 @@ class JobManager:
                 finished_at=None,
                 resource_keys=normalized_keys,
             )
-            record = _JobRecord(snapshot)
+            token = CancellationToken()
+            record = _JobRecord(snapshot, token)
             self._records[job_id] = record
+            token.subscribe(lambda state: self._sync_cancellation(job_id, state))
         self._notify(snapshot)
         try:
             future = self._executor.submit(
@@ -187,35 +221,51 @@ class JobManager:
         resource_keys: tuple[str, ...],
     ) -> None:
         locks = [self._resource_lock(key) for key in resource_keys]
+        acquired: list[threading.Lock] = []
+        token = self._token(job_id)
         try:
-            for lock in locks:
-                lock.acquire()
-            self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
-            try:
-                result = function(JobReporter(self, job_id))
-            except BaseException as exc:  # noqa: BLE001 - job boundary normalizes failures
-                if isinstance(exc, AncestryError):
-                    code = exc.code
-                    message = self._redact(exc.message)
+            with bind_cancellation_token(token):
+                try:
+                    for lock in locks:
+                        while not lock.acquire(timeout=0.05):
+                            token.raise_if_cancelled()
+                        acquired.append(lock)
+                    token.raise_if_cancelled()
+                    self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
+                    result = function(JobReporter(self, job_id))
+                    token.raise_if_cancelled()
+                except CancellationError:
+                    self._transition_cancelled(job_id)
+                except BaseException as exc:  # noqa: BLE001 - job boundary normalizes failures
+                    if (
+                        token.requested
+                        and isinstance(exc, AncestryError)
+                        and exc.code == "PROVIDER_CANCELLED"
+                    ):
+                        self._transition_cancelled(job_id)
+                    else:
+                        if isinstance(exc, AncestryError):
+                            code = exc.code
+                            message = self._redact(exc.message)
+                        else:
+                            code = "JOB_FAILED"
+                            message = "The background job failed."
+                        self._transition(
+                            job_id,
+                            JobState.FAILED,
+                            finished_at=_timestamp(),
+                            error_code=code,
+                            error_message=message,
+                        )
                 else:
-                    code = "JOB_FAILED"
-                    message = "The background job failed."
-                self._transition(
-                    job_id,
-                    JobState.FAILED,
-                    finished_at=_timestamp(),
-                    error_code=code,
-                    error_message=message,
-                )
-            else:
-                self._transition(
-                    job_id,
-                    JobState.COMPLETED,
-                    finished_at=_timestamp(),
-                    result=result,
-                )
+                    self._transition(
+                        job_id,
+                        JobState.COMPLETED,
+                        finished_at=_timestamp(),
+                        result=result,
+                    )
         finally:
-            for lock in reversed(locks):
+            for lock in reversed(acquired):
                 lock.release()
             self._capacity.release()
 
@@ -227,6 +277,16 @@ class JobManager:
         with self._lock:
             record = self._records[job_id]
             current = record.snapshot
+            if state is JobState.COMPLETED and record.cancellation_accepted_at is not None:
+                state = JobState.CANCELLED
+                changes.update(
+                    result=None,
+                    error_code="JOB_CANCELLED",
+                    error_message=self._cancellation_message(record.cancellation_was_deferred),
+                    cancellation_requested_at=record.cancellation_accepted_at,
+                    cancellation_pending=False,
+                    cancellation_deferred_by=None,
+                )
             values = {
                 "job_id": current.job_id,
                 "name": current.name,
@@ -239,28 +299,88 @@ class JobManager:
                 "error_code": current.error_code,
                 "error_message": current.error_message,
                 "progress": current.progress,
+                "cancellation_requested_at": current.cancellation_requested_at,
+                "cancellation_pending": current.cancellation_pending,
+                "cancellation_deferred_by": current.cancellation_deferred_by,
             }
             values.update(changes)
             record.snapshot = JobSnapshot(**values)
             snapshot = record.snapshot
         self._notify(snapshot)
 
+    def _sync_cancellation(self, job_id: str, state: CancellationState) -> None:
+        with self._lock:
+            record = self._records.get(job_id)
+            if record is None or record.snapshot.state not in {
+                JobState.QUEUED,
+                JobState.RUNNING,
+            }:
+                return
+            if state.pending:
+                record.cancellation_was_deferred = True
+            record.snapshot = replace(
+                record.snapshot,
+                cancellation_requested_at=state.requested_at,
+                cancellation_pending=state.pending,
+                cancellation_deferred_by=(
+                    self._redact(state.deferred_by) if state.pending and state.deferred_by else None
+                ),
+            )
+            snapshot = record.snapshot
+        self._notify(snapshot)
+
+    def _token(self, job_id: str) -> CancellationToken:
+        with self._lock:
+            record = self._records.get(job_id)
+            if record is None:
+                raise AncestryError(
+                    "JOB_NOT_FOUND",
+                    f"Background job not found: {job_id}",
+                    exit_code=2,
+                )
+            return record.token
+
+    def _transition_cancelled(self, job_id: str) -> None:
+        state = self._token(job_id).state
+        with self._lock:
+            was_deferred = self._records[job_id].cancellation_was_deferred
+        self._transition(
+            job_id,
+            JobState.CANCELLED,
+            finished_at=_timestamp(),
+            result=None,
+            error_code="JOB_CANCELLED",
+            error_message=self._cancellation_message(was_deferred),
+            cancellation_requested_at=state.requested_at,
+            cancellation_pending=False,
+            cancellation_deferred_by=None,
+        )
+
+    @staticmethod
+    def _cancellation_message(was_deferred: bool) -> str:
+        return (
+            "Cancellation was acknowledged after a protected operation reached a safe boundary."
+            if was_deferred
+            else "The background job acknowledged cancellation at a safe boundary."
+        )
+
     def _report_progress(self, job_id: str, event: ProgressEvent) -> None:
         with self._lock:
             record = self._records[job_id]
             state = record.snapshot.state
-        if state not in {JobState.QUEUED, JobState.RUNNING}:
-            return
-        self._transition(
-            job_id,
-            state,
-            progress=ProgressEvent(
-                operation=self._redact(event.operation),
-                timestamp=event.timestamp,
-                completed=event.completed,
-                total=event.total,
-            ),
-        )
+            if state not in {JobState.QUEUED, JobState.RUNNING}:
+                return
+            record.snapshot = replace(
+                record.snapshot,
+                progress=ProgressEvent(
+                    operation=self._redact(event.operation),
+                    timestamp=event.timestamp,
+                    completed=event.completed,
+                    total=event.total,
+                ),
+            )
+            snapshot = record.snapshot
+        self._notify(snapshot)
 
     def subscribe(self, listener: Callable[[JobSnapshot], None]) -> Callable[[], None]:
         with self._lock:
@@ -279,7 +399,7 @@ class JobManager:
         for listener in listeners:
             try:
                 listener(snapshot)
-            except Exception as exc:  # noqa: BLE001 - listeners cannot break job execution
+            except BaseException as exc:  # noqa: BLE001 - listeners cannot break job execution
                 logger.warning("Job listener failed: %s", type(exc).__name__)
 
     def get(self, job_id: str) -> JobSnapshot:
@@ -307,42 +427,80 @@ class JobManager:
                 return self.get(job_id)
             future = record.future
         if future is not None:
-            future.result(timeout=timeout)
+            try:
+                future.result(timeout=timeout)
+            except CancelledError:
+                pass
         return self.get(job_id)
 
-    def cancel_queued(self, job_id: str) -> JobSnapshot:
-        """Cancel work that has not started; running cancellation is cooperative."""
+    def active(self) -> tuple[JobSnapshot, ...]:
+        """Return active jobs in submission order."""
+
+        return tuple(
+            snapshot
+            for snapshot in self.list()
+            if snapshot.state in {JobState.QUEUED, JobState.RUNNING}
+        )
+
+    def foreground(self) -> JobSnapshot | None:
+        """Return the most recently submitted active job."""
+
+        active = self.active()
+        return active[-1] if active else None
+
+    def cancel_foreground(self) -> JobSnapshot | None:
+        """Request cancellation of the most recently submitted active job."""
+
+        foreground = self.foreground()
+        return self.cancel(foreground.job_id) if foreground is not None else None
+
+    def cancel_all(self) -> tuple[JobSnapshot, ...]:
+        """Request cancellation of every active job."""
+
+        return tuple(self.cancel(snapshot.job_id) for snapshot in self.active())
+
+    def cancel(self, job_id: str) -> JobSnapshot:
+        """Cancel queued work immediately or request cooperative running cancellation."""
 
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
                 return self.get(job_id)
-            future = record.future
-            if future is None or not future.cancel():
-                raise AncestryError(
-                    "JOB_ALREADY_RUNNING",
-                    f"Background job is already running: {job_id}",
-                    "Request cooperative cancellation instead.",
-                )
             current = record.snapshot
-            record.snapshot = JobSnapshot(
-                job_id=current.job_id,
-                name=current.name,
-                state=JobState.CANCELLED,
-                submitted_at=current.submitted_at,
-                started_at=None,
-                finished_at=_timestamp(),
-                resource_keys=current.resource_keys,
-                error_code="JOB_CANCELLED",
-                error_message="The queued background job was cancelled.",
-                progress=current.progress,
-            )
-            self._capacity.release()
-            snapshot = record.snapshot
-        self._notify(snapshot)
-        return snapshot
+            if current.state not in {JobState.QUEUED, JobState.RUNNING}:
+                return current
+            if record.cancellation_accepted_at is None:
+                record.cancellation_accepted_at = _timestamp()
+            future = record.future
+            if current.state is JobState.QUEUED and future is not None and future.cancel():
+                record.snapshot = replace(
+                    record.snapshot,
+                    state=JobState.CANCELLED,
+                    finished_at=_timestamp(),
+                    result=None,
+                    error_code="JOB_CANCELLED",
+                    error_message="The queued background job was cancelled.",
+                    cancellation_requested_at=record.cancellation_accepted_at,
+                    cancellation_pending=False,
+                    cancellation_deferred_by=None,
+                )
+                self._capacity.release()
+                snapshot = record.snapshot
+            else:
+                record.snapshot = replace(
+                    record.snapshot,
+                    cancellation_requested_at=record.cancellation_accepted_at,
+                )
+                snapshot = None
+        record.token.request()
+        if snapshot is not None:
+            self._notify(snapshot)
+            return snapshot
+        return self.get(job_id)
 
-    def shutdown(self, *, wait: bool = True) -> None:
+    def shutdown(self, *, wait: bool = True, cancel: bool = False) -> None:
         with self._lock:
             self._closed = True
+        if cancel:
+            self.cancel_all()
         self._executor.shutdown(wait=wait, cancel_futures=False)

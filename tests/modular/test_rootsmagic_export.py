@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ import ancestryllm.rootsmagic.reader as reader_module
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import AncestryError, FileIngressError, SecurityPolicyError
 from ancestryllm.core.ingress import FileFingerprint, FileKind, FileSnapshot
+from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.gedcom.engine import validate_gedcom_555
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
@@ -241,6 +243,49 @@ def _individual_names(path: Path) -> list[str]:
         for index, line in enumerate(lines[:-1])
         if line.endswith(" INDI") and lines[index + 1].startswith("1 NAME ")
     ]
+
+
+def test_cancellation_during_publication_finishes_complete_export_bundle(
+    export_tree: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    output = (tmp_path / "cancelled-publication.ged").resolve()
+    report = output.with_suffix(".export.md")
+    publication_started = threading.Event()
+    allow_publication = threading.Event()
+    replace: Callable[[str | Path, str | Path], None] = exporter_module.os.replace
+
+    def pause_first_publication(source: str | Path, destination: str | Path) -> None:
+        if Path(source) == Path(destination) == output:
+            publication_started.set()
+            assert allow_publication.wait(2)
+            return
+        replace(source, destination)
+
+    monkeypatch.setattr(exporter_module.os, "replace", pause_first_publication)
+    source_hash = sha256_file(export_tree)
+    try:
+        job = manager.submit(
+            "RootsMagic export",
+            lambda: _exporter(tmp_path).export(export_tree, output, living="include"),
+        )
+        assert publication_started.wait(2)
+        pending = manager.cancel(job.job_id)
+        assert pending.cancellation_pending is True
+        allow_publication.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        allow_publication.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert output.is_file()
+    assert report.is_file()
+    assert output.read_text(encoding="utf-8").endswith("0 TRLR\n")
+    assert "RootsMagic GEDCOM Export Report" in report.read_text(encoding="utf-8")
+    assert sha256_file(export_tree) == source_hash
 
 
 @pytest.mark.parametrize(
