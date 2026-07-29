@@ -178,6 +178,14 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
+    assert re.findall(
+        r"python -m pip install --disable-pip-version-check (uv\S*)",
+        release,
+    ) == ["uv==0.12.0", "uv==0.12.0"]
+    assert re.findall(
+        r"python -m pip install --disable-pip-version-check (uv\S*)",
+        readiness,
+    ) == ["uv==0.12.0", "uv==0.12.0", "uv==0.12.0"]
     assert release.count("attestations: true") == 1
     assert release.count("attestations: false") == 1
     assert "--actual downloaded" in release
