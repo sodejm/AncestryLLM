@@ -78,7 +78,7 @@ The RootsMagic adversarial acceptance matrix is:
 
 | Input condition | Result and invariant |
 | --- | --- |
-| Stable standalone database; valid WAL with matching SHM when present | Accepted from a verified process-owned immutable snapshot; the source remains byte- and metadata-identical. |
+| Stable standalone database; valid WAL with matching SHM when present | Accepted from a verified process-owned immutable snapshot; source bytes, schema, mode, and modification time remain unchanged. |
 | Rollback journal; SHM without WAL; malformed, busy, replaced, symbolic-link, or non-regular sidecar | Rejected with a stable sanitized error before rows, export content, or provider traffic. |
 | Corrupt/truncated SQLite or malformed/hostile schema identifiers | Rejected or safely quoted with no source mutation and no raw SQLite/path disclosure. |
 | Excessive tables, columns, aggregate rows, or per-table rows | Rejected incrementally at the configured collection/record boundary. |
