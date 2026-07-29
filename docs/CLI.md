@@ -84,13 +84,29 @@ ancestry prompts render lookup --value person='Ada Lovelace'
 `rootsmagic query` requires `--tree` and exactly one of `--sql` or
 `--question`. SQL is restricted to bounded, read-only queries. A natural-language
 `--question` is a provider operation and therefore needs an explicit provider
-profile and matching consent when its provider is not `none`.
+profile and matching consent when its provider is not `none`. The inspected
+schema and question are sent as explicitly delimited JSON data under a separate
+fixed system policy. Their combined UTF-8 size is bounded by
+`file_ingress.prompt_body.max_bytes`; an oversized payload fails locally as
+`ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` with exit code `2` before provider
+execution. `provider=none` remains network-free even when provider credentials
+are available.
 
 `rootsmagic export` requires `--tree` and `--output`; select `portable` or
 `preservation` output, GEDCOM `5.5.5` or `5.5.1`, destination, scope, generation
 limit, living-person handling, and an optional loss report as needed. The output
 and optional report parent directories must already exist; a rejected export
 does not create parent directory trees.
+Pointer allocation and record ordering use canonical semantic keys rather than
+SQLite row order. `portable` contains standard safely representable GEDCOM;
+`preservation` additionally contains attributable privacy-safe `_RM_*`
+extensions. Duplicate and conflicting representable values remain separate,
+while unsupported, blob, or unsafe values are counted without being copied into
+the loss report. Living-person exclusion and redaction fail closed across
+families, notes, citations, sources, media, custom values, reports, and command
+output. GEDCOM and its optional report publish as one rollback-capable pair.
+Destination selections are standards-based format targets, not claims of
+successful import into a current vendor product.
 Close RootsMagic before querying or exporting: the CLI rejects databases with
 an existing SQLite `-wal`, `-shm`, or rollback `-journal` sidecar before it
 hashes, copies, opens, or sends schema information to a provider.

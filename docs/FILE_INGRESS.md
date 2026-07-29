@@ -61,6 +61,12 @@ database generations. Close RootsMagic cleanly and retry only after all three
 sidecar paths are gone. Preflight reports `ROOTSMAGIC_WAL_ACTIVE`; a sidecar
 that appears after preflight, snapshot copy, or a provider call reports
 `FILE_INPUT_CHANGED`.
+Natural-language RootsMagic queries encode the inspected schema and question as
+one deterministic JSON data payload beneath a separate fixed system policy.
+The complete UTF-8 payload must fit `file_ingress.prompt_body.max_bytes` before
+provider execution. An excess fails locally as
+`ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` with exit code `2` and sanitized limit
+details; no schema values, question text, or provider request are emitted.
 
 ## Configuration
 
