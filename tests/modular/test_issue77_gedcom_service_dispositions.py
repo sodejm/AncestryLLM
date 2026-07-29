@@ -103,7 +103,20 @@ def _assert_no_publish_residue(directory: Path) -> None:
             "FILE_LINE_TOO_LONG",
         ),
     ),
-    ids=lambda value: value if isinstance(value, str) else None,
+    ids=(
+        "missing-head",
+        "duplicate-head",
+        "misplaced-head",
+        "missing-trailer",
+        "duplicate-trailer",
+        "misplaced-trailer",
+        "duplicate-xref",
+        "invalid-grammar",
+        "invalid-encoding",
+        "empty",
+        "nul",
+        "oversized-physical-line",
+    ),
 )
 def test_quality_rejects_adversarial_input_before_provider_or_publication(
     tmp_path: Path,
