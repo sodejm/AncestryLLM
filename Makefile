@@ -28,7 +28,7 @@ typecheck:
 
 security:
 	@$(VENV_DIR)/bin/pip-audit
-	@uvx semgrep scan --config p/python --config p/secrets src
+	@$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src
 
 sbom:
 	@$(VENV_DIR)/bin/cyclonedx-py environment --output-file sbom.json $(VENV_PYTHON)

@@ -114,15 +114,16 @@ git push origin v0.2.0
 Push only the release tag. The tag-triggered workflow verifies the signed,
 annotated tag; rebuilds and attests the artifacts; prepares a draft GitHub
 Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
-not provide PyPI's PEP 740 Integrity API; verifies the exact TestPyPI hashes and
-install smoke tests; and pauses for required production approval. Production
-PyPI publishing explicitly requests `attestations: true`. The workflow then
-verifies the PEP 740 provenance for both the wheel and source distribution,
-including exact repository, workflow, environment, filename, and SHA-256
-identity, with the pinned `pypi-attestations==0.0.30` verifier. It preserves the
-provenance and verifier output as evidence and fails closed before supported
-platform/Python install verification and the immutable GitHub Release. The
-attached `SHA256SUMS` covers every release asset except the checksum file itself.
+not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
+artifact hashes; and pauses for required production approval. Production PyPI
+publishing explicitly requests `attestations: true`. The workflow then verifies
+the PEP 740 provenance for both the wheel and source distribution, including
+exact repository, workflow, environment, filename, and SHA-256 identity, with
+the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
+verifier output as evidence and fails closed. After production PyPI publishing,
+the supported platform/Python wheel-and-sdist install smoke matrix runs before
+the immutable GitHub Release. The attached `SHA256SUMS` covers
+every release asset except the checksum file itself.
 
 ## Failure and recovery
 

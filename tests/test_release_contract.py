@@ -91,6 +91,7 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     versioning = (ROOT / "docs/VERSIONING.md").read_text(encoding="utf-8")
     releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
+    normalized_releasing = " ".join(releasing.split())
     manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
     assert "pipx install ancestryllm" in readme
@@ -112,6 +113,9 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "required production approval" in releasing
     assert "independent production approval" not in releasing
     assert "every release asset except the checksum file itself" in releasing
+    assert "verifies only the exact TestPyPI artifact hashes" in normalized_releasing
+    assert "After production PyPI publishing" in releasing
+    assert "TestPyPI hashes and install smoke tests" not in releasing
     assert "prune tests" in manifest
     assert "prune family_trees" in manifest
     assert "include docs/FILE_INGRESS.md" in manifest
@@ -193,6 +197,30 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--clobber" not in release
 
 
+def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
+    script = (ROOT / "scripts/run_pinned_semgrep.py").read_text(encoding="utf-8")
+    script_lock = ROOT / "scripts/run_pinned_semgrep.py.lock"
+    assert script_lock.is_file()
+    lock = tomllib.loads(script_lock.read_text(encoding="utf-8"))
+    locked_semgrep = [package for package in lock["package"] if package.get("name") == "semgrep"]
+    runner = "uv run --locked --script scripts/run_pinned_semgrep.py src"
+    sources = {
+        ".github/workflows/ci.yml": runner,
+        ".github/workflows/release-readiness.yml": runner,
+        ".github/workflows/release.yml": runner,
+        "Makefile": "$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src",
+    }
+
+    assert '#     "semgrep==1.170.0",' in script
+    assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
+    for relative_path, expected_command in sources.items():
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert content.count(expected_command) == 1
+        assert "uvx semgrep" not in content
+        assert "--config p/python" not in content
+        assert "--config p/secrets" not in content
+
+
 def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -227,6 +255,7 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
         "scripts/build_release.py",
         "scripts/create_release_evidence.py",
         "scripts/generate_release_checksums.py",
+        "scripts/run_pinned_semgrep.py",
         "scripts/verify_codeql_sarif.py",
         "scripts/verify_index_artifacts.py",
         "scripts/verify_pypi_attestations.py",

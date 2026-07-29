@@ -145,7 +145,7 @@ jobs:
           python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
           uv run pip-audit
-          uvx semgrep scan --error --config p/python --config p/secrets src
+          uv run --locked --script scripts/run_pinned_semgrep.py src
       - name: Generate CycloneDX SBOM
         run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

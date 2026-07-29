@@ -122,7 +122,7 @@ jobs:
           uv run mypy src/ancestryllm
           ./scripts/check_repository_safety.sh
           uv run pip-audit
-          uvx semgrep scan --error --config p/python --config p/secrets src
+          uv run --locked --script scripts/run_pinned_semgrep.py src
           uv run python scripts/build_release.py --output-dir dist
           uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
       - name: Compare approved readiness artifacts
