@@ -65,9 +65,12 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - Added threat modeling, secret scanning, Semgrep, CodeQL, dependency auditing,
   repository artifact guards, and CycloneDX SBOM generation.
 - RootsMagic export now fails closed when shared records could disclose living
-  people, rejects active SQLite sidecars, and bounds schema-assisted query
-  prompts with the stable `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before
-  any provider call.
+  people; accepts verified WAL generations, with matching SHM when present,
+  through process-owned
+  checkpoint/backup consolidation; rejects malformed, incomplete, busy,
+  replaced, symbolic-link, or non-regular sidecars, rollback journals, and
+  SHM files without a WAL; and bounds schema-assisted query prompts with the stable
+  `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
 [Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/sodejm/AncestryLLM/releases/tag/v0.2.0

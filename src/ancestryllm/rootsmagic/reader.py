@@ -81,6 +81,8 @@ _ARCHIVE_SIGNATURES = (
     b"Rar!\x1a\x07",
 )
 _READ_CHUNK_BYTES = 1024 * 1024
+_SQLITE_MAX_COLUMNS = 32_767
+_SQLITE_VARINT_MAX_BYTES = 9
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,36 @@ class QueryResult:
     rows: tuple[tuple[Any, ...], ...]
     sql: str
     truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _WalFingerprint:
+    """One stable main/WAL generation captured without opening the source in SQLite."""
+
+    main: FileFingerprint
+    wal: FileFingerprint
+    shm: FileFingerprint | None
+
+    @property
+    def snapshot(self) -> FileSnapshot:
+        """Keep the existing main-file snapshot interface for internal callers."""
+
+        return self.main.snapshot
+
+    @property
+    def sha256(self) -> str:
+        """Keep the existing main-file digest interface for internal callers."""
+
+        return self.main.sha256
+
+
+SourceFingerprint = FileFingerprint | _WalFingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class _SchemaInspection:
+    columns: dict[str, tuple[str, ...]]
+    declared_types: dict[str, tuple[tuple[str, str], ...]]
 
 
 class RootsMagicReader:
@@ -131,12 +163,18 @@ class RootsMagicReader:
             f"rootsmagic_operation_path_{id(self)}",
             default=None,
         )
-        self._operation_fingerprint: ContextVar[FileFingerprint | None] = ContextVar(
+        self._operation_fingerprint: ContextVar[SourceFingerprint | None] = ContextVar(
             f"rootsmagic_operation_fingerprint_{id(self)}",
             default=None,
         )
         self._operation_schema: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar(
             f"rootsmagic_operation_schema_{id(self)}",
+            default=None,
+        )
+        self._operation_declared_types: ContextVar[
+            dict[str, tuple[tuple[str, str], ...]] | None
+        ] = ContextVar(
+            f"rootsmagic_operation_declared_types_{id(self)}",
             default=None,
         )
 
@@ -595,7 +633,7 @@ class RootsMagicReader:
     def operation(
         self,
         path: Path,
-        expected: FileFingerprint | None = None,
+        expected: SourceFingerprint | None = None,
     ) -> Iterator[dict[str, tuple[str, ...]]]:
         """Bind schema, row preflight, and reads to one immutable SQLite snapshot."""
 
@@ -603,17 +641,20 @@ class RootsMagicReader:
         fingerprint = expected or self.fingerprint_source(selected)
         try:
             with self.connection(selected, fingerprint) as connection:
-                schema = self._schema_from_connection(connection)
+                inspection = self._inspect_schema_from_connection(connection)
+                schema = inspection.columns
                 connection_token = self._operation_connection.set(connection)
                 path_token = self._operation_path.set(selected)
                 fingerprint_token = self._operation_fingerprint.set(fingerprint)
                 schema_token = self._operation_schema.set(schema)
+                declared_types_token = self._operation_declared_types.set(inspection.declared_types)
                 try:
                     self.validate_row_limits(selected, schema, fingerprint.snapshot)
                     self.verify_source(selected, fingerprint)
                     yield schema
                     self.verify_source(selected, fingerprint)
                 finally:
+                    self._operation_declared_types.reset(declared_types_token)
                     self._operation_schema.reset(schema_token)
                     self._operation_fingerprint.reset(fingerprint_token)
                     self._operation_path.reset(path_token)
@@ -711,14 +752,195 @@ class RootsMagicReader:
             Path(f"{path}-journal"),
         )
 
-    def _assert_no_sidecars(self, path: Path) -> None:
-        if any(self._bound_lstat(item) is not None for item in self._sidecars(path)):
+    def _sidecar_error(self) -> AncestryError:
+        return AncestryError(
+            "ROOTSMAGIC_WAL_ACTIVE",
+            "The RootsMagic database has an unsafe SQLite transaction sidecar.",
+            "Close RootsMagic or create a stable backup, then retry.",
+            exit_code=2,
+        )
+
+    def _assert_no_unsafe_sidecars(self, path: Path) -> None:
+        wal, shm, journal = self._sidecars(path)
+        if self._bound_lstat(journal) is not None or (
+            self._bound_lstat(shm) is not None and self._bound_lstat(wal) is None
+        ):
+            raise self._sidecar_error()
+
+    def _fingerprint_auxiliary_bound(
+        self,
+        path: Path,
+        expected: FileSnapshot | None = None,
+        *,
+        missing_ok: bool = False,
+    ) -> FileFingerprint | None:
+        descriptor = self._open_bound_raw(path, missing_ok=missing_ok)
+        if descriptor is None:
+            return None
+        digest = hashlib.sha256()
+        try:
+            snapshot = self.ingress._validate_stat(
+                os.fstat(descriptor),
+                FileKind.ROOTSMAGIC,
+            )
+            if expected is not None and snapshot != expected:
+                raise self._changed_error()
+            while True:
+                cancellation_checkpoint()
+                chunk = os.read(descriptor, _READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                digest.update(chunk)
+            cancellation_checkpoint()
+            current = self.ingress._validate_stat(
+                os.fstat(descriptor),
+                FileKind.ROOTSMAGIC,
+            )
+            if current != snapshot or (expected is not None and current != expected):
+                raise self._changed_error()
+        except FileIngressError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise self._bound_error(
+                "FILE_INPUT_IO",
+                "The rootsmagic input could not be read completely.",
+                error_type=type(exc).__name__,
+            ) from exc
+        finally:
+            os.close(descriptor)
+        return FileFingerprint(snapshot=snapshot, sha256=digest.hexdigest())
+
+    def _copy_auxiliary_bound_to(
+        self,
+        path: Path,
+        destination: Path,
+        expected: FileFingerprint,
+    ) -> None:
+        descriptor = self._open_bound_raw(path)
+        assert descriptor is not None
+        digest = hashlib.sha256()
+        try:
+            snapshot = self.ingress._validate_stat(
+                os.fstat(descriptor),
+                FileKind.ROOTSMAGIC,
+            )
+            if snapshot != expected.snapshot:
+                raise self._changed_error()
+            with destination.open("xb", buffering=0) as output:
+                try:
+                    while True:
+                        cancellation_checkpoint()
+                        chunk = os.read(descriptor, _READ_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            cancellation_checkpoint()
+                            written = output.write(remaining)
+                            if written is None or written <= 0:
+                                raise OSError("The destination write made no progress.")
+                            remaining = remaining[written:]
+                    output.flush()
+                    os.fsync(output.fileno())
+                    cancellation_checkpoint()
+                    current = self.ingress._validate_stat(
+                        os.fstat(descriptor),
+                        FileKind.ROOTSMAGIC,
+                    )
+                    if (
+                        current != snapshot
+                        or current != expected.snapshot
+                        or digest.hexdigest() != expected.sha256
+                    ):
+                        raise self._changed_error()
+                except BaseException:
+                    cleanup_open_path(destination, output.fileno())
+                    raise
+        except FileIngressError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise self._bound_error(
+                "FILE_INPUT_IO",
+                "The rootsmagic input could not be copied safely.",
+                error_type=type(exc).__name__,
+            ) from exc
+        except CancellationError:
+            raise
+        finally:
+            os.close(descriptor)
+
+    def _consolidate_wal_snapshot(self, path: Path, destination: Path) -> None:
+        """Recover a verified WAL pair only inside the process-owned directory."""
+
+        connection: sqlite3.Connection | None = None
+        output: sqlite3.Connection | None = None
+        primary_error: BaseException | None = None
+        try:
+            uri = f"{path.resolve().as_uri()}?mode=rw"
+            connection = sqlite3.connect(
+                uri,
+                uri=True,
+                timeout=min(self.timeout_seconds, 30.0),
+            )
+            connection.enable_load_extension(False)
+            connection.execute("PRAGMA trusted_schema = OFF")
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+            if journal_mode is None or str(journal_mode[0]).casefold() != "wal":
+                raise self._sidecar_error()
+            checkpoint = connection.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
+            if (
+                checkpoint is None
+                or len(checkpoint) != 3
+                or int(checkpoint[0]) != 0
+                or int(checkpoint[1]) <= 0
+                or int(checkpoint[2]) != int(checkpoint[1])
+            ):
+                raise self._sidecar_error()
+            cancellation_checkpoint()
+            output = sqlite3.connect(destination)
+
+            def check_backup(_status: int, _remaining: int, _total: int) -> None:
+                cancellation_checkpoint()
+
+            connection.backup(output, pages=256, progress=check_backup)
+            output.execute("PRAGMA trusted_schema = OFF")
+            integrity = output.execute("PRAGMA quick_check").fetchone()
+            if integrity != ("ok",):
+                raise self._sidecar_error()
+            output.commit()
+        except AncestryError as exc:
+            primary_error = exc
+            raise
+        except CancellationError as exc:
+            primary_error = exc
+            raise
+        except (sqlite3.Error, OSError, RuntimeError, ValueError) as exc:
+            primary_error = exc
             raise AncestryError(
                 "ROOTSMAGIC_WAL_ACTIVE",
-                "The RootsMagic database has an active SQLite transaction sidecar.",
-                "Close RootsMagic, checkpoint or roll back the database, or query a stable backup.",
+                "The RootsMagic database has an unsafe SQLite transaction sidecar.",
+                "Close RootsMagic or create a stable backup, then retry.",
                 exit_code=2,
-            )
+                details={"error_type": type(exc).__name__},
+            ) from exc
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            cleanup_error: BaseException | None = None
+            if output is not None:
+                try:
+                    output.close()
+                except BaseException as exc:  # noqa: BLE001 - preserve the primary error
+                    cleanup_error = exc
+            if connection is not None:
+                try:
+                    connection.close()
+                except BaseException as exc:  # noqa: BLE001 - finish ordered cleanup
+                    cleanup_error = cleanup_error or exc
+            if primary_error is None and cleanup_error is not None:
+                raise cleanup_error
 
     def _fingerprint_bound(
         self,
@@ -811,33 +1033,74 @@ class RootsMagicReader:
         finally:
             os.close(descriptor)
 
-    def verify_source(self, path: Path, expected: FileFingerprint) -> None:
-        """Require the original database and absence of sidecars to remain stable."""
+    def verify_source(self, path: Path, expected: SourceFingerprint) -> None:
+        """Require every source component to remain byte-for-byte stable."""
 
-        if any(self._bound_lstat(item) is not None for item in self._sidecars(path)):
-            raise FileIngressError(
-                "FILE_INPUT_CHANGED",
-                "The rootsmagic input changed while it was being consumed.",
-                details={"input_class": FileKind.ROOTSMAGIC.value},
-            )
+        wal_path, shm_path, journal_path = self._sidecars(path)
+        if self._bound_lstat(journal_path) is not None:
+            raise self._changed_error()
         current = self._fingerprint_bound(path, expected.snapshot)
         if current.sha256 != expected.sha256:
             raise self._changed_error()
-        if any(self._bound_lstat(item) is not None for item in self._sidecars(path)):
+        if isinstance(expected, FileFingerprint):
+            if (
+                self._bound_lstat(wal_path) is not None
+                or self._bound_lstat(shm_path) is not None
+                or self._bound_lstat(journal_path) is not None
+            ):
+                raise self._changed_error()
+            return
+        current_wal = self._fingerprint_auxiliary_bound(
+            wal_path,
+            expected.wal.snapshot,
+            missing_ok=True,
+        )
+        if current_wal is None or current_wal.sha256 != expected.wal.sha256:
+            raise self._changed_error()
+        if expected.shm is None:
+            if self._bound_lstat(shm_path) is not None:
+                raise self._changed_error()
+        else:
+            current_shm = self._fingerprint_auxiliary_bound(
+                shm_path,
+                expected.shm.snapshot,
+                missing_ok=True,
+            )
+            if current_shm is None or current_shm.sha256 != expected.shm.sha256:
+                raise self._changed_error()
+        if self._bound_lstat(journal_path) is not None:
             raise self._changed_error()
 
     def fingerprint_source(
         self,
         path: Path,
         expected: FileSnapshot | None = None,
-    ) -> FileFingerprint:
-        """Hash a stable database only while transaction sidecars remain absent."""
+    ) -> SourceFingerprint:
+        """Hash one stable main file or main/WAL generation."""
 
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
-        self._assert_no_sidecars(selected)
-        fingerprint = self._fingerprint_bound(selected, expected)
+        self._assert_no_unsafe_sidecars(selected)
+        wal_path, shm_path, journal_path = self._sidecars(selected)
+        main_fingerprint = self._fingerprint_bound(selected, expected)
+        fingerprint: SourceFingerprint = main_fingerprint
+        wal = self._fingerprint_auxiliary_bound(wal_path, missing_ok=True)
+        if wal is not None:
+            shm = self._fingerprint_auxiliary_bound(shm_path, missing_ok=True)
+            fingerprint = _WalFingerprint(main=main_fingerprint, wal=wal, shm=shm)
+        elif self._bound_lstat(shm_path) is not None:
+            raise self._sidecar_error()
+        if self._bound_lstat(journal_path) is not None:
+            raise self._sidecar_error()
         self.verify_source(selected, fingerprint)
         return fingerprint
+
+    @staticmethod
+    def snapshot_provenance(fingerprint: SourceFingerprint) -> str:
+        """Describe the verified snapshot mode without disclosing sidecar metadata."""
+
+        if isinstance(fingerprint, _WalFingerprint):
+            return "verified main database plus WAL generation"
+        return "verified standalone database"
 
     @staticmethod
     def _same_path(left: Path | None, right: Path) -> bool:
@@ -847,24 +1110,37 @@ class RootsMagicReader:
     def connection(
         self,
         path: Path,
-        expected: FileSnapshot | FileFingerprint | None = None,
+        expected: FileSnapshot | SourceFingerprint | None = None,
     ) -> Iterator[sqlite3.Connection]:
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
         active = self._operation_connection.get()
         if active is not None and self._same_path(self._operation_path.get(), selected):
             yield active
             return
-        self._assert_no_sidecars(selected)
-        if isinstance(expected, FileFingerprint):
+        if isinstance(expected, (FileFingerprint, _WalFingerprint)):
             fingerprint = expected
             self.verify_source(selected, fingerprint)
         else:
             fingerprint = self.fingerprint_source(selected, expected)
-        self._assert_no_sidecars(selected)
         with tempfile.TemporaryDirectory(prefix="ancestry-rootsmagic-") as temporary:
-            snapshot_path = Path(temporary) / selected.name
-            self._copy_bound_to(selected, snapshot_path, fingerprint)
+            copied_path = Path(temporary) / selected.name
+            snapshot_path = copied_path
+            self._copy_bound_to(
+                selected,
+                copied_path,
+                fingerprint.main if isinstance(fingerprint, _WalFingerprint) else fingerprint,
+            )
+            if isinstance(fingerprint, _WalFingerprint):
+                self._copy_auxiliary_bound_to(
+                    Path(f"{selected}-wal"),
+                    Path(f"{copied_path}-wal"),
+                    fingerprint.wal,
+                )
             self.verify_source(selected, fingerprint)
+            if isinstance(fingerprint, _WalFingerprint):
+                snapshot_path = Path(temporary) / "consolidated.rmtree"
+                self._consolidate_wal_snapshot(copied_path, snapshot_path)
+                self.verify_source(selected, fingerprint)
             uri = f"{snapshot_path.resolve().as_uri()}?mode=ro&immutable=1"
             connection = sqlite3.connect(
                 uri,
@@ -878,6 +1154,36 @@ class RootsMagicReader:
             unsubscribe_cancellation: Callable[[], None] | None = None
             operation_error: BaseException | None = None
             try:
+                record_limit = self.ingress.limit(FileKind.ROOTSMAGIC).max_record_bytes
+                if (
+                    record_limit is not None
+                    and hasattr(connection, "setlimit")
+                    and hasattr(sqlite3, "SQLITE_LIMIT_LENGTH")
+                ):
+                    column_limit = _SQLITE_MAX_COLUMNS
+                    getlimit = getattr(connection, "getlimit", None)
+                    if callable(getlimit) and hasattr(sqlite3, "SQLITE_LIMIT_COLUMN"):
+                        column_limit = max(
+                            0,
+                            getlimit(sqlite3.SQLITE_LIMIT_COLUMN),
+                        )
+                    # A SQLite record header has one serial-type varint per
+                    # result column plus its own size varint. Python enforces
+                    # the exact public payload budget as each row arrives.
+                    framing_headroom = _SQLITE_VARINT_MAX_BYTES * (column_limit + 1)
+                    sqlite_length_limit = max(
+                        record_limit + framing_headroom,
+                        4_096,
+                    )
+                    if callable(getlimit):
+                        sqlite_length_limit = min(
+                            sqlite_length_limit,
+                            getlimit(sqlite3.SQLITE_LIMIT_LENGTH),
+                        )
+                    connection.setlimit(
+                        sqlite3.SQLITE_LIMIT_LENGTH,
+                        sqlite_length_limit,
+                    )
                 connection.execute("PRAGMA query_only = ON")
                 connection.execute("PRAGMA trusted_schema = OFF")
                 connection.execute("BEGIN")
@@ -975,6 +1281,7 @@ class RootsMagicReader:
         except AncestryError:
             raise
         except sqlite3.Error as exc:
+            self._raise_if_sqlite_length_limit(exc)
             raise AncestryError(
                 "ROOTSMAGIC_INPUT_INVALID",
                 "The RootsMagic input could not be inspected as a SQLite database.",
@@ -985,38 +1292,154 @@ class RootsMagicReader:
         self,
         connection: sqlite3.Connection,
     ) -> dict[str, tuple[str, ...]]:
+        return self._inspect_schema_from_connection(connection).columns
+
+    def _inspect_schema_from_connection(
+        self,
+        connection: sqlite3.Connection,
+    ) -> _SchemaInspection:
         cursor = connection.execute(
             "SELECT name, sql FROM sqlite_master WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
-        maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_collection_items
-        rows = cursor.fetchmany(maximum + 1) if maximum is not None else cursor.fetchall()
-        if maximum is not None and len(rows) > maximum:
+        result: dict[str, tuple[str, ...]] = {}
+        declared_types: dict[str, tuple[tuple[str, str], ...]] = {}
+        # PRAGMA is denied after the authorizer is installed, so parse declared
+        # CREATE TABLE SQL.
+        table_count = 0
+        while True:
+            cancellation_checkpoint()
+            row = cursor.fetchone()
+            if row is None:
+                break
+            table_count += 1
             self.ingress.validate_record(
                 FileKind.ROOTSMAGIC,
                 count=1,
                 byte_count=0,
                 nesting=0,
-                collection_items=len(rows),
+                collection_items=table_count,
             )
-        result: dict[str, tuple[str, ...]] = {}
-        # PRAGMA is denied after the authorizer is installed, so parse declared
-        # CREATE TABLE SQL.
-        for table_name, create_sql in rows:
-            cancellation_checkpoint()
+            table_name, create_sql = row
             try:
                 parsed = parse(str(create_sql), read="sqlite")[0]
                 if parsed is None:
                     raise ValueError("empty CREATE TABLE expression")
-                columns = tuple(
-                    column.this.name
+                definitions = tuple(
+                    column
                     for column in parsed.find_all(exp.ColumnDef)
                     if getattr(column.this, "name", None)
                 )
+                columns = tuple(column.this.name for column in definitions)
+                column_types = tuple(
+                    (
+                        column.this.name,
+                        column.kind.sql(dialect="sqlite").upper() if column.kind else "",
+                    )
+                    for column in definitions
+                )
             except Exception:  # noqa: BLE001 - vendor schemas can be unusual
                 columns = ()
+                column_types = ()
+            self.ingress.validate_record(
+                FileKind.ROOTSMAGIC,
+                count=1,
+                byte_count=0,
+                nesting=0,
+                collection_items=len(columns),
+            )
             result[str(table_name)] = columns
-        return result
+            declared_types[str(table_name)] = column_types
+        return _SchemaInspection(result, declared_types)
+
+    def declared_column_types(self, path: Path, table_name: str) -> dict[str, str]:
+        """Return parsed declared types for a table in the active snapshot."""
+
+        selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
+        active = self._operation_connection.get()
+        declared_types = self._operation_declared_types.get()
+        if (
+            active is not None
+            and self._same_path(self._operation_path.get(), selected)
+            and declared_types is not None
+        ):
+            actual = next(
+                (name for name in declared_types if name.casefold() == table_name.casefold()),
+                None,
+            )
+            return dict(declared_types.get(actual, ())) if actual is not None else {}
+
+        fingerprint = self.fingerprint_source(selected)
+        with self.connection(selected, fingerprint) as connection:
+            inspection = self._inspect_schema_from_connection(connection)
+        self.verify_source(selected, fingerprint)
+        actual = next(
+            (
+                name
+                for name in inspection.declared_types
+                if name.casefold() == table_name.casefold()
+            ),
+            None,
+        )
+        return dict(inspection.declared_types.get(actual, ())) if actual is not None else {}
+
+    @staticmethod
+    def _row_byte_count(values: tuple[Any, ...]) -> int:
+        """Return a content-size budget without serializing or retaining values."""
+
+        total = 0
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                total += len(value.encode("utf-8"))
+            elif isinstance(value, (bytes, bytearray, memoryview)):
+                total += len(value)
+            else:
+                total += len(str(value).encode("utf-8"))
+        return total
+
+    @staticmethod
+    def _is_sqlite_length_limit(exc: sqlite3.Error) -> bool:
+        error_code = getattr(exc, "sqlite_errorcode", None)
+        sqlite_too_big = getattr(sqlite3, "SQLITE_TOOBIG", None)
+        return error_code == sqlite_too_big or "string or blob too big" in str(exc).casefold()
+
+    def _raise_if_sqlite_length_limit(self, exc: sqlite3.Error) -> None:
+        if not self._is_sqlite_length_limit(exc):
+            return
+        maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_record_bytes
+        if maximum is None:
+            return
+        self.ingress.validate_record(
+            FileKind.ROOTSMAGIC,
+            count=1,
+            byte_count=maximum + 1,
+            nesting=0,
+            collection_items=1,
+        )
+
+    def _validate_result_row(
+        self,
+        values: tuple[Any, ...],
+        *,
+        count: int,
+        columns: tuple[str, ...] | None = None,
+    ) -> None:
+        if columns is not None:
+            self.ingress.validate_structure(
+                dict(zip(columns, values, strict=True)),
+                FileKind.ROOTSMAGIC,
+            )
+        else:
+            self.ingress.validate_structure(list(values), FileKind.ROOTSMAGIC)
+        self.ingress.validate_record(
+            FileKind.ROOTSMAGIC,
+            count=count,
+            byte_count=self._row_byte_count(values),
+            nesting=0,
+            collection_items=len(values),
+        )
 
     def validate_sql(self, sql: str, allowed_schema: dict[str, tuple[str, ...]]) -> str:
         cancellation_checkpoint()
@@ -1109,7 +1532,7 @@ class RootsMagicReader:
         path: Path,
         sql: str,
         *,
-        expected: FileFingerprint | None = None,
+        expected: SourceFingerprint | None = None,
         schema: dict[str, tuple[str, ...]] | None = None,
     ) -> QueryResult:
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
@@ -1136,11 +1559,26 @@ class RootsMagicReader:
                 "The RootsMagic schema snapshot is unavailable.",
             )
         validated = self.validate_sql(sql, query_schema)
+        rows: list[tuple[Any, ...]] = []
+        truncated = False
         try:
             cursor = active.execute(validated)
             columns = tuple(description[0] for description in cursor.description or ())
-            raw_rows = cursor.fetchmany(self.max_rows + 1)
-            cancellation_checkpoint()
+            while len(rows) <= self.max_rows:
+                cancellation_checkpoint()
+                row = cursor.fetchone()
+                if row is None:
+                    break
+                values = tuple(row)
+                self._validate_result_row(
+                    values,
+                    count=len(rows) + 1,
+                    columns=columns,
+                )
+                if len(rows) == self.max_rows:
+                    truncated = True
+                    break
+                rows.append(values)
         except sqlite3.Error as exc:
             if "interrupted" in str(exc).casefold():
                 raise
@@ -1149,17 +1587,13 @@ class RootsMagicReader:
                     "SQL_OPERATION_DENIED",
                     "SQLite blocked an operation forbidden by the read-only policy.",
                 ) from exc
+            self._raise_if_sqlite_length_limit(exc)
             raise AncestryError(
                 "ROOTSMAGIC_QUERY_FAILED",
                 "The read-only RootsMagic query failed.",
                 details={"error_type": type(exc).__name__},
             ) from exc
         self.verify_source(selected, operation_fingerprint)
-        truncated = len(raw_rows) > self.max_rows
-        rows: list[tuple[Any, ...]] = []
-        for row in raw_rows[: self.max_rows]:
-            cancellation_checkpoint()
-            rows.append(tuple(row))
         return QueryResult(columns, tuple(rows), validated, truncated)
 
     def read_table(
@@ -1208,28 +1642,29 @@ class RootsMagicReader:
             active.row_factory = sqlite3.Row
             # The identifier is selected from the inspected schema and quoted above.
             cursor = active.execute(f'SELECT * FROM "{quoted}"')  # noqa: S608
-            maximum = self.ingress.limit(FileKind.ROOTSMAGIC).max_records
-            rows = cursor.fetchmany(maximum + 1) if maximum is not None else cursor.fetchall()
-            if maximum is not None and len(rows) > maximum:
-                self.ingress.validate_record(
-                    FileKind.ROOTSMAGIC,
-                    count=len(rows),
-                    byte_count=0,
-                    nesting=0,
-                    collection_items=1,
+            result: list[dict[str, Any]] = []
+            while True:
+                cancellation_checkpoint()
+                row = cursor.fetchone()
+                if row is None:
+                    break
+                values = tuple(row)
+                columns = tuple(row.keys())
+                self._validate_result_row(
+                    values,
+                    count=len(result) + 1,
+                    columns=columns,
                 )
+                result.append(dict(zip(columns, values, strict=True)))
         except AncestryError:
             raise
         except sqlite3.Error as exc:
             if "interrupted" in str(exc).casefold():
                 raise
+            self._raise_if_sqlite_length_limit(exc)
             raise AncestryError(
                 "ROOTSMAGIC_READ_FAILED",
                 "The RootsMagic table could not be read safely.",
                 details={"error_type": type(exc).__name__},
             ) from exc
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            cancellation_checkpoint()
-            result.append(dict(row))
         return result

@@ -33,6 +33,7 @@ class _RowsCursor:
 
     def __init__(self, rows: list[Any]) -> None:
         self.rows = rows
+        self._position = 0
 
     def fetchall(self) -> list[Any]:
         return self.rows
@@ -41,7 +42,11 @@ class _RowsCursor:
         return self.rows
 
     def fetchone(self) -> Any:
-        return self.rows[0] if self.rows else None
+        if self._position >= len(self.rows):
+            return None
+        row = self.rows[self._position]
+        self._position += 1
+        return row
 
 
 class _InterruptingConnection:
@@ -354,12 +359,16 @@ def test_schema_row_traversal_checks_for_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Cursor:
-        @staticmethod
-        def fetchmany(_maximum: int) -> list[tuple[str, str]]:
-            return [
-                ("PersonTable", "CREATE TABLE PersonTable(PersonID INTEGER)"),
-                ("FamilyTable", "CREATE TABLE FamilyTable(FamilyID INTEGER)"),
-            ]
+        def __init__(self) -> None:
+            self._rows = iter(
+                [
+                    ("PersonTable", "CREATE TABLE PersonTable(PersonID INTEGER)"),
+                    ("FamilyTable", "CREATE TABLE FamilyTable(FamilyID INTEGER)"),
+                ]
+            )
+
+        def fetchone(self) -> tuple[str, str] | None:
+            return next(self._rows, None)
 
     class Connection:
         @staticmethod

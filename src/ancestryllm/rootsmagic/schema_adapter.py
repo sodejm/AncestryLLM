@@ -18,6 +18,13 @@ TABLE_ALIASES: dict[str, tuple[str, ...]] = {
     "child": ("ChildTable", "ChildrenTable", "Child", "Children"),
     "place": ("PlaceTable", "PlacesTable", "Place", "Places"),
     "event": ("EventTable", "EventsTable", "Event", "Events"),
+    "fact_type": (
+        "FactTypeTable",
+        "FactTypesTable",
+        "EventTypeTable",
+        "FactType",
+        "EventType",
+    ),
     "note": ("NoteTable", "NotesTable", "Note", "Notes"),
     "source": ("SourceTable", "SourcesTable", "Source", "Sources"),
     "citation": ("CitationTable", "CitationsTable", "Citation", "Citations"),
@@ -29,29 +36,29 @@ def _normalized_text(value: Any) -> str:
     return unicodedata.normalize("NFC", str(value))
 
 
-def semantic_value(value: Any) -> tuple[int, int | str]:
+def semantic_value(value: Any) -> tuple[int, int | str, str]:
     """Return a stable natural-order key without exposing a source value."""
 
     if value is None:
-        return (0, "")
+        return (0, "", "")
     if isinstance(value, bool):
-        return (1, int(value))
+        return (1, int(value), "")
     if isinstance(value, int):
-        return (1, value)
+        return (1, value, "")
     if isinstance(value, float) and value.is_integer():
-        return (1, int(value))
+        return (1, int(value), "")
     if isinstance(value, bytes):
-        return (3, "")
+        return (3, "", "")
     text = _normalized_text(value).strip()
     if re.fullmatch(r"[+-]?\d+", text):
-        return (1, int(text))
-    return (2, text.casefold())
+        return (1, int(text), text)
+    return (2, text.casefold(), text)
 
 
 def semantic_row_key(
     row: dict[str, Any],
     *identity_columns: str,
-) -> tuple[tuple[int, int | str], ...]:
+) -> tuple[tuple[int, int | str, str], ...]:
     lowered = {column.casefold(): value for column, value in row.items()}
     identity = next(
         (lowered[column.casefold()] for column in identity_columns if column.casefold() in lowered),
@@ -59,7 +66,10 @@ def semantic_row_key(
     )
     remainder = tuple(
         semantic_value(value)
-        for column, value in sorted(row.items(), key=lambda item: item[0].casefold())
+        for column, value in sorted(
+            row.items(),
+            key=lambda item: (item[0].casefold(), _normalized_text(item[0])),
+        )
         if column.casefold() not in {name.casefold() for name in identity_columns}
     )
     return (semantic_value(identity), *remainder)
@@ -70,7 +80,15 @@ class AdaptedTable:
     logical_name: str
     actual_name: str
     columns: tuple[str, ...]
+    declared_types: tuple[tuple[str, str], ...]
     rows: tuple[dict[str, Any], ...]
+
+    def declared_type(self, *column_names: str) -> str | None:
+        by_folded = {name.casefold(): value for name, value in self.declared_types}
+        return next(
+            (by_folded[name.casefold()] for name in column_names if name.casefold() in by_folded),
+            None,
+        )
 
 
 class RootsMagicSchemaAdapter:
@@ -103,6 +121,9 @@ class RootsMagicSchemaAdapter:
                 logical_name=logical_name,
                 actual_name=actual,
                 columns=self._schema[actual],
+                declared_types=tuple(
+                    self._reader.declared_column_types(self._path, actual).items()
+                ),
                 rows=tuple(rows),
             )
         return result
@@ -127,5 +148,8 @@ class RootsMagicSchemaAdapter:
         mapped = {table.actual_name.casefold() for table in self._tables.values()}
         return sorted(
             (name for name in self._schema if name.casefold() not in mapped),
-            key=lambda name: unicodedata.normalize("NFC", name).casefold(),
+            key=lambda name: (
+                unicodedata.normalize("NFC", name).casefold(),
+                unicodedata.normalize("NFC", name),
+            ),
         )
