@@ -43,6 +43,7 @@ jobs:
       - id: candidate
         name: Verify exact main commit and version
         env:
+          GH_TOKEN: ${{ github.token }}
           EXPECTED_COMMIT: ${{ inputs.commit_sha }}
           EXPECTED_VERSION: ${{ inputs.version }}
           LIFECYCLE_CLEANUP_CONFIRMED: ${{ inputs.lifecycle_cleanup_confirmed }}
@@ -64,19 +65,26 @@ jobs:
               raise SystemExit(f"project version {actual!r} != requested {expected!r}")
           PY
           test "$LIFECYCLE_CLEANUP_CONFIRMED" = "true"
-          milestone_json="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100")"
+          milestone_json="$(
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" |
+              jq 'add // []'
+          )"
+          test "$(
+            jq -r --arg title "$EXPECTED_VERSION CLI" \
+              '[.[] | select(.title == $title)] | length' <<<"$milestone_json"
+          )" -eq 1
           milestone_number="$(
             jq -r --arg title "$EXPECTED_VERSION CLI" \
-              '[.[] | select(.title == $title)][0].number // empty' <<<"$milestone_json"
+              '.[] | select(.title == $title) | .number' <<<"$milestone_json"
           )"
           test -n "$milestone_number"
-          open_items="$(
-            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100"
-          )"
-          if test "$(jq 'length' <<<"$open_items")" -ne 0; then
-            jq -r '.[] | "release item still open: #\(.number) \(.title)"' <<<"$open_items"
-            exit 1
-          fi
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" |
+            jq 'add // []' |
+            python scripts/verify_release_milestone.py \
+              --tracker-number 133 \
+              --tracker-label release-tracker
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"

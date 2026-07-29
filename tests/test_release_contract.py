@@ -37,6 +37,16 @@ def _literal_string_set(path: Path, assignment_name: str) -> set[str]:
     raise AssertionError(f"{assignment_name} was not defined in {path}")
 
 
+def _jobs_with_permission(workflow: str, permission: str) -> set[str]:
+    jobs: set[str] = set()
+    matches = list(re.finditer(r"(?m)^  ([a-z][a-z0-9-]*):\n", workflow))
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(workflow)
+        if permission in workflow[match.end() : end]:
+            jobs.add(match.group(1))
+    return jobs
+
+
 def test_package_version_is_one_stable_semver_value() -> None:
     version = str(_project()["version"])
 
@@ -91,6 +101,16 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "branch/worktree cleanup input" in releasing
     assert "docs/release-notes/<version>.md" in releasing
     assert "PyPI: unavailable" in releasing
+    assert "release-tracker" in releasing
+    assert "`sodejm` as the required reviewer" in releasing
+    assert "self-approval must remain permitted" in releasing
+    assert "Hosted control verification checklist" in releasing
+    assert "unique commits" in releasing
+    assert "resolved before merge" in releasing
+    assert "explicitly approves a GitHub-only release" in releasing
+    assert "API-token fallback" in releasing
+    assert "required production approval" in releasing
+    assert "independent production approval" not in releasing
     assert "every release asset except the checksum file itself" in releasing
     assert "prune tests" in manifest
     assert "prune family_trees" in manifest
@@ -151,13 +171,46 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--notes-file dist/release-notes.md" in release
     assert "subject-path: dist/*" in release
     assert "verify_codeql_sarif.py --directory codeql-sarif" in readiness
-    assert "needs: [validate, build, attest, draft-github-release]" in release
+    assert "needs: [validate, build, publish-build-provenance, draft-github-release]" in release
     assert "verified-pypi-distributions" in release
+    assert "verified-pypi-attestations" in release
     assert "artifact: [wheel, sdist]" in release
     assert "verify_release_assets.py" in release
+    assert "verify_pypi_attestations.py" in release
+    assert "pypi-attestations==0.0.30" in release
+    assert release.count("attestations: true") == 1
+    assert release.count("attestations: false") == 1
     assert "--actual downloaded" in release
     assert "--json isDraft,name,body" in release
     assert "--clobber" not in release
+
+
+def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    for workflow in (readiness, release):
+        assert "verify_release_milestone.py" in workflow
+        assert "--tracker-number 133" in workflow
+        assert "--tracker-label release-tracker" in workflow
+        assert "--paginate --slurp" in workflow
+
+
+def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> None:
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert _jobs_with_permission(release, "id-token: write") == {
+        "publish-build-provenance",
+        "publish-testpypi",
+        "publish-pypi",
+    }
+    assert _jobs_with_permission(release, "contents: write") == {
+        "draft-github-release",
+        "publish-github-release",
+    }
+    assert "id-token: write" not in readiness
+    assert "contents: write" not in readiness
 
 
 @pytest.mark.parametrize(
@@ -168,7 +221,9 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
         "scripts/generate_release_checksums.py",
         "scripts/verify_codeql_sarif.py",
         "scripts/verify_index_artifacts.py",
+        "scripts/verify_pypi_attestations.py",
         "scripts/verify_release_assets.py",
+        "scripts/verify_release_milestone.py",
     ),
 )
 def test_release_helpers_expose_non_mutating_help(script: str) -> None:
