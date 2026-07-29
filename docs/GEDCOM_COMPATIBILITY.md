@@ -87,3 +87,45 @@ verified, failed, unavailable, or unverified. Verify root selection,
 people/family counts, citations, names, dates, living-person behavior, and
 custom-tag loss reports using fictional fixtures only. A blank or pending row
 is an evidence gap, not a passing interoperability result.
+
+## RootsMagic export contract
+
+RootsMagic export feature-detects supported table and column aliases. Optional
+name, event, place, note, source, citation, media, and family tables may be
+absent; malformed required person structure is rejected. Canonical semantic
+keys and stable source identities determine GEDCOM pointers and record order,
+so SQLite row order, cycles, pedigree collapse, repeated relationships, and
+repeated runs do not change the bytes. Duplicate and conflicting representable
+values remain separate. Null values and blobs are not serialized. The loss
+report identifies unsupported or unsafe data only by table, column, count, and
+reason; it never includes the discarded values.
+
+The `portable` profile emits only safely representable standard GEDCOM. The
+`preservation` profile also emits attributable, privacy-safe `_RM_*`
+extensions. Living-person `exclude` and `redact` modes are fail closed: records
+owned by a living person, and shared records whose safe field-level separation
+cannot be proved, are omitted and counted rather than leaked through families,
+notes, citations, sources, media, custom fields, reports, CLI output, or JSON.
+
+GEDCOM 5.5.5 output receives strict validation. GEDCOM 5.5.1 output receives
+the common structural checks plus a limited compatibility rule set; this
+fallback does not establish full 5.5.1 semantics for every extension. All
+destination selections are standards-based formatting targets. Automated
+destination tests demonstrate format compatibility only, not a successful
+import into a current vendor product. Vendor interoperability may be claimed
+only from dated fictional-data evidence.
+
+The GEDCOM and Markdown loss report form one staged publication transaction.
+Source identity is revalidated before and during publication, and failure
+restores the prior complete pair or leaves the new complete pair—never a
+partial pair. The RootsMagic input remains immutable. Existing SQLite `-wal`,
+`-shm`, and rollback `-journal` sidecars are rejected even when empty or stale;
+live-WAL interpretation is outside this release contract.
+
+Natural-language RootsMagic queries serialize the inspected schema and question
+as JSON data beneath a separate fixed system policy. The combined UTF-8 payload
+is bounded by `file_ingress.prompt_body.max_bytes` before any provider call.
+An oversized payload fails locally with
+`ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` and exit code `2`, without including schema
+values or the question in error details. `provider=none` never attempts a
+network request, even when provider credentials or SDKs are present.

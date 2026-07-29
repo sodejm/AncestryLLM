@@ -24,6 +24,11 @@ from ancestryllm.core.publication import (
 )
 from ancestryllm.gedcom.engine import validate_gedcom_555
 from ancestryllm.rootsmagic.reader import RootsMagicReader
+from ancestryllm.rootsmagic.schema_adapter import (
+    RootsMagicSchemaAdapter,
+    semantic_row_key,
+    semantic_value,
+)
 
 
 def _value(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -40,9 +45,178 @@ def _clean_text(value: Any) -> str:
     return " ".join(str(value).replace("\r", " ").replace("\n", " ").split())
 
 
+def _identifier(row: dict[str, Any], *names: str) -> str:
+    value = _value(row, *names, default="")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return _clean_text(value)
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).strip().casefold() in {"1", "true", "yes"}
+
+
+def _validate_export(lines: list[str], gedcom_version: str) -> None:
+    """Apply common structural validation to both supported GEDCOM versions."""
+
+    if gedcom_version == "5.5.5":
+        validate_gedcom_555(lines)
+        return
+    version_lines = [index for index, line in enumerate(lines) if line == "2 VERS 5.5.1"]
+    if len(version_lines) != 1:
+        raise AncestryError(
+            "GEDCOM_VALIDATION_FAILED",
+            "GEDCOM 5.5.1 output must declare its version exactly once.",
+        )
+    compatible = list(lines)
+    compatible[version_lines[0]] = "2 VERS 5.5.5"
+    validate_gedcom_555(compatible)
+
+
 def _tag_name(column: str) -> str:
     clean = re.sub(r"[^A-Za-z0-9_]", "_", column).upper()
     return ("_RM_" + clean)[:31]
+
+
+def _extension_lines(
+    row: dict[str, Any],
+    known_columns: frozenset[str],
+    *,
+    level: int,
+) -> list[str]:
+    """Return privacy-safe scalar extensions in deterministic column order."""
+
+    result: list[str] = []
+    for column, raw in sorted(row.items(), key=lambda item: item[0].casefold()):
+        cancellation_checkpoint()
+        if column.casefold() in known_columns or raw is None or raw == "" or isinstance(raw, bytes):
+            continue
+        value = _clean_text(raw)
+        if value:
+            result.append(f"{level} {_tag_name(column)} {value}")
+    return result
+
+
+_KNOWN_COLUMNS: dict[str, frozenset[str]] = {
+    "person": frozenset({"personid", "id", "sex", "gender", "living", "isliving"}),
+    "name": frozenset(
+        {
+            "nameid",
+            "id",
+            "ownerid",
+            "personid",
+            "given",
+            "givenname",
+            "surname",
+            "lastname",
+            "isprimary",
+            "primaryname",
+        }
+    ),
+    "family": frozenset(
+        {
+            "familyid",
+            "id",
+            "fatherid",
+            "husbandid",
+            "motherid",
+            "wifeid",
+        }
+    ),
+    "child": frozenset({"familyid", "childid", "personid"}),
+    "place": frozenset({"placeid", "id", "name", "placename"}),
+    "event": frozenset(
+        {
+            "eventid",
+            "id",
+            "ownerid",
+            "personid",
+            "familyid",
+            "eventtype",
+            "type",
+            "date",
+            "eventdate",
+            "placeid",
+            "place",
+            "detail",
+            "description",
+            "note",
+        }
+    ),
+    "note": frozenset({"noteid", "id", "ownerid", "personid", "familyid", "text", "note"}),
+    "source": frozenset(
+        {
+            "sourceid",
+            "id",
+            "ownerid",
+            "personid",
+            "familyid",
+            "title",
+            "name",
+            "text",
+            "detail",
+        }
+    ),
+    "citation": frozenset(
+        {
+            "citationid",
+            "id",
+            "ownerid",
+            "personid",
+            "familyid",
+            "sourceid",
+            "page",
+            "detail",
+            "text",
+        }
+    ),
+    "media": frozenset(
+        {
+            "mediaid",
+            "id",
+            "ownerid",
+            "personid",
+            "familyid",
+            "file",
+            "filename",
+            "path",
+            "caption",
+            "title",
+        }
+    ),
+}
+
+_EVENT_TAGS = {
+    "birth": "BIRT",
+    "death": "DEAT",
+    "burial": "BURI",
+    "christening": "CHR",
+    "baptism": "BAPM",
+    "marriage": "MARR",
+    "divorce": "DIV",
+    "residence": "RESI",
+    "census": "CENS",
+    "occupation": "OCCU",
+}
+
+
+def _event_lines(row: dict[str, Any], place_names: dict[str, str]) -> list[str]:
+    event_type = _clean_text(_value(row, "EventType", "Type"))
+    tag = _EVENT_TAGS.get(event_type.casefold(), "EVEN")
+    result = [f"1 {tag}"]
+    if tag == "EVEN" and event_type:
+        result.append(f"2 TYPE {event_type}")
+    date = _clean_text(_value(row, "Date", "EventDate"))
+    if date:
+        result.append(f"2 DATE {date}")
+    place_id = _identifier(row, "PlaceID")
+    place = place_names.get(place_id) or _clean_text(_value(row, "Place"))
+    if place:
+        result.append(f"2 PLAC {place}")
+    detail = _clean_text(_value(row, "Detail", "Description", "Note"))
+    if detail:
+        result.append(f"2 NOTE {detail}")
+    return result
 
 
 def _paths_nested(left: Path, right: Path) -> bool:
@@ -76,7 +250,13 @@ class ExportReport:
     unmapped_tables: list[str] = field(default_factory=list)
     unmapped_columns: dict[str, list[str]] = field(default_factory=dict)
 
-    def markdown(self, source: Path, output: Path) -> str:
+    def markdown(
+        self,
+        source: Path,
+        output: Path,
+        *,
+        omitted_records: dict[str, int] | None = None,
+    ) -> str:
         lines = [
             "# RootsMagic GEDCOM Export Report",
             "",
@@ -93,15 +273,32 @@ class ExportReport:
         ]
         lines.extend(f"- `{name}`" for name in self.mapped_tables or ["None"])
         lines.extend(["", "## Unmapped data", ""])
-        lines.extend(f"- Table `{name}`" for name in self.unmapped_tables)
+        lines.extend(
+            f"- Table `{name}` — count: 1 table; reason: unsupported schema table; "
+            "private values omitted."
+            for name in self.unmapped_tables
+        )
         for table, columns in sorted(self.unmapped_columns.items()):
-            lines.append(f"- `{table}` columns: " + ", ".join(f"`{item}`" for item in columns))
+            lines.append(
+                f"- `{table}` columns: "
+                + ", ".join(f"`{item}`" for item in columns)
+                + f" — count: {len(columns)} column(s); "
+                "reason: unsupported or unsafe mapping"
+            )
+        for table, count in sorted((omitted_records or {}).items()):
+            lines.append(
+                f"- `{table}` records — count: {count} record(s); "
+                "reason: ownership, privacy, or selected scope cannot be safely represented"
+            )
         lines.extend(
             [
                 "",
-                "Portable exports omit unmapped fields. Preservation exports retain safely attributable",
-                "scalar PersonTable values as `_RM_*` custom tags; binary and unattached records remain report-only.",
-                "Manual importer smoke testing is required before claiming destination interoperability.",
+                "Portable exports omit unsupported fields. Preservation exports additionally retain",
+                "safely attributable scalar values as `_RM_*` custom tags. Nulls are omitted;",
+                "binary values and unsafe or unattached private records remain report-only.",
+                "Table and column names describe loss without recording private field values.",
+                "Automated checks demonstrate format compatibility only. Dated fictional-data",
+                "import evidence is required before claiming destination interoperability.",
             ]
         )
         return "\n".join(lines) + "\n"
@@ -148,16 +345,19 @@ class RootsMagicExporter:
         family_parents: dict[str, set[str]] = defaultdict(set)
         for family in families:
             cancellation_checkpoint()
-            family_id = str(_value(family, "FamilyID", "ID"))
-            for parent in (_value(family, "FatherID"), _value(family, "MotherID")):
+            family_id = _identifier(family, "FamilyID", "ID")
+            for parent in (
+                _identifier(family, "FatherID", "HusbandID"),
+                _identifier(family, "MotherID", "WifeID"),
+            ):
                 cancellation_checkpoint()
-                if str(parent) not in {"", "0", "None"}:
-                    family_parents[family_id].add(str(parent))
-                    family_members[family_id].add(str(parent))
+                if parent not in {"", "0", "None"}:
+                    family_parents[family_id].add(parent)
+                    family_members[family_id].add(parent)
         for child in children:
             cancellation_checkpoint()
-            family_id = str(_value(child, "FamilyID"))
-            child_id = str(_value(child, "ChildID", "PersonID"))
+            family_id = _identifier(child, "FamilyID")
+            child_id = _identifier(child, "ChildID", "PersonID")
             if child_id in {"", "0", "None"}:
                 continue
             family_members[family_id].add(child_id)
@@ -191,6 +391,424 @@ class RootsMagicExporter:
                     seen.add(related)
                     pending.append((related, depth + 1))
         return seen
+
+    def _build_export(
+        self,
+        adapter: RootsMagicSchemaAdapter,
+        *,
+        profile: str,
+        gedcom_version: str,
+        destination: str,
+        root_person_id: str | None,
+        scope: str,
+        generations: int | None,
+        living: str,
+    ) -> tuple[list[str], ExportReport, dict[str, int]]:
+        person_table = adapter.table("person")
+        if person_table is None or not person_table.rows:
+            raise AncestryError(
+                "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
+                "PersonTable is missing or empty; a safe GEDCOM cannot be produced.",
+            )
+        people_rows = list(person_table.rows)
+        name_rows = adapter.rows("name")
+        family_rows = adapter.rows("family")
+        child_rows = adapter.rows("child")
+        included = self._scope_people(
+            root_person_id,
+            scope,
+            generations,
+            family_rows,
+            child_rows,
+        )
+
+        people_by_id: dict[str, dict[str, Any]] = {}
+        living_ids: set[str] = set()
+        for row in people_rows:
+            cancellation_checkpoint()
+            person_id = _identifier(row, "PersonID", "ID")
+            if not person_id or person_id in people_by_id:
+                raise AncestryError(
+                    "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
+                    "Person identities are missing or duplicated; safe export is unavailable.",
+                )
+            people_by_id[person_id] = row
+            if _truthy(_value(row, "Living", "IsLiving", default="0")):
+                living_ids.add(person_id)
+
+        selected_rows = [
+            row
+            for person_id, row in people_by_id.items()
+            if (included is None or person_id in included)
+            and not (living == "exclude" and person_id in living_ids)
+        ]
+        selected_rows.sort(key=lambda row: semantic_row_key(row, "PersonID", "ID"))
+        person_map = {
+            _identifier(row, "PersonID", "ID"): f"@I{index}@"
+            for index, row in enumerate(selected_rows, 1)
+        }
+
+        names_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in name_rows:
+            cancellation_checkpoint()
+            owner = _identifier(row, "OwnerID", "PersonID")
+            if owner in person_map:
+                names_by_person[owner].append(row)
+        for rows in names_by_person.values():
+            rows.sort(
+                key=lambda row: (
+                    0 if _truthy(_value(row, "IsPrimary", "PrimaryName", default="0")) else 1,
+                    semantic_row_key(row, "NameID", "ID"),
+                )
+            )
+
+        children_by_family: dict[str, list[str]] = defaultdict(list)
+        for row in adapter.rows("child"):
+            cancellation_checkpoint()
+            family_id = _identifier(row, "FamilyID")
+            child_id = _identifier(row, "ChildID", "PersonID")
+            if family_id and child_id:
+                children_by_family[family_id].append(child_id)
+        for child_ids in children_by_family.values():
+            child_ids.sort(key=semantic_value)
+
+        sorted_families = sorted(
+            family_rows,
+            key=lambda row: semantic_row_key(row, "FamilyID", "ID"),
+        )
+        publishable_families: list[dict[str, Any]] = []
+        unsafe_family_ids: set[str] = set()
+        for row in sorted_families:
+            cancellation_checkpoint()
+            family_id = _identifier(row, "FamilyID", "ID")
+            members = {
+                _identifier(row, "FatherID", "HusbandID"),
+                _identifier(row, "MotherID", "WifeID"),
+                *children_by_family.get(family_id, []),
+            } - {"", "0", "None"}
+            if living != "include" and members & living_ids:
+                unsafe_family_ids.add(family_id)
+                continue
+            if not any(member in person_map for member in members):
+                continue
+            publishable_families.append(row)
+        family_map = {
+            _identifier(row, "FamilyID", "ID"): f"@F{index}@"
+            for index, row in enumerate(publishable_families, 1)
+        }
+
+        place_names = {
+            _identifier(row, "PlaceID", "ID"): _clean_text(_value(row, "Name", "PlaceName"))
+            for row in adapter.rows("place")
+            if _identifier(row, "PlaceID", "ID")
+        }
+        event_rows = sorted(
+            adapter.rows("event"),
+            key=lambda row: semantic_row_key(row, "EventID", "ID"),
+        )
+        note_rows = sorted(
+            adapter.rows("note"),
+            key=lambda row: semantic_row_key(row, "NoteID", "ID"),
+        )
+        citation_rows = sorted(
+            adapter.rows("citation"),
+            key=lambda row: semantic_row_key(row, "CitationID", "ID"),
+        )
+        media_rows = sorted(
+            adapter.rows("media"),
+            key=lambda row: semantic_row_key(row, "MediaID", "ID"),
+        )
+        source_rows = sorted(
+            adapter.rows("source"),
+            key=lambda row: semantic_row_key(row, "SourceID", "ID"),
+        )
+
+        def safe_owner(row: dict[str, Any]) -> bool:
+            person_id = _identifier(row, "OwnerID", "PersonID")
+            family_id = _identifier(row, "FamilyID")
+            if person_id:
+                return person_id in person_map and not (
+                    living != "include" and person_id in living_ids
+                )
+            if family_id:
+                return family_id in family_map and family_id not in unsafe_family_ids
+            return False
+
+        unsafe_source_ids = {
+            _identifier(row, "SourceID") for row in citation_rows if not safe_owner(row)
+        }
+        for row in source_rows:
+            owner = _identifier(row, "OwnerID", "PersonID")
+            family_id = _identifier(row, "FamilyID")
+            if (owner and not safe_owner(row)) or family_id in unsafe_family_ids:
+                unsafe_source_ids.add(_identifier(row, "SourceID", "ID"))
+        referenced_safe_sources = {
+            _identifier(row, "SourceID") for row in citation_rows if safe_owner(row)
+        }
+        publishable_sources = [
+            row
+            for row in source_rows
+            if (source_id := _identifier(row, "SourceID", "ID"))
+            and source_id not in unsafe_source_ids
+            and (safe_owner(row) or source_id in referenced_safe_sources)
+        ]
+        source_map = {
+            _identifier(row, "SourceID", "ID"): f"@S{index}@"
+            for index, row in enumerate(publishable_sources, 1)
+        }
+
+        events_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        events_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        notes_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        notes_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        citations_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        citations_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        media_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        media_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row, by_person, by_family in (
+            (row, events_by_person, events_by_family) for row in event_rows
+        ):
+            person_id = _identifier(row, "OwnerID", "PersonID")
+            family_id = _identifier(row, "FamilyID")
+            if person_id and safe_owner(row):
+                by_person[person_id].append(row)
+            elif family_id and safe_owner(row):
+                by_family[family_id].append(row)
+        for rows, by_person, by_family in (
+            (note_rows, notes_by_person, notes_by_family),
+            (citation_rows, citations_by_person, citations_by_family),
+            (media_rows, media_by_person, media_by_family),
+        ):
+            for row in rows:
+                cancellation_checkpoint()
+                person_id = _identifier(row, "OwnerID", "PersonID")
+                family_id = _identifier(row, "FamilyID")
+                if person_id and safe_owner(row):
+                    by_person[person_id].append(row)
+                elif family_id and safe_owner(row):
+                    by_family[family_id].append(row)
+
+        serialized_events = [
+            *(row for rows in events_by_person.values() for row in rows),
+            *(row for rows in events_by_family.values() for row in rows),
+        ]
+        serialized_notes = [
+            row
+            for rows in (*notes_by_person.values(), *notes_by_family.values())
+            for row in rows
+            if _clean_text(_value(row, "Text", "Note"))
+        ]
+        serialized_citations = [
+            row
+            for rows in (*citations_by_person.values(), *citations_by_family.values())
+            for row in rows
+            if _identifier(row, "SourceID") in source_map
+        ]
+        serialized_media = [
+            row
+            for rows in (*media_by_person.values(), *media_by_family.values())
+            for row in rows
+            if _clean_text(_value(row, "File", "Filename", "Path"))
+            or _clean_text(_value(row, "Caption", "Title"))
+        ]
+        used_place_ids = {
+            _identifier(row, "PlaceID") for row in serialized_events if _identifier(row, "PlaceID")
+        }
+        serialized_counts = {
+            "person": len(selected_rows),
+            "name": sum(
+                len(rows)
+                for person_id, rows in names_by_person.items()
+                if not (living == "redact" and person_id in living_ids)
+            ),
+            "family": len(publishable_families),
+            "child": sum(
+                1
+                for row in adapter.rows("child")
+                if _identifier(row, "FamilyID") in family_map
+                and _identifier(row, "ChildID", "PersonID") in person_map
+            ),
+            "place": sum(
+                1
+                for row in adapter.rows("place")
+                if _identifier(row, "PlaceID", "ID") in used_place_ids
+            ),
+            "event": len(serialized_events),
+            "note": len(serialized_notes),
+            "source": len(publishable_sources),
+            "citation": len(serialized_citations),
+            "media": len(serialized_media),
+        }
+        omitted_records: dict[str, int] = {}
+        for logical_name, serialized_count in serialized_counts.items():
+            table = adapter.table(logical_name)
+            if table is None:
+                continue
+            omitted_count = len(table.rows) - serialized_count
+            if omitted_count > 0:
+                omitted_records[table.actual_name] = omitted_count
+
+        lines = [
+            "0 HEAD",
+            "1 SOUR AncestryLLM",
+            "2 VERS 0.2.0",
+            "1 GEDC",
+            f"2 VERS {gedcom_version}",
+            "2 FORM LINEAGE-LINKED",
+            "1 CHAR UTF-8",
+            "1 SUBM @U1@",
+            "0 @U1@ SUBM",
+            "1 NAME AncestryLLM Local Export",
+        ]
+
+        def append_owned_payload(
+            owner_id: str,
+            event_index: dict[str, list[dict[str, Any]]],
+            note_index: dict[str, list[dict[str, Any]]],
+            citation_index: dict[str, list[dict[str, Any]]],
+            media_index: dict[str, list[dict[str, Any]]],
+        ) -> None:
+            for event in event_index.get(owner_id, []):
+                cancellation_checkpoint()
+                lines.extend(_event_lines(event, place_names))
+                if profile == "preservation":
+                    lines.extend(_extension_lines(event, _KNOWN_COLUMNS["event"], level=2))
+            for note in note_index.get(owner_id, []):
+                text = _clean_text(_value(note, "Text", "Note"))
+                if text:
+                    lines.append(f"1 NOTE {text}")
+                    if profile == "preservation":
+                        lines.extend(_extension_lines(note, _KNOWN_COLUMNS["note"], level=2))
+            for citation in citation_index.get(owner_id, []):
+                source_id = _identifier(citation, "SourceID")
+                if source_id not in source_map:
+                    continue
+                lines.append(f"1 SOUR {source_map[source_id]}")
+                page = _clean_text(_value(citation, "Page"))
+                detail = _clean_text(_value(citation, "Detail", "Text"))
+                if page:
+                    lines.append(f"2 PAGE {page}")
+                if detail:
+                    lines.append(f"2 DATA {detail}")
+                if profile == "preservation":
+                    lines.extend(_extension_lines(citation, _KNOWN_COLUMNS["citation"], level=2))
+            for media in media_index.get(owner_id, []):
+                filename = _clean_text(_value(media, "File", "Filename", "Path"))
+                caption = _clean_text(_value(media, "Caption", "Title"))
+                if not filename and not caption:
+                    continue
+                lines.append("1 OBJE")
+                if filename:
+                    lines.append(f"2 FILE {filename}")
+                if caption:
+                    lines.append(f"2 TITL {caption}")
+                if profile == "preservation":
+                    lines.extend(_extension_lines(media, _KNOWN_COLUMNS["media"], level=2))
+
+        unmapped_columns: dict[str, list[str]] = {}
+        for logical_name in _KNOWN_COLUMNS:
+            table = adapter.table(logical_name)
+            if table is None:
+                continue
+            unsupported = {
+                column
+                for column in table.columns
+                if column.casefold() not in _KNOWN_COLUMNS[logical_name]
+            }
+            for row in table.rows:
+                cancellation_checkpoint()
+                unsupported.update(
+                    column for column, value in row.items() if isinstance(value, bytes)
+                )
+            if unsupported:
+                unmapped_columns[table.actual_name] = sorted(unsupported, key=str.casefold)
+
+        for row in selected_rows:
+            cancellation_checkpoint()
+            person_id = _identifier(row, "PersonID", "ID")
+            lines.append(f"0 {person_map[person_id]} INDI")
+            if person_id in living_ids and living == "redact":
+                lines.append("1 NAME Living /Private/")
+                continue
+            names = names_by_person.get(person_id, [])
+            if not names:
+                lines.append("1 NAME Unknown")
+            for name in names:
+                given = _clean_text(_value(name, "Given", "GivenName"))
+                surname = _clean_text(_value(name, "Surname", "LastName"))
+                lines.append(
+                    f"1 NAME {given} /{surname}/" if surname else f"1 NAME {given or 'Unknown'}"
+                )
+                if profile == "preservation":
+                    lines.extend(_extension_lines(name, _KNOWN_COLUMNS["name"], level=2))
+            raw_sex = _clean_text(_value(row, "Sex", "Gender")).upper()
+            sex = {"0": "M", "1": "F", "2": "U"}.get(raw_sex, raw_sex[:1])
+            if sex in {"M", "F", "U", "X"}:
+                lines.append(f"1 SEX {sex}")
+            if profile == "preservation":
+                lines.extend(_extension_lines(row, _KNOWN_COLUMNS["person"], level=1))
+            append_owned_payload(
+                person_id,
+                events_by_person,
+                notes_by_person,
+                citations_by_person,
+                media_by_person,
+            )
+
+        for row in publishable_families:
+            cancellation_checkpoint()
+            family_id = _identifier(row, "FamilyID", "ID")
+            lines.append(f"0 {family_map[family_id]} FAM")
+            father = _identifier(row, "FatherID", "HusbandID")
+            mother = _identifier(row, "MotherID", "WifeID")
+            if father in person_map:
+                lines.append(f"1 HUSB {person_map[father]}")
+            if mother in person_map:
+                lines.append(f"1 WIFE {person_map[mother]}")
+            for child_id in children_by_family.get(family_id, []):
+                if child_id in person_map:
+                    lines.append(f"1 CHIL {person_map[child_id]}")
+            if profile == "preservation":
+                lines.extend(_extension_lines(row, _KNOWN_COLUMNS["family"], level=1))
+            append_owned_payload(
+                family_id,
+                events_by_family,
+                notes_by_family,
+                citations_by_family,
+                media_by_family,
+            )
+
+        for row in publishable_sources:
+            cancellation_checkpoint()
+            source_id = _identifier(row, "SourceID", "ID")
+            lines.append(f"0 {source_map[source_id]} SOUR")
+            title = _clean_text(_value(row, "Title", "Name"))
+            text = _clean_text(_value(row, "Text", "Detail"))
+            if title:
+                lines.append(f"1 TITL {title}")
+            if text:
+                lines.append(f"1 TEXT {text}")
+            if profile == "preservation":
+                lines.extend(_extension_lines(row, _KNOWN_COLUMNS["source"], level=1))
+        lines.append("0 TRLR")
+        _validate_export(lines, gedcom_version)
+
+        report = ExportReport(
+            profile=profile,
+            destination=destination,
+            people_read=len(people_rows),
+            people_written=len(selected_rows),
+            families_written=len(publishable_families),
+            living_omitted=(
+                len(living_ids if included is None else living_ids & included)
+                if living == "exclude"
+                else 0
+            ),
+            mapped_tables=adapter.mapped_tables,
+            unmapped_tables=adapter.unmapped_tables,
+            unmapped_columns=unmapped_columns,
+        )
+        return lines, report, omitted_records
 
     def export(
         self,
@@ -256,137 +874,25 @@ class RootsMagicExporter:
         try:
             fingerprint = self.reader.fingerprint_source(source_tree)
             with self.reader.operation(source_tree, fingerprint) as schema:
-                people_rows = self.reader.read_table(source_tree, "PersonTable")
-                name_rows = self.reader.read_table(source_tree, "NameTable")
-                family_rows = self.reader.read_table(source_tree, "FamilyTable")
-                child_rows = self.reader.read_table(source_tree, "ChildTable")
+                adapter = RootsMagicSchemaAdapter(
+                    self.reader,
+                    source_tree,
+                    schema,
+                )
+                lines, report, omitted_records = self._build_export(
+                    adapter,
+                    profile=profile,
+                    gedcom_version=gedcom_version,
+                    destination=destination,
+                    root_person_id=root_person_id,
+                    scope=scope,
+                    generations=generations,
+                    living=living,
+                )
         except FileIngressError as exc:
             if exc.code != "FILE_INPUT_CHANGED":
                 raise
             raise self._source_changed(exc) from exc
-        if not people_rows:
-            raise AncestryError(
-                "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
-                "PersonTable is missing or empty; a safe GEDCOM cannot be produced.",
-            )
-        included = self._scope_people(root_person_id, scope, generations, family_rows, child_rows)
-        names_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in name_rows:
-            names_by_person[str(_value(row, "OwnerID", "PersonID"))].append(row)
-        person_map: dict[str, str] = {}
-        living_ids: set[str] = set()
-        selected_rows: list[dict[str, Any]] = []
-        for row in people_rows:
-            person_id = str(_value(row, "PersonID", "ID"))
-            if included is not None and person_id not in included:
-                continue
-            is_living = str(_value(row, "Living", "IsLiving", default="0")).casefold() in {
-                "1",
-                "true",
-                "yes",
-            }
-            if is_living:
-                living_ids.add(person_id)
-                if living == "exclude":
-                    continue
-            selected_rows.append(row)
-        for index, row in enumerate(
-            sorted(selected_rows, key=lambda item: str(_value(item, "PersonID", "ID"))), 1
-        ):
-            person_map[str(_value(row, "PersonID", "ID"))] = f"@I{index}@"
-
-        lines = [
-            "0 HEAD",
-            "1 SOUR AncestryLLM",
-            "2 VERS 0.2.0",
-            "1 GEDC",
-            f"2 VERS {gedcom_version}",
-            "2 FORM LINEAGE-LINKED",
-            "1 CHAR UTF-8",
-            "1 SUBM @U1@",
-            "0 @U1@ SUBM",
-            "1 NAME AncestryLLM Local Export",
-        ]
-        known_person_columns = {"personid", "id", "sex", "living", "isliving"}
-        unmapped_person_columns: set[str] = set()
-        for row in selected_rows:
-            person_id = str(_value(row, "PersonID", "ID"))
-            pointer = person_map[person_id]
-            lines.append(f"0 {pointer} INDI")
-            names = names_by_person.get(person_id, [])
-            primary = next(
-                (
-                    item
-                    for item in names
-                    if str(_value(item, "IsPrimary", default="0")) in {"1", "True", "true"}
-                ),
-                names[0] if names else {},
-            )
-            given = _clean_text(_value(primary, "Given", "GivenName"))
-            surname = _clean_text(_value(primary, "Surname", "LastName"))
-            if person_id in living_ids and living == "redact":
-                given, surname = "Living", "Private"
-            lines.append(
-                f"1 NAME {given} /{surname}/" if surname else f"1 NAME {given or 'Unknown'}"
-            )
-            raw_sex = _clean_text(_value(row, "Sex", "Gender")).upper()
-            sex = {"0": "M", "1": "F", "2": "U"}.get(raw_sex, raw_sex[:1])
-            if sex in {"M", "F", "U", "X"}:
-                lines.append(f"1 SEX {sex}")
-            if profile == "preservation":
-                for column, raw in sorted(row.items()):
-                    if (
-                        column.casefold() in known_person_columns
-                        or raw in {None, "", 0}
-                        or isinstance(raw, bytes)
-                    ):
-                        continue
-                    lines.append(f"1 {_tag_name(column)} {_clean_text(raw)}")
-                    unmapped_person_columns.add(column)
-
-        families_written = 0
-        children_by_family: dict[str, list[str]] = defaultdict(list)
-        for row in child_rows:
-            child_id = str(_value(row, "ChildID", "PersonID"))
-            if child_id in person_map:
-                children_by_family[str(_value(row, "FamilyID"))].append(child_id)
-        for row in family_rows:
-            family_id = str(_value(row, "FamilyID", "ID"))
-            father = str(_value(row, "FatherID"))
-            mother = str(_value(row, "MotherID"))
-            children = children_by_family.get(family_id, [])
-            if father not in person_map and mother not in person_map and not children:
-                continue
-            families_written += 1
-            lines.append(f"0 @F{families_written}@ FAM")
-            if father in person_map:
-                lines.append(f"1 HUSB {person_map[father]}")
-            if mother in person_map:
-                lines.append(f"1 WIFE {person_map[mother]}")
-            lines.extend(f"1 CHIL {person_map[child]}" for child in children)
-        lines.append("0 TRLR")
-        if gedcom_version == "5.5.5":
-            validate_gedcom_555(lines)
-
-        mapped = [
-            name
-            for name in ("PersonTable", "NameTable", "FamilyTable", "ChildTable")
-            if name in schema
-        ]
-        unmapped = [name for name in schema if name not in mapped]
-        report = ExportReport(
-            profile=profile,
-            destination=destination,
-            people_read=len(people_rows),
-            people_written=len(selected_rows),
-            families_written=families_written,
-            living_omitted=len(living_ids) if living == "exclude" else 0,
-            mapped_tables=mapped,
-            unmapped_tables=unmapped,
-            unmapped_columns={"PersonTable": sorted(unmapped_person_columns)}
-            if unmapped_person_columns
-            else {},
-        )
         staged_output: Path | None = None
         staged_report: Path | None = None
         try:
@@ -396,7 +902,11 @@ class RootsMagicExporter:
             claim_staged_path(staged_output, output_token)
             report_token = self._atomic_write(
                 staged_report,
-                report.markdown(source_tree, resolved_output),
+                report.markdown(
+                    source_tree,
+                    resolved_output,
+                    omitted_records=omitted_records,
+                ),
             )
             claim_staged_path(staged_report, report_token)
 

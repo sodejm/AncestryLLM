@@ -51,6 +51,10 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 - Interactive exit now requires an explicit `wait`, `cancel`, or `stay`
   decision while jobs are active; EOF waits rather than cancelling work.
+- RootsMagic GEDCOM export now adapts to supported schema aliases, preserves
+  duplicate source material deterministically, distinguishes portable and
+  preservation profiles, and publishes the GEDCOM and sanitized loss report
+  as one complete-or-rollback pair.
 - Staged output publication and encrypted database backups defer cancellation
   across the complete commit-or-rollback boundary, preventing partial output
   bundles, and REPL shutdown drains workers before closing presentation,
@@ -60,6 +64,10 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 - Added threat modeling, secret scanning, Semgrep, CodeQL, dependency auditing,
   repository artifact guards, and CycloneDX SBOM generation.
+- RootsMagic export now fails closed when shared records could disclose living
+  people, rejects active SQLite sidecars, and bounds schema-assisted query
+  prompts with the stable `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before
+  any provider call.
 
 [Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/sodejm/AncestryLLM/releases/tag/v0.2.0
