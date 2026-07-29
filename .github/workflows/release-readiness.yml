@@ -43,6 +43,7 @@ jobs:
       - id: candidate
         name: Verify exact main commit and version
         env:
+          GH_TOKEN: ${{ github.token }}
           EXPECTED_COMMIT: ${{ inputs.commit_sha }}
           EXPECTED_VERSION: ${{ inputs.version }}
           LIFECYCLE_CLEANUP_CONFIRMED: ${{ inputs.lifecycle_cleanup_confirmed }}
@@ -64,19 +65,26 @@ jobs:
               raise SystemExit(f"project version {actual!r} != requested {expected!r}")
           PY
           test "$LIFECYCLE_CLEANUP_CONFIRMED" = "true"
-          milestone_json="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100")"
+          milestone_json="$(
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" |
+              jq 'add // []'
+          )"
+          test "$(
+            jq -r --arg title "$EXPECTED_VERSION CLI" \
+              '[.[] | select(.title == $title)] | length' <<<"$milestone_json"
+          )" -eq 1
           milestone_number="$(
             jq -r --arg title "$EXPECTED_VERSION CLI" \
-              '[.[] | select(.title == $title)][0].number // empty' <<<"$milestone_json"
+              '.[] | select(.title == $title) | .number' <<<"$milestone_json"
           )"
           test -n "$milestone_number"
-          open_items="$(
-            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100"
-          )"
-          if test "$(jq 'length' <<<"$open_items")" -ne 0; then
-            jq -r '.[] | "release item still open: #\(.number) \(.title)"' <<<"$open_items"
-            exit 1
-          fi
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" |
+            jq 'add // []' |
+            python scripts/verify_release_milestone.py \
+              --tracker-number 133 \
+              --tracker-label release-tracker
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
@@ -100,7 +108,7 @@ jobs:
           cache: pip
       - name: Install locked environment
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
       - name: Test with coverage
         run: uv run pytest --verbose --cov --cov-report=term-missing
@@ -134,10 +142,10 @@ jobs:
           cache: pip
       - name: Dependency and static analysis
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
           uv run pip-audit
-          uvx semgrep scan --error --config p/python --config p/secrets src
+          uv run --locked --script scripts/run_pinned_semgrep.py src
       - name: Generate CycloneDX SBOM
         run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -190,7 +198,7 @@ jobs:
           cache: pip
       - name: Build deterministic distributions
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
           uv run python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
