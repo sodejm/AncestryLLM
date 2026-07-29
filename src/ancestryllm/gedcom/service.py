@@ -73,6 +73,7 @@ class GedcomService:
                 paths,
                 self.ingress,
                 {path: fingerprint.snapshot for path, fingerprint in fingerprints.items()},
+                validate_structure=True,
             )
         except engine.GedcomParseError as exc:
             raise AncestryError(

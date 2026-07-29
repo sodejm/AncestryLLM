@@ -278,6 +278,33 @@ def test_xref_collisions_and_dangling_references_are_namespaced_per_source() -> 
     assert f"1 HUSB {source_b.pointer_map['@I1@']}" in family_b.lines
 
 
+def test_literal_xref_text_does_not_reserve_a_later_record_pointer(tmp_path: Path) -> None:
+    source_a = tmp_path / "literal-source.ged"
+    source_b = tmp_path / "record-source.ged"
+    source_a.write_text(
+        _minimal_text().replace(
+            "1 NAME Zoë /Fiction/",
+            "1 NAME Zoë /Fiction/\n1 _TEXT literal @I9@",
+        ),
+        encoding="utf-8",
+    )
+    source_b.write_text(
+        _minimal_text()
+        .replace("@I1@", "@I9@")
+        .replace(
+            "Zoë /Fiction/",
+            "Aster /Fiction/",
+        ),
+        encoding="utf-8",
+    )
+
+    literal_source, record_source = gm.load_sources([source_a, source_b])
+
+    assert "@I9@" not in literal_source.pointer_map
+    assert record_source.pointer_map["@I9@"] == "@I9@"
+    assert "1 _TEXT literal @I9@" in _record(literal_source, "INDI", "@I1@").lines
+
+
 @pytest.mark.parametrize(
     ("line", "expected_line_count"),
     [

@@ -458,6 +458,32 @@ def _exact_pointer_references(lines: Iterable[str]) -> set[str]:
     return references
 
 
+def _validate_input_document_structure(records: Sequence[GedcomRecord]) -> None:
+    """Reject ambiguous document envelopes and duplicate record identifiers."""
+    if not records or records[0].tag != "HEAD":
+        raise GedcomParseError("GEDCOM input must begin with exactly one HEAD record")
+    if records[-1].tag != "TRLR":
+        raise GedcomParseError("GEDCOM input must end with exactly one TRLR record")
+
+    head_count = 0
+    trailer_count = 0
+    declared: set[str] = set()
+    for record in records:
+        cancellation_checkpoint()
+        head_count += record.tag == "HEAD"
+        trailer_count += record.tag == "TRLR"
+        if not record.pointer:
+            continue
+        if record.pointer in declared:
+            raise GedcomParseError("GEDCOM input contains a duplicate record identifier")
+        declared.add(record.pointer)
+
+    if head_count != 1:
+        raise GedcomParseError("GEDCOM input must contain exactly one HEAD record")
+    if trailer_count != 1:
+        raise GedcomParseError("GEDCOM input must contain exactly one TRLR record")
+
+
 def _rooted_auxiliary_pointer_closure(
     seed_lines: Iterable[str],
     source_records: Sequence[GedcomRecord],
@@ -479,11 +505,11 @@ def _rooted_auxiliary_pointer_closure(
         pointer = pending.popleft()
         if pointer in retained:
             continue
-        record = auxiliary_records.get(pointer)
-        if record is None:
+        auxiliary_record = auxiliary_records.get(pointer)
+        if auxiliary_record is None:
             continue
         retained.add(pointer)
-        rewritten_lines = (_rewrite_xrefs(line, pointer_map) for line in record.lines)
+        rewritten_lines = (_rewrite_xrefs(line, pointer_map) for line in auxiliary_record.lines)
         for referenced in sorted(_exact_pointer_references(rewritten_lines)):
             if referenced not in retained:
                 pending.append(referenced)
@@ -808,6 +834,8 @@ def load_sources(
     paths: Sequence[str | Path],
     ingress: FileIngressPolicy | None = None,
     expected: Mapping[Path, FileSnapshot] | None = None,
+    *,
+    validate_structure: bool = False,
 ) -> list[ParsedSource]:
     """Load sources after allocating collision-free global xrefs.
 
@@ -836,13 +864,13 @@ def load_sources(
             original_records = list(iter_gedcom_records(path, policy, (expected or {}).get(path)))
         except GedcomParseError as exc:
             raise GedcomParseError(f"{path}: {exc}") from exc
+        if validate_structure:
+            _validate_input_document_structure(original_records)
         pointer_map: dict[str, str] = {}
-        all_xrefs = {
-            xref
-            for record in original_records
-            for line in record.lines
-            for xref in XREF_RE.findall(line)
-        }
+        all_xrefs = {record.pointer for record in original_records if record.pointer}
+        for record in original_records:
+            cancellation_checkpoint()
+            all_xrefs.update(_exact_pointer_references(record.lines))
         for record in original_records:
             cancellation_checkpoint()
             if record.pointer:
@@ -3399,11 +3427,7 @@ def _analyze_source_structure(
                             generations=generations,
                         )
                     )
-            references = {
-                pointer
-                for line in record.lines
-                for pointer in XREF_RE.findall(parse_gedcom_line(line).value)
-            }
+            references = _exact_pointer_references(record.lines)
             for dangling in sorted(references - declared):
                 findings.append(
                     _quality_finding(
