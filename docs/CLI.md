@@ -116,6 +116,33 @@ preservation and interoperability rules.
 the incremental-sync CLI. Use `ancestry gedcom sync update --help` or
 `ancestry gedcom sync rebase --help` before operating on a master or manifest;
 these workflows preserve protected and manually curated material by default.
+Persisted source bindings and canonical semantic ordering determine pointer
+allocation; filesystem, argument, and record order do not. Origins remain
+independent unless an existing binding explicitly associates them, and
+repeating the same synchronization produces the same semantic bundle.
+
+Automatic reconciliation can remove only source-owned, uncited, unprotected
+fact blocks. It never removes complete people, families, relationships, source
+records, cited facts, or protected/manual facts. A snapshot import never
+revives a tombstone automatically, and a changed fact that collides with a
+tombstoned logical identity is retained as a deletion conflict in the update
+report rather than restored silently. A reviewed manual rebase that restores
+matching content retires that tombstone.
+`--accept-manual-deletions` authorizes deletions only for that one reviewed
+rebase; it does not authorize later automatic removals.
+
+Before staging output, synchronization rejects malformed or future manifest
+schemas, generation gaps, non-monotonic release history, incoherent parent
+releases, and inconsistent active-source history as `MANIFEST_INVALID`. A
+master or published-artifact fingerprint mismatch is
+`MANIFEST_MASTER_MISMATCH`. Publication uses an exclusive final-directory
+operation as its serialization point: concurrent losers fail without changing
+the winning release, and each failure leaves either the previous complete
+release or the new complete release. Prior releases remain immutable and
+rollback metadata remains available. Cancellation requested during the
+non-interruptible commit or rollback is acknowledged after that boundary; a
+real publication failure takes precedence.
+
 The release root itself may be new, but its parent directory must already exist;
 a rejected synchronization does not create ancestor directory trees.
 On a failed or cancelled POSIX publication, AncestryLLM fails closed rather
@@ -131,7 +158,9 @@ either `--provider PROFILE` (the profile supplies its model and settings) or a
 built-in `--provider PROVIDER --model MODEL`. A direct remote selection also
 requires `--consent NAME`; AncestryLLM executes the exact operational profile
 linked to that consent and rejects a provider or model mismatch before SDK use.
-Rebase is deterministic and never invokes a provider. The retired
+With `--provider none`, synchronization does not construct provider adapters or
+make network calls, even when provider credentials are present and SDKs are
+importable. Rebase is deterministic and never invokes a provider. The retired
 `--ai-backend` and provider-specific model/key options are rejected rather than
 routed through legacy network code.
 
