@@ -32,3 +32,12 @@ exercise:
 
 `malformed-rejected.ged` must fail deterministically at line 8 with an invalid
 GEDCOM level error for `1NAME Missing required whitespace after the level`.
+
+## Public service quickstart
+
+The public CLI quickstart uses the structurally valid fictional fixtures
+`xref-source-a.ged` and `xref-source-b.ged` from the adjacent
+`gedcom_adversarial` directory, with `Aster Fiction` as the exact root name.
+The quality fixtures above remain intentionally malformed so internal advisory
+analysis can characterize structural defects without weakening the public
+service boundary.

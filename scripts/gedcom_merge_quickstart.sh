@@ -27,10 +27,11 @@ fail() {
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
-FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/gedcom_merge"
-SOURCE_A="${FIXTURE_DIR}/quality-source-a.ged"
-SOURCE_B="${FIXTURE_DIR}/quality-source-b.ged"
-MALFORMED_SOURCE="${FIXTURE_DIR}/malformed-rejected.ged"
+PUBLIC_FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/gedcom_adversarial"
+QUALITY_FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/gedcom_merge"
+SOURCE_A="${PUBLIC_FIXTURE_DIR}/xref-source-a.ged"
+SOURCE_B="${PUBLIC_FIXTURE_DIR}/xref-source-b.ged"
+MALFORMED_SOURCE="${QUALITY_FIXTURE_DIR}/malformed-rejected.ged"
 OUTPUT_PARENT="${TMPDIR:-/tmp}"
 SKIP_INSTALL=false
 
@@ -67,7 +68,10 @@ python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' \
   || fail "Python 3.12 or newer is required"
 [[ -f "${REPO_ROOT}/src/ancestryllm/__main__.py" ]] \
   || fail "AncestryLLM module entry point not found"
-[[ -d "$FIXTURE_DIR" ]] || fail "fixture directory not found: $FIXTURE_DIR"
+[[ -d "$PUBLIC_FIXTURE_DIR" ]] \
+  || fail "fixture directory not found: $PUBLIC_FIXTURE_DIR"
+[[ -d "$QUALITY_FIXTURE_DIR" ]] \
+  || fail "fixture directory not found: $QUALITY_FIXTURE_DIR"
 [[ -f "$SOURCE_A" ]] || fail "fixture not found: $SOURCE_A"
 [[ -f "$SOURCE_B" ]] || fail "fixture not found: $SOURCE_B"
 [[ -f "$MALFORMED_SOURCE" ]] || fail "fixture not found: $MALFORMED_SOURCE"
@@ -98,16 +102,16 @@ if [[ "$SKIP_INSTALL" == false ]]; then
   PYTHONPATH_PREFIX=
 fi
 
-MASTER_GEDCOM="${RUN_DIR}/maren-hollow.ged"
-MASTER_REPORT="${RUN_DIR}/maren-hollow.quality.md"
-printf 'Merging fixtures with AI disabled and root Maren Hollow...\n'
+MASTER_GEDCOM="${RUN_DIR}/aster-fiction.ged"
+MASTER_REPORT="${RUN_DIR}/aster-fiction.quality.md"
+printf 'Merging fixtures with AI disabled and root Aster Fiction...\n'
 ANCESTRYLLM_CONFIG_DIR="$RUN_CONFIG_DIR" \
   ANCESTRYLLM_DATA_DIR="$RUN_DATA_DIR" \
   PYTHONPATH="${PYTHONPATH_PREFIX}${PYTHONPATH_PREFIX:+${PYTHONPATH:+:}}${PYTHONPATH:-}" \
   "$PYTHON" -m ancestryllm gedcom merge \
   "$SOURCE_A" "$SOURCE_B" \
   --provider none \
-  --root-person "Maren Hollow" \
+  --root-person "Aster Fiction" \
   --quality-report "$MASTER_REPORT" \
   --output "$MASTER_GEDCOM"
 
@@ -124,7 +128,7 @@ ANCESTRYLLM_CONFIG_DIR="$RUN_CONFIG_DIR" \
   "$PYTHON" -m ancestryllm gedcom merge \
   "$SOURCE_A" "$MALFORMED_SOURCE" \
   --provider none \
-  --root-person "Maren Hollow" \
+  --root-person "Aster Fiction" \
   --quality-report "$MALFORMED_REPORT" \
   --output "$MALFORMED_GEDCOM"
 malformed_status=$?
