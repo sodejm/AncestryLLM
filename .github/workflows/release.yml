@@ -50,16 +50,26 @@ jobs:
           if actual != expected:
               raise SystemExit(f"project version {actual!r} != tag version {expected!r}")
           PY
-          milestone_json="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100")"
+          milestone_json="$(
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" |
+              jq 'add // []'
+          )"
+          test "$(
+            jq -r --arg title "$version CLI" \
+              '[.[] | select(.title == $title)] | length' <<<"$milestone_json"
+          )" -eq 1
           milestone_number="$(
             jq -r --arg title "$version CLI" \
-              '[.[] | select(.title == $title)][0].number // empty' <<<"$milestone_json"
+              '.[] | select(.title == $title) | .number' <<<"$milestone_json"
           )"
           test -n "$milestone_number"
-          test "$(
-            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" \
-              --jq 'length'
-          )" -eq 0
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" |
+            jq 'add // []' |
+            python scripts/verify_release_milestone.py \
+              --tracker-number 133 \
+              --tracker-label release-tracker
           git fetch --no-tags origin main
           test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$TAG_COMMIT"
           test "$(git rev-parse origin/main)" = "$TAG_COMMIT"
@@ -104,7 +114,7 @@ jobs:
           python-version: "3.12"
       - name: Build deterministic artifacts and SBOM
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
           uv run pytest --verbose --cov --cov-report=term-missing
           uv run ruff check src tests scripts
@@ -112,7 +122,7 @@ jobs:
           uv run mypy src/ancestryllm
           ./scripts/check_repository_safety.sh
           uv run pip-audit
-          uvx semgrep scan --error --config p/python --config p/secrets src
+          uv run --locked --script scripts/run_pinned_semgrep.py src
           uv run python scripts/build_release.py --output-dir dist
           uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
       - name: Compare approved readiness artifacts
@@ -156,8 +166,8 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  attest:
-    name: attest release artifacts
+  publish-build-provenance:
+    name: publish build provenance
     needs: [validate, build]
     runs-on: ubuntu-latest
     permissions:
@@ -175,7 +185,7 @@ jobs:
 
   draft-github-release:
     name: prepare draft GitHub Release
-    needs: [validate, build, attest]
+    needs: [validate, build, publish-build-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create and attach assets to the draft release
@@ -217,7 +227,7 @@ jobs:
 
   publish-testpypi:
     name: publish TestPyPI
-    needs: [validate, build, attest, draft-github-release]
+    needs: [validate, build, publish-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -235,6 +245,7 @@ jobs:
           cp release/*.whl release/*.tar.gz dist/
       - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
+          attestations: false # TestPyPI lacks PyPI's PEP 740 Integrity API
           repository-url: https://test.pypi.org/legacy/
 
   verify-testpypi:
@@ -288,9 +299,11 @@ jobs:
           mkdir dist
           cp release/*.whl release/*.tar.gz dist/
       - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          attestations: true
 
   verify-pypi-hashes:
-    name: verify PyPI artifact hashes
+    name: verify PyPI hashes and PEP 740 attestations
     needs: [validate, build, publish-pypi]
     runs-on: ubuntu-latest
     steps:
@@ -320,10 +333,27 @@ jobs:
             test "$attempt" -lt 12
             sleep 10
           done
+      - name: Verify PyPI PEP 740 attestations
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          python scripts/verify_pypi_attestations.py \
+            --version "$VERSION" \
+            --repository "$GITHUB_REPOSITORY" \
+            --verifier pypi-attestations==0.0.30 \
+            --checksums downloaded/SHA256SUMS \
+            --artifacts downloaded \
+            --evidence attestation-evidence
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-pypi-distributions
           path: downloaded/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-pypi-attestations
+          path: attestation-evidence/
           if-no-files-found: error
 
   verify-pypi-install:
