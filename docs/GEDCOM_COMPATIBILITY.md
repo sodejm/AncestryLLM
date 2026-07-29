@@ -15,10 +15,26 @@ endpoint, execution limits, shared client, and exact-cache policy; direct
 built-in selection requires `--model`.
 
 The merge engine preserves custom/vendor structures, citations, conflicting
-facts, family links, and stable pointers whenever representable. Optional LLM
-adjudication may identify likely duplicates but cannot delete conflicting
-evidence. Incremental sync never automatically deletes people, relationships,
-cited facts, protected baseline/manual content, families, or sources.
+facts, notes, media, family links, and stable pointers whenever representable.
+Incremental synchronization retains the greatest exact duplicate-citation
+multiplicity supplied by any one origin while consolidating only identical
+cross-origin repetitions. Persisted bindings and canonical semantic ordering,
+not input-path, argument, or record order, control new pointer allocation.
+Independent origins remain independent unless a persisted binding explicitly
+associates them. Optional LLM adjudication may identify likely duplicates but
+cannot delete conflicting evidence. Incremental sync never automatically
+deletes people, relationships, cited facts, protected baseline/manual content,
+families, or sources.
+
+Automatic reconciliation may remove only source-owned, uncited, unprotected
+fact blocks. Snapshot imports cannot revive tombstones. A changed fact matching
+a tombstoned logical identity is a conflict, while an explicit manual rebase
+that restores matching content retires that tombstone. Manual-deletion
+acceptance applies only to the reviewed rebase where it is supplied. Manifest
+schema, history, lineage, active-source continuity, and master/artifact
+fingerprints are validated before publication begins. An invalid history fails
+closed, and atomic publication leaves either the prior complete release or the
+new complete release with usable rollback metadata—never a partial bundle.
 Optional provider output reaches the deterministic engine only through narrow
 resolver contracts. A timeout, cancellation, consent denial, malformed
 response, or provider failure aborts the operation with a stable coded error;

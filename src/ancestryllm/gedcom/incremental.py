@@ -26,9 +26,10 @@ import stat
 import sys
 import unicodedata
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from ctypes import wintypes
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping, Never, Optional, Sequence
@@ -386,6 +387,19 @@ def _block_key(block: Sequence[str], core: ModuleType) -> str:
     return _hash_text("\n".join(_relative_lines(semantic, core)))
 
 
+def _block_logical_identity(block: Sequence[str], core: ModuleType) -> str:
+    """Identify a fact slot without treating its mutable value as a new fact."""
+    if not block:
+        return _hash_text("")
+    root = core.parse_gedcom_line(block[0])
+    identity_lines = [f"0 {root.tag}"]
+    for child in _direct_blocks(block, core):
+        cancellation_checkpoint()
+        if core.parse_gedcom_line(child[0]).tag in {"ADDR", "DATE", "PLAC", "TYPE"}:
+            identity_lines.extend(_relative_lines(child, core))
+    return _hash_text("\n".join(identity_lines))
+
+
 def _structure_key(lines: Sequence[str], core: ModuleType) -> str:
     """Hash a complete subtree after safe semantic normalization."""
     return _hash_text("\n".join(_relative_lines(lines, core)))
@@ -530,31 +544,55 @@ def _merge_same_fact(
     semantic, left_attachments = _block_parts(left, core)
     _, right_attachments = _block_parts(right, core)
     attachments = [list(value) for value in left_attachments]
-    exact = {_structure_key(value, core) for value in attachments}
+    exact = Counter(_structure_key(value, core) for value in attachments)
+    citation_counts = Counter(
+        _citation_identity(value, core)
+        for value in attachments
+        if core.parse_gedcom_line(value[0]).tag == "SOUR"
+    )
+    observed_citations: Counter[tuple[str, ...]] = Counter()
     for candidate in right_attachments:
         cancellation_checkpoint()
         candidate_key = _structure_key(candidate, core)
-        if candidate_key in exact:
-            if core.parse_gedcom_line(candidate[0]).tag == "SOUR":
+        candidate_tag = core.parse_gedcom_line(candidate[0]).tag
+        citation_identity: tuple[str, ...] | None = None
+        if candidate_tag == "SOUR":
+            citation_identity = _citation_identity(candidate, core)
+            observed_citations[citation_identity] += 1
+        if exact[candidate_key]:
+            if (
+                citation_identity is not None
+                and observed_citations[citation_identity] > citation_counts[citation_identity]
+            ):
+                attachments.append(list(candidate))
+                exact[candidate_key] += 1
+                citation_counts[citation_identity] += 1
+                stats.citations_attached.append(candidate_key[:12])
+            elif citation_identity is not None:
                 stats.citations_deduplicated.append(candidate_key[:12])
             continue
-        if core.parse_gedcom_line(candidate[0]).tag == "SOUR":
+        if citation_identity is not None:
             merged = False
-            for index, existing in enumerate(attachments):
-                if core.parse_gedcom_line(existing[0]).tag != "SOUR":
-                    continue
-                combined = _merge_citations(existing, candidate, core)
-                if combined is not None:
-                    attachments[index] = combined
-                    exact.add(_structure_key(combined, core))
-                    stats.citations_attached.append(candidate_key[:12])
-                    merged = True
-                    break
+            if observed_citations[citation_identity] <= citation_counts[citation_identity]:
+                for index, existing in enumerate(attachments):
+                    if core.parse_gedcom_line(existing[0]).tag != "SOUR":
+                        continue
+                    combined = _merge_citations(existing, candidate, core)
+                    if combined is not None:
+                        existing_key = _structure_key(existing, core)
+                        exact[existing_key] -= 1
+                        attachments[index] = combined
+                        exact[_structure_key(combined, core)] += 1
+                        stats.citations_attached.append(candidate_key[:12])
+                        merged = True
+                        break
             if merged:
                 continue
             stats.citations_attached.append(candidate_key[:12])
         attachments.append(list(candidate))
-        exact.add(candidate_key)
+        exact[candidate_key] += 1
+        if citation_identity is not None:
+            citation_counts[citation_identity] += 1
     output = list(semantic)
     for attachment in attachments:
         output.extend(attachment)
@@ -668,6 +706,38 @@ def _identity_fingerprint(person: Any) -> tuple[str, ...]:
         person.death_date.upper(),
         person.death_place.casefold(),
         person.gender.casefold(),
+    )
+
+
+def _person_allocation_key(
+    person: Any,
+    original_pointer: str,
+    core: ModuleType,
+) -> tuple[tuple[str, ...], tuple[str, ...], str, str]:
+    """Order new people by stable semantic content rather than record order."""
+    normalized = _replace_header_pointer(person.raw_lines, "@PERSON@", core)
+    return (
+        _identity_fingerprint(person),
+        tuple(sorted(_identifier_values(person, core))),
+        "\n".join(_relative_lines(normalized, core)),
+        original_pointer,
+    )
+
+
+def _record_allocation_key(
+    record: Any,
+    pointer_map: Mapping[str, str],
+    core: ModuleType,
+) -> tuple[str, str, str]:
+    """Order non-person records by canonical content with a stable xref tie-break."""
+    rewritten = _rewrite_lines(record.lines, pointer_map, core)
+    normalized = (
+        _replace_header_pointer(rewritten, "@RECORD@", core) if record.pointer else rewritten
+    )
+    return (
+        record.tag,
+        "\n".join(_relative_lines(normalized, core)),
+        record.pointer,
     )
 
 
@@ -818,7 +888,7 @@ def _snapshot_specs(
             ["Add the matching --snapshot or remove the unused --exported-at value."],
             details=(f"Unused export date entries: {len(unknown_dates)}",),
         )
-    return specs
+    return sorted(specs, key=lambda item: (item.source_id, item.vendor, item.sha256))
 
 
 def _new_manifest(
@@ -855,6 +925,19 @@ def _manifest_invalid(field_name: str) -> SyncError:
         "Malformed provenance cannot support a safe synchronization decision.",
         ["Restore an unmodified manifest from the matching release bundle."],
     )
+
+
+def _manifest_timestamp(value: Any, field_name: str) -> dt.datetime:
+    """Parse one required timezone-aware manifest timestamp."""
+    if not isinstance(value, str) or not value:
+        raise _manifest_invalid(field_name)
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _manifest_invalid(field_name) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise _manifest_invalid(field_name)
+    return parsed
 
 
 def _validate_manifest(value: dict[str, Any]) -> None:
@@ -998,6 +1081,7 @@ def _validate_manifest(value: dict[str, Any]) -> None:
         for block_hash, entry in entries.items():
             if (
                 not isinstance(block_hash, str)
+                or re.fullmatch(r"[0-9a-f]{64}", block_hash) is None
                 or not isinstance(entry, dict)
                 or not isinstance(entry.get("tag"), str)
                 or not entry["tag"]
@@ -1006,6 +1090,12 @@ def _validate_manifest(value: dict[str, Any]) -> None:
                 or any(item not in value["snapshots"] for item in entry["observations"])
                 or not isinstance(entry.get("protected"), list)
                 or any(not isinstance(item, str) for item in entry["protected"])
+            ):
+                raise _manifest_invalid("blocks")
+            logical_identity = entry.get("logical_identity")
+            if logical_identity is not None and (
+                not isinstance(logical_identity, str)
+                or re.fullmatch(r"[0-9a-f]{64}", logical_identity) is None
             ):
                 raise _manifest_invalid("blocks")
             for generation_field in ("first_seen_generation", "last_seen_generation"):
@@ -1026,24 +1116,109 @@ def _validate_manifest(value: dict[str, Any]) -> None:
             or isinstance(tombstone.get("generation"), bool)
             or not isinstance(tombstone.get("generation"), int)
             or tombstone["generation"] < 0
+            or (
+                tombstone.get("logical_identity") is not None
+                and (
+                    not isinstance(tombstone["logical_identity"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", tombstone["logical_identity"]) is None
+                )
+            )
         ):
             raise _manifest_invalid("manual_tombstones")
+    release_timestamps: list[dt.datetime] = []
     for release in value["releases"]:
         if (
             isinstance(release.get("generation"), bool)
             or not isinstance(release.get("generation"), int)
-            or release["generation"] < 0
+            or release["generation"] < 1
             or not isinstance(release.get("path"), str)
             or not release["path"]
             or not isinstance(release.get("master_sha256"), str)
             or re.fullmatch(r"[0-9a-f]{64}", release["master_sha256"]) is None
         ):
             raise _manifest_invalid("releases")
+        release_timestamps.append(_manifest_timestamp(release.get("created_at"), "releases"))
+    generation = value["generation"]
+    releases = value["releases"]
+    if len(releases) != generation or any(
+        release["generation"] != expected for expected, release in enumerate(releases, start=1)
+    ):
+        raise _manifest_invalid("releases")
+    if any(later < earlier for earlier, later in pairwise(release_timestamps)):
+        raise _manifest_invalid("releases")
+    if releases and releases[-1]["master_sha256"] != master["sha256"]:
+        raise _manifest_invalid("releases")
+    parent = value.get("parent_release")
+    if generation == 0:
+        if parent is not None:
+            raise _manifest_invalid("parent_release")
+    else:
+        if (
+            not isinstance(parent, dict)
+            or isinstance(parent.get("generation"), bool)
+            or not isinstance(parent.get("generation"), int)
+            or parent["generation"] != generation - 1
+        ):
+            raise _manifest_invalid("parent_release")
+        parent_master = parent.get("master")
+        if (
+            not isinstance(parent_master, dict)
+            or not isinstance(parent_master.get("path"), str)
+            or not parent_master["path"]
+            or not isinstance(parent_master.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", parent_master["sha256"]) is None
+        ):
+            raise _manifest_invalid("parent_release")
+        if generation > 1 and parent_master["sha256"] != releases[-2]["master_sha256"]:
+            raise _manifest_invalid("parent_release")
+        parent_manifest_path = parent.get("manifest_path")
+        parent_manifest_sha = parent.get("manifest_sha256")
+        if generation == 1:
+            if parent_manifest_path is not None or parent_manifest_sha is not None:
+                raise _manifest_invalid("parent_release")
+        elif (
+            not isinstance(parent_manifest_path, str)
+            or not parent_manifest_path
+            or not isinstance(parent_manifest_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", parent_manifest_sha) is None
+        ):
+            raise _manifest_invalid("parent_release")
+    for timestamp_field in ("created_at", "updated_at"):
+        if timestamp_field in value:
+            _manifest_timestamp(value[timestamp_field], timestamp_field)
+    artifact_checksums = value.get("artifact_checksums")
+    if artifact_checksums is not None and (
+        not isinstance(artifact_checksums, dict)
+        or set(artifact_checksums) != {"master.ged", "quality.md", "rollback.json", "update.md"}
+        or any(
+            not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None
+            for checksum in artifact_checksums.values()
+        )
+    ):
+        raise _manifest_invalid("artifact_checksums")
     if any(
         not isinstance(key, str) or isinstance(item, bool) or not isinstance(item, int) or item < 1
         for key, item in value["next_ids"].items()
     ):
         raise _manifest_invalid("next_ids")
+
+
+def _verify_manifest_artifacts(path: Path, value: Mapping[str, Any]) -> None:
+    """Verify the immutable release files named by a schema-v1 manifest."""
+    checksums = value.get("artifact_checksums")
+    if checksums is None:
+        return
+    assert isinstance(checksums, dict)
+    for name, expected in checksums.items():
+        cancellation_checkpoint()
+        artifact = path.parent / name
+        if not artifact.is_file() or _sha256_file(artifact) != expected:
+            raise SyncError(
+                "MANIFEST_MASTER_MISMATCH",
+                "A release artifact does not match the supplied manifest.",
+                "The release bundle may be incomplete, altered, or mixed across generations.",
+                ["Select an unmodified master and manifest from one complete release bundle."],
+            )
 
 
 def _load_manifest(
@@ -1061,6 +1236,7 @@ def _load_manifest(
     )
     assert isinstance(value, dict)
     _validate_manifest(value)
+    _verify_manifest_artifacts(path, value)
     expected = value["master"]["sha256"]
     actual = master_fingerprint.sha256
     if expected != actual:
@@ -1216,9 +1392,15 @@ def _match_people(
         inverse_pointer_map = {
             global_pointer: original for original, global_pointer in source.pointer_map.items()
         }
-        for incoming in people_by_source[index]:
+        ordered_people = sorted(
+            (
+                (incoming, inverse_pointer_map.get(incoming.pointer, incoming.pointer))
+                for incoming in people_by_source[index]
+            ),
+            key=lambda item: _person_allocation_key(item[0], item[1], core),
+        )
+        for incoming, original in ordered_people:
             cancellation_checkpoint()
-            original = inverse_pointer_map.get(incoming.pointer, incoming.pointer)
             candidate_pointers: set[str] = set()
             previous = previous_bindings.get(original)
             if previous in by_pointer:
@@ -1335,12 +1517,15 @@ def _map_nonpeople(
         for record in sources[0].records
         if record.tag not in {"HEAD", "TRLR", "INDI", "SUBM"}
     ]
-    incoming_records = [
-        record
-        for source in sources[1:]
-        for record in source.records
-        if record.tag not in {"HEAD", "TRLR", "INDI", "SUBM"}
-    ]
+    incoming_records = sorted(
+        (
+            record
+            for source in sources[1:]
+            for record in source.records
+            if record.tag not in {"HEAD", "TRLR", "INDI", "SUBM"}
+        ),
+        key=lambda record: _record_allocation_key(record, pointer_map, core),
+    )
     all_records = master_records + incoming_records
     for tag in ordered_tags:
         for record in (item for item in all_records if item.tag == tag):
@@ -1454,6 +1639,18 @@ def _reconcile_person_blocks(
         (str(item.get("person", "")), str(item.get("block_hash", "")))
         for item in manifest.get("manual_tombstones", ())
     }
+    logical_tombstones: set[tuple[str, str]] = set()
+    for item in manifest.get("manual_tombstones", ()):
+        cancellation_checkpoint()
+        person = str(item.get("person", ""))
+        block_hash = str(item.get("block_hash", ""))
+        logical_identity = item.get("logical_identity")
+        if logical_identity is None:
+            logical_identity = (
+                block_registry.get(person, {}).get(block_hash, {}).get("logical_identity")
+            )
+        if isinstance(logical_identity, str):
+            logical_tombstones.add((person, logical_identity))
     for source in sources:
         cancellation_checkpoint()
         for record in source.records:
@@ -1463,8 +1660,9 @@ def _reconcile_person_blocks(
             target = pointer_map.get(record.pointer, record.pointer)
             grouped[target].append((source_spec_by_path.get(record.source_file), record))
     people: list[Any] = []
-    for target, origin_records in grouped.items():
+    for target in sorted(grouped):
         cancellation_checkpoint()
+        origin_records = grouped[target]
         accumulator: dict[str, list[str]] = {}
         order: list[str] = []
         current_master_keys: set[str] = set()
@@ -1477,8 +1675,11 @@ def _reconcile_person_blocks(
             for block in core._top_level_blocks(rewritten):
                 cancellation_checkpoint()
                 key = _block_key(block, core)
+                logical_identity = _block_logical_identity(block, core)
                 tag = core.parse_gedcom_line(block[0]).tag
-                if origin_spec is not None and (target, key) in tombstones:
+                if origin_spec is not None and (
+                    (target, key) in tombstones or (target, logical_identity) in logical_tombstones
+                ):
                     stats.conflicts.append(
                         f"{target}:{tag}:{key[:12]} was present in "
                         f"{origin_spec.source_id} but retained as an intentional "
@@ -1501,6 +1702,7 @@ def _reconcile_person_blocks(
                         "first_seen_generation": manifest.get("generation", 0) + 1,
                     },
                 )
+                entry.setdefault("logical_identity", logical_identity)
                 if origin_spec is None:
                     current_master_keys.add(key)
                     if initialize and "baseline" not in entry["protected"]:
@@ -1609,7 +1811,7 @@ def _render_update_report(
         ("Added facts and structures", stats.added_facts),
         ("Consolidated duplicate facts", stats.consolidated_facts),
         ("Citations attached", stats.citations_attached),
-        ("Duplicate citations removed", stats.citations_deduplicated),
+        ("Cross-origin citation repetitions consolidated", stats.citations_deduplicated),
         ("Source records consolidated", stats.source_records_consolidated),
         ("Conflicts retained", stats.conflicts),
         ("Data actually removed", stats.removed),
@@ -3736,16 +3938,19 @@ def _master_block_index(
     core: ModuleType,
     ingress: FileIngressPolicy,
     expected: FileSnapshot,
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, dict[str, str]]]:
     """Index person blocks by pointer for explicit manual rebase comparison."""
-    result: dict[str, dict[str, str]] = defaultdict(dict)
+    result: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
     for record in core.iter_gedcom_records(path, ingress, expected):
         cancellation_checkpoint()
         if record.tag != "INDI":
             continue
         for block in core._top_level_blocks(record.lines):
             cancellation_checkpoint()
-            result[record.pointer][_block_key(block, core)] = core.parse_gedcom_line(block[0]).tag
+            result[record.pointer][_block_key(block, core)] = {
+                "tag": core.parse_gedcom_line(block[0]).tag,
+                "logical_identity": _block_logical_identity(block, core),
+            }
     return result
 
 
@@ -3765,6 +3970,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
     )
     assert isinstance(manifest, dict)
     _validate_manifest(manifest)
+    _verify_manifest_artifacts(manifest_path, manifest)
     previous_path = ingress.normalize_path(
         str(manifest.get("master", {}).get("path", "")),
         FileKind.GEDCOM,
@@ -3826,6 +4032,14 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             details=details,
         )
     next_generation = int(manifest.get("generation", 0)) + 1
+    revived = {
+        (pointer, block_hash) for pointer, hashes in additions.items() for block_hash in hashes
+    }
+    manifest["manual_tombstones"] = [
+        tombstone
+        for tombstone in manifest.get("manual_tombstones", [])
+        if (tombstone.get("person"), tombstone.get("block_hash")) not in revived
+    ]
     for pointer, hashes in additions.items():
         cancellation_checkpoint()
         registry = manifest.setdefault("blocks", {}).setdefault(pointer, {})
@@ -3834,11 +4048,16 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             entry = registry.setdefault(
                 block_hash,
                 {
-                    "tag": current[pointer][block_hash],
+                    "tag": current[pointer][block_hash]["tag"],
                     "kind": "person-block",
                     "observations": [],
                     "protected": [],
+                    "logical_identity": current[pointer][block_hash]["logical_identity"],
                 },
+            )
+            entry.setdefault(
+                "logical_identity",
+                current[pointer][block_hash]["logical_identity"],
             )
             if "manual" not in entry["protected"]:
                 entry["protected"].append("manual")
@@ -3848,6 +4067,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
                 "generation": next_generation,
                 "person": pointer,
                 "block_hash": block_hash,
+                "logical_identity": previous[pointer][block_hash]["logical_identity"],
                 "reason": args.reason,
             }
             for pointer, hashes in deletions.items()
@@ -3934,6 +4154,10 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             "instructions": "Select the previous matching master and manifest to roll back.",
         }
         _write_bytes(staging / "rollback.json", _json_bytes(rollback))
+        manifest["artifact_checksums"] = {
+            name: _sha256_file(staging / name)
+            for name in ("master.ged", "quality.md", "rollback.json", "update.md")
+        }
         _write_bytes(staging / "manifest.json", _json_bytes(manifest))
         ingress.verify(master, FileKind.GEDCOM, master_fingerprint)
         ingress.verify(previous_path, FileKind.GEDCOM, previous_fingerprint)

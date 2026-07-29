@@ -238,6 +238,123 @@ def _update_args(releases: Path, bundle: Path, *snapshots: str) -> list[str]:
     ]
 
 
+def _initialize_with_snapshots(releases: Path, *snapshots: str) -> Path:
+    arguments = [
+        "update",
+        "--master",
+        str(FIXTURES / "baseline-master.ged"),
+        "--initialize-manifest",
+        "--release-root",
+        str(releases),
+        "--no-quality-report",
+    ]
+    for snapshot in snapshots:
+        source_id = snapshot.partition(":")[0]
+        arguments.extend(("--snapshot", snapshot, "--exported-at", f"{source_id}=2025-01-15"))
+    assert run_sync(arguments) == 0
+    return next(releases.glob("g0001-*"))
+
+
+def _reverse_level_zero_body(source: Path, destination: Path) -> None:
+    records: list[list[str]] = []
+    for line in source.read_text(encoding="utf-8").splitlines(keepends=True):
+        if line.startswith("0 "):
+            records.append([])
+        records[-1].append(line)
+    assert records[0][0].startswith("0 HEAD")
+    assert records[-1][0].startswith("0 TRLR")
+    destination.write_text(
+        "".join(
+            line
+            for record in [records[0], *reversed(records[1:-1]), records[-1]]
+            for line in record
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_initial_allocation_is_independent_of_snapshot_argument_order(tmp_path: Path) -> None:
+    forward = _initialize_with_snapshots(
+        tmp_path / "forward",
+        _snapshot("ancestry-main", "ancestry", 2),
+        _snapshot("myheritage-main", "myheritage", 2),
+    )
+    reverse = _initialize_with_snapshots(
+        tmp_path / "reverse",
+        _snapshot("myheritage-main", "myheritage", 2),
+        _snapshot("ancestry-main", "ancestry", 2),
+    )
+
+    assert (forward / "master.ged").read_bytes() == (reverse / "master.ged").read_bytes()
+    forward_manifest = json.loads((forward / "manifest.json").read_text(encoding="utf-8"))
+    reverse_manifest = json.loads((reverse / "manifest.json").read_text(encoding="utf-8"))
+    for field in ("person_bindings", "record_aliases", "blocks", "next_ids"):
+        assert forward_manifest[field] == reverse_manifest[field]
+
+
+def test_initial_allocation_is_independent_of_snapshot_record_order(tmp_path: Path) -> None:
+    reordered = tmp_path / "fictional-reordered-snapshot.ged"
+    _reverse_level_zero_body(FIXTURES / "ancestry-snapshot-v2.ged", reordered)
+    canonical = _initialize_with_snapshots(
+        tmp_path / "canonical",
+        _snapshot("ancestry-main", "ancestry", 2),
+    )
+    reversed_records = _initialize_with_snapshots(
+        tmp_path / "reordered",
+        f"ancestry-main:ancestry={reordered}",
+    )
+
+    assert (canonical / "master.ged").read_bytes() == (reversed_records / "master.ged").read_bytes()
+    canonical_manifest = json.loads((canonical / "manifest.json").read_text(encoding="utf-8"))
+    reordered_manifest = json.loads(
+        (reversed_records / "manifest.json").read_text(encoding="utf-8")
+    )
+    for field in ("person_bindings", "record_aliases", "next_ids"):
+        assert canonical_manifest[field] == reordered_manifest[field]
+
+
+def test_duplicate_citation_multiplicity_is_preserved_loss_minimally(
+    tmp_path: Path,
+) -> None:
+    bundle = _initialize_with_snapshots(
+        tmp_path / "releases",
+        _snapshot("myheritage-main", "myheritage", 1),
+    )
+
+    master = (bundle / "master.ged").read_text(encoding="utf-8")
+    assert master.count("3 PAGE Family Bible, leaf 3\n") == 2
+
+
+def test_updating_one_origin_preserves_the_other_active_origin(tmp_path: Path) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    first_manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+    prior_myheritage = first_manifest["active_snapshots"]["myheritage-main"]
+
+    assert (
+        run_sync(
+            _update_args(
+                releases,
+                first,
+                _snapshot("ancestry-main", "ancestry", 2),
+            )
+        )
+        == 0
+    )
+
+    second = next(releases.glob("g0002-*"))
+    manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["active_snapshots"]["myheritage-main"] == prior_myheritage
+    assert (
+        manifest["active_snapshots"]["ancestry-main"]
+        != (first_manifest["active_snapshots"]["ancestry-main"])
+    )
+    assert len(manifest["snapshots"]) == 3
+    master = (second / "master.ged").read_text(encoding="utf-8")
+    assert "3 PAGE Family Bible, leaf 3\n" in master
+    assert "1 _MHID myheritage-fictional-elara-v1\n" in master
+
+
 def test_cancellation_during_incremental_publication_finishes_complete_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -873,6 +990,47 @@ def test_manifest_rejects_broken_snapshot_identity_and_provenance(
     assert not list(releases.glob("failed-update-*"))
 
 
+@pytest.mark.parametrize(
+    ("corruption", "expected_code"),
+    (
+        ("release-generation-gap", "MANIFEST_INVALID"),
+        ("release-master-fingerprint", "MANIFEST_INVALID"),
+        ("parent-generation", "MANIFEST_INVALID"),
+        ("artifact-fingerprint", "MANIFEST_MASTER_MISMATCH"),
+    ),
+)
+def test_manifest_rejects_incoherent_release_lineage_and_artifact_fingerprints(
+    tmp_path: Path,
+    capsys,
+    corruption: str,
+    expected_code: str,
+) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    payload = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+    if corruption == "release-generation-gap":
+        payload["releases"][0]["generation"] = 2
+    elif corruption == "release-master-fingerprint":
+        payload["releases"][0]["master_sha256"] = "0" * 64
+    elif corruption == "parent-generation":
+        payload["parent_release"]["generation"] = 9
+    else:
+        payload["artifact_checksums"]["update.md"] = "0" * 64
+    malformed = first / f"private-{corruption}-manifest.json"
+    malformed.write_text(json.dumps(payload), encoding="utf-8")
+    arguments = _update_args(
+        releases,
+        first,
+        _snapshot("ancestry-main", "ancestry", 2),
+    )
+    arguments[arguments.index("--manifest") + 1] = str(malformed)
+
+    assert run_sync(arguments) == incremental.EXIT_CODES[expected_code]
+    assert expected_code in capsys.readouterr().err
+    assert len(list(releases.glob("g*-*"))) == 1
+    assert not list(releases.glob(".gedcom-sync-*"))
+
+
 @pytest.mark.parametrize("raise_errors", (False, True))
 def test_update_rejects_vendor_identity_change_for_existing_source(
     tmp_path: Path,
@@ -1249,6 +1407,178 @@ def test_rebase_requires_confirmation_then_tombstones_manual_deletions(
     updated = next(releases.glob("g0003-*"))
     assert "Cartographer" not in (updated / "master.ged").read_text(encoding="utf-8")
     assert "intentional manual deletion" in (updated / "update.md").read_text(encoding="utf-8")
+
+
+def test_changed_fact_cannot_bypass_a_manual_tombstone(tmp_path: Path) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    edited_master = tmp_path / "fictional-manual-deletion.ged"
+    edited_master.write_text(
+        (first / "master.ged").read_text(encoding="utf-8").replace("1 OCCU Cartographer\n", ""),
+        encoding="utf-8",
+    )
+    assert (
+        run_sync(
+            [
+                "rebase",
+                "--master",
+                str(edited_master),
+                "--manifest",
+                str(first / "manifest.json"),
+                "--release-root",
+                str(releases),
+                "--reason",
+                "Fictional occupation removal",
+                "--accept-manual-deletions",
+            ]
+        )
+        == 0
+    )
+    rebased = next(releases.glob("g0002-*"))
+    changed_snapshot = tmp_path / "fictional-changed-occupation.ged"
+    changed_snapshot.write_text(
+        (FIXTURES / "ancestry-snapshot-v2.ged")
+        .read_text(encoding="utf-8")
+        .replace("1 OCCU Cartographer\n", "1 OCCU Surveyor\n"),
+        encoding="utf-8",
+    )
+
+    assert (
+        run_sync(
+            _update_args(
+                releases,
+                rebased,
+                f"ancestry-main:ancestry={changed_snapshot}",
+            )
+        )
+        == 0
+    )
+    updated = next(releases.glob("g0003-*"))
+    assert "Surveyor" not in (updated / "master.ged").read_text(encoding="utf-8")
+    assert "intentional manual deletion" in (updated / "update.md").read_text(encoding="utf-8")
+
+
+def test_explicit_manual_revival_retires_the_matching_tombstone(tmp_path: Path) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    deleted_master = tmp_path / "fictional-deleted-occupation.ged"
+    deleted_master.write_text(
+        (first / "master.ged").read_text(encoding="utf-8").replace("1 OCCU Cartographer\n", ""),
+        encoding="utf-8",
+    )
+    common_rebase = [
+        "--manifest",
+        str(first / "manifest.json"),
+        "--release-root",
+        str(releases),
+        "--reason",
+        "Fictional reviewed correction",
+    ]
+    assert (
+        run_sync(
+            [
+                "rebase",
+                "--master",
+                str(deleted_master),
+                *common_rebase,
+                "--accept-manual-deletions",
+            ]
+        )
+        == 0
+    )
+    rebased = next(releases.glob("g0002-*"))
+    revived_master = tmp_path / "fictional-revived-occupation.ged"
+    revived_master.write_text(
+        (rebased / "master.ged")
+        .read_text(encoding="utf-8")
+        .replace(
+            "1 NAME Rowan /Vale/\n2 GIVN Rowan\n2 SURN Vale\n",
+            "1 NAME Rowan /Vale/\n2 GIVN Rowan\n2 SURN Vale\n1 OCCU Cartographer\n",
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        run_sync(
+            [
+                "rebase",
+                "--master",
+                str(revived_master),
+                "--manifest",
+                str(rebased / "manifest.json"),
+                "--release-root",
+                str(releases),
+                "--reason",
+                "Fictional explicit restoration",
+            ]
+        )
+        == 0
+    )
+    revived = next(releases.glob("g0003-*"))
+    manifest = json.loads((revived / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["manual_tombstones"] == []
+    assert "Cartographer" in (revived / "master.ged").read_text(encoding="utf-8")
+
+
+def test_manual_deletion_authorization_applies_only_to_the_reviewed_rebase(
+    tmp_path: Path,
+) -> None:
+    releases = tmp_path / "releases"
+    first = _initialize_release(releases)
+    first_edit = tmp_path / "fictional-first-reviewed-deletion.ged"
+    first_edit.write_text(
+        (first / "master.ged")
+        .read_text(encoding="utf-8")
+        .replace(
+            "1 OCCU Cartographer\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        run_sync(
+            [
+                "rebase",
+                "--master",
+                str(first_edit),
+                "--manifest",
+                str(first / "manifest.json"),
+                "--release-root",
+                str(releases),
+                "--reason",
+                "Fictional first reviewed deletion",
+                "--accept-manual-deletions",
+            ]
+        )
+        == 0
+    )
+
+    rebased = next(releases.glob("g0002-*"))
+    second_edit = tmp_path / "fictional-second-unreviewed-deletion.ged"
+    second_master = (rebased / "master.ged").read_text(encoding="utf-8")
+    assert "1 OCCU School librarian\n" in second_master
+    second_edit.write_text(
+        second_master.replace("1 OCCU School librarian\n", ""),
+        encoding="utf-8",
+    )
+
+    assert (
+        run_sync(
+            [
+                "rebase",
+                "--master",
+                str(second_edit),
+                "--manifest",
+                str(rebased / "manifest.json"),
+                "--release-root",
+                str(releases),
+                "--reason",
+                "Fictional second unreviewed deletion",
+            ]
+        )
+        == incremental.EXIT_CODES["SYNC_UNSAFE_REMOVAL"]
+    )
+    assert len(list(releases.glob("g*-*"))) == 2
 
 
 def test_update_writes_rollback_metadata_and_cleans_up_interrupted_publish(

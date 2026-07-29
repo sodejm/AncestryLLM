@@ -1038,6 +1038,79 @@ def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
     assert not list(tmp_path.glob("failed-update-*"))
 
 
+def test_sync_service_cli_and_repl_publish_matching_semantic_bundles(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    import ancestryllm.cli as cli
+    from ancestryllm.gedcom.service import GedcomService
+
+    fixtures = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+    def arguments(release_root: Path) -> list[str]:
+        return [
+            "update",
+            "--master",
+            str(fixtures / "baseline-master.ged"),
+            "--initialize-manifest",
+            "--snapshot",
+            f"ancestry-main:ancestry={fixtures / 'ancestry-snapshot-v1.ged'}",
+            "--snapshot",
+            f"myheritage-main:myheritage={fixtures / 'myheritage-snapshot-v1.ged'}",
+            "--exported-at",
+            "ancestry-main=2025-01-15",
+            "--exported-at",
+            "myheritage-main=2025-02-03",
+            "--release-root",
+            str(release_root),
+            "--no-quality-report",
+        ]
+
+    service_root = tmp_path / "service-releases"
+    service_result = GedcomService().sync(arguments(service_root))
+    assert service_result.exit_code == 0
+
+    cli_root = tmp_path / "cli-releases"
+    assert cli.main(["gedcom", "sync", *arguments(cli_root)], app_context) == 0
+
+    repl_root = tmp_path / "repl-releases"
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(application.execute_line("gedcom sync " + shlex.join(arguments(repl_root))))
+        completed = application.jobs.wait("j000001", timeout=5)
+        application.jobs.shutdown()
+    assert completed.state.value == "completed"
+
+    bundles = [next(root.glob("g0001-*")) for root in (service_root, cli_root, repl_root)]
+    expected_artifacts = {
+        "master.ged",
+        "manifest.json",
+        "quality.md",
+        "rollback.json",
+        "update.md",
+    }
+    assert all({path.name for path in bundle.iterdir()} == expected_artifacts for bundle in bundles)
+    assert len({(bundle / "master.ged").read_bytes() for bundle in bundles}) == 1
+
+    manifests = [
+        json.loads((bundle / "manifest.json").read_text(encoding="utf-8")) for bundle in bundles
+    ]
+    semantic_fields = (
+        "active_snapshots",
+        "blocks",
+        "manual_tombstones",
+        "next_ids",
+        "person_bindings",
+        "record_aliases",
+        "removed",
+    )
+    for field in semantic_fields:
+        assert manifests[0][field] == manifests[1][field] == manifests[2][field]
+    assert not list(tmp_path.glob(".gedcom-sync-*"))
+    assert not list(tmp_path.glob("failed-update-*"))
+
+
 @pytest.mark.parametrize("operation", ("list", "query", "export"))
 def test_repl_rootsmagic_entry_points_share_real_ingress_and_preserve_outputs(
     shell_module,
