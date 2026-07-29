@@ -16,9 +16,12 @@ from ancestryllm.gedcom.contracts import QualityResolution
 from ancestryllm.gedcom.service import GedcomService
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_merge"
+ADVERSARIAL_FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_adversarial"
 SOURCE_A = FIXTURES / "quality-source-a.ged"
 SOURCE_B = FIXTURES / "quality-source-b.ged"
 MALFORMED = FIXTURES / "malformed-rejected.ged"
+PUBLIC_SOURCE_A = ADVERSARIAL_FIXTURES / "xref-source-a.ged"
+PUBLIC_SOURCE_B = ADVERSARIAL_FIXTURES / "xref-source-b.ged"
 
 
 def _loaded_fixture_tree() -> tuple[
@@ -266,19 +269,19 @@ class TestGedcomServiceRootErrors:
         with pytest.raises(AncestryError) as raised:
             if operation == "merge":
                 service.merge(
-                    [SOURCE_A, SOURCE_B],
+                    [PUBLIC_SOURCE_A, PUBLIC_SOURCE_B],
                     output,
                     root_person=requested,
                 )
             elif operation == "subtree":
                 service.subtree(
-                    SOURCE_A,
+                    PUBLIC_SOURCE_A,
                     output,
                     root_person=requested,
                 )
             else:
                 service.quality(
-                    SOURCE_A,
+                    PUBLIC_SOURCE_A,
                     output,
                     root_person=requested,
                 )
@@ -478,16 +481,16 @@ class TestDocumentationContract:
         for flag in ("--provider", "--model", "--consent"):
             assert flag in cli
 
-    def test_fixture_names_and_root_are_synchronized(self) -> None:
+    def test_public_demo_fixture_names_and_root_are_synchronized(self) -> None:
         repository = Path(__file__).parents[1]
         texts = [
             (FIXTURES / "README.md").read_text(encoding="utf-8"),
             (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(encoding="utf-8"),
             (repository / "scripts" / "gedcom_merge_quickstart.sh").read_text(encoding="utf-8"),
         ]
-        assert all("quality-source-a.ged" in text for text in texts)
-        assert all("quality-source-b.ged" in text for text in texts)
-        assert all("Maren Hollow" in text for text in texts)
+        assert all("xref-source-a.ged" in text for text in texts)
+        assert all("xref-source-b.ged" in text for text in texts)
+        assert all("Aster Fiction" in text for text in texts)
 
     def test_quickstart_shell_has_valid_syntax(self) -> None:
         script = Path(__file__).parents[1] / "scripts" / "gedcom_merge_quickstart.sh"

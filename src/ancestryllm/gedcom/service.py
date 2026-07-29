@@ -73,6 +73,7 @@ class GedcomService:
                 paths,
                 self.ingress,
                 {path: fingerprint.snapshot for path, fingerprint in fingerprints.items()},
+                validate_structure=True,
             )
         except engine.GedcomParseError as exc:
             raise AncestryError(
@@ -303,7 +304,9 @@ class GedcomService:
         )
         if any(paths_alias(resolved_output, item) for item in resolved_inputs):
             raise AncestryError(
-                "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite an input GEDCOM."
+                "GEDCOM_OVERWRITE_INPUT",
+                "Output must not overwrite an input GEDCOM.",
+                exit_code=2,
             )
         report_path = (
             self.ingress.normalize_path(
@@ -321,6 +324,7 @@ class GedcomService:
             raise AncestryError(
                 "GEDCOM_REPORT_ALIAS",
                 "The quality report must not alias an input GEDCOM or the primary output.",
+                exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources(resolved_inputs)
 
@@ -428,7 +432,9 @@ class GedcomService:
         )
         if paths_alias(source_path, output_path):
             raise AncestryError(
-                "GEDCOM_OVERWRITE_INPUT", "Output must not overwrite the input GEDCOM."
+                "GEDCOM_OVERWRITE_INPUT",
+                "Output must not overwrite the input GEDCOM.",
+                exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources([source_path])
         root_pointer = self._resolve_root_person(
@@ -485,6 +491,7 @@ class GedcomService:
             raise AncestryError(
                 "GEDCOM_REPORT_ALIAS",
                 "The quality report must not alias the immutable input GEDCOM.",
+                exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources([source_path])
 
