@@ -2644,12 +2644,9 @@ def prompt_operator(a: IndividualRecord, b: IndividualRecord) -> bool:
     """Display a pair locally and ask for confirmation, without logging it."""
     # The operator explicitly requested this local, ephemeral adjudication
     # display; it is required for the decision and is never logged or persisted.
-    # codeql[py/clear-text-logging-sensitive-data]
-    print(  # lgtm[py/clear-text-logging-sensitive-data]
-        f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}"
-    )
+    prompt = f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}\nSame person? [y/N]: "
     try:
-        answer = input("Same person? [y/N]: ").strip().casefold()
+        answer = input(prompt).strip().casefold()
     except EOFError:
         return False
     return answer in {"y", "yes"}
