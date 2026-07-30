@@ -100,6 +100,14 @@ PURE_CORE_MODULES: Final[frozenset[str]] = frozenset(
     }
 )
 
+PURE_GEDCOM_DOCUMENT_MODULES: Final[frozenset[str]] = frozenset(
+    {
+        "ancestryllm.gedcom.model",
+        "ancestryllm.gedcom.serializer",
+        "ancestryllm.gedcom.validator",
+    }
+)
+
 HOST_OBJECT_MODULES: Final[frozenset[str]] = frozenset({"os", "pathlib"})
 
 
@@ -319,6 +327,8 @@ def _pure_layer(module: str) -> str | None:
         return "domain"
     if module in PURE_CORE_MODULES:
         return "core-contract"
+    if module in PURE_GEDCOM_DOCUMENT_MODULES:
+        return "gedcom-document"
     if module == "ancestryllm.application" or (
         module.startswith("ancestryllm.application.")
         and not module.rsplit(".", 1)[-1].startswith("_")
@@ -332,6 +342,8 @@ def _allowed_pure_internal(layer: str, target: str) -> bool:
         return target == "ancestryllm.domain" or target.startswith("ancestryllm.domain.")
     if layer == "core-contract":
         return target in PURE_CORE_MODULES
+    if layer == "gedcom-document":
+        return target in PURE_GEDCOM_DOCUMENT_MODULES
     return (
         target == "ancestryllm.application"
         or (
@@ -406,7 +418,7 @@ def check_tree(
                             ),
                         )
                     )
-            elif root_import in HOST_OBJECT_MODULES:
+            elif root_import in HOST_OBJECT_MODULES and layer != "gedcom-document":
                 violations.append(
                     Violation(
                         path=reference.path,

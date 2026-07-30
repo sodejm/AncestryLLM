@@ -8,13 +8,12 @@ from collections.abc import Iterable, Sequence
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.gedcom.engine import (
     XREF_RE,
-    GedcomRecord,
     IndividualRecord,
     _top_level_blocks,
     connected_tree_pointers,
-    parse_gedcom_line,
     resolve_root_person,
 )
+from ancestryllm.gedcom.model import GedcomRecord, parse_gedcom_line
 
 
 def scoped_tree_pointers(

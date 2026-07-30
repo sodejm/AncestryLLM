@@ -17,6 +17,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
   GEDCOM content and its loss report without writing output files.
 - Public GEDCOM identity, quality, synchronization, parser, graph, and
   serialization seams for application-service composition.
+- A physically separated, standard-library-only GEDCOM document model,
+  physical-line parser, structural validator, and deterministic UTF-8-safe
+  line serializer behind the supported parser and serialization façades.
 
 ### Changed
 
@@ -28,12 +31,18 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - RootsMagic mapping is separated from atomic publication: `map()` performs
   deterministic in-memory conversion and validation, while `export()` owns
   staged output and report publication.
+- GEDCOM compatibility orchestration now delegates document parsing,
+  validation, and long-line serialization to the pure document kernel while
+  retaining stable diagnostics, cancellation checkpoints, and output behavior.
 
 ### Security
 
 - Architecture checks now enforce exact import gateways for private GEDCOM and
   RootsMagic compatibility kernels, including imports from within their owner
   packages.
+- Architecture checks prohibit application, infrastructure, adapter, provider,
+  publication, third-party, and compatibility-engine dependencies from the
+  pure GEDCOM document kernel.
 - Existing immutable RootsMagic source checks, explicit provider selection,
   and network-free `provider=none` behavior remain regression-tested across
   the new public boundaries.

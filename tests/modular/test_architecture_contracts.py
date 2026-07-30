@@ -170,6 +170,38 @@ def test_transport_neutral_layers_reject_adapter_and_runtime_implementations(
     )
 
 
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        "from ancestryllm.application import CommandExecutor",
+        "from ancestryllm.core.publication import atomic_publish",
+        "from ancestryllm.gedcom.engine import write_gedcom",
+        "from ancestryllm.rootsmagic.core import RootsMagicReader",
+        "from pydantic import BaseModel",
+    ],
+)
+def test_pure_gedcom_document_kernel_rejects_outward_dependencies(
+    tmp_path: Path,
+    dependency: str,
+) -> None:
+    root = tmp_path / "ancestryllm"
+    _write_module(root, "ancestryllm.gedcom.validator", f"{dependency}\n")
+
+    assert "ARCH101" in _codes(
+        root,
+        public_facades=(),
+        exceptions=(),
+        require_all_exceptions=False,
+        enforce_facades=False,
+    ) or "ARCH103" in _codes(
+        root,
+        public_facades=(),
+        exceptions=(),
+        require_all_exceptions=False,
+        enforce_facades=False,
+    )
+
+
 def test_private_kernel_import_outside_its_owner_fails_actionably(tmp_path: Path) -> None:
     root = tmp_path / "ancestryllm"
     _write_module(root, "ancestryllm.gedcom.engine", "class GedcomRecord: ...\n")
