@@ -12,6 +12,17 @@ from ancestryllm.gedcom.serializer import (
 )
 
 
+def write_quality_report(report: Any, output_path: str | Path) -> Any:
+    """Stage a rendered quality report through the publication adapter.
+
+    Quality analysis stays provider- and publication-neutral. CORE-24 (#166)
+    owns retirement of this private engine shim together with ``write_gedcom``.
+    """
+    from ancestryllm.gedcom.engine import write_quality_report as _write_quality_report
+
+    return _write_quality_report(report, output_path)
+
+
 def write_gedcom(
     records: list[Any],
     output_path: str | Path,
@@ -46,4 +57,5 @@ __all__ = [
     "SUPPORTED_GEDCOM_VERSIONS",
     "wrap_long_gedcom_lines",
     "write_gedcom",
+    "write_quality_report",
 ]

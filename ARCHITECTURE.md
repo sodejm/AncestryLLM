@@ -240,12 +240,12 @@ The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 ledger, abuse cases, evidence-backed residual-risk policy, and assurance gates
 are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-The large GEDCOM engine and incremental synchronizer and the RootsMagic
+The GEDCOM publication engine and incremental synchronizer and the RootsMagic
 reader/export implementation predate the full modular split. Declared public
 façades define the supported boundaries while characterized compatibility
-kernels remain centralized. The executable architecture checker allows private
-module imports only through exact named gateways, including inside each owner
-package; broad same-package access is not an exemption.
+kernels remain. The executable architecture checker allows private module
+imports only through exact named gateways, including inside each owner package;
+broad same-package access is not an exemption.
 
 ## Startup, configuration, and composition
 
@@ -569,30 +569,37 @@ and MyHeritage imports require recorded manual smoke tests for every release.
 
 ### Kernel and façades
 
-`gedcom/engine.py` remains the characterized loss-minimizing compatibility
-kernel. It owns record
-parsing, pointer allocation, date normalization, identity comparison, optional
-adjudication, merge decisions, quality analysis, report rendering, validation,
-and serialization. Its raw line/record representation is authoritative so
-unknown tags and nested structures survive. Validation uses the same bounded
-streaming representation; there is no legacy secondary parser path.
+`gedcom/engine.py` is now a smaller characterized compatibility kernel for
+source ingestion, collision-free pointer allocation, output assembly, and
+atomic publication. Its raw line/record representation remains authoritative
+so unknown tags and nested structures survive. Validation uses the same
+bounded streaming representation; there is no legacy secondary parser path.
 
-The smaller modules define stable public seams, and `GedcomService` imports
-only those seams rather than the private kernels:
+The operation modules physically own deterministic analysis and transformation
+behavior. They depend on the #163 document model and transport-neutral resolver
+ports, not the private engine, UI adapters, configuration, providers, keyring,
+or publication infrastructure. Cancellation checkpoints remain inside bounded
+loops. `GedcomService` imports only the stable public seams:
 
 - `parser.py` re-exports parsing and validation primitives;
-- `identity.py` exposes similarity, candidates, and merge functions;
-- `graph.py` selects connected, ancestor, or descendant subtrees;
-- `quality.py` exposes deterministic findings and Markdown reports;
+- `identity.py` owns date normalization, identity evidence, bounded candidate
+  discovery, similarity, optional resolver adjudication, and conservative
+  record merge;
+- `graph.py` owns root resolution, relationship traversal, and connected,
+  ancestor, or descendant subtree selection;
+- `quality.py` owns immutable deterministic findings, optional resolver
+  annotations, and Markdown rendering;
 - `serialization.py` exposes supported versions and the writer;
 - `service.py` provides merge, subtree, quality, and sync use cases;
 - `sync.py` injects the engine and an optional modular identity-resolver
   factory into the incremental synchronizer; updates default to
   `--provider none`, and rebase never invokes a provider.
 
-Physical extraction of the remaining engine and synchronizer responsibilities
-is still open. The public façade and exact-gateway checks prevent new consumers
-from increasing that migration debt.
+Publication and synchronization compatibility paths remain for #165 and #166.
+The public façade, operation-purity, and exact-gateway checks prevent new
+consumers from increasing that migration debt. Exact internal façade gateways
+permit operation modules and the compatibility publication kernel to share
+private implementation helpers without making those helpers supported API.
 
 ### Merge and serialization flow
 
@@ -744,7 +751,8 @@ Tests are intentionally split by risk:
   encrypted storage, prompt/research services, RootsMagic export, and basic
   incremental sync;
 - `tests/test_gedcom_merge.py` and `tests/test_gedcom_quality.py` characterize
-  the large legacy kernel and preservation behavior;
+  the operation modules, compatibility publication kernel, and preservation
+  behavior;
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
 - Wiki tests cover validation, deterministic mirroring, deletion, no-op
   behavior, commits, and workflow structure;
@@ -771,7 +779,7 @@ installed local hooks.
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
-| GEDCOM merge and quality | The document model, physical-line parser, validator, and deterministic line serializer are physically separated behind enforced public parser/serialization façades and broadly characterized with fictional regression tests. | Graph construction and merge, subtree, quality, publication, and synchronization operations remain in compatibility kernels pending #164-#166. |
+| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, and immutable quality analysis are physically separated behind enforced public façades and broadly characterized with fictional regression tests. | Publication and synchronization compatibility paths remain pending #165-#166. |
 | Incremental update | Public sync façade is enforced; initialization and idempotency are tested offline. | The private synchronizer still requires deeper extraction, and multi-generation, rebase, tombstone, and non-person paths need broader coverage. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |

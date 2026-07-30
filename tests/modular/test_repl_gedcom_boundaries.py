@@ -21,7 +21,7 @@ from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobState
-from ancestryllm.gedcom import engine
+from ancestryllm.gedcom import quality
 
 GEDCOM_FIXTURE = Path(__file__).parents[1] / "fixtures" / "gedcom_merge" / "quality-source-a.ged"
 
@@ -112,6 +112,11 @@ def test_ctrl_c_cancels_real_gedcom_job_and_keeps_repl_usable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    source = tmp_path / "source.ged"
+    source.write_text(
+        f"{GEDCOM_FIXTURE.read_text(encoding='utf-8')}0 TRLR\n",
+        encoding="utf-8",
+    )
     output = tmp_path / "quality.md"
     output.write_text("fictional sentinel\n", encoding="utf-8")
     traversal_started = threading.Event()
@@ -122,11 +127,11 @@ def test_ctrl_c_cancels_real_gedcom_job_and_keeps_repl_usable(
         assert release_checkpoint.wait(2)
         cancellation_checkpoint()
 
-    monkeypatch.setattr(engine, "cancellation_checkpoint", pause_traversal)
+    monkeypatch.setattr(quality, "cancellation_checkpoint", pause_traversal)
     command = " ".join(
         (
             "gedcom quality",
-            shlex.quote(str(GEDCOM_FIXTURE)),
+            shlex.quote(str(source)),
             "--output",
             shlex.quote(str(output)),
             "--root-person",

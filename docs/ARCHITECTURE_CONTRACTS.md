@@ -61,7 +61,7 @@ flowchart TB
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
-| GEDCOM document model, physical-line parser, validator, deterministic line serializer, graph, identity, quality, service, and synchronization seams | pure document modules behind the declared `parser` and `serialization` façades; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` (#163) |
+| GEDCOM document model, physical-line parser, validator, deterministic line serializer, graph, identity, quality, service, and synchronization seams | pure document modules plus physically owned graph, identity, and quality operations behind declared façades; private compatibility access is limited by exact gateways (#163-#164) |
 | RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
@@ -84,6 +84,10 @@ The checker enforces these rules:
   depend only on the Python standard library and one another; they cannot
   import application, infrastructure, adapter, provider, publication, or
   compatibility-engine code;
+- GEDCOM graph, identity, and quality operation modules cannot import UI
+  adapters, runtime configuration, publication or secret storage, keyring, or
+  provider implementations; optional intelligence enters through
+  transport-neutral resolver ports;
 - private GEDCOM and RootsMagic compatibility modules may be imported only by
   the exact importer modules declared in `PRIVATE_MODULE_GATEWAYS`; owner
   package membership does not grant blanket access, and application services
@@ -116,10 +120,12 @@ The Unreleased RootsMagic public inventory includes the package façade plus
 implementation behind `core`; `reader` and `schema_adapter` retain import
 compatibility but are not alternate public contracts. The GEDCOM inventory exposes parser, graph,
 identity, quality, serialization, service, and synchronization seams. The
-parser and serialization façades now re-export a physically separate pure
-document model, validator, and deterministic line serializer. Remaining
-centralized private operations remain characterized compatibility kernels, not
-supported consumer APIs.
+parser and serialization façades re-export a physically separate pure document
+model, validator, and deterministic line serializer. Graph traversal,
+identity/merge, and immutable quality analysis are also physically owned by
+their public operation modules. Exact internal façade gateways allow those
+implementations and the compatibility publication kernel to share private
+helpers without expanding the supported consumer API.
 
 ## Temporary exception lifecycle
 
@@ -146,8 +152,9 @@ PYTHONPATH=src .venv/bin/pytest tests/modular/test_architecture_contracts.py
 
 The tests prove the repository graph passes, every declared exception is live,
 valid inward imports are accepted, and representative framework, host-object,
-private-kernel (including same-owner-package), undeclared-façade,
-expanded-exception, and stale-exception violations fail with actionable codes.
+GEDCOM-operation runtime, private-kernel (including same-owner-package),
+undeclared-façade, expanded-exception, and stale-exception violations fail with
+actionable codes.
 
 Before accepting a boundary migration, rerun the core-contract
 characterization suite, inspect the dependency diff, remove dead exceptions
