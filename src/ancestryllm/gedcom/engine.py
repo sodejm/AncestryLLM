@@ -63,6 +63,20 @@ from ancestryllm.core.publication import (
     write_staged_text,
 )
 
+# Compatibility re-exports remain for the verified ``gedcom.incremental``
+# caller and characterization tests. CORE-24 (#166) owns their retirement.
+from ancestryllm.gedcom.model import (
+    GedcomParseError,
+    GedcomRecord,
+    ParsedSource,
+    parse_gedcom_line,
+)
+from ancestryllm.gedcom.serializer import (
+    SUPPORTED_GEDCOM_VERSIONS,
+    wrap_long_gedcom_lines,
+)
+from ancestryllm.gedcom.validator import validate_gedcom_555 as validate_document_555
+
 _rapidfuzz: ModuleType | None
 try:
     from rapidfuzz import fuzz as _rapidfuzz
@@ -119,7 +133,6 @@ MAX_DUPLICATE_RELATIVES_PER_ROLE = 16
 MAX_DEDUP_PROMPT_TOKENS = MAX_AI_TEXT * 2 + 1_000
 DETERMINISTIC_HARD_CONFLICTS = frozenset({"sex", "birth country", "death country"})
 XREF_RE = re.compile(r"@[A-Za-z0-9_:-]+@")
-SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
 _POINTER_REFERENCE_TAGS = frozenset(
     {
         "ALIA",
@@ -264,78 +277,6 @@ KNOWN_COUNTRY_NAMES = frozenset(COUNTRY_ALIASES.values()) | frozenset(
         "yugoslavia",
     }
 )
-LINE_RE = re.compile(
-    r"^(?P<level>[0-9]{1,2})(?:\s+(?P<xref>@[^@\s]+@))?\s+"
-    r"(?P<tag>[A-Za-z0-9_]+)(?:\s+(?P<value>.*))?$"
-)
-
-
-class GedcomParseError(ValueError):
-    """Raised when an input line cannot be interpreted as a GEDCOM line."""
-
-
-@dataclass(frozen=True, slots=True)
-class GedcomLine:
-    """Parsed metadata for one original GEDCOM line."""
-
-    level: int
-    xref: str
-    tag: str
-    value: str
-    raw: str
-
-
-def parse_gedcom_line(line: str, line_number: int = 0) -> GedcomLine:
-    """Parse one GEDCOM line without evaluating its contents.
-
-    Args:
-        line: A physical GEDCOM line, with or without its newline terminator.
-        line_number: Optional one-based source location used in error messages.
-
-    Returns:
-        Parsed level, xref, uppercase tag, value, and untouched logical text.
-
-    Raises:
-        GedcomParseError: The line has an invalid level or GEDCOM grammar.
-    """
-    raw = line.rstrip("\r\n").lstrip("\ufeff")
-    if not re.match(r"^(?:0|[1-9][0-9]?)(?:\s|$)", raw):
-        raise GedcomParseError(f"Invalid GEDCOM level {line_number}: {raw!r}")
-    match = LINE_RE.fullmatch(raw)
-    if not match:
-        raise GedcomParseError(f"Invalid GEDCOM line {line_number}: {raw!r}")
-    level = int(match.group("level"))
-    return GedcomLine(
-        level=level,
-        xref=match.group("xref") or "",
-        tag=match.group("tag").upper(),
-        value=match.group("value") or "",
-        raw=raw,
-    )
-
-
-@dataclass
-class GedcomRecord:
-    """A complete level-zero record, kept as lines for round-trip fidelity."""
-
-    lines: list[str]
-    source_file: str
-    sequence: int
-
-    @property
-    def header(self) -> GedcomLine:
-        """Return parsed metadata for the level-zero line."""
-        return parse_gedcom_line(self.lines[0])
-
-    @property
-    def pointer(self) -> str:
-        """Return this record's xref, if it has one."""
-        return self.header.xref
-
-    @property
-    def tag(self) -> str:
-        """Return the record type, such as ``INDI`` or ``FAM``."""
-        return self.header.tag
 
 
 def iter_gedcom_records(
@@ -410,15 +351,6 @@ def iter_gedcom_records(
             "The gedcom input must contain at least one record.",
             details={"input_class": FileKind.GEDCOM.value},
         )
-
-
-@dataclass
-class ParsedSource:
-    """All source records after pointer names have been made globally unique."""
-
-    path: Path
-    records: list[GedcomRecord]
-    pointer_map: dict[str, str]
 
 
 def _unique_pointer(original: str, used: set[str], source_number: int) -> str:
@@ -593,117 +525,13 @@ def _normalise_header_lines(
 
 
 def validate_gedcom_555(lines: Sequence[str]) -> None:
-    """Validate the structural requirements emitted for GEDCOM 5.5.5.
-
-    This deliberately validates the generic grammar and referential shape,
-    rather than trying to hard-code every vendor extension.  Custom tags are
-    allowed by GEDCOM and are retained; a destination service may ignore them.
-    """
-    if not lines:
-        raise GedcomParseError("GEDCOM output is empty")
-    parsed_lines: list[GedcomLine] = []
-    for number, line in enumerate(lines, 1):
-        cancellation_checkpoint()
-        parsed_lines.append(parse_gedcom_line(line, number))
-    if parsed_lines[0].level != 0 or parsed_lines[0].tag != "HEAD":
-        raise GedcomParseError("GEDCOM must start with 0 HEAD")
-    if parsed_lines[-1].level != 0 or parsed_lines[-1].tag != "TRLR":
-        raise GedcomParseError("GEDCOM must end with 0 TRLR")
-    pointers: set[str] = set()
-    if sum(parsed.tag == "HEAD" for parsed in parsed_lines if parsed.level == 0) != 1:
-        raise GedcomParseError("GEDCOM must contain exactly one 0 HEAD record")
-    if sum(parsed.tag == "TRLR" for parsed in parsed_lines if parsed.level == 0) != 1:
-        raise GedcomParseError("GEDCOM must contain exactly one 0 TRLR record")
-    previous_level = 0
-    head_version = ""
-    head_charset = ""
-    in_gedc = False
-    for parsed in parsed_lines:
-        cancellation_checkpoint()
-        if len(parsed.raw.encode("utf-8")) > 255:
-            raise GedcomParseError("GEDCOM line exceeds the 255-byte limit")
-        if len(parsed.tag) > 31:
-            raise GedcomParseError(f"GEDCOM tag is longer than 31 characters: {parsed.tag}")
-        tag_index = 2 if parsed.xref else 1
-        raw_tag = parsed.raw.split()[tag_index]
-        if raw_tag != parsed.tag:
-            raise GedcomParseError(f"GEDCOM tags must be uppercase: {raw_tag}")
-        if parsed.xref:
-            if parsed.level != 0:
-                raise GedcomParseError("xref IDs may only introduce level-zero records")
-            if len(parsed.xref) > 22 or not re.fullmatch(
-                r"@[A-Za-z_][A-Za-z0-9_:-]*@", parsed.xref
-            ):
-                raise GedcomParseError(f"Invalid GEDCOM xref ID: {parsed.xref}")
-            if parsed.xref in pointers:
-                raise GedcomParseError(f"Duplicate GEDCOM xref ID: {parsed.xref}")
-            pointers.add(parsed.xref)
-        if parsed.level > previous_level + 1:
-            raise GedcomParseError("GEDCOM levels may not skip a level")
-        previous_level = parsed.level
-        if parsed.level == 1:
-            in_gedc = parsed.tag == "GEDC"
-            if parsed.tag == "CHAR":
-                head_charset = parsed.value.strip().upper()
-        elif parsed.level == 2 and in_gedc and parsed.tag == "VERS":
-            head_version = parsed.value.strip()
-    if head_version != "5.5.5":
-        raise GedcomParseError(
-            f"Expected HEAD.GEDC.VERS 5.5.5, found {head_version or '(missing)'}"
-        )
-    if head_charset != "UTF-8":
-        raise GedcomParseError(f"Expected HEAD.CHAR UTF-8, found {head_charset or '(missing)'}")
-
-
-def _canonical_gedcom_line(line: str) -> str:
-    """Emit one line with canonical ASCII level/tag spelling."""
-    parsed = parse_gedcom_line(line)
-    prefix = f"{parsed.level} "
-    if parsed.xref:
-        prefix += f"{parsed.xref} "
-    prefix += parsed.tag
-    return f"{prefix} {parsed.value}" if parsed.value else prefix
-
-
-def _take_utf8_prefix(value: str, limit: int) -> tuple[str, str]:
-    """Take the largest character-safe UTF-8 prefix within ``limit`` bytes."""
-    used = 0
-    end = 0
-    for index, character in enumerate(value):
-        size = len(character.encode("utf-8"))
-        if used + size > limit:
-            break
-        used += size
-        end = index + 1
-    if end == 0 and value:
-        raise GedcomParseError("GEDCOM continuation limit cannot hold one character")
-    return value[:end], value[end:]
+    """Compatibility adapter for internal engine callers; retire in #166."""
+    validate_document_555(lines, checkpoint=cancellation_checkpoint)
 
 
 def _wrap_long_gedcom_lines(lines: Sequence[str]) -> list[str]:
-    """Wrap long text values using standard level+1 CONC continuations."""
-    wrapped: list[str] = []
-    for line in lines:
-        cancellation_checkpoint()
-        parsed = parse_gedcom_line(line)
-        canonical = _canonical_gedcom_line(line)
-        if len(canonical.encode("utf-8")) <= 255 or not parsed.value:
-            wrapped.append(canonical)
-            continue
-        if parsed.level >= 99:
-            raise GedcomParseError("Cannot wrap a value below GEDCOM level 99")
-        prefix = canonical[: len(canonical) - len(parsed.value)]
-        remaining = parsed.value
-        first_limit = 255 - len(prefix.encode("utf-8"))
-        first, remaining = _take_utf8_prefix(remaining, first_limit)
-        wrapped.append(prefix + first)
-        continuation_prefix = f"{parsed.level + 1} CONC "
-        continuation_limit = 255 - len(continuation_prefix.encode("utf-8"))
-        while remaining:
-            cancellation_checkpoint()
-            chunk, remaining = _take_utf8_prefix(remaining, continuation_limit)
-            wrapped.append(continuation_prefix + chunk)
-    return wrapped
+    """Compatibility adapter for internal engine callers; retire in #166."""
+    return wrap_long_gedcom_lines(lines, checkpoint=cancellation_checkpoint)
 
 
 def _family_members(source_records: Iterable[GedcomRecord]) -> dict[str, set[str]]:
