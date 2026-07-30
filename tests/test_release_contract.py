@@ -62,14 +62,14 @@ def test_package_version_is_one_stable_semver_value() -> None:
     )
 
 
-def test_release_configuration_names_the_exact_0_3_control_plane() -> None:
+def test_release_configuration_names_the_exact_0_4_control_plane() -> None:
     configuration = _release_configuration()
 
     assert configuration == {
         "schema_version": 1,
         "release": str(_project()["version"]),
-        "milestone": {"number": 2, "title": "0.3.0 Core Contracts"},
-        "tracker": {"number": 174, "label": "release-tracker"},
+        "milestone": {"number": 3, "title": "0.4.0 Genealogy Core Facades"},
+        "tracker": {"number": 193, "label": "release-tracker"},
     }
 
 

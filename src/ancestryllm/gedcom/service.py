@@ -49,22 +49,45 @@ from ancestryllm.domain.genealogy import (
     GenealogyQualityFinding,
     QualityKind,
 )
-from ancestryllm.gedcom import engine
 from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolution, QualityResolver
-from ancestryllm.gedcom.graph import scoped_tree_pointers
-from ancestryllm.gedcom.incremental import (
+from ancestryllm.gedcom.graph import (
+    connected_tree_pointers,
+    resolve_root_person,
+    scoped_tree_pointers,
+)
+from ancestryllm.gedcom.identity import (
+    DEFAULT_SIMILARITY_THRESHOLD,
+    IndividualRecord,
+    MergeDecision,
+    build_dedup_prompt,
+    dedup_response_schema,
+    enrich_relationship_context,
+    individual_from_record,
+    merge_records,
+)
+from ancestryllm.gedcom.parser import GedcomParseError, GedcomRecord, load_sources
+from ancestryllm.gedcom.quality import (
+    QUALITY_AI_LIMIT,
+    QualityReport,
+    analyze_quality,
+    build_quality_prompt,
+    quality_annotations_from_payload,
+    quality_response_schema,
+    refine_quality_report_with_ai,
+    write_quality_report,
+)
+from ancestryllm.gedcom.serialization import SUPPORTED_GEDCOM_VERSIONS, write_gedcom
+from ancestryllm.gedcom.sync import (
     SOURCE_ID_RE,
     SUPPORTED_VENDORS,
     SyncCommand,
     SyncRebaseCommand,
     SyncSnapshotInput,
     SyncUpdateCommand,
+    execute_sync_command,
 )
 from ancestryllm.gedcom.sync import (
     execute_sync as execute_sync_arguments,
-)
-from ancestryllm.gedcom.sync import (
-    execute_sync_command,
 )
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.policy import ConsentGrant
@@ -144,7 +167,7 @@ def _stable_code(value: str, fallback: str) -> str:
 
 
 def _quality_values(
-    report: engine.QualityReport | None,
+    report: QualityReport | None,
 ) -> tuple[GenealogyQualityFinding, ...]:
     if report is None:
         return ()
@@ -165,10 +188,10 @@ def _quality_values(
 
 
 def _merge_aggregate(
-    people: list[engine.IndividualRecord],
+    people: list[IndividualRecord],
     pointer_map: dict[str, str],
-    decisions: list[engine.MergeDecision],
-    report: engine.QualityReport | None,
+    decisions: list[MergeDecision],
+    report: QualityReport | None,
     include_people: set[str] | None,
 ) -> GenealogyAggregate:
     grouped_sources: dict[str, list[str]] = {}
@@ -238,7 +261,7 @@ def _merge_aggregate(
 
 
 def _subtree_aggregate(
-    people: list[engine.IndividualRecord],
+    people: list[IndividualRecord],
     keep_people: set[str],
 ) -> GenealogyAggregate:
     identities: list[GenealogyIdentity] = []
@@ -290,19 +313,19 @@ class GedcomService:
         paths: list[Path],
     ) -> tuple[
         list[Any],
-        list[engine.GedcomRecord],
-        list[engine.IndividualRecord],
+        list[GedcomRecord],
+        list[IndividualRecord],
         dict[Path, FileFingerprint],
     ]:
         fingerprints = {path: self.ingress.fingerprint(path, FileKind.GEDCOM) for path in paths}
         try:
-            sources = engine.load_sources(
+            sources = load_sources(
                 paths,
                 self.ingress,
                 {path: fingerprint.snapshot for path, fingerprint in fingerprints.items()},
                 validate_structure=True,
             )
-        except engine.GedcomParseError as exc:
+        except GedcomParseError as exc:
             raise AncestryError(
                 "GEDCOM_PARSE_INVALID",
                 "A GEDCOM input contains invalid syntax.",
@@ -313,14 +336,12 @@ class GedcomService:
         self._verify_sources(fingerprints)
         source_records = [record for source in sources for record in source.records]
         people = [
-            engine._individual_from_record(record)
-            for record in source_records
-            if record.tag == "INDI"
+            individual_from_record(record) for record in source_records if record.tag == "INDI"
         ]
         return (
             sources,
             source_records,
-            engine.enrich_relationship_context(people, source_records),
+            enrich_relationship_context(people, source_records),
             fingerprints,
         )
 
@@ -331,7 +352,7 @@ class GedcomService:
     @staticmethod
     def _resolve_root_person(
         requested: str,
-        records: list[engine.IndividualRecord],
+        records: list[IndividualRecord],
         source_pointer_maps: list[dict[str, str]],
         merged_pointer_map: dict[str, str],
     ) -> str:
@@ -346,7 +367,7 @@ class GedcomService:
             resolved = next(iter(matches)) if len(matches) == 1 else None
         else:
             try:
-                resolved = engine.resolve_root_person(
+                resolved = resolve_root_person(
                     requested,
                     records,
                     source_pointer_maps,
@@ -385,7 +406,7 @@ class GedcomService:
         def resolve(left: Any, right: Any) -> dict[str, object]:
             if verify_inputs is not None:
                 verify_inputs()
-            schema: dict[str, object] = engine._dedup_response_schema()
+            schema: dict[str, object] = dedup_response_schema()
             request = GenerationRequest(
                 provider_id=provider_id,
                 model=model,
@@ -400,7 +421,7 @@ class GedcomService:
                         role="user",
                         content=(
                             "<untrusted_genealogy_data>\n"
-                            + engine._build_dedup_prompt(left, right)
+                            + build_dedup_prompt(left, right)
                             + "\n</untrusted_genealogy_data>"
                         ),
                     ),
@@ -436,7 +457,7 @@ class GedcomService:
     ) -> QualityResolver:
         llm = self._require_provider(provider_id)
 
-        def resolve(report: engine.QualityReport) -> QualityResolution:
+        def resolve(report: QualityReport) -> QualityResolution:
             if verify_inputs is not None:
                 verify_inputs()
             request = GenerationRequest(
@@ -456,12 +477,12 @@ class GedcomService:
                         role="user",
                         content=(
                             "<untrusted_genealogy_findings>\n"
-                            + engine._build_quality_prompt(report)
+                            + build_quality_prompt(report)
                             + "\n</untrusted_genealogy_findings>"
                         ),
                     ),
                 ),
-                response_schema=engine._quality_response_schema(),
+                response_schema=quality_response_schema(),
                 data_classes=frozenset({DataClass.POSSIBLY_LIVING_PERSON}),
                 max_output_tokens=2_000,
                 timeout_seconds=self.provider_timeout_seconds,
@@ -476,9 +497,9 @@ class GedcomService:
                     "Retry with a model that supports the required structured output.",
                     details={"result_type": type(result.parsed).__name__},
                 )
-            allowed = {finding.finding_id for finding in report.findings[: engine.QUALITY_AI_LIMIT]}
+            allowed = {finding.finding_id for finding in report.findings[:QUALITY_AI_LIMIT]}
             try:
-                annotations = engine._quality_annotations_from_payload(result.parsed, allowed)
+                annotations = quality_annotations_from_payload(result.parsed, allowed)
             except (TypeError, ValueError) as exc:
                 raise ProviderError(
                     "PROVIDER_OUTPUT_INVALID",
@@ -522,7 +543,7 @@ class GedcomService:
         provider_id: str = "none",
         model: str = "",
         consent: ConsentGrant | None = None,
-        threshold: int = engine.DEFAULT_SIMILARITY_THRESHOLD,
+        threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
         cancellation: CancellationPort | None = None,
     ) -> _GedcomGenealogyExecution:
         cancellation_port = cancellation or NeverCancelled()
@@ -570,7 +591,7 @@ class GedcomService:
             self._verify_sources(fingerprints)
 
         pointer_map: dict[str, str] = {}
-        decisions: list[engine.MergeDecision] = []
+        decisions: list[MergeDecision] = []
         resolver: IdentityResolver | None = None
         if provider_id != "none":
             resolver = self._identity_resolver(
@@ -579,7 +600,7 @@ class GedcomService:
                 consent,
                 verify_inputs,
             )
-        merged = engine.merge_records(
+        merged = merge_records(
             people,
             threshold=threshold,
             auto=True,
@@ -594,15 +615,15 @@ class GedcomService:
             root_pointer = self._resolve_root_person(
                 root_person, merged, [source.pointer_map for source in sources], pointer_map
             )
-            include_people, include_families = engine.connected_tree_pointers(
+            include_people, include_families = connected_tree_pointers(
                 root_pointer, merged, source_records, pointer_map
             )
         staged_output: Path | None = None
         staged_report: Path | None = None
-        report: engine.QualityReport | None = None
+        report: QualityReport | None = None
         try:
             staged_output = staging_path(resolved_output)
-            output_token = engine.write_gedcom(
+            output_token = write_gedcom(
                 merged,
                 staged_output,
                 source_documents=sources,
@@ -618,7 +639,7 @@ class GedcomService:
                     raise AncestryError(
                         "QUALITY_ROOT_REQUIRED", "Quality reporting requires a root person."
                     )
-                report = engine.analyze_quality(
+                report = analyze_quality(
                     merged,
                     source_records,
                     sources,
@@ -628,7 +649,7 @@ class GedcomService:
                     output_file=str(resolved_output),
                 )
                 staged_report = staging_path(report_path)
-                report_token = engine.write_quality_report(report, staged_report)
+                report_token = write_quality_report(report, staged_report)
                 claim_staged_path(staged_report, report_token)
                 artifacts.append((staged_report, report_path))
             cancellation_port.check_cancelled()
@@ -675,7 +696,7 @@ class GedcomService:
         provider_id: str = "none",
         model: str = "",
         consent: ConsentGrant | None = None,
-        threshold: int = engine.DEFAULT_SIMILARITY_THRESHOLD,
+        threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
     ) -> GedcomOperationResult:
         """Return the shipped compatibility result for terminal adapters."""
 
@@ -732,7 +753,7 @@ class GedcomService:
         )
         staged_output = staging_path(output_path)
         try:
-            output_token = engine.write_gedcom(
+            output_token = write_gedcom(
                 people,
                 staged_output,
                 source_documents=sources,
@@ -821,11 +842,11 @@ class GedcomService:
             [sources[0].pointer_map],
             {},
         )
-        report = engine.analyze_quality(
+        report = analyze_quality(
             people, source_records, sources, root_pointer, output_file=str(source_path)
         )
         if provider_id != "none":
-            report = engine.refine_quality_report_with_ai(
+            report = refine_quality_report_with_ai(
                 report,
                 self._quality_resolver(
                     provider_id,
@@ -836,7 +857,7 @@ class GedcomService:
             )
         staged_output = staging_path(output_path)
         try:
-            output_token = engine.write_quality_report(report, staged_output)
+            output_token = write_quality_report(report, staged_output)
             claim_staged_path(staged_output, output_token)
             cancellation_port.check_cancelled()
             publish_staged_bundle(
@@ -894,7 +915,7 @@ class GedcomService:
             len(request.inputs) < 2
             or request.root_person_ref is None
             or not request.root_person_ref.strip()
-            or request.gedcom_version not in engine.SUPPORTED_GEDCOM_VERSIONS
+            or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
             or not 0 <= request.similarity_threshold <= 100
         ):
             raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
@@ -968,7 +989,7 @@ class GedcomService:
             not request.root_person_ref.strip()
             or request.scope not in {"connected", "ancestors", "descendants"}
             or (request.generations is not None and request.generations < 0)
-            or request.gedcom_version not in engine.SUPPORTED_GEDCOM_VERSIONS
+            or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
         ):
             raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
         registry = self._require_artifacts()
@@ -1070,7 +1091,7 @@ class GedcomService:
         command_name = request.sync_command
         if (
             command_name not in {"update", "rebase"}
-            or request.gedcom_version not in engine.SUPPORTED_GEDCOM_VERSIONS
+            or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
         ):
             raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
 

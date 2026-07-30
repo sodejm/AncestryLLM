@@ -189,9 +189,30 @@ def test_private_kernel_import_outside_its_owner_fails_actionably(tmp_path: Path
 
     assert any(
         violation.code == "ARCH201"
-        and "use the public 'ancestryllm.gedcom' façade" in violation.message
+        and "use the public 'ancestryllm.gedcom' façade through a declared gateway"
+        in violation.message
         for violation in report.violations
     )
+
+
+def test_private_kernel_import_from_feature_service_in_same_owner_fails(tmp_path: Path) -> None:
+    root = tmp_path / "ancestryllm"
+    _write_module(root, "ancestryllm.gedcom.engine", "class GedcomRecord: ...\n")
+    _write_module(
+        root,
+        "ancestryllm.gedcom.service",
+        "from ancestryllm.gedcom.engine import GedcomRecord\n",
+    )
+
+    report = check_tree(
+        root,
+        public_facades=(),
+        exceptions=(),
+        require_all_exceptions=False,
+        enforce_facades=False,
+    )
+
+    assert any(violation.code == "ARCH201" for violation in report.violations)
 
 
 def test_importing_an_undeclared_facade_symbol_fails(tmp_path: Path) -> None:

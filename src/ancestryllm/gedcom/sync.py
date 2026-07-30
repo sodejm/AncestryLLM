@@ -9,10 +9,15 @@ from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.gedcom import engine, incremental
 from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.incremental import (
+    SOURCE_ID_RE,
+    SUPPORTED_VENDORS,
     CancellationCheck,
     ResolverFactory,
     SyncCommand,
     SyncExecutionResult,
+    SyncRebaseCommand,
+    SyncSnapshotInput,
+    SyncUpdateCommand,
 )
 
 
@@ -93,7 +98,13 @@ def run_sync(
 
 
 __all__ = [
+    "SOURCE_ID_RE",
+    "SUPPORTED_VENDORS",
+    "SyncCommand",
     "SyncExecutionResult",
+    "SyncRebaseCommand",
+    "SyncSnapshotInput",
+    "SyncUpdateCommand",
     "execute_sync",
     "execute_sync_command",
     "run_sync",

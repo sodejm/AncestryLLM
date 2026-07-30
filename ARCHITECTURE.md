@@ -1,8 +1,8 @@
 # AncestryLLM architecture
 
 This document is the architectural source of truth for the repository. It
-distinguishes behavior implemented in the current tree, remaining `0.3.0`
-targets, and later-roadmap boundaries that are intentionally not implemented.
+distinguishes shipped `0.3.0` behavior, implemented Unreleased changes, and
+later-roadmap boundaries that are intentionally not implemented.
 Executable ownership and import rules are specified in
 [`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
 REPL layers and migration compatibility contract are specified in
@@ -14,9 +14,12 @@ with the accepted desktop decision in
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
-The shipped `0.2.0` runtime and current `0.3.0` development tree are a
-single-user, local-first Python application for genealogy research. They combine
-deterministic RootsMagic and GEDCOM workflows with optional LLM assistance.
+The shipped `0.3.0` runtime and current Unreleased development tree are a
+single-user, local-first Python application for genealogy research. They
+combine deterministic RootsMagic and GEDCOM workflows with optional LLM
+assistance. The Unreleased tree contains the first 0.4.0 boundary slice, but
+package and release-control versions remain 0.3.0 until a dedicated 0.4.0
+release process is established.
 There is no implemented or supported HTTP, desktop, browser, or multi-user
 runtime. ADR-0025 accepts a later local Electron desktop adapter and private
 FastAPI sidecar; it does not accept a public/LAN API, browser client, or
@@ -133,8 +136,8 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, and diagnostics. |
 | `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. |
-| `src/ancestryllm/rootsmagic/` | Immutable database discovery/query and schema-adaptive GEDCOM export. |
-| `src/ancestryllm/gedcom/` | Loss-minimizing parser/merge kernel, graph selection, quality analysis, and incremental sync. |
+| `src/ancestryllm/rootsmagic/` | Public immutable-source, query-orchestration, and GEDCOM mapping/export boundaries over characterized compatibility modules. |
+| `src/ancestryllm/gedcom/` | Public parser, graph, identity, quality, serialization, service, and sync boundaries over characterized loss-minimizing kernels. |
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
@@ -237,11 +240,12 @@ The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 ledger, abuse cases, evidence-backed residual-risk policy, and assurance gates
 are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-The large GEDCOM engine and incremental synchronizer predate the full modular
-split. Thin façade modules (`parser.py`, `identity.py`, `quality.py`,
-`serialization.py`, `graph.py`, `service.py`, and `sync.py`) define the intended
-public boundaries while the characterized kernel remains centralized in
-`engine.py` and `incremental.py`.
+The large GEDCOM engine and incremental synchronizer and the RootsMagic
+reader/export implementation predate the full modular split. Declared public
+façades define the supported boundaries while characterized compatibility
+kernels remain centralized. The executable architecture checker allows private
+module imports only through exact named gateways, including inside each owner
+package; broad same-package access is not an exemption.
 
 ## Startup, configuration, and composition
 
@@ -497,8 +501,11 @@ keys and installed SDKs never select one of those callbacks.
 
 ## RootsMagic subsystem
 
-`RootsMagicService` composes an immutable reader, deterministic exporter, and
-optional LLM-to-SQL use case.
+`RootsMagicService` composes an immutable reader, a dedicated query
+orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
+public immutable-source and schema boundary, `rootsmagic/query.py` owns
+explicit-provider natural-language query policy, and `rootsmagic/export.py` is
+the public GEDCOM mapping/export boundary.
 
 ### Immutable reader
 
@@ -532,6 +539,12 @@ model cannot execute SQL directly and cannot weaken the read-only connection.
 - living-person exclusion, redaction, or explicit inclusion;
 - an export report listing mapped tables, unmapped tables/columns, and counts.
 
+`RootsMagicExporter.map()` returns a typed, validated
+`RootsMagicGedcomDocument` containing GEDCOM text, a structured loss report,
+and the verified source identity. It does not create or replace files.
+`export()` is the compatibility publication boundary: it maps first, then
+stages and publishes the GEDCOM/report pair.
+
 Preservation mode retains safely attributable scalar person columns as
 `_RM_*` custom tags. Binary values and unattached/unsupported records remain
 report-only. The current exporter is intentionally schema-adaptive but narrow;
@@ -540,6 +553,10 @@ Output and report files are published as a rollback-capable bundle. Existing
 targets are restored if either publication step or the final source
 fingerprint check fails.
 
+Further extraction of reader, schema-adapter, mapping, and publication
+internals remains open work; the public modules above are the dependency
+contracts that work must preserve.
+
 Destination selection does not prove interoperability. Current Ancestry, Geni,
 and MyHeritage imports require recorded manual smoke tests for every release.
 
@@ -547,14 +564,16 @@ and MyHeritage imports require recorded manual smoke tests for every release.
 
 ### Kernel and façades
 
-`gedcom/engine.py` is the characterized loss-minimizing kernel. It owns record
+`gedcom/engine.py` remains the characterized loss-minimizing compatibility
+kernel. It owns record
 parsing, pointer allocation, date normalization, identity comparison, optional
 adjudication, merge decisions, quality analysis, report rendering, validation,
 and serialization. Its raw line/record representation is authoritative so
 unknown tags and nested structures survive. Validation uses the same bounded
 streaming representation; there is no legacy secondary parser path.
 
-The smaller modules define stable seams:
+The smaller modules define stable public seams, and `GedcomService` imports
+only those seams rather than the private kernels:
 
 - `parser.py` re-exports parsing and validation primitives;
 - `identity.py` exposes similarity, candidates, and merge functions;
@@ -565,6 +584,10 @@ The smaller modules define stable seams:
 - `sync.py` injects the engine and an optional modular identity-resolver
   factory into the incremental synchronizer; updates default to
   `--provider none`, and rebase never invokes a provider.
+
+Physical extraction of the remaining engine and synchronizer responsibilities
+is still open. The public façade and exact-gateway checks prevent new consumers
+from increasing that migration debt.
 
 ### Merge and serialization flow
 
@@ -741,10 +764,10 @@ installed local hooks.
 | Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. | Future adapters may consume these contracts but may not redefine them. |
 | Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
-| RootsMagic query | Implemented with layered read-only controls and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
-| RootsMagic export | Implemented for core tables with explicit loss reports. | It is not a complete exporter for every RootsMagic table/version. |
-| GEDCOM merge and quality | Broadly characterized with fictional regression tests. | The kernel remains large and partially outside strict static checks. |
-| Incremental update | Publicly wired; initialization and idempotency are tested offline. | Multi-generation, rebase, tombstone, and non-person paths need deeper coverage. |
+| RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with layered read-only controls and synthetic tests. | Reader/schema compatibility internals still need physical extraction; vendor schema variation and live-file behavior need release testing. |
+| RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
+| GEDCOM merge and quality | Public parser/graph/identity/quality/serialization seams are enforced and broadly characterized with fictional regression tests. | The compatibility kernel remains large and partially outside strict static checks; deeper extraction remains open. |
+| Incremental update | Public sync façade is enforced; initialization and idempotency are tested offline. | The private synchronizer still requires deeper extraction, and multi-generation, rebase, tombstone, and non-person paths need broader coverage. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside `0.3.0`. |

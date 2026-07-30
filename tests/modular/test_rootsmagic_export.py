@@ -124,6 +124,21 @@ def _exporter(tmp_path: Path) -> RootsMagicExporter:
     return RootsMagicExporter(RootsMagicReader([tmp_path]))
 
 
+def test_mapping_returns_validated_document_without_publishing(
+    tmp_path: Path,
+    export_tree: Path,
+) -> None:
+    before = {path.name for path in tmp_path.iterdir()}
+
+    document = _exporter(tmp_path).map(export_tree, living="include")
+
+    assert document.source_path == export_tree
+    assert document.lines[0] == "0 HEAD"
+    assert document.lines[-1] == "0 TRLR"
+    assert document.report.people_written == 8
+    assert {path.name for path in tmp_path.iterdir()} == before
+
+
 @pytest.mark.parametrize("sidecar_suffix", ("-shm", "-journal"))
 def test_transaction_sidecar_preflight_blocks_fingerprint_copy_and_sqlite_open(
     export_tree: Path,

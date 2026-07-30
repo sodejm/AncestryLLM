@@ -2,7 +2,7 @@
 
 AncestryLLM follows [Semantic Versioning 2.0.0](https://semver.org/). Package
 versions use `MAJOR.MINOR.PATCH`; Git tags add the conventional `v` prefix, so
-package version `0.3.0` is tagged `v0.3.0`.
+package version `0.4.0` is tagged `v0.4.0`.
 
 ## Public API
 

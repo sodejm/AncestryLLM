@@ -20,34 +20,37 @@ _SPEC.loader.exec_module(verifier)
 def _configuration() -> dict[str, object]:
     return {
         "schema_version": 1,
-        "release": "0.3.0",
-        "milestone": {"number": 2, "title": "0.3.0 Core Contracts"},
-        "tracker": {"number": 174, "label": "release-tracker"},
+        "release": "0.4.0",
+        "milestone": {"number": 3, "title": "0.4.0 Genealogy Core Facades"},
+        "tracker": {"number": 193, "label": "release-tracker"},
     }
 
 
 def test_accepts_exact_release_control_configuration() -> None:
     configuration = verifier.validate_release_configuration(
         _configuration(),
-        expected_version="0.3.0",
+        expected_version="0.4.0",
     )
 
-    assert configuration.release == "0.3.0"
-    assert configuration.milestone_number == 2
-    assert configuration.milestone_title == "0.3.0 Core Contracts"
-    assert configuration.tracker_number == 174
+    assert configuration.release == "0.4.0"
+    assert configuration.milestone_number == 3
+    assert configuration.milestone_title == "0.4.0 Genealogy Core Facades"
+    assert configuration.tracker_number == 193
     assert configuration.tracker_label == "release-tracker"
 
 
 @pytest.mark.parametrize(
     ("mutation", "message"),
     (
-        ({"release": "0.2.0"}, "does not match"),
+        ({"release": "0.3.0"}, "does not match"),
         ({"release": "0.3"}, "stable SemVer"),
         ({"schema_version": 2}, "schema_version"),
         ({"unexpected": True}, "keys are invalid"),
-        ({"milestone": {"number": True, "title": "0.3.0 Core Contracts"}}, "positive integer"),
-        ({"tracker": {"number": 174, "label": "release-tracker\n"}}, "trimmed string"),
+        (
+            {"milestone": {"number": True, "title": "0.4.0 Genealogy Core Facades"}},
+            "positive integer",
+        ),
+        ({"tracker": {"number": 193, "label": "release-tracker\n"}}, "trimmed string"),
     ),
 )
 def test_rejects_mismatched_or_malformed_configuration(
@@ -60,7 +63,7 @@ def test_rejects_mismatched_or_malformed_configuration(
     with pytest.raises(ValueError, match=message):
         verifier.validate_release_configuration(
             configuration,
-            expected_version="0.3.0",
+            expected_version="0.4.0",
         )
 
 
@@ -75,7 +78,7 @@ def test_cli_rejects_invalid_json(tmp_path: Path) -> None:
             "--config",
             str(configuration),
             "--version",
-            "0.3.0",
+            "0.4.0",
         ],
         check=False,
         capture_output=True,

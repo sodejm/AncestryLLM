@@ -6,7 +6,37 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
-No changes yet.
+## [0.4.0] - Unreleased
+
+### Added
+
+- Public RootsMagic `core`, `query`, and `export` boundaries for immutable
+  source access, explicit-provider natural-language query orchestration, and
+  schema-adaptive GEDCOM mapping/publication.
+- A typed `RootsMagicGedcomDocument` mapping result so callers can validate
+  GEDCOM content and its loss report without writing output files.
+- Public GEDCOM identity, quality, synchronization, parser, graph, and
+  serialization seams for application-service composition.
+
+### Changed
+
+- `GedcomService` now depends on the declared public GEDCOM façades instead of
+  importing the private engine and incremental synchronizer directly.
+- `RootsMagicService` delegates natural-language query policy to
+  `RootsMagicQueryService`, keeping source access deterministic and provider
+  orchestration outside the immutable reader.
+- RootsMagic mapping is separated from atomic publication: `map()` performs
+  deterministic in-memory conversion and validation, while `export()` owns
+  staged output and report publication.
+
+### Security
+
+- Architecture checks now enforce exact import gateways for private GEDCOM and
+  RootsMagic compatibility kernels, including imports from within their owner
+  packages.
+- Existing immutable RootsMagic source checks, explicit provider selection,
+  and network-free `provider=none` behavior remain regression-tested across
+  the new public boundaries.
 
 ## [0.3.0] - 2026-07-29
 
@@ -90,6 +120,7 @@ No changes yet.
   SHM files without a WAL; and bounds schema-assisted query prompts with the stable
   `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
-[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sodejm/AncestryLLM/releases/tag/v0.2.0

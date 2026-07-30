@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from ancestryllm.gedcom.engine import IndividualRecord, QualityReport
+    from ancestryllm.gedcom.identity import IndividualRecord
+    from ancestryllm.gedcom.quality import QualityReport
 
 
 class DuplicateDecision(Protocol):
