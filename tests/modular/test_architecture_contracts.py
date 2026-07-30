@@ -202,6 +202,44 @@ def test_pure_gedcom_document_kernel_rejects_outward_dependencies(
     )
 
 
+@pytest.mark.parametrize(
+    "module",
+    (
+        "ancestryllm.gedcom.graph",
+        "ancestryllm.gedcom.identity",
+        "ancestryllm.gedcom.quality",
+    ),
+)
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        "from ancestryllm.cli import main",
+        "from ancestryllm.core.config import AppConfig",
+        "from ancestryllm.core.publication import atomic_publish",
+        "from ancestryllm.core.secrets import SecretStore",
+        "from ancestryllm.llm.providers.openai import OpenAIProvider",
+        "import httpx",
+        "from keyring import get_password",
+        "from prompt_toolkit import PromptSession",
+    ],
+)
+def test_gedcom_operations_reject_runtime_and_adapter_dependencies(
+    tmp_path: Path,
+    module: str,
+    dependency: str,
+) -> None:
+    root = tmp_path / "ancestryllm"
+    _write_module(root, module, f"{dependency}\n")
+
+    assert "ARCH104" in _codes(
+        root,
+        public_facades=(),
+        exceptions=(),
+        require_all_exceptions=False,
+        enforce_facades=False,
+    )
+
+
 def test_private_kernel_import_outside_its_owner_fails_actionably(tmp_path: Path) -> None:
     root = tmp_path / "ancestryllm"
     _write_module(root, "ancestryllm.gedcom.engine", "class GedcomRecord: ...\n")

@@ -10,7 +10,7 @@ import pytest
 import ancestryllm.gedcom.service as service_module
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.jobs import JobManager, JobState
-from ancestryllm.gedcom import engine
+from ancestryllm.gedcom import graph, identity, quality
 from ancestryllm.gedcom.service import GedcomService
 
 GEDCOM_FIXTURE = Path(__file__).parents[1] / "fixtures" / "gedcom_merge" / "quality-source-a.ged"
@@ -41,6 +41,11 @@ def test_gedcom_service_actions_cancel_before_replacing_existing_output(
     monkeypatch: pytest.MonkeyPatch,
     action: str,
 ) -> None:
+    source = tmp_path / "source.ged"
+    source.write_text(
+        f"{GEDCOM_FIXTURE.read_text(encoding='utf-8')}0 TRLR\n",
+        encoding="utf-8",
+    )
     output = tmp_path / f"{action}.out"
     output.write_text("fictional sentinel\n", encoding="utf-8")
     traversal_started = threading.Event()
@@ -51,21 +56,30 @@ def test_gedcom_service_actions_cancel_before_replacing_existing_output(
         assert allow_checkpoint.wait(2)
         cancellation_checkpoint()
 
-    monkeypatch.setattr(engine, "cancellation_checkpoint", pause_traversal)
+    checkpoint_modules = {
+        "merge": identity,
+        "subtree": graph,
+        "quality": quality,
+    }
+    monkeypatch.setattr(
+        checkpoint_modules[action],
+        "cancellation_checkpoint",
+        pause_traversal,
+    )
     service = GedcomService()
     operations = {
         "merge": lambda: service.merge(
-            [GEDCOM_FIXTURE, GEDCOM_FIXTURE],
+            [source, source],
             output,
         ),
         "subtree": lambda: service.subtree(
-            GEDCOM_FIXTURE,
+            source,
             output,
             root_person="Maren Hollow",
             scope="ancestors",
         ),
         "quality": lambda: service.quality(
-            GEDCOM_FIXTURE,
+            source,
             output,
             root_person="Maren Hollow",
         ),
@@ -84,7 +98,7 @@ def test_gedcom_service_actions_cancel_before_replacing_existing_output(
     assert cancelled.state is JobState.CANCELLED
     assert cancelled.error_code == "JOB_CANCELLED"
     assert output.read_text(encoding="utf-8") == "fictional sentinel\n"
-    assert tuple(tmp_path.iterdir()) == (output,)
+    assert set(tmp_path.iterdir()) == {source, output}
 
 
 def test_merge_publication_failure_wins_cancellation_and_rolls_back_bundle(

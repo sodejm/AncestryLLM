@@ -16,6 +16,7 @@ import pytest
 
 from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom import identity
 
 # ---------------------------------------------------------------------------
 # Date normalisation
@@ -77,7 +78,7 @@ class TestNormaliseGedcomDate:
     def test_unparseable_value_is_not_written_to_debug_logs(self, caplog):
         private_value = "PRIVATE-DATE-CANARY is not a date"
 
-        with caplog.at_level(logging.DEBUG, logger=gm.__name__):
+        with caplog.at_level(logging.DEBUG, logger=identity.__name__):
             assert gm.normalise_gedcom_date(private_value) == private_value
 
         assert private_value not in caplog.text
@@ -536,14 +537,14 @@ class TestIdentitySafetyRegressions:
     """Cover failures that could collapse distinct people or family events."""
 
     def test_state_or_province_is_not_inferred_as_country(self):
-        assert gm._country_from_place("Boston, Massachusetts") == ""
-        assert gm._country_from_place("Toronto, Ontario") == ""
-        assert gm._country_from_place("Boston, Massachusetts, USA") == ("united states")
+        assert identity._country_from_place("Boston, Massachusetts") == ""
+        assert identity._country_from_place("Toronto, Ontario") == ""
+        assert identity._country_from_place("Boston, Massachusetts, USA") == ("united states")
 
     def test_different_family_event_tags_do_not_match(self):
         marriage = gm.GenealogicalFact("MARR", date="1920", place="Boston")
         divorce = gm.GenealogicalFact("DIV", date="1920", place="Boston")
-        assert gm._fact_similarity(marriage, divorce) == 0.0
+        assert identity._fact_similarity(marriage, divorce) == 0.0
 
     def test_conflicting_alternative_countries_force_review(self):
         shared = gm.GenealogicalFact(
@@ -578,7 +579,11 @@ class TestIdentitySafetyRegressions:
             gm.RelativeIdentity("@C8@", "Alex Smith", "1940"),
             gm.RelativeIdentity("@C9@", "Quasar Jones", "1975"),
         )
-        score = gm._collection_similarity(left, right, gm._relative_similarity)
+        score = identity._collection_similarity(
+            left,
+            right,
+            identity._relative_similarity,
+        )
         assert score < 70.0
 
     def test_transitive_cluster_conflict_retains_third_person(self):
@@ -613,10 +618,10 @@ class TestIdentitySafetyRegressions:
         candidates = [(0, 1, 100.0), (1, 2, 95.0)]
         with (
             patch(
-                "ancestryllm.gedcom.engine.find_duplicate_candidates",
+                "ancestryllm.gedcom.identity.find_duplicate_candidates",
                 return_value=candidates,
             ),
-            patch("ancestryllm.gedcom.engine.ai_resolve", return_value=verdict),
+            patch("ancestryllm.gedcom.identity.ai_resolve", return_value=verdict),
         ):
             merged = gm.merge_records([a, bridge, c], auto=True)
         assert {person.pointer for person in merged} == {"@A@", "@C@"}
@@ -636,7 +641,7 @@ class TestAiPromptContext:
             partners=(gm.RelativeIdentity("@P1@", "Alex Smith"),),
             children=(gm.RelativeIdentity("@C1@", "Casey Smith", "1940"),),
         )
-        prompt = gm._build_dedup_prompt(person, person)
+        prompt = identity._build_dedup_prompt(person, person)
         for expected in (
             "b.country=united states",
             "Carpenter",
@@ -655,7 +660,7 @@ class TestAiPromptContext:
                 "_VENDOR": ["1 _VENDOR private extension\n"],
             },
         )
-        prompt = gm._build_dedup_prompt(person, person)
+        prompt = identity._build_dedup_prompt(person, person)
         assert "private medical detail" not in prompt
         assert "secret source text" not in prompt
         assert "private extension" not in prompt
@@ -855,7 +860,7 @@ class TestDependentPreservation:
                 "preferred_values": {},
             }
 
-        with patch("ancestryllm.gedcom.engine.ai_resolve", side_effect=duplicate):
+        with patch("ancestryllm.gedcom.identity.ai_resolve", side_effect=duplicate):
             merged = gm.merge_records(
                 [primary, secondary, first_child, second_child],
                 threshold=70,
@@ -1021,7 +1026,7 @@ class TestInjectedIdentityResolver:
         ],
     )
     def test_confidence_accepts_only_scalar_values(self, value, expected):
-        assert gm._confidence_value({"confidence": value}) == pytest.approx(expected)
+        assert identity._confidence_value({"confidence": value}) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------

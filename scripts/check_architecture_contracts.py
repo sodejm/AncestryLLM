@@ -60,10 +60,7 @@ PRIVATE_MODULE_OWNERS: Final[dict[str, str]] = {
 PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
     "ancestryllm.gedcom.engine": frozenset(
         {
-            "ancestryllm.gedcom.graph",
-            "ancestryllm.gedcom.identity",
             "ancestryllm.gedcom.parser",
-            "ancestryllm.gedcom.quality",
             "ancestryllm.gedcom.serialization",
             "ancestryllm.gedcom.sync",
         }
@@ -98,6 +95,26 @@ PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
     ),
 }
 
+# Public operation modules keep a small private implementation surface for
+# composing the compatibility kernel. These exact importers may use undeclared
+# symbols without turning those symbols into supported consumer API.
+PUBLIC_FACADE_INTERNAL_GATEWAYS: Final[dict[str, frozenset[str]]] = {
+    "ancestryllm.gedcom.graph": frozenset(
+        {
+            "ancestryllm.gedcom.engine",
+            "ancestryllm.gedcom.quality",
+        }
+    ),
+    "ancestryllm.gedcom.identity": frozenset(
+        {
+            "ancestryllm.gedcom.engine",
+            "ancestryllm.gedcom.graph",
+            "ancestryllm.gedcom.quality",
+        }
+    ),
+    "ancestryllm.gedcom.quality": frozenset({"ancestryllm.gedcom.engine"}),
+}
+
 ADAPTER_OWNERS: Final[dict[str, str]] = {
     "ancestryllm.cli": "terminal",
     "ancestryllm.console": "terminal",
@@ -120,6 +137,43 @@ PURE_GEDCOM_DOCUMENT_MODULES: Final[frozenset[str]] = frozenset(
         "ancestryllm.gedcom.model",
         "ancestryllm.gedcom.serializer",
         "ancestryllm.gedcom.validator",
+    }
+)
+
+PURE_GEDCOM_OPERATION_MODULES: Final[frozenset[str]] = frozenset(
+    {
+        "ancestryllm.gedcom.graph",
+        "ancestryllm.gedcom.identity",
+        "ancestryllm.gedcom.quality",
+    }
+)
+
+GEDCOM_OPERATION_FORBIDDEN_INTERNAL_PREFIXES: Final[tuple[str, ...]] = (
+    "ancestryllm.api",
+    "ancestryllm.cli",
+    "ancestryllm.console",
+    "ancestryllm.core.config",
+    "ancestryllm.core.publication",
+    "ancestryllm.core.secrets",
+    "ancestryllm.desktop",
+    "ancestryllm.electron",
+    "ancestryllm.execution",
+    "ancestryllm.llm.providers",
+    "ancestryllm.terminal",
+)
+
+GEDCOM_OPERATION_FORBIDDEN_EXTERNAL_ROOTS: Final[frozenset[str]] = frozenset(
+    {
+        "anthropic",
+        "click",
+        "electron",
+        "fastapi",
+        "google",
+        "httpx",
+        "keyring",
+        "openai",
+        "prompt_toolkit",
+        "rich",
     }
 )
 
@@ -371,6 +425,14 @@ def _allowed_pure_internal(layer: str, target: str) -> bool:
     )
 
 
+def _is_forbidden_gedcom_operation_dependency(imported: str) -> bool:
+    root = imported.split(".", maxsplit=1)[0]
+    return root in GEDCOM_OPERATION_FORBIDDEN_EXTERNAL_ROOTS or any(
+        imported == prefix or imported.startswith(f"{prefix}.")
+        for prefix in GEDCOM_OPERATION_FORBIDDEN_INTERNAL_PREFIXES
+    )
+
+
 def _matches_exception(
     reference: ImportReference,
     exception: DependencyException,
@@ -419,6 +481,22 @@ def check_tree(
 
         layer = _pure_layer(reference.importer)
         root_import = reference.imported.split(".", maxsplit=1)[0]
+        if (
+            reference.importer in PURE_GEDCOM_OPERATION_MODULES
+            and _is_forbidden_gedcom_operation_dependency(reference.imported)
+        ):
+            violations.append(
+                Violation(
+                    path=reference.path,
+                    line=reference.line,
+                    code="ARCH104",
+                    message=(
+                        f"GEDCOM operation module {reference.importer!r} imports "
+                        f"runtime or adapter dependency {reference.imported!r}; "
+                        "inject a transport-neutral value or port instead"
+                    ),
+                )
+            )
         if layer is not None:
             if root_import == "ancestryllm":
                 if not _allowed_pure_internal(layer, reference.imported):
@@ -505,7 +583,11 @@ def check_tree(
                     )
 
         allowed = exports.get(reference.imported)
-        if allowed is not None:
+        internal_gateways = PUBLIC_FACADE_INTERNAL_GATEWAYS.get(
+            reference.imported,
+            frozenset(),
+        )
+        if allowed is not None and reference.importer not in internal_gateways:
             requested_symbols = tuple(
                 name
                 for name in reference.names

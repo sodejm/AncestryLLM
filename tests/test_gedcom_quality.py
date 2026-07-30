@@ -12,6 +12,7 @@ import pytest
 
 from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom import quality
 from ancestryllm.gedcom.contracts import QualityResolution
 from ancestryllm.gedcom.service import GedcomService
 
@@ -149,7 +150,7 @@ class TestDuplicateAndMarriedNameAnalysis:
         first = gm.IndividualRecord("@I1@", given_name="Nell", surname="Ember")
         second = gm.IndividualRecord("@I2@", given_name="Nell", surname="Ember")
         assert gm.assess_similarity(first, second).score == 88.0
-        assert gm._quality_duplicate_pairs([first, second]) == []
+        assert quality._quality_duplicate_pairs([first, second]) == []
 
     def test_typed_married_primary_is_high_severity(self) -> None:
         findings = [
@@ -184,7 +185,7 @@ class TestAncestryAndDataQuality:
             gm.GedcomRecord(["0 @F1@ FAM", "1 HUSB @I2@", "1 CHIL @I1@"], "x.ged", 0),
             gm.GedcomRecord(["0 @F2@ FAM", "1 HUSB @I1@", "1 CHIL @I2@"], "x.ged", 1),
         ]
-        generations, cycles = gm.ancestor_generations("@I1@", records)
+        generations, cycles = quality.ancestor_generations("@I1@", records)
         assert generations == {"@I1@": 0, "@I2@": 1}
         assert cycles == {"@I1@", "@I2@"}
 
@@ -321,6 +322,30 @@ class TestMarkdownAndCli:
         gm.write_quality_report(_fixture_report(), destination)
         assert destination.read_text(encoding="utf-8").startswith("# GEDCOM Merge Quality Report")
 
+    def test_quality_writer_compatibility_routes_through_serialization(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        report = _fixture_report()
+        destination = tmp_path / "quality.md"
+        token = object()
+
+        def fake_write_quality_report(
+            received_report: object,
+            received_path: str | Path,
+        ) -> object:
+            assert received_report is report
+            assert received_path == destination
+            return token
+
+        monkeypatch.setattr(
+            "ancestryllm.gedcom.serialization.write_quality_report",
+            fake_write_quality_report,
+        )
+
+        assert quality.write_quality_report(report, destination) is token
+
     def test_default_report_and_quality_root_do_not_filter_export(self, tmp_path: Path) -> None:
         output = tmp_path / "master.ged"
         result = gm.main(
@@ -452,7 +477,7 @@ class TestQualityAiRefinement:
         assert raised.value.code == "PROVIDER_TIMEOUT"
 
     def test_unknown_model_finding_ids_are_ignored(self) -> None:
-        parsed = gm._quality_annotations_from_payload(
+        parsed = quality._quality_annotations_from_payload(
             {
                 "annotations": [
                     {

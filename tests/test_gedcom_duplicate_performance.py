@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from unittest.mock import patch
 
-from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom import identity as gm
 
 
 def _person(
