@@ -3385,7 +3385,7 @@ def test_service_cleanup_preserves_a_replacement_at_its_staging_name(
         raise OSError("fictional report write failure")
 
     monkeypatch.setattr(
-        gedcom_engine,
+        gedcom_service_module,
         "write_quality_report",
         replace_output_stage_then_fail,
     )

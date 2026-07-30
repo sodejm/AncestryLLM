@@ -3,7 +3,7 @@
 AncestryLLM is a local-first platform for genealogy research tools. It combines
 deterministic RootsMagic and GEDCOM workflows with optional, explicitly selected
 LLM providers. The one-shot CLI and prompt-toolkit/Rich REPL are the only
-implemented product surfaces in 0.3.0. They derive commands from the same
+implemented product surfaces in 0.4.0. They derive commands from the same
 `CommandSpec` metadata and dispatch through the shared `CommandExecutor` into
 transport-neutral application services. The accepted local Electron and private
 FastAPI desktop architecture remains a later-roadmap adapter direction; it is

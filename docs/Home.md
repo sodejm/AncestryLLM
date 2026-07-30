@@ -5,7 +5,7 @@ combines deterministic RootsMagic and GEDCOM workflows with optional,
 explicitly selected LLM providers.
 
 Start with the [CLI reference](CLI.md) for one-shot commands or the
-[interactive console guide](CONSOLE.md). In 0.3.0 these are the only
+[interactive console guide](CONSOLE.md). In 0.4.0 these are the only
 implemented product surfaces: both use the same command specification,
 transport-neutral executor, application DTOs, and genealogy services. FastAPI
 and Electron remain unshipped later-roadmap adapters and must reuse that service

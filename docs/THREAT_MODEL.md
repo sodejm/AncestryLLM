@@ -2,7 +2,7 @@
 
 ## Implementation status
 
-The 0.3.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
+The 0.4.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
 shared command, application-service, and genealogy-core contracts. It does not
 implement FastAPI routes, an Electron application, a renderer or preload bridge,
 desktop packaging, plugins, or an update channel. Desktop diagrams, controls,

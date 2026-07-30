@@ -24,7 +24,7 @@ from ancestryllm.core.publication import (
 )
 from ancestryllm.gedcom.parser import validate_gedcom_555
 from ancestryllm.gedcom.serialization import wrap_long_gedcom_lines
-from ancestryllm.rootsmagic.reader import RootsMagicReader
+from ancestryllm.rootsmagic.reader import RootsMagicReader, SourceFingerprint
 from ancestryllm.rootsmagic.schema_adapter import (
     RootsMagicSchemaAdapter,
     semantic_row_key,
@@ -410,6 +410,18 @@ class RootsMagicExportResult:
     report: ExportReport
 
 
+@dataclass(frozen=True, slots=True)
+class RootsMagicGedcomDocument:
+    """Mapped, validated GEDCOM content that has not yet been published."""
+
+    source_path: Path
+    source_fingerprint: SourceFingerprint
+    sqlite_snapshot: str
+    lines: tuple[str, ...]
+    report: ExportReport
+    omitted_records: tuple[tuple[str, int], ...]
+
+
 class RootsMagicExporter:
     def __init__(self, reader: RootsMagicReader) -> None:
         self.reader = reader
@@ -426,6 +438,27 @@ class RootsMagicExporter:
     @staticmethod
     def _atomic_write(path: Path, payload: str) -> StagedFileToken:
         return write_staged_text(path, payload)
+
+    @staticmethod
+    def _validate_mapping_options(
+        *,
+        profile: str,
+        gedcom_version: str,
+        destination: str,
+        living: str,
+    ) -> None:
+        if profile not in {"portable", "preservation"}:
+            raise AncestryError(
+                "EXPORT_PROFILE_INVALID", "Profile must be portable or preservation."
+            )
+        if gedcom_version not in {"5.5.5", "5.5.1"}:
+            raise AncestryError("GEDCOM_VERSION_INVALID", "GEDCOM version must be 5.5.5 or 5.5.1.")
+        if destination not in {"generic", "ancestry", "geni", "myheritage"}:
+            raise AncestryError("EXPORT_DESTINATION_INVALID", "Unsupported destination profile.")
+        if living not in {"exclude", "redact", "include"}:
+            raise AncestryError(
+                "EXPORT_LIVING_INVALID", "Living policy must be exclude, redact, or include."
+            )
 
     @staticmethod
     def _scope_people(
@@ -1026,6 +1059,63 @@ class RootsMagicExporter:
         )
         return lines, report, omitted_records
 
+    def map(
+        self,
+        tree: Path,
+        *,
+        profile: str = "portable",
+        gedcom_version: str = "5.5.5",
+        destination: str = "generic",
+        root_person_id: str | None = None,
+        scope: str = "connected",
+        generations: int | None = None,
+        living: str = "exclude",
+    ) -> RootsMagicGedcomDocument:
+        """Map one stable RootsMagic snapshot without publishing any files."""
+
+        self._validate_mapping_options(
+            profile=profile,
+            gedcom_version=gedcom_version,
+            destination=destination,
+            living=living,
+        )
+        source_tree = self.reader.ingress.normalize_path(
+            tree,
+            FileKind.ROOTSMAGIC,
+            absolute=True,
+        )
+        try:
+            fingerprint = self.reader.fingerprint_source(source_tree)
+            sqlite_snapshot = self.reader.snapshot_provenance(fingerprint)
+            with self.reader.operation(source_tree, fingerprint) as schema:
+                adapter = RootsMagicSchemaAdapter(
+                    self.reader,
+                    source_tree,
+                    schema,
+                )
+                lines, report, omitted_records = self._build_export(
+                    adapter,
+                    profile=profile,
+                    gedcom_version=gedcom_version,
+                    destination=destination,
+                    root_person_id=root_person_id,
+                    scope=scope,
+                    generations=generations,
+                    living=living,
+                )
+        except FileIngressError as exc:
+            if exc.code != "FILE_INPUT_CHANGED":
+                raise
+            raise self._source_changed(exc) from exc
+        return RootsMagicGedcomDocument(
+            source_path=source_tree,
+            source_fingerprint=fingerprint,
+            sqlite_snapshot=sqlite_snapshot,
+            lines=tuple(lines),
+            report=report,
+            omitted_records=tuple(sorted(omitted_records.items())),
+        )
+
     def export(
         self,
         tree: Path,
@@ -1040,18 +1130,12 @@ class RootsMagicExporter:
         living: str = "exclude",
         report_path: Path | None = None,
     ) -> RootsMagicExportResult:
-        if profile not in {"portable", "preservation"}:
-            raise AncestryError(
-                "EXPORT_PROFILE_INVALID", "Profile must be portable or preservation."
-            )
-        if gedcom_version not in {"5.5.5", "5.5.1"}:
-            raise AncestryError("GEDCOM_VERSION_INVALID", "GEDCOM version must be 5.5.5 or 5.5.1.")
-        if destination not in {"generic", "ancestry", "geni", "myheritage"}:
-            raise AncestryError("EXPORT_DESTINATION_INVALID", "Unsupported destination profile.")
-        if living not in {"exclude", "redact", "include"}:
-            raise AncestryError(
-                "EXPORT_LIVING_INVALID", "Living policy must be exclude, redact, or include."
-            )
+        self._validate_mapping_options(
+            profile=profile,
+            gedcom_version=gedcom_version,
+            destination=destination,
+            living=living,
+        )
         source_tree = self.reader.ingress.normalize_path(
             tree,
             FileKind.ROOTSMAGIC,
@@ -1087,50 +1171,43 @@ class RootsMagicExporter:
                 "Create both local parent directories, then retry the export.",
                 exit_code=2,
             )
-        try:
-            fingerprint = self.reader.fingerprint_source(source_tree)
-            sqlite_snapshot = self.reader.snapshot_provenance(fingerprint)
-            with self.reader.operation(source_tree, fingerprint) as schema:
-                adapter = RootsMagicSchemaAdapter(
-                    self.reader,
-                    source_tree,
-                    schema,
-                )
-                lines, report, omitted_records = self._build_export(
-                    adapter,
-                    profile=profile,
-                    gedcom_version=gedcom_version,
-                    destination=destination,
-                    root_person_id=root_person_id,
-                    scope=scope,
-                    generations=generations,
-                    living=living,
-                )
-        except FileIngressError as exc:
-            if exc.code != "FILE_INPUT_CHANGED":
-                raise
-            raise self._source_changed(exc) from exc
+        document = self.map(
+            source_tree,
+            profile=profile,
+            gedcom_version=gedcom_version,
+            destination=destination,
+            root_person_id=root_person_id,
+            scope=scope,
+            generations=generations,
+            living=living,
+        )
         staged_output: Path | None = None
         staged_report: Path | None = None
         try:
             staged_output = staging_path(resolved_output)
             staged_report = staging_path(resolved_report)
-            output_token = self._atomic_write(staged_output, "\n".join(lines) + "\n")
+            output_token = self._atomic_write(
+                staged_output,
+                "\n".join(document.lines) + "\n",
+            )
             claim_staged_path(staged_output, output_token)
             report_token = self._atomic_write(
                 staged_report,
-                report.markdown(
+                document.report.markdown(
                     source_tree,
                     resolved_output,
-                    omitted_records=omitted_records,
-                    sqlite_snapshot=sqlite_snapshot,
+                    omitted_records=dict(document.omitted_records),
+                    sqlite_snapshot=document.sqlite_snapshot,
                 ),
             )
             claim_staged_path(staged_report, report_token)
 
             def validate_source() -> None:
                 try:
-                    self.reader.verify_source(source_tree, fingerprint)
+                    self.reader.verify_source(
+                        document.source_path,
+                        document.source_fingerprint,
+                    )
                 except FileIngressError as exc:
                     raise self._source_changed(exc) from exc
 
@@ -1148,4 +1225,4 @@ class RootsMagicExporter:
             if staged_report is not None:
                 cleanup_staged_path(staged_report)
             raise
-        return RootsMagicExportResult(resolved_output, resolved_report, report)
+        return RootsMagicExportResult(resolved_output, resolved_report, document.report)

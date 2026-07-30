@@ -37,6 +37,10 @@ PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.gedcom.sync",
     "ancestryllm.llm.contracts",
     "ancestryllm.llm.service",
+    "ancestryllm.rootsmagic",
+    "ancestryllm.rootsmagic.core",
+    "ancestryllm.rootsmagic.export",
+    "ancestryllm.rootsmagic.query",
     "ancestryllm.rootsmagic.service",
 )
 
@@ -46,6 +50,37 @@ PRIVATE_MODULE_OWNERS: Final[dict[str, str]] = {
     "ancestryllm.rootsmagic.exporter": "ancestryllm.rootsmagic",
     "ancestryllm.rootsmagic.reader": "ancestryllm.rootsmagic",
     "ancestryllm.rootsmagic.schema_adapter": "ancestryllm.rootsmagic",
+}
+
+# Only these narrow gateways may adapt compatibility implementations to the
+# supported façades above. Feature services are deliberately absent: they must
+# consume public contracts even when they share the same package owner.
+PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
+    "ancestryllm.gedcom.engine": frozenset(
+        {
+            "ancestryllm.gedcom.graph",
+            "ancestryllm.gedcom.identity",
+            "ancestryllm.gedcom.parser",
+            "ancestryllm.gedcom.quality",
+            "ancestryllm.gedcom.serialization",
+            "ancestryllm.gedcom.sync",
+        }
+    ),
+    "ancestryllm.gedcom.incremental": frozenset({"ancestryllm.gedcom.sync"}),
+    "ancestryllm.rootsmagic.exporter": frozenset({"ancestryllm.rootsmagic.export"}),
+    "ancestryllm.rootsmagic.reader": frozenset(
+        {
+            "ancestryllm.rootsmagic.core",
+            "ancestryllm.rootsmagic.exporter",
+            "ancestryllm.rootsmagic.schema_adapter",
+        }
+    ),
+    "ancestryllm.rootsmagic.schema_adapter": frozenset(
+        {
+            "ancestryllm.rootsmagic.core",
+            "ancestryllm.rootsmagic.exporter",
+        }
+    ),
 }
 
 ADAPTER_OWNERS: Final[dict[str, str]] = {
@@ -397,18 +432,22 @@ def check_tree(
                 )
 
         for target in _targets(reference, module_names):
-            private_owner = next(
+            private_match = next(
                 (
-                    owner
+                    (private_module, owner)
                     for private_module, owner in PRIVATE_MODULE_OWNERS.items()
                     if target == private_module or target.startswith(f"{private_module}.")
                 ),
                 None,
             )
-            if private_owner is not None and not (
-                reference.importer == private_owner
-                or reference.importer.startswith(f"{private_owner}.")
-            ):
+            if private_match is not None:
+                private_module, private_owner = private_match
+                allowed_gateways = PRIVATE_MODULE_GATEWAYS.get(private_module, frozenset())
+            else:
+                private_module = ""
+                private_owner = None
+                allowed_gateways = frozenset()
+            if private_owner is not None and reference.importer not in allowed_gateways:
                 violations.append(
                     Violation(
                         path=reference.path,
@@ -416,7 +455,7 @@ def check_tree(
                         code="ARCH201",
                         message=(
                             f"{reference.importer!r} imports private owner module {target!r}; "
-                            f"use the public {private_owner!r} façade"
+                            f"use the public {private_owner!r} façade through a declared gateway"
                         ),
                     )
                 )

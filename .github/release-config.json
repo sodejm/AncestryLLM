@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "release": "0.3.0",
+  "release": "0.4.0",
   "milestone": {
-    "number": 2,
-    "title": "0.3.0 Core Contracts"
+    "number": 3,
+    "title": "0.4.0 Genealogy Core Facades"
   },
   "tracker": {
-    "number": 174,
+    "number": 193,
     "label": "release-tracker"
   }
 }

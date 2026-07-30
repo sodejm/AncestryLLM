@@ -1,8 +1,9 @@
 # Architecture ownership and dependency contracts
 
-Status: executable for the `0.3.0` release candidate. `ARCHITECTURE.md` is the
-repository-wide source of truth; this page explains the checks that enforce its
-public façades, ownership boundaries, and current-versus-target graph.
+Status: executable in the post-0.3 Unreleased development tree.
+`ARCHITECTURE.md` is the repository-wide source of truth; this page explains
+the checks that enforce its public façades, ownership boundaries, and
+current-versus-target graph.
 
 ## State legend
 
@@ -11,8 +12,8 @@ The repository distinguishes three states deliberately:
 | State | Meaning |
 |---|---|
 | Implemented | Present in this tree and protected by tests or an executable gate. |
-| Remaining `0.3.0` target | Required before the release, but not yet a claim about the current code. |
-| Later roadmap | Accepted or proposed direction outside `0.3.0`; no runtime may depend on it yet. |
+| Unreleased 0.4.0 candidate | Implemented or proposed work that has not passed a dedicated 0.4.0 release process. |
+| Later roadmap | Accepted or proposed direction outside the next release; no runtime may depend on it yet. |
 
 The shared command specifications, transport-neutral application contracts,
 shared `CommandExecutor`, and service-owned genealogy aggregate (#44) are
@@ -60,6 +61,8 @@ flowchart TB
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
+| GEDCOM parsing, graph, identity, quality, serialization, service, and synchronization seams | declared public modules in `ancestryllm.gedcom`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
+| RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
 
@@ -77,9 +80,10 @@ The checker enforces these rules:
   import Click, prompt-toolkit, Rich, FastAPI, Pydantic, Electron, provider
   SDKs, configuration, keyring, storage, publication implementations, or
   host-filesystem `Path` objects;
-- code outside `ancestryllm.gedcom` cannot import the private GEDCOM engine or
-  incremental synchronizer directly, and code outside `ancestryllm.rootsmagic`
-  cannot import its reader, exporter, or schema adapter directly;
+- private GEDCOM and RootsMagic compatibility modules may be imported only by
+  the exact importer modules declared in `PRIVATE_MODULE_GATEWAYS`; owner
+  package membership does not grant blanket access, and application services
+  cannot bypass the public façades;
 - an adapter cannot import a sibling adapter or become an application
   dependency;
 - imports from declared public façade modules must use names in their literal
@@ -102,6 +106,12 @@ requires all of the following in the same change:
 Removing a symbol requires the compatibility and versioning process. Renaming
 an implementation detail does not require a compatibility shim unless that
 detail was already in a declared façade.
+
+The Unreleased RootsMagic public inventory includes the package façade plus
+`core`, `query`, and `export`. The GEDCOM inventory exposes parser, graph,
+identity, quality, serialization, service, and synchronization seams. The
+centralized private modules remain characterized compatibility kernels, not
+supported consumer APIs.
 
 ## Temporary exception lifecycle
 
@@ -128,8 +138,8 @@ PYTHONPATH=src .venv/bin/pytest tests/modular/test_architecture_contracts.py
 
 The tests prove the repository graph passes, every declared exception is live,
 valid inward imports are accepted, and representative framework, host-object,
-private-kernel, undeclared-façade, expanded-exception, and stale-exception
-violations fail with actionable codes.
+private-kernel (including same-owner-package), undeclared-façade,
+expanded-exception, and stale-exception violations fail with actionable codes.
 
 Before accepting a boundary migration, rerun the core-contract
 characterization suite, inspect the dependency diff, remove dead exceptions
