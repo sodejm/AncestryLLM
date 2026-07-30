@@ -107,9 +107,15 @@ families, notes, citations, sources, media, custom values, reports, and command
 output. GEDCOM and its optional report publish as one rollback-capable pair.
 Destination selections are standards-based format targets, not claims of
 successful import into a current vendor product.
-Close RootsMagic before querying or exporting: the CLI rejects databases with
-an existing SQLite `-wal`, `-shm`, or rollback `-journal` sidecar before it
-hashes, copies, opens, or sends schema information to a provider.
+Closing RootsMagic before querying or exporting is recommended. The CLI can
+accept a valid SQLite `-wal` generation only after fingerprinting,
+descriptor-relative copying, a full checkpoint, and consolidation inside a
+process-owned directory. A matching `-shm` is verified when present but SQLite
+reconstructs it only in owned staging when absent. Busy, malformed, replaced,
+symbolic-link, or non-regular sidecars are rejected; rollback `-journal` files
+and `-shm` files without a WAL are always rejected. The source database and
+sidecars are never opened by SQLite or modified, and schema is never sent to a
+provider before these checks complete.
 It also rejects hard-linked database aliases because SQLite sidecars are named
 for one pathname; use a standalone stable backup with a link count of one.
 Configured family-tree directories are identity-bound for each command. A

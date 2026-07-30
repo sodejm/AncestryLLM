@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import socket
 import sqlite3
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
+import ancestryllm.rootsmagic.reader as reader_module
 from ancestryllm.cli import main
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressLimits, FileKind
@@ -180,6 +182,64 @@ def test_rootsmagic_cli_path_normalizes_to_the_stable_sanitized_error(
     assert private_detail not in error
 
 
+def test_rootsmagic_export_rejects_directory_input_offline_and_atomically(
+    app_context: AppContext,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree_directory = tmp_path / "PRIVATE_ROOTSMAGIC_DIRECTORY.rmtree"
+    tree_directory.mkdir()
+    directory_before = tree_directory.stat()
+    output = tmp_path / "existing-directory-input.ged"
+    report = tmp_path / "existing-directory-input.md"
+    output.write_bytes(b"output sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    app_context.config.family_tree_dirs = [tmp_path]
+    provider_call = Mock(side_effect=AssertionError("provider must remain offline"))
+    network_call = Mock(side_effect=AssertionError("network must remain offline"))
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+    monkeypatch.setattr(socket, "create_connection", network_call)
+    monkeypatch.setattr(reader_module.tempfile, "tempdir", str(tmp_path))
+
+    assert (
+        main(
+            [
+                "--json",
+                "rootsmagic",
+                "export",
+                "--tree",
+                str(tree_directory),
+                "--output",
+                str(output),
+                "--report",
+                str(report),
+            ],
+            app_context,
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[FILE_INPUT_NOT_REGULAR]" in captured.err
+    assert str(tree_directory) not in captured.err
+    assert "PRIVATE_ROOTSMAGIC_DIRECTORY" not in captured.err
+    directory_after = tree_directory.stat()
+    assert (directory_after.st_dev, directory_after.st_ino, directory_after.st_mode) == (
+        directory_before.st_dev,
+        directory_before.st_ino,
+        directory_before.st_mode,
+    )
+    assert not list(tree_directory.iterdir())
+    assert output.read_bytes() == b"output sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+    assert not list(tmp_path.glob("ancestry-rootsmagic-*"))
+    provider_call.assert_not_called()
+    network_call.assert_not_called()
+
+
 @pytest.mark.parametrize("invalid_target", ("output", "report"))
 def test_rootsmagic_export_cli_output_paths_share_stable_sanitized_error(
     invalid_target: str,
@@ -233,6 +293,67 @@ def test_rootsmagic_export_cli_output_paths_share_stable_sanitized_error(
     assert report.read_bytes() == b"report sentinel\n"
     assert not list(tmp_path.glob(".ancestry-publish-*"))
     provider_call.assert_not_called()
+
+
+def test_rootsmagic_json_cli_budget_rejection_is_offline_atomic_and_redacted(
+    app_context: AppContext,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = tmp_path / "fictional-private-budget.rmtree"
+    _rootsmagic_tree(tree)
+    connection = sqlite3.connect(tree)
+    connection.execute("ALTER TABLE PersonTable ADD COLUMN Payload BLOB")
+    connection.execute(
+        "UPDATE PersonTable SET Payload = ? WHERE PersonID = 1",
+        (b"PRIVATE_BUDGET_CANARY" * 128,),
+    )
+    connection.commit()
+    connection.close()
+    source_before = (tree.read_bytes(), tree.stat().st_mtime_ns, tree.stat().st_mode)
+    app_context.config.family_tree_dirs = [tmp_path]
+    _set_limit(app_context, FileKind.ROOTSMAGIC, max_record_bytes=1024)
+    output = tmp_path / "existing.ged"
+    report = tmp_path / "existing.md"
+    output.write_bytes(b"GEDCOM sentinel\n")
+    report.write_bytes(b"report sentinel\n")
+    provider_call = Mock(side_effect=AssertionError("provider must remain offline"))
+    network_call = Mock(side_effect=AssertionError("network must remain offline"))
+    monkeypatch.setattr(app_context.llm, "generate", provider_call)
+    monkeypatch.setattr(socket, "create_connection", network_call)
+    monkeypatch.setattr(reader_module.tempfile, "tempdir", str(tmp_path))
+
+    assert (
+        main(
+            [
+                "--json",
+                "rootsmagic",
+                "export",
+                "--tree",
+                str(tree),
+                "--output",
+                str(output),
+                "--report",
+                str(report),
+            ],
+            app_context,
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[FILE_RECORD_TOO_LARGE]" in captured.err
+    assert str(tree) not in captured.err
+    assert "PRIVATE_BUDGET_CANARY" not in captured.err
+    assert (tree.read_bytes(), tree.stat().st_mtime_ns, tree.stat().st_mode) == source_before
+    assert output.read_bytes() == b"GEDCOM sentinel\n"
+    assert report.read_bytes() == b"report sentinel\n"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+    assert not list(tmp_path.glob("ancestry-rootsmagic-*"))
+    provider_call.assert_not_called()
+    network_call.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", (FileKind.PROMPT_BODY, FileKind.JSON_SCHEMA, FileKind.OCR))

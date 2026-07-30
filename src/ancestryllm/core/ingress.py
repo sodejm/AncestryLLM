@@ -81,6 +81,7 @@ class FileIngressLimits:
     rootsmagic: FileLimit = FileLimit(
         max_bytes=8_589_934_592,
         max_records=5_000_000,
+        max_record_bytes=16_777_216,
         max_collection_items=50_000,
     )
     ocr: FileLimit = FileLimit(

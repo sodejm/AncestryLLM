@@ -119,8 +119,13 @@ The GEDCOM and Markdown loss report form one staged publication transaction.
 Source identity is revalidated before and during publication, and failure
 restores the prior complete pair or leaves the new complete pair—never a
 partial pair. The RootsMagic input remains immutable. Existing SQLite `-wal`,
-`-shm`, and rollback `-journal` sidecars are rejected even when empty or stale;
-live-WAL interpretation is outside this release contract.
+and matching `-shm` sidecars when present, are accepted only when they can be
+fingerprinted, copied descriptor-relative, fully checkpointed, and consolidated
+inside a process-owned directory. SQLite reconstructs a missing SHM only in
+owned staging. Busy, malformed, replaced, symbolic-link, or non-regular
+sidecars are rejected. Rollback `-journal` files and `-shm` files without a WAL
+are always rejected. The source database and sidecars are never opened by
+SQLite and are revalidated throughout.
 
 Natural-language RootsMagic queries serialize the inspected schema and question
 as JSON data beneath a separate fixed system policy. The combined UTF-8 payload

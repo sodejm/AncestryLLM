@@ -20,7 +20,7 @@ one GEDCOM logical record.
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `config` | 1,048,576 | 65,536 | 20,000 | — | 16 | 20,000 |
 | `gedcom` | 536,870,912 | 1,048,576 | 5,000,000 | 16,777,216 | 99 | 250,000 |
-| `rootsmagic` | 8,589,934,592 | — | 5,000,000 aggregate and per table | — | — | 50,000 |
+| `rootsmagic` | 8,589,934,592 | — | 5,000,000 aggregate and per table | 16,777,216 | — | 50,000 |
 | `ocr` | 5,000,000 | 1,048,576 | 100,000 | — | — | — |
 | `manifest` | 33,554,432 | 1,048,576 | 500,000 | — | 64 | 2,000,000 |
 | `json_schema` | 2,097,152 | 262,144 | 50,000 | — | 64 | 100,000 |
@@ -28,7 +28,10 @@ one GEDCOM logical record.
 
 GEDCOM remains a streaming input: only one logical record is accumulated by
 the parser at a time. RootsMagic is opened read-only only after its regular-file
-and byte checks pass; table reads stop at the configured row limit plus one.
+and byte checks pass. Schema and table cursors are consumed incrementally;
+each row is validated before the next row is fetched. SQLite's connection-level
+length limit rejects very large text/blob values before Python materializes
+them, while the logical-row check enforces the exact configured byte budget.
 JSON and TOML documents are byte- and line-bounded before parsing, then checked
 for nesting and collection size. JSON containers and TOML arrays/inline tables
 are also scanned before recursive parser work, and parser recursion is mapped
@@ -54,13 +57,34 @@ verified directory capability, rather than reopening an unchecked absolute
 pathname. Replacing a parent with a symbolic link, junction, or different
 directory therefore fails as `FILE_INPUT_CHANGED` before database bytes,
 schema, or rows can reach SQLite, an export, or a provider.
-RootsMagic operations fail closed when any SQLite `-wal`, `-shm`, or rollback
-`-journal` sidecar path exists, including an empty, stale, or symbolic-link
-sidecar, instead of reading or copying an active transaction or risking mixed
-database generations. Close RootsMagic cleanly and retry only after all three
-sidecar paths are gone. Preflight reports `ROOTSMAGIC_WAL_ACTIVE`; a sidecar
-that appears after preflight, snapshot copy, or a provider call reports
-`FILE_INPUT_CHANGED`.
+RootsMagic operations accept a valid main database plus `-wal`, and verify a
+matching `-shm` when present, only after descriptor-bound fingerprints, a
+verified copy into a process-owned directory, a full WAL checkpoint, and
+SQLite backup consolidation. When SHM is absent, SQLite reconstructs it only in
+owned staging; the source is unchanged. The original database and sidecars are
+never opened by SQLite. The composite source identity is rechecked after every
+copy and consolidation step. A busy, malformed, replaced, symbolic-link, or
+non-regular sidecar fails closed with `ROOTSMAGIC_WAL_ACTIVE` or
+`FILE_INPUT_CHANGED`. Any rollback `-journal`, or an `-shm` without a WAL, is
+rejected. Closing RootsMagic or using a stable backup remains the most reliable
+operational choice, but a verified WAL generation is supported.
+Export reports identify whether the immutable SQLite snapshot came from a
+standalone main database or a verified main plus WAL generation. Raw
+sidecar paths and hashes remain deliberately absent from the user-facing
+report; the composite fingerprint stays internal so local filesystem metadata
+is not disclosed.
+
+The RootsMagic adversarial acceptance matrix is:
+
+| Input condition | Result and invariant |
+| --- | --- |
+| Stable standalone database; valid WAL with matching SHM when present | Accepted from a verified process-owned immutable snapshot; source bytes, schema, mode, and modification time remain unchanged. |
+| Rollback journal; SHM without WAL; malformed, busy, replaced, symbolic-link, or non-regular sidecar | Rejected with a stable sanitized error before rows, export content, or provider traffic. |
+| Corrupt/truncated SQLite or malformed/hostile schema identifiers | Rejected or safely quoted with no source mutation and no raw SQLite/path disclosure. |
+| Excessive tables, columns, aggregate rows, or per-table rows | Rejected incrementally at the configured collection/record boundary. |
+| Oversized text/blob, embedded NUL text, or invalid UTF-8 text | Rejected before publication; no output/report partials or temporary artifacts remain. |
+| Duplicate/missing person identifiers, orphan links, self-links, or relationship cycles | Rejected when identity is ambiguous; otherwise exported deterministically without inventing relationships. |
+
 Natural-language RootsMagic queries encode the inspected schema and question as
 one deterministic JSON data payload beneath a separate fixed system policy.
 The complete UTF-8 payload must fit `file_ingress.prompt_body.max_bytes` before
@@ -89,6 +113,7 @@ max_collection_items = 125000
 [file_ingress.rootsmagic]
 max_bytes = 4294967296
 max_records = 1000000
+max_record_bytes = 8388608
 max_collection_items = 25000
 
 [file_ingress.prompt_body]

@@ -22,7 +22,7 @@ from ancestryllm.core.publication import (
     staging_path,
     write_staged_text,
 )
-from ancestryllm.gedcom.engine import validate_gedcom_555
+from ancestryllm.gedcom.engine import _wrap_long_gedcom_lines, validate_gedcom_555
 from ancestryllm.rootsmagic.reader import RootsMagicReader
 from ancestryllm.rootsmagic.schema_adapter import (
     RootsMagicSchemaAdapter,
@@ -34,7 +34,11 @@ from ancestryllm.rootsmagic.schema_adapter import (
 def _value(row: dict[str, Any], *names: str, default: Any = "") -> Any:
     lowered = {key.casefold(): value for key, value in row.items()}
     for name in names:
-        if name.casefold() in lowered and lowered[name.casefold()] is not None:
+        if (
+            name.casefold() in lowered
+            and lowered[name.casefold()] is not None
+            and lowered[name.casefold()] != ""
+        ):
             return lowered[name.casefold()]
     return default
 
@@ -46,10 +50,15 @@ def _clean_text(value: Any) -> str:
 
 
 def _identifier(row: dict[str, Any], *names: str) -> str:
-    value = _value(row, *names, default="")
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return _clean_text(value)
+    for name in names:
+        value = _value(row, name, default="")
+        if isinstance(value, float) and value.is_integer():
+            result = str(int(value))
+        else:
+            result = _clean_text(value)
+        if result.casefold() not in {"", "0", "none"}:
+            return result
+    return ""
 
 
 def _truthy(value: Any) -> bool:
@@ -78,22 +87,89 @@ def _tag_name(column: str) -> str:
     return ("_RM_" + clean)[:31]
 
 
+def _text_lines(level: int, tag: str, value: Any) -> list[str]:
+    """Preserve logical newlines with CONT while normalizing each text line."""
+
+    if isinstance(value, bytes) or value is None:
+        return []
+    logical = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    parts = [" ".join(part.split()) for part in logical.split("\n")]
+    if not any(parts):
+        return []
+    first = f"{level} {tag}" + (f" {parts[0]}" if parts[0] else "")
+    result = [first]
+    for part in parts[1:]:
+        result.append(f"{level + 1} CONT" + (f" {part}" if part else ""))
+    return result
+
+
+_ALIAS_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "name": (
+        ("Given", "GivenName"),
+        ("Surname", "LastName"),
+        ("IsPrimary", "PrimaryName"),
+    ),
+    "place": (("Name", "PlaceName"),),
+    "event": (
+        ("EventType", "Type"),
+        ("Date", "EventDate"),
+        ("Detail", "Description", "Note"),
+    ),
+    "note": (("Text", "Note"),),
+    "source": (("Title", "Name"), ("Text", "Detail")),
+    "citation": (("Detail", "Text"),),
+    "media": (("File", "Filename", "Path"), ("Caption", "Title")),
+}
+
+
+def _retained_alias_values(
+    row: dict[str, Any],
+    alias_groups: tuple[tuple[str, ...], ...],
+) -> list[tuple[str, Any]]:
+    """Return non-selected, distinct populated aliases in stable order."""
+
+    by_folded = {column.casefold(): (column, value) for column, value in row.items()}
+    retained: list[tuple[str, Any]] = []
+    for group in alias_groups:
+        populated: list[tuple[str, Any, str]] = []
+        for alias in group:
+            item = by_folded.get(alias.casefold())
+            if item is None or item[1] is None or item[1] == "" or isinstance(item[1], bytes):
+                continue
+            cleaned = _clean_text(item[1])
+            if cleaned:
+                populated.append((item[0], item[1], cleaned))
+        if not populated:
+            continue
+        seen = {populated[0][2]}
+        for column, raw, cleaned in populated[1:]:
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+            retained.append((column, raw))
+    return retained
+
+
 def _extension_lines(
     row: dict[str, Any],
     known_columns: frozenset[str],
     *,
     level: int,
+    alias_groups: tuple[tuple[str, ...], ...] = (),
 ) -> list[str]:
     """Return privacy-safe scalar extensions in deterministic column order."""
 
     result: list[str] = []
-    for column, raw in sorted(row.items(), key=lambda item: item[0].casefold()):
+    for column, raw in _retained_alias_values(row, alias_groups):
+        result.extend(_text_lines(level, _tag_name(column), raw))
+    for column, raw in sorted(
+        row.items(),
+        key=lambda item: (item[0].casefold(), unicodedata.normalize("NFC", item[0])),
+    ):
         cancellation_checkpoint()
         if column.casefold() in known_columns or raw is None or raw == "" or isinstance(raw, bytes):
             continue
-        value = _clean_text(raw)
-        if value:
-            result.append(f"{level} {_tag_name(column)} {value}")
+        result.extend(_text_lines(level, _tag_name(column), raw))
     return result
 
 
@@ -141,6 +217,19 @@ _KNOWN_COLUMNS: dict[str, frozenset[str]] = {
             "detail",
             "description",
             "note",
+        }
+    ),
+    "fact_type": frozenset(
+        {
+            "facttypeid",
+            "eventtypeid",
+            "typeid",
+            "id",
+            "name",
+            "eventname",
+            "gedcomtag",
+            "gedcom",
+            "tag",
         }
     ),
     "note": frozenset({"noteid", "id", "ownerid", "personid", "familyid", "text", "note"}),
@@ -200,22 +289,29 @@ _EVENT_TAGS = {
 }
 
 
-def _event_lines(row: dict[str, Any], place_names: dict[str, str]) -> list[str]:
+def _event_lines(
+    row: dict[str, Any],
+    place_names: dict[str, tuple[str, ...]],
+    event_types: dict[str, tuple[str, str]],
+) -> list[str]:
     event_type = _clean_text(_value(row, "EventType", "Type"))
-    tag = _EVENT_TAGS.get(event_type.casefold(), "EVEN")
+    metadata_tag, metadata_name = event_types.get(event_type, ("", ""))
+    resolved_name = metadata_name or event_type
+    tag = metadata_tag or _EVENT_TAGS.get(resolved_name.casefold(), "EVEN")
     result = [f"1 {tag}"]
-    if tag == "EVEN" and event_type:
-        result.append(f"2 TYPE {event_type}")
+    if tag == "EVEN" and resolved_name:
+        result.extend(_text_lines(2, "TYPE", resolved_name))
     date = _clean_text(_value(row, "Date", "EventDate"))
     if date:
         result.append(f"2 DATE {date}")
     place_id = _identifier(row, "PlaceID")
-    place = place_names.get(place_id) or _clean_text(_value(row, "Place"))
-    if place:
-        result.append(f"2 PLAC {place}")
-    detail = _clean_text(_value(row, "Detail", "Description", "Note"))
-    if detail:
-        result.append(f"2 NOTE {detail}")
+    places = place_names.get(place_id, ())
+    if not places:
+        inline_place = _clean_text(_value(row, "Place"))
+        places = (inline_place,) if inline_place else ()
+    for place in places:
+        result.extend(_text_lines(2, "PLAC", place))
+    result.extend(_text_lines(2, "NOTE", _value(row, "Detail", "Description", "Note")))
     return result
 
 
@@ -256,11 +352,13 @@ class ExportReport:
         output: Path,
         *,
         omitted_records: dict[str, int] | None = None,
+        sqlite_snapshot: str,
     ) -> str:
         lines = [
             "# RootsMagic GEDCOM Export Report",
             "",
             f"- Source: `{source.name}`",
+            f"- SQLite snapshot: `{sqlite_snapshot}`",
             f"- Output: `{output.name}`",
             f"- Profile: `{self.profile}`",
             f"- Destination check: `{self.destination}`",
@@ -410,6 +508,25 @@ class RootsMagicExporter:
                 "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
                 "PersonTable is missing or empty; a safe GEDCOM cannot be produced.",
             )
+        person_identifier_column = next(
+            (
+                column
+                for candidate in ("PersonID", "ID")
+                for column in person_table.columns
+                if column.casefold() == candidate.casefold()
+            ),
+            None,
+        )
+        person_identifier_type = person_table.declared_type("PersonID", "ID")
+        if (
+            person_identifier_column is None
+            or person_identifier_type is None
+            or "INT" not in person_identifier_type.upper()
+        ):
+            raise AncestryError(
+                "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
+                "Person identifier declaration is incompatible; safe export is unavailable.",
+            )
         people_rows = list(person_table.rows)
         name_rows = adapter.rows("name")
         family_rows = adapter.rows("family")
@@ -426,6 +543,12 @@ class RootsMagicExporter:
         living_ids: set[str] = set()
         for row in people_rows:
             cancellation_checkpoint()
+            raw_person_id = _value(row, person_identifier_column, default=None)
+            if isinstance(raw_person_id, bool) or not isinstance(raw_person_id, int):
+                raise AncestryError(
+                    "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
+                    "Person identifier values are incompatible; safe export is unavailable.",
+                )
             person_id = _identifier(row, "PersonID", "ID")
             if not person_id or person_id in people_by_id:
                 raise AncestryError(
@@ -497,11 +620,38 @@ class RootsMagicExporter:
             for index, row in enumerate(publishable_families, 1)
         }
 
+        place_values: dict[str, set[str]] = defaultdict(set)
+        for row in adapter.rows("place"):
+            cancellation_checkpoint()
+            place_id = _identifier(row, "PlaceID", "ID")
+            place_name = _clean_text(_value(row, "Name", "PlaceName"))
+            if place_id and place_name:
+                place_values[place_id].add(place_name)
         place_names = {
-            _identifier(row, "PlaceID", "ID"): _clean_text(_value(row, "Name", "PlaceName"))
-            for row in adapter.rows("place")
-            if _identifier(row, "PlaceID", "ID")
+            place_id: tuple(sorted(values, key=semantic_value))
+            for place_id, values in place_values.items()
         }
+        event_types: dict[str, tuple[str, str]] = {}
+        for row in sorted(
+            adapter.rows("fact_type"),
+            key=lambda item: semantic_row_key(
+                item,
+                "FactTypeID",
+                "EventTypeID",
+                "TypeID",
+                "ID",
+            ),
+        ):
+            cancellation_checkpoint()
+            type_id = _identifier(row, "FactTypeID", "EventTypeID", "TypeID", "ID")
+            if not type_id or type_id in event_types:
+                continue
+            metadata_name = _clean_text(_value(row, "Name", "EventName"))
+            candidate_tag = _clean_text(_value(row, "GedcomTag", "Gedcom", "Tag")).upper()
+            metadata_tag = (
+                candidate_tag if re.fullmatch(r"[A-Z_][A-Z0-9_]{0,30}", candidate_tag) else ""
+            )
+            event_types[type_id] = (metadata_tag, metadata_name)
         event_rows = sorted(
             adapter.rows("event"),
             key=lambda row: semantic_row_key(row, "EventID", "ID"),
@@ -556,6 +706,19 @@ class RootsMagicExporter:
             _identifier(row, "SourceID", "ID"): f"@S{index}@"
             for index, row in enumerate(publishable_sources, 1)
         }
+        sources_by_person: dict[str, list[str]] = defaultdict(list)
+        sources_by_family: dict[str, list[str]] = defaultdict(list)
+        for row in publishable_sources:
+            cancellation_checkpoint()
+            source_id = _identifier(row, "SourceID", "ID")
+            if source_id in referenced_safe_sources:
+                continue
+            person_id = _identifier(row, "OwnerID", "PersonID")
+            family_id = _identifier(row, "FamilyID")
+            if person_id and safe_owner(row):
+                sources_by_person[person_id].append(source_id)
+            elif family_id and safe_owner(row):
+                sources_by_family[family_id].append(source_id)
 
         events_by_person: dict[str, list[dict[str, Any]]] = defaultdict(list)
         events_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -638,6 +801,12 @@ class RootsMagicExporter:
             "source": len(publishable_sources),
             "citation": len(serialized_citations),
             "media": len(serialized_media),
+            "fact_type": sum(
+                1
+                for row in adapter.rows("fact_type")
+                if _identifier(row, "FactTypeID", "EventTypeID", "TypeID", "ID")
+                in {_clean_text(_value(event, "EventType", "Type")) for event in serialized_events}
+            ),
         }
         omitted_records: dict[str, int] = {}
         for logical_name, serialized_count in serialized_counts.items():
@@ -667,43 +836,68 @@ class RootsMagicExporter:
             note_index: dict[str, list[dict[str, Any]]],
             citation_index: dict[str, list[dict[str, Any]]],
             media_index: dict[str, list[dict[str, Any]]],
+            source_index: dict[str, list[str]],
         ) -> None:
             for event in event_index.get(owner_id, []):
                 cancellation_checkpoint()
-                lines.extend(_event_lines(event, place_names))
+                lines.extend(_event_lines(event, place_names, event_types))
                 if profile == "preservation":
-                    lines.extend(_extension_lines(event, _KNOWN_COLUMNS["event"], level=2))
+                    lines.extend(
+                        _extension_lines(
+                            event,
+                            _KNOWN_COLUMNS["event"],
+                            level=2,
+                            alias_groups=_ALIAS_GROUPS["event"],
+                        )
+                    )
             for note in note_index.get(owner_id, []):
-                text = _clean_text(_value(note, "Text", "Note"))
-                if text:
-                    lines.append(f"1 NOTE {text}")
+                note_lines = _text_lines(1, "NOTE", _value(note, "Text", "Note"))
+                if note_lines:
+                    lines.extend(note_lines)
                     if profile == "preservation":
-                        lines.extend(_extension_lines(note, _KNOWN_COLUMNS["note"], level=2))
+                        lines.extend(
+                            _extension_lines(
+                                note,
+                                _KNOWN_COLUMNS["note"],
+                                level=2,
+                                alias_groups=_ALIAS_GROUPS["note"],
+                            )
+                        )
             for citation in citation_index.get(owner_id, []):
                 source_id = _identifier(citation, "SourceID")
                 if source_id not in source_map:
                     continue
                 lines.append(f"1 SOUR {source_map[source_id]}")
-                page = _clean_text(_value(citation, "Page"))
-                detail = _clean_text(_value(citation, "Detail", "Text"))
-                if page:
-                    lines.append(f"2 PAGE {page}")
-                if detail:
-                    lines.append(f"2 DATA {detail}")
+                lines.extend(_text_lines(2, "PAGE", _value(citation, "Page")))
+                lines.extend(_text_lines(2, "DATA", _value(citation, "Detail", "Text")))
                 if profile == "preservation":
-                    lines.extend(_extension_lines(citation, _KNOWN_COLUMNS["citation"], level=2))
+                    lines.extend(
+                        _extension_lines(
+                            citation,
+                            _KNOWN_COLUMNS["citation"],
+                            level=2,
+                            alias_groups=_ALIAS_GROUPS["citation"],
+                        )
+                    )
             for media in media_index.get(owner_id, []):
                 filename = _clean_text(_value(media, "File", "Filename", "Path"))
                 caption = _clean_text(_value(media, "Caption", "Title"))
                 if not filename and not caption:
                     continue
                 lines.append("1 OBJE")
-                if filename:
-                    lines.append(f"2 FILE {filename}")
-                if caption:
-                    lines.append(f"2 TITL {caption}")
+                lines.extend(_text_lines(2, "FILE", _value(media, "File", "Filename", "Path")))
+                lines.extend(_text_lines(2, "TITL", _value(media, "Caption", "Title")))
                 if profile == "preservation":
-                    lines.extend(_extension_lines(media, _KNOWN_COLUMNS["media"], level=2))
+                    lines.extend(
+                        _extension_lines(
+                            media,
+                            _KNOWN_COLUMNS["media"],
+                            level=2,
+                            alias_groups=_ALIAS_GROUPS["media"],
+                        )
+                    )
+            for source_id in source_index.get(owner_id, []):
+                lines.append(f"1 SOUR {source_map[source_id]}")
 
         unmapped_columns: dict[str, list[str]] = {}
         for logical_name in _KNOWN_COLUMNS:
@@ -720,6 +914,14 @@ class RootsMagicExporter:
                 unsupported.update(
                     column for column, value in row.items() if isinstance(value, bytes)
                 )
+                if profile == "portable":
+                    unsupported.update(
+                        column
+                        for column, _value_to_retain in _retained_alias_values(
+                            row,
+                            _ALIAS_GROUPS.get(logical_name, ()),
+                        )
+                    )
             if unsupported:
                 unmapped_columns[table.actual_name] = sorted(unsupported, key=str.casefold)
 
@@ -740,7 +942,14 @@ class RootsMagicExporter:
                     f"1 NAME {given} /{surname}/" if surname else f"1 NAME {given or 'Unknown'}"
                 )
                 if profile == "preservation":
-                    lines.extend(_extension_lines(name, _KNOWN_COLUMNS["name"], level=2))
+                    lines.extend(
+                        _extension_lines(
+                            name,
+                            _KNOWN_COLUMNS["name"],
+                            level=2,
+                            alias_groups=_ALIAS_GROUPS["name"],
+                        )
+                    )
             raw_sex = _clean_text(_value(row, "Sex", "Gender")).upper()
             sex = {"0": "M", "1": "F", "2": "U"}.get(raw_sex, raw_sex[:1])
             if sex in {"M", "F", "U", "X"}:
@@ -753,6 +962,7 @@ class RootsMagicExporter:
                 notes_by_person,
                 citations_by_person,
                 media_by_person,
+                sources_by_person,
             )
 
         for row in publishable_families:
@@ -776,21 +986,26 @@ class RootsMagicExporter:
                 notes_by_family,
                 citations_by_family,
                 media_by_family,
+                sources_by_family,
             )
 
         for row in publishable_sources:
             cancellation_checkpoint()
             source_id = _identifier(row, "SourceID", "ID")
             lines.append(f"0 {source_map[source_id]} SOUR")
-            title = _clean_text(_value(row, "Title", "Name"))
-            text = _clean_text(_value(row, "Text", "Detail"))
-            if title:
-                lines.append(f"1 TITL {title}")
-            if text:
-                lines.append(f"1 TEXT {text}")
+            lines.extend(_text_lines(1, "TITL", _value(row, "Title", "Name")))
+            lines.extend(_text_lines(1, "TEXT", _value(row, "Text", "Detail")))
             if profile == "preservation":
-                lines.extend(_extension_lines(row, _KNOWN_COLUMNS["source"], level=1))
+                lines.extend(
+                    _extension_lines(
+                        row,
+                        _KNOWN_COLUMNS["source"],
+                        level=1,
+                        alias_groups=_ALIAS_GROUPS["source"],
+                    )
+                )
         lines.append("0 TRLR")
+        lines = _wrap_long_gedcom_lines(lines)
         _validate_export(lines, gedcom_version)
 
         report = ExportReport(
@@ -873,6 +1088,7 @@ class RootsMagicExporter:
             )
         try:
             fingerprint = self.reader.fingerprint_source(source_tree)
+            sqlite_snapshot = self.reader.snapshot_provenance(fingerprint)
             with self.reader.operation(source_tree, fingerprint) as schema:
                 adapter = RootsMagicSchemaAdapter(
                     self.reader,
@@ -906,6 +1122,7 @@ class RootsMagicExporter:
                     source_tree,
                     resolved_output,
                     omitted_records=omitted_records,
+                    sqlite_snapshot=sqlite_snapshot,
                 ),
             )
             claim_staged_path(staged_report, report_token)
