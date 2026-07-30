@@ -49,7 +49,7 @@ earlier priority.
 flowchart LR
     Operator["Local operator"]
     CLI["One-shot CLI\nancestry ..."]
-    Console["Interactive cmd2 console\nancestry"]
+    Console["Interactive prompt-toolkit/Rich REPL\nancestry"]
     Services["Application services"]
     Domain["Genealogy and LLM DTOs"]
     Workspace["Encrypted SQLCipher\nworkspace"]
@@ -139,9 +139,9 @@ The intended dependency rules are:
 
 - Console command sets contain no business logic. They translate tokens into
   the canonical CLI dispatcher.
-- Services do not import `cmd2`, Rich, or console modules. They return typed
-  DTOs, paths, or serializable values and normally raise stable `AncestryError`
-  subclasses.
+- Services do not import `prompt_toolkit`, Rich, or console modules. They return
+  typed DTOs, paths, or serializable values and normally raise stable
+  `AncestryError` subclasses.
 - Presentation converts dataclasses, SQLAlchemy rows, paths, and collections to
   plain values. `--json` and human output represent the same result.
 - Provider adapters implement generation only. They cannot discover modules,
@@ -240,8 +240,10 @@ must first exist here so one-shot and interactive behavior cannot drift.
 
 ### Interactive console
 
-The current `console/app.py` is a `cmd2` shell over `run_tokens()`. It is the
-legacy implementation retained during the migration described in
+The current `console/app.py` compatibility entry point starts the asynchronous
+prompt-toolkit/Rich REPL implemented in `console/shell.py`. Its UI-independent
+`SessionRouter` parses commands from the shared `CommandSpec` metadata, and the
+shell executes them through the canonical `cli.dispatch()` path described in
 [`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md):
 
 - command sets are explicit built-ins loaded only when enabled;
@@ -249,17 +251,19 @@ legacy implementation retained during the migration described in
   module state;
 - shell execution, Python execution, script execution, redirection, editing,
   and shortcuts are disabled;
-- secret-like option names are rejected, while secret entry uses no-echo
-  `getpass` through the secrets command;
+- secret-like option names are rejected, while the secrets command uses
+  no-echo prompt-toolkit password prompts;
 - history is stored under the private data directory with owner-only mode where
-  supported.
+  supported;
+- bounded background jobs expose structured progress, cooperative cancellation,
+  and cancellation-resistant shutdown.
 
-The target replacement is a `prompt_toolkit` input adapter with a UI-neutral
-session router, typed command executors, structured progress, and Rich
-presentation. It must remain a sibling adapter over the same application
-services. One-shot CLI grammar, JSON serialization, stable coded errors,
-consent authorization, and network-free `provider=none` behavior are
-compatibility contracts during and after the migration.
+The REPL remains a sibling adapter over the same application services as the
+one-shot CLI. A transport-neutral executor and DTO boundary beyond the current
+shared command metadata and dispatcher remains planned for 0.3; it must not
+create a second UI-specific registry. One-shot CLI grammar, JSON serialization,
+stable coded errors, consent authorization, and network-free `provider=none`
+behavior remain compatibility contracts.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
