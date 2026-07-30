@@ -91,6 +91,9 @@ dependency.
   history, and interactive history is stored with owner-only permissions.
 - Provider selection and consent stay explicit. `provider=none` remains
   network-free even when keys or provider SDKs are installed.
+- The shared services keep RootsMagic inputs immutable and GEDCOM processing
+  rooted, loss-minimal, and atomically published; the REPL cannot weaken these
+  policies through session state.
 - Background jobs expose queued, running, completed, failed, and cancelled
   states. Their serialized snapshots expose `cancellation_requested_at`,
   `cancellation_pending`, and `cancellation_deferred_by`; the last field is a
@@ -113,6 +116,21 @@ dependency.
   provider/execution/cache resources, and finally closes database sessions.
   Each later cleanup is attempted after an earlier failure, then the original
   failure or outer cancellation is propagated.
+
+### CLI and REPL outcome mapping
+
+| Concern | One-shot CLI | Interactive REPL |
+|---|---|---|
+| Command metadata and execution | Builds a typed invocation from the shared `CommandSpec` registry and resolves it through `CommandExecutor` | Uses the same registry, parser metadata, typed invocation, and `CommandExecutor` |
+| Success | Returns process exit code `0` and renders the service DTO | Keeps the session open and renders the same DTO; background result snapshots retain the dispatch exit code |
+| Application failure | Renders the bracketed `AncestryError.code`, safe message, optional remediation, and returns `AncestryError.exit_code` (normally `1`) | Renders the same bracketed code, safe message, remediation, and serializable details, then keeps the session open |
+| Usage, input, or local file failure | Preserves argparse presentation where applicable and returns exit code `2` | Renders a safe coded usage/input error carrying exit code `2`, without a traceback, and keeps the session open |
+| JSON | `--json` serializes the plain service result without terminal objects | A command-level `--json` serializes the same plain service result without Rich objects |
+
+The REPL deliberately has no per-command process exit status because a failed
+command does not end the process. The numeric exit code remains part of the
+stable error contract and background dispatch result; automation that needs a
+process status continues to use the one-shot CLI.
 
 ## Migration status
 
