@@ -61,7 +61,7 @@ flowchart TB
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
-| GEDCOM parsing, graph, identity, quality, serialization, service, and synchronization seams | declared public modules in `ancestryllm.gedcom`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
+| GEDCOM document model, physical-line parser, validator, deterministic line serializer, graph, identity, quality, service, and synchronization seams | pure document modules behind the declared `parser` and `serialization` façades; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` (#163) |
 | RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
@@ -80,6 +80,10 @@ The checker enforces these rules:
   import Click, prompt-toolkit, Rich, FastAPI, Pydantic, Electron, provider
   SDKs, configuration, keyring, storage, publication implementations, or
   host-filesystem `Path` objects;
+- the GEDCOM document model, validator, and deterministic line serializer may
+  depend only on the Python standard library and one another; they cannot
+  import application, infrastructure, adapter, provider, publication, or
+  compatibility-engine code;
 - private GEDCOM and RootsMagic compatibility modules may be imported only by
   the exact importer modules declared in `PRIVATE_MODULE_GATEWAYS`; owner
   package membership does not grant blanket access, and application services
@@ -110,7 +114,9 @@ detail was already in a declared façade.
 The Unreleased RootsMagic public inventory includes the package façade plus
 `core`, `query`, and `export`. The GEDCOM inventory exposes parser, graph,
 identity, quality, serialization, service, and synchronization seams. The
-centralized private modules remain characterized compatibility kernels, not
+parser and serialization façades now re-export a physically separate pure
+document model, validator, and deterministic line serializer. Remaining
+centralized private operations remain characterized compatibility kernels, not
 supported consumer APIs.
 
 ## Temporary exception lifecycle
