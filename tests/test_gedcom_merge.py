@@ -7,6 +7,7 @@ directories, so the suite runs without the network, Ollama, or remote APIs.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -72,6 +73,15 @@ class TestNormaliseGedcomDate:
         result = gm.normalise_gedcom_date(bad)
         assert isinstance(result, str)
 
+    def test_unparseable_value_is_not_written_to_debug_logs(self, caplog):
+        private_value = "PRIVATE-DATE-CANARY is not a date"
+
+        with caplog.at_level(logging.DEBUG, logger=gm.__name__):
+            assert gm.normalise_gedcom_date(private_value) == private_value
+
+        assert private_value not in caplog.text
+        assert "Could not normalise a GEDCOM date value" in caplog.text
+
     def test_month_year_only(self):
         assert gm.normalise_gedcom_date("JUL 1850") == "JUL 1850"
 
@@ -128,6 +138,29 @@ class TestIndividualRecord:
     def test_birth_year_none_when_no_date(self):
         rec = _make_record(birth_date="")
         assert rec.birth_year is None
+
+    def test_operator_prompt_is_local_stdout_only(
+        self,
+        caplog,
+        capsys,
+        monkeypatch,
+    ):
+        first = _make_record(given_name="Fictional-Operator-Canary-A")
+        second = _make_record(
+            pointer="@I2@",
+            given_name="Fictional-Operator-Canary-B",
+            source_file="/fake/file_b.ged",
+        )
+        monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+
+        with caplog.at_level(logging.DEBUG):
+            assert gm.prompt_operator(first, second) is False
+
+        output = capsys.readouterr().out
+        assert "Fictional-Operator-Canary-A" in output
+        assert "Fictional-Operator-Canary-B" in output
+        assert "Fictional-Operator-Canary-A" not in caplog.text
+        assert "Fictional-Operator-Canary-B" not in caplog.text
 
     def test_summary_contains_name(self):
         rec = _make_record(given_name="Jane", surname="Doe")

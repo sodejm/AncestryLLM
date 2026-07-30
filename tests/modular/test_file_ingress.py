@@ -2558,7 +2558,7 @@ def test_copy_only_install_rejects_same_size_restored_mtime_source_race(
     def mutate_before_copy_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -2658,7 +2658,7 @@ def test_simulated_windows_cleanup_uses_handle_deletion_without_opening_director
     def reject_windows_directory_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -2805,7 +2805,7 @@ def test_simulated_windows_writer_retries_cleanup_after_closing_shared_descripto
     def track_writer_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -2871,7 +2871,7 @@ def test_simulated_windows_copy_failure_retries_cleanup_after_descriptor_close(
     def track_destination_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -3099,7 +3099,7 @@ def test_private_candidate_digest_verification_requests_noatime(
     def record_candidate_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -3135,7 +3135,7 @@ def test_backup_destination_close_failure_removes_the_untracked_copy(
     def record_backup_descriptor(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -3178,7 +3178,7 @@ def test_backup_copy_race_cannot_overwrite_a_symlink_referent(
     def race_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -3661,7 +3661,7 @@ def test_failed_private_install_never_exposes_partial_public_bytes(
     def track_private_install_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
@@ -4844,7 +4844,7 @@ def test_hardlink_fallback_uses_nonblocking_open_and_rejects_fifo_swap(
     def swap_before_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
