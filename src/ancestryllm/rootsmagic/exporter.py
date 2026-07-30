@@ -22,7 +22,8 @@ from ancestryllm.core.publication import (
     staging_path,
     write_staged_text,
 )
-from ancestryllm.gedcom.engine import _wrap_long_gedcom_lines, validate_gedcom_555
+from ancestryllm.gedcom.parser import validate_gedcom_555
+from ancestryllm.gedcom.serialization import wrap_long_gedcom_lines
 from ancestryllm.rootsmagic.reader import RootsMagicReader
 from ancestryllm.rootsmagic.schema_adapter import (
     RootsMagicSchemaAdapter,
@@ -1005,7 +1006,7 @@ class RootsMagicExporter:
                     )
                 )
         lines.append("0 TRLR")
-        lines = _wrap_long_gedcom_lines(lines)
+        lines = wrap_long_gedcom_lines(lines)
         _validate_export(lines, gedcom_version)
 
         report = ExportReport(

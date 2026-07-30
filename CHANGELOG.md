@@ -6,16 +6,34 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.3.0] - 2026-07-29
+
 ### Added
 
-- Release automation and evidence gates for future CLI releases.
+- One shared `CommandSpec` and dispatch-key inventory for both the one-shot CLI
+  and prompt-toolkit/Rich REPL.
+- A transport-neutral `CommandInvocation`/`CommandOutcome` contract and shared
+  `CommandExecutor`, with stable error mapping and opaque artifact references.
+- Framework-independent application ports, operation DTOs, and genealogy result
+  contracts for future adapters to consume.
+- A service-owned genealogy aggregate for canonical identity, provenance,
+  deterministic change/conflict accounting, and quality findings.
+- Exact release configuration and evidence gates for the 0.3.0 milestone and
+  tracker.
 
 ### Changed
 
+- Migrated CLI and REPL dispatch to the same immutable executor registry while
+  preserving command grammar, JSON payloads, coded errors, consent, offline
+  behavior, and artifact contracts established by 0.2.0.
 - Routed GEDCOM merge, incremental update, and quality assistance exclusively
   through the modular provider service, including operational named profiles,
   shared Ollama clients, bounded scheduling, exact-result single-flight
   caching, and privacy-minimal audit telemetry.
+- Reconciled architecture, console, user, contributor, module-authoring,
+  versioning, release, and agent guidance around implemented 0.3.0 boundaries.
 
 ### Security
 
@@ -30,7 +48,7 @@ All notable changes to AncestryLLM are recorded here. The project follows
   because bounded relative context can include people whose living status is
   unknown.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-07-29
 
 ### Added
 
@@ -72,5 +90,6 @@ All notable changes to AncestryLLM are recorded here. The project follows
   SHM files without a WAL; and bounds schema-assisted query prompts with the stable
   `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
-[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sodejm/AncestryLLM/releases/tag/v0.2.0

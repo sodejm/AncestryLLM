@@ -1,9 +1,15 @@
 # Contributing
 
-Use Python 3.12-3.14, create a focused branch, and run `make setup`. Put domain
-logic in services, not console adapters. New providers implement the common
+Use Python 3.12-3.14, create a focused branch, and run `make setup`. Define
+commands through the shared `CommandSpec`, route both terminal adapters through
+`CommandInvocation` and `CommandExecutor`, and put domain logic in services,
+not presentation or dispatch adapters. Core and application contracts must
+remain independent of Click, prompt-toolkit, Rich, FastAPI/Pydantic, Electron,
+provider SDKs, and host-filesystem objects. New providers implement the common
 contract and mocked timeout/malformed-output/consent/offline tests. New modules
-must be explicit built-ins with one-shot and console parity.
+must be explicit built-ins with one-shot and console parity; follow the
+[module-authoring contract](docs/MODULE_AUTHORING.md) rather than adding a
+second command registry.
 
 Before a pull request run
 `make test lint typecheck security sbom package workflow-audit`. Describe
@@ -20,6 +26,11 @@ families, conflicts, and conservative removal invariants. RootsMagic fixtures
 must be synthetic and source files must remain hash-identical after tests.
 
 ## Secure desktop development
+
+The current 0.3.0 runtime has no FastAPI routes, Electron application, renderer,
+preload bridge, or desktop package. Those components are later-roadmap adapters
+that must consume the existing application-service surface without redefining
+command or genealogy behavior.
 
 Desktop work is governed by
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)

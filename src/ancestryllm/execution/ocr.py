@@ -1,0 +1,33 @@
+"""Focused OCR extraction command handler."""
+
+from __future__ import annotations
+
+from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.core.context import AppContext
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+from ancestryllm.execution.common import consent, optional_text, path, text
+
+
+class OcrExecutor:
+    def __init__(self, context: AppContext, ingress: FileIngressPolicy) -> None:
+        self._context = context
+        self._ingress = ingress
+
+    def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        from ancestryllm.ocr.service import OcrService
+
+        source = self._ingress.read_text(path(invocation, "input"), FileKind.OCR)
+        return CommandOutcome(
+            OcrService(self._context.llm).extract(
+                source,
+                provider_id=text(invocation, "provider"),
+                model=text(invocation, "model"),
+                consent=consent(
+                    self._context,
+                    optional_text(invocation, "consent"),
+                ),
+            )
+        )
+
+
+__all__ = ["OcrExecutor"]

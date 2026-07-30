@@ -44,9 +44,13 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from ancestryllm.gedcom.contracts import IdentityResolver, QualityResolver
+    from ancestryllm.gedcom.contracts import (
+        DuplicateDecision,
+        IdentityResolver,
+        QualityResolver,
+    )
 
-from ancestryllm.core.cancellation import cancellation_checkpoint
+from ancestryllm.core.cancellation import CancellationError, cancellation_checkpoint
 from ancestryllm.core.errors import FileIngressError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind, FileSnapshot
 from ancestryllm.core.publication import (
@@ -2640,16 +2644,18 @@ def merge_two_records(
     )
 
 
-def prompt_operator(a: IndividualRecord, b: IndividualRecord) -> bool:
-    """Display a pair locally and ask for confirmation, without logging it."""
-    # The operator explicitly requested this local, ephemeral adjudication
-    # display; it is required for the decision and is never logged or persisted.
-    prompt = f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}\nSame person? [y/N]: "
-    try:
-        answer = input(prompt).strip().casefold()
-    except EOFError:
+def _resolve_duplicate_decision(
+    left: IndividualRecord,
+    right: IndividualRecord,
+    decision: DuplicateDecision | None,
+) -> bool:
+    """Invoke an injected decision callback and conservatively fail closed."""
+    if decision is None:
         return False
-    return answer in {"y", "yes"}
+    try:
+        return decision(left, right) is True
+    except (CancellationError, EOFError, KeyboardInterrupt):
+        return False
 
 
 def _get_ai_verdict(
@@ -2669,6 +2675,7 @@ def merge_records(
     pointer_map: Optional[dict[str, str]] = None,
     decisions: Optional[list[MergeDecision]] = None,
     duplicate_limits: Optional[DuplicateSearchLimits] = None,
+    duplicate_decision: DuplicateDecision | None = None,
 ) -> list[IndividualRecord]:
     """Merge candidate people while retaining every source fact and family edge.
 
@@ -2688,6 +2695,9 @@ def merge_records(
             pairs but do not affect merge behavior.
         duplicate_limits: Candidate and adjudication budgets.  Defaults are
             deliberately bounded for production-sized common-name groups.
+        duplicate_decision: Optional transport-owned callback for low-confidence
+            matches. Missing, cancelled, interrupted, and EOF decisions retain
+            both people.
 
     Returns:
         Canonical people in stable source order.
@@ -2822,7 +2832,15 @@ def merge_records(
             confidence = _confidence_value(verdict)
             if confidence < AI_CONFIDENCE_AUTO_ACCEPT:
                 verdict = dict(verdict)
-                verdict["is_duplicate"] = False if auto else prompt_operator(first, second)
+                verdict["is_duplicate"] = (
+                    False
+                    if auto
+                    else _resolve_duplicate_decision(
+                        first,
+                        second,
+                        duplicate_decision,
+                    )
+                )
             if not bool(verdict.get("is_duplicate", False)):
                 if decisions is not None:
                     decisions.append(
@@ -4691,9 +4709,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         if quality_report is not None:
             write_quality_report(quality_report, quality_path)
-        print(f"Merge complete: {len(all_records)} individuals -> {len(merged)} in {output}")
-        if quality_report is not None:
-            print(f"Quality report: {quality_path}")
         return 0
     except FileIngressError as exc:
         log.error("%s", exc.render())

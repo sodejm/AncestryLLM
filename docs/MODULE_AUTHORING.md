@@ -1,17 +1,30 @@
 # Built-in module authoring
 
 A built-in module is registered through the explicit module registry with a
-`ModuleDescriptor` and transport-neutral `CommandSpec`. The descriptor records
+`ModuleDescriptor` and transport-neutral `CommandSpec`. Command contracts live
+in `core/commands.py`, which imports no UI, web, provider, storage, or
+application-composition packages. The descriptor records
 the module identity, summary, implementation path, and supported action names.
 The command specification records action metadata and typed arguments used by
 both one-shot CLI execution and the prompt-toolkit/Rich REPL.
 
 Module authors should add or update the command specification first, then wire
-the action to a thin dispatcher that delegates to an application service. The
-dispatch layer must not open storage directly, read secrets, call providers, or
-implement business rules. Services return serializable DTOs or stable
-`AncestryError` instances so terminal, JSON, and future adapters can present the
-same result contract.
+the action to a thin dispatcher that delegates to an application service. Each
+action also derives one stable `DispatchKey` (`command.action`) from the same
+specification; adapters must not maintain a parallel route table. The
+implemented execution path is `CommandSpec` → shared argument parsing →
+`CommandInvocation` → `CommandExecutor` → dispatcher → application service.
+The dispatch layer must not open storage directly, read secrets, call providers,
+or implement business rules. Services return transport-neutral, serializable
+DTOs, opaque artifact references, and stable coded errors so terminal, JSON, and
+future adapters can present the same result contract.
+
+Genealogy services delegate canonical identity, provenance, deterministic
+change/conflict accounting, and quality-finding construction to the
+service-owned aggregate. Do not recreate those rules in a command handler,
+provider, serializer, FastAPI route, or Electron process. Future transports
+must consume the same operation, result, artifact, and error contracts; they do
+not get a second UI-specific command registry or separate domain semantics.
 
 Long-running REPL actions are submitted through the UI-independent job manager.
 Its `JobReporter` accepts a current operation and, when known, validated

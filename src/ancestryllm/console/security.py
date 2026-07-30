@@ -7,7 +7,7 @@ import shlex
 from collections.abc import Mapping
 from typing import Any, TextIO
 
-from ancestryllm.core.modules import COMMAND_SPECIFICATIONS
+from ancestryllm.core.commands import COMMAND_SPECIFICATIONS
 
 SECRET_NAME_MARKERS = (
     "api_key",

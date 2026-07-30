@@ -1,20 +1,26 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from ancestryllm import cli
-from ancestryllm.core.context import AppContext
-from ancestryllm.core.modules import (
+from ancestryllm.console.parser import parse_repl_invocation
+from ancestryllm.core import modules as legacy_modules
+from ancestryllm.core.commands import (
     BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     ArgumentCardinality,
     ArgumentType,
     CompletionKind,
-    ModuleRegistry,
+    DispatchKey,
 )
+from ancestryllm.core.context import AppContext
+from ancestryllm.core.modules import ModuleRegistry
 
 
 def _argument(command: str, action: str, name: str):
@@ -45,6 +51,59 @@ def test_builtin_descriptors_derive_actions_from_transport_neutral_specs() -> No
     assert profile.default == "portable"
     assert profile.choices == ("portable", "preservation")
     assert profile.help
+
+
+def test_legacy_core_modules_exports_retain_020_contract_identity() -> None:
+    assert legacy_modules.COMMAND_SPECIFICATIONS is COMMAND_SPECIFICATIONS
+    assert legacy_modules.BUILTIN_MODULES is BUILTIN_MODULES
+    assert legacy_modules.DispatchKey is DispatchKey
+
+
+def test_command_specs_expose_one_complete_stable_dispatch_registry() -> None:
+    routes = [
+        route for specification in COMMAND_SPECIFICATIONS.values() for route in specification.routes
+    ]
+    assert len(routes) == sum(
+        len(specification.actions) for specification in COMMAND_SPECIFICATIONS.values()
+    )
+    assert len({route.key for route in routes}) == len(routes)
+    assert all(route.key.value == f"{route.key.command}.{route.key.action}" for route in routes)
+    assert COMMAND_SPECIFICATIONS["gedcom"].route("merge").key == DispatchKey("gedcom", "merge")
+    with pytest.raises(KeyError, match="missing"):
+        COMMAND_SPECIFICATIONS["gedcom"].route("missing")
+
+
+def test_cli_and_repl_parsers_attach_the_same_dispatch_key() -> None:
+    tokens = ["gedcom", "merge", "a.ged", "b.ged", "--output", "merged.ged"]
+    cli_namespace = cli.build_parser().parse_args(tokens)
+    repl_namespace = parse_repl_invocation(tokens).namespace
+    expected = DispatchKey("gedcom", "merge")
+    assert cli_namespace.dispatch_key == expected
+    assert repl_namespace.dispatch_key == expected
+
+
+def test_importing_command_specs_does_not_load_ui_or_web_frameworks() -> None:
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path(__file__).parents[2] / "src")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import ancestryllm.core.commands; "
+                "forbidden=('argparse','click','prompt_toolkit','rich','fastapi','pydantic'); "
+                "loaded=sorted(name for name in sys.modules "
+                "if name.split('.', 1)[0] in forbidden); "
+                "assert not loaded, loaded"
+            ),
+        ],
+        cwd=Path(__file__).parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_build_parser_preserves_argument_types_defaults_and_groups() -> None:

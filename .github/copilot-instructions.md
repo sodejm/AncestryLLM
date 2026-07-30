@@ -7,8 +7,8 @@
 - This repository is local-first and privacy-sensitive. Prefer safe defaults when
   requirements are uncertain.
 - The implemented terminal surfaces are the one-shot CLI and prompt-toolkit/Rich REPL.
-  Do not describe FastAPI/Electron or the transport-neutral 0.3 executor as implemented
-  until the architecture and code both support that claim.
+  FastAPI, Electron, and other desktop-host surfaces remain future adapters; they must
+  consume the same application-service contracts instead of redefining behavior.
 
 ## Engineering and validation
 
@@ -17,6 +17,10 @@
 - Keep core and service code independent of terminal, web, and desktop frameworks.
 - Use the existing `CommandSpec` and `ModuleDescriptor` contracts instead of adding a
   UI-specific command registry.
+- Route CLI and REPL commands through the implemented, transport-neutral
+  `CommandInvocation` and `CommandExecutor` boundary.
+- Keep application ports, DTOs, artifact references, and error mapping transport-neutral
+  and serializable so future adapters can reuse the same service surface.
 - Add regression tests for behavior changes in [tests](../tests), using fictional data.
 - Maintain cross-platform behavior where practical.
 - Use `make setup`, `make test`, `make lint`, `make typecheck`, and `make security` as

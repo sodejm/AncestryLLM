@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "release": "0.3.0",
+  "milestone": {
+    "number": 2,
+    "title": "0.3.0 Core Contracts"
+  },
+  "tracker": {
+    "number": 174,
+    "label": "release-tracker"
+  }
+}

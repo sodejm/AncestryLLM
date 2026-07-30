@@ -58,8 +58,12 @@ def test_rejects_changed_or_redirected_registry_content_before_writing_config(
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
-        sha256=hashlib.sha256(expected).hexdigest(),
-        size=len(expected),
+        revisions=(
+            runner.RuleRevision(
+                sha256=hashlib.sha256(expected).hexdigest(),
+                size=len(expected),
+            ),
+        ),
     )
     monkeypatch.setattr(
         runner.urllib.request,
@@ -82,8 +86,12 @@ def test_rejects_changed_registry_size_before_writing_config(
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
-        sha256=hashlib.sha256(payload).hexdigest(),
-        size=len(payload) + 1,
+        revisions=(
+            runner.RuleRevision(
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size=len(payload) + 1,
+            ),
+        ),
     )
     monkeypatch.setattr(
         runner.urllib.request,
@@ -96,6 +104,37 @@ def test_rejects_changed_registry_size_before_writing_config(
         runner.download_rule_bundle(bundle, destination)
 
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("revision_index", (0, 1))
+def test_accepts_each_reviewed_exact_bundle_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revision_index: int,
+) -> None:
+    runner = _load_runner()
+    payloads = (b"rules:\n- id: pinned\n", b'{"rules":[{"id":"pinned"}]}\n')
+    bundle = runner.RuleBundle(
+        name="test",
+        url="https://semgrep.dev/c/p/test",
+        revisions=tuple(
+            runner.RuleRevision(
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size=len(payload),
+            )
+            for payload in payloads
+        ),
+    )
+    monkeypatch.setattr(
+        runner.urllib.request,
+        "urlopen",
+        lambda request, timeout: _Download(payloads[revision_index], request.full_url),
+    )
+    destination = tmp_path / "test.yml"
+
+    runner.download_rule_bundle(bundle, destination)
+
+    assert destination.read_bytes() == payloads[revision_index]
 
 
 def test_resolves_semgrep_beside_the_script_interpreter(
@@ -122,8 +161,12 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
         runner.RuleBundle(
             name=name,
             url=url,
-            sha256=hashlib.sha256(payloads[url]).hexdigest(),
-            size=len(payloads[url]),
+            revisions=(
+                runner.RuleRevision(
+                    sha256=hashlib.sha256(payloads[url]).hexdigest(),
+                    size=len(payloads[url]),
+                ),
+            ),
         )
         for name, url in (
             ("python", "https://semgrep.dev/c/p/python"),

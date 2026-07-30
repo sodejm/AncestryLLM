@@ -3,6 +3,7 @@
 - [Home](Home.md)
 - [CLI reference](CLI.md)
 - [Interactive console guide](CONSOLE.md)
+- [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Bounded file ingress](FILE_INGRESS.md)
 - [Versioning and compatibility](VERSIONING.md)
 - [Release runbook](RELEASING.md)

@@ -1,16 +1,27 @@
 # Data-flow threat model and control matrix
 
+## Implementation status
+
+The 0.3.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
+shared command, application-service, and genealogy-core contracts. It does not
+implement FastAPI routes, an Electron application, a renderer or preload bridge,
+desktop packaging, plugins, or an update channel. Desktop diagrams, controls,
+abuse cases, and gates below define accepted later-roadmap requirements; they
+are not evidence that those adapters exist or that their controls have passed.
+Each future adapter must reuse the implemented service contracts and complete
+its named verification before a planned control can be treated as effective.
+
 ## Assets and trust boundaries
 
 Sensitive assets are genealogy records, living-person status, notes, provider
 credentials, SQLCipher keys, prompts/responses, consent grants, and RootsMagic
-source files. Desktop assets additionally include opaque file grants, internal
+source files. Later desktop assets additionally include opaque file grants, internal
 API bootstrap material, event streams, plugin packages, update metadata,
 release signatures, and support evidence. Data crosses boundaries at
-prompt-toolkit/Rich REPL input, one-shot CLI input, the sandboxed Electron
-renderer and preload bridge, the authenticated FastAPI sidecar,
-GEDCOM/RootsMagic parsing, the OS keyring, encrypted database, configured
-provider endpoints, and exported files.
+prompt-toolkit/Rich REPL input, one-shot CLI input, GEDCOM/RootsMagic parsing,
+the OS keyring, encrypted database, configured provider endpoints, and exported
+files. A future desktop runtime adds crossings through a sandboxed Electron
+renderer and preload bridge and an authenticated FastAPI sidecar.
 
 The local operator is trusted to choose data and consent. The renderer, other
 local processes, imported genealogy content, file paths, plugins, packages,

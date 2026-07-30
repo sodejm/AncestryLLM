@@ -14,6 +14,8 @@ from ancestryllm.llm.service import LLMService
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter, RootsMagicExportResult
 from ancestryllm.rootsmagic.reader import QueryResult, RootsMagicReader
 
+__all__ = ["RootsMagicService"]
+
 SQL_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {"sql": {"type": "string", "minLength": 1}},

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import subprocess
 import sys
@@ -19,6 +20,10 @@ STABLE_SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 def _project() -> dict:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)["project"]
+
+
+def _release_configuration() -> dict:
+    return json.loads((ROOT / ".github/release-config.json").read_text(encoding="utf-8"))
 
 
 def _literal_string_set(path: Path, assignment_name: str) -> set[str]:
@@ -57,6 +62,17 @@ def test_package_version_is_one_stable_semver_value() -> None:
     )
 
 
+def test_release_configuration_names_the_exact_0_3_control_plane() -> None:
+    configuration = _release_configuration()
+
+    assert configuration == {
+        "schema_version": 1,
+        "release": str(_project()["version"]),
+        "milestone": {"number": 2, "title": "0.3.0 Core Contracts"},
+        "tracker": {"number": 174, "label": "release-tracker"},
+    }
+
+
 @pytest.mark.parametrize("arguments", (["--version"],))
 def test_global_version_bypasses_application_initialization(
     arguments: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -88,16 +104,24 @@ def test_module_entry_point_reports_the_same_version() -> None:
 
 
 def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
+    configuration = _release_configuration()
+    version = str(configuration["release"])
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     versioning = (ROOT / "docs/VERSIONING.md").read_text(encoding="utf-8")
     releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    release_notes = ROOT / "docs/release-notes" / f"{version}.md"
     normalized_releasing = " ".join(releasing.split())
     manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
     assert "pipx install ancestryllm" in readme
+    assert f"implemented product surfaces in {version}" in readme
     assert "Semantic Versioning 2.0.0" in versioning
+    assert f"package version `{version}` is tagged `v{version}`" in versioning
     assert "must never be replaced, moved, deleted, or reused" in versioning
     assert "OIDC Trusted Publishing" in releasing
+    assert "`.github/release-config.json`" in releasing
+    assert "#133" not in releasing
     assert "git branch -d" in releasing
     assert "branch/worktree cleanup input" in releasing
     assert "docs/release-notes/<version>.md" in releasing
@@ -116,6 +140,15 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "verifies only the exact TestPyPI artifact hashes" in normalized_releasing
     assert "After production PyPI publishing" in releasing
     assert "TestPyPI hashes and install smoke tests" not in releasing
+    assert f"## [{version}] -" in changelog
+    assert f"[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v{version}...HEAD" in (
+        changelog
+    )
+    assert release_notes.is_file()
+    assert release_notes.read_text(encoding="utf-8").startswith(f"# AncestryLLM {version}\n")
+    assert (ROOT / "docs/release-notes/0.2.0.md").is_file()
+    assert (ROOT / "docs/release-evidence/0.2.0/findings.json").is_file()
+    assert (ROOT / "docs/release-evidence/0.2.0/interoperability.json").is_file()
     assert "prune tests" in manifest
     assert "prune family_trees" in manifest
     assert "include docs/FILE_INGRESS.md" in manifest
@@ -235,15 +268,36 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
         assert "--config p/secrets" not in content
 
 
+def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
+    """Keep repository-only test tooling importable in clean hosted environments."""
+
+    command = "uv run python -m pytest --verbose --cov --cov-report=term-missing"
+    for relative_path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-readiness.yml",
+        ".github/workflows/release.yml",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert content.count(command) == 1
+        assert "uv run pytest " not in content
+
+
 def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     for workflow in (readiness, release):
+        assert "verify_release_configuration.py" in workflow
+        assert "--config .github/release-config.json" in workflow
         assert "verify_release_milestone.py" in workflow
-        assert "--tracker-number 133" in workflow
-        assert "--tracker-label release-tracker" in workflow
+        assert '--tracker-number "$tracker_number"' in workflow
+        assert '--tracker-label "$tracker_label"' in workflow
+        assert 'gh api "repos/$GITHUB_REPOSITORY/milestones/$milestone_number"' in workflow
+        assert 'test "$(jq -r \'.state\' <<<"$milestone_json")" = "open"' in workflow
         assert "--paginate --slurp" in workflow
+        assert "--tracker-number 133" not in workflow
+        assert "$version CLI" not in workflow
+        assert "$EXPECTED_VERSION CLI" not in workflow
 
 
 def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> None:
@@ -274,6 +328,7 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
         "scripts/verify_index_artifacts.py",
         "scripts/verify_pypi_attestations.py",
         "scripts/verify_release_assets.py",
+        "scripts/verify_release_configuration.py",
         "scripts/verify_release_milestone.py",
     ),
 )
