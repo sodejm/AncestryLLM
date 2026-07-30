@@ -161,6 +161,7 @@ jobs:
     permissions:
       actions: read # required by CodeQL for workflow metadata
       contents: read # required to analyze repository contents
+      security-events: read # required by CodeQL for repository analysis metadata
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -174,9 +175,11 @@ jobs:
         with:
           output: codeql-sarif
           upload: never
+          upload-database: false
       - name: Require zero-result CodeQL evidence
         run: python scripts/verify_codeql_sarif.py --directory codeql-sarif
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
         with:
           name: release-codeql-sarif
           path: codeql-sarif/

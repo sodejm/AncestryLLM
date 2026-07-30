@@ -166,6 +166,11 @@ def test_release_sdist_closes_shipped_cli_document_links() -> None:
 def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    codeql = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    readiness_codeql = readiness.split("\n  codeql:\n", maxsplit=1)[1].split(
+        "\n  package:\n",
+        maxsplit=1,
+    )[0]
 
     assert "--gates evidence/gates.json" in readiness
     assert "approved/gates.json" in release
@@ -182,6 +187,11 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
+    assert "security-events: read" in readiness_codeql
+    assert "upload-database: false" in readiness_codeql
+    assert "if: ${{ always() }}" in readiness_codeql
+    assert "upload: always" in codeql
+    assert "upload: never" not in codeql
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         release,
