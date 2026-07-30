@@ -8,11 +8,13 @@
 - `ARCHITECTURE.md` is authoritative for implemented and target architecture; supporting
   documents must not contradict it.
 - The implemented terminal surfaces are the one-shot CLI and the prompt-toolkit/Rich
-  REPL. Treat FastAPI/Electron and other desktop-host architecture as future work until
-  the architecture and code both say otherwise.
+  REPL. FastAPI, Electron, and other desktop-host surfaces remain future adapters; they
+  must consume the same application-service contracts instead of redefining behavior.
 - Use the existing `CommandSpec` and `ModuleDescriptor` contracts; do not add another
-  UI-specific command registry. The transport-neutral 0.3 executor/DTO boundary remains
-  planned until it is implemented.
+  UI-specific command registry. CLI and REPL dispatch through the implemented,
+  transport-neutral `CommandInvocation` and `CommandExecutor` boundary.
+- Keep application ports, DTOs, artifact references, and error mapping transport-neutral
+  and serializable so future adapters can reuse the same service surface.
 
 ## Commands and validation
 
