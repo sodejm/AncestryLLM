@@ -73,7 +73,7 @@ def test_invalid_database_families_fail_stably_without_artifacts_or_source_chang
 ) -> None:
     source = tmp_path / "fictional-private-corrupt.rmtree"
     source.write_bytes(payload)
-    os.chmod(source, 0o640)
+    os.chmod(source, 0o600)
     before = _identity(source)
     output = tmp_path / "existing.ged"
     report = tmp_path / "existing.md"

@@ -966,7 +966,7 @@ def normalise_gedcom_date(raw_date: str) -> str:
                 return f"{qualifier} {result}".strip()
             except ValueError:
                 continue
-        log.debug("Could not normalise date %r", raw_date)
+        log.debug("Could not normalise a GEDCOM date value")
         return raw_date
 
 
@@ -1342,7 +1342,7 @@ class IndividualRecord:
         return tuple(relative.name for relative in self.partners if relative.name)
 
     def summary(self) -> str:
-        """Return a prompt/logging summary without dumping sensitive notes."""
+        """Return a bounded operator/provider adjudication summary."""
         parts = [f"[{self.pointer}] {self.full_name or '(unknown)'}"]
         if self.alternate_names:
             parts.append(f"alternate-names={list(self.alternate_names[:3])}")
@@ -2641,7 +2641,10 @@ def merge_two_records(
 
 
 def prompt_operator(a: IndividualRecord, b: IndividualRecord) -> bool:
-    """Ask for confirmation, defaulting to no on EOF or invalid input."""
+    """Display a pair locally and ask for confirmation, without logging it."""
+    # The operator explicitly requested this local, ephemeral adjudication
+    # display; it is required for the decision and is never logged or persisted.
+    # codeql[py/clear-text-logging-sensitive-data]
     print(f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}")
     try:
         answer = input("Same person? [y/N]: ").strip().casefold()
