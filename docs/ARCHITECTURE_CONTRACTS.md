@@ -62,7 +62,7 @@ flowchart TB
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
 | GEDCOM parsing, graph, identity, quality, serialization, service, and synchronization seams | declared public modules in `ancestryllm.gedcom`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
-| RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
+| RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; physical source/schema ownership is in `.source` and `.schema`, and private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
 
@@ -108,7 +108,9 @@ an implementation detail does not require a compatibility shim unless that
 detail was already in a declared façade.
 
 The Unreleased RootsMagic public inventory includes the package façade plus
-`core`, `query`, and `export`. The GEDCOM inventory exposes parser, graph,
+`core`, `query`, and `export`. The private `source` and `schema` modules own the
+implementation behind `core`; `reader` and `schema_adapter` retain import
+compatibility but are not alternate public contracts. The GEDCOM inventory exposes parser, graph,
 identity, quality, serialization, service, and synchronization seams. The
 centralized private modules remain characterized compatibility kernels, not
 supported consumer APIs.

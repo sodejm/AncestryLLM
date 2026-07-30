@@ -1076,4 +1076,5 @@ __all__ = [
     "FileLimit",
     "FileSnapshot",
     "TextLine",
+    "cleanup_open_path",
 ]

@@ -49,7 +49,9 @@ PRIVATE_MODULE_OWNERS: Final[dict[str, str]] = {
     "ancestryllm.gedcom.incremental": "ancestryllm.gedcom",
     "ancestryllm.rootsmagic.exporter": "ancestryllm.rootsmagic",
     "ancestryllm.rootsmagic.reader": "ancestryllm.rootsmagic",
+    "ancestryllm.rootsmagic.schema": "ancestryllm.rootsmagic",
     "ancestryllm.rootsmagic.schema_adapter": "ancestryllm.rootsmagic",
+    "ancestryllm.rootsmagic.source": "ancestryllm.rootsmagic",
 }
 
 # Only these narrow gateways may adapt compatibility implementations to the
@@ -75,10 +77,23 @@ PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
             "ancestryllm.rootsmagic.schema_adapter",
         }
     ),
+    "ancestryllm.rootsmagic.schema": frozenset(
+        {
+            "ancestryllm.rootsmagic.core",
+            "ancestryllm.rootsmagic.schema_adapter",
+        }
+    ),
     "ancestryllm.rootsmagic.schema_adapter": frozenset(
         {
             "ancestryllm.rootsmagic.core",
             "ancestryllm.rootsmagic.exporter",
+        }
+    ),
+    "ancestryllm.rootsmagic.source": frozenset(
+        {
+            "ancestryllm.rootsmagic.core",
+            "ancestryllm.rootsmagic.reader",
+            "ancestryllm.rootsmagic.schema",
         }
     ),
 }

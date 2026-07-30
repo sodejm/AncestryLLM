@@ -505,7 +505,10 @@ keys and installed SDKs never select one of those callbacks.
 orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
 public immutable-source and schema boundary, `rootsmagic/query.py` owns
 explicit-provider natural-language query policy, and `rootsmagic/export.py` is
-the public GEDCOM mapping/export boundary.
+the public GEDCOM mapping/export boundary. The physical read-only source and
+schema implementations live in `rootsmagic/source.py` and
+`rootsmagic/schema.py`; `reader.py` and `schema_adapter.py` are compatibility
+aliases only.
 
 ### Immutable reader
 
@@ -516,10 +519,13 @@ ATTACH/transactions, and a progress deadline.
 
 Queries are parsed with `sqlglot`. Exactly one SELECT, CTE, or set operation is
 allowed; forbidden AST nodes and tables outside the inspected schema are
-rejected. The reader applies `LIMIT max_rows + 1`, returns a truncation flag,
-and binds schema inspection, row validation, and query execution to one
-filesystem identity and SHA-256 fingerprint to detect concurrent source
-changes.
+rejected. The reader applies `LIMIT max_rows + 1`, returns explicit truncation
+metadata, represents binary and non-finite query values with tagged JSON-safe
+objects, and binds schema inspection, row validation, and query execution to
+one filesystem identity and SHA-256 fingerprint to detect concurrent source
+changes. Deterministic database/table schema DTOs expose names, columns, and
+declared types without importing application configuration, providers, UI
+grants, keyring, GEDCOM mapping, or artifact publication.
 
 Natural-language questions are a two-stage operation: an explicitly selected
 provider returns one schema-validated SQL string, then the same deterministic
@@ -553,9 +559,8 @@ Output and report files are published as a rollback-capable bundle. Existing
 targets are restored if either publication step or the final source
 fingerprint check fails.
 
-Further extraction of reader, schema-adapter, mapping, and publication
-internals remains open work; the public modules above are the dependency
-contracts that work must preserve.
+Further extraction of mapping and publication internals remains open work; the
+public modules above are the dependency contracts that work must preserve.
 
 Destination selection does not prove interoperability. Current Ancestry, Geni,
 and MyHeritage imports require recorded manual smoke tests for every release.
@@ -764,7 +769,7 @@ installed local hooks.
 | Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. | Future adapters may consume these contracts but may not redefine them. |
 | Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
-| RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with layered read-only controls and synthetic tests. | Reader/schema compatibility internals still need physical extraction; vendor schema variation and live-file behavior need release testing. |
+| RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
 | GEDCOM merge and quality | Public parser/graph/identity/quality/serialization seams are enforced and broadly characterized with fictional regression tests. | The compatibility kernel remains large and partially outside strict static checks; deeper extraction remains open. |
 | Incremental update | Public sync façade is enforced; initialization and idempotency are tested offline. | The private synchronizer still requires deeper extraction, and multi-generation, rebase, tombstone, and non-person paths need broader coverage. |
