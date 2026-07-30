@@ -151,7 +151,12 @@ class TestIndividualRecord:
             given_name="Fictional-Operator-Canary-B",
             source_file="/fake/file_b.ged",
         )
-        monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+
+        def respond_no(prompt: str) -> str:
+            print(prompt, end="")
+            return "n"
+
+        monkeypatch.setattr("builtins.input", respond_no)
 
         with caplog.at_level(logging.DEBUG):
             assert gm.prompt_operator(first, second) is False
