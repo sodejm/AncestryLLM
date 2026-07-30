@@ -22,27 +22,48 @@ from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
+class RuleRevision:
+    """One reviewed byte-for-byte representation of a rule bundle."""
+
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True)
 class RuleBundle:
     """An immutable Semgrep registry rule-bundle reference."""
 
     name: str
     url: str
-    sha256: str
-    size: int
+    revisions: tuple[RuleRevision, ...]
 
 
 RULE_BUNDLES = (
     RuleBundle(
         name="python",
         url="https://semgrep.dev/c/p/python",
-        sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
-        size=487_962,
+        # Registry edges served these reviewed YAML and JSON encodings of the
+        # same 151-rule set. Both remain byte-pinned; every other response fails.
+        revisions=(
+            RuleRevision(
+                sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="084e9272b4297bbdc7afcd0b8ece70816f2e9c9973639b26eab2c071456ccc6b",
+                size=432_695,
+            ),
+        ),
     ),
     RuleBundle(
         name="secrets",
         url="https://semgrep.dev/c/p/secrets",
-        sha256="139b35ad3442bc83d1f0864db82fa4fdc7e1f1ee4b5ac872bfbeb604c82c6518",
-        size=89_772,
+        revisions=(
+            RuleRevision(
+                sha256="139b35ad3442bc83d1f0864db82fa4fdc7e1f1ee4b5ac872bfbeb604c82c6518",
+                size=89_772,
+            ),
+        ),
     ),
 )
 
@@ -62,6 +83,9 @@ def _validate_rule_url(url: str) -> None:
 def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
     """Download and verify one exact rule bundle before writing it."""
     _validate_rule_url(bundle.url)
+    if not bundle.revisions:
+        raise ValueError(f"Semgrep {bundle.name} rule bundle has no reviewed revisions")
+    maximum_size = max(revision.size for revision in bundle.revisions)
     request = urllib.request.Request(  # noqa: S310
         bundle.url,
         headers={"User-Agent": "AncestryLLM-release-security-gate"},
@@ -71,15 +95,18 @@ def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
         _validate_rule_url(final_url)
         if final_url != bundle.url:
             raise RuntimeError(f"Semgrep {bundle.name} rule bundle redirected unexpectedly")
-        payload = response.read(bundle.size + 1)
+        payload = response.read(maximum_size + 1)
 
     digest = hashlib.sha256(payload).hexdigest()
-    if digest != bundle.sha256:
+    matching_revisions = tuple(
+        revision for revision in bundle.revisions if revision.sha256 == digest
+    )
+    if not matching_revisions:
         raise RuntimeError(
             f"Semgrep {bundle.name} rule bundle content hash differs from the "
             "committed release-security contract"
         )
-    if len(payload) != bundle.size:
+    if all(len(payload) != revision.size for revision in matching_revisions):
         raise RuntimeError(
             f"Semgrep {bundle.name} rule bundle size differs from the committed "
             "release-security contract"
