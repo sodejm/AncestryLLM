@@ -9,7 +9,7 @@ help:
 
 setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
-	@$(VENV_PYTHON) -m pip install --upgrade pip uv
+	@$(VENV_PYTHON) -m pip install --upgrade pip uv==0.12.0
 	@$(VENV_PYTHON) -m uv sync --active --all-extras --locked
 
 console:
