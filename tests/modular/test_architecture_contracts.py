@@ -218,6 +218,7 @@ def test_pure_gedcom_document_kernel_rejects_outward_dependencies(
         "from ancestryllm.core.publication import atomic_publish",
         "from ancestryllm.core.secrets import SecretStore",
         "from ancestryllm.llm.providers.openai import OpenAIProvider",
+        "import httpx",
         "from keyring import get_password",
         "from prompt_toolkit import PromptSession",
     ],

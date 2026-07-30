@@ -169,6 +169,7 @@ GEDCOM_OPERATION_FORBIDDEN_EXTERNAL_ROOTS: Final[frozenset[str]] = frozenset(
         "electron",
         "fastapi",
         "google",
+        "httpx",
         "keyring",
         "openai",
         "prompt_toolkit",

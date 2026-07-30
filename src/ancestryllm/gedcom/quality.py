@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 if TYPE_CHECKING:
     from ancestryllm.gedcom.contracts import QualityResolver
@@ -1416,6 +1416,14 @@ build_quality_prompt = _build_quality_prompt
 quality_annotations_from_payload = _quality_annotations_from_payload
 quality_response_schema = _quality_response_schema
 
+
+def write_quality_report(report: QualityReport, output_path: str | Path) -> Any:
+    """Preserve the historical writer import through the serialization façade."""
+    from ancestryllm.gedcom.serialization import write_quality_report as _write_quality_report
+
+    return _write_quality_report(report, output_path)
+
+
 __all__ = [
     "QUALITY_AI_LIMIT",
     "QualityFinding",
@@ -1427,4 +1435,5 @@ __all__ = [
     "quality_response_schema",
     "refine_quality_report_with_ai",
     "render_quality_report",
+    "write_quality_report",
 ]

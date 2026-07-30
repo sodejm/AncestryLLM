@@ -322,6 +322,30 @@ class TestMarkdownAndCli:
         gm.write_quality_report(_fixture_report(), destination)
         assert destination.read_text(encoding="utf-8").startswith("# GEDCOM Merge Quality Report")
 
+    def test_quality_writer_compatibility_routes_through_serialization(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        report = _fixture_report()
+        destination = tmp_path / "quality.md"
+        token = object()
+
+        def fake_write_quality_report(
+            received_report: object,
+            received_path: str | Path,
+        ) -> object:
+            assert received_report is report
+            assert received_path == destination
+            return token
+
+        monkeypatch.setattr(
+            "ancestryllm.gedcom.serialization.write_quality_report",
+            fake_write_quality_report,
+        )
+
+        assert quality.write_quality_report(report, destination) is token
+
     def test_default_report_and_quality_root_do_not_filter_export(self, tmp_path: Path) -> None:
         output = tmp_path / "master.ged"
         result = gm.main(
