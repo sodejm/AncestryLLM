@@ -41,7 +41,7 @@ jobs:
           python -m pip install --disable-pip-version-check uv
           uv sync --locked --all-extras
       - name: Tests
-        run: uv run pytest --verbose --cov --cov-report=term-missing
+        run: uv run python -m pytest --verbose --cov --cov-report=term-missing
       - name: Lint and type check
         if: matrix.python == '3.12'
         run: |

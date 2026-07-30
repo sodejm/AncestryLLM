@@ -110,7 +110,7 @@ jobs:
           python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
       - name: Test with coverage
-        run: uv run pytest --verbose --cov --cov-report=term-missing
+        run: uv run python -m pytest --verbose --cov --cov-report=term-missing
       - name: Static quality gates
         if: matrix.python == '3.12'
         run: |

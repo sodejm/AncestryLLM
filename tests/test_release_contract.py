@@ -268,6 +268,20 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
         assert "--config p/secrets" not in content
 
 
+def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
+    """Keep repository-only test tooling importable in clean hosted environments."""
+
+    command = "uv run python -m pytest --verbose --cov --cov-report=term-missing"
+    for relative_path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-readiness.yml",
+        ".github/workflows/release.yml",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert content.count(command) == 1
+        assert "uv run pytest " not in content
+
+
 def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
