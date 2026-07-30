@@ -5,6 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+__all__ = [
+    "BUILTIN_MODULES",
+    "COMMAND_SPECIFICATIONS",
+    "GLOBAL_ARGUMENTS",
+    "ActionSpec",
+    "ArgumentAction",
+    "ArgumentCardinality",
+    "ArgumentDefault",
+    "ArgumentSpec",
+    "ArgumentType",
+    "CommandRoute",
+    "CommandSpec",
+    "CompletionKind",
+    "DispatchKey",
+    "ExclusiveArgumentGroup",
+    "ModuleDescriptor",
+]
+
 
 class ArgumentType(str, Enum):
     """Serializable value types understood by command transports."""

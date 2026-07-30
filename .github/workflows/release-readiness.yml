@@ -118,6 +118,7 @@ jobs:
           uv run ruff check src tests scripts
           uv run ruff format --check src tests scripts
           uv run mypy src/ancestryllm
+          uv run python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
           uv run zizmor --persona=pedantic .github/workflows
 

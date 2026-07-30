@@ -21,6 +21,7 @@ test:
 lint:
 	@$(VENV_DIR)/bin/ruff check src tests scripts
 	@$(VENV_DIR)/bin/ruff format --check src tests scripts
+	@$(VENV_PYTHON) scripts/check_architecture_contracts.py
 	@./scripts/check_repository_safety.sh
 
 typecheck:

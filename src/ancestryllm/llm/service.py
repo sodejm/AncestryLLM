@@ -31,6 +31,8 @@ from ancestryllm.storage.models import LlmRunModel
 if TYPE_CHECKING:
     from ancestryllm.llm.profiles import ProviderProfileService
 
+__all__ = ["LLMService"]
+
 SAFE_RETRY_ERROR_CODES = frozenset({"PROVIDER_RATE_LIMITED", "PROVIDER_TRANSIENT"})
 MAX_RETRY_DELAY_SECONDS = 60.0
 

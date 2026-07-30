@@ -31,6 +31,8 @@ from ancestryllm.domain.models import LivingStatus
 from ancestryllm.llm.contracts import DataClass
 from ancestryllm.llm.policy import ConsentGrant
 
+__all__ = ["build_parser", "dispatch", "main", "run_tokens"]
+
 _ARGUMENT_TYPES: dict[ArgumentType, type[str] | type[int] | type[float] | type[Path]] = {
     ArgumentType.STRING: str,
     ArgumentType.INTEGER: int,

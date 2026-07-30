@@ -51,6 +51,26 @@ from ancestryllm.core.commands import (
 )
 from ancestryllm.core.context import AppContext
 
+__all__ = [
+    "BUILTIN_MODULES",
+    "COMMAND_SPECIFICATIONS",
+    "GLOBAL_ARGUMENTS",
+    "ActionSpec",
+    "ArgumentAction",
+    "ArgumentCardinality",
+    "ArgumentDefault",
+    "ArgumentSpec",
+    "ArgumentType",
+    "CommandRoute",
+    "CommandSpec",
+    "CompletionKind",
+    "DispatchKey",
+    "ExclusiveArgumentGroup",
+    "ModuleDescriptor",
+    "ModuleRegistry",
+    "ToolModule",
+]
+
 
 class ToolModule(Protocol):
     """Minimum contract implemented by each built-in console module."""

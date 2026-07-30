@@ -1,23 +1,27 @@
 # AncestryLLM architecture
 
 This document is the architectural source of truth for the repository. It
-describes the system that exists now, the invariants new work must preserve,
-and the boundaries that are intentionally not implemented. The target REPL
-layers and migration compatibility contract are specified in
+distinguishes behavior implemented in the current tree, remaining `0.3.0`
+targets, and later-roadmap boundaries that are intentionally not implemented.
+Executable ownership and import rules are specified in
+[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
+REPL layers and migration compatibility contract are specified in
 [`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
-AncestryLLM 0.2 is a single-user, local-first Python application for genealogy
-research. It combines deterministic RootsMagic and GEDCOM workflows with
-optional LLM assistance. The current release has no supported HTTP, desktop,
-browser, or multi-user runtime. ADR-0025 accepts a future local Electron desktop
-adapter and private FastAPI sidecar; it does not accept a public/LAN API,
-browser client, or multi-user server. The one-shot CLI, interactive console, and
-future desktop API are sibling adapters over the same application services and
-must not depend on each other's presentation code.
+The shipped `0.2.0` runtime and current `0.3.0` development tree are a
+single-user, local-first Python application for genealogy research. They combine
+deterministic RootsMagic and GEDCOM workflows with optional LLM assistance.
+There is no implemented or supported HTTP, desktop, browser, or multi-user
+runtime. ADR-0025 accepts a later local Electron desktop adapter and private
+FastAPI sidecar; it does not accept a public/LAN API, browser client, or
+multi-user server. The one-shot CLI and interactive console are the implemented
+terminal adapters. Future adapters must consume the same application contracts
+and services without depending on terminal presentation or redefining domain
+behavior.
 
 ## Architectural priorities
 
@@ -50,19 +54,28 @@ flowchart LR
     Operator["Local operator"]
     CLI["One-shot CLI\nancestry ..."]
     Console["Interactive prompt-toolkit/Rich REPL\nancestry"]
-    Services["Application services"]
-    Domain["Genealogy and LLM DTOs"]
+    Specs["Shared CommandSpec and DispatchKey\nimplemented"]
+    Contracts["Transport-neutral application contracts\nimplemented"]
+    Current["Current compatibility dispatch\n#42 removal target"]
+    Services["Feature services"]
+    Domain["Domain objects\n#44 aggregate target"]
     Workspace["Encrypted SQLCipher\nworkspace"]
     Keyring["OS credential store"]
     RM["RootsMagic .rmtree\nread-only input"]
     GED["GEDCOM files and\nrelease bundles"]
     LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
+    Future["FastAPI/Electron adapters\nlater roadmap"]
 
     Operator --> CLI
     Operator --> Console
-    CLI --> Services
-    Console --> CLI
+    CLI --> Specs
+    Console --> Specs
+    CLI --> Current
+    Console --> Current
+    Current --> Services
+    Specs --> Contracts
+    Services --> Contracts
     Services --> Domain
     Services --> Workspace
     Workspace --> Keyring
@@ -70,7 +83,13 @@ flowchart LR
     Services --> GED
     Services --> LocalLLM
     Services --> Cloud
+    Future -. "must consume" .-> Contracts
 ```
+
+The `Current` node records an implemented compatibility path, not the target
+dependency direction: `console` still invokes `cli.dispatch`, while `cli`
+reuses the Rich presentation adapter and launches the REPL. Issue #42 must
+replace those inversions with the shared executor before `0.3.0`.
 
 The local operator is trusted to select files, providers, and consent. Imported
 GEDCOM, RootsMagic content, prompt variables, OCR text, provider output, and
@@ -95,10 +114,12 @@ The project has three deliberately different data roles:
 
 | Path | Architectural responsibility |
 |---|---|
-| `src/ancestryllm/cli.py` | Canonical argument grammar, one-shot dispatch, and application entry point. |
-| `src/ancestryllm/console/` | Interactive shell, built-in command sets, and Rich presentation adapter. |
-| `src/ancestryllm/core/` | Configuration, dependency composition, module registry, secret boundary, and stable errors. |
-| `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy value objects. |
+| `src/ancestryllm/cli.py` | Implemented one-shot adapter and application entry point; currently retains compatibility dispatch until #42. |
+| `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL adapter and terminal presentation. |
+| `src/ancestryllm/application/` | Implemented transport-neutral DTO, operation, port, artifact, and stable error contracts; shared executor is the #42 target. |
+| `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
+| `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
+| `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy value objects and failure categories; aggregate ownership is the #44 target. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, and diagnostics. |
 | `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. |
 | `src/ancestryllm/rootsmagic/` | Immutable database discovery/query and schema-adaptive GEDCOM export. |
@@ -106,10 +127,10 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Future internal FastAPI adapter with authenticated, versioned DTO routes; no console imports or public binding. |
-| `desktop/` | Future Electron main, preload, sandboxed renderer, generated contracts, mock bridge, and desktop tests governed by ADR-0025. |
+| `src/ancestryllm/api/` | Later-roadmap internal FastAPI adapter; no routes are implemented for `0.3.0`. |
+| `desktop/` | Later-roadmap Electron adapter governed by ADR-0025; no application or packaging is implemented for `0.3.0`. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
-| `scripts/` | Repository safety, local benchmark, GEDCOM demo, and deterministic Wiki publication tooling. |
+| `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
 | `.github/` | CI, security analysis, dependency updates, issue/PR policy, and Wiki publication. |
 | `pyproject.toml`, `uv.lock`, `Makefile` | Package contract, locked dependency graph, tool policy, and supported developer commands. |
@@ -121,27 +142,41 @@ genealogy artifacts must never be committed.
 
 ```mermaid
 flowchart TB
-    Adapters["Adapters\ncli.py, console/"]
-    App["Application services\nGedcom, RootsMagic, OCR, Prompts, Research, LLM"]
-    Contracts["Contracts and domain\ndomain/, llm/contracts.py, core/errors.py"]
+    Adapters["Implemented terminal adapters\ncli.py, console/"]
+    Compat["Implemented compatibility dispatch\nremoved by #42"]
+    Specs["Implemented command contracts\ncore/commands.py"]
+    Contracts["Implemented application contracts\napplication/, domain/errors.py"]
+    App["Feature services\nGEDCOM, RootsMagic, OCR, Prompts, Research, LLM"]
+    Aggregate["0.3 target\nservice-owned genealogy aggregate (#44)"]
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
     External["SQLCipher, keyring, RootsMagic, GEDCOM, provider SDKs"]
+    Future["Later-roadmap adapters\nFastAPI, Electron"]
 
-    Adapters --> App
+    Adapters --> Specs
     Adapters --> Contracts
+    Adapters --> Compat
+    Compat --> App
+    Specs --> Contracts
     App --> Contracts
     App --> Infra
+    App -.-> Aggregate
+    Aggregate --> Contracts
     Infra --> Contracts
     Infra --> External
+    Future -.-> Contracts
 ```
 
 The intended dependency rules are:
 
-- Console command sets contain no business logic. They translate tokens into
-  the canonical CLI dispatcher.
+- CLI and REPL derive grammar and route identity from the one shared
+  `CommandSpec` registry. No adapter may add a second command registry.
+- Until #42, console command sets contain no business logic and translate
+  tokens into the compatibility CLI dispatcher. After #42, both terminal
+  adapters must translate to application requests and invoke one shared
+  executor.
 - Services do not import `prompt_toolkit`, Rich, or console modules. They return
-  typed DTOs, paths, or serializable values and normally raise stable
-  `AncestryError` subclasses.
+  typed values through the application contracts and raise stable,
+  transport-neutral failures at the application boundary.
 - Presentation converts dataclasses, SQLAlchemy rows, paths, and collections to
   plain values. `--json` and human output represent the same result.
 - Provider adapters implement generation only. They cannot discover modules,
@@ -151,6 +186,12 @@ The intended dependency rules are:
 - Future interfaces may depend on services and contracts. They must not import
   the console or bypass configuration, consent, storage, or file-safety
   factories.
+
+These rules are executable in `scripts/check_architecture_contracts.py` and
+documented with the public-façade and temporary-exception lifecycle in
+[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The four
+current CLI/REPL compatibility exceptions are exact, owned by #42, and fail the
+gate if expanded or left stale.
 
 ### Accepted desktop adapter
 
@@ -229,14 +270,17 @@ or defining an API key cannot select a provider or initiate a request.
 
 ### One-shot CLI
 
-`cli.py` owns the supported command grammar for modules, RootsMagic, GEDCOM,
-prompts, people, providers/consent, secrets, OCR, and database maintenance.
-`dispatch()` constructs a use-case service where needed and renders its result
-through `PresentationAdapter`. Stable application errors are rendered without
-provider secrets or raw input payloads; ordinary input errors exit separately.
+`core/commands.py` owns the supported command specification for modules,
+RootsMagic, GEDCOM, prompts, people, providers/consent, secrets, OCR, and
+database maintenance. `cli.py` translates that shared specification into the
+one-shot `argparse` grammar. Its current compatibility `dispatch()` constructs a
+use-case service where needed and renders through `PresentationAdapter`; #42
+must move use-case selection and execution behind `CommandExecutor` while
+preserving the adapter's output and exit behavior.
 
-This parser and dispatcher are the compatibility contract. New console actions
-must first exist here so one-shot and interactive behavior cannot drift.
+The shared command specification and application operation inventory are the
+command contract. New actions must be added there first so one-shot and
+interactive behavior cannot drift or acquire a UI-specific registry.
 
 ### Interactive console
 
@@ -259,11 +303,12 @@ shell executes them through the canonical `cli.dispatch()` path described in
   and cancellation-resistant shutdown.
 
 The REPL remains a sibling adapter over the same application services as the
-one-shot CLI. A transport-neutral executor and DTO boundary beyond the current
-shared command metadata and dispatcher remains planned for 0.3; it must not
-create a second UI-specific registry. One-shot CLI grammar, JSON serialization,
-stable coded errors, consent authorization, and network-free `provider=none`
-behavior remain compatibility contracts.
+one-shot CLI. The transport-neutral DTO, port, artifact, operation, and stable
+error boundary is implemented under `application/`. The shared executor and
+removal of the CLI/REPL dependency inversions remain #42 work for `0.3.0`.
+One-shot CLI grammar, JSON serialization, stable coded errors, consent
+authorization, and network-free `provider=none` behavior remain compatibility
+contracts throughout that migration.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
@@ -271,9 +316,20 @@ registry, not entry-point discovery or a third-party plugin API.
 
 ## Stable contracts and domain objects
 
+`application/dto.py`, `application/operations.py`, and
+`application/ports.py` define immutable, strict, serialization-only requests,
+results, opaque artifact/secret references, and interaction ports for every
+`DispatchKey`. They contain no terminal, web, desktop, Pydantic, provider-SDK,
+database-session, or host-filesystem objects. `application/errors.py` maps the
+complete pure domain failure set to sanitized stable envelopes. The boundary
+and operation inventory are documented in
+[`docs/APPLICATION_CONTRACTS.md`](docs/APPLICATION_CONTRACTS.md).
+
 `core/errors.py` defines sanitized, coded exceptions with a message,
-remediation, exit code, and serializable details. Adapters should expose these
-codes rather than leaking arbitrary provider, database, or parser exceptions.
+remediation, exit code, and serializable details for shipped compatibility.
+The #42 executor migration maps use-case failures to application envelopes
+before adapters render them; adapters must not leak arbitrary provider,
+database, parser, or host exceptions.
 
 `domain/models.py` defines immutable genealogy value objects for people, names,
 identifiers, provenance, citations, facts, and relationships. `LivingStatus`
@@ -282,8 +338,9 @@ as deceased.
 
 `llm/contracts.py` separately defines validated Pydantic DTOs for messages,
 generation requests/results, provider capabilities, and data classifications.
-The provider contract is deliberately narrow: generation and streaming only,
-with no autonomous tool-use surface.
+These provider-internal validation models are not the application-service DTO
+boundary. The provider contract is deliberately narrow: generation and
+streaming only, with no autonomous tool-use surface.
 
 ## Encrypted workspace and secret boundary
 
@@ -588,6 +645,9 @@ built-in adapter package.
 The scripts are part of the repository architecture, not application runtime
 plugins:
 
+- `check_architecture_contracts.py` enforces inward dependencies, declared
+  public façades, private owner modules, and exact temporary exceptions without
+  importing the application.
 - `check_repository_safety.sh` rejects tracked private/runtime artifact types
   outside fictional fixtures and scans tracked text for private-key markers.
 - `benchmark_local_llm.py` is dry-run by default. With `--execute`, it contacts
@@ -618,17 +678,19 @@ locked `uv.lock` dependency graph. The Make targets are the local contract:
 | Command | Gate |
 |---|---|
 | `make test` | Pytest regression and characterization suite. |
-| `make lint` | Ruff lint/format plus repository artifact safety. |
+| `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
 | `make security` | Dependency audit and Semgrep Python/secret rules. |
 | `make sbom` | CycloneDX environment SBOM. |
 
 CI installs the locked environment with all extras and tests Python 3.12,
-3.13, and 3.14. Coverage is branch-aware with a current 65% floor. Python 3.12
-also runs Ruff, strict mypy, and the repository safety script. A separate job
-runs `pip-audit`, Semgrep, and uploads an SBOM. CodeQL runs on pushes, pull
-requests, and a weekly schedule. Dependabot covers Python and GitHub Actions.
-Pinned action commit SHAs reduce workflow supply-chain drift.
+3.13, and 3.14. Coverage is branch-aware with a current 75% floor. Python 3.12
+also runs Ruff, strict mypy, the executable architecture contract, and the
+repository safety script. Release readiness and release workflows run the same
+architecture check. A separate job runs `pip-audit`, Semgrep, and uploads an
+SBOM. CodeQL runs on pushes, pull requests, and a weekly schedule. Dependabot
+covers Python and GitHub Actions. Pinned action commit SHAs reduce workflow
+supply-chain drift.
 
 Tests are intentionally split by risk:
 
@@ -657,7 +719,9 @@ installed local hooks.
 
 | Area | Current state | Remaining assurance boundary |
 |---|---|---|
-| CLI and interactive console | Implemented with shared dispatch and modular tests. | A future console migration must preserve command/JSON/error compatibility. |
+| CLI and interactive console | Implemented prompt-toolkit/Rich adapters share `CommandSpec`, route identity, and the compatibility dispatcher. | #42 must put both adapters through `CommandExecutor`, remove four exact dependency exceptions, and preserve command/JSON/error behavior. |
+| Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, and stable error mapping are implemented and tested. | #42 must make them the terminal execution boundary; future adapters may consume but not redefine them. |
+| Genealogy contract ownership | Existing identity, provenance, change, conflict, and serialization behavior is characterized. | #44 must place deterministic identity/provenance/result rules in the service-owned aggregate without weakening loss-minimal behavior. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Implemented with layered read-only controls and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Implemented for core tables with explicit loss reports. | It is not a complete exporter for every RootsMagic table/version. |
@@ -665,7 +729,7 @@ installed local hooks.
 | Incremental update | Publicly wired; initialization and idempotency are tested offline. | Multi-generation, rebase, tombstone, and non-person paths need deeper coverage. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | Accepted by ADR-0025 but not implemented. | #98 must merge before the isolated desktop workspace, authenticated sidecar, and hardened bridge/runtime issues begin. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside `0.3.0`. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts
@@ -694,7 +758,7 @@ Use these paths when extending the system:
 
 | Change | Primary locations | Required architectural checks |
 |---|---|---|
-| New command | `cli.py`, service, console command set, CLI docs | One-shot/console parity, serializable result, stable errors. |
+| New command | `core/commands.py`, `application/operations.py`, executor/service, adapters, CLI docs | One shared route identity, exact request/result contract, one-shot/REPL parity, stable errors; no UI registry. |
 | New built-in module | `core/modules.py`, `console/`, service package | Explicit registry only; disabled module is not imported; no adapter business logic. |
 | New provider | `llm/providers/`, `llm/registry.py`, extras/docs/tests | Explicit selection, endpoint policy, consent, schema validation, redacted failures, no auto-discovery. |
 | New persisted data | `storage/models.py`, migration, repository/service | SQLCipher only, schema revision path, provenance/privacy/backup impact. |

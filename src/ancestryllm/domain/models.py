@@ -6,6 +6,17 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+__all__ = [
+    "Citation",
+    "Fact",
+    "LivingStatus",
+    "Person",
+    "PersonName",
+    "Provenance",
+    "Relationship",
+    "SourceIdentifier",
+]
+
 
 class LivingStatus(StrEnum):
     """Conservative living status used by privacy policy."""

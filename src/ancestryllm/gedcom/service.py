@@ -27,6 +27,8 @@ from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
 
+__all__ = ["GedcomOperationResult", "GedcomService", "GedcomSyncResult"]
+
 
 @dataclass(frozen=True, slots=True)
 class GedcomOperationResult:
