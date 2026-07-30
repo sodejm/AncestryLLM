@@ -14,6 +14,7 @@ PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.application",
     "ancestryllm.application.dto",
     "ancestryllm.application.errors",
+    "ancestryllm.application.executor",
     "ancestryllm.application.operations",
     "ancestryllm.application.ports",
     "ancestryllm.cli",
@@ -46,8 +47,9 @@ PRIVATE_MODULE_OWNERS: Final[dict[str, str]] = {
 }
 
 ADAPTER_OWNERS: Final[dict[str, str]] = {
-    "ancestryllm.cli": "terminal-cli",
-    "ancestryllm.console": "terminal-repl",
+    "ancestryllm.cli": "terminal",
+    "ancestryllm.console": "terminal",
+    "ancestryllm.terminal": "terminal",
     "ancestryllm.api": "future-fastapi",
     "ancestryllm.desktop": "future-electron",
     "ancestryllm.electron": "future-electron",
@@ -76,40 +78,7 @@ class DependencyException:
     reason: str
 
 
-TEMPORARY_EXCEPTIONS: Final[tuple[DependencyException, ...]] = (
-    DependencyException(
-        importer="ancestryllm.cli",
-        imported="ancestryllm.console.presentation",
-        names=("PresentationAdapter",),
-        owner="CLI/REPL executor migration",
-        issue="#42",
-        reason="The current CLI still delegates terminal rendering to the REPL adapter.",
-    ),
-    DependencyException(
-        importer="ancestryllm.cli",
-        imported="ancestryllm.console.shell",
-        names=("run_repl",),
-        owner="CLI/REPL executor migration",
-        issue="#42",
-        reason="The one-shot CLI remains the compatibility entry point for launching the REPL.",
-    ),
-    DependencyException(
-        importer="ancestryllm.console.parser",
-        imported="ancestryllm.cli",
-        names=("build_parser",),
-        owner="CLI/REPL executor migration",
-        issue="#42",
-        reason="The REPL deliberately reuses the shipped CLI parser until both use CommandExecutor.",
-    ),
-    DependencyException(
-        importer="ancestryllm.console.shell",
-        imported="ancestryllm.cli",
-        names=("dispatch",),
-        owner="CLI/REPL executor migration",
-        issue="#42",
-        reason="The REPL deliberately reuses shipped CLI dispatch until both use CommandExecutor.",
-    ),
-)
+TEMPORARY_EXCEPTIONS: Final[tuple[DependencyException, ...]] = ()
 
 
 @dataclass(frozen=True, slots=True)

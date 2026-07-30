@@ -186,19 +186,19 @@ def test_exception_expansion_is_rejected_and_original_becomes_stale(tmp_path: Pa
     _write_module(
         root,
         "ancestryllm.cli",
-        "from ancestryllm.console.presentation import PresentationAdapter, render_extra\n",
+        "from ancestryllm.api.routes import create_app, debug_app\n",
     )
     _write_module(
         root,
-        "ancestryllm.console.presentation",
-        "class PresentationAdapter: ...\ndef render_extra(): ...\n",
+        "ancestryllm.api.routes",
+        "def create_app(): ...\ndef debug_app(): ...\n",
     )
     exception = DependencyException(
         importer="ancestryllm.cli",
-        imported="ancestryllm.console.presentation",
-        names=("PresentationAdapter",),
-        owner="executor migration",
-        issue="#42",
+        imported="ancestryllm.api.routes",
+        names=("create_app",),
+        owner="future API adapter",
+        issue="#11",
         reason="Compatibility-only dependency.",
     )
 
@@ -213,13 +213,7 @@ def test_exception_expansion_is_rejected_and_original_becomes_stale(tmp_path: Pa
 
 
 def test_temporary_exceptions_are_exact_owned_and_issue_bound() -> None:
-    assert len(TEMPORARY_EXCEPTIONS) == 4
-    for exception in TEMPORARY_EXCEPTIONS:
-        assert exception.owner
-        assert exception.issue == "#42"
-        assert exception.reason
-        assert exception.names
-        assert tuple(sorted(exception.names)) == exception.names
+    assert TEMPORARY_EXCEPTIONS == ()
 
 
 def test_dead_exception_is_a_failure(tmp_path: Path) -> None:

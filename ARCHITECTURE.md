@@ -7,6 +7,8 @@ Executable ownership and import rules are specified in
 [`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
 REPL layers and migration compatibility contract are specified in
 [`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
+with the implemented shared execution contract in
+[`docs/COMMAND_EXECUTOR.md`](docs/COMMAND_EXECUTOR.md),
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
 and the operator-focused guides under `docs/`, especially the threat model,
@@ -56,7 +58,9 @@ flowchart LR
     Console["Interactive prompt-toolkit/Rich REPL\nancestry"]
     Specs["Shared CommandSpec and DispatchKey\nimplemented"]
     Contracts["Transport-neutral application contracts\nimplemented"]
-    Current["Current compatibility dispatch\n#42 removal target"]
+    Terminal["Shared terminal translation\nparser and presentation"]
+    Executor["Transport-neutral CommandExecutor\nimplemented"]
+    Handlers["Focused command-family executors\nadapter composition"]
     Services["Feature services"]
     Domain["Domain objects\n#44 aggregate target"]
     Workspace["Encrypted SQLCipher\nworkspace"]
@@ -71,9 +75,11 @@ flowchart LR
     Operator --> Console
     CLI --> Specs
     Console --> Specs
-    CLI --> Current
-    Console --> Current
-    Current --> Services
+    CLI --> Terminal
+    Console --> Terminal
+    Terminal --> Executor
+    Executor --> Handlers
+    Handlers --> Services
     Specs --> Contracts
     Services --> Contracts
     Services --> Domain
@@ -86,10 +92,13 @@ flowchart LR
     Future -. "must consume" .-> Contracts
 ```
 
-The `Current` node records an implemented compatibility path, not the target
-dependency direction: `console` still invokes `cli.dispatch`, while `cli`
-reuses the Rich presentation adapter and launches the REPL. Issue #42 must
-replace those inversions with the shared executor before `0.3.0`.
+The one-shot CLI and REPL are sibling terminal adapters. Both use the generated
+parser and terminal translation layer to create the same transport-neutral
+`CommandInvocation`, then resolve it through the same immutable
+`CommandExecutor` registry. Neither adapter imports the other. Focused
+command-family executors translate application invocations to the existing
+feature services without owning genealogy, provider-policy, or file-safety
+rules.
 
 The local operator is trusted to select files, providers, and consent. Imported
 GEDCOM, RootsMagic content, prompt variables, OCR text, provider output, and
@@ -114,9 +123,11 @@ The project has three deliberately different data roles:
 
 | Path | Architectural responsibility |
 |---|---|
-| `src/ancestryllm/cli.py` | Implemented one-shot adapter and application entry point; currently retains compatibility dispatch until #42. |
-| `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL adapter and terminal presentation. |
-| `src/ancestryllm/application/` | Implemented transport-neutral DTO, operation, port, artifact, and stable error contracts; shared executor is the #42 target. |
+| `src/ancestryllm/cli.py` | Thin one-shot compatibility adapter and application entry point over the shared terminal path. |
+| `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL input, session, completion, and job adapter. |
+| `src/ancestryllm/terminal/` | Shared terminal parser, invocation translation, presentation, and dispatch composition used by CLI and REPL. |
+| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, and `CommandExecutor` contracts. |
+| `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
 | `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy value objects and failure categories; aggregate ownership is the #44 target. |
@@ -143,9 +154,11 @@ genealogy artifacts must never be committed.
 ```mermaid
 flowchart TB
     Adapters["Implemented terminal adapters\ncli.py, console/"]
-    Compat["Implemented compatibility dispatch\nremoved by #42"]
+    Terminal["Shared terminal translation\nterminal/"]
     Specs["Implemented command contracts\ncore/commands.py"]
     Contracts["Implemented application contracts\napplication/, domain/errors.py"]
+    Executor["Transport-neutral CommandExecutor\napplication/executor.py"]
+    Handlers["Focused adapter executors\nexecution/"]
     App["Feature services\nGEDCOM, RootsMagic, OCR, Prompts, Research, LLM"]
     Aggregate["0.3 target\nservice-owned genealogy aggregate (#44)"]
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
@@ -154,8 +167,10 @@ flowchart TB
 
     Adapters --> Specs
     Adapters --> Contracts
-    Adapters --> Compat
-    Compat --> App
+    Adapters --> Terminal
+    Terminal --> Executor
+    Executor --> Handlers
+    Handlers --> App
     Specs --> Contracts
     App --> Contracts
     App --> Infra
@@ -170,10 +185,12 @@ The intended dependency rules are:
 
 - CLI and REPL derive grammar and route identity from the one shared
   `CommandSpec` registry. No adapter may add a second command registry.
-- Until #42, console command sets contain no business logic and translate
-  tokens into the compatibility CLI dispatcher. After #42, both terminal
-  adapters must translate to application requests and invoke one shared
-  executor.
+- Console command sets contain no business logic. Both terminal adapters
+  translate parser state into transport-neutral invocations and invoke the same
+  `CommandExecutor`; neither adapter may call the other.
+- Focused executors are adapter composition. They may translate path strings
+  and construct existing services, but cannot own domain algorithms, provider
+  authorization, immutable-input rules, or terminal presentation.
 - Services do not import `prompt_toolkit`, Rich, or console modules. They return
   typed values through the application contracts and raise stable,
   transport-neutral failures at the application boundary.
@@ -189,9 +206,9 @@ The intended dependency rules are:
 
 These rules are executable in `scripts/check_architecture_contracts.py` and
 documented with the public-façade and temporary-exception lifecycle in
-[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The four
-current CLI/REPL compatibility exceptions are exact, owned by #42, and fail the
-gate if expanded or left stale.
+[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The #42
+migration removed every CLI/REPL compatibility exception; the gate now rejects
+any sibling-adapter import without an explicit, reviewed exception record.
 
 ### Accepted desktop adapter
 
@@ -272,11 +289,11 @@ or defining an API key cannot select a provider or initiate a request.
 
 `core/commands.py` owns the supported command specification for modules,
 RootsMagic, GEDCOM, prompts, people, providers/consent, secrets, OCR, and
-database maintenance. `cli.py` translates that shared specification into the
-one-shot `argparse` grammar. Its current compatibility `dispatch()` constructs a
-use-case service where needed and renders through `PresentationAdapter`; #42
-must move use-case selection and execution behind `CommandExecutor` while
-preserving the adapter's output and exit behavior.
+database maintenance. `terminal/parser.py` translates that shared
+specification into the one-shot and REPL `argparse` grammar. `cli.py` preserves
+the shipped entry points and secret-confirmation behavior, then delegates to
+the shared terminal translator and `CommandExecutor`. Presentation and exit
+behavior remain adapter concerns.
 
 The shared command specification and application operation inventory are the
 command contract. New actions must be added there first so one-shot and
@@ -287,7 +304,8 @@ interactive behavior cannot drift or acquire a UI-specific registry.
 The current `console/app.py` compatibility entry point starts the asynchronous
 prompt-toolkit/Rich REPL implemented in `console/shell.py`. Its UI-independent
 `SessionRouter` parses commands from the shared `CommandSpec` metadata, and the
-shell executes them through the canonical `cli.dispatch()` path described in
+shell executes parser namespaces through the shared terminal dispatch path
+described in
 [`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md):
 
 - command sets are explicit built-ins loaded only when enabled;
@@ -302,13 +320,12 @@ shell executes them through the canonical `cli.dispatch()` path described in
 - bounded background jobs expose structured progress, cooperative cancellation,
   and cancellation-resistant shutdown.
 
-The REPL remains a sibling adapter over the same application services as the
-one-shot CLI. The transport-neutral DTO, port, artifact, operation, and stable
-error boundary is implemented under `application/`. The shared executor and
-removal of the CLI/REPL dependency inversions remain #42 work for `0.3.0`.
-One-shot CLI grammar, JSON serialization, stable coded errors, consent
-authorization, and network-free `provider=none` behavior remain compatibility
-contracts throughout that migration.
+The REPL is a sibling adapter over the same executor and application services
+as the one-shot CLI. The transport-neutral DTO, port, artifact, operation,
+invocation, outcome, executor, and stable-error boundary is implemented under
+`application/`. The migration removed the earlier CLI/REPL dependency
+inversions while retaining one-shot grammar, JSON serialization, stable coded
+errors, consent authorization, and network-free `provider=none` behavior.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
@@ -327,9 +344,10 @@ and operation inventory are documented in
 
 `core/errors.py` defines sanitized, coded exceptions with a message,
 remediation, exit code, and serializable details for shipped compatibility.
-The #42 executor migration maps use-case failures to application envelopes
-before adapters render them; adapters must not leak arbitrary provider,
-database, parser, or host exceptions.
+Command executors propagate those stable failures to the terminal boundary;
+future transports map them through the application error-envelope contract.
+Adapters must not leak arbitrary provider, database, parser, or host
+exceptions.
 
 `domain/models.py` defines immutable genealogy value objects for people, names,
 identifiers, provenance, citations, facts, and relationships. `LivingStatus`
@@ -719,8 +737,8 @@ installed local hooks.
 
 | Area | Current state | Remaining assurance boundary |
 |---|---|---|
-| CLI and interactive console | Implemented prompt-toolkit/Rich adapters share `CommandSpec`, route identity, and the compatibility dispatcher. | #42 must put both adapters through `CommandExecutor`, remove four exact dependency exceptions, and preserve command/JSON/error behavior. |
-| Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, and stable error mapping are implemented and tested. | #42 must make them the terminal execution boundary; future adapters may consume but not redefine them. |
+| CLI and interactive console | Implemented prompt-toolkit/Rich adapters share `CommandSpec`, route identity, terminal translation, and `CommandExecutor`; no sibling-adapter import exceptions remain. | Preserve command, JSON, coded-error, exit, consent, offline, and file-safety behavior as services evolve. |
+| Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. | Future adapters may consume these contracts but may not redefine them. |
 | Genealogy contract ownership | Existing identity, provenance, change, conflict, and serialization behavior is characterized. | #44 must place deterministic identity/provenance/result rules in the service-owned aggregate without weakening loss-minimal behavior. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Implemented with layered read-only controls and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |

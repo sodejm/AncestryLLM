@@ -14,10 +14,10 @@ The repository distinguishes three states deliberately:
 | Remaining `0.3.0` target | Required before the release, but not yet a claim about the current code. |
 | Later roadmap | Accepted or proposed direction outside `0.3.0`; no runtime may depend on it yet. |
 
-At the #162 checkpoint, the shared command specifications and transport-neutral
-application contracts are implemented. The shared `CommandExecutor` migration
-(#42) and service-owned genealogy aggregate (#44) remain `0.3.0` targets.
-FastAPI routes and the Electron application remain later-roadmap adapters.
+At the #42 checkpoint, the shared command specifications, transport-neutral
+application contracts, and shared `CommandExecutor` migration are implemented.
+The service-owned genealogy aggregate (#44) remains a `0.3.0` target. FastAPI
+routes and the Electron application remain later-roadmap adapters.
 
 ## Dependency graph and owners
 
@@ -27,7 +27,9 @@ flowchart TB
     REPL["prompt-toolkit/Rich REPL adapter"]
     Specs["CommandSpec and DispatchKey\n#41 implemented"]
     Contracts["Application DTOs, ports, operations,\nartifacts, and stable errors\n#161 implemented"]
-    Executor["CommandExecutor\n#42 remaining 0.3.0 target"]
+    Terminal["Shared terminal translation\n#42 implemented"]
+    Executor["CommandExecutor\n#42 implemented"]
+    Handlers["Focused command-family executors\n#42 implemented"]
     Services["Feature services and composition"]
     Aggregate["Genealogy aggregate and\ndeterministic results\n#44 remaining 0.3.0 target"]
     Domain["Framework-independent domain"]
@@ -36,12 +38,12 @@ flowchart TB
 
     CLI --> Specs
     REPL --> Specs
-    CLI -. "temporary compatibility dispatch" .-> REPL
-    REPL -. "temporary compatibility dispatch" .-> CLI
     Specs --> Contracts
-    CLI -. "0.3 migration" .-> Executor
-    REPL -. "0.3 migration" .-> Executor
-    Executor --> Services
+    CLI --> Terminal
+    REPL --> Terminal
+    Terminal --> Executor
+    Executor --> Handlers
+    Handlers --> Services
     Executor --> Contracts
     Services --> Domain
     Services --> Infra
@@ -56,7 +58,7 @@ flowchart TB
 | Command grammar, aliases, route identity, and dispatch metadata | `ancestryllm.core.commands` (#41) |
 | Request/result DTOs, operation inventory, ports, opaque artifact and secret references, stable error envelopes | `ancestryllm.application` and `ancestryllm.domain.errors` (#161) |
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
-| Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor` (#42 target) |
+| Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, and genealogy result semantics | service-owned genealogy aggregate (#44 target) |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
@@ -108,17 +110,12 @@ and imported symbol tuple, plus a responsible owner, a blocking issue, and a
 reason. Wildcards, package-wide exemptions, and silent expansion are rejected.
 A stale exception also fails the gate so completed migration debt is removed.
 
-The #162 checkpoint has four exact compatibility exceptions, all owned by #42:
-
-- `cli` imports `console.presentation.PresentationAdapter`;
-- `cli` lazily imports `console.shell.run_repl`;
-- `console.parser` imports `cli.build_parser`;
-- `console.shell` imports `cli.dispatch`.
-
-The shared-executor migration must remove these exception records together with
-the corresponding inverted imports. Any replacement compatibility shim must
-remain adapter-local, have focused behavior tests, and must not become a second
-command registry or service API.
+The #42 shared-executor migration removed all four former CLI/REPL
+compatibility exceptions and the corresponding inverted imports. The executable
+exception inventory is empty. Compatibility re-exports remain adapter-local,
+are covered by focused tests, and do not form a second command registry or
+service API. Any future exception must satisfy the exact owner, issue, reason,
+and stale-record checks above.
 
 ## Validation and review
 

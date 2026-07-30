@@ -130,13 +130,18 @@ dependency.
 ## Compatibility paths
 
 ```text
-ancestry MODULE ACTION ...       -> unchanged one-shot parser and dispatcher
+ancestry MODULE ACTION ...       -> shared parser and CommandExecutor
 ancestry                          -> asynchronous prompt-toolkit/Rich REPL
 ```
 
 The REPL and one-shot CLI are sibling adapters, not separate application service
 paths. All supported adapters must preserve one-shot semantics, provider policy,
 stable errors, and source-file safety guarantees.
+
+Both adapters now translate parser state through `ancestryllm.terminal` into
+the same transport-neutral `CommandInvocation` and resolve it through the same
+immutable `CommandExecutor` registry. The REPL does not import the CLI, and the
+CLI does not import REPL parser, presentation, or shell modules.
 
 ## Command registration model
 

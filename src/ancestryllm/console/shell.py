@@ -15,7 +15,6 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from ancestryllm.cli import dispatch
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
 from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
@@ -32,6 +31,7 @@ from ancestryllm.console.security import (
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager, JobReporter
+from ancestryllm.terminal.dispatch import dispatch
 
 _BACKGROUND_ACTIONS = frozenset(
     {
@@ -221,7 +221,7 @@ class ReplApplication:
                 raise AncestryError("REPL_ROUTE_INVALID", "The routed command had no invocation.")
             namespace = result.invocation.namespace
             if namespace.command == "secrets" and namespace.action == "set":
-                await self._set_secret(namespace.name)
+                await self._set_secret(namespace)
             elif self._should_background(namespace):
                 snapshot = self.jobs.submit_with_progress(
                     f"{namespace.command} {namespace.action}",
@@ -446,7 +446,21 @@ class ReplApplication:
         ):
             return dispatch(namespace, self.context)
 
-    async def _set_secret(self, name: str) -> None:
+    def _dispatch_secret(self, namespace: argparse.Namespace, value: str) -> int:
+        with (
+            contextlib.redirect_stdout(self.stdout),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            return dispatch(namespace, self.context, secret_value=value)
+
+    async def _set_secret(self, namespace: argparse.Namespace) -> None:
+        name = getattr(namespace, "name", None)
+        if not isinstance(name, str):
+            raise AncestryError(
+                "ARGUMENT_INVALID",
+                "Missing required command argument: name.",
+                exit_code=2,
+            )
         try:
             value = await self.secret_session.prompt_async(
                 f"Secret value for {name}: ",
@@ -465,8 +479,7 @@ class ReplApplication:
         self.context.secrets.register_sensitive(confirmation)
         if value != confirmation:
             raise AncestryError("SECRET_CONFIRMATION_FAILED", "Secret values did not match.")
-        await asyncio.to_thread(self.context.secrets.set, name, value)
-        self.presenter.render(f"Stored secret reference: {name}")
+        await asyncio.to_thread(self._dispatch_secret, namespace, value)
 
 
 def run_repl(context: AppContext | None = None) -> int:

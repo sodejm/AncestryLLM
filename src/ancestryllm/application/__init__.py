@@ -8,6 +8,15 @@ from ancestryllm.application.dto import (
     ServiceRequest,
     ServiceResult,
 )
+from ancestryllm.application.executor import (
+    CommandArgument,
+    CommandExecutor,
+    CommandHandler,
+    CommandInvocation,
+    CommandOutcome,
+    CommandScalar,
+    CommandValue,
+)
 from ancestryllm.application.operations import OPERATION_CONTRACTS, OperationContract
 from ancestryllm.application.ports import (
     CancellationPort,
@@ -23,6 +32,13 @@ __all__ = [
     "ArtifactRef",
     "BoundaryDTO",
     "CancellationPort",
+    "CommandArgument",
+    "CommandExecutor",
+    "CommandHandler",
+    "CommandInvocation",
+    "CommandOutcome",
+    "CommandScalar",
+    "CommandValue",
     "DecisionPort",
     "IdentityResolutionPort",
     "OperationContract",

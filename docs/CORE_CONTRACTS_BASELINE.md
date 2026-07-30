@@ -1,9 +1,10 @@
 # Core-contracts characterization baseline
 
-Status: implemented `0.2.0` behavior captured as the factual input to the
-`0.3.0 Core Contracts` work. This document describes current code, not the
-target dependency direction. `ARCHITECTURE.md` remains authoritative when this
-supporting inventory is updated.
+Status: immutable characterization of implemented `0.2.0` behavior and the
+pre-migration #160 checkpoint, captured as factual input to the `0.3.0 Core
+Contracts` work. The dependency-flow descriptions below are historical
+baseline evidence, not claims about the current tree. `ARCHITECTURE.md` is the
+authoritative current and target architecture.
 
 The baseline is intentionally executable, bounded, deterministic, fictional,
 and payload-safe. It adds no production refactor. Generated reports belong in
