@@ -198,8 +198,10 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
 
 
 def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
+    project = _project()
     script = (ROOT / "scripts/run_pinned_semgrep.py").read_text(encoding="utf-8")
     script_lock = ROOT / "scripts/run_pinned_semgrep.py.lock"
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert script_lock.is_file()
     lock = tomllib.loads(script_lock.read_text(encoding="utf-8"))
     locked_semgrep = [package for package in lock["package"] if package.get("name") == "semgrep"]
@@ -213,6 +215,8 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
 
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
+    assert "uv==0.12.0" in project["optional-dependencies"]["dev"]
+    assert "pip install --upgrade pip uv==0.12.0" in makefile
     for relative_path, expected_command in sources.items():
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert content.count(expected_command) == 1
