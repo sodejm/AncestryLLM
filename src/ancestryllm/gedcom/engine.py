@@ -2645,7 +2645,9 @@ def prompt_operator(a: IndividualRecord, b: IndividualRecord) -> bool:
     # The operator explicitly requested this local, ephemeral adjudication
     # display; it is required for the decision and is never logged or persisted.
     # codeql[py/clear-text-logging-sensitive-data]
-    print(f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}")
+    print(  # lgtm[py/clear-text-logging-sensitive-data]
+        f"\nPotential duplicate:\n  A: {a.summary()}\n  B: {b.summary()}"
+    )
     try:
         answer = input("Same person? [y/N]: ").strip().casefold()
     except EOFError:
