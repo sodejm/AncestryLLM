@@ -74,7 +74,11 @@ self-approval; do not make that change during the one-maintainer release.
    from `main`; then confirm the remote branch was deleted. Never use `-D` to
    make this check pass. Preserve and record any dirty or active worktree,
    graph-unique commits, unmerged branch, or abnormal deletion failure for
-   explicit follow-up.
+   explicit follow-up. A squash merge can leave graph-unique branch commits
+   even when its tree exactly matches `main`; record that tree comparison and
+   preserve the local branch instead of treating identical content as
+   reachability or forcing deletion. The lifecycle attestation confirms the
+   audit and every cleanup that was safe, not deletion of preserved history.
 3. Finalize the dated changelog, curated
    `docs/release-notes/<version>.md`, and versioned
    findings/interoperability records under
@@ -87,8 +91,8 @@ self-approval; do not make that change during the one-maintainer release.
    milestone has no open issues or pull requests except the single configured
    `release-tracker` issue.
 6. Run `Release readiness` with the exact `main` commit and semantic version,
-   and affirm the branch/worktree cleanup input, backed by the documented
-   reachability and unique-commit audit.
+   and affirm the branch/worktree lifecycle audit input, backed by the
+   documented reachability, unique-commit, cleanup, and preservation record.
 7. Review the evidence artifact and confirm every required job succeeded.
 
 At the exact approval points, a maintainer approves the release-preparation PR;

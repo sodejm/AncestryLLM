@@ -123,7 +123,7 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "`.github/release-config.json`" in releasing
     assert "#133" not in releasing
     assert "git branch -d" in releasing
-    assert "branch/worktree cleanup input" in releasing
+    assert "branch/worktree lifecycle audit input" in releasing
     assert "docs/release-notes/<version>.md" in releasing
     assert "PyPI: unavailable" in releasing
     assert "release-tracker" in releasing
@@ -131,6 +131,8 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "self-approval must remain permitted" in releasing
     assert "Hosted control verification checklist" in releasing
     assert "unique commits" in releasing
+    assert "squash merge can leave graph-unique branch commits" in releasing
+    assert "not deletion of preserved history" in releasing
     assert "resolved before merge" in releasing
     assert "explicitly approves a GitHub-only release" in releasing
     assert "API-token fallback" in releasing
@@ -205,6 +207,10 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
         maxsplit=1,
     )[0]
 
+    assert (
+        "Confirm lifecycle audit and every safe branch/worktree cleanup are recorded" in readiness
+    )
+    assert "Confirm merged release branches and worktrees were safely removed" not in readiness
     assert "--gates evidence/gates.json" in readiness
     assert "approved/gates.json" in release
     assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
