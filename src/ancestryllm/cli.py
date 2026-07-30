@@ -11,11 +11,7 @@ from typing import Any, Callable, Sequence
 
 from ancestryllm import __version__
 from ancestryllm.console.presentation import PresentationAdapter
-from ancestryllm.core.config import AppConfig
-from ancestryllm.core.context import AppContext
-from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.ingress import FileIngressPolicy, FileKind
-from ancestryllm.core.modules import (
+from ancestryllm.core.commands import (
     BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     GLOBAL_ARGUMENTS,
@@ -25,8 +21,12 @@ from ancestryllm.core.modules import (
     ArgumentSpec,
     ArgumentType,
     ModuleDescriptor,
-    ModuleRegistry,
 )
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.context import AppContext
+from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.ingress import FileIngressPolicy, FileKind
+from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.domain.models import LivingStatus
 from ancestryllm.llm.contracts import DataClass
 from ancestryllm.llm.policy import ConsentGrant
@@ -88,9 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     for command in COMMAND_SPECIFICATIONS.values():
         command_parser = commands.add_parser(command.name, help=command.help)
         actions = command_parser.add_subparsers(dest="action", required=True)
-        for action in command.actions:
-            action_parser = actions.add_parser(action.name, help=action.help)
-            _add_action_arguments(action_parser, action)
+        for route in command.routes:
+            action_parser = actions.add_parser(route.action.name, help=route.action.help)
+            action_parser.set_defaults(dispatch_key=route.key)
+            _add_action_arguments(action_parser, route.action)
     return parser
 
 

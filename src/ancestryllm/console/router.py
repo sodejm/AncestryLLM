@@ -8,16 +8,16 @@ from typing import Any
 
 from ancestryllm.console.parser import ParsedInvocation, parse_repl_invocation, split_repl_input
 from ancestryllm.console.security import is_secret_name
-from ancestryllm.core.context import AppContext
-from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.modules import (
+from ancestryllm.core.commands import (
     BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     ActionSpec,
     ArgumentAction,
     ArgumentSpec,
-    ModuleRegistry,
 )
+from ancestryllm.core.context import AppContext
+from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.modules import ModuleRegistry
 
 
 class RouteKind(str, Enum):

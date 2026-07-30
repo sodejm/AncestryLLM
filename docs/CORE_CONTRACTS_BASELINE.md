@@ -32,8 +32,10 @@ flowchart LR
     CLI --> Present
 ```
 
-- `core/modules.py` owns the built-in `CommandSpec`, `ActionSpec`,
-  `ArgumentSpec`, and `ModuleDescriptor` metadata.
+- `core/commands.py` owns the framework-independent `CommandSpec`,
+  `ActionSpec`, `ArgumentSpec`, `ModuleDescriptor`, and derived `DispatchKey`
+  metadata. `core/modules.py` retains the compatibility exports and owns only
+  application-context enablement.
 - `cli.build_parser()` translates that metadata into the one-shot `argparse`
   grammar. `cli.dispatch()` still receives an `argparse.Namespace`, selects the
   use case, calls a service, and renders through `PresentationAdapter`.
@@ -46,10 +48,10 @@ flowchart LR
 - `core/errors.py` owns sanitized coded exceptions. CLI and REPL compatibility
   tests fix their public code, message, and exit behavior.
 
-The CLI and REPL therefore share command metadata and a dispatcher today. They
-do not yet share a transport-neutral request DTO and executor: argument
-normalization and use-case selection remain coupled to `argparse` and
-`cli.py`.
+The CLI and REPL therefore share command metadata, stable dispatch identities,
+and a dispatcher today. They do not yet share a transport-neutral request DTO
+and executor: argument normalization and use-case selection remain coupled to
+`argparse` and `cli.py`.
 
 ## Current provider flow
 

@@ -11,7 +11,7 @@ from prompt_toolkit.completion import CompleteEvent, Completer, Completion, Thre
 from prompt_toolkit.document import Document
 
 from ancestryllm.console.router import SessionRouter
-from ancestryllm.core.modules import (
+from ancestryllm.core.commands import (
     BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
     ActionSpec,

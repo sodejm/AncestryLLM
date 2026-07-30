@@ -17,9 +17,10 @@ import pytest
 from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.console.router import RouteKind, SessionRouter
+from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.modules import BUILTIN_MODULES, COMMAND_SPECIFICATIONS, ModuleRegistry
+from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
 
