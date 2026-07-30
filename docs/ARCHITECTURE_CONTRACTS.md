@@ -112,7 +112,9 @@ an implementation detail does not require a compatibility shim unless that
 detail was already in a declared façade.
 
 The Unreleased RootsMagic public inventory includes the package façade plus
-`core`, `query`, and `export`. The GEDCOM inventory exposes parser, graph,
+`core`, `query`, and `export`. The private `source` and `schema` modules own the
+implementation behind `core`; `reader` and `schema_adapter` retain import
+compatibility but are not alternate public contracts. The GEDCOM inventory exposes parser, graph,
 identity, quality, serialization, service, and synchronization seams. The
 parser and serialization façades now re-export a physically separate pure
 document model, validator, and deterministic line serializer. Remaining

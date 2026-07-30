@@ -24,9 +24,10 @@ from ancestryllm.core.publication import (
 )
 from ancestryllm.gedcom.parser import validate_gedcom_555
 from ancestryllm.gedcom.serialization import wrap_long_gedcom_lines
-from ancestryllm.rootsmagic.reader import RootsMagicReader, SourceFingerprint
-from ancestryllm.rootsmagic.schema_adapter import (
+from ancestryllm.rootsmagic.core import (
+    RootsMagicReader,
     RootsMagicSchemaAdapter,
+    SourceFingerprint,
     semantic_row_key,
     semantic_value,
 )

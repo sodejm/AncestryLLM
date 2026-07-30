@@ -7,6 +7,7 @@ query-cancellation, or issue #29 export suites.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import os
 import sqlite3
@@ -249,7 +250,16 @@ def test_exact_record_budget_is_accepted_despite_sqlite_record_overhead(
 
     assert configured_length_limits == [len(payload) + 9 * (sqlite_column_limit + 1)]
     assert configured_length_limits[0] > len(payload)
-    assert row == ((payload,) if method == "query" else {"Payload": payload})
+    assert row == (
+        (
+            {
+                "encoding": "base64",
+                "data": base64.b64encode(payload).decode("ascii"),
+            },
+        )
+        if method == "query"
+        else {"Payload": payload}
+    )
 
 
 @pytest.mark.parametrize("method", ("query", "read_table"))
