@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "baseline_id": "0.3.0-core-contracts",
+  "fixture_sha256": {
+    "tests/fixtures/gedcom_adversarial/minimal-551.ged": "4634efa88467c981f0f2d2197d6a9d931ce9754bf1f687f595d118ef82bd71d0",
+    "tests/fixtures/gedcom_adversarial/minimal-555.ged": "37ba6120959a631fb9fcd58d20c1e9db9c3d8f040f5800a688040ac7c1240e23",
+    "tests/fixtures/gedcom_adversarial/preserve-extensions.ged": "8c18c790e80aada5c85f7ef097f18cd440c530c30807185bfabb645648d40309",
+    "tests/fixtures/gedcom_adversarial/xref-source-a.ged": "9096981d55413b1bc3a71494f0ddb54009ab562654fa4e75e3ea0ec43528064d",
+    "tests/fixtures/gedcom_adversarial/xref-source-b.ged": "69c6ae8e621d9d3db4cead5bf3050f19985a63d079d455d8d06e173ef9398870",
+    "tests/fixtures/gedcom_incremental/ancestry-snapshot-v1.ged": "efaad2608ab181f15099137c5968786149b5155570e665e56460a488c550575e",
+    "tests/fixtures/gedcom_incremental/ancestry-snapshot-v2.ged": "9f47f447db3333c1d8f294a2dfb0b0067352b34abbe587199bddd71f74abcb22",
+    "tests/fixtures/gedcom_incremental/baseline-master.ged": "a622211c73377be4f44b2317fa71e9fc9c231b2a87f882bad60265238e1c942b",
+    "tests/fixtures/gedcom_incremental/myheritage-snapshot-v1.ged": "929056e9047edf44ccd046973a4fffe5d015ac580cccd3d3fa38bac6d2dacf43",
+    "tests/fixtures/gedcom_incremental/myheritage-snapshot-v2.ged": "912d7af54bd22ec2cfd5a881bac8f207a04d9ca847f32ff42fbd0bdda25b34c8",
+    "tests/fixtures/gedcom_merge/malformed-rejected.ged": "f319b2f8b9e160d0e755fc677e62c715cad34e2f949431334569d412be32b3f7",
+    "tests/fixtures/gedcom_merge/quality-source-a.ged": "cc2df8fed19c274a229af33199b735349c5d184c6008baef1ab3e9e101908df6",
+    "tests/fixtures/gedcom_merge/quality-source-b.ged": "7525bd837a1e160c313cd5852b592b9b58fb9adea48006bd09bc67bac1018fb2"
+  },
+  "semantic_groups": [
+    {
+      "id": "gedcom-parse-serialize-root-loss",
+      "test_nodes": [
+        "tests/test_gedcom_adversarial.py::test_manifest_is_a_complete_fictional_catalog",
+        "tests/test_gedcom_adversarial.py::test_committed_minimal_versions_parse",
+        "tests/test_gedcom_adversarial.py::test_extensions_alternatives_and_continuations_are_preserved",
+        "tests/test_gedcom_adversarial.py::test_xref_collisions_and_dangling_references_are_namespaced_per_source",
+        "tests/test_gedcom_adversarial.py::test_555_validator_preserves_semantic_anomalies_for_quality_findings",
+        "tests/test_gedcom_adversarial.py::test_555_validator_accepts_a_deep_acyclic_family_graph",
+        "tests/test_gedcom_adversarial.py::test_semantic_property_corpus_survives_serialize_reparse",
+        "tests/modular/test_gedcom_rooted_reference_closure.py::test_subtree_retains_only_transitive_referenced_level_zero_records"
+      ]
+    },
+    {
+      "id": "cli-repl-contract",
+      "test_nodes": [
+        "tests/modular/test_cli_console.py::test_action_matrix_covers_every_shipped_module_action",
+        "tests/modular/test_cli_console.py::test_one_shot_returns_expected_dtos_for_every_action",
+        "tests/modular/test_cli_console.py::test_every_action_serializes_json_and_repl_routes_direct_and_module_context",
+        "tests/modular/test_cli_console.py::test_stable_service_error_code_and_exit_are_preserved",
+        "tests/modular/test_cli_console.py::test_invalid_values_missing_files_and_json_parser_failures_are_sanitized",
+        "tests/modular/test_cli_console.py::test_disabled_modules_are_not_imported_or_dispatched",
+        "tests/modular/test_cli_console.py::test_disabled_module_has_matching_repl_code_exit_and_message",
+        "tests/modular/test_cli_console.py::test_secret_values_never_reach_one_shot_status_output",
+        "tests/modular/test_cli_console.py::test_clean_install_entry_points_and_json_smoke"
+      ]
+    },
+    {
+      "id": "provider-consent-offline",
+      "test_nodes": [
+        "tests/modular/test_llm_provider_contracts.py::test_remote_provider_consent_denial_precedes_any_adapter_call",
+        "tests/modular/test_llm_provider_contracts.py::test_provider_failure_redacts_exception_text_and_secret",
+        "tests/modular/test_llm_provider_contracts.py::test_none_is_strictly_offline_with_keys_and_sdk_modules_present",
+        "tests/modular/test_gedcom_provider_boundary.py::test_only_provider_adapters_import_network_clients",
+        "tests/modular/test_gedcom_provider_boundary.py::test_identity_adjudication_uses_shared_generation_contract",
+        "tests/modular/test_gedcom_provider_boundary.py::test_quality_refinement_uses_shared_generation_contract",
+        "tests/modular/test_gedcom_provider_boundary.py::test_provider_error_is_not_swallowed_or_copied_into_merge_output",
+        "tests/modular/test_gedcom_provider_boundary.py::test_provider_none_never_constructs_a_gedcom_resolver"
+      ]
+    },
+    {
+      "id": "incremental-state-provenance-recovery",
+      "test_nodes": [
+        "tests/modular/test_incremental.py::test_initial_allocation_is_independent_of_snapshot_argument_order",
+        "tests/modular/test_incremental.py::test_initial_allocation_is_independent_of_snapshot_record_order",
+        "tests/modular/test_incremental.py::test_incremental_initialization_is_offline_and_publishes_atomic_bundle",
+        "tests/modular/test_incremental.py::test_incremental_active_snapshot_is_idempotent",
+        "tests/modular/test_incremental.py::test_incremental_replaces_changed_snapshots_and_preserves_snapshot_history",
+        "tests/modular/test_incremental.py::test_rebase_requires_confirmation_then_tombstones_manual_deletions",
+        "tests/modular/test_incremental.py::test_changed_fact_cannot_bypass_a_manual_tombstone",
+        "tests/modular/test_incremental.py::test_explicit_manual_revival_retires_the_matching_tombstone",
+        "tests/modular/test_incremental.py::test_update_writes_rollback_metadata_and_cleans_up_interrupted_publish",
+        "tests/modular/test_incremental.py::test_failure_contract_preserves_existing_sentinel_and_creates_no_report",
+        "tests/modular/test_incremental.py::test_moved_destination_and_failed_rollback_never_claims_commit"
+      ]
+    },
+    {
+      "id": "rootsmagic-readonly-bounded-artifacts",
+      "test_nodes": [
+        "tests/modular/test_rootsmagic_issue29_hardening.py::test_export_contract_matrix_is_structural_private_and_deterministic",
+        "tests/modular/test_rootsmagic_issue29_hardening.py::test_source_revalidation_failure_rolls_back_the_complete_prior_pair",
+        "tests/modular/test_rootsmagic_export.py::test_header_only_sqlite_input_fails_stably_across_query_and_export",
+        "tests/modular/test_rootsmagic_export.py::test_export_result_json_preserves_the_public_field_set",
+        "tests/modular/test_rootsmagic_export.py::test_failed_atomic_output_replacement_keeps_prior_output_and_source_unchanged",
+        "tests/modular/test_rootsmagic_export.py::test_changed_source_discards_completed_export_and_report",
+        "tests/modular/test_rootsmagic_export.py::test_query_service_enforces_row_limits_and_requires_explicit_provider",
+        "tests/modular/test_rootsmagic_export.py::test_generated_sql_retains_prompt_injection_as_data_and_authorizer_blocks_extension",
+        "tests/modular/test_rootsmagic_issue78_adversarial.py::test_invalid_database_families_fail_stably_without_artifacts_or_source_changes",
+        "tests/modular/test_rootsmagic_issue78_adversarial.py::test_malformed_declared_schema_is_rejected_without_disclosing_schema_text",
+        "tests/modular/test_rootsmagic_issue78_adversarial.py::test_quoted_hostile_unknown_identifier_is_data_not_executable_sql",
+        "tests/modular/test_rootsmagic_issue78_adversarial.py::test_orphans_self_parenting_and_cycles_are_deterministic_and_source_read_only",
+        "tests/modular/test_rootsmagic_cancellation.py::test_public_read_progress_interruption_becomes_job_cancellation",
+        "tests/modular/test_rootsmagic_cancellation.py::test_sqlite_timeout_wins_race_with_later_cancellation",
+        "tests/modular/test_rootsmagic_cancellation.py::test_bound_copy_cancellation_removes_partial_snapshot_and_preserves_source"
+      ]
+    }
+  ],
+  "public_facades": [
+    "ancestryllm.cli",
+    "ancestryllm.console",
+    "ancestryllm.core.errors",
+    "ancestryllm.core.modules",
+    "ancestryllm.gedcom.parser",
+    "ancestryllm.gedcom.serialization",
+    "ancestryllm.gedcom.service",
+    "ancestryllm.llm.contracts",
+    "ancestryllm.llm.service",
+    "ancestryllm.rootsmagic.service"
+  ],
+  "performance": {
+    "runs": 7,
+    "warm_iterations_per_run": 60,
+    "cold_start_regression_percent": 10.0,
+    "cold_start_regression_floor_ms": 100.0,
+    "warm_regression_percent": 10.0,
+    "warm_regression_minimum_ms": 500.0,
+    "peak_rss_regression_percent": 10.0
+  }
+}
