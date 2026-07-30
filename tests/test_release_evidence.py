@@ -79,24 +79,29 @@ def _interoperability() -> dict[str, Any]:
     }
 
 
-def test_versioned_release_evidence_records_are_valid() -> None:
-    root = Path(__file__).parents[1] / "docs" / "release-evidence" / "0.2.0"
+@pytest.mark.parametrize("version", ["0.2.0", "0.3.0"])
+def test_versioned_release_evidence_records_are_valid(version: str) -> None:
+    root = Path(__file__).parents[1] / "docs" / "release-evidence" / version
     findings = json.loads((root / "findings.json").read_text(encoding="utf-8"))
     interoperability = json.loads((root / "interoperability.json").read_text(encoding="utf-8"))
 
-    assert evidence._validate_findings(findings, "0.2.0") == []
-    vendors = evidence._validate_interoperability(interoperability, "0.2.0")
+    assert evidence._validate_findings(findings, version) == []
+    vendors = evidence._validate_interoperability(interoperability, version)
     assert {vendor["status"] for vendor in vendors} == {"unverified"}
 
 
-def test_curated_release_notes_distinguish_unverified_interoperability() -> None:
-    notes = (Path(__file__).parents[1] / "docs" / "release-notes" / "0.2.0.md").read_text(
+@pytest.mark.parametrize("version", ["0.2.0", "0.3.0"])
+def test_curated_release_notes_distinguish_unverified_interoperability(
+    version: str,
+) -> None:
+    notes = (Path(__file__).parents[1] / "docs" / "release-notes" / f"{version}.md").read_text(
         encoding="utf-8"
     )
+    normalized_notes = " ".join(notes.split())
 
     assert "Interoperability limitations" in notes
     assert "`unverified`" in notes
-    assert "does not make a positive compatibility claim" in notes
+    assert "does not make a positive compatibility claim" in normalized_notes
     assert "SHA256SUMS" in notes
 
 

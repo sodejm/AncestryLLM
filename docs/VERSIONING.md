@@ -2,7 +2,7 @@
 
 AncestryLLM follows [Semantic Versioning 2.0.0](https://semver.org/). Package
 versions use `MAJOR.MINOR.PATCH`; Git tags add the conventional `v` prefix, so
-package version `0.2.0` is tagged `v0.2.0`.
+package version `0.3.0` is tagged `v0.3.0`.
 
 ## Public API
 
@@ -32,5 +32,4 @@ version. Deprecations are documented in a minor release before removal whenever
 the current compatibility line permits it.
 
 Production publishing accepts stable `vMAJOR.MINOR.PATCH` tags only. Pre-release
-publishing requires a separately reviewed workflow and is not enabled for
-0.2.0.
+publishing requires a separately reviewed workflow and is not enabled.

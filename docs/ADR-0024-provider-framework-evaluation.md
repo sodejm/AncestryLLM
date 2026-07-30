@@ -20,10 +20,10 @@ it is an architectural comparison, not a claim of measured provider latency.
 
 ## Decision
 
-Retain the native provider adapters for the current release. Defer LangChain
-and LiteLLM adoption until a concrete capability cannot be implemented safely
-behind the existing contract and the added dependency/security surface is
-accepted through a new ADR.
+Retain the native provider adapters implemented for 0.3.0. Defer LangChain and
+LiteLLM adoption until a concrete capability cannot be implemented safely behind
+the existing contract and the added dependency/security surface is accepted
+through a new ADR.
 
 | Dimension | Native adapters | LangChain | LiteLLM |
 |---|---|---|---|

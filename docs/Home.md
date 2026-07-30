@@ -5,9 +5,13 @@ combines deterministic RootsMagic and GEDCOM workflows with optional,
 explicitly selected LLM providers.
 
 Start with the [CLI reference](CLI.md) for one-shot commands or the
-[interactive console guide](CONSOLE.md). The pages below cover versioning,
-privacy controls, providers, GEDCOM interoperability, backups, release
-operations, and security practices.
+[interactive console guide](CONSOLE.md). In 0.3.0 these are the only
+implemented product surfaces: both use the same command specification,
+transport-neutral executor, application DTOs, and genealogy services. FastAPI
+and Electron remain unshipped later-roadmap adapters and must reuse that service
+surface rather than define another command or domain layer. The pages below
+cover versioning, privacy controls, providers, GEDCOM interoperability,
+backups, release operations, and security practices.
 
 All user-selected files are governed by the shared
 [bounded file-ingress policy](FILE_INGRESS.md), including byte and record
@@ -23,8 +27,8 @@ Wiki UI.
 
 Use the sidebar to navigate the complete published documentation set.
 
-The accepted local desktop direction, process boundaries, MVP scope, and secure
-development gates are defined in the
+The accepted later-roadmap local desktop direction, process boundaries, MVP
+scope, and secure development gates are defined in the
 [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md). Its
 OWASP Top 10:2025 and NIST SP 800-218 control evidence is maintained in the
 [threat model](THREAT_MODEL.md).

@@ -12,10 +12,19 @@ Module authors should add or update the command specification first, then wire
 the action to a thin dispatcher that delegates to an application service. Each
 action also derives one stable `DispatchKey` (`command.action`) from the same
 specification; adapters must not maintain a parallel route table. The
-dispatch layer must not open storage directly, read secrets, call providers, or
-implement business rules. Services return serializable DTOs or stable
-`AncestryError` instances so terminal, JSON, and future adapters can present the
-same result contract.
+implemented execution path is `CommandSpec` → shared argument parsing →
+`CommandInvocation` → `CommandExecutor` → dispatcher → application service.
+The dispatch layer must not open storage directly, read secrets, call providers,
+or implement business rules. Services return transport-neutral, serializable
+DTOs, opaque artifact references, and stable coded errors so terminal, JSON, and
+future adapters can present the same result contract.
+
+Genealogy services delegate canonical identity, provenance, deterministic
+change/conflict accounting, and quality-finding construction to the
+service-owned aggregate. Do not recreate those rules in a command handler,
+provider, serializer, FastAPI route, or Electron process. Future transports
+must consume the same operation, result, artifact, and error contracts; they do
+not get a second UI-specific command registry or separate domain semantics.
 
 Long-running REPL actions are submitted through the UI-independent job manager.
 Its `JobReporter` accepts a current operation and, when known, validated
