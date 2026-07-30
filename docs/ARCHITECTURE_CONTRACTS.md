@@ -14,10 +14,10 @@ The repository distinguishes three states deliberately:
 | Remaining `0.3.0` target | Required before the release, but not yet a claim about the current code. |
 | Later roadmap | Accepted or proposed direction outside `0.3.0`; no runtime may depend on it yet. |
 
-At the #42 checkpoint, the shared command specifications, transport-neutral
-application contracts, and shared `CommandExecutor` migration are implemented.
-The service-owned genealogy aggregate (#44) remains a `0.3.0` target. FastAPI
-routes and the Electron application remain later-roadmap adapters.
+The shared command specifications, transport-neutral application contracts,
+shared `CommandExecutor`, and service-owned genealogy aggregate (#44) are
+implemented. FastAPI routes and the Electron application remain
+later-roadmap adapters.
 
 ## Dependency graph and owners
 
@@ -31,7 +31,7 @@ flowchart TB
     Executor["CommandExecutor\n#42 implemented"]
     Handlers["Focused command-family executors\n#42 implemented"]
     Services["Feature services and composition"]
-    Aggregate["Genealogy aggregate and\ndeterministic results\n#44 remaining 0.3.0 target"]
+    Aggregate["Genealogy aggregate and\ndeterministic results\n#44 implemented"]
     Domain["Framework-independent domain"]
     Infra["Storage, provider, and file infrastructure"]
     Future["FastAPI and Electron adapters\nlater roadmap"]
@@ -47,7 +47,7 @@ flowchart TB
     Executor --> Contracts
     Services --> Domain
     Services --> Infra
-    Services -. "0.3 genealogy ownership" .-> Aggregate
+    Services --> Aggregate
     Aggregate --> Domain
     Future -. "later adapter dependency" .-> Contracts
     Future -. "later adapter dependency" .-> Executor
@@ -59,7 +59,7 @@ flowchart TB
 | Request/result DTOs, operation inventory, ports, opaque artifact and secret references, stable error envelopes | `ancestryllm.application` and `ancestryllm.domain.errors` (#161) |
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
-| Identity, provenance, deterministic changes/conflicts, and genealogy result semantics | service-owned genealogy aggregate (#44 target) |
+| Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
 

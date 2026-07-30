@@ -62,7 +62,7 @@ flowchart LR
     Executor["Transport-neutral CommandExecutor\nimplemented"]
     Handlers["Focused command-family executors\nadapter composition"]
     Services["Feature services"]
-    Domain["Domain objects\n#44 aggregate target"]
+    Domain["Genealogy domain values and\nservice-owned aggregate implemented"]
     Workspace["Encrypted SQLCipher\nworkspace"]
     Keyring["OS credential store"]
     RM["RootsMagic .rmtree\nread-only input"]
@@ -126,11 +126,11 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/cli.py` | Thin one-shot compatibility adapter and application entry point over the shared terminal path. |
 | `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL input, session, completion, and job adapter. |
 | `src/ancestryllm/terminal/` | Shared terminal parser, invocation translation, presentation, and dispatch composition used by CLI and REPL. |
-| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, and `CommandExecutor` contracts. |
+| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. |
 | `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
 | `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
-| `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy value objects and failure categories; aggregate ownership is the #44 target. |
+| `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, and diagnostics. |
 | `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. |
 | `src/ancestryllm/rootsmagic/` | Immutable database discovery/query and schema-adaptive GEDCOM export. |
@@ -160,7 +160,7 @@ flowchart TB
     Executor["Transport-neutral CommandExecutor\napplication/executor.py"]
     Handlers["Focused adapter executors\nexecution/"]
     App["Feature services\nGEDCOM, RootsMagic, OCR, Prompts, Research, LLM"]
-    Aggregate["0.3 target\nservice-owned genealogy aggregate (#44)"]
+    Aggregate["Implemented\nservice-owned genealogy aggregate (#44)"]
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
     External["SQLCipher, keyring, RootsMagic, GEDCOM, provider SDKs"]
     Future["Later-roadmap adapters\nFastAPI, Electron"]
@@ -174,7 +174,7 @@ flowchart TB
     Specs --> Contracts
     App --> Contracts
     App --> Infra
-    App -.-> Aggregate
+    App --> Aggregate
     Aggregate --> Contracts
     Infra --> Contracts
     Infra --> External
@@ -739,7 +739,7 @@ installed local hooks.
 |---|---|---|
 | CLI and interactive console | Implemented prompt-toolkit/Rich adapters share `CommandSpec`, route identity, terminal translation, and `CommandExecutor`; no sibling-adapter import exceptions remain. | Preserve command, JSON, coded-error, exit, consent, offline, and file-safety behavior as services evolve. |
 | Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. | Future adapters may consume these contracts but may not redefine them. |
-| Genealogy contract ownership | Existing identity, provenance, change, conflict, and serialization behavior is characterized. | #44 must place deterministic identity/provenance/result rules in the service-owned aggregate without weakening loss-minimal behavior. |
+| Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Implemented with layered read-only controls and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Implemented for core tables with explicit loss reports. | It is not a complete exporter for every RootsMagic table/version. |

@@ -17,6 +17,7 @@ from ancestryllm.application.executor import (
     CommandScalar,
     CommandValue,
 )
+from ancestryllm.application.genealogy import GenealogyAggregate
 from ancestryllm.application.operations import OPERATION_CONTRACTS, OperationContract
 from ancestryllm.application.ports import (
     CancellationPort,
@@ -40,6 +41,7 @@ __all__ = [
     "CommandScalar",
     "CommandValue",
     "DecisionPort",
+    "GenealogyAggregate",
     "IdentityResolutionPort",
     "OperationContract",
     "ProgressPort",

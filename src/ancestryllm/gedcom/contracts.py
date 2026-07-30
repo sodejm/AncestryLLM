@@ -10,6 +10,12 @@ if TYPE_CHECKING:
     from ancestryllm.gedcom.engine import IndividualRecord, QualityReport
 
 
+class DuplicateDecision(Protocol):
+    """Resolve a low-confidence duplicate without owning transport interaction."""
+
+    def __call__(self, left: IndividualRecord, right: IndividualRecord) -> bool | None: ...
+
+
 class IdentityResolver(Protocol):
     """Adjudicate one bounded pair without exposing provider implementation details."""
 
@@ -32,4 +38,9 @@ class QualityResolver(Protocol):
     def __call__(self, report: QualityReport) -> QualityResolution: ...
 
 
-__all__ = ["IdentityResolver", "QualityResolution", "QualityResolver"]
+__all__ = [
+    "DuplicateDecision",
+    "IdentityResolver",
+    "QualityResolution",
+    "QualityResolver",
+]

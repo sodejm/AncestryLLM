@@ -97,10 +97,10 @@ selection is not authorization: existing provider policy must still require a
 matching explicit consent grant before any disclosure or network call.
 
 The operation DTOs expose deterministic change, conflict, quality, and
-provenance records. The genealogy aggregate introduced by the dependent
-genealogy-contract work owns the rules that produce those records. Adapters
-only translate and render them. RootsMagic inputs remain immutable and
-RootsMagic/GEDCOM outputs remain loss-visible and atomically published.
+provenance records. The implemented service-owned genealogy aggregate owns the
+rules that produce those records. Adapters only translate and render them.
+RootsMagic inputs remain immutable and RootsMagic/GEDCOM outputs remain
+loss-visible and atomically published.
 
 ## Stable failure contract
 

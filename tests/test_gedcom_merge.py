@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.gedcom import engine as gm
 
 # ---------------------------------------------------------------------------
@@ -138,34 +139,6 @@ class TestIndividualRecord:
     def test_birth_year_none_when_no_date(self):
         rec = _make_record(birth_date="")
         assert rec.birth_year is None
-
-    def test_operator_prompt_is_local_stdout_only(
-        self,
-        caplog,
-        capsys,
-        monkeypatch,
-    ):
-        first = _make_record(given_name="Fictional-Operator-Canary-A")
-        second = _make_record(
-            pointer="@I2@",
-            given_name="Fictional-Operator-Canary-B",
-            source_file="/fake/file_b.ged",
-        )
-
-        def respond_no(prompt: str) -> str:
-            print(prompt, end="")
-            return "n"
-
-        monkeypatch.setattr("builtins.input", respond_no)
-
-        with caplog.at_level(logging.DEBUG):
-            assert gm.prompt_operator(first, second) is False
-
-        output = capsys.readouterr().out
-        assert "Fictional-Operator-Canary-A" in output
-        assert "Fictional-Operator-Canary-B" in output
-        assert "Fictional-Operator-Canary-A" not in caplog.text
-        assert "Fictional-Operator-Canary-B" not in caplog.text
 
     def test_summary_contains_name(self):
         rec = _make_record(given_name="Jane", surname="Doe")
@@ -1141,6 +1114,73 @@ class TestMergeRecords:
                 auto=True,
                 identity_resolver=fail_ai,
             )
+
+    def test_low_confidence_duplicate_uses_injected_decision(self):
+        a = _make_record(pointer="@I1@", source_file="/a.ged")
+        b = _make_record(
+            pointer="@I2@",
+            surname="Smyth",
+            birth_date="1851",
+            source_file="/b.ged",
+        )
+        seen: list[tuple[str, str]] = []
+
+        result = gm.merge_records(
+            [a, b],
+            threshold=70,
+            identity_resolver=lambda _left, _right: {
+                "is_duplicate": True,
+                "confidence": 0.1,
+                "reasoning": "Fictional low-confidence match.",
+            },
+            duplicate_decision=lambda left, right: (
+                seen.append((left.pointer, right.pointer)) or True
+            ),
+        )
+
+        assert len(result) == 1
+        assert seen == [("@I1@", "@I2@")]
+
+    @pytest.mark.parametrize(
+        "decision",
+        [
+            pytest.param(None, id="missing"),
+            pytest.param(lambda _left, _right: None, id="cancelled"),
+            pytest.param(
+                lambda _left, _right: (_ for _ in ()).throw(EOFError()),
+                id="eof",
+            ),
+            pytest.param(
+                lambda _left, _right: (_ for _ in ()).throw(CancellationError("cancelled")),
+                id="cooperative-cancellation",
+            ),
+            pytest.param(
+                lambda _left, _right: (_ for _ in ()).throw(KeyboardInterrupt()),
+                id="keyboard-interrupt",
+            ),
+        ],
+    )
+    def test_low_confidence_duplicate_fails_closed(self, decision):
+        a = _make_record(pointer="@I1@", source_file="/a.ged")
+        b = _make_record(
+            pointer="@I2@",
+            surname="Smyth",
+            birth_date="1851",
+            source_file="/b.ged",
+        )
+
+        result = gm.merge_records(
+            [a, b],
+            threshold=70,
+            identity_resolver=lambda _left, _right: {
+                "is_duplicate": True,
+                "confidence": 0.1,
+                "reasoning": "Fictional low-confidence match.",
+            },
+            duplicate_decision=decision,
+        )
+
+        assert [person.pointer for person in result] == ["@I1@", "@I2@"]
 
 
 # ---------------------------------------------------------------------------

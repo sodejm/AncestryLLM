@@ -84,6 +84,76 @@ EXIT_CODES = {
     "SYNC_PUBLICATION_INCOMPLETE": 7,
 }
 ResolverFactory = Callable[[str, str, str | None], IdentityResolver]
+CancellationCheck = Callable[[], None]
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAccounting:
+    """Deterministic domain accounting retained outside rendered transcripts."""
+
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    conflicts: int = 0
+    warnings: int = 0
+    information: int = 0
+    quality_warnings: int = 0
+    errors: int = 0
+    resolved: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SyncExecutionResult:
+    """Structured incremental result rendered only by an outer adapter."""
+
+    exit_code: int
+    output: str = ""
+    error: str = ""
+    committed: bool = False
+    artifacts: tuple[Path, ...] = ()
+    accounting: SyncAccounting = field(default_factory=SyncAccounting)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncSnapshotInput:
+    """Transport-neutral snapshot input used by the sync application service."""
+
+    source_id: str
+    vendor: str
+    path: Path
+    exported_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncUpdateCommand:
+    """Typed update command shared by terminal parsing and application services."""
+
+    master: Path
+    release_root: Path
+    provider: str
+    snapshots: tuple[SyncSnapshotInput, ...]
+    manifest: Path | None = None
+    initialize_manifest: bool = False
+    quality_root_person: str | None = None
+    no_quality_report: bool = False
+    dry_run: bool = False
+    gedcom_version: str = "5.5.5"
+    auto: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRebaseCommand:
+    """Typed rebase command shared by terminal parsing and application services."""
+
+    master: Path
+    manifest: Path
+    release_root: Path
+    reason: str
+    accept_manual_deletions: bool = False
+    dry_run: bool = False
+
+
+SyncCommand = SyncUpdateCommand | SyncRebaseCommand
 
 
 class PlainEnglishArgumentParser(argparse.ArgumentParser):
@@ -135,6 +205,53 @@ class SyncStats:
     removed: list[str] = field(default_factory=list)
     disappeared_retained: list[str] = field(default_factory=list)
     record_aliases: dict[str, str] = field(default_factory=dict)
+
+
+def _checkpoint(cancellation_check: CancellationCheck | None = None) -> None:
+    """Observe both the process token and an injected service cancellation port."""
+
+    cancellation_checkpoint()
+    if cancellation_check is not None:
+        cancellation_check()
+
+
+def _sync_accounting(stats: SyncStats, quality: Any | None = None) -> SyncAccounting:
+    """Map one update's detailed stats to stable service-owned counts."""
+
+    severities = Counter(
+        str(getattr(finding, "severity", "")).casefold()
+        for finding in getattr(quality, "findings", ())
+    )
+    return SyncAccounting(
+        created=(len(stats.added_people) + len(stats.added_facts) + len(stats.citations_attached)),
+        updated=(
+            len(stats.mapped_people)
+            + len(stats.consolidated_facts)
+            + len(stats.citations_deduplicated)
+            + len(stats.source_records_consolidated)
+        ),
+        unchanged=len(stats.unchanged_people),
+        conflicts=len(stats.conflicts),
+        warnings=(
+            len(stats.unresolved_people) + len(stats.removed) + len(stats.disappeared_retained)
+        ),
+        information=severities["low"],
+        quality_warnings=severities["medium"],
+        errors=severities["critical"] + severities["high"],
+        resolved=len(stats.record_aliases),
+    )
+
+
+def _rebase_accounting(
+    additions: Mapping[str, set[str]],
+    deletions: Mapping[str, set[str]],
+) -> SyncAccounting:
+    """Map explicit manual rebase changes to the same deterministic contract."""
+
+    return SyncAccounting(
+        created=sum(len(hashes) for hashes in additions.values()),
+        updated=sum(len(hashes) for hashes in deletions.values()),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,20 +875,9 @@ def _next_pointer(
     return pointer
 
 
-def _parse_snapshot_argument(value: str) -> tuple[str, str, Path]:
-    """Parse ``SOURCE_ID:VENDOR=PATH`` without restricting path characters."""
-    descriptor, separator, raw_path = value.partition("=")
-    source_id, vendor_separator, vendor = descriptor.partition(":")
-    if not separator or not vendor_separator or not raw_path:
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            "A snapshot descriptor is incomplete.",
-            "The updater cannot distinguish the source, vendor, and file path.",
-            [
-                "Use --snapshot SOURCE_ID:VENDOR=/absolute/or/relative/file.ged.",
-                "Example: --snapshot ancestry-main:ancestry=tree.ged.",
-            ],
-        )
+def _validate_snapshot_identity(source_id: str, vendor: str) -> None:
+    """Validate stable snapshot identity fields for every calling adapter."""
+
     if not SOURCE_ID_RE.fullmatch(source_id):
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -789,7 +895,79 @@ def _parse_snapshot_argument(value: str) -> tuple[str, str, Path]:
             "Vendor metadata controls reporting and future compatibility profiles.",
             [f"Choose one of: {', '.join(SUPPORTED_VENDORS)}."],
         )
+
+
+def _parse_snapshot_argument(value: str) -> tuple[str, str, Path]:
+    """Parse ``SOURCE_ID:VENDOR=PATH`` without restricting path characters."""
+
+    descriptor, separator, raw_path = value.partition("=")
+    source_id, vendor_separator, vendor = descriptor.partition(":")
+    if not separator or not vendor_separator or not raw_path:
+        raise SyncError(
+            "SYNC_CONFIGURATION",
+            "A snapshot descriptor is incomplete.",
+            "The updater cannot distinguish the source, vendor, and file path.",
+            [
+                "Use --snapshot SOURCE_ID:VENDOR=/absolute/or/relative/file.ged.",
+                "Example: --snapshot ancestry-main:ancestry=tree.ged.",
+            ],
+        )
+    _validate_snapshot_identity(source_id, vendor)
     return source_id, vendor, Path(raw_path)
+
+
+def _validate_exported_at(timestamp: str) -> None:
+    """Require one explicit export time to be valid ISO-8601 text."""
+
+    try:
+        dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SyncError(
+            "SYNC_CONFIGURATION",
+            "An export date is not valid ISO-8601 text.",
+            "Incorrect dates make snapshot history misleading.",
+            ["Use a value such as 2026-07-17 or 2026-07-17T14:30:00-04:00."],
+        ) from exc
+
+
+def _snapshot_inputs_from_arguments(
+    snapshots: Sequence[str],
+    exported_at_values: Sequence[str] | None,
+) -> tuple[SyncSnapshotInput, ...]:
+    """Convert terminal-only repeated arguments into typed snapshot inputs."""
+
+    explicit_dates: dict[str, str] = {}
+    for value in exported_at_values or ():
+        source_id, separator, timestamp = value.partition("=")
+        if not separator or not timestamp:
+            raise SyncError(
+                "SYNC_CONFIGURATION",
+                "An export date descriptor is incomplete.",
+                "An export date must be tied to one stable source ID.",
+                ["Use --exported-at SOURCE_ID=YYYY-MM-DD or an ISO-8601 timestamp."],
+            )
+        _validate_exported_at(timestamp)
+        explicit_dates[source_id] = timestamp
+
+    inputs = tuple(
+        SyncSnapshotInput(
+            source_id=source_id,
+            vendor=vendor,
+            path=path,
+            exported_at=explicit_dates.get(source_id),
+        )
+        for source_id, vendor, path in map(_parse_snapshot_argument, snapshots)
+    )
+    unknown_dates = sorted(set(explicit_dates) - {snapshot.source_id for snapshot in inputs})
+    if unknown_dates:
+        raise SyncError(
+            "SYNC_CONFIGURATION",
+            "An --exported-at value refers to a source ID with no snapshot.",
+            "The date would have no snapshot observation to describe.",
+            ["Add the matching --snapshot or remove the unused --exported-at value."],
+            details=(f"Unused export date entries: {len(unknown_dates)}",),
+        )
+    return inputs
 
 
 def _header_export_date(
@@ -813,33 +991,19 @@ def _header_export_date(
 
 
 def _snapshot_specs(
-    args: argparse.Namespace, core: ModuleType, ingress: FileIngressPolicy
+    inputs: Sequence[SyncSnapshotInput],
+    core: ModuleType,
+    ingress: FileIngressPolicy,
 ) -> list[SnapshotSpec]:
-    """Validate repeated snapshot arguments and derive export timestamps."""
-    explicit_dates: dict[str, str] = {}
-    for value in args.exported_at or []:
-        source_id, separator, timestamp = value.partition("=")
-        if not separator or not timestamp:
-            raise SyncError(
-                "SYNC_CONFIGURATION",
-                "An export date descriptor is incomplete.",
-                "An export date must be tied to one stable source ID.",
-                ["Use --exported-at SOURCE_ID=YYYY-MM-DD or an ISO-8601 timestamp."],
-            )
-        try:
-            dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise SyncError(
-                "SYNC_CONFIGURATION",
-                "An export date is not valid ISO-8601 text.",
-                "Incorrect dates make snapshot history misleading.",
-                ["Use a value such as 2026-07-17 or 2026-07-17T14:30:00-04:00."],
-            ) from exc
-        explicit_dates[source_id] = timestamp
+    """Validate typed snapshot inputs and derive export timestamps."""
+
     specs: list[SnapshotSpec] = []
     seen: set[str] = set()
-    for value in args.snapshot:
-        source_id, vendor, path = _parse_snapshot_argument(value)
+    for item in inputs:
+        source_id = item.source_id
+        vendor = item.vendor
+        path = item.path
+        _validate_snapshot_identity(source_id, vendor)
         path = ingress.normalize_path(path, FileKind.GEDCOM, absolute=True)
         if source_id in seen:
             raise SyncError(
@@ -850,8 +1014,9 @@ def _snapshot_specs(
             )
         seen.add(source_id)
         snapshot = ingress.inspect(path, FileKind.GEDCOM)
-        if source_id in explicit_dates:
-            exported_at = explicit_dates[source_id]
+        if item.exported_at is not None:
+            _validate_exported_at(item.exported_at)
+            exported_at = item.exported_at
             basis = "operator"
         else:
             header_date = _header_export_date(path, core, ingress, snapshot)
@@ -878,15 +1043,6 @@ def _snapshot_specs(
                 sha256=fingerprint.sha256,
                 fingerprint=fingerprint,
             )
-        )
-    unknown_dates = sorted(set(explicit_dates) - seen)
-    if unknown_dates:
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            "An --exported-at value refers to a source ID with no snapshot.",
-            "The date would have no snapshot observation to describe.",
-            ["Add the matching --snapshot or remove the unused --exported-at value."],
-            details=(f"Unused export date entries: {len(unknown_dates)}",),
         )
     return sorted(specs, key=lambda item: (item.source_id, item.vendor, item.sha256))
 
@@ -3542,15 +3698,6 @@ def _publish_and_finalize_directory(
         )
 
 
-def _report_committed_status(lines: Sequence[str]) -> None:
-    """Best-effort status output that cannot invalidate an immutable commit."""
-    try:
-        for line in lines:
-            print(line)
-    except BaseException:
-        return
-
-
 def _quality_report(
     people: list[Any],
     records: list[Any],
@@ -3570,42 +3717,83 @@ def _quality_report(
     )
 
 
+def _update_command_from_namespace(args: argparse.Namespace) -> SyncUpdateCommand:
+    """Translate terminal parser state into the shared typed update command."""
+
+    return SyncUpdateCommand(
+        master=Path(args.master),
+        release_root=Path(args.release_root),
+        provider=str(args.provider),
+        snapshots=_snapshot_inputs_from_arguments(args.snapshot, args.exported_at),
+        manifest=Path(args.manifest) if args.manifest else None,
+        initialize_manifest=bool(args.initialize_manifest),
+        quality_root_person=args.quality_root_person,
+        no_quality_report=bool(args.no_quality_report),
+        dry_run=bool(args.dry_run),
+        gedcom_version=str(args.gedcom_version),
+        auto=bool(args.auto),
+    )
+
+
+def _rebase_command_from_namespace(args: argparse.Namespace) -> SyncRebaseCommand:
+    """Translate terminal parser state into the shared typed rebase command."""
+
+    return SyncRebaseCommand(
+        master=Path(args.master),
+        manifest=Path(args.manifest),
+        release_root=Path(args.release_root),
+        reason=str(args.reason),
+        accept_manual_deletions=bool(args.accept_manual_deletions),
+        dry_run=bool(args.dry_run),
+    )
+
+
 def _normalize_command_paths(
-    args: argparse.Namespace,
-    command: str,
+    command: SyncCommand,
     ingress: FileIngressPolicy,
-) -> None:
+) -> SyncCommand:
     """Normalize every standalone user-supplied sync path at one boundary."""
 
-    args.master = ingress.normalize_path(args.master, FileKind.GEDCOM, absolute=True)
-    args.release_root = ingress.normalize_path(
-        args.release_root,
+    master = ingress.normalize_path(command.master, FileKind.GEDCOM, absolute=True)
+    release_root = ingress.normalize_path(
+        command.release_root,
         FileKind.MANIFEST,
         absolute=True,
     )
-    if command == "update":
-        if args.manifest:
-            args.manifest = ingress.normalize_path(
-                args.manifest,
-                FileKind.MANIFEST,
-                absolute=True,
-            )
-        return
-    args.manifest = ingress.normalize_path(
-        args.manifest,
+    if isinstance(command, SyncUpdateCommand):
+        manifest = (
+            ingress.normalize_path(command.manifest, FileKind.MANIFEST, absolute=True)
+            if command.manifest is not None
+            else None
+        )
+        return dataclasses.replace(
+            command,
+            master=master,
+            release_root=release_root,
+            manifest=manifest,
+        )
+    manifest = ingress.normalize_path(
+        command.manifest,
         FileKind.MANIFEST,
         absolute=True,
+    )
+    return dataclasses.replace(
+        command,
+        master=master,
+        release_root=release_root,
+        manifest=manifest,
     )
 
 
 def _perform_update(
-    args: argparse.Namespace,
+    args: SyncUpdateCommand,
     core: ModuleType,
     ingress: FileIngressPolicy,
     identity_resolver: IdentityResolver | None = None,
-) -> int:
+    cancellation_check: CancellationCheck | None = None,
+) -> SyncExecutionResult:
     """Execute one offline-first update and publish an atomic generation bundle."""
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     master: Path = args.master
     release_root: Path = args.release_root
     master_fingerprint = ingress.fingerprint(master, FileKind.GEDCOM)
@@ -3636,7 +3824,7 @@ def _perform_update(
                 "Or add --no-quality-report.",
             ],
         )
-    specs = _snapshot_specs(args, core, ingress)
+    specs = _snapshot_specs(args.snapshots, core, ingress)
     manifest_path: Path | None = args.manifest
     manifest_fingerprint = (
         ingress.fingerprint(manifest_path, FileKind.MANIFEST) if manifest_path is not None else None
@@ -3683,11 +3871,14 @@ def _perform_update(
         for spec in specs
     ):
         verify_inputs()
-        print(
-            "No update was needed: every supplied snapshot is already active "
-            "with the same SHA-256 checksum. No release files were changed."
+        _checkpoint(cancellation_check)
+        return SyncExecutionResult(
+            exit_code=0,
+            output=(
+                "No update was needed: every supplied snapshot is already active "
+                "with the same SHA-256 checksum. No release files were changed.\n"
+            ),
         )
-        return 0
     try:
         sources = core.load_sources(
             [master, *(spec.path for spec in specs)],
@@ -3705,7 +3896,7 @@ def _perform_update(
             ["Open the named file and repair the reported GEDCOM line, then retry."],
             details=(f"Error class: {type(exc).__name__}",),
         ) from exc
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     stats = SyncStats()
     pointer_map, bindings, _ = _match_people(
         sources,
@@ -3716,9 +3907,9 @@ def _perform_update(
         provider_id=args.provider,
         identity_resolver=guarded_identity_resolver,
     )
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     pointer_map, nonpeople = _map_nonpeople(sources, pointer_map, manifest, core, stats)
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     people, block_registry = _reconcile_person_blocks(
         sources,
         specs,
@@ -3728,7 +3919,7 @@ def _perform_update(
         stats,
         initialize=args.initialize_manifest,
     )
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     nonpeople = [
         core.GedcomRecord(
             _rewrite_lines(record.lines, pointer_map, core),
@@ -3764,10 +3955,25 @@ def _perform_update(
             dry_run=True,
         )
         verify_inputs()
-        print(report, end="")
-        return 0
+        _checkpoint(cancellation_check)
+        return SyncExecutionResult(
+            exit_code=0,
+            output=report,
+            accounting=_sync_accounting(stats),
+        )
     release_root_capability = _ensure_release_root(release_root)
     final_dir = release_root / release_name
+    published_artifacts = tuple(
+        final_dir / name
+        for name in (
+            "master.ged",
+            "manifest.json",
+            "update.md",
+            "quality.md",
+            "rollback.json",
+        )
+    )
+    quality: Any | None = None
     staging: Path | None = None
     staging_name: str | None = None
     staging_descriptor: int | None = None
@@ -3786,7 +3992,7 @@ def _perform_update(
             staging_marker_descriptor,
             staging_marker_identity,
         ) = _create_staging_directory(release_root_capability, ".gedcom-sync-")
-        cancellation_checkpoint()
+        _checkpoint(cancellation_check)
         staged_master = staging / "master.ged"
         core.write_gedcom(
             people,
@@ -3829,6 +4035,7 @@ def _perform_update(
         )
         _write_bytes(staging / "update.md", report_text.encode("utf-8"))
         if not args.no_quality_report:
+            assert args.quality_root_person is not None
             quality = _quality_report(
                 people,
                 output_records,
@@ -3865,7 +4072,7 @@ def _perform_update(
         manifest_payload = _json_bytes(manifest)
         _write_bytes(staging / "manifest.json", manifest_payload)
         verify_inputs()
-        cancellation_checkpoint()
+        _checkpoint(cancellation_check)
         assert staging_marker_descriptor is not None
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
@@ -3897,7 +4104,12 @@ def _perform_update(
             _close_capability_quietly(release_root_capability)
             if isinstance(exc, CancellationError):
                 raise
-            return 0
+            return SyncExecutionResult(
+                exit_code=0,
+                committed=True,
+                artifacts=published_artifacts,
+                accounting=_sync_accounting(stats, quality),
+            )
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
@@ -3922,15 +4134,21 @@ def _perform_update(
         raise
     _close_descriptor_quietly(staging_descriptor)
     _close_capability_quietly(release_root_capability)
-    _report_committed_status(
-        (
-            f"Incremental update complete: {final_dir}",
-            f"Master GEDCOM: {final_dir / 'master.ged'}",
-            f"Manifest: {final_dir / 'manifest.json'}",
-            f"Update report: {final_dir / 'update.md'}",
+    return SyncExecutionResult(
+        exit_code=0,
+        output="\n".join(
+            (
+                f"Incremental update complete: {final_dir}",
+                f"Master GEDCOM: {final_dir / 'master.ged'}",
+                f"Manifest: {final_dir / 'manifest.json'}",
+                f"Update report: {final_dir / 'update.md'}",
+            )
         )
+        + "\n",
+        committed=True,
+        artifacts=published_artifacts,
+        accounting=_sync_accounting(stats, quality),
     )
-    return 0
 
 
 def _master_block_index(
@@ -3954,9 +4172,14 @@ def _master_block_index(
     return result
 
 
-def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIngressPolicy) -> int:
+def _perform_rebase(
+    args: SyncRebaseCommand,
+    core: ModuleType,
+    ingress: FileIngressPolicy,
+    cancellation_check: CancellationCheck | None = None,
+) -> SyncExecutionResult:
     """Adopt external edits explicitly as protected manual provenance."""
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     master: Path = args.master
     manifest_path: Path = args.manifest
     release_root: Path = args.release_root
@@ -4004,7 +4227,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         ingress,
         master_fingerprint.snapshot,
     )
-    cancellation_checkpoint()
+    _checkpoint(cancellation_check)
     additions = {
         pointer: set(hashes) - set(previous.get(pointer, {}))
         for pointer, hashes in current.items()
@@ -4041,10 +4264,10 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         if (tombstone.get("person"), tombstone.get("block_hash")) not in revived
     ]
     for pointer, hashes in additions.items():
-        cancellation_checkpoint()
+        _checkpoint(cancellation_check)
         registry = manifest.setdefault("blocks", {}).setdefault(pointer, {})
         for block_hash in hashes:
-            cancellation_checkpoint()
+            _checkpoint(cancellation_check)
             entry = registry.setdefault(
                 block_hash,
                 {
@@ -4089,11 +4312,25 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             FileKind.MANIFEST,
             manifest_fingerprint,
         )
-        print(summary, end="")
-        return 0
+        _checkpoint(cancellation_check)
+        return SyncExecutionResult(
+            exit_code=0,
+            output=summary,
+            accounting=_rebase_accounting(additions, deletions),
+        )
     release_root_capability = _ensure_release_root(release_root)
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     final_dir = release_root / f"g{next_generation:04d}-{timestamp}"
+    published_artifacts = tuple(
+        final_dir / name
+        for name in (
+            "master.ged",
+            "manifest.json",
+            "update.md",
+            "quality.md",
+            "rollback.json",
+        )
+    )
     staging: Path | None = None
     staging_name: str | None = None
     staging_descriptor: int | None = None
@@ -4112,7 +4349,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             staging_marker_descriptor,
             staging_marker_identity,
         ) = _create_staging_directory(release_root_capability, ".gedcom-rebase-")
-        cancellation_checkpoint()
+        _checkpoint(cancellation_check)
         ingress.copy_to(
             master,
             staging / "master.ged",
@@ -4166,7 +4403,7 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             FileKind.MANIFEST,
             manifest_fingerprint,
         )
-        cancellation_checkpoint()
+        _checkpoint(cancellation_check)
         assert staging_marker_descriptor is not None
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
@@ -4198,7 +4435,12 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
             _close_capability_quietly(release_root_capability)
             if isinstance(exc, CancellationError):
                 raise
-            return 0
+            return SyncExecutionResult(
+                exit_code=0,
+                committed=True,
+                artifacts=published_artifacts,
+                accounting=_rebase_accounting(additions, deletions),
+            )
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
@@ -4223,58 +4465,62 @@ def _perform_rebase(args: argparse.Namespace, core: ModuleType, ingress: FileIng
         raise
     _close_descriptor_quietly(staging_descriptor)
     _close_capability_quietly(release_root_capability)
-    _report_committed_status((f"Manual rebase complete: {final_dir}",))
-    return 0
+    return SyncExecutionResult(
+        exit_code=0,
+        output=f"Manual rebase complete: {final_dir}\n",
+        committed=True,
+        artifacts=published_artifacts,
+        accounting=_rebase_accounting(additions, deletions),
+    )
 
 
-def main(
-    argv: Sequence[str],
+def _execute_typed_command(
+    command: SyncCommand,
     core: ModuleType,
-    ingress: FileIngressPolicy | None = None,
+    ingress: FileIngressPolicy,
     *,
-    resolver_factory: ResolverFactory | None = None,
-    raise_errors: bool = False,
-) -> int:
-    """Dispatch ``update`` or ``rebase`` and render transparent failures."""
-    command = argv[0] if argv else ""
-    policy = ingress or FileIngressPolicy()
-    try:
-        if command == "update":
-            args = _build_update_parser().parse_args(list(argv[1:]))
-            _normalize_command_paths(args, command, policy)
-            identity_resolver: IdentityResolver | None = None
-            if args.provider != "none":
-                if resolver_factory is None:
-                    raise AncestryError(
-                        "LLM_SERVICE_UNAVAILABLE",
-                        "Incremental LLM assistance requires the modular application service.",
-                    )
-                identity_resolver = resolver_factory(
-                    args.provider,
-                    args.model,
-                    args.consent,
-                )
-            return _perform_update(args, core, policy, identity_resolver)
-        if command == "rebase":
-            args = _build_rebase_parser().parse_args(list(argv[1:]))
-            _normalize_command_paths(args, command, policy)
-            return _perform_rebase(args, core, policy)
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            f"Unknown incremental command: {command or '(missing)'}",
-            "Only update and rebase have defined provenance behavior.",
-            ["Use gedcom_merge.py update --help or rebase --help."],
+    identity_resolver: IdentityResolver | None,
+    cancellation_check: CancellationCheck | None,
+) -> SyncExecutionResult:
+    """Execute one normalized typed command without adapter concerns."""
+
+    normalized = _normalize_command_paths(command, ingress)
+    if isinstance(normalized, SyncUpdateCommand):
+        if normalized.provider != "none" and normalized.auto and identity_resolver is None:
+            raise AncestryError(
+                "LLM_SERVICE_UNAVAILABLE",
+                "Incremental LLM assistance requires the modular application service.",
+            )
+        return _perform_update(
+            normalized,
+            core,
+            ingress,
+            identity_resolver if normalized.auto else None,
+            cancellation_check,
         )
+    return _perform_rebase(normalized, core, ingress, cancellation_check)
+
+
+def _with_error_contract(
+    operation: Callable[[], SyncExecutionResult],
+    *,
+    raise_errors: bool,
+) -> SyncExecutionResult:
+    """Apply the stable coded sync error contract around one operation."""
+
+    try:
+        return operation()
     except FileIngressError as exc:
         if raise_errors:
             raise
-        print(exc.render(), end="\n", file=__import__("sys").stderr)
-        return exc.exit_code
+        return SyncExecutionResult(
+            exit_code=exc.exit_code,
+            error=exc.render() + "\n",
+        )
     except SyncError as exc:
         if raise_errors:
             raise exc.as_ancestry_error() from exc
-        print(exc.render(), end="", file=__import__("sys").stderr)
-        return exc.exit_code
+        return SyncExecutionResult(exit_code=exc.exit_code, error=exc.render())
     except AncestryError:
         raise
     except Exception as exc:
@@ -4290,5 +4536,85 @@ def main(
         )
         if raise_errors:
             raise error.as_ancestry_error() from exc
-        print(error.render(), end="", file=__import__("sys").stderr)
-        return error.exit_code
+        return SyncExecutionResult(exit_code=error.exit_code, error=error.render())
+
+
+def execute_command(
+    command: SyncCommand,
+    core: ModuleType,
+    ingress: FileIngressPolicy | None = None,
+    *,
+    identity_resolver: IdentityResolver | None = None,
+    cancellation_check: CancellationCheck | None = None,
+    raise_errors: bool = False,
+) -> SyncExecutionResult:
+    """Execute a typed sync command for a non-terminal application adapter."""
+
+    policy = ingress or FileIngressPolicy()
+    return _with_error_contract(
+        lambda: _execute_typed_command(
+            command,
+            core,
+            policy,
+            identity_resolver=identity_resolver,
+            cancellation_check=cancellation_check,
+        ),
+        raise_errors=raise_errors,
+    )
+
+
+def execute(
+    argv: Sequence[str],
+    core: ModuleType,
+    ingress: FileIngressPolicy | None = None,
+    *,
+    resolver_factory: ResolverFactory | None = None,
+    cancellation_check: CancellationCheck | None = None,
+    raise_errors: bool = False,
+) -> SyncExecutionResult:
+    """Parse and dispatch ``update`` or ``rebase`` without terminal I/O."""
+
+    command_name = argv[0] if argv else ""
+    policy = ingress or FileIngressPolicy()
+
+    def parse_and_execute() -> SyncExecutionResult:
+        if command_name == "update":
+            args = _build_update_parser().parse_args(list(argv[1:]))
+            command: SyncCommand = _update_command_from_namespace(args)
+            identity_resolver: IdentityResolver | None = None
+            if args.provider != "none" and args.auto:
+                if resolver_factory is None:
+                    raise AncestryError(
+                        "LLM_SERVICE_UNAVAILABLE",
+                        "Incremental LLM assistance requires the modular application service.",
+                    )
+                identity_resolver = resolver_factory(
+                    args.provider,
+                    args.model,
+                    args.consent,
+                )
+            return _execute_typed_command(
+                command,
+                core,
+                policy,
+                identity_resolver=identity_resolver,
+                cancellation_check=cancellation_check,
+            )
+        if command_name == "rebase":
+            args = _build_rebase_parser().parse_args(list(argv[1:]))
+            command = _rebase_command_from_namespace(args)
+            return _execute_typed_command(
+                command,
+                core,
+                policy,
+                identity_resolver=None,
+                cancellation_check=cancellation_check,
+            )
+        raise SyncError(
+            "SYNC_CONFIGURATION",
+            f"Unknown incremental command: {command_name or '(missing)'}",
+            "Only update and rebase have defined provenance behavior.",
+            ["Use gedcom_merge.py update --help or rebase --help."],
+        )
+
+    return _with_error_contract(parse_and_execute, raise_errors=raise_errors)

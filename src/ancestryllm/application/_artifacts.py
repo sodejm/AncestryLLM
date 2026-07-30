@@ -193,6 +193,58 @@ class _ArtifactRegistry:
         binding = self._grants[grant.grant_id]
         return self._describe(path, binding)
 
+    def describe_output(
+        self,
+        grant: ArtifactGrantRef,
+        *,
+        operation: str,
+    ) -> ArtifactRef:
+        """Describe one ready artifact published through a write grant."""
+
+        path = self.resolve(grant, operation=operation, access=ArtifactAccess.WRITE)
+        binding = self._grants[grant.grant_id]
+        return self._describe(path, binding)
+
+    def describe_generated_output(
+        self,
+        grant: ArtifactGrantRef,
+        generated_path: Path,
+        *,
+        operation: str,
+        media_type: str,
+        artifact_type: str,
+    ) -> ArtifactRef:
+        """Describe a regular file created beneath one granted output root."""
+
+        root = self.resolve(grant, operation=operation, access=ArtifactAccess.WRITE)
+        try:
+            generated_path.relative_to(root)
+            root_before = os.lstat(root)
+            if not stat.S_ISDIR(root_before.st_mode):
+                raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
+            resolved_root = root.resolve(strict=True)
+            generated_before = os.lstat(generated_path)
+            if not stat.S_ISREG(generated_before.st_mode):
+                raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
+            resolved_generated = generated_path.resolve(strict=True)
+            resolved_generated.relative_to(resolved_root)
+            root_after = os.lstat(root)
+            if self._identity(root_after) != self._identity(root_before):
+                raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
+        except DomainFailure:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID) from exc
+        binding = _Grant(
+            resolved_generated,
+            operation,
+            ArtifactAccess.WRITE,
+            media_type,
+            artifact_type,
+            self._identity(generated_before),
+        )
+        return self._describe(resolved_generated, binding)
+
     def publish_bytes(
         self,
         grant: ArtifactGrantRef,

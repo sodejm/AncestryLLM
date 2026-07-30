@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,39 @@ def test_repository_dependency_contract_passes_with_only_live_exceptions() -> No
 
     assert report.passed
     assert report.used_exceptions == frozenset(TEMPORARY_EXCEPTIONS)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "gedcom/engine.py",
+        "gedcom/incremental.py",
+        "gedcom/service.py",
+    ),
+)
+def test_gedcom_kernel_and_service_paths_do_not_perform_terminal_io(
+    relative_path: str,
+) -> None:
+    source = (PACKAGE_ROOT / relative_path).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    terminal_calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"input", "print"}
+    }
+    captured_stream_imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module in {"contextlib", "io"}
+        for alias in node.names
+        if alias.name in {"StringIO", "redirect_stderr", "redirect_stdout"}
+    }
+
+    assert terminal_calls == set()
+    assert captured_stream_imports == set()
 
 
 def test_every_declared_public_facade_has_a_literal_bound_allowlist() -> None:

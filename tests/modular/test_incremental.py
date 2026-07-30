@@ -23,9 +23,25 @@ from ancestryllm.core.ingress import (
 from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.gedcom import engine, incremental
 from ancestryllm.gedcom.service import GedcomService
-from ancestryllm.gedcom.sync import run_sync
+from ancestryllm.gedcom.sync import execute_sync, run_sync
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+def test_structured_sync_execution_is_terminal_neutral_and_legacy_rendering_matches(
+    capsys,
+) -> None:
+    result = execute_sync([])
+
+    assert result.exit_code == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+    assert result.output == ""
+    assert "ERROR [SYNC_CONFIGURATION]" in result.error
+    assert capsys.readouterr() == ("", "")
+
+    assert run_sync([]) == result.exit_code
+    rendered = capsys.readouterr()
+    assert rendered.out == result.output
+    assert rendered.err == result.error
 
 
 def test_incremental_argument_errors_use_stable_typed_contract() -> None:

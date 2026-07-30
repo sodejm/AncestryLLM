@@ -319,21 +319,40 @@ class GedcomQualityResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class GedcomSyncSnapshot(BoundaryDTO):
+    """One website snapshot identified without exposing its host path."""
+
+    source_id: str
+    vendor: str
+    artifact: ArtifactGrantRef
+    exported_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GedcomSyncRequest(ServiceRequest):
-    """Run one sync operation with scoped workspace and artifact grants."""
+    """Run one typed sync operation with scoped artifact grants."""
 
     sync_command: str
-    workspace: ArtifactGrantRef
-    source: ArtifactGrantRef | None
-    output: ArtifactGrantRef | None
-    options: tuple[NamedValue, ...]
+    master: ArtifactGrantRef
+    release_root: ArtifactGrantRef
     provider: ProviderSelection
+    manifest: ArtifactGrantRef | None = None
+    snapshots: tuple[GedcomSyncSnapshot, ...] = ()
+    initialize_manifest: bool = False
+    quality_root_person_ref: str | None = None
+    quality_report_enabled: bool = True
+    dry_run: bool = False
+    accept_manual_deletions: bool = False
+    reason: str | None = None
+    gedcom_version: str = "5.5.5"
+    automatic_identity_resolution: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class GedcomSyncResult(ServiceResult):
     """Sync artifacts and deterministic change/conflict accounting."""
 
+    committed: bool
     artifacts: tuple[ArtifactRef, ...]
     changes: ChangeSummary
     quality: QualitySummary
@@ -667,6 +686,7 @@ __all__ = [
     "GedcomSubtreeResult",
     "GedcomSyncRequest",
     "GedcomSyncResult",
+    "GedcomSyncSnapshot",
     "ModuleDisableRequest",
     "ModuleDisableResult",
     "ModuleEnableRequest",

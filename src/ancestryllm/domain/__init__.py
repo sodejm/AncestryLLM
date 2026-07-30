@@ -1,5 +1,13 @@
 """Shared genealogy domain objects."""
 
+from ancestryllm.domain.genealogy import (
+    ChangeKind,
+    GenealogyChange,
+    GenealogyIdentity,
+    GenealogyProvenance,
+    GenealogyQualityFinding,
+    QualityKind,
+)
 from ancestryllm.domain.models import (
     Citation,
     Fact,
@@ -12,12 +20,18 @@ from ancestryllm.domain.models import (
 )
 
 __all__ = [
+    "ChangeKind",
     "Citation",
     "Fact",
+    "GenealogyChange",
+    "GenealogyIdentity",
+    "GenealogyProvenance",
+    "GenealogyQualityFinding",
     "LivingStatus",
     "Person",
     "PersonName",
     "Provenance",
+    "QualityKind",
     "Relationship",
     "SourceIdentifier",
 ]

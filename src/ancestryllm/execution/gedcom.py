@@ -35,57 +35,54 @@ class GedcomExecutor:
         )
         action = invocation.key.action
         if action == "merge":
-            return CommandOutcome(
-                service.merge(
-                    [Path(item) for item in text_values(invocation, "inputs")],
-                    path(invocation, "output"),
-                    root_person=optional_text(invocation, "root_person"),
-                    quality_path=optional_path(invocation, "quality_report"),
-                    gedcom_version=text(invocation, "gedcom_version"),
-                    provider_id=text(invocation, "provider"),
-                    model=text(invocation, "model"),
-                    consent=consent(
-                        self._context,
-                        optional_text(invocation, "consent"),
-                    ),
-                    threshold=integer(invocation, "similarity_threshold"),
-                )
+            merge_result = service.merge(
+                [Path(item) for item in text_values(invocation, "inputs")],
+                path(invocation, "output"),
+                root_person=optional_text(invocation, "root_person"),
+                quality_path=optional_path(invocation, "quality_report"),
+                gedcom_version=text(invocation, "gedcom_version"),
+                provider_id=text(invocation, "provider"),
+                model=text(invocation, "model"),
+                consent=consent(
+                    self._context,
+                    optional_text(invocation, "consent"),
+                ),
+                threshold=integer(invocation, "similarity_threshold"),
             )
+            return CommandOutcome(merge_result)
         if action == "subtree":
-            return CommandOutcome(
-                service.subtree(
-                    path(invocation, "input"),
-                    path(invocation, "output"),
-                    root_person=text(invocation, "root_person"),
-                    scope=text(invocation, "scope"),
-                    generations=optional_integer(invocation, "generations"),
-                    gedcom_version=text(invocation, "gedcom_version"),
-                )
+            subtree_result = service.subtree(
+                path(invocation, "input"),
+                path(invocation, "output"),
+                root_person=text(invocation, "root_person"),
+                scope=text(invocation, "scope"),
+                generations=optional_integer(invocation, "generations"),
+                gedcom_version=text(invocation, "gedcom_version"),
             )
+            return CommandOutcome(subtree_result)
         if action == "quality":
-            return CommandOutcome(
-                service.quality(
-                    path(invocation, "input"),
-                    path(invocation, "output"),
-                    root_person=text(invocation, "root_person"),
-                    provider_id=text(invocation, "provider"),
-                    model=text(invocation, "model"),
-                    consent=consent(
-                        self._context,
-                        optional_text(invocation, "consent"),
-                    ),
-                )
+            quality_result = service.quality(
+                path(invocation, "input"),
+                path(invocation, "output"),
+                root_person=text(invocation, "root_person"),
+                provider_id=text(invocation, "provider"),
+                model=text(invocation, "model"),
+                consent=consent(
+                    self._context,
+                    optional_text(invocation, "consent"),
+                ),
             )
-        result = service.sync(
+            return CommandOutcome(quality_result)
+        sync_result = service.sync(
             [
                 text(invocation, "sync_command"),
                 *text_values(invocation, "sync_args"),
             ]
         )
         return CommandOutcome(
-            result if invocation.json_output else None,
-            exit_code=result.exit_code,
-            plain_text=None if invocation.json_output else result.output,
+            sync_result if invocation.json_output else None,
+            exit_code=sync_result.exit_code,
+            plain_text=None if invocation.json_output else sync_result.output,
         )
 
 

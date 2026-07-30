@@ -32,6 +32,7 @@ from ancestryllm.application.dto import (
 )
 from ancestryllm.application.errors import (
     DOMAIN_ERROR_MAPPINGS,
+    domain_failure_from_exception,
     error_envelope,
     map_domain_failure,
 )
@@ -47,7 +48,7 @@ from ancestryllm.application.ports import (
 )
 from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.core.commands import COMMAND_SPECIFICATIONS
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, FileIngressError, ProviderError
 from ancestryllm.domain.errors import (
     DomainFailure,
     DomainFailureCode,
@@ -339,6 +340,65 @@ def test_domain_error_mapping_is_exhaustive_stable_and_sanitized() -> None:
     )
     sanitized = error_envelope(unsafe)
     assert sanitized.details == (FailureDetail("attempt", 2),)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    (
+        (
+            AncestryError("GEDCOM_ROOT_PERSON_UNRESOLVED", "private identity detail"),
+            DomainFailureCode.IDENTITY_AMBIGUOUS,
+        ),
+        (
+            FileIngressError("FILE_INPUT_TOO_LARGE", "private size detail"),
+            DomainFailureCode.ARTIFACT_TOO_LARGE,
+        ),
+        (
+            FileIngressError("FILE_ENCODING_INVALID", "private encoding detail"),
+            DomainFailureCode.ARTIFACT_INVALID,
+        ),
+        (
+            AncestryError("CONSENT_INACTIVE", "private consent detail"),
+            DomainFailureCode.PROVIDER_CONSENT_REQUIRED,
+        ),
+        (
+            ProviderError("PROVIDER_OUTPUT_INVALID", "private provider detail"),
+            DomainFailureCode.PROVIDER_UNAVAILABLE,
+        ),
+        (
+            AncestryError("GEDCOM_OVERWRITE_INPUT", "private destination detail"),
+            DomainFailureCode.INVALID_REQUEST,
+        ),
+        (
+            AncestryError("PROMPT_NOT_FOUND", "private resource detail"),
+            DomainFailureCode.NOT_FOUND,
+        ),
+        (
+            AncestryError("SYNC_PUBLICATION_INCOMPLETE", "private output detail"),
+            DomainFailureCode.PUBLICATION_FAILED,
+        ),
+        (OSError("private host path"), DomainFailureCode.PUBLICATION_FAILED),
+        (RuntimeError("private internal detail"), DomainFailureCode.INTERNAL),
+    ),
+)
+def test_current_exceptions_map_to_sanitized_domain_failures(
+    error: Exception,
+    expected: DomainFailureCode,
+) -> None:
+    failure = domain_failure_from_exception(error)
+
+    assert failure.code is expected
+    assert failure.details == ()
+    assert "private" not in str(failure)
+
+
+def test_existing_domain_failure_is_preserved_by_current_exception_mapping() -> None:
+    failure = DomainFailure(
+        DomainFailureCode.CONFLICT,
+        (DomainFailureDetail("conflicts", 2),),
+    )
+
+    assert domain_failure_from_exception(failure) is failure
 
 
 def test_current_cancellation_adapter_maps_legacy_signal_without_detail() -> None:

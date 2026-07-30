@@ -7,7 +7,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from ancestryllm.application.dto import ErrorEnvelope, FailureDetail
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 
 
@@ -110,6 +110,80 @@ DOMAIN_ERROR_MAPPINGS: Mapping[DomainFailureCode, ErrorMapping] = MappingProxyTy
     }
 )
 
+_ARTIFACT_TOO_LARGE_CODES = frozenset(
+    {
+        "FILE_COLLECTION_LIMIT_EXCEEDED",
+        "FILE_INPUT_TOO_LARGE",
+        "FILE_LINE_TOO_LONG",
+        "FILE_NESTING_LIMIT_EXCEEDED",
+        "FILE_RECORD_LIMIT_EXCEEDED",
+        "FILE_RECORD_TOO_LARGE",
+    }
+)
+_INVALID_REQUEST_CODES = frozenset(
+    {
+        "ARGUMENT_INVALID",
+        "CONFIG_INVALID",
+        "GEDCOM_INPUT_REQUIRED",
+        "GEDCOM_OVERWRITE_INPUT",
+        "GEDCOM_REPORT_ALIAS",
+        "GEDCOM_VERSION_INVALID",
+        "QUALITY_ROOT_REQUIRED",
+        "SYNC_CONFIGURATION",
+    }
+)
+_ARTIFACT_INVALID_CODES = frozenset(
+    {
+        "GEDCOM_PARSE_INVALID",
+        "MANIFEST_INVALID",
+        "MANIFEST_MASTER_MISMATCH",
+        "SYNC_PARSE",
+    }
+)
+_PUBLICATION_CODES = frozenset(
+    {
+        "GEDCOM_VALIDATION_FAILED",
+        "PUBLICATION_FAILED",
+        "SYNC_OUTPUT",
+        "SYNC_PUBLICATION_INCOMPLETE",
+    }
+)
+
+
+def domain_failure_from_exception(error: Exception) -> DomainFailure:
+    """Classify a current internal exception without retaining unsafe detail."""
+
+    if isinstance(error, DomainFailure):
+        return error
+    if isinstance(error, AncestryError):
+        code = error.code
+        if code in {"CANCELLED", "JOB_CANCELLED", "PROVIDER_CANCELLED"}:
+            failure_code = DomainFailureCode.CANCELLED
+        elif code in {"GEDCOM_ROOT_PERSON_UNRESOLVED", "SYNC_AMBIGUOUS"}:
+            failure_code = DomainFailureCode.IDENTITY_AMBIGUOUS
+        elif code == "SYNC_UNSAFE_REMOVAL":
+            failure_code = DomainFailureCode.CONFLICT
+        elif code in _ARTIFACT_TOO_LARGE_CODES:
+            failure_code = DomainFailureCode.ARTIFACT_TOO_LARGE
+        elif code.startswith("FILE_") or code in _ARTIFACT_INVALID_CODES:
+            failure_code = DomainFailureCode.ARTIFACT_INVALID
+        elif code in _PUBLICATION_CODES:
+            failure_code = DomainFailureCode.PUBLICATION_FAILED
+        elif code.startswith("CONSENT_") or code == "CLOUD_CONSENT_REQUIRED":
+            failure_code = DomainFailureCode.PROVIDER_CONSENT_REQUIRED
+        elif isinstance(error, ProviderError) or code.startswith(("PROVIDER_", "LLM_")):
+            failure_code = DomainFailureCode.PROVIDER_UNAVAILABLE
+        elif code in _INVALID_REQUEST_CODES:
+            failure_code = DomainFailureCode.INVALID_REQUEST
+        elif code.endswith("_NOT_FOUND"):
+            failure_code = DomainFailureCode.NOT_FOUND
+        else:
+            failure_code = DomainFailureCode.INTERNAL
+        return DomainFailure(failure_code)
+    if isinstance(error, OSError):
+        return DomainFailure(DomainFailureCode.PUBLICATION_FAILED)
+    return DomainFailure(DomainFailureCode.INTERNAL)
+
 
 def map_domain_failure(failure: DomainFailure) -> AncestryError:
     """Map every declared domain code without exposing exception text."""
@@ -152,6 +226,7 @@ def error_envelope(
 __all__ = [
     "DOMAIN_ERROR_MAPPINGS",
     "ErrorMapping",
+    "domain_failure_from_exception",
     "error_envelope",
     "map_domain_failure",
 ]
