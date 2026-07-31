@@ -43,7 +43,7 @@ RULE_BUNDLES = (
         name="python",
         url="https://semgrep.dev/c/p/python",
         # Registry edges served these reviewed YAML and JSON encodings of the
-        # same 151-rule set. Both remain byte-pinned; every other response fails.
+        # same 151-rule set. All remain byte-pinned; every other response fails.
         revisions=(
             RuleRevision(
                 sha256="6c5830b3c92994be81404c599c7d5595538aa8d6036fb8042eb3861e6608638d",
@@ -71,6 +71,8 @@ RULE_BUNDLES = (
     ),
 )
 
+_DOWNLOAD_ATTEMPTS = 3
+
 
 def _validate_rule_url(url: str) -> None:
     parsed = urlparse(url)
@@ -85,7 +87,7 @@ def _validate_rule_url(url: str) -> None:
 
 
 def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
-    """Download and verify one exact rule bundle before writing it."""
+    """Download and verify one reviewed rule bundle before writing it."""
     _validate_rule_url(bundle.url)
     if not bundle.revisions:
         raise ValueError(f"Semgrep {bundle.name} rule bundle has no reviewed revisions")
@@ -94,28 +96,33 @@ def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
         bundle.url,
         headers={"User-Agent": "AncestryLLM-release-security-gate"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
-        final_url = response.geturl()
-        _validate_rule_url(final_url)
-        if final_url != bundle.url:
-            raise RuntimeError(f"Semgrep {bundle.name} rule bundle redirected unexpectedly")
-        payload = response.read(maximum_size + 1)
+    observations: list[str] = []
+    mismatch = "content hash"
+    for _attempt in range(_DOWNLOAD_ATTEMPTS):
+        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+            final_url = response.geturl()
+            _validate_rule_url(final_url)
+            if final_url != bundle.url:
+                raise RuntimeError(f"Semgrep {bundle.name} rule bundle redirected unexpectedly")
+            payload = response.read(maximum_size + 1)
 
-    digest = hashlib.sha256(payload).hexdigest()
-    matching_revisions = tuple(
-        revision for revision in bundle.revisions if revision.sha256 == digest
+        digest = hashlib.sha256(payload).hexdigest()
+        observations.append(f"sha256={digest}, size={len(payload)}")
+        matching_revisions = tuple(
+            revision for revision in bundle.revisions if revision.sha256 == digest
+        )
+        if matching_revisions and any(
+            len(payload) == revision.size for revision in matching_revisions
+        ):
+            destination.write_bytes(payload)
+            return
+        mismatch = "size" if matching_revisions else "content hash"
+
+    observed = "; ".join(dict.fromkeys(observations))
+    raise RuntimeError(
+        f"Semgrep {bundle.name} rule bundle {mismatch} differs from the committed "
+        f"release-security contract after {_DOWNLOAD_ATTEMPTS} attempts; observed {observed}"
     )
-    if not matching_revisions:
-        raise RuntimeError(
-            f"Semgrep {bundle.name} rule bundle content hash differs from the "
-            "committed release-security contract"
-        )
-    if all(len(payload) != revision.size for revision in matching_revisions):
-        raise RuntimeError(
-            f"Semgrep {bundle.name} rule bundle size differs from the committed "
-            "release-security contract"
-        )
-    destination.write_bytes(payload)
 
 
 def _semgrep_executable() -> Path:
