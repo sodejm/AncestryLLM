@@ -381,6 +381,22 @@ def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_
     assert "uv run python -m pytest tests/test_verify_release_project.py -q" in proof
 
 
+def test_release_project_proof_trigger_covers_its_repository_inputs() -> None:
+    proof = (ROOT / ".github/workflows/release-project-gate-proof.yml").read_text(encoding="utf-8")
+
+    proof_inputs = {
+        ".github/release-config.json",
+        ".github/workflows/release-project-gate-proof.yml",
+        "pyproject.toml",
+        "scripts/verify_release_configuration.py",
+        "scripts/verify_release_project.py",
+        "tests/test_verify_release_project.py",
+        "uv.lock",
+    }
+    for repository_input in proof_inputs:
+        assert f"      - {repository_input}" in proof
+
+
 def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
