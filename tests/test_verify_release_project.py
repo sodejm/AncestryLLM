@@ -134,9 +134,7 @@ def test_accepts_complete_project_schema_while_target_p0_is_not_release_ready(ve
 def test_schema_validation_rejects_incomplete_target_iteration_fields(verifier, gate):
     item = _item(99)
     item["fieldValues"]["nodes"] = [
-        field
-        for field in item["fieldValues"]["nodes"]
-        if field["field"]["name"] != "Validation"
+        field for field in item["fieldValues"]["nodes"] if field["field"]["name"] != "Validation"
     ]
 
     with pytest.raises(
