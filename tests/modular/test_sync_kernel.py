@@ -9,6 +9,7 @@ import pytest
 
 from ancestryllm.application.dto import (
     DecisionKind,
+    DecisionOption,
     DecisionResponse,
     ProgressUpdate,
 )
@@ -113,12 +114,15 @@ class _Harness:
         fail_stage: SyncStage | None = None,
         recovery_fails: bool = False,
         prior_preserved: bool = True,
+        staged_removed: bool | None = None,
     ) -> None:
         self.deltas = (_delta(),) if deltas is None else deltas
         self.decision_requests = (_decision(),) if decisions is None else decisions
         self.fail_stage = fail_stage
         self.recovery_fails = recovery_fails
         self.prior_preserved = prior_preserved
+        self.staged_removed = staged_removed
+        self.published = False
         self.calls: list[str] = []
         self.events: list[SyncEvent] = []
         self.recovery_contexts: list[SyncRecoveryContext] = []
@@ -178,14 +182,23 @@ class _Harness:
             ("artifact:gedcom", "artifact:manifest"),
         )
 
-    def commit(self, staged: SyncStagedApplication) -> SyncPublication:
-        self.calls.append("commit")
+    def prepare(self, staged: SyncStagedApplication) -> SyncPublication:
+        self.calls.append("prepare")
         self._fail_if_requested(SyncStage.COMMIT)
         return SyncPublication(
             "revision:fixture",
             staged.plan_id,
             staged.artifact_refs,
         )
+
+    def commit(
+        self,
+        staged: SyncStagedApplication,
+        publication: SyncPublication,
+    ) -> None:
+        del staged, publication
+        self.calls.append("commit")
+        self.published = True
 
     def recover(self, context: SyncRecoveryContext) -> SyncRecoveryMetadata:
         self.calls.append("recovery")
@@ -195,7 +208,11 @@ class _Harness:
         return SyncRecoveryMetadata(
             "recovery:fixture",
             self.prior_preserved,
-            context.staging_ref is not None,
+            (
+                context.staging_ref is not None
+                if self.staged_removed is None
+                else self.staged_removed
+            ),
             "SYNC_RECOVERED",
         )
 
@@ -307,13 +324,13 @@ def test_plan_is_content_addressed_and_independent_of_delta_order() -> None:
 
     first = SyncPlan.create(
         operation_id="operation:fixture",
-        operation=SyncOperation.UPDATE,
+        options=SyncOptions(SyncOperation.UPDATE),
         input_fingerprint=state.input_fingerprint,
         output=SyncPlanningOutput((update, create), (_decision(),), losses),
     )
     second = SyncPlan.create(
         operation_id="operation:fixture",
-        operation=SyncOperation.UPDATE,
+        options=SyncOptions(SyncOperation.UPDATE),
         input_fingerprint=state.input_fingerprint,
         output=SyncPlanningOutput(
             (create, update),
@@ -332,6 +349,50 @@ def test_plan_is_content_addressed_and_independent_of_delta_order() -> None:
         "SYNC_UNATTRIBUTED_VALUE",
         "SYNC_UNSUPPORTED_TAG",
     ]
+
+
+def test_plan_identity_includes_every_plan_affecting_option() -> None:
+    state = SyncSnapshotState.create(
+        state_ref="state:fixture",
+        master=_document(),
+        manifest=_document("document:manifest", MANIFEST_DIGEST),
+        snapshots=(_snapshot(),),
+    )
+    output = SyncPlanningOutput((_delta(),))
+    options = (
+        SyncOptions(SyncOperation.UPDATE),
+        SyncOptions(SyncOperation.UPDATE, gedcom_version="5.5.1"),
+        SyncOptions(SyncOperation.UPDATE, initialize_manifest=True),
+        SyncOptions(SyncOperation.REBASE),
+        SyncOptions(SyncOperation.REBASE, accept_manual_deletions=True),
+    )
+
+    plans = tuple(
+        SyncPlan.create(
+            operation_id="operation:fixture",
+            options=item,
+            input_fingerprint=state.input_fingerprint,
+            output=output,
+        )
+        for item in options
+    )
+
+    assert len({plan.plan_id for plan in plans}) == len(options)
+    assert tuple(plan.options for plan in plans) == options
+    encoded = json.loads(plans[-1].to_json())
+    assert encoded["options"]["accept_manual_deletions"] is True
+    assert encoded["options"]["gedcom_version"] == "5.5.5"
+
+
+def test_snapshot_state_rejects_a_fingerprint_not_derived_from_its_inputs() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        SyncSnapshotState(
+            "state:fixture",
+            _document(),
+            _document("document:manifest", MANIFEST_DIGEST),
+            (_snapshot(),),
+            "f" * 64,
+        )
 
 
 def test_tombstone_conflict_and_rebase_actions_remain_explicit() -> None:
@@ -355,7 +416,7 @@ def test_tombstone_conflict_and_rebase_actions_remain_explicit() -> None:
 
     plan = SyncPlan.create(
         operation_id="operation:fixture",
-        operation=SyncOperation.REBASE,
+        options=SyncOptions(SyncOperation.REBASE),
         input_fingerprint=state.input_fingerprint,
         output=SyncPlanningOutput(deltas, (conflict,)),
     )
@@ -382,6 +443,7 @@ def test_replayed_decision_is_used_without_calling_decision_adapter() -> None:
         "comparison",
         "planning",
         "application",
+        "prepare",
         "commit",
     ]
 
@@ -425,6 +487,7 @@ def test_success_uses_declared_stage_order_and_atomic_publication_boundary() -> 
         "planning",
         "decision",
         "application",
+        "prepare",
         "commit",
     ]
     assert [
@@ -461,7 +524,7 @@ def test_repeated_success_with_identical_inputs_is_idempotent() -> None:
     assert first.publication == second.publication
 
 
-@pytest.mark.parametrize("checkpoint", range(1, 12))
+@pytest.mark.parametrize("checkpoint", range(1, 13))
 def test_cancellation_at_every_interruptible_boundary_preserves_prior_revision(
     checkpoint: int,
 ) -> None:
@@ -535,6 +598,21 @@ def test_recovery_failure_and_incomplete_recovery_are_explicit() -> None:
     assert not incomplete.recovery.prior_revision_preserved
 
 
+def test_staged_state_cleanup_is_required_for_complete_recovery() -> None:
+    result = _kernel(
+        _Harness(
+            fail_stage=SyncStage.COMMIT,
+            prior_preserved=True,
+            staged_removed=False,
+        )
+    ).execute(_request())
+
+    assert result.error_code == "SYNC_RECOVERY_INCOMPLETE"
+    assert result.recovery is not None
+    assert result.recovery.prior_revision_preserved
+    assert not result.recovery.staged_state_removed
+
+
 def test_unknown_or_invalid_replayed_decisions_fail_before_application() -> None:
     unknown = SyncDecisionSelection("decision:unknown", "ACCEPT")
     invalid = SyncDecisionSelection("decision:manual-deletion", "REJECT")
@@ -577,8 +655,8 @@ def test_recovery_metadata_and_events_cannot_contain_paths_or_payload_fields() -
 
 def test_publication_must_match_staged_plan_and_artifact_references() -> None:
     class MismatchedCommit(_Harness):
-        def commit(self, staged: SyncStagedApplication) -> SyncPublication:
-            self.calls.append("commit")
+        def prepare(self, staged: SyncStagedApplication) -> SyncPublication:
+            self.calls.append("prepare")
             return SyncPublication(
                 "revision:fixture",
                 staged.plan_id,
@@ -593,6 +671,38 @@ def test_publication_must_match_staged_plan_and_artifact_references() -> None:
     assert result.publication is None
     assert result.recovery is not None
     assert result.recovery.prior_revision_preserved
+    assert not harness.published
+
+
+@pytest.mark.parametrize(
+    "decision_id",
+    (
+        "decision+invalid",
+        "decision@invalid",
+        "decision..invalid",
+        "d" * 129,
+    ),
+)
+def test_kernel_decision_ids_match_application_dto_constraints(
+    decision_id: str,
+) -> None:
+    with pytest.raises(ValueError):
+        ApplicationDecisionRequest(
+            decision_id,
+            "GEDCOM_SYNC",
+            "SYNC_SELECT",
+            DecisionKind.CONFIRM,
+            (DecisionOption("KEEP", "KEEP"),),
+        )
+    with pytest.raises(ValueError):
+        SyncDecisionRequest(
+            decision_id,
+            "SYNC_SELECT",
+            (),
+            ("KEEP",),
+        )
+    with pytest.raises(ValueError):
+        SyncDecisionSelection(decision_id, "KEEP")
 
 
 def test_decision_options_are_bounded_to_the_application_port_limit() -> None:
@@ -753,12 +863,26 @@ def test_contract_references_reject_locations_and_payload_text(
         _document(unsafe_ref)
 
 
-def test_snapshot_export_time_requires_rfc3339() -> None:
+@pytest.mark.parametrize(
+    "exported_at",
+    (
+        "yesterday",
+        "2026-13-01T00:00:00Z",
+        "2026-02-30T00:00:00Z",
+        "2026-01-01T24:00:00Z",
+        "2026-01-01T00:60:00Z",
+        "2026-01-01T00:00:00+24:00",
+        "2026-01-01T00:00:00+00:60",
+    ),
+)
+def test_snapshot_export_time_requires_valid_rfc3339_components(
+    exported_at: str,
+) -> None:
     with pytest.raises(ValueError, match="RFC 3339"):
         SyncSnapshot(
             "source:rootsmagic",
             "ROOTSMAGIC",
-            "yesterday",
+            exported_at,
             _document("document:snapshot", SNAPSHOT_DIGEST),
         )
 

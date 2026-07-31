@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -85,6 +86,17 @@ def _validate_ref(label: str, value: str) -> None:
         raise ValueError(f"{label} must be a bounded opaque reference.")
 
 
+def _validate_decision_id(label: str, value: str) -> None:
+    """Match the shared application decision DTO's identifier contract."""
+
+    if not 1 <= len(value) <= 128:
+        raise ValueError(f"{label} length is outside its bounded range.")
+    if not all(character.isalnum() or character in "._:-" for character in value):
+        raise ValueError(f"{label} contains unsupported characters.")
+    if ".." in value:
+        raise ValueError(f"{label} must not contain paths or control characters.")
+
+
 def _validate_code(label: str, value: str) -> None:
     if len(value) > MAX_CODE_LENGTH or _CODE_RE.fullmatch(value) is None:
         raise ValueError(f"{label} must be a bounded uppercase code.")
@@ -98,6 +110,27 @@ def _validate_sha256(label: str, value: str) -> None:
 def _validate_count(label: str, value: int) -> None:
     if isinstance(value, bool) or not 0 <= value <= MAX_COUNT:
         raise ValueError(f"{label} is outside its bounded range.")
+
+
+def _validate_rfc3339(label: str, value: str) -> None:
+    """Validate both RFC 3339 shape and calendar/time component ranges."""
+
+    if _RFC3339_RE.fullmatch(value) is None:
+        raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.")
+    hour = int(value[11:13])
+    minute = int(value[14:16])
+    second = int(value[17:19])
+    if hour > 23 or minute > 59 or second > 59:
+        raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.")
+    if not value.endswith("Z"):
+        offset_hour = int(value[-5:-3])
+        offset_minute = int(value[-2:])
+        if offset_hour > 23 or offset_minute > 59:
+            raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.")
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.") from exc
 
 
 def _encode(value: object) -> object:
@@ -178,8 +211,7 @@ class SyncSnapshot(SyncValue):
     def __post_init__(self) -> None:
         _validate_ref("source_id", self.source_id)
         _validate_code("vendor_code", self.vendor_code)
-        if _RFC3339_RE.fullmatch(self.exported_at) is None:
-            raise ValueError("exported_at must be a bounded RFC 3339 timestamp.")
+        _validate_rfc3339("exported_at", self.exported_at)
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +241,7 @@ class SyncDecisionSelection(SyncValue):
     option_id: str
 
     def __post_init__(self) -> None:
-        _validate_ref("decision_id", self.decision_id)
+        _validate_decision_id("decision_id", self.decision_id)
         _validate_code("option_id", self.option_id)
 
 
@@ -256,6 +288,29 @@ class SyncSnapshotState(SyncValue):
         source_ids = tuple(snapshot.source_id for snapshot in self.snapshots)
         if source_ids != tuple(sorted(source_ids)) or len(source_ids) != len(set(source_ids)):
             raise ValueError("snapshots must have unique source IDs in deterministic order.")
+        if self.input_fingerprint != self.fingerprint_for(
+            master=self.master,
+            manifest=self.manifest,
+            snapshots=self.snapshots,
+        ):
+            raise ValueError("input_fingerprint does not match the captured inputs.")
+
+    @staticmethod
+    def fingerprint_for(
+        *,
+        master: SyncDocument,
+        manifest: SyncDocument | None,
+        snapshots: tuple[SyncSnapshot, ...],
+    ) -> str:
+        """Return the deterministic fingerprint for captured inputs."""
+
+        return _digest(
+            {
+                "master": master,
+                "manifest": manifest,
+                "snapshots": snapshots,
+            }
+        )
 
     @classmethod
     def create(
@@ -268,12 +323,10 @@ class SyncSnapshotState(SyncValue):
     ) -> SyncSnapshotState:
         """Create state with a deterministic content fingerprint."""
 
-        fingerprint = _digest(
-            {
-                "master": master,
-                "manifest": manifest,
-                "snapshots": snapshots,
-            }
+        fingerprint = cls.fingerprint_for(
+            master=master,
+            manifest=manifest,
+            snapshots=snapshots,
         )
         return cls(state_ref, master, manifest, snapshots, fingerprint)
 
@@ -314,7 +367,7 @@ class SyncDecisionRequest(SyncValue):
     option_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        _validate_ref("decision_id", self.decision_id)
+        _validate_decision_id("decision_id", self.decision_id)
         _validate_code("decision_code", self.decision_code)
         if not self.option_ids:
             raise ValueError("A decision must declare at least one option.")
@@ -446,7 +499,7 @@ class SyncPlan(SyncValue):
 
     plan_id: str
     operation_id: str
-    operation: SyncOperation
+    options: SyncOptions
     input_fingerprint: str
     entries: tuple[SyncPlanEntry, ...]
     decisions: tuple[SyncDecisionRequest, ...]
@@ -474,7 +527,7 @@ class SyncPlan(SyncValue):
         return "plan:" + _digest(
             {
                 "operation_id": self.operation_id,
-                "operation": self.operation,
+                "options": self.options,
                 "input_fingerprint": self.input_fingerprint,
                 "entries": self.entries,
                 "decisions": self.decisions,
@@ -487,7 +540,7 @@ class SyncPlan(SyncValue):
         cls,
         *,
         operation_id: str,
-        operation: SyncOperation,
+        options: SyncOptions,
         input_fingerprint: str,
         output: SyncPlanningOutput,
     ) -> SyncPlan:
@@ -529,7 +582,7 @@ class SyncPlan(SyncValue):
         provisional = cls.__new__(cls)
         object.__setattr__(provisional, "plan_id", "plan:pending")
         object.__setattr__(provisional, "operation_id", operation_id)
-        object.__setattr__(provisional, "operation", operation)
+        object.__setattr__(provisional, "options", options)
         object.__setattr__(provisional, "input_fingerprint", input_fingerprint)
         object.__setattr__(provisional, "entries", entries)
         object.__setattr__(provisional, "decisions", decisions)
@@ -538,7 +591,7 @@ class SyncPlan(SyncValue):
         return cls(
             plan_id,
             operation_id,
-            operation,
+            options,
             input_fingerprint,
             entries,
             decisions,
@@ -782,13 +835,19 @@ class ApplicationStage(Protocol):
 
 @runtime_checkable
 class CommitStage(Protocol):
-    """Atomically publish one staged application.
+    """Validate a publication receipt, then atomically publish staged state.
 
-    An implementation must validate the returned DTO before publication and
-    must not raise after the publication boundary has been crossed.
+    ``prepare`` must not publish. ``commit`` receives a kernel-validated receipt
+    and must not raise after the publication boundary has been crossed.
     """
 
-    def commit(self, staged: SyncStagedApplication) -> SyncPublication: ...
+    def prepare(self, staged: SyncStagedApplication) -> SyncPublication: ...
+
+    def commit(
+        self,
+        staged: SyncStagedApplication,
+        publication: SyncPublication,
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -907,6 +966,12 @@ class SyncKernel:
                 or snapshot_state.snapshots != request.snapshots
             ):
                 raise SyncStageError("SYNC_SNAPSHOT_INPUT_MISMATCH")
+            if snapshot_state.input_fingerprint != SyncSnapshotState.fingerprint_for(
+                master=snapshot_state.master,
+                manifest=snapshot_state.manifest,
+                snapshots=snapshot_state.snapshots,
+            ):
+                raise SyncStageError("SYNC_SNAPSHOT_FINGERPRINT_MISMATCH")
             checkpoint()
             emit(current_stage, SyncEventPhase.COMPLETED, "SYNC_SNAPSHOT_COMPLETED")
 
@@ -930,7 +995,7 @@ class SyncKernel:
                 raise SyncStageError("SYNC_PLAN_DELTA_MISMATCH")
             plan = SyncPlan.create(
                 operation_id=request.operation_id,
-                operation=request.options.operation,
+                options=request.options,
                 input_fingerprint=snapshot_state.input_fingerprint,
                 output=output,
             )
@@ -994,11 +1059,13 @@ class SyncKernel:
             current_stage = SyncStage.COMMIT
             emit(current_stage, SyncEventPhase.STARTED, "SYNC_COMMIT_STARTED")
             checkpoint()
-            publication = self._commit.commit(staged)
+            publication = self._commit.prepare(staged)
             if publication.plan_id != plan.plan_id:
                 raise SyncStageError("SYNC_PUBLICATION_PLAN_MISMATCH")
             if publication.artifact_refs != staged.artifact_refs:
                 raise SyncStageError("SYNC_PUBLICATION_ARTIFACT_MISMATCH")
+            checkpoint()
+            self._commit.commit(staged, publication)
             emit(
                 current_stage,
                 SyncEventPhase.COMPLETED,
@@ -1036,7 +1103,9 @@ class SyncKernel:
             )
             if recovery is None:
                 code = "SYNC_RECOVERY_FAILED"
-            elif not recovery.prior_revision_preserved:
+            elif not recovery.prior_revision_preserved or (
+                staged is not None and not recovery.staged_state_removed
+            ):
                 code = "SYNC_RECOVERY_INCOMPLETE"
             return SyncKernelResult(
                 request.operation_id,
