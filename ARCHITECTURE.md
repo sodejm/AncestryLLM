@@ -244,11 +244,12 @@ GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
 publication/recovery, operation orchestration, and legacy argument translation
 now have focused physical owners. `gedcom.engine` and `gedcom.incremental` are
 import-only compatibility façades; production composition uses those owners
-directly. The RootsMagic reader/export implementation still predates the full
-modular split and retains characterized compatibility modules. The executable
-architecture checker allows private module imports only through exact named
-gateways, including inside each owner package; broad same-package access is not
-an exemption.
+directly. RootsMagic immutable source/schema access, query execution, pure
+mapping, and application-owned export publication also have focused physical
+owners. Legacy reader, schema, and exporter paths remain characterized aliases
+or compatibility façades. The executable architecture checker allows private
+module imports only through exact named gateways, including inside each owner
+package; broad same-package access is not an exemption.
 
 ## Startup, configuration, and composition
 

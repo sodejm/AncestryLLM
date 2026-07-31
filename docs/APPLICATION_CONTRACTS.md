@@ -1,9 +1,9 @@
 # Application-service contracts
 
-Status: implemented for the `0.3.0` release candidate. These contracts are the
-framework-independent boundary shared by the current terminal adapters and the
-future FastAPI/Electron adapters. `ARCHITECTURE.md` owns the repository-wide
-dependency graph and current-versus-target status.
+Status: implemented in the `0.4.0` Unreleased development tree. These contracts
+are the framework-independent boundary shared by the current terminal adapters
+and the future FastAPI/Electron adapters. `ARCHITECTURE.md` owns the
+repository-wide dependency graph and current-versus-target status.
 
 ## Public boundary
 
@@ -17,11 +17,14 @@ The public boundary is intentionally small:
 | `ancestryllm.application.errors` | Complete mapping from pure domain failures to stable coded application errors and transport envelopes. |
 | `ancestryllm.domain.errors` | Framework-independent failure categories and bounded safe detail values. |
 
-The private modules `application._artifacts` and `application._compat` belong to
-adapter composition. `application._rootsmagic` owns RootsMagic query runtime
-orchestration behind the public operation DTOs and the
-`rootsmagic.query.RootsMagicQueryService` compatibility façade. These modules
-are not alternate service APIs or operation registries.
+The private modules `application._artifacts`, `application._compat`,
+`application._rootsmagic`, and `application._rootsmagic_export` belong to
+application composition. `application._rootsmagic` owns RootsMagic query
+runtime orchestration behind the public operation DTOs and the
+`rootsmagic.query.RootsMagicQueryService` compatibility façade.
+`application._rootsmagic_export` owns export validation, staging, and atomic
+publication behind the public export boundary and legacy exporter compatibility
+façade. These modules are not alternate service APIs or operation registries.
 
 Every boundary dataclass is frozen and slotted. `BoundaryDTO.to_json()` emits a
 versioned envelope with sorted keys, finite JSON numbers, and a one-megabyte
