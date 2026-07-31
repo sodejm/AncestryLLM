@@ -8,6 +8,8 @@ from ancestryllm.application._rootsmagic_export import (
     RootsMagicExporter,
     RootsMagicExportResult,
 )
+from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
+from ancestryllm.application.ports import CancellationPort, ProgressPort
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.llm.policy import ConsentGrant
@@ -19,7 +21,14 @@ __all__ = ["RootsMagicService"]
 
 
 class RootsMagicService:
-    def __init__(self, config: AppConfig, llm: LLMService | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        llm: LLMService | None = None,
+        *,
+        progress: ProgressPort | None = None,
+        cancellation: CancellationPort | None = None,
+    ) -> None:
         self.config = config
         ingress = FileIngressPolicy(config.file_ingress)
         self.reader = RootsMagicReader(
@@ -28,7 +37,13 @@ class RootsMagicService:
             config.query_timeout_seconds,
             ingress,
         )
-        self.query_service = RootsMagicQueryService(config, self.reader, llm)
+        self.query_service = RootsMagicQueryService(
+            config,
+            self.reader,
+            llm,
+            progress=progress,
+            cancellation=cancellation,
+        )
         self.exporter = RootsMagicExporter(self.reader)
 
     def list_trees(self) -> list[Path]:
@@ -53,6 +68,16 @@ class RootsMagicService:
             model=model,
             consent=consent,
         )
+
+    def execute_query(
+        self,
+        request: RootsMagicQueryRequest,
+        *,
+        consent: ConsentGrant | None = None,
+    ) -> RootsMagicQueryResult:
+        """Execute a typed query request through the application boundary."""
+
+        return self.query_service.execute(request, consent=consent)
 
     def export(
         self,

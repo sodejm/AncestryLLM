@@ -52,6 +52,16 @@ class QueryRow(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class QueryExecutionRecord(BoundaryDTO):
+    """Safe execution metadata for one validated read-only query."""
+
+    mode_code: str
+    provider_id: str
+    row_limit: int
+    returned_rows: int
+
+
+@dataclass(frozen=True, slots=True)
 class ChangeSummary(BoundaryDTO):
     """Deterministic genealogy change and conflict accounting."""
 
@@ -224,6 +234,7 @@ class RootsMagicQueryResult(ServiceResult):
     columns: tuple[str, ...]
     rows: tuple[QueryRow, ...]
     truncated: bool
+    execution: QueryExecutionRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -723,6 +734,7 @@ __all__ = [
     "ProvidersListRequest",
     "ProvidersListResult",
     "QualitySummary",
+    "QueryExecutionRecord",
     "QueryRow",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",
