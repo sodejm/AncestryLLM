@@ -120,7 +120,7 @@ requires-dist = [
     { name = "sqlcipher3", specifier = ">=0.6.2,<0.7" },
     { name = "sqlglot", specifier = ">=28,<31" },
     { name = "tomli-w", specifier = ">=1.2,<2" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=6.2,<7" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=6.2,<8" },
     { name = "types-python-dateutil", marker = "extra == 'dev'", specifier = ">=2.9,<3" },
     { name = "uv", marker = "extra == 'dev'", specifier = "==0.12.0" },
     { name = "wheel", marker = "extra == 'dev'", specifier = ">=0.45,<1" },
