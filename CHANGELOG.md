@@ -13,8 +13,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - Public RootsMagic `core`, `query`, and `export` boundaries for immutable
   source access, explicit-provider natural-language query orchestration, and
   schema-adaptive GEDCOM mapping/publication.
-- A typed `RootsMagicGedcomDocument` mapping result so callers can validate
-  GEDCOM content and its loss report without writing output files.
+- A typed, JSON-safe `RootsMagicGedcomDocument` mapping result with an opaque
+  source reference and structured loss report so callers can inspect mapped
+  content without receiving host paths or writing output files.
 - Public GEDCOM identity, quality, synchronization, parser, graph, and
   serialization seams for application-service composition.
 - A physically separated, standard-library-only GEDCOM document model,
@@ -28,9 +29,10 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - `RootsMagicService` delegates natural-language query policy to
   `RootsMagicQueryService`, keeping source access deterministic and provider
   orchestration outside the immutable reader.
-- RootsMagic mapping is separated from atomic publication: `map()` performs
-  deterministic in-memory conversion and validation, while `export()` owns
-  staged output and report publication.
+- RootsMagic mapping is separated from validation and atomic publication:
+  `map()` performs deterministic in-memory conversion, while `export()` keeps
+  source verification private, validates before staging, and owns output/report
+  publication.
 - GEDCOM compatibility orchestration now delegates document parsing,
   validation, and long-line serialization to the pure document kernel while
   retaining stable diagnostics, cancellation checkpoints, and output behavior.

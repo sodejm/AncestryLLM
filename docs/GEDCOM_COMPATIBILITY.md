@@ -121,6 +121,16 @@ is an evidence gap, not a passing interoperability result.
 
 ## RootsMagic export contract
 
+The public mapper returns a typed, deterministic GEDCOM document plus a
+value-free structured loss report and opaque content-derived source reference.
+That JSON-safe result contains no source path, filesystem metadata, publication
+path, or private verification lease. Validation and path selection occur only
+at the application publication boundary, before any staged output is created.
+The reusable mapper lives in `rootsmagic.mapping`. The public
+`rootsmagic.export` façade preserves its mapper, exporter, and result imports;
+the legacy `rootsmagic.exporter` module aliases the application-owned validator
+and publisher for import compatibility.
+
 RootsMagic export feature-detects supported table and column aliases. Optional
 name, event, place, note, source, citation, media, and family tables may be
 absent; malformed required person structure is rejected. Canonical semantic
@@ -146,7 +156,8 @@ destination tests demonstrate format compatibility only, not a successful
 import into a current vendor product. Vendor interoperability may be claimed
 only from dated fictional-data evidence.
 
-The GEDCOM and Markdown loss report form one staged publication transaction.
+After the typed document passes the public GEDCOM validator, the GEDCOM and
+Markdown loss report form one staged publication transaction.
 Source identity is revalidated before and during publication, and failure
 restores the prior complete pair or leaves the new complete pair—never a
 partial pair. The RootsMagic input remains immutable. Existing SQLite `-wal`,

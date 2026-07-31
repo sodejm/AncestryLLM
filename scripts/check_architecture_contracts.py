@@ -30,12 +30,15 @@ PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.gedcom.contracts",
     "ancestryllm.gedcom.graph",
     "ancestryllm.gedcom.identity",
+    "ancestryllm.gedcom.model",
     "ancestryllm.gedcom.parser",
     "ancestryllm.gedcom.quality",
+    "ancestryllm.gedcom.serializer",
     "ancestryllm.gedcom.serialization",
     "ancestryllm.gedcom.service",
     "ancestryllm.gedcom.sync",
     "ancestryllm.gedcom.sync_kernel",
+    "ancestryllm.gedcom.validator",
     "ancestryllm.llm.contracts",
     "ancestryllm.llm.service",
     "ancestryllm.rootsmagic",
@@ -67,7 +70,9 @@ PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
         }
     ),
     "ancestryllm.gedcom.incremental": frozenset({"ancestryllm.gedcom.sync"}),
-    "ancestryllm.rootsmagic.exporter": frozenset({"ancestryllm.rootsmagic.export"}),
+    "ancestryllm.rootsmagic.exporter": frozenset(
+        {"ancestryllm.rootsmagic", "ancestryllm.rootsmagic.export"}
+    ),
     "ancestryllm.rootsmagic.reader": frozenset(
         {
             "ancestryllm.rootsmagic.core",

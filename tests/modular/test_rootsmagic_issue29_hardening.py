@@ -8,6 +8,8 @@ import pytest
 
 import ancestryllm.core.publication as publication_module
 import ancestryllm.rootsmagic.exporter as exporter_module
+import ancestryllm.rootsmagic.schema as schema_module
+import ancestryllm.rootsmagic.schema_adapter as schema_adapter_module
 from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file
@@ -98,6 +100,16 @@ def comprehensive_tree(tmp_path: Path) -> Path:
 
 def _exporter(tmp_path: Path) -> RootsMagicExporter:
     return RootsMagicExporter(RootsMagicReader([tmp_path]))
+
+
+def test_schema_adapter_is_the_implementation_module_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = object()
+
+    assert schema_adapter_module is schema_module
+    monkeypatch.setattr(schema_adapter_module, "_compatibility_marker", marker, raising=False)
+    assert schema_module._compatibility_marker is marker
 
 
 def test_schema_adapter_maps_loss_minimally_and_preserves_duplicates(

@@ -1,8 +1,8 @@
 # Core-contracts characterization baseline
 
 Status: immutable characterization of implemented `0.2.0` behavior and the
-pre-migration #160 checkpoint, captured as factual input to the `0.3.0 Core
-Contracts` work. The dependency-flow descriptions below are historical
+pre-migration #160 checkpoint, captured as factual input to the earlier Core
+Contracts work. The dependency-flow descriptions below are historical
 baseline evidence, not claims about the current tree. `ARCHITECTURE.md` is the
 authoritative current and target architecture.
 
@@ -91,7 +91,7 @@ provider modules are present in the characterization tests.
 | GEDCOM merge and quality | `GedcomService` fingerprints immutable inputs, delegates parsing, identity, provenance, conflict, ordering, and serialization to the characterized GEDCOM kernel, revalidates inputs, stages new outputs, and publishes them atomically. Optional quality output is a coordinated secondary artifact. |
 | Incremental GEDCOM sync | `gedcom.incremental` treats `master.ged` plus its private manifest as the synchronization authority. It retains snapshot history, tombstones manual deletions, makes rebase explicit, and publishes or rolls back the coordinated bundle. |
 | RootsMagic query | `RootsMagicService` delegates to a read-only, authorizer-protected, deadline-bounded `RootsMagicReader`. The source identity and digest bind schema inspection and query execution; results are bounded and expose truncation. |
-| RootsMagic export | `RootsMagicExporter` produces a new GEDCOM plus a loss report. Source revalidation, coordinated staging, rollback, and source-hash tests protect the immutable `.rmtree` input and any prior destination pair. |
+| RootsMagic export | Public `RootsMagicMapper` produces the typed, path-free GEDCOM document and loss report. Application-owned `RootsMagicExporter` validates and publishes the pair; source revalidation, coordinated staging, rollback, and source-hash tests protect the immutable `.rmtree` input and any prior destination pair. |
 | Provider audit | `LLMService` records request and response hashes plus operational metadata. Canonical payload retention is allowed only by an exact consent grant and remains inside encrypted storage. |
 | CLI/REPL rendering | Services currently return dataclasses, collections, and in some cases host `Path` objects. `PresentationAdapter` creates the human and JSON forms without exposing secrets or raw failures. |
 
@@ -138,7 +138,7 @@ than copied into a report, fixtures are rehashed after every group, and the
 source-tree digest is checked before and after all semantic and performance
 work.
 
-## Known boundary gaps for 0.3.0
+## Known historical boundary gaps
 
 These observations identify work for the later core-contract issues; they are
 not permission to change shipped behavior during characterization.

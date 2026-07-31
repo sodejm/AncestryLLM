@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from ancestryllm.gedcom.model import GedcomParseError, parse_gedcom_line
+from ancestryllm.gedcom.model import GedcomDocument, GedcomParseError, parse_gedcom_line
 
 SUPPORTED_GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
+
+
+def serialize_gedcom_document(document: GedcomDocument) -> str:
+    """Serialize typed GEDCOM content without choosing or writing a path."""
+
+    if document.version not in SUPPORTED_GEDCOM_VERSIONS:
+        raise GedcomParseError(f"Unsupported GEDCOM version: {document.version}")
+    return "\n".join(document.lines) + "\n"
 
 
 def _canonical_gedcom_line(line: str) -> str:
@@ -66,4 +74,8 @@ def wrap_long_gedcom_lines(
     return wrapped
 
 
-__all__ = ["SUPPORTED_GEDCOM_VERSIONS", "wrap_long_gedcom_lines"]
+__all__ = [
+    "SUPPORTED_GEDCOM_VERSIONS",
+    "serialize_gedcom_document",
+    "wrap_long_gedcom_lines",
+]

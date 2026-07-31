@@ -22,6 +22,14 @@ class GedcomParseError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class GedcomDocument:
+    """Transport-neutral GEDCOM content before any artifact publication."""
+
+    version: str
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GedcomLine:
     """Parsed metadata for one original GEDCOM line."""
 
@@ -83,6 +91,7 @@ class ParsedSource:
 
 
 __all__ = [
+    "GedcomDocument",
     "GedcomLine",
     "GedcomParseError",
     "GedcomRecord",

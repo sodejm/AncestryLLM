@@ -1,7 +1,7 @@
 # AncestryLLM architecture
 
 This document is the architectural source of truth for the repository. It
-distinguishes shipped `0.3.0` behavior, implemented Unreleased changes, and
+distinguishes the last published behavior, implemented Unreleased changes, and
 later-roadmap boundaries that are intentionally not implemented.
 Executable ownership and import rules are specified in
 [`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
@@ -14,12 +14,12 @@ with the accepted desktop decision in
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
-The shipped `0.3.0` runtime and current Unreleased development tree are a
+The last published runtime and current `0.4.0` Unreleased development tree are a
 single-user, local-first Python application for genealogy research. They
 combine deterministic RootsMagic and GEDCOM workflows with optional LLM
-assistance. The Unreleased tree contains the first 0.4.0 boundary slice, but
-package and release-control versions remain 0.3.0 until a dedicated 0.4.0
-release process is established.
+assistance. Package and release-control metadata in this tree identifies the
+`0.4.0` Unreleased candidate; that development metadata is not evidence that
+0.4.0 has been tagged or published.
 There is no implemented or supported HTTP, desktop, browser, or multi-user
 runtime. ADR-0025 accepts a later local Electron desktop adapter and private
 FastAPI sidecar; it does not accept a public/LAN API, browser client, or
@@ -141,8 +141,8 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Later-roadmap internal FastAPI adapter; no routes are implemented for `0.3.0`. |
-| `desktop/` | Later-roadmap Electron adapter governed by ADR-0025; no application or packaging is implemented for `0.3.0`. |
+| `src/ancestryllm/api/` | Later-roadmap internal FastAPI adapter; no routes are implemented in the current release scope. |
+| `desktop/` | Later-roadmap Electron adapter governed by ADR-0025; no application or packaging is implemented in the current release scope. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
@@ -504,11 +504,15 @@ keys and installed SDKs never select one of those callbacks.
 `RootsMagicService` composes an immutable reader, a dedicated query
 orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
 public immutable-source and schema boundary, `rootsmagic/query.py` owns
-explicit-provider natural-language query policy, and `rootsmagic/export.py` is
-the public GEDCOM mapping/export boundary. The physical read-only source and
-schema implementations live in `rootsmagic/source.py` and
-`rootsmagic/schema.py`; `reader.py` and `schema_adapter.py` are compatibility
-aliases only.
+explicit-provider natural-language query policy, and
+`rootsmagic/mapping.py` is the reusable GEDCOM mapping boundary.
+Application-owned validation and publication live in
+`application/_rootsmagic_export.py`; the public `rootsmagic/export.py` façade
+retains its declared mapper, exporter, and result imports while the legacy
+`rootsmagic/exporter.py` name aliases that application boundary. The
+physical read-only source and schema implementations live in
+`rootsmagic/source.py` and `rootsmagic/schema.py`; `reader.py` and
+`schema_adapter.py` are compatibility aliases only.
 
 ### Immutable reader
 
@@ -535,7 +539,7 @@ model cannot execute SQL directly and cannot weaken the read-only connection.
 
 ### GEDCOM export
 
-`RootsMagicExporter` adapts the inspected `PersonTable`, `NameTable`,
+`RootsMagicMapper` adapts the inspected `PersonTable`, `NameTable`,
 `FamilyTable`, and `ChildTable` into GEDCOM. It supports:
 
 - portable and preservation profiles;
@@ -545,11 +549,17 @@ model cannot execute SQL directly and cannot weaken the read-only connection.
 - living-person exclusion, redaction, or explicit inclusion;
 - an export report listing mapped tables, unmapped tables/columns, and counts.
 
-`RootsMagicExporter.map()` returns a typed, validated
-`RootsMagicGedcomDocument` containing GEDCOM text, a structured loss report,
-and the verified source identity. It does not create or replace files.
-`export()` is the compatibility publication boundary: it maps first, then
-stages and publishes the GEDCOM/report pair.
+`RootsMagicMapper.map()` returns a typed, deterministic
+`RootsMagicGedcomDocument` containing GEDCOM content, a value-free structured
+loss report, and an opaque content-derived source reference. The public DTO is
+JSON-safe and does not expose source paths, filesystem metadata, fingerprints,
+or publication state. Mapping does not validate or publish artifacts.
+Application-owned `RootsMagicExporter.export()` is the compatibility
+publication boundary: it privately retains the verified source lease, maps
+first, validates the typed document through the public GEDCOM validator, and
+only then stages and publishes the GEDCOM/report pair. Output paths, overwrite
+checks, source revalidation, and rollback-capable atomic publication do not
+cross into the reusable RootsMagic package core.
 
 Preservation mode retains safely attributable scalar person columns as
 `_RM_*` custom tags. Binary values and unattached/unsupported records remain
@@ -559,8 +569,8 @@ Output and report files are published as a rollback-capable bundle. Existing
 targets are restored if either publication step or the final source
 fingerprint check fails.
 
-Further extraction of mapping and publication internals remains open work; the
-public modules above are the dependency contracts that work must preserve.
+The public modules above are the dependency contracts future adapters and
+mapping work must preserve.
 
 Destination selection does not prove interoperability. Current Ancestry, Geni,
 and MyHeritage imports require recorded manual smoke tests for every release.
@@ -806,12 +816,12 @@ installed local hooks.
 | Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
-| RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
+| RootsMagic export | Reusable mapping boundary and typed no-publication document are implemented for core tables with explicit loss reports; validation and rollback-safe publication are application-owned behind compatibility façades that preserve public imports. | Coverage is incomplete for every RootsMagic table/version. |
 | GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and pure synchronization contracts are physically separated behind enforced public façades and broadly characterized with fictional regression tests. CORE-24 migrates ordinary consumers to those façades and removes the dead private engine CLI and loader shims. | Publication remains a bounded compatibility implementation behind the serialization façade until a typed publication port owns atomic-write failure injection. |
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; #160 initialization, idempotency, rebase, tombstone, and rollback behavior remains characterized offline. CORE-24 limits direct private imports to exact characterization exceptions. | The legacy module still owns the concrete adapter behind the public sync façade; multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside `0.3.0`. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside the current release scope. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

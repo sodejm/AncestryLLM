@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ancestryllm.application._rootsmagic_export import (
+    RootsMagicExporter,
+    RootsMagicExportResult,
+)
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
 from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
-from ancestryllm.rootsmagic.export import RootsMagicExporter, RootsMagicExportResult
 from ancestryllm.rootsmagic.query import RootsMagicQueryService
 
 __all__ = ["RootsMagicService"]

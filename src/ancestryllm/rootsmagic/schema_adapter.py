@@ -1,15 +1,11 @@
-"""Compatibility exports for the RootsMagic schema implementation."""
+"""Compatibility alias for the RootsMagic schema implementation."""
 
-from ancestryllm.rootsmagic.schema import (
-    AdaptedTable,
-    RootsMagicSchemaAdapter,
-    semantic_row_key,
-    semantic_value,
-)
+from __future__ import annotations
 
-__all__ = [
-    "AdaptedTable",
-    "RootsMagicSchemaAdapter",
-    "semantic_row_key",
-    "semantic_value",
-]
+import sys
+
+from ancestryllm.rootsmagic import schema as _schema
+
+# Importers receive the implementation module itself so monkeypatches through
+# either the legacy name or the physical owner observe the same state.
+sys.modules[__name__] = _schema
