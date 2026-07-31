@@ -1,6 +1,6 @@
 # Application-service contracts
 
-Status: implemented in the `0.4.0` Unreleased development tree. These contracts
+Status: implemented for the `0.4.0` release line. These contracts
 are the framework-independent boundary shared by the current terminal adapters
 and the future FastAPI/Electron adapters. `ARCHITECTURE.md` owns the
 repository-wide dependency graph and current-versus-target status.

@@ -172,7 +172,7 @@ Removing a symbol requires the compatibility and versioning process. Renaming
 an implementation detail does not require a compatibility shim unless that
 detail was already in a declared façade.
 
-The Unreleased RootsMagic public inventory includes the package façade plus
+The `0.4.0` RootsMagic public inventory includes the package façade plus
 `core`, `query`, and `export`. The reusable mapper lives in the physical
 `mapping` implementation. The `query` module is a compatibility façade for
 the private typed application orchestrator, so provider and SQL policy have one

@@ -1,6 +1,6 @@
 # Shared command executor contract
 
-Status: implemented for the `0.3.0` development tree by issue #42.
+Status: implemented since `0.3.0` and preserved in the `0.4.0` release line.
 
 The one-shot CLI and prompt-toolkit/Rich REPL use one execution path:
 
