@@ -35,6 +35,7 @@ PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.gedcom.serialization",
     "ancestryllm.gedcom.service",
     "ancestryllm.gedcom.sync",
+    "ancestryllm.gedcom.sync_kernel",
     "ancestryllm.llm.contracts",
     "ancestryllm.llm.service",
     "ancestryllm.rootsmagic",
@@ -145,6 +146,7 @@ PURE_GEDCOM_OPERATION_MODULES: Final[frozenset[str]] = frozenset(
         "ancestryllm.gedcom.graph",
         "ancestryllm.gedcom.identity",
         "ancestryllm.gedcom.quality",
+        "ancestryllm.gedcom.sync_kernel",
     }
 )
 

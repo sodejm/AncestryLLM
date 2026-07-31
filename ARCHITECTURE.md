@@ -591,11 +591,15 @@ loops. `GedcomService` imports only the stable public seams:
   annotations, and Markdown rendering;
 - `serialization.py` exposes supported versions and the writer;
 - `service.py` provides merge, subtree, quality, and sync use cases;
-- `sync.py` injects the engine and an optional modular identity-resolver
-  factory into the incremental synchronizer; updates default to
-  `--provider none`, and rebase never invokes a provider.
+- `sync_kernel.py` owns path-free, immutable stage contracts and the
+  deterministic synchronization coordinator;
+- `sync.py` adapts shared application decision, cancellation, and progress
+  ports to that coordinator and retains the legacy incremental entry points.
+  Compatibility updates default to `--provider none`, and rebase never invokes
+  a provider.
 
-Publication and synchronization compatibility paths remain for #165 and #166.
+The pure synchronization boundary is implemented by #165. The historical
+incremental synchronizer and publication compatibility paths remain for #166.
 The public façade, operation-purity, and exact-gateway checks prevent new
 consumers from increasing that migration debt. Exact internal façade gateways
 permit operation modules and the compatibility publication kernel to share
@@ -661,12 +665,30 @@ become protected manual content. Deletions require
 silently resurrect them. Rollback means selecting a previous matching master
 and manifest; published generation directories are never overwritten.
 
-The public sync route and offline initialization/idempotency tests now exist,
-so the earlier standalone CLI wiring gap is closed. Verification depth is still
-uneven: update initialization and idempotency have focused modular tests, while
-rebase, tombstone non-resurrection, broad non-person remapping, checksum failure
-paths, and multi-generation vendor replacement need stronger end-to-end
-coverage before the subsystem should be described as fully hardened.
+`gedcom/sync_kernel.py` defines the transport-neutral synchronization sequence:
+snapshot, comparison, planning, explicit decisions, unpublished application,
+atomic commit, and recovery. Its request, plan, decision, loss-report,
+publication, recovery, event, and result values are immutable, bounded,
+serializable, path-free, and identified by safe opaque references. Plans are
+content-addressed and deterministic over normalized inputs, including explicit
+update, deletion, tombstone, conflict, and rebase actions. Decisions can be
+persisted and replayed through the shared application `DecisionPort`.
+
+Cancellation is cooperative only before the atomic publication boundary.
+Every pre-publication cancellation or stage failure invokes recovery with coded
+metadata and opaque references; a successful recovery must preserve the prior
+revision and remove unpublished state. Commit adapters must validate their
+publication result before crossing the boundary and must not raise afterward.
+Structural progress failures after a successful commit therefore cannot
+invalidate or misreport the immutable publication.
+
+The existing `sync.py` CLI/service functions remain compatibility shims to
+`gedcom.incremental` while #166 supplies the concrete stage adapters and removes
+obsolete publication paths. The #160 characterization baseline continues to
+cover offline initialization, idempotency, rebase, tombstone non-resurrection,
+rollback metadata, and failed-publication preservation during that migration.
+Broader non-person remapping and multi-generation vendor replacement still need
+release evidence before the subsystem should be described as fully hardened.
 
 ## Supporting application services
 
@@ -780,8 +802,8 @@ installed local hooks.
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
-| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, and immutable quality analysis are physically separated behind enforced public façades and broadly characterized with fictional regression tests. | Publication and synchronization compatibility paths remain pending #165-#166. |
-| Incremental update | Public sync façade is enforced; initialization and idempotency are tested offline. | The private synchronizer still requires deeper extraction, and multi-generation, rebase, tombstone, and non-person paths need broader coverage. |
+| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and pure synchronization contracts are physically separated behind enforced public façades and broadly characterized with fictional regression tests. | The historical publication compatibility path remains pending #166. |
+| Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; #160 initialization, idempotency, rebase, tombstone, and rollback behavior remains characterized offline. | The legacy incremental module still owns the concrete adapters and publication implementation pending #166; multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside `0.3.0`. |
