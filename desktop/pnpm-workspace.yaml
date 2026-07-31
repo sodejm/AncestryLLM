@@ -1,3 +1,9 @@
+autoInstallPeers: false
+enablePrePostScripts: false
+engineStrict: true
+ignoreScripts: false
+saveExact: true
+sharedWorkspaceLockfile: false
 onlyBuiltDependencies:
   - electron
   - esbuild

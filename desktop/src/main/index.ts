@@ -1,22 +1,25 @@
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain, session, shell, type IpcMainInvokeEvent } from 'electron'
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
 import { desktopChannels } from '../shared-contract/desktop'
 import { parseTheme } from '../shared-contract/runtime'
+import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 
 app.enableSandbox()
 const bridge = createMockAncestryBridge(process.env.ANCESTRYLLM_DESKTOP_FIXTURE === 'failure' ? 'failure' : 'success')
-const rendererFile = pathToFileURL(join(__dirname, '../renderer/index.html')).href
+const rendererPath = join(__dirname, '../renderer/index.html')
+
+function rendererPolicy() {
+  return {
+    developmentUrl: process.env.ELECTRON_RENDERER_URL,
+    isPackaged: app.isPackaged,
+    rendererPath,
+  }
+}
 
 function trustedSender(event: IpcMainInvokeEvent): boolean {
   if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) return false
-  const candidate = new URL(event.senderFrame.url)
-  candidate.hash = ''
-  if (process.env.NODE_ENV !== 'development') return candidate.href === rendererFile
-  const developmentUrl = process.env.ELECTRON_RENDERER_URL
-  if (!developmentUrl) return false
-  return candidate.origin === new URL(developmentUrl).origin
+  return isTrustedRendererUrl({ ...rendererPolicy(), senderUrl: event.senderFrame.url })
 }
 
 function createWindow(): void {
@@ -28,8 +31,9 @@ function createWindow(): void {
   window.webContents.on('will-navigate', (event) => event.preventDefault())
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
   window.once('ready-to-show', () => window.show())
-  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else void window.loadFile(join(__dirname, '../renderer/index.html'))
+  const rendererTarget = resolveRendererTarget(rendererPolicy())
+  if (rendererTarget.kind === 'url') void window.loadURL(rendererTarget.value)
+  else void window.loadFile(rendererTarget.value)
 }
 
 app.whenReady().then(() => {
