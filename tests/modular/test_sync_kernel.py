@@ -27,6 +27,7 @@ from ancestryllm.gedcom.sync_kernel import (
     SyncDelta,
     SyncDocument,
     SyncEvent,
+    SyncEventPhase,
     SyncKernel,
     SyncLossEntry,
     SyncLossReport,
@@ -469,7 +470,8 @@ def test_tombstone_conflict_and_rebase_actions_remain_explicit() -> None:
 
 
 def test_replayed_decision_is_used_without_calling_decision_adapter() -> None:
-    replayed = SyncDecisionSelection("decision:manual-deletion", "ACCEPT")
+    original = _kernel(_Harness()).execute(_request())
+    replayed = original.decisions[0]
     harness = _Harness()
 
     result = _kernel(harness).execute(_request(replayed=(replayed,)))
@@ -485,6 +487,21 @@ def test_replayed_decision_is_used_without_calling_decision_adapter() -> None:
         "prepare",
         "commit",
     ]
+
+
+def test_replayed_decision_is_rejected_when_destructive_content_changes() -> None:
+    original = _kernel(_Harness()).execute(_request())
+    replayed = original.decisions[0]
+    changed = replace(_decision(), destructive_option_ids=("KEEP",))
+    harness = _Harness(decisions=(changed,))
+
+    result = _kernel(harness).execute(_request(replayed=(replayed,)))
+
+    assert result.outcome is SyncOutcome.FAILED
+    assert result.error_code == "SYNC_DECISION_PLAN_MISMATCH"
+    assert result.failed_stage is SyncStage.DECISION
+    assert "decision" not in harness.calls
+    assert "application" not in harness.calls
 
 
 def test_no_change_is_repeatable_and_never_stages_or_publishes() -> None:
@@ -747,7 +764,16 @@ def test_completed_decisions_are_retained_when_a_later_decision_is_cancelled() -
     result = _kernel(CancelSecondDecision()).execute(_request())
 
     assert result.outcome is SyncOutcome.CANCELLED
-    assert result.decisions == (SyncDecisionSelection("decision:first", "KEEP"),)
+    assert tuple(
+        (selection.decision_id, selection.option_id) for selection in result.decisions
+    ) == (("decision:first", "KEEP"),)
+
+
+def test_committed_result_requires_every_declared_decision_selection() -> None:
+    committed = _kernel(_Harness()).execute(_request())
+
+    with pytest.raises(ValueError, match="every declared decision"):
+        replace(committed, decisions=())
 
 
 def test_recovery_metadata_and_events_cannot_contain_paths_or_payload_fields() -> None:
@@ -846,6 +872,49 @@ def test_sync_request_enforces_aggregate_serialized_size(
         _request()
 
 
+def test_planning_output_enforces_aggregate_serialized_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delta = _delta()
+    decision = _decision()
+    monkeypatch.setattr(sync_kernel_module, "MAX_SYNC_JSON_BYTES", 1)
+
+    with pytest.raises(ValueError, match="Serialized sync contract"):
+        SyncPlanningOutput((delta,), (decision,))
+
+
+def test_sync_plan_construction_enforces_aggregate_serialized_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _kernel(_Harness()).execute(_request(dry_run=True))
+    assert result.plan is not None
+    monkeypatch.setattr(sync_kernel_module, "MAX_SYNC_JSON_BYTES", 1)
+
+    with pytest.raises(ValueError, match="Serialized sync contract"):
+        replace(result.plan)
+
+
+@pytest.mark.parametrize(
+    ("operation", "initialize_manifest", "manifest"),
+    (
+        (SyncOperation.UPDATE, False, None),
+        (SyncOperation.UPDATE, True, _document("document:manifest", MANIFEST_DIGEST)),
+        (SyncOperation.REBASE, False, None),
+    ),
+)
+def test_sync_request_enforces_operation_manifest_invariant(
+    operation: SyncOperation,
+    initialize_manifest: bool,
+    manifest: SyncDocument | None,
+) -> None:
+    with pytest.raises(ValueError, match="manifest"):
+        replace(
+            _request(),
+            manifest=manifest,
+            options=SyncOptions(operation, initialize_manifest=initialize_manifest),
+        )
+
+
 def test_application_coordinator_maps_decisions_and_structural_progress() -> None:
     harness = _Harness()
     decisions = _ApplicationDecisionPort()
@@ -868,6 +937,11 @@ def test_application_coordinator_maps_decisions_and_structural_progress() -> Non
     assert [update.stage for update in progress.updates] == [event.code for event in result.events]
     assert all(update.operation == "GEDCOM_SYNC" for update in progress.updates)
     assert all(update.artifact_id is None for update in progress.updates)
+    assert all(
+        (update.completed, update.total) == (None, None)
+        for update, event in zip(progress.updates, result.events, strict=True)
+        if event.phase is not SyncEventPhase.COMPLETED
+    )
 
 
 def test_application_coordinator_uses_explicit_destructive_option_metadata() -> None:
@@ -903,7 +977,11 @@ def test_application_coordinator_maps_conflict_decisions() -> None:
 
     assert result.outcome is SyncOutcome.COMMITTED
     assert decisions.requests[0].kind is DecisionKind.RESOLVE_CONFLICT
-    assert result.decisions == (SyncDecisionSelection("decision:conflict", "KEEP_MASTER"),)
+    assert result.plan is not None
+    assert tuple(
+        (selection.decision_id, selection.option_id) for selection in result.decisions
+    ) == (("decision:conflict", "KEEP_MASTER"),)
+    assert result.decisions[0].plan_id == result.plan.plan_id
 
 
 def test_application_decision_cancellation_recovers_without_publication() -> None:

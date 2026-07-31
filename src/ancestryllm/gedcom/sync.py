@@ -45,6 +45,7 @@ from ancestryllm.gedcom.sync_kernel import (
     SyncDecisionRequest,
     SyncDecisionSelection,
     SyncEvent,
+    SyncEventPhase,
     SyncKernel,
     SyncKernelResult,
     SyncRequest,
@@ -129,14 +130,15 @@ class _ApplicationEventStage:
         self._port = port
 
     def emit(self, event: SyncEvent) -> None:
+        item_count = event.item_count if event.phase is SyncEventPhase.COMPLETED else None
         try:
             self._port.emit(
                 ProgressUpdate(
                     operation="GEDCOM_SYNC",
                     stage=event.code,
                     sequence=event.sequence,
-                    completed=event.item_count,
-                    total=event.item_count,
+                    completed=item_count,
+                    total=item_count,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - application port boundary

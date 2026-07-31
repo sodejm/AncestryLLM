@@ -245,10 +245,13 @@ class SyncDecisionSelection(SyncValue):
 
     decision_id: str
     option_id: str
+    plan_id: str | None = None
 
     def __post_init__(self) -> None:
         _validate_decision_id("decision_id", self.decision_id)
         _validate_code("option_id", self.option_id)
+        if self.plan_id is not None:
+            _validate_ref("plan_id", self.plan_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +267,11 @@ class SyncRequest(SyncValue):
 
     def __post_init__(self) -> None:
         _validate_ref("operation_id", self.operation_id)
+        if self.options.operation is SyncOperation.UPDATE:
+            if (self.manifest is None) is not self.options.initialize_manifest:
+                raise ValueError("Update manifest presence must be the inverse of initialization.")
+        elif self.manifest is None:
+            raise ValueError("Rebase requires an existing manifest.")
         if len(self.snapshots) > MAX_ITEMS or len(self.replayed_decisions) > MAX_ITEMS:
             raise ValueError("Sync request exceeds its bounded size.")
         source_ids = tuple(snapshot.source_id for snapshot in self.snapshots)
@@ -520,6 +528,7 @@ class SyncPlanningOutput(SyncValue):
             or len(self.losses) > MAX_ITEMS
         ):
             raise ValueError("Planning output exceeds its bounded size.")
+        _validate_serialized_size(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,6 +568,7 @@ class SyncPlan(SyncValue):
             raise ValueError("Plan decision IDs must be unique.")
         if self.plan_id != self.expected_plan_id():
             raise ValueError("plan_id does not match the deterministic plan content.")
+        _validate_serialized_size(self)
 
     def expected_plan_id(self) -> str:
         """Return the content-derived opaque plan identity."""
@@ -746,6 +756,8 @@ class SyncKernelResult(SyncValue):
                     raise ValueError("Result contains an undeclared decision.")
                 if selection.option_id not in declared[selection.decision_id]:
                     raise ValueError("Result contains an invalid decision option.")
+                if selection.plan_id != self.plan.plan_id:
+                    raise ValueError("Result decision does not match the result plan.")
         if len(self.events) > MAX_EVENTS:
             raise ValueError("Result events exceed their bounded size.")
         if tuple(event.sequence for event in self.events) != tuple(range(len(self.events))):
@@ -759,6 +771,8 @@ class SyncKernelResult(SyncValue):
         if self.outcome is SyncOutcome.COMMITTED:
             if self.plan is None or self.publication is None:
                 raise ValueError("Committed results require a plan and publication.")
+            if decision_ids != tuple(decision.decision_id for decision in self.plan.decisions):
+                raise ValueError("Committed results require every declared decision selection.")
             if self.publication.plan_id != self.plan.plan_id:
                 raise ValueError("Committed publication does not match the result plan.")
             if (
@@ -1168,7 +1182,17 @@ class SyncKernel:
                 raise SyncStageError("SYNC_DECISION_ID_MISMATCH")
             if selection.option_id not in decision.option_ids:
                 raise SyncStageError("SYNC_DECISION_OPTION_INVALID")
-            selections.append(selection)
+            if selection.plan_id is not None and selection.plan_id != plan.plan_id:
+                raise SyncStageError("SYNC_DECISION_PLAN_MISMATCH")
+            if decision.decision_id in replayed and selection.plan_id is None:
+                raise SyncStageError("SYNC_DECISION_PLAN_MISMATCH")
+            selections.append(
+                SyncDecisionSelection(
+                    selection.decision_id,
+                    selection.option_id,
+                    plan.plan_id,
+                )
+            )
             checkpoint()
 
     def _recover(
