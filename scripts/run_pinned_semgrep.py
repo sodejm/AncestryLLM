@@ -51,6 +51,10 @@ RULE_BUNDLES = (
             ),
             RuleRevision(
                 sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="084e9272b4297bbdc7afcd0b8ece70816f2e9c9973639b26eab2c071456ccc6b",
                 size=432_695,
             ),
         ),
