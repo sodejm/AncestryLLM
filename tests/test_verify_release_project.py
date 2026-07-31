@@ -122,6 +122,29 @@ def test_rejects_unfinished_project_item_pagination(verifier, gate):
         verifier.verify_project_gate(_page([_item(202)], has_next_page=True), gate)
 
 
+def test_accepts_complete_project_schema_while_target_p0_is_not_release_ready(verifier, gate):
+    not_ready = _item(99, state="OPEN", status="In progress", validation="Pending")
+
+    verifier.verify_project_schema(_page([not_ready]), gate)
+
+    with pytest.raises(verifier.ProjectVerificationError, match="issue #99 is still open"):
+        verifier.verify_project_gate(_page([not_ready]), gate)
+
+
+def test_schema_validation_rejects_incomplete_target_iteration_fields(verifier, gate):
+    item = _item(99)
+    item["fieldValues"]["nodes"] = [
+        field
+        for field in item["fieldValues"]["nodes"]
+        if field["field"]["name"] != "Validation"
+    ]
+
+    with pytest.raises(
+        verifier.ProjectVerificationError, match="missing required field 'Validation'"
+    ):
+        verifier.verify_project_schema(_page([item]), gate)
+
+
 @pytest.mark.parametrize(
     "payload, expected",
     [
@@ -132,6 +155,9 @@ def test_rejects_unfinished_project_item_pagination(verifier, gate):
 def test_rejects_missing_project_access_or_malformed_responses(verifier, gate, payload, expected):
     with pytest.raises(verifier.ProjectVerificationError, match=expected):
         verifier.verify_project_gate(payload, gate)
+
+    with pytest.raises(verifier.ProjectVerificationError, match=expected):
+        verifier.verify_project_schema(payload, gate)
 
 
 @pytest.mark.parametrize(

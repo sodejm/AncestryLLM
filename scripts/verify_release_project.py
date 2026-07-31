@@ -191,8 +191,13 @@ def _validate_cleared(issue: ProjectIssue, gate: ProjectGate, *, dependency: boo
         )
 
 
-def verify_project_gate(payload: object, gate: ProjectGate) -> None:
-    """Verify all selected P0 items and their dependency closure from API data."""
+def verify_project_schema(payload: object, gate: ProjectGate) -> list[ProjectIssue]:
+    """Verify private Project access, pagination, and target-iteration field schema.
+
+    This deliberately does not assert that the target iteration is release-ready.
+    It is suitable for integration proof while implementation work remains open;
+    ``verify_project_gate`` remains the strict release decision.
+    """
     items: list[ProjectIssue] = []
     pages = _pages(payload)
     for page_index, page in enumerate(pages, start=1):
@@ -231,6 +236,13 @@ def verify_project_gate(payload: object, gate: ProjectGate) -> None:
             )
         by_issue[key] = issue
 
+    return target_items
+
+
+def verify_project_gate(payload: object, gate: ProjectGate) -> None:
+    """Verify all selected P0 items and their dependency closure from API data."""
+    target_items = verify_project_schema(payload, gate)
+    by_issue = {(issue.repository, issue.number): issue for issue in target_items}
     selected = [issue for issue in target_items if issue.fields["Priority"] == gate.priority]
     if not selected:
         raise ProjectVerificationError(
@@ -283,6 +295,11 @@ def main() -> int:
     parser.add_argument("--priority", required=True)
     parser.add_argument("--status", required=True)
     parser.add_argument("--validation", required=True)
+    parser.add_argument(
+        "--schema-only",
+        action="store_true",
+        help="validate Project access, pagination, coordinates, and target field schema only",
+    )
     args = parser.parse_args()
     gate = ProjectGate(
         owner=args.project_owner,
@@ -294,7 +311,11 @@ def main() -> int:
         validation=args.validation,
     )
     try:
-        verify_project_gate(json.load(sys.stdin), gate)
+        payload = json.load(sys.stdin)
+        if args.schema_only:
+            verify_project_schema(payload, gate)
+        else:
+            verify_project_gate(payload, gate)
     except (json.JSONDecodeError, ProjectVerificationError) as error:
         print(f"release Project verification failed: {error}", file=sys.stderr)
         return 1

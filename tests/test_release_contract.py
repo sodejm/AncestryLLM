@@ -137,6 +137,14 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "ANCESTRYLLM_PROJECT_READ_TOKEN" in releasing
     assert "read:project" in releasing
     assert "fork or Dependabot pull request cannot receive the secret" in releasing
+    assert (
+        "without claiming that the in-development iteration is ready to release"
+        in normalized_releasing
+    )
+    assert (
+        "`Release readiness` and the tag workflow continue to use the strict live gate"
+        in normalized_releasing
+    )
     assert "v0.5.0 — Foundation" in releasing
     assert "P0 is reserved for work that must complete before publication" in releasing
     assert "verifier has no issue-number exception" in releasing
@@ -358,11 +366,19 @@ def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_
         assert "GH_TOKEN: ${{ github.token }}" in workflow
         assert "verify_release_project.py" in workflow
 
+    for workflow in (readiness, release):
+        assert "--schema-only" not in workflow
+
     assert "push:" in proof
     assert "branches: [main]" in proof
     assert "pull_request:" not in proof
     assert "workflow_dispatch:" not in proof
     assert 'test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"' in proof
+    assert "project_release=\"$(jq -er '.release' .github/release-config.json)\"" in proof
+    assert '--version "$project_release"' in proof
+    assert "--schema-only" in proof
+    assert "import tomllib" not in proof
+    assert "uv run python -m pytest tests/test_verify_release_project.py -q" in proof
 
 
 def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> None:

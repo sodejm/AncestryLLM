@@ -28,11 +28,15 @@ Actions operations, but supply the named secret only to the Project GraphQL
 read. A missing or unusable secret fails the Project gate closed.
 
 `Release Project gate proof` runs only for a path-scoped push to `main`, checks
-that the checkout and `origin/main` are the triggering commit, and then runs
-the same query-only verifier. It has no pull-request or manual trigger, so a
-fork or Dependabot pull request cannot receive the secret. After this change
-is merged, its exact-main run is the hosted proof; do not create the secret in
-a pull request or place the token in repository files.
+that the checkout and `origin/main` are the triggering commit, validates the
+configured release coordinates, and performs the authenticated Project query.
+It verifies pagination and target-iteration field schema without claiming that
+the in-development iteration is ready to release; a deterministic regression
+then proves the strict verifier rejects an open P0 item. `Release readiness`
+and the tag workflow continue to use the strict live gate. The proof has no
+pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
+After this change is merged, its exact-main run is the hosted proof; do not
+create the secret in a pull request or place the token in repository files.
 
 ## v0.5.0 supported offline shell
 

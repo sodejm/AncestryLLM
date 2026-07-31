@@ -32,7 +32,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify exact main commit and private Project gate
+      - name: Verify exact main commit and private Project schema
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}
@@ -41,9 +41,10 @@ jobs:
           git fetch --no-tags origin main
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
           test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+          project_release="$(jq -er '.release' .github/release-config.json)"
           python scripts/verify_release_configuration.py \
             --config .github/release-config.json \
-            --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+            --version "$project_release"
           project_owner="$(jq -r '.project.owner' .github/release-config.json)"
           project_number="$(jq -r '.project.number' .github/release-config.json)"
           project_title="$(jq -r '.project.title' .github/release-config.json)"
@@ -61,6 +62,7 @@ jobs:
             -f owner="$project_owner" \
             -F number="$project_number" |
             python scripts/verify_release_project.py \
+              --schema-only \
               --project-owner "$project_owner" \
               --project-number "$project_number" \
               --project-title "$project_title" \
@@ -68,3 +70,12 @@ jobs:
               --priority "$project_priority" \
               --status "$project_status" \
               --validation "$project_validation"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Prove strict verifier rejects a non-ready P0 fixture
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv sync --locked --all-extras
+          uv run python -m pytest tests/test_verify_release_project.py -q
