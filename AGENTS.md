@@ -44,5 +44,9 @@
 
 - Work on a dedicated branch or worktree; never edit `main` or `master` directly.
 - Preserve unrelated changes. Do not push unless explicitly requested.
+- Whenever Codex creates a GitHub issue, determine the appropriate release iteration
+  from the Feature Release project's scope, priority, and dependency order, then add
+  the issue to that iteration on the release calendar. If project access prevents the
+  assignment, report the issue and intended iteration explicitly.
 - Before completion, check behavior, tests, documentation, dead code, and relevant quality/security gates.
 - Link and close an issue only when the change fully satisfies its acceptance criteria.
