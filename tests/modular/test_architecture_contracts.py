@@ -41,6 +41,7 @@ def test_repository_dependency_contract_passes_with_only_live_exceptions() -> No
         "gedcom/engine.py",
         "gedcom/incremental.py",
         "gedcom/service.py",
+        "gedcom/sync_kernel.py",
     ),
 )
 def test_gedcom_kernel_and_service_paths_do_not_perform_terminal_io(
@@ -208,6 +209,7 @@ def test_pure_gedcom_document_kernel_rejects_outward_dependencies(
         "ancestryllm.gedcom.graph",
         "ancestryllm.gedcom.identity",
         "ancestryllm.gedcom.quality",
+        "ancestryllm.gedcom.sync_kernel",
     ),
 )
 @pytest.mark.parametrize(

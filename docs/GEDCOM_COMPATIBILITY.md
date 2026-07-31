@@ -43,6 +43,37 @@ rules. Identity confidence must be finite and between zero and one. An
 automatic merge accepts a provider duplicate decision only at or above the
 conservative confidence floor; lower-confidence pairs remain separate.
 
+## Staged synchronization and recovery
+
+The pure synchronization kernel accepts only immutable document metadata and
+adapter-issued opaque references. Outer adapters capture and validate host
+inputs before invoking the kernel; GEDCOM records, user content, file paths,
+credentials, provider payloads, and publication mechanics do not cross this
+boundary. The ordered stages are snapshot, comparison, planning, explicit
+decision, unpublished application, atomic commit, and recovery.
+
+A normalized plan is deterministic and content-addressed. It carries
+provenance references, explicit update, deletion, tombstone, conflict, and
+rebase actions, plus a coded payload-free loss report. Decision requests use
+stable IDs and coded options. Selected decisions can be serialized and replayed
+through the shared application `DecisionPort` without prompting again.
+
+Cancellation checkpoints occur only before atomic commit. A cancellation or
+failure before publication invokes recovery with the failed stage, a stable
+error code, and opaque state, plan, and staging references. Recovery reports
+whether the prior immutable revision was preserved and unpublished state was
+removed; it does not log document content or host paths. A commit adapter must
+validate the publication result before crossing the atomic boundary and must
+not raise afterward. Failure to render structural progress after commit cannot
+turn an already published revision into a failed result.
+
+The current CLI and typed sync service entry points remain compatibility shims
+to the characterized incremental synchronizer. Issue #166 owns the concrete
+stage adapters, publication extraction, and obsolete compatibility-path
+removal. Until that migration is complete, the #160 offline baseline protects
+initialization, idempotency, rebase, tombstone non-resurrection, rollback
+metadata, and failed-publication preservation.
+
 ## Adversarial input dispositions
 
 The fictional adversarial corpus in
