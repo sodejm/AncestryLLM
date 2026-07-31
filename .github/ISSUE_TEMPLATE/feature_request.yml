@@ -1,0 +1,127 @@
+name: Feature request
+description: Propose a testable enhancement with explicit safety constraints
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Define the user-visible outcome and its acceptance tests before proposing
+        implementation details. Use fictional examples and omit private data.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: Describe the user or developer problem, not only a preferred implementation.
+      placeholder: Today ..., which means ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable outcome and public contract.
+      placeholder: Given ..., when ..., then ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Define what is included and explicitly excluded.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable conditions required to close the feature.
+      placeholder: |
+        - [ ] Given ..., when ..., then ...
+        - [ ] Existing compatibility and safety guarantees remain intact.
+        - [ ] User and operator documentation is updated.
+        - [ ] Obsolete code made unnecessary by this feature is removed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-first-plan
+    attributes:
+      label: Test-first development plan
+      description: |
+        Map each behavioral acceptance criterion to the smallest deterministic
+        test that should fail before implementation. Include contract,
+        integration, boundary, and negative coverage where relevant.
+      placeholder: |
+        Acceptance criterion:
+        Test level and intended file:
+        Given / when / then:
+        Expected initial failure:
+
+        Repeat for each behavioral criterion.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain other approaches and why they do not meet the need.
+    validations:
+      required: true
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security, privacy, and data safety
+      description: |
+        Cover credentials, provider consent, network behavior, private genealogy
+        data, immutable RootsMagic inputs, and loss-minimal GEDCOM handling as relevant.
+      placeholder: Risks and required safeguards, or "No additional impact" with rationale.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation-evidence
+    attributes:
+      label: Validation plan and evidence
+      description: |
+        List the focused tests and relevant repository gates before work starts.
+        Update this field with exact commands and results as evidence becomes available.
+      placeholder: |
+        - Focused test names and expected result:
+        - make test
+        - make lint
+        - make typecheck
+        - make security
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add related issues, references, mockups, or implementation constraints.
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness checklist
+      options:
+        - label: I searched open and closed issues for duplicates.
+          required: true
+        - label: I did not include private genealogy data, credentials, logs, or prompt/response payloads.
+          required: true
+        - label: I will observe the focused test fail for the expected reason before implementing the behavior.
+          required: true
