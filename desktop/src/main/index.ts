@@ -25,7 +25,7 @@ function trustedSender(event: IpcMainInvokeEvent): boolean {
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1080, minWidth: 720, height: 720, minHeight: 560, show: false,
-    webPreferences: { preload: join(__dirname, '../preload/index.mjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
+    webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())

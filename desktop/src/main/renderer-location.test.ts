@@ -34,6 +34,27 @@ describe('renderer location policy', () => {
     })).toBe(true)
   })
 
+  it('trusts the selected local renderer when unpackaged without a development server', () => {
+    expect(resolveRendererTarget({
+      developmentUrl: undefined,
+      isPackaged: false,
+      rendererPath,
+    })).toEqual({ kind: 'file', value: rendererPath })
+
+    expect(isTrustedRendererUrl({
+      developmentUrl: undefined,
+      isPackaged: false,
+      rendererPath,
+      senderUrl: 'file:///application/out/renderer/index.html#home',
+    })).toBe(true)
+    expect(isTrustedRendererUrl({
+      developmentUrl: undefined,
+      isPackaged: false,
+      rendererPath,
+      senderUrl: 'https://attacker.invalid/app',
+    })).toBe(false)
+  })
+
   it('trusts only the exact local renderer file in packaged mode', () => {
     expect(isTrustedRendererUrl({
       developmentUrl: undefined,

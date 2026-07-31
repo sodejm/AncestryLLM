@@ -30,13 +30,13 @@ export function isTrustedRendererUrl(policy: RendererTrustPolicy): boolean {
   }
   candidate.hash = ''
 
-  if (policy.isPackaged) {
-    return candidate.href === pathToFileURL(policy.rendererPath).href
+  const target = resolveRendererTarget(policy)
+  if (target.kind === 'file') {
+    return candidate.href === pathToFileURL(target.value).href
   }
-  if (!policy.developmentUrl) return false
 
   try {
-    return candidate.origin === new URL(policy.developmentUrl).origin
+    return candidate.origin === new URL(target.value).origin
   } catch {
     return false
   }
