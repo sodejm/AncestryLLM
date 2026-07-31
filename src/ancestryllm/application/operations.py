@@ -45,6 +45,41 @@ class TreeRecord(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class RootsMagicSourceSummary(BoundaryDTO):
+    """Sanitized metadata with a string fingerprint for one granted source."""
+
+    source_ref: str
+    friendly_name: str
+    fingerprint: str
+    detected_version: str
+    grant_status_code: str
+    immutable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RootsMagicQueryParameterDefinition(BoundaryDTO):
+    """Transport-neutral validation schema for one allowlisted query parameter."""
+
+    parameter_id: str
+    value_type_code: str
+    required: bool
+    minimum: int | None
+    maximum: int | None
+    allowed_values: tuple[Scalar, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RootsMagicQueryDefinition(BoundaryDTO):
+    """One allowlisted query definition suitable for adapter presentation."""
+
+    query_id: str
+    label: str
+    description: str
+    parameters: tuple[RootsMagicQueryParameterDefinition, ...]
+    maximum_rows: int
+
+
+@dataclass(frozen=True, slots=True)
 class QueryRow(BoundaryDTO):
     """One deterministic query row aligned with result column names."""
 
@@ -238,6 +273,20 @@ class RootsMagicQueryResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class RootsMagicResultPage(BoundaryDTO):
+    """One bounded page of sanitized RootsMagic query results."""
+
+    query_id: str
+    columns: tuple[str, ...]
+    rows: tuple[QueryRow, ...]
+    offset: int
+    returned_rows: int
+    total_rows: int | None
+    has_more: bool
+    next_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class RootsMagicExportRequest(ServiceRequest):
     """Export an immutable RootsMagic tree through scoped output grants."""
 
@@ -262,6 +311,17 @@ class RootsMagicExportResult(ServiceResult):
     changes: ChangeSummary
     quality: QualitySummary
     provenance: tuple[ProvenanceRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RootsMagicExportArtifact(BoundaryDTO):
+    """Published metadata with a sanitized string fingerprint and no host path."""
+
+    artifact: ArtifactRef
+    source_ref: str
+    source_fingerprint: str
+    profile_code: str
+    gedcom_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -736,12 +796,17 @@ __all__ = [
     "QualitySummary",
     "QueryExecutionRecord",
     "QueryRow",
+    "RootsMagicExportArtifact",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",
     "RootsMagicListRequest",
     "RootsMagicListResult",
+    "RootsMagicQueryDefinition",
+    "RootsMagicQueryParameterDefinition",
     "RootsMagicQueryRequest",
     "RootsMagicQueryResult",
+    "RootsMagicResultPage",
+    "RootsMagicSourceSummary",
     "SecretDeleteRequest",
     "SecretDeleteResult",
     "SecretSetRequest",

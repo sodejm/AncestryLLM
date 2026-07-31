@@ -147,6 +147,89 @@ def test_operation_contracts_cover_every_command_route_exactly() -> None:
     assert all(contract.key == key for key, contract in OPERATION_CONTRACTS.items())
 
 
+def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> None:
+    public_names = {
+        "RootsMagicExportArtifact",
+        "RootsMagicQueryDefinition",
+        "RootsMagicQueryRequest",
+        "RootsMagicResultPage",
+        "RootsMagicSourceSummary",
+    }
+    assert public_names <= set(operations_module.__all__)
+
+    parameter = operations_module.RootsMagicQueryParameterDefinition(
+        parameter_id="minimum_birth_year",
+        value_type_code="integer",
+        required=False,
+        minimum=1,
+        maximum=9999,
+        allowed_values=(),
+    )
+    values: tuple[BoundaryDTO, ...] = (
+        operations_module.RootsMagicSourceSummary(
+            source_ref="grant_rm_fixture",
+            friendly_name="Fixture tree",
+            fingerprint="a" * 64,
+            detected_version="10",
+            grant_status_code="ready",
+            immutable=True,
+        ),
+        operations_module.RootsMagicQueryDefinition(
+            query_id="people_by_birth_year",
+            label="People by birth year",
+            description="Returns a bounded set of matching people.",
+            parameters=(parameter,),
+            maximum_rows=100,
+        ),
+        operations_module.RootsMagicResultPage(
+            query_id="people_by_birth_year",
+            columns=("person_ref", "display_name"),
+            rows=(operations_module.QueryRow(("person_1", "Ada Example")),),
+            offset=0,
+            returned_rows=1,
+            total_rows=None,
+            has_more=False,
+            next_offset=None,
+        ),
+        operations_module.RootsMagicExportArtifact(
+            artifact=cast(ArtifactRef, _sample(ArtifactRef)),
+            source_ref="grant_rm_fixture",
+            source_fingerprint="a" * 64,
+            profile_code="portable",
+            gedcom_version="5.5.5",
+        ),
+    )
+
+    for value in values:
+        encoded = value.to_json()
+        assert type(value).from_json(encoded) == value
+        assert "/Users/" not in encoded
+        assert "C:\\\\" not in encoded
+        assert "SourceFingerprint" not in encoded
+
+    source_summary = cast(operations_module.RootsMagicSourceSummary, values[0])
+    export_artifact = cast(operations_module.RootsMagicExportArtifact, values[3])
+    assert type(source_summary.fingerprint) is str
+    assert type(export_artifact.source_fingerprint) is str
+    assert get_type_hints(operations_module.RootsMagicSourceSummary)["fingerprint"] is str
+    assert get_type_hints(operations_module.RootsMagicExportArtifact)["source_fingerprint"] is str
+    assert all(
+        not isinstance(getattr(source_summary, field.name), Path)
+        for field in fields(source_summary)
+    )
+    assert all(
+        not isinstance(getattr(export_artifact, field.name), Path)
+        for field in fields(export_artifact)
+    )
+
+    assert tuple(field.name for field in fields(operations_module.RootsMagicQueryRequest)) == (
+        "tree_ref",
+        "sql",
+        "question",
+        "provider",
+    )
+
+
 @pytest.mark.parametrize(
     "operation",
     tuple(OPERATION_CONTRACTS.values()),
