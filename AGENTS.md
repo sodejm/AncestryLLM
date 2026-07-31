@@ -27,7 +27,12 @@
 
 - Write typed Python, keep adapters thin, return serializable service DTOs, and use stable coded errors.
 - Keep core and service code independent of terminal, web, and desktop frameworks.
-- Add regression tests for behavior changes and maintain cross-platform behavior where practical.
+- Follow the
+  [red-green-refactor process](CONTRIBUTING.md#test-driven-development) for
+  behavioral changes: observe the focused test fail for the expected reason
+  before changing production code. Document why no failing behavior test
+  applies to a genuinely non-behavioral change.
+- Maintain cross-platform behavior where practical.
 - Treat RootsMagic files as immutable, keep Compose `family_trees` mounts read-only, and
   keep GEDCOM handling loss-minimal.
 - Provider `none` must remain network-free even when environment keys exist.

@@ -21,7 +21,11 @@
   `CommandInvocation` and `CommandExecutor` boundary.
 - Keep application ports, DTOs, artifact references, and error mapping transport-neutral
   and serializable so future adapters can reuse the same service surface.
-- Add regression tests for behavior changes in [tests](../tests), using fictional data.
+- Follow the
+  [red-green-refactor process](../CONTRIBUTING.md#test-driven-development) for
+  behavioral changes: add the smallest deterministic test in [tests](../tests),
+  use fictional data, and observe the expected failure before changing production code.
+  Document why no failing behavior test applies to a genuinely non-behavioral change.
 - Maintain cross-platform behavior where practical.
 - Use `make setup`, `make test`, `make lint`, `make typecheck`, and `make security` as
   the canonical commands. Targeted checks may be used during development, but completion
