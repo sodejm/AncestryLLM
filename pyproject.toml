@@ -111,7 +111,7 @@ source = ["ancestryllm"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-# Ratchet from the characterized GEDCOM engine baseline; raise with focused tests.
+# Ratchet from the characterized GEDCOM façade corpus; raise with focused tests.
 fail_under = 75
 
 [tool.ruff]
@@ -124,8 +124,6 @@ select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF"]
 ignore = ["E501", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/ancestryllm/gedcom/engine.py" = ["BLE001", "E741", "I001", "RUF005", "RUF059"]
-"src/ancestryllm/gedcom/incremental.py" = ["BLE001", "I001", "RUF005", "RUF059"]
 "tests/**" = ["RUF003", "RUF059", "S105", "S106", "S108", "S603", "S607"]
 
 [tool.mypy]

@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+import ancestryllm.gedcom.engine as engine
+import ancestryllm.gedcom.incremental as incremental
 from ancestryllm.core.errors import AncestryError, FileIngressError, ProviderError
 from ancestryllm.core.ingress import (
     FileFingerprint,
@@ -21,11 +23,26 @@ from ancestryllm.core.ingress import (
     TextLine,
 )
 from ancestryllm.core.jobs import JobManager, JobState
-from ancestryllm.gedcom import engine, incremental
+from ancestryllm.gedcom import (
+    parser as gedcom_parser,
+)
+from ancestryllm.gedcom import (
+    sync_algorithms,
+    sync_cli,
+    sync_contracts,
+    sync_operations,
+    sync_publication,
+)
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.gedcom.sync import execute_sync, run_sync
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+def test_legacy_module_facades_reexport_supported_owner_contracts() -> None:
+    assert engine.GedcomRecord is gedcom_parser.GedcomRecord
+    assert incremental.SyncError is sync_contracts.SyncError
+    assert incremental.execute_command is sync_operations.execute_command
 
 
 def test_structured_sync_execution_is_terminal_neutral_and_legacy_rendering_matches(
@@ -33,7 +50,7 @@ def test_structured_sync_execution_is_terminal_neutral_and_legacy_rendering_matc
 ) -> None:
     result = execute_sync([])
 
-    assert result.exit_code == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+    assert result.exit_code == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
     assert result.output == ""
     assert "ERROR [SYNC_CONFIGURATION]" in result.error
     assert capsys.readouterr() == ("", "")
@@ -45,8 +62,8 @@ def test_structured_sync_execution_is_terminal_neutral_and_legacy_rendering_matc
 
 
 def test_incremental_argument_errors_use_stable_typed_contract() -> None:
-    parser = incremental.PlainEnglishArgumentParser(prog="ancestry gedcom update")
-    with pytest.raises(incremental.SyncError) as raised:
+    parser = sync_cli.PlainEnglishArgumentParser(prog="ancestry gedcom update")
+    with pytest.raises(sync_contracts.SyncError) as raised:
         parser.error("missing --master")
     assert raised.value.code == "SYNC_CONFIGURATION"
     assert raised.value.exit_code == 2
@@ -79,7 +96,7 @@ def test_incremental_argparse_errors_redact_private_argument_values(
             run_sync(arguments, raise_errors=True)
         rendered = raised.value.render() + repr(raised.value.details)
     else:
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
         rendered = capsys.readouterr().err
 
     assert "SYNC_CONFIGURATION" in rendered
@@ -121,7 +138,7 @@ def test_malformed_snapshot_errors_redact_private_descriptor_values(
             run_sync(arguments, raise_errors=True)
         rendered = raised.value.render() + repr(raised.value.details)
     else:
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
         rendered = capsys.readouterr().err
 
     assert "SYNC_CONFIGURATION" in rendered
@@ -206,8 +223,8 @@ def test_sync_unexpandable_paths_use_file_ingress_error_contract(
 
 
 def test_incremental_normalization_boundary_returns_strings() -> None:
-    assert incremental._normal_value("DATE", "July 15, 1850", engine) == "15 JUL 1850"
-    assert incremental._normal_value("CTRY", "USA", engine) == "united states"
+    assert sync_algorithms._normal_value("DATE", "July 15, 1850", engine) == "15 JUL 1850"
+    assert sync_algorithms._normal_value("CTRY", "USA", engine) == "united states"
 
 
 def _snapshot(name: str, vendor: str, version: int) -> str:
@@ -379,7 +396,7 @@ def test_cancellation_during_incremental_publication_finishes_complete_bundle(
     first = _initialize_release(releases)
     publication_started = threading.Event()
     allow_publication = threading.Event()
-    original_publish = incremental._publish_directory_no_clobber
+    original_publish = sync_publication._publish_directory_no_clobber
 
     def pause_release_publication(
         staging_name: str,
@@ -392,7 +409,7 @@ def test_cancellation_during_incremental_publication_finishes_complete_bundle(
         original_publish(staging_name, destination_name, release_root)
 
     monkeypatch.setattr(
-        incremental,
+        sync_publication,
         "_publish_directory_no_clobber",
         pause_release_publication,
     )
@@ -490,7 +507,7 @@ def simulated_windows_capabilities(monkeypatch):
         "fail_published_marker": False,
         "marker_delete_failures": 0,
     }
-    original_rename = incremental._exclusive_rename_directory
+    original_rename = sync_publication._exclusive_rename_directory
 
     def open_shared_marker(path: Path, *, create: bool) -> int:
         flags = os.O_RDWR
@@ -509,7 +526,7 @@ def simulated_windows_capabilities(monkeypatch):
         return os.open(path, flags)
 
     def mark_descriptor_for_deletion(descriptor: int) -> None:
-        path = incremental._held_file_path(descriptor)
+        path = sync_publication._held_file_path(descriptor)
         value = os.fstat(descriptor)
         if (
             state["fail_published_marker"]
@@ -536,8 +553,8 @@ def simulated_windows_capabilities(monkeypatch):
             held_marker = False
             for descriptor in shared_marker_descriptors:
                 try:
-                    marker_path = incremental._held_file_path(descriptor)
-                except (OSError, incremental.SyncError, ValueError):
+                    marker_path = sync_publication._held_file_path(descriptor)
+                except (OSError, sync_contracts.SyncError, ValueError):
                     continue
                 if marker_path.parent == source_path:
                     held_marker = True
@@ -551,20 +568,20 @@ def simulated_windows_capabilities(monkeypatch):
             destination_dir_fd=destination_dir_fd,
         )
 
-    monkeypatch.setattr(incremental, "_uses_windows_capability_handles", lambda: True)
-    monkeypatch.setattr(incremental, "_open_windows_shared_marker", open_shared_marker)
+    monkeypatch.setattr(sync_publication, "_uses_windows_capability_handles", lambda: True)
+    monkeypatch.setattr(sync_publication, "_open_windows_shared_marker", open_shared_marker)
     monkeypatch.setattr(
-        incremental,
+        sync_publication,
         "_open_windows_delete_descriptor",
         open_delete_descriptor,
     )
     monkeypatch.setattr(
-        incremental,
+        sync_publication,
         "_windows_mark_descriptor_for_deletion",
         mark_descriptor_for_deletion,
     )
     monkeypatch.setattr(
-        incremental,
+        sync_publication,
         "_exclusive_rename_directory",
         rename_with_share_delete_assertion,
     )
@@ -993,7 +1010,7 @@ def test_manifest_rejects_broken_snapshot_identity_and_provenance(
     )
     arguments[arguments.index("--manifest") + 1] = str(malformed)
 
-    assert run_sync(arguments) == incremental.EXIT_CODES["MANIFEST_INVALID"]
+    assert run_sync(arguments) == sync_contracts.EXIT_CODES["MANIFEST_INVALID"]
     rendered = capsys.readouterr().err
     assert "MANIFEST_INVALID" in rendered
     assert str(malformed) not in rendered
@@ -1041,7 +1058,7 @@ def test_manifest_rejects_incoherent_release_lineage_and_artifact_fingerprints(
     )
     arguments[arguments.index("--manifest") + 1] = str(malformed)
 
-    assert run_sync(arguments) == incremental.EXIT_CODES[expected_code]
+    assert run_sync(arguments) == sync_contracts.EXIT_CODES[expected_code]
     assert expected_code in capsys.readouterr().err
     assert len(list(releases.glob("g*-*"))) == 1
     assert not list(releases.glob(".gedcom-sync-*"))
@@ -1066,7 +1083,7 @@ def test_update_rejects_vendor_identity_change_for_existing_source(
             run_sync(arguments, raise_errors=True)
         rendered = raised.value.render()
     else:
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
         rendered = capsys.readouterr().err
 
     assert "SYNC_CONFIGURATION" in rendered
@@ -1089,7 +1106,7 @@ def test_rebase_rejects_tampered_manifest_parent_before_indexing(
     replacement = _replace_copy(prior_master, b"Mira", b"Zira")
     os.replace(replacement, prior_master)
     index = Mock(side_effect=AssertionError("indexing must not run"))
-    monkeypatch.setattr(incremental, "_master_block_index", index)
+    monkeypatch.setattr(sync_operations, "_master_block_index", index)
 
     status = run_sync(
         [
@@ -1105,7 +1122,7 @@ def test_rebase_rejects_tampered_manifest_parent_before_indexing(
         ]
     )
 
-    assert status == incremental.EXIT_CODES["MANIFEST_MASTER_MISMATCH"]
+    assert status == sync_contracts.EXIT_CODES["MANIFEST_MASTER_MISMATCH"]
     assert "MANIFEST_MASTER_MISMATCH" in capsys.readouterr().err
     index.assert_not_called()
     assert len(list(releases.glob("g*-*"))) == 1
@@ -1592,7 +1609,7 @@ def test_manual_deletion_authorization_applies_only_to_the_reviewed_rebase(
                 "Fictional second unreviewed deletion",
             ]
         )
-        == incremental.EXIT_CODES["SYNC_UNSAFE_REMOVAL"]
+        == sync_contracts.EXIT_CODES["SYNC_UNSAFE_REMOVAL"]
     )
     assert len(list(releases.glob("g*-*"))) == 2
 
@@ -1612,7 +1629,7 @@ def test_update_writes_rollback_metadata_and_cleans_up_interrupted_publish(
     assert (first / "master.ged").is_file()
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_publish_directory_no_clobber",
         side_effect=OSError("disk full"),
     ):
@@ -1632,17 +1649,17 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
 ) -> None:
     releases = tmp_path / f"{operation}-releases"
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_publish = incremental._publish_directory_no_clobber
+    original_publish = sync_publication._publish_directory_no_clobber
     concurrent_destination: Path | None = None
 
     def publish_after_concurrent_claim(
         staging_name: str,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
+        release_root: sync_publication._DirectoryCapability,
     ) -> None:
         nonlocal concurrent_destination
         concurrent_destination = (
-            incremental._capability_current_path(release_root) / destination_name
+            sync_publication._capability_current_path(release_root) / destination_name
         )
         concurrent_destination.mkdir()
         try:
@@ -1655,11 +1672,11 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
             raise
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_publish_directory_no_clobber",
         side_effect=publish_after_concurrent_claim,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert concurrent_destination is not None
     assert (concurrent_destination / "concurrent-sentinel.txt").read_text(
@@ -1683,7 +1700,7 @@ def test_sync_detects_release_root_swap_during_final_rename_without_touching_for
     arguments = _new_publication_args(tmp_path, operation, releases)
     moved_root = tmp_path / f"{operation}-moved-original"
     foreign_sentinel = releases / "foreign-sentinel.txt"
-    original_rename = incremental._exclusive_rename_directory
+    original_rename = sync_publication._exclusive_rename_directory
     swapped = False
 
     def rename_after_root_swap(
@@ -1712,11 +1729,11 @@ def test_sync_detects_release_root_swap_during_final_rename_without_touching_for
         )
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_exclusive_rename_directory",
         side_effect=rename_after_root_swap,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert swapped
     assert foreign_sentinel.read_text(encoding="utf-8") == "preserve foreign owner"
@@ -1740,7 +1757,7 @@ def test_staging_cleanup_rejects_untrusted_or_reused_directory_identity(
 ) -> None:
     releases = tmp_path / "releases"
     releases.mkdir()
-    release_capability = incremental._open_directory_capability(releases, owned=False)
+    release_capability = sync_publication._open_directory_capability(releases, owned=False)
     (
         staging,
         staging_name,
@@ -1749,7 +1766,7 @@ def test_staging_cleanup_rejects_untrusted_or_reused_directory_identity(
         marker_name,
         marker_descriptor,
         marker_identity,
-    ) = incremental._create_staging_directory(release_capability, ".gedcom-sync-")
+    ) = sync_publication._create_staging_directory(release_capability, ".gedcom-sync-")
     assert descriptor is not None
     moved_owned = tmp_path / "moved-owned-staging"
     os.rename(staging, moved_owned)
@@ -1771,8 +1788,8 @@ def test_staging_cleanup_rejects_untrusted_or_reused_directory_identity(
             st_birthtime_ns=expected.birth_ns,
         )
 
-    with patch.object(incremental.os, "lstat", side_effect=untrusted_lstat):
-        incremental._cleanup_staging_directory(
+    with patch.object(sync_publication.os, "lstat", side_effect=untrusted_lstat):
+        sync_publication._cleanup_staging_directory(
             release_capability,
             staging_name,
             descriptor,
@@ -1782,7 +1799,7 @@ def test_staging_cleanup_rejects_untrusted_or_reused_directory_identity(
             marker_identity,
         )
 
-    incremental._close_capability_quietly(release_capability)
+    sync_publication._close_capability_quietly(release_capability)
     assert sentinel.read_text(encoding="utf-8") == "preserve replacement"
 
 
@@ -1812,18 +1829,18 @@ def test_windows_marker_handle_uses_delete_sharing_for_create_and_reopen() -> No
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_windows_create_file_handle",
             side_effect=create_handle,
         ),
         patch.object(
-            incremental,
+            sync_publication,
             "_windows_descriptor_from_handle",
             side_effect=lambda _handle, _flags: next(descriptors),
         ),
     ):
-        assert incremental._open_windows_shared_marker(Path("marker"), create=True) == 201
-        assert incremental._open_windows_shared_marker(Path("marker"), create=False) == 202
+        assert sync_publication._open_windows_shared_marker(Path("marker"), create=True) == 201
+        assert sync_publication._open_windows_shared_marker(Path("marker"), create=False) == 202
 
     assert len(calls) == 2
     for call in calls:
@@ -1877,7 +1894,7 @@ def test_simulated_windows_marker_failure_rolls_back_and_cleans(
     arguments = _new_publication_args(tmp_path, operation, releases)
     simulated_windows_capabilities["fail_published_marker"] = True
 
-    assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert simulated_windows_capabilities["marker_delete_failures"] == 1
     if preexisting:
@@ -1890,7 +1907,7 @@ def test_simulated_windows_marker_failure_rolls_back_and_cleans(
 def test_staging_cleanup_stops_after_a_late_directory_swap(tmp_path: Path) -> None:
     releases = tmp_path / "releases"
     releases.mkdir()
-    release_capability = incremental._open_directory_capability(releases, owned=False)
+    release_capability = sync_publication._open_directory_capability(releases, owned=False)
     (
         staging,
         staging_name,
@@ -1899,7 +1916,7 @@ def test_staging_cleanup_stops_after_a_late_directory_swap(tmp_path: Path) -> No
         marker_name,
         marker_descriptor,
         marker_identity,
-    ) = incremental._create_staging_directory(release_capability, ".gedcom-sync-")
+    ) = sync_publication._create_staging_directory(release_capability, ".gedcom-sync-")
     assert descriptor is not None
     moved_owned = tmp_path / "moved-owned-staging"
     sentinel = staging / "foreign-sentinel.txt"
@@ -1915,8 +1932,8 @@ def test_staging_cleanup_stops_after_a_late_directory_swap(tmp_path: Path) -> No
             sentinel.write_text("preserve foreign owner", encoding="utf-8")
         return original_listdir(path)
 
-    with patch.object(incremental.os, "listdir", side_effect=swap_before_preflight):
-        incremental._cleanup_staging_directory(
+    with patch.object(sync_publication.os, "listdir", side_effect=swap_before_preflight):
+        sync_publication._cleanup_staging_directory(
             release_capability,
             staging_name,
             descriptor,
@@ -1926,7 +1943,7 @@ def test_staging_cleanup_stops_after_a_late_directory_swap(tmp_path: Path) -> No
             marker_identity,
         )
 
-    incremental._close_capability_quietly(release_capability)
+    sync_publication._close_capability_quietly(release_capability)
     assert swapped
     assert sentinel.read_text(encoding="utf-8") == "preserve foreign owner"
     assert (moved_owned / marker_name).is_file()
@@ -1937,7 +1954,7 @@ def test_capability_tree_cleanup_stops_after_a_late_directory_swap(
 ) -> None:
     candidate = tmp_path / "owned-candidate"
     candidate.mkdir()
-    capability = incremental._open_directory_capability(candidate, owned=True)
+    capability = sync_publication._open_directory_capability(candidate, owned=True)
     assert capability.descriptor is not None
     descriptor = capability.descriptor
     marker_name = capability.marker_name
@@ -1955,8 +1972,8 @@ def test_capability_tree_cleanup_stops_after_a_late_directory_swap(
             sentinel.write_text("preserve foreign owner", encoding="utf-8")
         return original_listdir(path)
 
-    with patch.object(incremental.os, "listdir", side_effect=swap_before_preflight):
-        incremental._cleanup_capability_tree(capability)
+    with patch.object(sync_publication.os, "listdir", side_effect=swap_before_preflight):
+        sync_publication._cleanup_capability_tree(capability)
 
     assert swapped
     assert sentinel.read_text(encoding="utf-8") == "preserve foreign owner"
@@ -1972,8 +1989,8 @@ def test_failure_contract_preserves_existing_sentinel_and_creates_no_report(
     sentinel.write_text("preserve existing report", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, "update", releases)
 
-    with patch.object(incremental, "_write_bytes", side_effect=OSError("disk full")):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    with patch.object(sync_publication, "_write_bytes", side_effect=OSError("disk full")):
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert sentinel.read_text(encoding="utf-8") == "preserve existing report"
     assert sentinel.name in {path.name for path in releases.iterdir()}
@@ -1989,7 +2006,7 @@ def test_missing_release_parent_is_rejected_without_creating_output(
     releases = missing_parent / "releases"
     arguments = _new_publication_args(tmp_path, operation, releases)
 
-    assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     rendered = capsys.readouterr().err
     assert "SYNC_OUTPUT" in rendered
@@ -2007,8 +2024,8 @@ def test_late_sync_failure_leaves_only_safe_empty_residue(
     releases = tmp_path / f"new-{operation}-releases"
     arguments = _new_publication_args(tmp_path, operation, releases)
 
-    with patch.object(incremental, "_write_bytes", side_effect=OSError("disk full")):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    with patch.object(sync_publication, "_write_bytes", side_effect=OSError("disk full")):
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     _assert_cleanup_residue(releases, operation)
 
@@ -2023,7 +2040,7 @@ def test_late_input_failure_leaves_only_safe_empty_residue(
 
     assert (
         run_sync(arguments, _LateInputFailurePolicy())
-        == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+        == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
     )
 
     _assert_cleanup_residue(releases, operation)
@@ -2035,7 +2052,7 @@ def test_late_rebase_copy_failure_leaves_only_safe_empty_residue(tmp_path: Path)
 
     assert (
         run_sync(arguments, _LateCopyFailurePolicy())
-        == incremental.EXIT_CODES["SYNC_CONFIGURATION"]
+        == sync_contracts.EXIT_CODES["SYNC_CONFIGURATION"]
     )
 
     _assert_cleanup_residue(releases, "rebase")
@@ -2052,8 +2069,8 @@ def test_late_sync_failure_preserves_preexisting_release_root_and_sentinel(
     sentinel.write_text("preserve preexisting owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
 
-    with patch.object(incremental, "_write_bytes", side_effect=OSError("disk full")):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    with patch.object(sync_publication, "_write_bytes", side_effect=OSError("disk full")):
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert sentinel.read_text(encoding="utf-8") == "preserve preexisting owner"
     assert releases.is_dir()
@@ -2073,17 +2090,17 @@ def test_marker_delete_failure_rolls_back_before_reporting_failure(
         releases.mkdir()
         sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_remove = incremental._remove_published_staging_marker
+    original_remove = sync_publication._remove_published_staging_marker
     marker_failures = 0
 
     def fail_published_marker_once(
         marker_name: str,
-        marker_identity: incremental._DirectoryIdentity,
+        marker_identity: sync_publication._DirectoryIdentity,
         directory_descriptor: int | None,
-        directory_identity: incremental._DirectoryIdentity,
+        directory_identity: sync_publication._DirectoryIdentity,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
-        transaction: incremental._PublicationTransactionState,
+        release_root: sync_publication._DirectoryCapability,
+        transaction: sync_publication._PublicationTransactionState,
     ) -> BaseException | None:
         nonlocal marker_failures
         if marker_failures == 0:
@@ -2101,11 +2118,11 @@ def test_marker_delete_failure_rolls_back_before_reporting_failure(
         )
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_remove_published_staging_marker",
         side_effect=fail_published_marker_once,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert marker_failures == 1
     if preexisting:
@@ -2126,14 +2143,14 @@ def test_marker_fstat_failure_rolls_back_and_cleans(
         releases.mkdir()
         sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_fstat = incremental.os.fstat
+    original_fstat = sync_publication.os.fstat
     marker_failures = 0
 
     def fail_published_marker_fstat_once(descriptor: int):
         nonlocal marker_failures
         try:
-            selected = incremental._held_file_path(descriptor)
-        except (OSError, incremental.SyncError, ValueError):
+            selected = sync_publication._held_file_path(descriptor)
+        except (OSError, sync_contracts.SyncError, ValueError):
             selected = Path()
         if (
             marker_failures == 0
@@ -2145,11 +2162,11 @@ def test_marker_fstat_failure_rolls_back_and_cleans(
         return original_fstat(descriptor)
 
     with patch.object(
-        incremental.os,
+        sync_publication.os,
         "fstat",
         side_effect=fail_published_marker_fstat_once,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert marker_failures == 1
     if preexisting:
@@ -2170,20 +2187,20 @@ def test_marker_delete_failure_retains_descriptor_through_rollback(
         releases.mkdir()
         sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_remove = incremental._remove_published_staging_marker
-    original_rollback = incremental._rollback_published_directory
+    original_remove = sync_publication._remove_published_staging_marker
+    original_rollback = sync_publication._rollback_published_directory
     marker_failures = 0
     retained_descriptor: int | None = None
     retained_during_rollback = False
 
     def fail_published_marker_once(
         marker_name: str,
-        marker_identity: incremental._DirectoryIdentity,
+        marker_identity: sync_publication._DirectoryIdentity,
         directory_descriptor: int | None,
-        directory_identity: incremental._DirectoryIdentity,
+        directory_identity: sync_publication._DirectoryIdentity,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
-        transaction: incremental._PublicationTransactionState,
+        release_root: sync_publication._DirectoryCapability,
+        transaction: sync_publication._PublicationTransactionState,
     ) -> BaseException | None:
         nonlocal marker_failures, retained_descriptor
         if marker_failures == 0:
@@ -2205,28 +2222,28 @@ def test_marker_delete_failure_retains_descriptor_through_rollback(
     def assert_retained_then_rollback(
         staging_name: str,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
+        release_root: sync_publication._DirectoryCapability,
     ) -> bool:
         nonlocal retained_during_rollback
         assert retained_descriptor is not None
         assert os.fstat(retained_descriptor).st_ino > 0
-        assert incremental._held_file_path(retained_descriptor).parent.name == destination_name
+        assert sync_publication._held_file_path(retained_descriptor).parent.name == destination_name
         retained_during_rollback = True
         return original_rollback(staging_name, destination_name, release_root)
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_remove_published_staging_marker",
             side_effect=fail_published_marker_once,
         ),
         patch.object(
-            incremental,
+            sync_publication,
             "_rollback_published_directory",
             side_effect=assert_retained_then_rollback,
         ),
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert marker_failures == 1
     assert retained_during_rollback
@@ -2247,17 +2264,17 @@ def test_moved_destination_and_failed_rollback_never_claims_commit(
     moved_release = tmp_path / f"moved-owned-{operation}"
     arguments = _new_publication_args(tmp_path, operation, releases)
     marker_descriptor: int | None = None
-    original_remove = incremental._remove_published_staging_marker
+    original_remove = sync_publication._remove_published_staging_marker
     remove_attempts = 0
 
     def fail_first_marker_remove(
         marker_name: str,
-        marker_identity: incremental._DirectoryIdentity,
+        marker_identity: sync_publication._DirectoryIdentity,
         directory_descriptor: int | None,
-        directory_identity: incremental._DirectoryIdentity,
+        directory_identity: sync_publication._DirectoryIdentity,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
-        transaction: incremental._PublicationTransactionState,
+        release_root: sync_publication._DirectoryCapability,
+        transaction: sync_publication._PublicationTransactionState,
     ) -> BaseException | None:
         nonlocal marker_descriptor, remove_attempts
         remove_attempts += 1
@@ -2278,27 +2295,27 @@ def test_moved_destination_and_failed_rollback_never_claims_commit(
     def move_destination_and_fail_rollback(
         _staging_name: str,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
+        release_root: sync_publication._DirectoryCapability,
     ) -> bool:
         assert marker_descriptor is not None
         assert os.fstat(marker_descriptor).st_ino > 0
-        physical_root = incremental._capability_current_path(release_root)
+        physical_root = sync_publication._capability_current_path(release_root)
         os.rename(physical_root / destination_name, moved_release)
         return False
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_remove_published_staging_marker",
             side_effect=fail_first_marker_remove,
         ),
         patch.object(
-            incremental,
+            sync_publication,
             "_rollback_published_directory",
             side_effect=move_destination_and_fail_rollback,
         ),
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert remove_attempts == 1
     assert sentinel.read_text(encoding="utf-8") == "preserve prior owner"
@@ -2320,17 +2337,17 @@ def test_failed_rollback_requires_clean_marker_removal_before_commit(
 ) -> None:
     releases = tmp_path / f"rollback-false-{operation}"
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_remove = incremental._remove_published_staging_marker
+    original_remove = sync_publication._remove_published_staging_marker
     remove_attempts = 0
 
     def controlled_marker_remove(
         marker_name: str,
-        marker_identity: incremental._DirectoryIdentity,
+        marker_identity: sync_publication._DirectoryIdentity,
         directory_descriptor: int | None,
-        directory_identity: incremental._DirectoryIdentity,
+        directory_identity: sync_publication._DirectoryIdentity,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
-        transaction: incremental._PublicationTransactionState,
+        release_root: sync_publication._DirectoryCapability,
+        transaction: sync_publication._PublicationTransactionState,
     ) -> BaseException | None:
         nonlocal remove_attempts
         remove_attempts += 1
@@ -2349,12 +2366,12 @@ def test_failed_rollback_requires_clean_marker_removal_before_commit(
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_remove_published_staging_marker",
             side_effect=controlled_marker_remove,
         ),
         patch.object(
-            incremental,
+            sync_publication,
             "_rollback_published_directory",
             return_value=False,
         ),
@@ -2369,7 +2386,7 @@ def test_failed_rollback_requires_clean_marker_removal_before_commit(
         assert result == 0
         assert not markers
     else:
-        assert result == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert result == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
         if os.name == "nt":
             assert not bundles
         else:
@@ -2394,8 +2411,8 @@ def test_unlink_interruption_after_marker_removal_recovers_committed_success(
     sentinel = releases / "prior-owner.txt"
     sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_unlink = incremental.os.unlink
-    original_remove = incremental._remove_published_staging_marker
+    original_unlink = sync_publication.os.unlink
+    original_remove = sync_publication._remove_published_staging_marker
     interrupted = False
 
     def unlink_then_interrupt(*args, **kwargs) -> None:
@@ -2406,7 +2423,7 @@ def test_unlink_interruption_after_marker_removal_recovers_committed_success(
             not interrupted
             and selected.name.startswith(".ancestryllm-staging-")
             and isinstance(directory_descriptor, int)
-            and incremental._held_file_path(directory_descriptor).name.startswith("g")
+            and sync_publication._held_file_path(directory_descriptor).name.startswith("g")
         ):
             original_unlink(*args, **kwargs)
             interrupted = True
@@ -2415,14 +2432,14 @@ def test_unlink_interruption_after_marker_removal_recovers_committed_success(
 
     def remove_with_interrupted_unlink(*args, **kwargs):
         with patch.object(
-            incremental.os,
+            sync_publication.os,
             "unlink",
             side_effect=unlink_then_interrupt,
         ):
             return original_remove(*args, **kwargs)
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_remove_published_staging_marker",
         side_effect=remove_with_interrupted_unlink,
     ):
@@ -2447,17 +2464,17 @@ def test_release_root_swap_at_marker_removal_rolls_back_in_held_root(
     arguments = _new_publication_args(tmp_path, operation, releases)
     moved_root = tmp_path / f"marker-root-moved-{operation}"
     foreign_sentinel = releases / "foreign-sentinel.txt"
-    original_remove = incremental._remove_published_staging_marker
+    original_remove = sync_publication._remove_published_staging_marker
     swapped = False
 
     def swap_then_remove(
         marker_name: str,
-        marker_identity: incremental._DirectoryIdentity,
+        marker_identity: sync_publication._DirectoryIdentity,
         directory_descriptor: int | None,
-        directory_identity: incremental._DirectoryIdentity,
+        directory_identity: sync_publication._DirectoryIdentity,
         destination_name: str,
-        release_root: incremental._DirectoryCapability,
-        transaction: incremental._PublicationTransactionState,
+        release_root: sync_publication._DirectoryCapability,
+        transaction: sync_publication._PublicationTransactionState,
     ) -> BaseException | None:
         nonlocal swapped
         if not swapped:
@@ -2476,11 +2493,11 @@ def test_release_root_swap_at_marker_removal_rolls_back_in_held_root(
         )
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_remove_published_staging_marker",
         side_effect=swap_then_remove,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert swapped
     assert foreign_sentinel.read_text(encoding="utf-8") == "preserve foreign owner"
@@ -2509,7 +2526,7 @@ def test_release_root_swap_during_staging_mkdir_uses_held_root_for_cleanup(
     arguments = _new_publication_args(tmp_path, operation, releases)
     moved_root = tmp_path / f"mkdir-root-moved-{operation}"
     foreign_sentinel = releases / "foreign-sentinel.txt"
-    original_mkdir = incremental.os.mkdir
+    original_mkdir = sync_publication.os.mkdir
     swapped = False
 
     def mkdir_then_swap(*args, **kwargs) -> None:
@@ -2522,8 +2539,8 @@ def test_release_root_swap_during_staging_mkdir_uses_held_root_for_cleanup(
             releases.mkdir()
             foreign_sentinel.write_text("preserve foreign owner", encoding="utf-8")
 
-    with patch.object(incremental.os, "mkdir", side_effect=mkdir_then_swap):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+    with patch.object(sync_publication.os, "mkdir", side_effect=mkdir_then_swap):
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert swapped
     assert foreign_sentinel.read_text(encoding="utf-8") == "preserve foreign owner"
@@ -2548,7 +2565,7 @@ def test_release_root_candidate_mkdir_interruption_is_bounded_and_explicit(
 ) -> None:
     releases = tmp_path / f"candidate-mkdir-{operation}"
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_mkdir = incremental.os.mkdir
+    original_mkdir = sync_publication.os.mkdir
     interrupted = False
 
     def mkdir_then_interrupt(*args, **kwargs) -> None:
@@ -2560,7 +2577,7 @@ def test_release_root_candidate_mkdir_interruption_is_bounded_and_explicit(
             raise interruption("fictional release-root mkdir interruption")
 
     with (
-        patch.object(incremental.os, "mkdir", side_effect=mkdir_then_interrupt),
+        patch.object(sync_publication.os, "mkdir", side_effect=mkdir_then_interrupt),
         pytest.raises(interruption),
     ):
         run_sync(arguments)
@@ -2578,7 +2595,7 @@ def test_windows_candidate_mkdir_interruption_preserves_foreign_replacement(
     interruption: type[BaseException],
 ) -> None:
     releases = tmp_path / "windows-ambiguous-candidate"
-    original_mkdir = incremental.os.mkdir
+    original_mkdir = sync_publication.os.mkdir
     moved_owned = tmp_path / "windows-moved-owned-candidate"
     candidate: Path | None = None
 
@@ -2594,18 +2611,18 @@ def test_windows_candidate_mkdir_interruption_preserves_foreign_replacement(
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_uses_windows_capability_handles",
             return_value=True,
         ),
         patch.object(
-            incremental.os,
+            sync_publication.os,
             "mkdir",
             side_effect=create_swap_and_interrupt,
         ),
         pytest.raises(interruption),
     ):
-        incremental._ensure_release_root(releases)
+        sync_publication._ensure_release_root(releases)
 
     assert candidate is not None
     assert candidate.is_dir()
@@ -2627,7 +2644,7 @@ def test_release_root_candidate_collision_preserves_foreign_directory(
     sentinel = foreign_candidate / "foreign-sentinel.txt"
     sentinel.write_text("preserve foreign owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_uuid4 = incremental.uuid.uuid4
+    original_uuid4 = sync_publication.uuid.uuid4
     calls = 0
 
     def collide_once():
@@ -2637,7 +2654,7 @@ def test_release_root_candidate_collision_preserves_foreign_directory(
             return SimpleNamespace(hex=collision_hex)
         return original_uuid4()
 
-    with patch.object(incremental.uuid, "uuid4", side_effect=collide_once):
+    with patch.object(sync_publication.uuid, "uuid4", side_effect=collide_once):
         assert run_sync(arguments) == 0
 
     assert calls > 1
@@ -2649,7 +2666,7 @@ def test_release_root_candidate_collision_preserves_foreign_directory(
 def test_flat_cleanup_never_removes_late_empty_foreign_replacement(tmp_path: Path) -> None:
     releases = tmp_path / "cleanup-root"
     releases.mkdir()
-    release_capability = incremental._open_directory_capability(releases, owned=False)
+    release_capability = sync_publication._open_directory_capability(releases, owned=False)
     (
         staging,
         staging_name,
@@ -2658,9 +2675,9 @@ def test_flat_cleanup_never_removes_late_empty_foreign_replacement(tmp_path: Pat
         marker_name,
         marker_descriptor,
         marker_identity,
-    ) = incremental._create_staging_directory(release_capability, ".gedcom-sync-")
+    ) = sync_publication._create_staging_directory(release_capability, ".gedcom-sync-")
     moved_owned = tmp_path / "moved-owned-staging"
-    original_stat = incremental.os.stat
+    original_stat = sync_publication.os.stat
     matching_stats = 0
 
     def swap_after_final_validation(*args, **kwargs):
@@ -2674,11 +2691,11 @@ def test_flat_cleanup_never_removes_late_empty_foreign_replacement(tmp_path: Pat
         return value
 
     with patch.object(
-        incremental.os,
+        sync_publication.os,
         "stat",
         side_effect=swap_after_final_validation,
     ):
-        incremental._cleanup_staging_directory(
+        sync_publication._cleanup_staging_directory(
             release_capability,
             staging_name,
             descriptor,
@@ -2688,7 +2705,7 @@ def test_flat_cleanup_never_removes_late_empty_foreign_replacement(tmp_path: Pat
             marker_identity,
         )
 
-    incremental._close_capability_quietly(release_capability)
+    sync_publication._close_capability_quietly(release_capability)
     assert matching_stats == 2
     assert staging.is_dir()
     assert not any(staging.iterdir())
@@ -2705,8 +2722,8 @@ def test_clean_commit_retries_release_capability_marker_removal(
     releases = tmp_path / f"capability-retry-{operation}"
     releases.mkdir()
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_unlink = incremental.os.unlink
-    original_close = incremental._close_capability_quietly
+    original_unlink = sync_publication.os.unlink
+    original_close = sync_publication._close_capability_quietly
     attempts = 0
 
     def fail_capability_marker_once(*args, **kwargs) -> None:
@@ -2719,17 +2736,17 @@ def test_clean_commit_retries_release_capability_marker_removal(
         original_unlink(*args, **kwargs)
 
     def close_with_marker_retry(
-        capability: incremental._DirectoryCapability,
+        capability: sync_publication._DirectoryCapability,
     ) -> None:
         with patch.object(
-            incremental.os,
+            sync_publication.os,
             "unlink",
             side_effect=fail_capability_marker_once,
         ):
             original_close(capability)
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_close_capability_quietly",
         side_effect=close_with_marker_retry,
     ):
@@ -2766,15 +2783,17 @@ def test_staging_creation_interruption_leaves_only_empty_residue(
 
     def is_staging_marker(descriptor: int) -> bool:
         try:
-            return incremental._held_file_path(descriptor).name.startswith(".ancestryllm-staging-")
-        except (OSError, incremental.SyncError, ValueError):
+            return sync_publication._held_file_path(descriptor).name.startswith(
+                ".ancestryllm-staging-"
+            )
+        except (OSError, sync_contracts.SyncError, ValueError):
             return False
 
-    original_open = incremental._open_plain_directory_entry_descriptor
-    original_mkdir = incremental.os.mkdir
-    original_write = incremental.os.write
-    original_fsync = incremental.os.fsync
-    original_verify = incremental._require_selected_capability
+    original_open = sync_publication._open_plain_directory_entry_descriptor
+    original_mkdir = sync_publication.os.mkdir
+    original_write = sync_publication.os.write
+    original_fsync = sync_publication.os.fsync
+    original_verify = sync_publication._require_selected_capability
 
     def interrupt_mkdir(
         path: str | os.PathLike[str],
@@ -2803,11 +2822,11 @@ def test_staging_creation_interruption_leaves_only_empty_residue(
             inject()
         original_fsync(descriptor)
 
-    def interrupt_verify(capability: incremental._DirectoryCapability) -> None:
+    def interrupt_verify(capability: sync_publication._DirectoryCapability) -> None:
         original_verify(capability)
         if triggered:
             return
-        physical_root = incremental._capability_current_path(capability)
+        physical_root = sync_publication._capability_current_path(capability)
         if any(
             path.name.startswith((".gedcom-sync-", ".gedcom-rebase-"))
             for path in physical_root.iterdir()
@@ -2815,16 +2834,16 @@ def test_staging_creation_interruption_leaves_only_empty_residue(
             inject()
 
     target = {
-        "mkdir": patch.object(incremental.os, "mkdir", side_effect=interrupt_mkdir),
+        "mkdir": patch.object(sync_publication.os, "mkdir", side_effect=interrupt_mkdir),
         "open": patch.object(
-            incremental,
+            sync_publication,
             "_open_plain_directory_entry_descriptor",
             side_effect=interrupt_open,
         ),
-        "write": patch.object(incremental.os, "write", side_effect=interrupt_write),
-        "fsync": patch.object(incremental.os, "fsync", side_effect=interrupt_fsync),
+        "write": patch.object(sync_publication.os, "write", side_effect=interrupt_write),
+        "fsync": patch.object(sync_publication.os, "fsync", side_effect=interrupt_fsync),
         "verify": patch.object(
-            incremental,
+            sync_publication,
             "_require_selected_capability",
             side_effect=interrupt_verify,
         ),
@@ -2862,7 +2881,7 @@ def test_interruption_between_rename_and_marker_finalization_rolls_back(
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_finalize_published_directory",
             side_effect=interrupt_finalization,
         ),
@@ -2888,7 +2907,7 @@ def test_interruption_after_transaction_return_preserves_committed_success(
     sentinel = releases / "prior-owner.txt"
     sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_publish = incremental._publish_and_finalize_directory
+    original_publish = sync_publication._publish_and_finalize_directory
     interrupted = False
 
     def commit_then_interrupt(*args, **kwargs):
@@ -2901,7 +2920,7 @@ def test_interruption_after_transaction_return_preserves_committed_success(
         raise interruption("fictional return-to-caller interruption")
 
     with patch.object(
-        incremental,
+        sync_publication,
         "_publish_and_finalize_directory",
         side_effect=commit_then_interrupt,
     ):
@@ -2928,15 +2947,15 @@ def test_raw_close_interruption_after_commit_preserves_success(
 ) -> None:
     releases = tmp_path / f"close-interrupted-{operation}"
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_close = incremental.os.close
+    original_close = sync_publication.os.close
     interrupted = False
 
     def interrupt_marker_close_once(descriptor: int) -> None:
         nonlocal interrupted
         try:
-            selected = incremental._held_file_path(descriptor)
+            selected = sync_publication._held_file_path(descriptor)
             value = os.fstat(descriptor)
-        except (OSError, incremental.SyncError, ValueError):
+        except (OSError, sync_contracts.SyncError, ValueError):
             selected = Path()
             value = None
         selected_target = (
@@ -2964,7 +2983,7 @@ def test_raw_close_interruption_after_commit_preserves_success(
         original_close(descriptor)
 
     with patch.object(
-        incremental.os,
+        sync_publication.os,
         "close",
         side_effect=interrupt_marker_close_once,
     ):
@@ -2985,7 +3004,7 @@ def test_candidate_identity_interruption_leaves_only_empty_candidate(
 ) -> None:
     releases = tmp_path / f"candidate-identity-{operation}"
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_identity = incremental._directory_identity
+    original_identity = sync_publication._directory_identity
     interrupted = False
 
     def interrupt_candidate_identity(path: Path):
@@ -2997,7 +3016,7 @@ def test_candidate_identity_interruption_leaves_only_empty_candidate(
 
     with (
         patch.object(
-            incremental,
+            sync_publication,
             "_directory_identity",
             side_effect=interrupt_candidate_identity,
         ),
@@ -3023,7 +3042,7 @@ def test_persistent_staging_identity_failure_leaves_only_empty_residue(
         releases.mkdir()
         sentinel.write_text("preserve prior owner", encoding="utf-8")
     arguments = _new_publication_args(tmp_path, operation, releases)
-    original_stat = incremental.os.stat
+    original_stat = sync_publication.os.stat
     failures = 0
 
     def fail_staging_identity(*args, **kwargs):
@@ -3034,11 +3053,11 @@ def test_persistent_staging_identity_failure_leaves_only_empty_residue(
         return original_stat(*args, **kwargs)
 
     with patch.object(
-        incremental.os,
+        sync_publication.os,
         "stat",
         side_effect=fail_staging_identity,
     ):
-        assert run_sync(arguments) == incremental.EXIT_CODES["SYNC_OUTPUT"]
+        assert run_sync(arguments) == sync_contracts.EXIT_CODES["SYNC_OUTPUT"]
 
     assert failures >= 1
     if preexisting:
@@ -3062,10 +3081,10 @@ def test_directory_capability_interruption_leaves_only_empty_candidate(
         triggered = True
         raise interruption(f"fictional capability {phase} interruption")
 
-    original_open_marker = incremental._open_held_marker
-    original_write = incremental.os.write
-    original_fsync = incremental.os.fsync
-    original_fstat = incremental.os.fstat
+    original_open_marker = sync_publication._open_held_marker
+    original_write = sync_publication.os.write
+    original_fsync = sync_publication.os.fsync
+    original_fstat = sync_publication.os.fstat
 
     def interrupt_open_marker(
         path: Path,
@@ -3094,8 +3113,8 @@ def test_directory_capability_interruption_leaves_only_empty_candidate(
     def interrupt_verify(descriptor: int):
         if not triggered:
             try:
-                selected = incremental._held_file_path(descriptor)
-            except (OSError, incremental.SyncError, ValueError):
+                selected = sync_publication._held_file_path(descriptor)
+            except (OSError, sync_contracts.SyncError, ValueError):
                 selected = Path()
             if selected.name.startswith(".ancestryllm-capability-"):
                 inject()
@@ -3103,16 +3122,16 @@ def test_directory_capability_interruption_leaves_only_empty_candidate(
 
     target = {
         "open": patch.object(
-            incremental,
+            sync_publication,
             "_open_held_marker",
             side_effect=interrupt_open_marker,
         ),
-        "write": patch.object(incremental.os, "write", side_effect=interrupt_write),
-        "fsync": patch.object(incremental.os, "fsync", side_effect=interrupt_fsync),
-        "verify": patch.object(incremental.os, "fstat", side_effect=interrupt_verify),
+        "write": patch.object(sync_publication.os, "write", side_effect=interrupt_write),
+        "fsync": patch.object(sync_publication.os, "fsync", side_effect=interrupt_fsync),
+        "verify": patch.object(sync_publication.os, "fstat", side_effect=interrupt_verify),
     }[phase]
     with target, pytest.raises(interruption):
-        incremental._open_directory_capability(candidate, owned=True)
+        sync_publication._open_directory_capability(candidate, owned=True)
 
     assert triggered
     if os.name == "nt":

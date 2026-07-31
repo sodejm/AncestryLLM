@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import ancestryllm.gedcom.incremental as incremental
+import ancestryllm.gedcom.sync_algorithms as sync_algorithms
+import ancestryllm.gedcom.sync_contracts as sync_contracts
+import ancestryllm.gedcom.sync_publication as sync_publication
 from ancestryllm.core.cancellation import (
     CancellationError,
     CancellationToken,
@@ -48,10 +50,14 @@ def test_relative_line_traversal_checks_for_cancellation(
         if calls == 2:
             raise CancellationError("cancel traversal")
 
-    monkeypatch.setattr(incremental, "cancellation_checkpoint", cancel_during_traversal)
+    monkeypatch.setattr(
+        sync_algorithms,
+        "cancellation_checkpoint",
+        cancel_during_traversal,
+    )
 
     with pytest.raises(CancellationError, match="cancel traversal"):
-        incremental._relative_lines(
+        sync_algorithms._relative_lines(
             ("1 NAME Fictional /Person/", "2 GIVN Fictional", "2 SURN Person"),
             _Core,
         )
@@ -61,7 +67,7 @@ def test_people_matching_checks_before_expensive_source_traversal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        incremental,
+        sync_algorithms,
         "cancellation_checkpoint",
         lambda: (_ for _ in ()).throw(CancellationError("cancel matching")),
     )
@@ -72,12 +78,12 @@ def test_people_matching_checks_before_expensive_source_traversal(
     source = SimpleNamespace(records=[])
 
     with pytest.raises(CancellationError, match="cancel matching"):
-        incremental._match_people(
+        sync_algorithms._match_people(
             (source,),
             (),
             {"next_ids": {}},
             core,
-            incremental.SyncStats(),
+            sync_contracts.SyncStats(),
         )
 
 
@@ -87,6 +93,6 @@ def test_staged_artifact_write_honours_preexisting_cancellation(tmp_path: Path) 
     token.request()
 
     with bind_cancellation_token(token), pytest.raises(CancellationError):
-        incremental._write_bytes(destination, b'{"fictional": true}\n')
+        sync_publication._write_bytes(destination, b'{"fictional": true}\n')
 
     assert not destination.exists()

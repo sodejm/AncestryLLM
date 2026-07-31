@@ -21,9 +21,10 @@ from ancestryllm.application.ports import (
 )
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
-from ancestryllm.gedcom import engine, incremental
+from ancestryllm.gedcom import sync_gedcom
 from ancestryllm.gedcom.contracts import IdentityResolver
-from ancestryllm.gedcom.incremental import (
+from ancestryllm.gedcom.sync_cli import execute
+from ancestryllm.gedcom.sync_contracts import (
     SOURCE_ID_RE,
     SUPPORTED_VENDORS,
     CancellationCheck,
@@ -51,6 +52,7 @@ from ancestryllm.gedcom.sync_kernel import (
     SyncRequest,
     SyncStageError,
 )
+from ancestryllm.gedcom.sync_operations import execute_command
 
 
 def _raise_port_failure(exc: Exception, code: str) -> NoReturn:
@@ -198,9 +200,9 @@ def execute_sync(
 ) -> SyncExecutionResult:
     """Return one structured sync result without writing to terminal streams."""
 
-    return incremental.execute(
+    return execute(
         list(argv),
-        engine,
+        sync_gedcom,
         ingress,
         resolver_factory=resolver_factory,
         cancellation_check=cancellation_check,
@@ -218,9 +220,9 @@ def execute_sync_command(
 ) -> SyncExecutionResult:
     """Execute one typed service command without synthesizing terminal arguments."""
 
-    return incremental.execute_command(
+    return execute_command(
         command,
-        engine,
+        sync_gedcom,
         ingress,
         identity_resolver=identity_resolver,
         cancellation_check=cancellation_check,
