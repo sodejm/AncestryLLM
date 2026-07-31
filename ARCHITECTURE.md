@@ -583,6 +583,15 @@ fingerprint check fails.
 The public modules above are the dependency contracts future adapters and
 mapping work must preserve.
 
+The application boundary also owns the sanitized
+`RootsMagicSourceSummary`, `RootsMagicQueryDefinition`,
+`RootsMagicQueryRequest`, `RootsMagicResultPage`, and
+`RootsMagicExportArtifact` DTOs. They are transport-neutral values, not an
+Electron or FastAPI implementation: adapters may present allowlisted query
+definitions and translate validated parameters, while source grants,
+providers, consent, and publication remain outside the reusable RootsMagic
+source, schema, and mapping modules.
+
 Destination selection does not prove interoperability. Current Ancestry, Geni,
 and MyHeritage imports require recorded manual smoke tests for every release.
 

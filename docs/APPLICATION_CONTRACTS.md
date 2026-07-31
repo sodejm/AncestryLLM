@@ -63,6 +63,19 @@ authorizer, row bound, timeout, and source-fingerprint checks. The serialized
 `RootsMagicQueryResult` contains canonical scalar rows and coded execution
 metadata, while progress contains only operation/stage codes and counters.
 
+The reusable RootsMagic consumer surface also exposes sanitized
+`RootsMagicSourceSummary`, `RootsMagicQueryDefinition`,
+`RootsMagicResultPage`, and `RootsMagicExportArtifact` DTOs. Together with
+`RootsMagicQueryRequest`, these are the stable application-owned values for a
+future workbench adapter: opaque source references replace host paths, query
+definitions carry a finite parameter schema, pages are explicitly bounded,
+and exports return artifact references rather than destinations. The current
+CLI/REPL direct-SQL behavior remains an application-service compatibility
+contract. A future renderer must expose only allowlisted query definitions and
+must translate schema-validated parameters to that trusted service request at
+the adapter/application composition boundary; it must not expose raw SQL or
+interpret file grants in the reusable RootsMagic core.
+
 ## Ports and adapter responsibilities
 
 Services depend on five narrow structural protocols:
