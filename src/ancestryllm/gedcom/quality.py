@@ -26,12 +26,12 @@ from ancestryllm.gedcom.identity import (
     IndividualRecord,
     MatchAssessment,
     MergeDecision,
-    _bounded_candidate_pairs,
-    _duplicate_profile,
     _extract_year,
     _fact_from_block,
     _top_level_blocks,
     assess_similarity,
+    bounded_candidate_pairs,
+    duplicate_profile,
     normalise_gedcom_date,
 )
 from ancestryllm.gedcom.model import GedcomRecord, ParsedSource, parse_gedcom_line
@@ -313,10 +313,10 @@ def _quality_duplicate_pairs(
     people: Sequence[IndividualRecord],
 ) -> list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]]:
     """Find bounded report-only same-source and cross-source duplicate pairs."""
-    profiles = tuple(_duplicate_profile(person) for person in people)
+    profiles = tuple(duplicate_profile(person) for person in people)
     limits = DuplicateSearchLimits()
     results: list[tuple[IndividualRecord, IndividualRecord, MatchAssessment]] = []
-    for left, right in _bounded_candidate_pairs(
+    for left, right in bounded_candidate_pairs(
         profiles,
         limits,
         cross_source_only=False,
@@ -1414,6 +1414,7 @@ def refine_quality_report_with_ai(
 
 build_quality_prompt = _build_quality_prompt
 quality_annotations_from_payload = _quality_annotations_from_payload
+quality_duplicate_pairs = _quality_duplicate_pairs
 quality_response_schema = _quality_response_schema
 
 
@@ -1432,6 +1433,7 @@ __all__ = [
     "ancestor_generations",
     "build_quality_prompt",
     "quality_annotations_from_payload",
+    "quality_duplicate_pairs",
     "quality_response_schema",
     "refine_quality_report_with_ai",
     "render_quality_report",

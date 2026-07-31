@@ -10,7 +10,8 @@ import ancestryllm.gedcom.graph as graph_module
 import ancestryllm.rootsmagic.exporter as exporter_module
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.jobs import JobManager, JobState
-from ancestryllm.gedcom.engine import GedcomRecord, IndividualRecord
+from ancestryllm.gedcom.identity import IndividualRecord
+from ancestryllm.gedcom.parser import GedcomRecord
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 
 

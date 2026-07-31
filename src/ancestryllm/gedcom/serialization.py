@@ -15,8 +15,9 @@ from ancestryllm.gedcom.serializer import (
 def write_quality_report(report: Any, output_path: str | Path) -> Any:
     """Stage a rendered quality report through the publication adapter.
 
-    Quality analysis stays provider- and publication-neutral. CORE-24 (#166)
-    owns retirement of this private engine shim together with ``write_gedcom``.
+    Quality analysis stays provider- and publication-neutral. Retire this
+    private-engine gateway with ``write_gedcom`` after publication has a typed
+    application port.
     """
     from ancestryllm.gedcom.engine import write_quality_report as _write_quality_report
 
@@ -36,8 +37,8 @@ def write_gedcom(
     """Stage GEDCOM output through the publication compatibility adapter.
 
     Verified caller: ``gedcom.service``. The deterministic line kernel above
-    is already independent; CORE-24 (#166) owns retirement of this private
-    engine shim once publication orchestration has its permanent boundary.
+    is already independent; retire this private-engine gateway once
+    publication orchestration has its permanent boundary.
     """
     from ancestryllm.gedcom.engine import write_gedcom as _write_gedcom
 

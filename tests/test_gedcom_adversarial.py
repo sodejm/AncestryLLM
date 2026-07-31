@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from ancestryllm.core.errors import FileIngressError
-from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom import identity, serialization
+from ancestryllm.gedcom import parser as gm
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_adversarial"
 MANIFEST = FIXTURES / "manifest.json"
@@ -245,7 +246,7 @@ def test_extensions_alternatives_and_continuations_are_preserved() -> None:
         == "first-joined\nnext line"
     )
     assert "2 DATE definitely not a date" in individual.lines
-    assert gm.normalise_gedcom_date("definitely not a date") == "definitely not a date"
+    assert identity.normalise_gedcom_date("definitely not a date") == "definitely not a date"
     assert _record(source, "SOUR", "@S1@").lines == [
         "0 @S1@ SOUR",
         "1 TITL Fictional Archive Catalogue",
@@ -321,7 +322,7 @@ def test_utf8_line_wrapping_preserves_logical_value(
 ) -> None:
     original = gm.parse_gedcom_line(line)
 
-    wrapped = gm._wrap_long_gedcom_lines([line])
+    wrapped = serialization.wrap_long_gedcom_lines([line])
 
     assert len(wrapped) == expected_line_count
     assert all(len(physical.encode("utf-8")) <= 255 for physical in wrapped)
@@ -330,7 +331,7 @@ def test_utf8_line_wrapping_preserves_logical_value(
 
 def test_level_99_value_that_requires_wrapping_is_rejected() -> None:
     with pytest.raises(gm.GedcomParseError, match="level 99"):
-        gm._wrap_long_gedcom_lines(["99 NOTE " + "x" * 248])
+        serialization.wrap_long_gedcom_lines(["99 NOTE " + "x" * 248])
 
 
 def _without_version(lines: list[str]) -> list[str]:
@@ -500,11 +501,11 @@ def test_semantic_property_corpus_survives_serialize_reparse(
         tags=frozenset({"INDI", "FAM", "NOTE"}),
     )
     people = [
-        gm._individual_from_record(record) for record in source.records if record.tag == "INDI"
+        identity.individual_from_record(record) for record in source.records if record.tag == "INDI"
     ]
     output = tmp_path / "property-output.ged"
 
-    gm.write_gedcom(people, output, source_documents=[source])
+    serialization.write_gedcom(people, output, source_documents=[source])
 
     emitted_records = list(gm.iter_gedcom_records(output))
     gm.validate_gedcom_555([line for record in emitted_records for line in record.lines])

@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from ancestryllm.core.errors import AncestryError, ProviderError
-from ancestryllm.gedcom import engine as gm
-from ancestryllm.gedcom import quality
+from ancestryllm.gedcom import identity as gm
+from ancestryllm.gedcom import parser, quality
 from ancestryllm.gedcom.contracts import QualityResolution
 from ancestryllm.gedcom.service import GedcomService
 
@@ -20,23 +20,22 @@ FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_merge"
 ADVERSARIAL_FIXTURES = Path(__file__).parent / "fixtures" / "gedcom_adversarial"
 SOURCE_A = FIXTURES / "quality-source-a.ged"
 SOURCE_B = FIXTURES / "quality-source-b.ged"
-MALFORMED = FIXTURES / "malformed-rejected.ged"
 PUBLIC_SOURCE_A = ADVERSARIAL_FIXTURES / "xref-source-a.ged"
 PUBLIC_SOURCE_B = ADVERSARIAL_FIXTURES / "xref-source-b.ged"
 
 
 def _loaded_fixture_tree() -> tuple[
     list[gm.IndividualRecord],
-    list[gm.GedcomRecord],
-    list[gm.ParsedSource],
+    list[parser.GedcomRecord],
+    list[parser.ParsedSource],
     dict[str, str],
     list[gm.MergeDecision],
 ]:
     """Return the deterministically merged fictional fixture tree."""
-    sources = gm.load_sources([SOURCE_A, SOURCE_B])
+    sources = parser.load_sources([SOURCE_A, SOURCE_B])
     source_records = [record for source in sources for record in source.records]
     people = [
-        gm._individual_from_record(record) for record in source_records if record.tag == "INDI"
+        gm.individual_from_record(record) for record in source_records if record.tag == "INDI"
     ]
     people = gm.enrich_relationship_context(people, source_records)
     pointer_map: dict[str, str] = {}
@@ -50,10 +49,10 @@ def _loaded_fixture_tree() -> tuple[
     return merged, source_records, sources, pointer_map, decisions
 
 
-def _fixture_report() -> gm.QualityReport:
+def _fixture_report() -> quality.QualityReport:
     """Build the deterministic fixture report used by focused tests."""
     people, records, sources, pointer_map, decisions = _loaded_fixture_tree()
-    return gm.analyze_quality(
+    return quality.analyze_quality(
         people,
         records,
         sources,
@@ -68,7 +67,7 @@ class TestTypedPersonalNames:
     """Preserve typed names and every standard subordinate name component."""
 
     def test_parses_case_insensitive_type_and_components(self) -> None:
-        record = gm.GedcomRecord(
+        record = parser.GedcomRecord(
             [
                 "0 @I1@ INDI",
                 "1 NAME Dr. Ana /Stone/ Jr.",
@@ -82,7 +81,7 @@ class TestTypedPersonalNames:
             "names.ged",
             0,
         )
-        person = gm._individual_from_record(record)
+        person = gm.individual_from_record(record)
         assert person.names == (
             gm.PersonalName(
                 value="Dr. Ana /Stone/ Jr.",
@@ -127,7 +126,7 @@ class TestTypedPersonalNames:
                 ),
             ),
         )
-        serialized = gm._record_to_gedcom_lines(person)
+        serialized = gm.serialize_individual_record(person)
         assert "1 NAME Ana /Stone/" in serialized
         assert "2 TYPE married" in serialized
         assert "2 NICK Annie" in serialized
@@ -150,7 +149,7 @@ class TestDuplicateAndMarriedNameAnalysis:
         first = gm.IndividualRecord("@I1@", given_name="Nell", surname="Ember")
         second = gm.IndividualRecord("@I2@", given_name="Nell", surname="Ember")
         assert gm.assess_similarity(first, second).score == 88.0
-        assert quality._quality_duplicate_pairs([first, second]) == []
+        assert quality.quality_duplicate_pairs([first, second]) == []
 
     def test_typed_married_primary_is_high_severity(self) -> None:
         findings = [
@@ -182,15 +181,15 @@ class TestAncestryAndDataQuality:
 
     def test_iterative_cycle_detection_terminates(self) -> None:
         records = [
-            gm.GedcomRecord(["0 @F1@ FAM", "1 HUSB @I2@", "1 CHIL @I1@"], "x.ged", 0),
-            gm.GedcomRecord(["0 @F2@ FAM", "1 HUSB @I1@", "1 CHIL @I2@"], "x.ged", 1),
+            parser.GedcomRecord(["0 @F1@ FAM", "1 HUSB @I2@", "1 CHIL @I1@"], "x.ged", 0),
+            parser.GedcomRecord(["0 @F2@ FAM", "1 HUSB @I1@", "1 CHIL @I2@"], "x.ged", 1),
         ]
         generations, cycles = quality.ancestor_generations("@I1@", records)
         assert generations == {"@I1@": 0, "@I2@": 1}
         assert cycles == {"@I1@", "@I2@"}
 
     def test_adopted_parentage_is_labeled_for_ancestor(self) -> None:
-        root_record = gm.GedcomRecord(
+        root_record = parser.GedcomRecord(
             [
                 "0 @I1@ INDI",
                 "1 NAME Root /Person/",
@@ -200,12 +199,12 @@ class TestAncestryAndDataQuality:
             "adoption.ged",
             0,
         )
-        parent_record = gm.GedcomRecord(
+        parent_record = parser.GedcomRecord(
             ["0 @I2@ INDI", "1 NAME Parent /Person/", "1 FAMS @F1@"],
             "adoption.ged",
             1,
         )
-        family_record = gm.GedcomRecord(
+        family_record = parser.GedcomRecord(
             ["0 @F1@ FAM", "1 HUSB @I2@", "1 CHIL @I1@"],
             "adoption.ged",
             2,
@@ -213,13 +212,13 @@ class TestAncestryAndDataQuality:
         records = [root_record, parent_record, family_record]
         people = gm.enrich_relationship_context(
             [
-                gm._individual_from_record(root_record),
-                gm._individual_from_record(parent_record),
+                gm.individual_from_record(root_record),
+                gm.individual_from_record(parent_record),
             ],
             records,
         )
-        source = gm.ParsedSource(Path("adoption.ged"), records, {})
-        report = gm.analyze_quality(people, records, [source], "@I1@")
+        source = parser.ParsedSource(Path("adoption.ged"), records, {})
+        report = quality.analyze_quality(people, records, [source], "@I1@")
         assert ("@I2@", 1, "adopted") in report.ancestor_relationships
 
     def test_fixture_reports_invalid_and_alternative_dates(self) -> None:
@@ -297,13 +296,13 @@ class TestGedcomServiceRootErrors:
         assert output.read_bytes() == b"sentinel\n"
 
 
-class TestMarkdownAndCli:
-    """Verify atomic output, root semantics, defaults, and rejected syntax."""
+class TestMarkdownPublication:
+    """Verify deterministic rendering and atomic report publication."""
 
     def test_markdown_contains_all_required_sections_and_escaping(self) -> None:
         finding = dataclasses.replace(_fixture_report().findings[0], recommendation="Compare A | B")
         report = dataclasses.replace(_fixture_report(), findings=(finding,))
-        rendered = gm.render_quality_report(report)
+        rendered = quality.render_quality_report(report)
         for heading in (
             "Top 25 actions",
             "Direct ancestors by generation",
@@ -319,7 +318,7 @@ class TestMarkdownAndCli:
     def test_atomic_quality_write_replaces_destination(self, tmp_path: Path) -> None:
         destination = tmp_path / "quality.md"
         destination.write_text("old", encoding="utf-8")
-        gm.write_quality_report(_fixture_report(), destination)
+        quality.write_quality_report(_fixture_report(), destination)
         assert destination.read_text(encoding="utf-8").startswith("# GEDCOM Merge Quality Report")
 
     def test_quality_writer_compatibility_routes_through_serialization(
@@ -346,105 +345,6 @@ class TestMarkdownAndCli:
 
         assert quality.write_quality_report(report, destination) is token
 
-    def test_default_report_and_quality_root_do_not_filter_export(self, tmp_path: Path) -> None:
-        output = tmp_path / "master.ged"
-        result = gm.main(
-            [
-                str(SOURCE_A),
-                str(SOURCE_B),
-                "--ai-backend",
-                "none",
-                "--auto",
-                "--quality-root-person",
-                "Maren Hollow",
-                "-o",
-                str(output),
-            ]
-        )
-        assert result == 0
-        assert output.with_suffix(".quality.md").is_file()
-        assert output.read_text(encoding="utf-8").count(" INDI") == 23
-
-    def test_report_can_be_disabled_without_a_root(self, tmp_path: Path) -> None:
-        output = tmp_path / "master.ged"
-        result = gm.main(
-            [
-                str(SOURCE_A),
-                str(SOURCE_B),
-                "--ai-backend",
-                "none",
-                "--auto",
-                "--no-quality-report",
-                "-o",
-                str(output),
-            ]
-        )
-        assert result == 0
-        assert output.is_file()
-        assert not output.with_suffix(".quality.md").exists()
-
-    def test_fixture_merge_preserves_people_edges_names_and_custom_facts(
-        self, tmp_path: Path
-    ) -> None:
-        output = tmp_path / "fidelity.ged"
-        result = gm.main(
-            [
-                str(SOURCE_A),
-                str(SOURCE_B),
-                "--ai-backend",
-                "none",
-                "--auto",
-                "--quality-root-person",
-                "Maren Hollow",
-                "-o",
-                str(output),
-            ]
-        )
-        text = output.read_text(encoding="utf-8")
-        assert result == 0
-        assert "1 NAME Cato /Hollow/" in text
-        assert "1 NAME Maren /Vale/" in text
-        assert "2 PEDI adopted" in text
-        assert "1 _PROFILE Rich duplicate" in text
-        assert "2 DATE 02 FEB 1960" in text
-        assert "2 DATE 02 FEB 1964" in text
-        assert "1 CHIL @A_COUSIN@" in text
-
-    def test_successful_report_requires_root(self, tmp_path: Path) -> None:
-        output = tmp_path / "master.ged"
-        result = gm.main(
-            [
-                str(SOURCE_A),
-                str(SOURCE_B),
-                "--ai-backend",
-                "none",
-                "--auto",
-                "-o",
-                str(output),
-            ]
-        )
-        assert result == 1
-        assert not output.exists()
-
-    def test_malformed_input_writes_only_diagnostic_without_root(self, tmp_path: Path) -> None:
-        output = tmp_path / "rejected.ged"
-        result = gm.main(
-            [
-                str(SOURCE_A),
-                str(MALFORMED),
-                "--ai-backend",
-                "none",
-                "--auto",
-                "-o",
-                str(output),
-            ]
-        )
-        diagnostic = output.with_suffix(".quality.md")
-        assert result == 1
-        assert not output.exists()
-        assert "Line: 8" in diagnostic.read_text(encoding="utf-8")
-        assert str(MALFORMED.resolve()) in diagnostic.read_text(encoding="utf-8")
-
 
 class TestQualityAiRefinement:
     """Exercise the provider-neutral advisory resolver."""
@@ -459,7 +359,7 @@ class TestQualityAiRefinement:
             remote=False,
         )
 
-        refined = gm.refine_quality_report_with_ai(report, lambda _report: resolution)
+        refined = quality.refine_quality_report_with_ai(report, lambda _report: resolution)
 
         assert refined.findings[0].severity == finding.severity
         assert refined.findings[0].evidence == finding.evidence
@@ -469,15 +369,15 @@ class TestQualityAiRefinement:
     def test_provider_failure_propagates_as_stable_error(self) -> None:
         report = _fixture_report()
 
-        def fail(_report: gm.QualityReport) -> QualityResolution:
+        def fail(_report: quality.QualityReport) -> QualityResolution:
             raise ProviderError("PROVIDER_TIMEOUT", "The provider request timed out.")
 
         with pytest.raises(ProviderError) as raised:
-            gm.refine_quality_report_with_ai(report, fail)
+            quality.refine_quality_report_with_ai(report, fail)
         assert raised.value.code == "PROVIDER_TIMEOUT"
 
     def test_unknown_model_finding_ids_are_ignored(self) -> None:
-        parsed = quality._quality_annotations_from_payload(
+        parsed = quality.quality_annotations_from_payload(
             {
                 "annotations": [
                     {

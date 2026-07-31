@@ -47,6 +47,7 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.gedcom.contracts import IdentityResolver
+from ancestryllm.gedcom.identity import individual_from_record
 
 MANIFEST_SCHEMA_VERSION = 1
 SOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -1491,9 +1492,9 @@ def _build_rebase_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _person_from_record(record: Any, core: ModuleType) -> Any:
+def _person_from_record(record: Any, _core: ModuleType) -> Any:
     """Build one comparison person while retaining its full source record."""
-    return core._individual_from_record(record)
+    return individual_from_record(record)
 
 
 def _verdict_confidence(value: object) -> float:
@@ -1897,7 +1898,7 @@ def _reconcile_person_blocks(
         for key in retained_order:
             lines.extend(accumulator[key])
         record = core.GedcomRecord(lines, str(sources[0].path), len(people))
-        people.append(core._individual_from_record(record))
+        people.append(individual_from_record(record))
     return people, block_registry
 
 

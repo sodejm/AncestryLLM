@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ancestryllm.gedcom import identity as gm
+from ancestryllm.gedcom import parser
 
 
 def _person(
@@ -80,9 +81,9 @@ def test_candidate_generation_caps_both_endpoints_without_global_pair_set() -> N
         for index in range(20)
     ]
     limits = _small_limits(max_bucket_size=32, max_pairs_per_person=2)
-    profiles = tuple(gm._duplicate_profile(record) for record in records)
+    profiles = tuple(gm.duplicate_profile(record) for record in records)
 
-    pairs = list(gm._bounded_candidate_pairs(profiles, limits, cross_source_only=True))
+    pairs = list(gm.bounded_candidate_pairs(profiles, limits, cross_source_only=True))
     endpoint_counts = Counter(index for pair in pairs for index in pair)
 
     assert len(pairs) <= limits.max_scored_pairs
@@ -95,7 +96,7 @@ def test_normalized_profile_is_built_once_per_record() -> None:
         _person(index, source="/a.ged" if index % 2 == 0 else "/b.ged") for index in range(12)
     ]
 
-    with patch.object(gm, "_duplicate_profile", wraps=gm._duplicate_profile) as profile:
+    with patch.object(gm, "duplicate_profile", wraps=gm.duplicate_profile) as profile:
         gm.find_duplicate_candidates(records, limits=_small_limits())
 
     assert profile.call_count == len(records)
@@ -129,11 +130,15 @@ def test_hard_conflict_is_retained_without_adjudication() -> None:
     right = _person(2, source="/b.ged", surname="Shared", gender="F")
     decisions: list[gm.MergeDecision] = []
 
-    with (
-        patch.object(gm, "find_duplicate_candidates", return_value=[(0, 1, 84.0)]),
-        patch.object(gm, "_get_ai_verdict") as adjudicate,
-    ):
-        merged = gm.merge_records([left, right], threshold=70, auto=True, decisions=decisions)
+    adjudicate = Mock()
+    with patch.object(gm, "find_duplicate_candidates", return_value=[(0, 1, 84.0)]):
+        merged = gm.merge_records(
+            [left, right],
+            threshold=70,
+            auto=True,
+            identity_resolver=adjudicate,
+            decisions=decisions,
+        )
 
     assert len(merged) == 2
     adjudicate.assert_not_called()
@@ -153,14 +158,13 @@ def test_per_person_adjudication_budget_fails_closed() -> None:
     decisions: list[gm.MergeDecision] = []
     verdict = {"is_duplicate": False, "confidence": 1.0, "reasoning": "distinct"}
 
-    with (
-        patch.object(gm, "find_duplicate_candidates", return_value=candidates),
-        patch.object(gm, "_get_ai_verdict", return_value=verdict) as adjudicate,
-    ):
+    adjudicate = Mock(return_value=verdict)
+    with patch.object(gm, "find_duplicate_candidates", return_value=candidates):
         merged = gm.merge_records(
             records,
             threshold=70,
             auto=True,
+            identity_resolver=adjudicate,
             decisions=decisions,
             duplicate_limits=limits,
         )
@@ -173,8 +177,8 @@ def test_per_person_adjudication_budget_fails_closed() -> None:
 
 
 def test_safe_merge_preserves_custom_blocks_citations_relationships_and_facts() -> None:
-    left = gm._individual_from_record(
-        gm.GedcomRecord(
+    left = gm.individual_from_record(
+        parser.GedcomRecord(
             [
                 "0 @I1@ INDI",
                 "1 NAME Ada /Sample/",
@@ -190,8 +194,8 @@ def test_safe_merge_preserves_custom_blocks_citations_relationships_and_facts() 
             0,
         )
     )
-    right = gm._individual_from_record(
-        gm.GedcomRecord(
+    right = gm.individual_from_record(
+        parser.GedcomRecord(
             [
                 "0 @I2@ INDI",
                 "1 NAME Ada /Sample/",

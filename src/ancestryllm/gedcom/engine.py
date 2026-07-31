@@ -1,7 +1,7 @@
-"""Internal loss-minimizing GEDCOM engine.
+"""Internal loss-minimizing GEDCOM compatibility engine.
 
-The CLI reads two or more GEDCOM files and transactionally publishes one
-master file.
+Application commands use :mod:`ancestryllm.gedcom.service`; this module owns
+the low-level parser and publication mechanics used by the supported façades.
 Source fact blocks remain the data-fidelity authority, although xrefs, dates,
 headers, ordering, and line wrapping may be normalized.  A rooted export
 intentionally omits people outside the selected connected component.
@@ -15,8 +15,6 @@ citations, media, and government identifiers. Public callers use
 
 from __future__ import annotations
 
-import argparse
-import dataclasses
 import logging
 import os
 import re
@@ -90,22 +88,18 @@ from ancestryllm.gedcom.identity import (
     GenealogicalFact as GenealogicalFact,
     IndividualRecord,
     MatchAssessment as MatchAssessment,
-    MergeDecision,
     PersonalName as PersonalName,
     RelativeIdentity as RelativeIdentity,
     _blocking_keys as _blocking_keys,
     _dedup_response_schema as _dedup_response_schema,
-    _individual_from_record,
     _normalise_country as _normalise_country,
     _normalise_record_dates,
     _record_to_gedcom_lines,
     _top_level_blocks,
-    ai_resolve as ai_resolve,
     assess_similarity as assess_similarity,
-    enrich_relationship_context,
+    enrich_relationship_context as enrich_relationship_context,
     estimate_duplicate_search as estimate_duplicate_search,
     find_duplicate_candidates as find_duplicate_candidates,
-    merge_records,
     merge_two_records as merge_two_records,
     normalise_gedcom_date as normalise_gedcom_date,
     similarity_score as similarity_score,
@@ -393,24 +387,6 @@ def load_sources(
     return sources
 
 
-def load_gedcom(path: str | Path) -> list[IndividualRecord]:
-    """Load only INDI summaries from one GEDCOM file.
-
-    ``load_sources`` should be preferred by the CLI because it globally
-    disambiguates pointers and retains family/source records for output.
-    This compatibility helper is useful for callers and tests.
-    """
-    source_records = list(iter_gedcom_records(path))
-    people = [
-        _individual_from_record(
-            dataclasses.replace(record, lines=_normalise_record_dates(record.lines))
-        )
-        for record in source_records
-        if record.tag == "INDI"
-    ]
-    return enrich_relationship_context(people, source_records)
-
-
 def _atomic_write_text(path: Path, payload: str) -> StagedFileToken:
     """Write through a publication-owned reservation without clobbering it."""
 
@@ -640,199 +616,3 @@ def write_gedcom(
     token = _atomic_write_text(out_path, payload)
     log.info("Wrote %d individuals to %s", len(records), out_path)
     return token
-
-
-def _build_arg_parser() -> argparse.ArgumentParser:
-    """Build the command-line parser."""
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("input_files", nargs="+", metavar="FILE")
-    parser.add_argument("-o", "--output", default="merged.ged")
-    parser.add_argument(
-        "--ai-backend",
-        choices=("none",),
-        default="none",
-        help="Compatibility flag; the internal characterization CLI is offline-only.",
-    )
-    parser.add_argument(
-        "--similarity-threshold",
-        type=int,
-        default=DEFAULT_SIMILARITY_THRESHOLD,
-    )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help="Do not ask interactive questions.",
-    )
-    parser.add_argument(
-        "--root-person",
-        help=(
-            "Export only the connected tree containing this GEDCOM pointer "
-            "(for example @I1@) or unique full name."
-        ),
-    )
-    parser.add_argument(
-        "--quality-root-person",
-        help=(
-            "Person pointer or unique full name used only to prioritize the "
-            "quality report. Defaults to --root-person."
-        ),
-    )
-    parser.add_argument(
-        "--quality-report",
-        metavar="PATH",
-        help="Markdown report path; default is <output-stem>.quality.md.",
-    )
-    parser.add_argument(
-        "--no-quality-report",
-        action="store_true",
-        help="Disable the advisory quality report and its root requirement.",
-    )
-    parser.add_argument(
-        "--gedcom-version",
-        choices=SUPPORTED_GEDCOM_VERSIONS,
-        default="5.5.5",
-        help="Output version; 5.5.1 is a compatibility fallback.",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    return parser
-
-
-def main(argv: Optional[list[str]] = None) -> int:
-    """Run the merge command and return a shell exit code.
-
-    The command transactionally publishes the merged GEDCOM and advisory
-    Markdown report. A syntax failure writes only a diagnostic report.
-    Provider operations are available only through
-    :class:`ancestryllm.gedcom.service.GedcomService`.
-
-    Args:
-        argv: Optional command-line arguments excluding the program name.
-
-    Returns:
-        Zero on success and one for input, validation, or output failure.
-    """
-    parser = _build_arg_parser()
-    args = parser.parse_args(argv)
-    if len(args.input_files) < 2:
-        parser.error("At least two input GEDCOM files are required")
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-    paths = [Path(path).expanduser().absolute() for path in args.input_files]
-    output = Path(args.output).resolve()
-    quality_enabled = not args.no_quality_report
-    quality_path = (
-        Path(args.quality_report).resolve()
-        if args.quality_report
-        else output.with_suffix(".quality.md")
-    )
-    quality_requested_root = args.quality_root_person or args.root_person
-    try:
-        if output in paths:
-            raise ValueError("Output path must not overwrite an input file")
-        if quality_enabled and quality_path in paths:
-            raise ValueError("Quality report path must not overwrite an input file")
-        if quality_enabled and quality_path == output:
-            raise ValueError("Quality report path must differ from GEDCOM output")
-        sources = load_sources(paths)
-        if quality_enabled and not quality_requested_root:
-            raise ValueError(
-                "quality reporting requires --quality-root-person or "
-                "--root-person; use --no-quality-report to disable reporting"
-            )
-        all_records = [
-            _individual_from_record(record)
-            for source in sources
-            for record in source.records
-            if record.tag == "INDI"
-        ]
-        all_source_records = [record for source in sources for record in source.records]
-        all_records = enrich_relationship_context(
-            all_records,
-            all_source_records,
-        )
-        pointer_map: dict[str, str] = {}
-        merge_decisions: list[MergeDecision] = []
-        merged = merge_records(
-            all_records,
-            threshold=args.similarity_threshold,
-            auto=args.auto,
-            pointer_map=pointer_map,
-            decisions=merge_decisions,
-        )
-        include_individuals: Optional[set[str]] = None
-        include_families: Optional[set[str]] = None
-        if args.root_person:
-            root_pointer = resolve_root_person(
-                args.root_person,
-                merged,
-                [source.pointer_map for source in sources],
-                pointer_map,
-            )
-            include_individuals, include_families = connected_tree_pointers(
-                root_pointer,
-                merged,
-                all_source_records,
-                pointer_map,
-            )
-            log.info(
-                "Rooted export at %s: %d people, %d families",
-                root_pointer,
-                len(include_individuals),
-                len(include_families),
-            )
-        quality_report: Optional[QualityReport] = None
-        if quality_enabled:
-            quality_root_pointer = resolve_root_person(
-                quality_requested_root,
-                merged,
-                [source.pointer_map for source in sources],
-                pointer_map,
-            )
-            quality_report = analyze_quality(
-                merged,
-                all_source_records,
-                sources,
-                quality_root_pointer,
-                pointer_map=pointer_map,
-                merge_decisions=merge_decisions,
-                output_file=str(output),
-            )
-        write_gedcom(
-            merged,
-            output,
-            source_documents=sources,
-            pointer_map=pointer_map,
-            include_individuals=include_individuals,
-            include_families=include_families,
-            gedcom_version=args.gedcom_version,
-        )
-        if quality_report is not None:
-            write_quality_report(quality_report, quality_path)
-        return 0
-    except FileIngressError as exc:
-        log.error("%s", exc.render())
-        return 1
-    except GedcomParseError as exc:
-        if quality_enabled:
-            source_path = next(
-                (str(path) for path in paths if str(path) in str(exc)),
-                str(paths[0]) if paths else "unknown",
-            )
-            try:
-                write_quality_diagnostic(quality_path, source_path, exc)
-            except OSError as report_exc:
-                log.error("Could not write diagnostic report: %s", report_exc)
-        log.error("Merge failed: %s", exc)
-        return 1
-    except (OSError, ValueError) as exc:
-        log.error("Merge failed: %s", exc)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

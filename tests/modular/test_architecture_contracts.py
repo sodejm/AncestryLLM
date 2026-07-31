@@ -7,13 +7,16 @@ from pathlib import Path
 
 import pytest
 from scripts.check_architecture_contracts import (
+    CHARACTERIZATION_IMPORT_EXCEPTIONS,
     PUBLIC_FACADE_MODULES,
     TEMPORARY_EXCEPTIONS,
     DependencyException,
+    check_repository_consumers,
     check_tree,
 )
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "ancestryllm"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_module(root: Path, module: str, source: str) -> None:
@@ -33,6 +36,57 @@ def test_repository_dependency_contract_passes_with_only_live_exceptions() -> No
 
     assert report.passed
     assert report.used_exceptions == frozenset(TEMPORARY_EXCEPTIONS)
+
+
+def test_repository_consumers_use_supported_facades() -> None:
+    report = check_repository_consumers(REPOSITORY_ROOT)
+
+    assert report.passed
+    assert report.used_exceptions == frozenset(CHARACTERIZATION_IMPORT_EXCEPTIONS)
+
+
+def test_repository_consumer_gate_rejects_private_gedcom_import(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    consumer = repository_root / "tests" / "test_feature.py"
+    consumer.parent.mkdir(parents=True)
+    consumer.write_text(
+        "from ancestryllm.gedcom.engine import GedcomRecord\n",
+        encoding="utf-8",
+    )
+
+    report = check_repository_consumers(
+        repository_root,
+        exceptions=(),
+        require_all_exceptions=False,
+    )
+
+    assert {violation.code for violation in report.violations} == {"ARCH501"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from ancestryllm.gedcom.identity import _country_from_place\n",
+        "from ancestryllm.gedcom import identity as gm\ngm._country_from_place('Boston')\n",
+        "import ancestryllm.gedcom.quality as quality\nquality._duplicate_pairs([])\n",
+    ),
+)
+def test_repository_consumer_gate_rejects_private_facade_symbol(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    repository_root = tmp_path / "repository"
+    consumer = repository_root / "tests" / "test_feature.py"
+    consumer.parent.mkdir(parents=True)
+    consumer.write_text(source, encoding="utf-8")
+
+    report = check_repository_consumers(
+        repository_root,
+        exceptions=(),
+        require_all_exceptions=False,
+    )
+
+    assert {violation.code for violation in report.violations} == {"ARCH503"}
 
 
 @pytest.mark.parametrize(

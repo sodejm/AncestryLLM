@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from ancestryllm.core.cancellation import CancellationError
-from ancestryllm.gedcom import engine as gm
-from ancestryllm.gedcom import identity
+from ancestryllm.gedcom import identity as gm
+from ancestryllm.gedcom import parser, serialization
 
 # ---------------------------------------------------------------------------
 # Date normalisation
@@ -78,7 +77,7 @@ class TestNormaliseGedcomDate:
     def test_unparseable_value_is_not_written_to_debug_logs(self, caplog):
         private_value = "PRIVATE-DATE-CANARY is not a date"
 
-        with caplog.at_level(logging.DEBUG, logger=identity.__name__):
+        with caplog.at_level(logging.DEBUG, logger=gm.__name__):
             assert gm.normalise_gedcom_date(private_value) == private_value
 
         assert private_value not in caplog.text
@@ -157,7 +156,7 @@ class TestIndividualRecord:
 
 def _parse_individual(lines, source="/source.ged"):
     """Parse one synthetic INDI block through the production extractor."""
-    return gm._individual_from_record(gm.GedcomRecord(lines, source, 0))
+    return gm.individual_from_record(parser.GedcomRecord(lines, source, 0))
 
 
 class TestIdentityFactExtraction:
@@ -249,7 +248,7 @@ class TestIdentityFactExtraction:
 
 def _family_record(pointer, lines, sequence=0):
     """Build one synthetic FAM record for relationship tests."""
-    return gm.GedcomRecord([f"0 {pointer} FAM", *lines], "/family.ged", sequence)
+    return parser.GedcomRecord([f"0 {pointer} FAM", *lines], "/family.ged", sequence)
 
 
 class TestRelationshipEnrichment:
@@ -537,14 +536,14 @@ class TestIdentitySafetyRegressions:
     """Cover failures that could collapse distinct people or family events."""
 
     def test_state_or_province_is_not_inferred_as_country(self):
-        assert identity._country_from_place("Boston, Massachusetts") == ""
-        assert identity._country_from_place("Toronto, Ontario") == ""
-        assert identity._country_from_place("Boston, Massachusetts, USA") == ("united states")
+        assert gm.country_from_place("Boston, Massachusetts") == ""
+        assert gm.country_from_place("Toronto, Ontario") == ""
+        assert gm.country_from_place("Boston, Massachusetts, USA") == "united states"
 
     def test_different_family_event_tags_do_not_match(self):
         marriage = gm.GenealogicalFact("MARR", date="1920", place="Boston")
         divorce = gm.GenealogicalFact("DIV", date="1920", place="Boston")
-        assert identity._fact_similarity(marriage, divorce) == 0.0
+        assert gm.fact_similarity(marriage, divorce) == 0.0
 
     def test_conflicting_alternative_countries_force_review(self):
         shared = gm.GenealogicalFact(
@@ -579,10 +578,10 @@ class TestIdentitySafetyRegressions:
             gm.RelativeIdentity("@C8@", "Alex Smith", "1940"),
             gm.RelativeIdentity("@C9@", "Quasar Jones", "1975"),
         )
-        score = identity._collection_similarity(
+        score = gm.collection_similarity(
             left,
             right,
-            identity._relative_similarity,
+            gm.relative_similarity,
         )
         assert score < 70.0
 
@@ -621,7 +620,7 @@ class TestIdentitySafetyRegressions:
                 "ancestryllm.gedcom.identity.find_duplicate_candidates",
                 return_value=candidates,
             ),
-            patch("ancestryllm.gedcom.identity.ai_resolve", return_value=verdict),
+            patch("ancestryllm.gedcom.identity.resolve_duplicate", return_value=verdict),
         ):
             merged = gm.merge_records([a, bridge, c], auto=True)
         assert {person.pointer for person in merged} == {"@A@", "@C@"}
@@ -641,7 +640,7 @@ class TestAiPromptContext:
             partners=(gm.RelativeIdentity("@P1@", "Alex Smith"),),
             children=(gm.RelativeIdentity("@C1@", "Casey Smith", "1940"),),
         )
-        prompt = identity._build_dedup_prompt(person, person)
+        prompt = gm.build_dedup_prompt(person, person)
         for expected in (
             "b.country=united states",
             "Carpenter",
@@ -660,7 +659,7 @@ class TestAiPromptContext:
                 "_VENDOR": ["1 _VENDOR private extension\n"],
             },
         )
-        prompt = identity._build_dedup_prompt(person, person)
+        prompt = gm.build_dedup_prompt(person, person)
         assert "private medical detail" not in prompt
         assert "secret source text" not in prompt
         assert "private extension" not in prompt
@@ -805,7 +804,7 @@ class TestSyntheticSerialization:
             family_links=("@F1@", "@F2@"),
             family_references=(("FAMS", "@F1@"), ("FAMC", "@F2@")),
         )
-        text = gm._record_to_gedcom_lines(record)
+        text = gm.serialize_individual_record(record)
         assert "1 NAME Jonathan Smith" in text
         assert text.count("1 BIRT") == 2
         assert "1 OCCU Carpenter" in text
@@ -860,7 +859,7 @@ class TestDependentPreservation:
                 "preferred_values": {},
             }
 
-        with patch("ancestryllm.gedcom.identity.ai_resolve", side_effect=duplicate):
+        with patch("ancestryllm.gedcom.identity.resolve_duplicate", side_effect=duplicate):
             merged = gm.merge_records(
                 [primary, secondary, first_child, second_child],
                 threshold=70,
@@ -915,7 +914,7 @@ class TestDependentPreservation:
                 "1 CHIL @C2@",
             ],
         )
-        head = gm.GedcomRecord(
+        head = parser.GedcomRecord(
             [
                 "0 HEAD",
                 "1 GEDC",
@@ -926,7 +925,7 @@ class TestDependentPreservation:
             0,
         )
         sources = [
-            gm.ParsedSource(
+            parser.ParsedSource(
                 Path("/a.ged"),
                 [head, family_a, family_b],
                 {},
@@ -935,7 +934,7 @@ class TestDependentPreservation:
         pointer_map = {"@P2@": "@P1@"}
         merged_parent = gm.merge_two_records(parent_a, parent_b)
         output = tmp_path / "dependents.ged"
-        gm.write_gedcom(
+        serialization.write_gedcom(
             [merged_parent, child_a, child_b],
             output,
             source_documents=sources,
@@ -962,7 +961,7 @@ class TestDependentPreservation:
                 "2 PEDI adopted",
             ],
         )
-        head = gm.GedcomRecord(
+        head = parser.GedcomRecord(
             [
                 "0 HEAD",
                 "1 GEDC",
@@ -973,9 +972,9 @@ class TestDependentPreservation:
             0,
         )
         family = _family_record("@F1@", ["1 CHIL @C1@"])
-        source = gm.ParsedSource(Path("/a.ged"), [head, family], {})
+        source = parser.ParsedSource(Path("/a.ged"), [head, family], {})
         output = tmp_path / "pedigree.ged"
-        gm.write_gedcom([child], output, source_documents=[source])
+        serialization.write_gedcom([child], output, source_documents=[source])
         text = output.read_text(encoding="utf-8")
         assert "1 FAMC @F1@\n2 PEDI adopted" in text
         assert "1 CHIL @C1@" in text
@@ -993,7 +992,7 @@ class TestInjectedIdentityResolver:
         a = _make_record(pointer="@I1@", source_file="/a.ged")
         b = _make_record(pointer="@I2@", source_file="/b.ged")
 
-        verdict = gm.ai_resolve(a, b)
+        verdict = gm.resolve_duplicate(a, b)
 
         assert verdict["is_duplicate"] is False
         assert verdict["reasoning"] == "LLM adjudication disabled"
@@ -1009,7 +1008,7 @@ class TestInjectedIdentityResolver:
             calls.append((left, right))
             return expected
 
-        assert gm.ai_resolve(a, b, resolver=resolver) == expected
+        assert gm.resolve_duplicate(a, b, resolver=resolver) == expected
         assert calls == [(a, b)]
 
     @pytest.mark.parametrize(
@@ -1026,7 +1025,7 @@ class TestInjectedIdentityResolver:
         ],
     )
     def test_confidence_accepts_only_scalar_values(self, value, expected):
-        assert identity._confidence_value({"confidence": value}) == pytest.approx(expected)
+        assert gm.confidence_value({"confidence": value}) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -1196,13 +1195,13 @@ class TestMergeRecords:
 class TestRecordToGedcomLines:
     def test_basic_serialisation(self):
         rec = _make_record(pointer="@I42@", given_name="Alice", surname="Brown")
-        lines = gm._record_to_gedcom_lines(rec)
+        lines = gm.serialize_individual_record(rec)
         assert "0 @I42@ INDI" in lines
         assert "NAME Alice /Brown/" in lines
 
     def test_birth_and_death_included(self):
         rec = _make_record(birth_date="1850", death_date="1920")
-        lines = gm._record_to_gedcom_lines(rec)
+        lines = gm.serialize_individual_record(rec)
         assert "1 BIRT" in lines
         assert "2 DATE 1850" in lines
         assert "1 DEAT" in lines
@@ -1210,7 +1209,7 @@ class TestRecordToGedcomLines:
 
     def test_gender_included(self):
         rec = _make_record(gender="F")
-        lines = gm._record_to_gedcom_lines(rec)
+        lines = gm.serialize_individual_record(rec)
         assert "1 SEX F" in lines
 
 
@@ -1223,7 +1222,7 @@ class TestWriteGedcom:
     def test_creates_output_file(self, tmp_path):
         records = [_make_record(pointer="@I1@")]
         out = tmp_path / "out.ged"
-        gm.write_gedcom(records, out, source_parsers=None)
+        serialization.write_gedcom(records, out, source_parsers=None)
         assert out.exists()
         content = out.read_text(encoding="utf-8")
         assert "0 TRLR" in content
@@ -1234,152 +1233,13 @@ class TestWriteGedcom:
             _make_record(pointer="@I2@", given_name="Bob", surname="Brown"),
         ]
         out = tmp_path / "out.ged"
-        gm.write_gedcom(records, out, source_parsers=None)
+        serialization.write_gedcom(records, out, source_parsers=None)
         content = out.read_text(encoding="utf-8")
         assert "@I1@" in content
         assert "@I2@" in content
 
     def test_output_file_has_header(self, tmp_path):
         out = tmp_path / "out.ged"
-        gm.write_gedcom([], out, source_parsers=None)
+        serialization.write_gedcom([], out, source_parsers=None)
         content = out.read_text(encoding="utf-8")
         assert "0 HEAD" in content
-
-
-# ---------------------------------------------------------------------------
-# CLI argument parsing (no file I/O)
-# ---------------------------------------------------------------------------
-
-
-class TestBuildArgParser:
-    def test_default_output_is_merged_ged(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged"])
-        assert args.output == "merged.ged"
-
-    def test_custom_output(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged", "-o", "master.ged"])
-        assert args.output == "master.ged"
-
-    def test_internal_cli_defaults_to_offline_only(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged"])
-        assert args.ai_backend == "none"
-
-    @pytest.mark.parametrize("backend", ["ollama", "openai", "gemini", "openrouter", "auto"])
-    def test_internal_cli_rejects_direct_provider_backends(self, backend: str):
-        ap = gm._build_arg_parser()
-        with pytest.raises(SystemExit):
-            ap.parse_args(["a.ged", "b.ged", "--ai-backend", backend])
-
-    def test_auto_flag(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged", "--auto"])
-        assert args.auto is True
-
-    def test_similarity_threshold_custom(self):
-        ap = gm._build_arg_parser()
-        args = ap.parse_args(["a.ged", "b.ged", "--similarity-threshold", "75"])
-        assert args.similarity_threshold == 75
-
-
-# ---------------------------------------------------------------------------
-# CLI main() integration (file I/O mocked)
-# ---------------------------------------------------------------------------
-
-
-class TestMainCli:
-    def test_returns_1_when_only_one_file(self, capsys):
-        # main() calls ap.error() which raises SystemExit(2) when fewer than
-        # two files are given.
-        with pytest.raises(SystemExit) as exc_info:
-            gm.main(["only_one.ged"])
-        assert exc_info.value.code != 0
-
-    def test_returns_1_when_file_not_found(self, tmp_path):
-        result = gm.main(
-            [
-                str(tmp_path / "nonexistent_a.ged"),
-                str(tmp_path / "nonexistent_b.ged"),
-            ]
-        )
-        assert result == 1
-
-    def test_returns_0_on_successful_merge(self, tmp_path):
-        """Full integration: write two minimal GEDCOM files and merge them."""
-        gedcom_a = textwrap.dedent("""\
-            0 HEAD
-            1 SOUR Test
-            0 @I1@ INDI
-            1 NAME Alice /Brown/
-            1 SEX F
-            1 BIRT
-            2 DATE 1850
-            0 TRLR
-        """)
-        gedcom_b = textwrap.dedent("""\
-            0 HEAD
-            1 SOUR Test
-            0 @I2@ INDI
-            1 NAME Bob /Green/
-            1 SEX M
-            1 BIRT
-            2 DATE 1855
-            0 TRLR
-        """)
-        file_a = tmp_path / "a.ged"
-        file_b = tmp_path / "b.ged"
-        file_a.write_text(gedcom_a, encoding="utf-8")
-        file_b.write_text(gedcom_b, encoding="utf-8")
-        out = tmp_path / "merged.ged"
-
-        result = gm.main(
-            [
-                str(file_a),
-                str(file_b),
-                "-o",
-                str(out),
-                "--auto",
-                "--no-quality-report",
-            ]
-        )
-        assert result == 0
-        assert out.exists()
-        content = out.read_text(encoding="utf-8")
-        assert "0 TRLR" in content
-
-    def test_merges_duplicates_in_two_files(self, tmp_path):
-        """Two files with the same person should produce one output individual."""
-        gedcom_template = textwrap.dedent("""\
-            0 HEAD
-            1 SOUR Test
-            0 {ptr} INDI
-            1 NAME John /Smith/
-            1 SEX M
-            1 BIRT
-            2 DATE 15 JUL 1850
-            1 DEAT
-            2 DATE 01 JAN 1920
-            0 TRLR
-        """)
-        file_a = tmp_path / "a.ged"
-        file_b = tmp_path / "b.ged"
-        file_a.write_text(gedcom_template.format(ptr="@I1@"), encoding="utf-8")
-        file_b.write_text(gedcom_template.format(ptr="@I2@"), encoding="utf-8")
-        out = tmp_path / "merged.ged"
-
-        result = gm.main(
-            [
-                str(file_a),
-                str(file_b),
-                "-o",
-                str(out),
-                "--auto",
-                "--no-quality-report",
-            ]
-        )
-        assert result == 0
-        content = out.read_text(encoding="utf-8")
-        # Only one INDI block should appear in the output.
-        assert content.count("INDI") == 1

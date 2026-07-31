@@ -1429,7 +1429,7 @@ class _DuplicateProfile:
     blocking_keys: tuple[tuple[str, ...], ...]
 
 
-def _duplicate_profile(record: IndividualRecord) -> _DuplicateProfile:
+def duplicate_profile(record: IndividualRecord) -> _DuplicateProfile:
     """Normalize person, event, place, and relationship keys exactly once."""
     cancellation_checkpoint()
     year = record.birth_year
@@ -1518,7 +1518,7 @@ def _duplicate_profile(record: IndividualRecord) -> _DuplicateProfile:
 
 def _blocking_keys(record: IndividualRecord) -> set[tuple[str, ...]]:
     """Return cached-profile keys for compatibility with quality helpers."""
-    return set(_duplicate_profile(record).blocking_keys)
+    return set(duplicate_profile(record).blocking_keys)
 
 
 def _blocking_frequencies(
@@ -1583,7 +1583,7 @@ def estimate_duplicate_search(
 ) -> DuplicateSearchPlan:
     """Estimate bounded duplicate work without scoring or exposing genealogy."""
     effective_limits = limits or DuplicateSearchLimits()
-    profiles = tuple(_duplicate_profile(record) for record in records)
+    profiles = tuple(duplicate_profile(record) for record in records)
     frequencies = _blocking_frequencies(profiles)
     raw_pairs = _raw_pair_upper_bound(profiles, cross_source_only)
     per_person_pair_bound = len(records) * effective_limits.max_pairs_per_person // 2
@@ -1617,7 +1617,7 @@ def estimate_duplicate_search(
     )
 
 
-def _bounded_candidate_pairs(
+def bounded_candidate_pairs(
     profiles: Sequence[_DuplicateProfile],
     limits: DuplicateSearchLimits,
     *,
@@ -1675,9 +1675,9 @@ def find_duplicate_candidates(
     if not 0 <= threshold <= 100:
         raise ValueError("similarity threshold must be between 0 and 100")
     effective_limits = limits or DuplicateSearchLimits()
-    profiles = tuple(_duplicate_profile(record) for record in records)
+    profiles = tuple(duplicate_profile(record) for record in records)
     candidates: list[tuple[float, int, int]] = []
-    for left, right in _bounded_candidate_pairs(
+    for left, right in bounded_candidate_pairs(
         profiles,
         effective_limits,
         cross_source_only=True,
@@ -1749,7 +1749,7 @@ def _dedup_response_schema() -> dict[str, object]:
     }
 
 
-def ai_resolve(
+def resolve_duplicate(
     a: IndividualRecord,
     b: IndividualRecord,
     *,
@@ -1905,7 +1905,7 @@ def _get_ai_verdict(
     resolver: IdentityResolver | None,
 ) -> dict[str, object]:
     """Resolve a bounded pair, allowing stable service errors to propagate."""
-    return ai_resolve(a, b, resolver=resolver)
+    return resolve_duplicate(a, b, resolver=resolver)
 
 
 def merge_records(
@@ -2233,11 +2233,18 @@ def _record_to_gedcom_lines(record: IndividualRecord) -> str:
 
 
 build_dedup_prompt = _build_dedup_prompt
+collection_similarity = _collection_similarity
+confidence_value = _confidence_value
+country_from_place = _country_from_place
 dedup_response_schema = _dedup_response_schema
+fact_similarity = _fact_similarity
 individual_from_record = _individual_from_record
+relative_similarity = _relative_similarity
+serialize_individual_record = _record_to_gedcom_lines
 
 __all__ = [
     "DEFAULT_SIMILARITY_THRESHOLD",
+    "DETERMINISTIC_HARD_CONFLICTS",
     "DuplicateSearchLimits",
     "DuplicateSearchPlan",
     "GenealogicalFact",
@@ -2247,14 +2254,23 @@ __all__ = [
     "PersonalName",
     "RelativeIdentity",
     "assess_similarity",
+    "bounded_candidate_pairs",
     "build_dedup_prompt",
+    "collection_similarity",
+    "confidence_value",
+    "country_from_place",
     "dedup_response_schema",
+    "duplicate_profile",
     "enrich_relationship_context",
     "estimate_duplicate_search",
+    "fact_similarity",
     "find_duplicate_candidates",
     "individual_from_record",
     "merge_records",
     "merge_two_records",
     "normalise_gedcom_date",
+    "relative_similarity",
+    "resolve_duplicate",
+    "serialize_individual_record",
     "similarity_score",
 ]
