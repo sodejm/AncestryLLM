@@ -349,9 +349,7 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
 def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_proof() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    proof = (ROOT / ".github/workflows/release-project-gate-proof.yml").read_text(
-        encoding="utf-8"
-    )
+    proof = (ROOT / ".github/workflows/release-project-gate-proof.yml").read_text(encoding="utf-8")
 
     for workflow in (readiness, release, proof):
         assert "PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}" in workflow
