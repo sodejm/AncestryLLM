@@ -1,12 +1,13 @@
-# Pre-commit hooks: run automatically before each commit to block secrets and
-# common mistakes from ever entering the public history.
+# Commit hooks block secrets and cheap file-hygiene mistakes. The pre-push hook
+# runs the canonical local quality and security gates outside the edit loop.
 #
 # Setup:
-#   pip install pre-commit
-#   pre-commit install
+#   make bootstrap
 #
 # Run against all files on demand:
 #   pre-commit run --all-files
+default_stages: [pre-commit]
+
 repos:
   # Use the locally installed gitleaks binary (brew) so no Go build is required.
   - repo: local
@@ -16,6 +17,22 @@ repos:
         entry: gitleaks protect --staged --redact
         language: system
         pass_filenames: false
+
+      - id: ancestryllm-pre-push
+        name: Run canonical local gates before push
+        entry: make pre-push
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: ancestryllm-workflow-audit
+        name: Audit changed GitHub Actions workflows
+        entry: make workflow-audit
+        language: system
+        pass_filenames: false
+        files: ^\.github/workflows/
+        stages: [pre-push]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

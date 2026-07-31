@@ -106,10 +106,13 @@ The workflow rechecks the exact configured milestone and tracker, permits only
 that `release-tracker` exception, and refuses every other open item. Local
 worktrees are machine-specific, so their cleanup is an explicit operator
 attestation recorded in the evidence bundle.
-The readiness workflow records the exact commit, run URL, and complete gate
-inventory in `gates.json`. The tag workflow rechecks milestone closure, requires
-that exact approved record, and compares the release distribution hashes with
-the readiness build before any artifact is published.
+The readiness workflow is the authoritative product-quality and security gate.
+It records the exact commit, run URL, and complete gate inventory in
+`gates.json`. The tag workflow rechecks milestone closure, requires that exact
+approved record, deterministically rebuilds the distributions and SBOM, and
+compares the distribution hashes with the readiness build before any artifact
+is published. It does not repeat pytest, lint, type checking, dependency audit,
+or Semgrep after accepting the exact successful readiness evidence.
 
 ## Tag and publish
 
@@ -131,7 +134,8 @@ git push origin "${release_tag}"
 ```
 
 Push only the release tag. The tag-triggered workflow verifies the signed,
-annotated tag; rebuilds and attests the artifacts; prepares a draft GitHub
+annotated tag and exact readiness evidence; deterministically rebuilds and
+attests the artifacts; prepares a draft GitHub
 Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
 not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
 artifact hashes; and pauses for required production approval. Production PyPI
