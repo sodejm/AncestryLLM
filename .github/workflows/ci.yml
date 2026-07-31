@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "37 5 * * 1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +17,49 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      dependencies: ${{ steps.classify.outputs.dependencies }}
+      workflows: ${{ steps.classify.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify pull request changes
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "dependencies=true" >> "$GITHUB_OUTPUT"
+            echo "workflows=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          dependencies=false
+          workflows=false
+          while IFS= read -r changed_path; do
+            case "$changed_path" in
+              pyproject.toml|uv.lock)
+                dependencies=true
+                ;;
+            esac
+            case "$changed_path" in
+              .github/workflows/*)
+                workflows=true
+                ;;
+            esac
+          done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+
+          echo "dependencies=$dependencies" >> "$GITHUB_OUTPUT"
+          echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
+
   test:
     name: test (${{ matrix.python }})
     strategy:
@@ -38,12 +84,34 @@ jobs:
             uv-${{ runner.os }}-${{ matrix.python }}-
       - name: Install locked environment
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
       - name: Tests
         run: uv run python -m pytest --verbose --cov --cov-report=term-missing
-      - name: Lint and type check
-        if: matrix.python == '3.12'
+
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cache uv downloads and builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-3.12-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-3.12-
+      - name: Install locked environment
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv sync --locked --all-extras
+      - name: Lint, type check, and repository contracts
         run: |
           uv run ruff check src tests scripts
           uv run ruff format --check src tests scripts
@@ -53,6 +121,7 @@ jobs:
 
   security:
     name: security
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,17 +143,21 @@ jobs:
           key: uv-${{ runner.os }}-3.12-${{ hashFiles('uv.lock') }}
           restore-keys: |
             uv-${{ runner.os }}-3.12-
-      - name: Install locked environment
-        run: |
-          python -m pip install --disable-pip-version-check uv
-          uv sync --locked --all-extras
-      - name: Dependency and static analysis
-        run: |
-          uv run pip-audit
-          uv run --locked --script scripts/run_pinned_semgrep.py src
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check uv==0.12.0
+      - name: Install locked environment for dependency checks
+        if: needs.changes.outputs.dependencies == 'true'
+        run: uv sync --locked --all-extras
+      - name: Audit locked dependencies
+        if: needs.changes.outputs.dependencies == 'true'
+        run: uv run pip-audit
+      - name: Run pinned static security analysis
+        run: uv run --locked --script scripts/run_pinned_semgrep.py src
       - name: Generate CycloneDX SBOM
+        if: needs.changes.outputs.dependencies == 'true'
         run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: needs.changes.outputs.dependencies == 'true'
         with:
           name: ancestryllm-sbom
           path: sbom.json
@@ -103,7 +176,7 @@ jobs:
           cache: pip
       - name: Install locked environment
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
       - name: Build reproducible release artifacts
         run: uv run python scripts/build_release.py --output-dir dist
@@ -119,8 +192,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.12", "3.13", "3.14"]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.12","3.13","3.14"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -165,6 +238,8 @@ jobs:
 
   workflow-audit:
     name: workflow audit
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -176,6 +251,51 @@ jobs:
           cache: pip
       - name: Audit workflow security
         run: |
-          python -m pip install --disable-pip-version-check uv
+          python -m pip install --disable-pip-version-check uv==0.12.0
           uv sync --locked --all-extras
           uv run zizmor --persona=pedantic .github/workflows
+
+  pr-gate:
+    name: PR gate
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - test
+      - quality
+      - security
+      - package
+      - install-smoke
+      - sdist-smoke
+      - workflow-audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all pull request gates
+        shell: bash
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          INSTALL_RESULT: ${{ needs.install-smoke.result }}
+          SDIST_RESULT: ${{ needs.sdist-smoke.result }}
+          WORKFLOW_AUDIT_RESULT: ${{ needs.workflow-audit.result }}
+        run: |
+          require_success() {
+            local gate="$1"
+            local result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error title=${gate} gate::Expected success, got ${result}"
+              return 1
+            fi
+          }
+
+          require_success test "$TEST_RESULT"
+          require_success quality "$QUALITY_RESULT"
+          require_success security "$SECURITY_RESULT"
+          require_success package "$PACKAGE_RESULT"
+          require_success install-smoke "$INSTALL_RESULT"
+          require_success sdist-smoke "$SDIST_RESULT"
+
+          if [[ "$WORKFLOW_AUDIT_RESULT" != "success" && "$WORKFLOW_AUDIT_RESULT" != "skipped" ]]; then
+            echo "::error title=workflow audit gate::Expected success or skipped, got ${WORKFLOW_AUDIT_RESULT}"
+            exit 1
+          fi

@@ -739,11 +739,12 @@ locked `uv.lock` dependency graph. The Make targets are the local contract:
 CI installs the locked environment with all extras and tests Python 3.12,
 3.13, and 3.14. Coverage is branch-aware with a current 75% floor. Python 3.12
 also runs Ruff, strict mypy, the executable architecture contract, and the
-repository safety script. Release readiness and release workflows run the same
-architecture check. A separate job runs `pip-audit`, Semgrep, and uploads an
-SBOM. CodeQL runs on pushes, pull requests, and a weekly schedule. Dependabot
-covers Python and GitHub Actions. Pinned action commit SHAs reduce workflow
-supply-chain drift.
+repository safety script. Release readiness is the authoritative release gate
+and runs the same architecture check; the tag workflow consumes that exact
+approved evidence instead of repeating it. Dependency changes run `pip-audit`
+and produce an SBOM, while Semgrep remains a pull-request gate. CodeQL runs on
+pushes, pull requests, and a weekly schedule. Dependabot covers Python and
+GitHub Actions. Pinned action commit SHAs reduce workflow supply-chain drift.
 
 Tests are intentionally split by risk:
 

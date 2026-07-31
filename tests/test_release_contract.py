@@ -258,9 +258,9 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     sources = {
         ".github/workflows/ci.yml": runner,
         ".github/workflows/release-readiness.yml": runner,
-        ".github/workflows/release.yml": runner,
         "Makefile": "$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src",
     }
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
@@ -272,6 +272,7 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
         assert "uvx semgrep" not in content
         assert "--config p/python" not in content
         assert "--config p/secrets" not in content
+    assert runner not in release
 
 
 def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
@@ -281,11 +282,33 @@ def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
     for relative_path in (
         ".github/workflows/ci.yml",
         ".github/workflows/release-readiness.yml",
-        ".github/workflows/release.yml",
     ):
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert content.count(command) == 1
         assert "uv run pytest " not in content
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert command not in release
+
+
+def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    duplicate_gates = (
+        "uv run python -m pytest",
+        "uv run ruff check",
+        "uv run ruff format",
+        "uv run mypy",
+        "scripts/check_architecture_contracts.py",
+        "scripts/check_repository_safety.sh",
+        "uv run pip-audit",
+        "scripts/run_pinned_semgrep.py",
+    )
+
+    assert "Rebuild deterministic artifacts and SBOM" in release
+    assert "uv run python scripts/build_release.py --output-dir dist" in release
+    assert "uv run cyclonedx-py environment --output-file dist/sbom.json" in release
+    assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
+    for duplicate_gate in duplicate_gates:
+        assert duplicate_gate not in release
 
 
 def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:

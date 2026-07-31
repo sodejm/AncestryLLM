@@ -10,8 +10,9 @@ Describe what this PR changes and why.
 
 ## Verification
 
-- [ ] `pre-commit run --all-files`
-- [ ] `pytest --verbose`
+- [ ] Relevant targeted checks passed during development
+- [ ] `make pre-push` passed before the branch was pushed
+- [ ] `make workflow-audit` passed if GitHub Actions workflows changed
 - [ ] Security-sensitive paths remain read-only (`:ro` for `family_trees`)
 - [ ] No secrets or private genealogy data added
 

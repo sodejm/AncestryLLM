@@ -52,7 +52,7 @@ for per-format input limits and stable rejection codes.
 ```bash
 git clone https://github.com/sodejm/AncestryLLM.git
 cd AncestryLLM
-make setup
+make bootstrap
 make test
 make lint
 make typecheck
@@ -60,8 +60,11 @@ make security
 make sbom
 ```
 
-`make setup` creates `.venv` and installs the checkout in editable mode with
-locked development and provider dependencies. The equivalent manual command is
+`make bootstrap` creates `.venv`, installs the checkout in editable mode with
+locked development and provider dependencies, and installs lightweight commit
+hooks plus the canonical pre-push quality/security gate. Use `make setup` when
+automation needs the environment without modifying Git hooks. The equivalent
+manual install command is
 `.venv/bin/pip install --editable '.[all-llm,dev]'`; it is for contributors,
 not end-user installation.
 
@@ -76,6 +79,7 @@ Read [the architecture](https://github.com/sodejm/AncestryLLM/blob/main/ARCHITEC
 [GEDCOM compatibility](https://github.com/sodejm/AncestryLLM/blob/main/docs/GEDCOM_COMPATIBILITY.md),
 [encrypted backups](https://github.com/sodejm/AncestryLLM/blob/main/docs/ENCRYPTED_BACKUPS.md),
 [bounded file ingress](https://github.com/sodejm/AncestryLLM/blob/main/docs/FILE_INGRESS.md),
+[CI workflow guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CI.md),
 and [threat model](https://github.com/sodejm/AncestryLLM/blob/main/docs/THREAT_MODEL.md).
 
 Versioning follows [Semantic Versioning 2.0.0](https://semver.org/). The

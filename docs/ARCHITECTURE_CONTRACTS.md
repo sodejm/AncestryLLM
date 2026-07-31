@@ -69,8 +69,9 @@ flowchart TB
 ## Enforced inward dependencies
 
 `scripts/check_architecture_contracts.py` parses imports without importing the
-application. It is run by `make lint`, the ordinary CI workflow, release
-readiness, and the release workflow.
+application. It is run by `make lint`, the ordinary CI workflow, and release
+readiness. The tag workflow consumes the exact approved readiness evidence
+instead of repeating the check.
 
 The checker enforces these rules:
 

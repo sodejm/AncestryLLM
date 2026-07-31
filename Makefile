@@ -2,15 +2,17 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 
-.PHONY: help setup console test lint typecheck security sbom package workflow-audit hooks
+.PHONY: help setup bootstrap console test lint typecheck security pre-push sbom package workflow-audit hooks
 
 help:
-	@echo "Available targets: setup console test lint typecheck security sbom package workflow-audit hooks"
+	@echo "Available targets: setup bootstrap console test lint typecheck security pre-push sbom package workflow-audit hooks"
 
 setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
 	@$(VENV_PYTHON) -m pip install --upgrade pip uv==0.12.0
 	@$(VENV_PYTHON) -m uv sync --active --all-extras --locked
+
+bootstrap: setup hooks
 
 console:
 	@$(VENV_PYTHON) -m ancestryllm
@@ -31,6 +33,8 @@ security:
 	@$(VENV_DIR)/bin/pip-audit
 	@$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src
 
+pre-push: test lint typecheck security
+
 sbom:
 	@$(VENV_DIR)/bin/cyclonedx-py environment --output-file sbom.json $(VENV_PYTHON)
 
@@ -40,5 +44,5 @@ package:
 workflow-audit:
 	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows
 
-hooks:
-	@$(VENV_DIR)/bin/pre-commit install
+hooks: setup
+	@$(VENV_DIR)/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
