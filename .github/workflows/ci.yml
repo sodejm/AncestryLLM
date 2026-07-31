@@ -60,8 +60,25 @@ jobs:
           echo "dependencies=$dependencies" >> "$GITHUB_OUTPUT"
           echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
 
+  lockfile:
+    name: lockfile consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Check uv lockfile consistency
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv lock --check
+
   test:
     name: test (${{ matrix.python }})
+    needs: lockfile
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +108,7 @@ jobs:
 
   quality:
     name: quality
+    needs: lockfile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,7 +139,7 @@ jobs:
 
   security:
     name: security
-    needs: changes
+    needs: [changes, lockfile]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,6 +183,7 @@ jobs:
 
   package:
     name: package
+    needs: lockfile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -238,7 +257,7 @@ jobs:
 
   workflow-audit:
     name: workflow audit
-    needs: changes
+    needs: [changes, lockfile]
     if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -259,6 +278,7 @@ jobs:
     name: PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
+      - lockfile
       - test
       - quality
       - security
@@ -271,6 +291,7 @@ jobs:
       - name: Require all pull request gates
         shell: bash
         env:
+          LOCKFILE_RESULT: ${{ needs.lockfile.result }}
           TEST_RESULT: ${{ needs.test.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
@@ -288,6 +309,7 @@ jobs:
             fi
           }
 
+          require_success lockfile "$LOCKFILE_RESULT"
           require_success test "$TEST_RESULT"
           require_success quality "$QUALITY_RESULT"
           require_success security "$SECURITY_RESULT"

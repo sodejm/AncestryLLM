@@ -26,6 +26,13 @@ repos:
         always_run: true
         stages: [pre-push]
 
+      - id: ancestryllm-lockfile-consistency
+        name: Check uv lockfile consistency
+        entry: make lock-check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
       - id: ancestryllm-workflow-audit
         name: Audit changed GitHub Actions workflows
         entry: make workflow-audit

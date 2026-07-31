@@ -19,7 +19,7 @@ def test_dependabot_batches_routine_updates_without_delaying_security_fixes() ->
     assert configuration.startswith("version: 2\nupdates:\n")
     assert configuration.count('package-ecosystem: "') == 2
 
-    for ecosystem in ("pip", "github-actions"):
+    for ecosystem in ("uv", "github-actions"):
         block = _ecosystem_block(configuration, ecosystem)
         assert 'interval: "weekly"' in block
         assert "cooldown:\n      default-days: 3" in block
@@ -28,5 +28,6 @@ def test_dependabot_batches_routine_updates_without_delaying_security_fixes() ->
         assert 'patterns:\n          - "*"' in block
 
     # Security updates must not inherit a routine-update label or cadence.
-    pip_block = _ecosystem_block(configuration, "pip")
-    assert '      - "security"' not in pip_block
+    uv_block = _ecosystem_block(configuration, "uv")
+    assert '      - "security"' not in uv_block
+    assert 'package-ecosystem: "pip"' not in configuration

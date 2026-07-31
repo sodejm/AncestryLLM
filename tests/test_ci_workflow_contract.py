@@ -52,8 +52,18 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
     assert security_job.count(dependency_condition) == 4
     assert security_job.count("uv run pip-audit") == 1
     assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py src") == 1
-    assert "needs: changes" in workflow_audit_job
+    assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
+
+
+def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    lockfile_job = _job(workflow, "lockfile")
+
+    assert "name: lockfile consistency" in lockfile_job
+    assert "uv lock --check" in lockfile_job
+    for job in ("test", "quality", "security", "package", "workflow-audit"):
+        assert "lockfile" in _job(workflow, job).split("runs-on:", maxsplit=1)[0]
 
 
 def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
@@ -63,6 +73,7 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
     assert "name: PR gate" in gate
     assert "if: ${{ always() && github.event_name == 'pull_request' }}" in gate
     for dependency in (
+        "lockfile",
         "test",
         "quality",
         "security",
@@ -106,8 +117,12 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert "default_stages: [pre-commit]" in hooks
     assert "entry: make pre-push" in hooks
     assert "entry: make workflow-audit" in hooks
+    assert "entry: make lock-check" in hooks
+    assert "files: ^(pyproject\\.toml|uv\\.lock)$" in hooks
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
+    assert "lock-check:" in makefile
+    assert "-m uv lock --check" in makefile
     assert "pre-push: test lint typecheck security" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 
