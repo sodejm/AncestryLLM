@@ -6,9 +6,9 @@ from __future__ import annotations
 import argparse
 import ast
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Iterable, Sequence
+from typing import Final, Iterable, Mapping, Sequence
 
 PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.application",
@@ -180,6 +180,10 @@ GEDCOM_OPERATION_FORBIDDEN_EXTERNAL_ROOTS: Final[frozenset[str]] = frozenset(
 )
 
 HOST_OBJECT_MODULES: Final[frozenset[str]] = frozenset({"os", "pathlib"})
+
+STANDARD_MODULE_ATTRIBUTES: Final[frozenset[str]] = frozenset(
+    {"__doc__", "__loader__", "__name__", "__package__", "__spec__"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -517,70 +521,464 @@ def _private_gedcom_targets(reference: ImportReference) -> tuple[str, ...]:
     return tuple(targets)
 
 
+@dataclass(frozen=True, slots=True)
+class _ModuleBinding:
+    """One lexically bound module name and the modules imported through it."""
+
+    path: str
+    imported_modules: frozenset[str]
+
+    def child(self, name: str) -> _ModuleBinding | None:
+        path = f"{self.path}.{name}"
+        if any(
+            imported == path or imported.startswith(f"{path}.")
+            for imported in self.imported_modules
+        ):
+            return _ModuleBinding(path=path, imported_modules=self.imported_modules)
+        return None
+
+
+@dataclass(slots=True)
+class _LexicalScope:
+    """Bindings visible at one Python lexical scope while walking in source order."""
+
+    kind: str
+    parent: _LexicalScope | None
+    local_names: frozenset[str] = frozenset()
+    aliases: dict[str, _ModuleBinding] = field(default_factory=dict)
+    shadowed: set[str] = field(default_factory=set)
+
+
+class _LocalBindingCollector(ast.NodeVisitor):
+    """Collect names local to one function without descending into child scopes."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+        self.globals: set[str] = set()
+        self.nonlocals: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        self.names.update(
+            alias.asname or alias.name.split(".", maxsplit=1)[0] for alias in node.names
+        )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self.names.update(alias.asname or alias.name for alias in node.names if alias.name != "*")
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        return
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        return
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        return
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        return
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.globals.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.nonlocals.update(node.names)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name is not None:
+            self.names.add(node.name)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        for case in node.cases:
+            self.names.update(_pattern_names(case.pattern))
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    names = {
+        argument.arg
+        for argument in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)
+    }
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _function_local_names(
+    body: Sequence[ast.stmt],
+    arguments: ast.arguments,
+) -> frozenset[str]:
+    collector = _LocalBindingCollector()
+    for statement in body:
+        collector.visit(statement)
+    names = collector.names | _argument_names(arguments)
+    names.difference_update(collector.globals | collector.nonlocals)
+    return frozenset(names)
+
+
+def _target_names(target: ast.AST) -> set[str]:
+    return {
+        node.id
+        for node in ast.walk(target)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+    }
+
+
+def _pattern_names(pattern: ast.pattern) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(pattern):
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name is not None:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+            names.add(node.rest)
+    return names
+
+
+class _FacadeAccessVisitor(ast.NodeVisitor):
+    """Resolve façade module aliases without leaking them across lexical scopes."""
+
+    def __init__(
+        self,
+        *,
+        path: Path,
+        importer: str,
+        facade_exports: Mapping[str, frozenset[str]],
+    ) -> None:
+        self.path = path
+        self.importer = importer
+        self.facade_exports = facade_exports
+        self.facades = frozenset(facade_exports)
+        self.scope = _LexicalScope(kind="module", parent=None)
+        self.violations: list[Violation] = []
+
+    @staticmethod
+    def _closure_parent(scope: _LexicalScope) -> _LexicalScope | None:
+        current: _LexicalScope | None = scope
+        while current is not None and current.kind == "class":
+            current = current.parent
+        return current
+
+    def _resolve_name(
+        self,
+        name: str,
+        scope: _LexicalScope | None = None,
+    ) -> _ModuleBinding | None:
+        current = scope or self.scope
+        if name in current.aliases:
+            return current.aliases[name]
+        if name in current.shadowed or name in current.local_names:
+            return None
+        return self._resolve_name(name, current.parent) if current.parent is not None else None
+
+    def _resolve_module(self, node: ast.expr) -> _ModuleBinding | None:
+        if isinstance(node, ast.Name):
+            return self._resolve_name(node.id)
+        if isinstance(node, ast.Attribute):
+            parent = self._resolve_module(node.value)
+            return parent.child(node.attr) if parent is not None else None
+        return None
+
+    def _bind_alias(self, name: str, binding: _ModuleBinding) -> None:
+        existing = self.scope.aliases.get(name)
+        if existing is not None and existing.path == binding.path:
+            binding = _ModuleBinding(
+                path=binding.path,
+                imported_modules=existing.imported_modules | binding.imported_modules,
+            )
+        self.scope.aliases[name] = binding
+        self.scope.shadowed.add(name)
+
+    def _shadow(self, names: Iterable[str]) -> None:
+        for name in names:
+            self.scope.aliases.pop(name, None)
+            self.scope.shadowed.add(name)
+
+    def _add_undeclared(self, line: int, facade: str, symbol: str, action: str) -> None:
+        self.violations.append(
+            Violation(
+                path=self.path,
+                line=line,
+                code="ARCH503",
+                message=(
+                    f"repository consumer {self.importer!r} {action} undeclared symbol "
+                    f"{symbol!r} through supported façade {facade!r}"
+                ),
+            )
+        )
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            name = alias.asname or alias.name.split(".", maxsplit=1)[0]
+            if alias.name in self.facades:
+                path = alias.name if alias.asname else alias.name.split(".", maxsplit=1)[0]
+                self._bind_alias(
+                    name,
+                    _ModuleBinding(path=path, imported_modules=frozenset({alias.name})),
+                )
+            else:
+                self._shadow((name,))
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        imported = node.module or ""
+        allowed = self.facade_exports.get(imported)
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            child = f"{imported}.{alias.name}"
+            name = alias.asname or alias.name
+            if child in self.facades:
+                self._bind_alias(
+                    name,
+                    _ModuleBinding(path=child, imported_modules=frozenset({child})),
+                )
+                continue
+            self._shadow((name,))
+            if allowed is not None and alias.name not in allowed:
+                self._add_undeclared(node.lineno, imported, alias.name, "imports")
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        module = self._resolve_module(node.value)
+        if module is not None and module.path in self.facade_exports:
+            child = f"{module.path}.{node.attr}"
+            if (
+                child not in self.facades
+                and node.attr not in STANDARD_MODULE_ATTRIBUTES
+                and node.attr not in self.facade_exports[module.path]
+            ):
+                self._add_undeclared(node.lineno, module.path, node.attr, "accesses")
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        for target in node.targets:
+            self.visit(target)
+            self._shadow(_target_names(target))
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self.visit(node.annotation)
+        if node.value is not None:
+            self.visit(node.value)
+        self.visit(node.target)
+        self._shadow(_target_names(node.target))
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self.visit(node.target)
+        self.visit(node.value)
+        self._shadow(_target_names(node.target))
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._shadow(_target_names(node.target))
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        for target in node.targets:
+            self.visit(target)
+            self._shadow(_target_names(target))
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self._shadow(_target_names(node.target))
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._shadow(_target_names(node.target))
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._shadow(_target_names(item.optional_vars))
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._shadow(_target_names(item.optional_vars))
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type is not None:
+            self.visit(node.type)
+        if node.name is not None:
+            self._shadow((node.name,))
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for case in node.cases:
+            self._shadow(_pattern_names(case.pattern))
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+
+    def _visit_function(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        if node.returns is not None:
+            self.visit(node.returns)
+        self._shadow((node.name,))
+        previous = self.scope
+        self.scope = _LexicalScope(
+            kind="function",
+            parent=self._closure_parent(previous),
+            local_names=_function_local_names(node.body, node.args),
+        )
+        try:
+            for statement in node.body:
+                self.visit(statement)
+        finally:
+            self.scope = previous
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        previous = self.scope
+        self.scope = _LexicalScope(
+            kind="lambda",
+            parent=self._closure_parent(previous),
+            local_names=frozenset(_argument_names(node.args)),
+        )
+        try:
+            self.visit(node.body)
+        finally:
+            self.scope = previous
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        previous = self.scope
+        self.scope = _LexicalScope(kind="class", parent=previous)
+        try:
+            for statement in node.body:
+                self.visit(statement)
+        finally:
+            self.scope = previous
+        self._shadow((node.name,))
+
+    def _visit_comprehension(
+        self,
+        generators: Sequence[ast.comprehension],
+        values: Sequence[ast.expr],
+    ) -> None:
+        if not generators:
+            for value in values:
+                self.visit(value)
+            return
+        self.visit(generators[0].iter)
+        previous = self.scope
+        local_names = frozenset(
+            name for generator in generators for name in _target_names(generator.target)
+        )
+        self.scope = _LexicalScope(
+            kind="comprehension",
+            parent=self._closure_parent(previous),
+            local_names=local_names,
+        )
+        try:
+            for index, generator in enumerate(generators):
+                if index:
+                    self.visit(generator.iter)
+                self._shadow(_target_names(generator.target))
+                for condition in generator.ifs:
+                    self.visit(condition)
+            for value in values:
+                self.visit(value)
+        finally:
+            self.scope = previous
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, (node.key, node.value))
+
+
+def _repository_facade_exports(repository_root: Path) -> dict[str, frozenset[str]]:
+    package_root = repository_root / "src" / "ancestryllm"
+    paths = tuple(sorted(package_root.rglob("*.py"))) if package_root.is_dir() else ()
+    module_paths = {_module_name(package_root, path): path for path in paths}
+    exports: dict[str, frozenset[str]] = {}
+    for module in PUBLIC_FACADE_MODULES:
+        if not module.startswith("ancestryllm.gedcom."):
+            continue
+        path = module_paths.get(module)
+        if path is None:
+            continue
+        declared = _literal_all(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+        if declared is not None:
+            exports[module] = frozenset(declared)
+    return exports
+
+
 def _private_facade_symbol_violations(
     path: Path,
     importer: str,
+    facade_exports: Mapping[str, frozenset[str]],
 ) -> tuple[Violation, ...]:
-    """Reject underscore-prefixed access through supported GEDCOM façades."""
+    """Reject consumer access not declared by supported GEDCOM façades."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    facades = frozenset(
-        module
-        for module in PUBLIC_FACADE_MODULES
-        if module.startswith("ancestryllm.gedcom.")
-        and module not in {"ancestryllm.gedcom.engine", "ancestryllm.gedcom.incremental"}
+    visitor = _FacadeAccessVisitor(
+        path=path,
+        importer=importer,
+        facade_exports=facade_exports,
     )
-    aliases: dict[str, str] = {}
-    violations: list[Violation] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in facades and alias.asname:
-                    aliases[alias.asname] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            imported = node.module or ""
-            if imported in facades:
-                for alias in node.names:
-                    if alias.name.startswith("_") and not alias.name.startswith("__"):
-                        violations.append(
-                            Violation(
-                                path=path,
-                                line=node.lineno,
-                                code="ARCH503",
-                                message=(
-                                    f"repository consumer {importer!r} imports private symbol "
-                                    f"{alias.name!r} from supported façade {imported!r}"
-                                ),
-                            )
-                        )
-            if imported == "ancestryllm.gedcom":
-                for alias in node.names:
-                    child = f"{imported}.{alias.name}"
-                    if child in facades:
-                        aliases[alias.asname or alias.name] = child
-
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in aliases
-            and node.attr.startswith("_")
-            and not node.attr.startswith("__")
-        ):
-            violations.append(
-                Violation(
-                    path=path,
-                    line=node.lineno,
-                    code="ARCH503",
-                    message=(
-                        f"repository consumer {importer!r} accesses private symbol "
-                        f"{node.attr!r} through supported façade {aliases[node.value.id]!r}"
-                    ),
-                )
-            )
-
-    return tuple(violations)
+    visitor.visit(tree)
+    return tuple(visitor.violations)
 
 
 def check_repository_consumers(
@@ -588,6 +986,7 @@ def check_repository_consumers(
     *,
     exceptions: Sequence[ConsumerImportException] = CHARACTERIZATION_IMPORT_EXCEPTIONS,
     require_all_exceptions: bool = True,
+    facade_exports: Mapping[str, frozenset[str]] | None = None,
 ) -> ArchitectureReport:
     """Reject private GEDCOM imports and façade symbols in tests and scripts."""
 
@@ -611,11 +1010,15 @@ def check_repository_consumers(
     )
     violations: list[Violation] = []
     used_exceptions: set[ConsumerImportException] = set()
+    resolved_facade_exports = (
+        _repository_facade_exports(repository_root) if facade_exports is None else facade_exports
+    )
     for path in paths:
         violations.extend(
             _private_facade_symbol_violations(
                 path,
                 _repository_module_name(repository_root, path),
+                resolved_facade_exports,
             )
         )
     for reference in references:
