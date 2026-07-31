@@ -17,6 +17,10 @@ from scripts.check_architecture_contracts import (
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "ancestryllm"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+GEDCOM_FACADE_EXPORTS = {
+    "ancestryllm.gedcom.identity": frozenset({"country_from_place"}),
+    "ancestryllm.gedcom.quality": frozenset({"analyze_quality"}),
+}
 
 
 def _write_module(root: Path, module: str, source: str) -> None:
@@ -67,8 +71,14 @@ def test_repository_consumer_gate_rejects_private_gedcom_import(tmp_path: Path) 
     "source",
     (
         "from ancestryllm.gedcom.identity import _country_from_place\n",
+        "from ancestryllm.gedcom.identity import GEDCOM_MONTHS\n",
         "from ancestryllm.gedcom import identity as gm\ngm._country_from_place('Boston')\n",
         "import ancestryllm.gedcom.quality as quality\nquality._duplicate_pairs([])\n",
+        (
+            "import ancestryllm.gedcom.identity\n"
+            "ancestryllm.gedcom.identity._country_from_place('Boston')\n"
+        ),
+        ("import ancestryllm.gedcom.identity\nancestryllm.gedcom.identity.GEDCOM_MONTHS\n"),
     ),
 )
 def test_repository_consumer_gate_rejects_private_facade_symbol(
@@ -84,9 +94,61 @@ def test_repository_consumer_gate_rejects_private_facade_symbol(
         repository_root,
         exceptions=(),
         require_all_exceptions=False,
+        facade_exports=GEDCOM_FACADE_EXPORTS,
     )
 
     assert {violation.code for violation in report.violations} == {"ARCH503"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from ancestryllm.gedcom.identity import country_from_place\n",
+        ("from ancestryllm.gedcom import identity as gm\ngm.country_from_place('Boston')\n"),
+        (
+            "import ancestryllm.gedcom.identity\n"
+            "ancestryllm.gedcom.identity.country_from_place('Boston')\n"
+        ),
+        (
+            "import ancestryllm.gedcom.identity as identity\n"
+            "def inspect(identity):\n"
+            "    return identity.GEDCOM_MONTHS\n"
+        ),
+        (
+            "import ancestryllm.gedcom.identity as identity\n"
+            "def inspect():\n"
+            "    identity = object()\n"
+            "    return identity.GEDCOM_MONTHS\n"
+        ),
+        (
+            "import ancestryllm.gedcom.identity as identity\n"
+            "values = [identity.GEDCOM_MONTHS for identity in fixtures]\n"
+        ),
+        (
+            "import ancestryllm.gedcom.identity as identity\n"
+            "class Fixture:\n"
+            "    identity = object()\n"
+            "    value = identity.GEDCOM_MONTHS\n"
+        ),
+    ),
+)
+def test_repository_consumer_gate_respects_exports_and_lexical_shadowing(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    repository_root = tmp_path / "repository"
+    consumer = repository_root / "tests" / "test_feature.py"
+    consumer.parent.mkdir(parents=True)
+    consumer.write_text(source, encoding="utf-8")
+
+    report = check_repository_consumers(
+        repository_root,
+        exceptions=(),
+        require_all_exceptions=False,
+        facade_exports=GEDCOM_FACADE_EXPORTS,
+    )
+
+    assert report.passed
 
 
 @pytest.mark.parametrize(

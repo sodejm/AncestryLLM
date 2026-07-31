@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
 import pytest
 
-import ancestryllm.gedcom.service as service_module
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.gedcom import graph, identity, quality
@@ -116,7 +116,7 @@ def test_merge_publication_failure_wins_cancellation_and_rolls_back_bundle(
     service = GedcomService()
     second_artifact_started = threading.Event()
     allow_failure = threading.Event()
-    replace = service_module.os.replace
+    replace = os.replace
     failed_once = False
 
     def fail_quality(source: str | Path, destination: str | Path) -> None:
@@ -129,7 +129,7 @@ def test_merge_publication_failure_wins_cancellation_and_rolls_back_bundle(
         if Path(source) != Path(destination):
             replace(source, destination)
 
-    monkeypatch.setattr(service_module.os, "replace", fail_quality)
+    monkeypatch.setattr(os, "replace", fail_quality)
     manager = JobManager(max_workers=1, max_pending=1)
     try:
         job = manager.submit(
