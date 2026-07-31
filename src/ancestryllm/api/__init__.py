@@ -1,0 +1,47 @@
+"""Private, authenticated FastAPI foundation for the future Electron host."""
+
+from ancestryllm.api.app import ApiLifecycle, InternalApiApplication, create_app
+from ancestryllm.api.contracts import (
+    API_BUILD_HEADER,
+    API_CONTRACT,
+    API_NAMESPACE,
+    API_VERSION_HEADER,
+    ApiVersion,
+    CapabilityAction,
+    CapabilityManifest,
+    CapabilityModule,
+    ErrorEnvelope,
+    FailureDetail,
+    HealthResponse,
+    PageMetadata,
+    PaginationPolicy,
+    PaginationRequest,
+    RequestSizePolicy,
+)
+from ancestryllm.api.errors import error_response
+from ancestryllm.api.server import create_uvicorn_config
+from ancestryllm.api.settings import ApiSettings
+
+__all__ = [
+    "API_BUILD_HEADER",
+    "API_CONTRACT",
+    "API_NAMESPACE",
+    "API_VERSION_HEADER",
+    "ApiLifecycle",
+    "ApiSettings",
+    "ApiVersion",
+    "CapabilityAction",
+    "CapabilityManifest",
+    "CapabilityModule",
+    "ErrorEnvelope",
+    "FailureDetail",
+    "HealthResponse",
+    "InternalApiApplication",
+    "PageMetadata",
+    "PaginationPolicy",
+    "PaginationRequest",
+    "RequestSizePolicy",
+    "create_app",
+    "create_uvicorn_config",
+    "error_response",
+]
