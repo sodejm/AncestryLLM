@@ -1,0 +1,131 @@
+name: Bug report
+description: Report a reproducible problem and define its regression test
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private genealogy records, databases,
+        backups, logs, or prompt/response payloads. Report security
+        vulnerabilities privately through the link on the template chooser.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the actual behavior, stable error codes, and user impact.
+      placeholder: When ..., AncestryLLM actually ... instead of ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use the smallest reproducible sequence and fictional data.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: State the observable result that should occur.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the observable, testable conditions required to close this bug.
+      placeholder: |
+        - [ ] The reported defect is reproduced by an automated regression test.
+        - [ ] The regression test passes after the fix.
+        - [ ] Adjacent behavior and documented compatibility remain intact.
+        - [ ] Obsolete code made unnecessary by the fix is removed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-first-plan
+    attributes:
+      label: Test-first regression plan
+      description: |
+        Define the smallest deterministic test that reproduces the defect before
+        production code changes. Include boundary and negative cases when the
+        defect involves security, privacy, data integrity, or error handling.
+      placeholder: |
+        Intended test file and exact test name:
+        Given / when / then:
+        Expected initial failure:
+        Boundary or negative cases:
+    validations:
+      required: true
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security, privacy, and data safety
+      description: |
+        Cover credentials, provider consent, network behavior, private genealogy
+        data, immutable RootsMagic inputs, and loss-minimal GEDCOM handling as relevant.
+      placeholder: Risks and required safeguards, or "No additional impact" with rationale.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include only details relevant to reproducing the defect.
+      placeholder: |
+        OS:
+        Python version:
+        Install or container mode:
+        Provider and model, if relevant:
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation-evidence
+    attributes:
+      label: Validation plan and evidence
+      description: |
+        List the focused regression test and relevant repository gates. Update
+        this field with exact commands and results as evidence becomes available.
+      placeholder: |
+        - Focused regression test:
+        - make test
+        - make lint
+        - make typecheck
+        - make security
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized evidence and context
+      description: |
+        Add sanitized logs or screenshots, related issues, references, and
+        implementation constraints. Remove secrets, paths, person details,
+        and genealogy data before attaching evidence.
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness checklist
+      options:
+        - label: I searched open and closed issues for duplicates.
+          required: true
+        - label: I used fictional or fully sanitized reproduction data.
+          required: true
+        - label: I will observe the regression test fail for the expected reason before implementing the fix.
+          required: true

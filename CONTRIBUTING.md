@@ -11,6 +11,35 @@ must be explicit built-ins with one-shot and console parity; follow the
 [module-authoring contract](docs/MODULE_AUTHORING.md) rather than adding a
 second command registry.
 
+## Test-driven development
+
+Every behavioral change starts from a testable acceptance criterion and follows
+the red-green-refactor loop:
+
+1. **Red:** Add the smallest deterministic, offline test that expresses one
+   required behavior. Run it before changing production code and confirm that
+   it fails for the expected reason.
+2. **Green:** Make the minimum production change needed to pass the new test
+   without weakening existing assertions or safety controls.
+3. **Refactor:** Improve the implementation and test clarity while keeping the
+   focused test green.
+4. **Verify:** Run the surrounding test slice, then the relevant canonical
+   repository gates.
+
+Bug fixes begin with a regression test that reproduces the defect. Changes to
+public commands, service contracts, serialized DTOs, coded errors, providers,
+storage, or genealogy behavior include contract or integration coverage at the
+appropriate boundary. Tests use fictional data and keep `provider=none`
+network-free.
+
+Documentation-only, comment-only, metadata-only, and other genuinely
+non-behavioral changes may not have a meaningful failing behavior test. Explain
+that exception in the issue and pull request, and name the focused validation
+used instead. Do not use an exception for configuration, workflow, or
+dependency changes that alter observable behavior. Pull requests must be green;
+record the initial expected failure as evidence rather than committing a
+deliberately failing test.
+
 Before a pull request run
 `make test lint typecheck security sbom package workflow-audit`. Describe
 scope, privacy impact, threat-model changes, migration impact, and exact test
@@ -40,9 +69,9 @@ as untrusted. Preserve the network-free `provider=none` contract.
 
 Before implementation, map the change to its threat/control and abuse-case IDs,
 OWASP Top 10:2025 category, applicable versioned OWASP ASVS 5.0.0 requirements,
-and NIST SP 800-218 (`PO`, `PS`, `PW`, or `RV`) outcomes. Add positive,
-boundary, and negative regression tests before or with the behavior. A scanner
-result alone does not close a control.
+and NIST SP 800-218 (`PO`, `PS`, `PW`, or `RV`) outcomes. Add and observe
+positive, boundary, and negative regression tests failing before implementing
+the behavior. A scanner result alone does not close a control.
 
 Use the dedicated issue branch/worktree and remain within its exclusive path
 ownership. Do not edit shared lockfiles, generated contracts, workflows,
