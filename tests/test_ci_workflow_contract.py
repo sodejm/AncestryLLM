@@ -76,6 +76,18 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
     assert 'WORKFLOW_AUDIT_RESULT" != "skipped"' in gate
 
 
+def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    install_job = _job(workflow, "install-smoke")
+
+    assert install_job.count("github.event_name == 'pull_request'") == 2
+    assert "'[\"ubuntu-latest\"]'" in install_job
+    assert '\'["ubuntu-latest","macos-latest","windows-latest"]\'' in install_job
+    assert "'[\"3.12\"]'" in install_job
+    assert '\'["3.12","3.13","3.14"]\'' in install_job
+    assert "runs-on: ${{ matrix.os }}" in install_job
+
+
 def test_ci_pins_uv_bootstrap_version() -> None:
     workflow = CI_PATH.read_text(encoding="utf-8")
     installed_versions = re.findall(
@@ -98,3 +110,12 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert "bootstrap: setup hooks" in makefile
     assert "pre-push: test lint typecheck security" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
+
+
+def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
+    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+
+    assert "### Phase A: establish the aggregate gate" in guide
+    assert "### Phase B: reduce the pull-request matrix" in guide
+    assert "Do not merge both commits at once" in guide
+    assert "`PR gate`" in guide

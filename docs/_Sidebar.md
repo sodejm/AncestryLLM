@@ -6,6 +6,7 @@
 - [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Bounded file ingress](FILE_INGRESS.md)
 - [Versioning and compatibility](VERSIONING.md)
+- [Continuous integration](CI.md)
 - [Release runbook](RELEASING.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md)

@@ -79,6 +79,7 @@ Read [the architecture](https://github.com/sodejm/AncestryLLM/blob/main/ARCHITEC
 [GEDCOM compatibility](https://github.com/sodejm/AncestryLLM/blob/main/docs/GEDCOM_COMPATIBILITY.md),
 [encrypted backups](https://github.com/sodejm/AncestryLLM/blob/main/docs/ENCRYPTED_BACKUPS.md),
 [bounded file ingress](https://github.com/sodejm/AncestryLLM/blob/main/docs/FILE_INGRESS.md),
+[CI workflow guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CI.md),
 and [threat model](https://github.com/sodejm/AncestryLLM/blob/main/docs/THREAT_MODEL.md).
 
 Versioning follows [Semantic Versioning 2.0.0](https://semver.org/). The
