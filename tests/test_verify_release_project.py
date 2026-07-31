@@ -173,6 +173,20 @@ def test_rejects_incomplete_p0_items(verifier, gate, item, expected):
         verifier.verify_project_gate(_page([item]), gate)
 
 
+def test_allows_open_non_p0_post_release_item_without_issue_exception(verifier, gate):
+    verifier.verify_project_gate(
+        _page(
+            [
+                _item(224),
+                _item(
+                    202, priority="P1", state="OPEN", status="In progress", validation="Accepted"
+                ),
+            ]
+        ),
+        gate,
+    )
+
+
 def test_rejects_open_or_incomplete_dependency(verifier, gate):
     open_blocker = {
         "number": 224,

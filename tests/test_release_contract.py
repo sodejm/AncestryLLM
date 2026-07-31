@@ -135,6 +135,8 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "GitHub Project 2" in releasing
     assert "Release iteration" in releasing
     assert "v0.5.0 — Foundation" in releasing
+    assert "P0 is reserved for work that must complete before publication" in releasing
+    assert "verifier has no issue-number exception" in releasing
     assert "macOS 15/26" in releasing
     assert "Windows 11" in releasing
     assert "Ubuntu 24.04" in releasing

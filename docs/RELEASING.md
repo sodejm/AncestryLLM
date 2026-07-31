@@ -123,6 +123,11 @@ The workflow rechecks the exact configured GitHub Project 2 release gate and
 refuses any incomplete selected P0 item or dependency. Local worktrees are
 machine-specific, so their cleanup is an explicit operator attestation recorded
 in the evidence bundle.
+
+P0 is reserved for work that must complete before publication. An umbrella,
+roadmap, or tracker designed to close after the release must be P1 or outside
+the selected iteration; the verifier has no issue-number exception. This keeps
+the P0 gate fail-closed while retaining post-release follow-up in Project 2.
 The readiness workflow is the authoritative product-quality and security gate.
 It records the exact commit, run URL, and complete gate inventory in
 `gates.json`. The tag workflow rechecks the Project-native release gate,
