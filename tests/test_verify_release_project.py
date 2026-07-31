@@ -138,18 +138,24 @@ def test_rejects_missing_project_access_or_malformed_responses(verifier, gate, p
     "mutate, expected",
     [
         (
-            lambda item: item["fieldValues"].update({"nodes": item["fieldValues"]["nodes"][1:]}),
-            "missing required field 'Release iteration'",
+            lambda item: item["fieldValues"].update(
+                {
+                    "nodes": [
+                        field
+                        for field in item["fieldValues"]["nodes"]
+                        if field["field"]["name"] != "Status"
+                    ]
+                }
+            ),
+            "missing required field 'Status'",
         ),
         (
             lambda item: item["fieldValues"]["nodes"].append(_field("Status", "Done")),
             "duplicate required field 'Status'",
         ),
         (
-            lambda item: item["fieldValues"]["nodes"].__setitem__(
-                0, {"field": {"name": "Release iteration"}}
-            ),
-            "malformed required field 'Release iteration'",
+            lambda item: item["fieldValues"]["nodes"].__setitem__(2, {"field": {"name": "Status"}}),
+            "malformed required field 'Status'",
         ),
     ],
 )
@@ -158,6 +164,27 @@ def test_rejects_absent_duplicate_or_malformed_required_fields(verifier, gate, m
     mutate(item)
     with pytest.raises(verifier.ProjectVerificationError, match=expected):
         verifier.verify_project_gate(_page([item]), gate)
+
+
+def test_ignores_legacy_project_items_without_target_iteration_fields(verifier, gate):
+    legacy = _item(60, state="OPEN")
+    legacy["fieldValues"] = {"nodes": [_field("Priority", "P0")]}
+
+    verifier.verify_project_gate(_page([_item(224), legacy]), gate)
+
+
+def test_rejects_target_iteration_item_with_incomplete_fields_even_when_not_p0(verifier, gate):
+    target_p1 = _item(202, priority="P1")
+    target_p1["fieldValues"]["nodes"] = [
+        field
+        for field in target_p1["fieldValues"]["nodes"]
+        if field["field"]["name"] != "Validation"
+    ]
+
+    with pytest.raises(
+        verifier.ProjectVerificationError, match="missing required field 'Validation'"
+    ):
+        verifier.verify_project_gate(_page([_item(224), target_p1]), gate)
 
 
 @pytest.mark.parametrize(
@@ -187,7 +214,7 @@ def test_allows_open_non_p0_post_release_item_without_issue_exception(verifier, 
     )
 
 
-def test_rejects_open_or_incomplete_dependency(verifier, gate):
+def test_rejects_open_dependency_even_when_it_is_not_a_project_item(verifier, gate):
     open_blocker = {
         "number": 224,
         "state": "OPEN",
@@ -196,15 +223,15 @@ def test_rejects_open_or_incomplete_dependency(verifier, gate):
     with pytest.raises(verifier.ProjectVerificationError, match="open dependency #224"):
         verifier.verify_project_gate(_page([_item(202, blockers=(open_blocker,))]), gate)
 
+
+def test_accepts_closed_historical_dependency_outside_selected_iteration(verifier, gate):
     closed_blocker = {
-        "number": 224,
+        "number": 13,
         "state": "CLOSED",
         "repository": {"nameWithOwner": "sodejm/AncestryLLM"},
     }
-    with pytest.raises(
-        verifier.ProjectVerificationError, match="is not tracked in the selected iteration"
-    ):
-        verifier.verify_project_gate(_page([_item(202, blockers=(closed_blocker,))]), gate)
+
+    verifier.verify_project_gate(_page([_item(202, blockers=(closed_blocker,))]), gate)
 
 
 def test_rejects_incomplete_dependency_pagination(verifier, gate):

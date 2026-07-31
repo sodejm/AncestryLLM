@@ -76,12 +76,17 @@ self-approval; do not make that change during the one-maintainer release.
    `Release iteration`. A selected P0 issue must be closed with Project
    `Status: Done` and `Validation: Verified`. The workflow reads canonical
    Issue content by repository and issue number, rather than a Project item's
-   cached display title. It paginates the Project item connection and follows
-   native `blockedBy` dependencies: an open, untracked, differently-iterated,
-   non-Done, or non-Verified dependency blocks release. A truncated dependency
-   response, missing Project access, malformed field, or duplicate item also
-   blocks release. Close an item only after its implementation, documentation,
-   regression tests, dead-code review, and required hosted checks are complete.
+   cached display title. Every item that explicitly names the configured
+   `Release iteration` must provide all four configured Project fields; legacy
+   items outside that iteration may be incomplete. It paginates the Project
+   item connection and follows native `blockedBy` dependencies: an open
+   dependency blocks release, while a closed historical or externally tracked
+   dependency outside the selected iteration is accepted. A dependency in the
+   selected iteration must be `Done` and `Verified`. A truncated dependency
+   response, missing Project access, malformed target-iteration field, or
+   duplicate target-iteration item also blocks release. Close an item only
+   after its implementation, documentation, regression tests, dead-code
+   review, and required hosted checks are complete.
 2. For every candidate release branch and worktree, first confirm a clean
    status with `git status --short`, then audit reachability and unique commits
    with `git rev-list --left-right --count main...<branch>` and
@@ -105,8 +110,9 @@ self-approval; do not make that change during the one-maintainer release.
    `main` ruleset, after required checks pass and conversations are resolved.
 5. Run the release-configuration verifier and confirm the exact configured
    GitHub Project 2 P0 gate: every selected issue is `Done` and `Verified`, and
-   its complete native dependency closure is closed and verified in the same
-   iteration.
+   each dependency in the selected iteration is closed and verified. Closed
+   historical dependencies outside that iteration do not need to be added to
+   the release Project.
 6. Run `Release readiness` with the exact `main` commit and semantic version,
    and affirm the branch/worktree lifecycle audit input, backed by the
    documented reachability, unique-commit, cleanup, and preservation record.
@@ -120,9 +126,10 @@ approval may be self-approval by the workflow initiator. A separate explicit
 approval is required for the GitHub-only fallback described below.
 
 The workflow rechecks the exact configured GitHub Project 2 release gate and
-refuses any incomplete selected P0 item or dependency. Local worktrees are
-machine-specific, so their cleanup is an explicit operator attestation recorded
-in the evidence bundle.
+refuses any incomplete selected P0 item or target-iteration dependency. Closed
+historical dependencies outside that iteration are accepted. Local worktrees
+are machine-specific, so their cleanup is an explicit operator attestation
+recorded in the evidence bundle.
 
 P0 is reserved for work that must complete before publication. An umbrella,
 roadmap, or tracker designed to close after the release must be P1 or outside

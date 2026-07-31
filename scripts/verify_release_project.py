@@ -36,6 +36,7 @@ class ProjectIssue:
     repository: str
     state: str
     fields: dict[str, str]
+    field_errors: dict[str, str]
     blockers: tuple[dict[str, Any], ...]
     blockers_complete: bool
 
@@ -83,13 +84,17 @@ def _project_from_page(page: dict[str, Any]) -> dict[str, Any]:
     return _require_mapping(project, "GitHub Project")
 
 
-def _fields(item: dict[str, Any], item_label: str) -> dict[str, str]:
-    values = _require_mapping(item.get("fieldValues"), f"{item_label} field values")
+def _fields(item: dict[str, Any], item_label: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Parse Project fields without rejecting items outside the release iteration."""
+    values = item.get("fieldValues")
+    if not isinstance(values, dict):
+        return {}, {}
     nodes = values.get("nodes")
     if not isinstance(nodes, list):
-        raise ProjectVerificationError(f"{item_label} field values are malformed")
+        return {}, {}
 
     found: dict[str, str] = {}
+    errors: dict[str, str] = {}
     for node in nodes:
         if not isinstance(node, dict):
             continue
@@ -100,9 +105,8 @@ def _fields(item: dict[str, Any], item_label: str) -> dict[str, str]:
         if field_name not in _REQUIRED_FIELDS:
             continue
         if field_name in found:
-            raise ProjectVerificationError(
-                f"{item_label} has duplicate required field {field_name!r}"
-            )
+            errors[field_name] = f"has duplicate required field {field_name!r}"
+            continue
         if field_name == "Release iteration":
             value = node.get("title")
             iteration_id = node.get("iterationId")
@@ -112,21 +116,27 @@ def _fields(item: dict[str, Any], item_label: str) -> dict[str, str]:
                 or not isinstance(iteration_id, str)
                 or not iteration_id
             ):
-                raise ProjectVerificationError(
-                    f"{item_label} has malformed required field {field_name!r}"
-                )
+                errors[field_name] = f"has malformed required field {field_name!r}"
+                continue
         else:
             value = node.get("name")
             if not isinstance(value, str) or not value:
-                raise ProjectVerificationError(
-                    f"{item_label} has malformed required field {field_name!r}"
-                )
+                errors[field_name] = f"has malformed required field {field_name!r}"
+                continue
         found[field_name] = value
 
+    return found, errors
+
+
+def _require_complete_target_fields(issue: ProjectIssue) -> None:
+    """Fail closed only after an item explicitly identifies the target iteration."""
+    item_label = f"Project issue #{issue.number}"
     for field_name in _REQUIRED_FIELDS:
-        if field_name not in found:
+        error = issue.field_errors.get(field_name)
+        if error is not None:
+            raise ProjectVerificationError(f"{item_label} {error}")
+        if field_name not in issue.fields:
             raise ProjectVerificationError(f"{item_label} is missing required field {field_name!r}")
-    return found
 
 
 def _issue_from_item(item: object) -> ProjectIssue | None:
@@ -152,12 +162,14 @@ def _issue_from_item(item: object) -> ProjectIssue | None:
     if not isinstance(blockers, list) or not isinstance(page_info.get("hasNextPage"), bool):
         raise ProjectVerificationError(f"{item_label} dependencies are malformed")
 
+    fields, field_errors = _fields(mapping, item_label)
     return ProjectIssue(
         item_id=item_id,
         number=number,
         repository=repository_name,
         state=state,
-        fields=_fields(mapping, item_label),
+        fields=fields,
+        field_errors=field_errors,
         blockers=tuple(
             _require_mapping(blocker, f"{item_label} dependency") for blocker in blockers
         ),
@@ -171,10 +183,6 @@ def _validate_cleared(issue: ProjectIssue, gate: ProjectGate, *, dependency: boo
         if dependency:
             raise ProjectVerificationError(f"open dependency #{issue.number}")
         raise ProjectVerificationError(f"issue #{issue.number} is still open")
-    if issue.fields["Release iteration"] != gate.iteration:
-        raise ProjectVerificationError(
-            f"dependency #{issue.number} is not tracked in the selected iteration"
-        )
     if issue.fields["Status"] != gate.status:
         raise ProjectVerificationError(f"{prefix} #{issue.number} Status must be {gate.status!r}")
     if issue.fields["Validation"] != gate.validation:
@@ -186,7 +194,6 @@ def _validate_cleared(issue: ProjectIssue, gate: ProjectGate, *, dependency: boo
 def verify_project_gate(payload: object, gate: ProjectGate) -> None:
     """Verify all selected P0 items and their dependency closure from API data."""
     items: list[ProjectIssue] = []
-    seen_item_ids: set[str] = set()
     pages = _pages(payload)
     for page_index, page in enumerate(pages, start=1):
         project = _project_from_page(page)
@@ -205,13 +212,18 @@ def verify_project_gate(payload: object, gate: ProjectGate) -> None:
             issue = _issue_from_item(item)
             if issue is None:
                 continue
-            if issue.item_id in seen_item_ids:
-                raise ProjectVerificationError(f"duplicate Project item {issue.item_id!r}")
-            seen_item_ids.add(issue.item_id)
             items.append(issue)
 
+    target_items = [
+        issue for issue in items if issue.fields.get("Release iteration") == gate.iteration
+    ]
+    seen_item_ids: set[str] = set()
     by_issue: dict[tuple[str, int], ProjectIssue] = {}
-    for issue in items:
+    for issue in target_items:
+        _require_complete_target_fields(issue)
+        if issue.item_id in seen_item_ids:
+            raise ProjectVerificationError(f"duplicate Project item {issue.item_id!r}")
+        seen_item_ids.add(issue.item_id)
         key = (issue.repository, issue.number)
         if key in by_issue:
             raise ProjectVerificationError(
@@ -219,12 +231,7 @@ def verify_project_gate(payload: object, gate: ProjectGate) -> None:
             )
         by_issue[key] = issue
 
-    selected = [
-        issue
-        for issue in items
-        if issue.fields["Release iteration"] == gate.iteration
-        and issue.fields["Priority"] == gate.priority
-    ]
+    selected = [issue for issue in target_items if issue.fields["Priority"] == gate.priority]
     if not selected:
         raise ProjectVerificationError(
             f"GitHub Project has no {gate.priority} issues in iteration {gate.iteration!r}"
@@ -257,9 +264,9 @@ def verify_project_gate(payload: object, gate: ProjectGate) -> None:
                 raise ProjectVerificationError(f"open dependency #{number}")
             dependency = by_issue.get((repository_name, number))
             if dependency is None:
-                raise ProjectVerificationError(
-                    f"dependency #{number} is not tracked in the selected iteration"
-                )
+                # A closed historical or externally tracked prerequisite does not
+                # need to be carried into the current release iteration.
+                continue
             _validate_cleared(dependency, gate, dependency=True)
             verify_dependencies(dependency)
 
