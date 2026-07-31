@@ -19,14 +19,19 @@ single-user, local-first Python application for genealogy research. They
 combine deterministic RootsMagic and GEDCOM workflows with optional LLM
 assistance. Package and release-control metadata in this tree identifies the
 `0.4.0` Unreleased candidate; that development metadata is not evidence that
-0.4.0 has been tagged or published.
-There is no implemented or supported HTTP, desktop, browser, or multi-user
-runtime. ADR-0025 accepts a later local Electron desktop adapter and private
-FastAPI sidecar; it does not accept a public/LAN API, browser client, or
-multi-user server. The one-shot CLI and interactive console are the implemented
-terminal adapters. Future adapters must consume the same application contracts
-and services without depending on terminal presentation or redefining domain
-behavior.
+0.4.0 has been tagged or published. Isolated `0.5.0` work for Issue #11 adds a
+source-level, authenticated FastAPI control adapter for health and capability
+discovery. That work is not release evidence: `0.5.0` cannot be promoted until
+Issue #193 completes and `0.4.0` is released.
+
+There is no implemented or supported Electron, browser, public/LAN, or
+multi-user runtime. The internal API exposes no genealogy, provider, domain, or
+generic command-dispatch route. ADR-0025 accepts a later local Electron desktop
+adapter and additional private FastAPI routes; it does not accept a public/LAN
+API, browser client, or multi-user server. The one-shot CLI and interactive
+console are the implemented terminal adapters. Every adapter must consume the
+same application contracts and services without depending on terminal
+presentation or redefining domain behavior.
 
 ## Architectural priorities
 
@@ -72,7 +77,8 @@ flowchart LR
     GED["GEDCOM files and\nrelease bundles"]
     LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
-    Future["FastAPI/Electron adapters\nlater roadmap"]
+    ControlAPI["Versioned FastAPI control adapter\nhealth/capabilities in 0.5.0 source"]
+    Future["Electron and domain API adapters\nlater roadmap"]
 
     Operator --> CLI
     Operator --> Console
@@ -92,6 +98,10 @@ flowchart LR
     Services --> GED
     Services --> LocalLLM
     Services --> Cloud
+    ControlAPI --> Specs
+    ControlAPI --> Contracts
+    ControlAPI --> Executor
+    Future -. "must consume" .-> ControlAPI
     Future -. "must consume" .-> Contracts
 ```
 
@@ -141,7 +151,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Later-roadmap internal FastAPI adapter; no routes are implemented in the current release scope. |
+| `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
 | `desktop/` | Later-roadmap Electron adapter governed by ADR-0025; no application or packaging is implemented in the current release scope. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
@@ -166,7 +176,8 @@ flowchart TB
     Aggregate["Implemented\nservice-owned genealogy aggregate (#44)"]
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
     External["SQLCipher, keyring, RootsMagic, GEDCOM, provider SDKs"]
-    Future["Later-roadmap adapters\nFastAPI, Electron"]
+    ControlAPI["0.5.0 source-level control adapter\nFastAPI health/capabilities"]
+    Future["Later-roadmap adapters\nElectron and domain API routes"]
 
     Adapters --> Specs
     Adapters --> Contracts
@@ -181,6 +192,10 @@ flowchart TB
     Aggregate --> Contracts
     Infra --> Contracts
     Infra --> External
+    ControlAPI --> Specs
+    ControlAPI --> Contracts
+    ControlAPI --> Executor
+    Future -.-> ControlAPI
     Future -.-> Contracts
 ```
 
@@ -227,8 +242,10 @@ dependency and assurance gates pass.
   backend-for-frontend. Main validates the sender/frame/origin, mediates opaque
   file grants, supervises the sidecar, and proxies only declared endpoints.
 - A loopback-only FastAPI sidecar authenticates every request before body
-  parsing and adapts versioned DTOs to application services. It does not import
-  CLI or console presentation and is not a public API.
+  parsing and adapts versioned DTOs to application services. The source-level
+  Issue #11 foundation implements only authenticated health and capability
+  discovery; domain routers remain separately owned future work. It does not
+  import CLI or console presentation and is not a public API.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
   do not move into the renderer or main process.
@@ -851,7 +868,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside the current release scope. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` Issue #11 slice implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, and deterministic OpenAPI at source level. No Electron runtime, supervisor, packaged sidecar, domain route, or generic command route is implemented. | Complete the separately owned desktop and domain API work plus packaged assurance evidence. `0.5.0` release promotion remains blocked until Issue #193 completes and `0.4.0` is released. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

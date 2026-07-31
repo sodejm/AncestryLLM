@@ -7,8 +7,10 @@
 - This repository is local-first and privacy-sensitive. Prefer safe defaults when
   requirements are uncertain.
 - The implemented terminal surfaces are the one-shot CLI and prompt-toolkit/Rich REPL.
-  FastAPI, Electron, and other desktop-host surfaces remain future adapters; they must
-  consume the same application-service contracts instead of redefining behavior.
+  The authenticated FastAPI health/capability foundation is implemented for isolated
+  0.5.0 work; Electron, FastAPI domain routers, and other desktop-host surfaces remain
+  future adapters. They must consume the same application-service contracts instead
+  of redefining behavior.
 
 ## Engineering and validation
 

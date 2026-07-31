@@ -7,18 +7,20 @@ current-versus-target graph.
 
 ## State legend
 
-The repository distinguishes three states deliberately:
+The repository distinguishes four states deliberately:
 
 | State | Meaning |
 |---|---|
 | Implemented | Present in this tree and protected by tests or an executable gate. |
 | Unreleased 0.4.0 candidate | Implemented or proposed work that has not passed a dedicated 0.4.0 release process. |
+| Isolated 0.5.0 foundation | Source-level work that may proceed independently but cannot be promoted before the 0.4.0 release gate completes. |
 | Later roadmap | Accepted or proposed direction outside the next release; no runtime may depend on it yet. |
 
 The shared command specifications, transport-neutral application contracts,
 shared `CommandExecutor`, and service-owned genealogy aggregate (#44) are
-implemented. FastAPI routes and the Electron application remain
-later-roadmap adapters.
+implemented. The isolated Issue #11 slice implements authenticated FastAPI
+health and capability discovery over those contracts. The Electron application
+and FastAPI domain routers remain later-roadmap adapters.
 
 ## Dependency graph and owners
 
@@ -35,7 +37,8 @@ flowchart TB
     Aggregate["Genealogy aggregate and\ndeterministic results\n#44 implemented"]
     Domain["Framework-independent domain"]
     Infra["Storage, provider, and file infrastructure"]
-    Future["FastAPI and Electron adapters\nlater roadmap"]
+    ControlAPI["FastAPI control adapter\n#11 isolated 0.5.0 foundation"]
+    Future["Electron and domain API adapters\nlater roadmap"]
 
     CLI --> Specs
     REPL --> Specs
@@ -50,8 +53,11 @@ flowchart TB
     Services --> Infra
     Services --> Aggregate
     Aggregate --> Domain
+    ControlAPI --> Specs
+    ControlAPI --> Contracts
+    ControlAPI --> Executor
+    Future -. "later adapter dependency" .-> ControlAPI
     Future -. "later adapter dependency" .-> Contracts
-    Future -. "later adapter dependency" .-> Executor
 ```
 
 | Concern | Authoritative owner |
@@ -60,6 +66,7 @@ flowchart TB
 | Request/result DTOs, operation inventory, ports, opaque artifact and secret references, stable error envelopes | `ancestryllm.application` and `ancestryllm.domain.errors` (#161) |
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
+| Internal API versioning, strict schemas, authenticated control routes, capability projection, safe error mapping, and deterministic OpenAPI | `ancestryllm.api` (#11 isolated `0.5.0` foundation) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
 | GEDCOM document model, bounded path parser, validator, deterministic line serializer, graph, identity, quality, service, synchronization, and publication seams | pure document modules plus physically owned parser, serialization, graph, identity, quality, synchronization-contract, algorithm, manifest, publication/recovery, operation, and legacy-argument modules behind declared façades; `engine` and `incremental` are import-only compatibility façades (#163-#166) |
 | RootsMagic immutable source/schema, typed query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `ancestryllm.application._rootsmagic` behind the `.query` façade, and `ancestryllm.rootsmagic.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
@@ -113,8 +120,9 @@ incremental-cancellation, RootsMagic-export, adversarial, duplicate-benchmark,
 merge, and quality suites. The duplicate-performance, merge, quality, and
 adversarial suites also reached underscore-prefixed helpers through façade
 module aliases. The application service and terminal command paths already
-entered through supported GEDCOM façades; there is no implemented FastAPI or
-Electron consumer in this release line.
+entered through supported GEDCOM façades; the control API consumes only shared
+command metadata and application execution contracts. There is no Electron or
+domain-API consumer in this release line.
 
 After the migration, ordinary consumers and tests import only the physical
 parser, serialization, graph, identity, quality, service, synchronization, and
