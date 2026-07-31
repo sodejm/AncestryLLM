@@ -18,7 +18,10 @@ The public boundary is intentionally small:
 | `ancestryllm.domain.errors` | Framework-independent failure categories and bounded safe detail values. |
 
 The private modules `application._artifacts` and `application._compat` belong to
-adapter composition. They are not an alternate service API.
+adapter composition. `application._rootsmagic` owns RootsMagic query runtime
+orchestration behind the public operation DTOs and the
+`rootsmagic.query.RootsMagicQueryService` compatibility façade. These modules
+are not alternate service APIs or operation registries.
 
 Every boundary dataclass is frozen and slotted. `BoundaryDTO.to_json()` emits a
 versioned envelope with sorted keys, finite JSON numbers, and a one-megabyte
@@ -48,6 +51,14 @@ the shared command specifications:
 This inventory is the only application-operation registry. Terminal, HTTP, and
 desktop adapters may translate their inputs into these requests but must not
 create a second UI-specific registry or redefine result semantics.
+
+`RootsMagicQueryRequest` admits exactly one non-empty direct SQL statement or
+natural-language question. Direct SQL is deterministic and provider-free even
+when credentials are present. Questions require an explicit non-`none`
+provider and model, then reuse the same immutable reader, SQL validator,
+authorizer, row bound, timeout, and source-fingerprint checks. The serialized
+`RootsMagicQueryResult` contains canonical scalar rows and coded execution
+metadata, while progress contains only operation/stage codes and counters.
 
 ## Ports and adapter responsibilities
 

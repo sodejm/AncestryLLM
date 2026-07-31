@@ -62,7 +62,7 @@ flowchart TB
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
 | GEDCOM document model, physical-line parser, validator, deterministic line serializer, graph, identity, quality, service, and synchronization seams | pure document modules plus physically owned graph, identity, and quality operations behind declared façades; private compatibility access is limited by exact gateways (#163-#164) |
-| RootsMagic immutable source/schema, query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `.query`, and `.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
+| RootsMagic immutable source/schema, typed query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `ancestryllm.application._rootsmagic` behind the `.query` façade, and `ancestryllm.rootsmagic.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
 
@@ -164,7 +164,9 @@ detail was already in a declared façade.
 
 The Unreleased RootsMagic public inventory includes the package façade plus
 `core`, `query`, and `export`. The reusable mapper lives in the physical
-`mapping` implementation;
+`mapping` implementation. The `query` module is a compatibility façade for
+the private typed application orchestrator, so provider and SQL policy have one
+owner;
 validation and atomic publication are owned by the private application
 exporter. The public `export` façade preserves its declared mapper, exporter,
 and result imports, while `rootsmagic.exporter` remains a compatibility alias.

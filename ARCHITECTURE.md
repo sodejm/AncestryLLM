@@ -503,8 +503,10 @@ keys and installed SDKs never select one of those callbacks.
 
 `RootsMagicService` composes an immutable reader, a dedicated query
 orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
-public immutable-source and schema boundary, `rootsmagic/query.py` owns
-explicit-provider natural-language query policy, and
+public immutable-source and schema boundary. The private
+`application/_rootsmagic.py` module owns SQL/provider orchestration behind the
+typed `RootsMagicQueryRequest` and `RootsMagicQueryResult` boundary;
+`rootsmagic/query.py` is its compatibility façade, not a second policy owner.
 `rootsmagic/mapping.py` is the reusable GEDCOM mapping boundary.
 Application-owned validation and publication live in
 `application/_rootsmagic_export.py`; the public `rootsmagic/export.py` façade
@@ -536,6 +538,11 @@ provider returns one schema-validated SQL string, then the same deterministic
 AST validation and SQLite authorizer run it. File limits and the source
 fingerprint are verified before provider use and carried into the query. The
 model cannot execute SQL directly and cannot weaken the read-only connection.
+Direct SQL always bypasses provider resolution, including when credentials are
+present. The typed result carries deterministic rows plus safe execution
+metadata; progress publishes only coded stages and counters. SQL validation,
+authorization, timeout, cancellation, provider policy, and execution failures
+retain their stable coded errors at the service boundary.
 
 ### GEDCOM export
 
