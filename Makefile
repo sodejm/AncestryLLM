@@ -2,10 +2,10 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 
-.PHONY: help setup bootstrap console test lint typecheck security pre-push sbom package workflow-audit hooks
+.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks
 
 help:
-	@echo "Available targets: setup bootstrap console test lint typecheck security pre-push sbom package workflow-audit hooks"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks"
 
 setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
@@ -16,6 +16,12 @@ bootstrap: setup hooks
 
 console:
 	@$(VENV_PYTHON) -m ancestryllm
+
+lock:
+	@$(VENV_PYTHON) -m uv lock
+
+lock-check:
+	@$(VENV_PYTHON) -m uv lock --check
 
 test:
 	@$(VENV_PYTHON) -m pytest --verbose
