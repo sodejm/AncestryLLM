@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 from ancestryllm.core.errors import ProviderError
-from ancestryllm.gedcom import engine
+from ancestryllm.gedcom import identity as engine
+from ancestryllm.gedcom import quality
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, GenerationResult
 from ancestryllm.llm.validation import validate_structured_output
@@ -44,8 +45,8 @@ def _person(pointer: str, *, surname: str, birth: str, source: str) -> engine.In
     )
 
 
-def _quality_report() -> engine.QualityReport:
-    finding = engine.QualityFinding(
+def _quality_report() -> quality.QualityReport:
+    finding = quality.QualityFinding(
         finding_id="quality-1",
         code="DATE_GAP",
         severity="medium",
@@ -55,7 +56,7 @@ def _quality_report() -> engine.QualityReport:
         recommendation="Compare fictional records.",
         evidence=("Fictional evidence",),
     )
-    return engine.QualityReport(
+    return quality.QualityReport(
         root_pointer="@I1@",
         root_name="Fictional Person",
         input_files=("fictional.ged",),
@@ -126,7 +127,7 @@ def test_identity_adjudication_uses_shared_generation_contract() -> None:
     assert request.module_id == "gedcom"
     assert request.purpose == "identity_adjudication"
     assert request.timeout_seconds == 17.0
-    assert request.response_schema == engine._dedup_response_schema()
+    assert request.response_schema == engine.dedup_response_schema()
     assert verdict["_provider"] == "ollama"
     assert verdict["_model"] == "resolved-fixture-model"
 
@@ -180,7 +181,7 @@ def test_quality_refinement_uses_shared_generation_contract() -> None:
     )
     service = GedcomService(llm, provider_timeout_seconds=19.0)  # type: ignore[arg-type]
 
-    refined = engine.refine_quality_report_with_ai(
+    refined = quality.refine_quality_report_with_ai(
         _quality_report(),
         service._quality_resolver("ollama", "fixture-model", None),
     )
@@ -189,7 +190,7 @@ def test_quality_refinement_uses_shared_generation_contract() -> None:
     assert request.module_id == "gedcom"
     assert request.purpose == "quality_refinement"
     assert request.timeout_seconds == 19.0
-    assert request.response_schema == engine._quality_response_schema()
+    assert request.response_schema == quality.quality_response_schema()
     assert refined.findings[0].ai_why.startswith("It may distinguish")
     assert refined.ai_backend == "ollama/resolved-fixture-model"
     assert refined.privacy_status.startswith("Local provider refinement")
@@ -210,7 +211,7 @@ def test_quality_refinement_uses_resolved_provider_locality() -> None:
     )
     service = GedcomService(llm)  # type: ignore[arg-type]
 
-    refined = engine.refine_quality_report_with_ai(
+    refined = quality.refine_quality_report_with_ai(
         _quality_report(),
         service._quality_resolver("ollama", "fixture-model", None),
     )
@@ -239,7 +240,7 @@ def test_remote_quality_refinement_discloses_provider_when_no_annotations_apply(
     llm = RecordingLLM(payload, remote=True)
     service = GedcomService(llm)  # type: ignore[arg-type]
 
-    refined = engine.refine_quality_report_with_ai(
+    refined = quality.refine_quality_report_with_ai(
         _quality_report(),
         service._quality_resolver("openrouter", "fixture-model", None),
     )
@@ -300,7 +301,7 @@ def test_non_standard_non_finite_json_confidence_is_rejected() -> None:
     )
 
     with pytest.raises(ProviderError) as raised:
-        validate_structured_output(payload, engine._dedup_response_schema())
+        validate_structured_output(payload, engine.dedup_response_schema())
 
     assert raised.value.code == "PROVIDER_OUTPUT_INVALID"
 

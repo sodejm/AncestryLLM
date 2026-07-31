@@ -31,7 +31,7 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.core.publication import paths_alias, publish_staged_bundle, staging_path
-from ancestryllm.gedcom import engine
+from ancestryllm.gedcom import parser as engine
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader

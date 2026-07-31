@@ -198,6 +198,53 @@ TEMPORARY_EXCEPTIONS: Final[tuple[DependencyException, ...]] = ()
 
 
 @dataclass(frozen=True, slots=True)
+class ConsumerImportException:
+    """One exact implementation-characterization import with a removal lifecycle."""
+
+    importer: str
+    imported: str
+    names: tuple[str, ...]
+    owner: str
+    issue: str
+    reason: str
+    lifecycle: str
+
+
+# These tests deliberately exercise implementation seams captured by #160. They
+# are not consumer compatibility promises, and any import shape change makes the
+# exception stale instead of silently expanding the supported surface.
+CHARACTERIZATION_IMPORT_EXCEPTIONS: Final[tuple[ConsumerImportException, ...]] = (
+    ConsumerImportException(
+        importer="tests.modular.test_file_ingress",
+        imported="ancestryllm.gedcom.engine",
+        names=(),
+        owner="GEDCOM publication characterization",
+        issue="#160 / #166",
+        reason="Injects an atomic-write failure below the public publication boundary.",
+        lifecycle="Remove when the publication façade exposes a typed failure-injection port.",
+    ),
+    ConsumerImportException(
+        importer="tests.modular.test_incremental",
+        imported="ancestryllm.gedcom",
+        names=("engine", "incremental"),
+        owner="incremental-sync characterization",
+        issue="#160 / #166",
+        reason="Characterizes the retained sync compatibility kernel and engine injection seam.",
+        lifecycle="Remove with the incremental compatibility kernel after callers migrate.",
+    ),
+    ConsumerImportException(
+        importer="tests.modular.test_incremental_cancellation_boundaries",
+        imported="ancestryllm.gedcom.incremental",
+        names=(),
+        owner="incremental cancellation characterization",
+        issue="#160 / #166",
+        reason="Checks cancellation inside implementation-only traversal boundaries.",
+        lifecycle="Remove when those boundaries are represented by public sync operations.",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
 class ImportReference:
     path: Path
     line: int
@@ -224,7 +271,7 @@ class Violation:
 @dataclass(frozen=True, slots=True)
 class ArchitectureReport:
     violations: tuple[Violation, ...]
-    used_exceptions: frozenset[DependencyException]
+    used_exceptions: frozenset[DependencyException | ConsumerImportException]
 
     @property
     def passed(self) -> bool:
@@ -437,12 +484,188 @@ def _is_forbidden_gedcom_operation_dependency(imported: str) -> bool:
 
 def _matches_exception(
     reference: ImportReference,
-    exception: DependencyException,
+    exception: DependencyException | ConsumerImportException,
 ) -> bool:
     return (
         reference.importer == exception.importer
         and reference.imported == exception.imported
         and reference.names == tuple(sorted(exception.names))
+    )
+
+
+def _repository_module_name(root: Path, path: Path) -> str:
+    relative = path.relative_to(root).with_suffix("")
+    parts = list(relative.parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _private_gedcom_targets(reference: ImportReference) -> tuple[str, ...]:
+    private_modules = (
+        "ancestryllm.gedcom.engine",
+        "ancestryllm.gedcom.incremental",
+    )
+    targets: list[str] = []
+    for private_module in private_modules:
+        if reference.imported == private_module or reference.imported.startswith(
+            f"{private_module}."
+        ):
+            targets.append(private_module)
+        if any(f"{reference.imported}.{name}" == private_module for name in reference.names):
+            targets.append(private_module)
+    return tuple(targets)
+
+
+def _private_facade_symbol_violations(
+    path: Path,
+    importer: str,
+) -> tuple[Violation, ...]:
+    """Reject underscore-prefixed access through supported GEDCOM façades."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    facades = frozenset(
+        module
+        for module in PUBLIC_FACADE_MODULES
+        if module.startswith("ancestryllm.gedcom.")
+        and module not in {"ancestryllm.gedcom.engine", "ancestryllm.gedcom.incremental"}
+    )
+    aliases: dict[str, str] = {}
+    violations: list[Violation] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in facades and alias.asname:
+                    aliases[alias.asname] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            imported = node.module or ""
+            if imported in facades:
+                for alias in node.names:
+                    if alias.name.startswith("_") and not alias.name.startswith("__"):
+                        violations.append(
+                            Violation(
+                                path=path,
+                                line=node.lineno,
+                                code="ARCH503",
+                                message=(
+                                    f"repository consumer {importer!r} imports private symbol "
+                                    f"{alias.name!r} from supported façade {imported!r}"
+                                ),
+                            )
+                        )
+            if imported == "ancestryllm.gedcom":
+                for alias in node.names:
+                    child = f"{imported}.{alias.name}"
+                    if child in facades:
+                        aliases[alias.asname or alias.name] = child
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+            and node.attr.startswith("_")
+            and not node.attr.startswith("__")
+        ):
+            violations.append(
+                Violation(
+                    path=path,
+                    line=node.lineno,
+                    code="ARCH503",
+                    message=(
+                        f"repository consumer {importer!r} accesses private symbol "
+                        f"{node.attr!r} through supported façade {aliases[node.value.id]!r}"
+                    ),
+                )
+            )
+
+    return tuple(violations)
+
+
+def check_repository_consumers(
+    repository_root: Path,
+    *,
+    exceptions: Sequence[ConsumerImportException] = CHARACTERIZATION_IMPORT_EXCEPTIONS,
+    require_all_exceptions: bool = True,
+) -> ArchitectureReport:
+    """Reject private GEDCOM imports and façade symbols in tests and scripts."""
+
+    repository_root = repository_root.resolve()
+    paths = tuple(
+        sorted(
+            path
+            for directory in (repository_root / "tests", repository_root / "scripts")
+            if directory.is_dir()
+            for path in directory.rglob("*.py")
+        )
+    )
+    references = tuple(
+        reference
+        for path in paths
+        for reference in _imports(
+            repository_root,
+            path,
+            _repository_module_name(repository_root, path),
+        )
+    )
+    violations: list[Violation] = []
+    used_exceptions: set[ConsumerImportException] = set()
+    for path in paths:
+        violations.extend(
+            _private_facade_symbol_violations(
+                path,
+                _repository_module_name(repository_root, path),
+            )
+        )
+    for reference in references:
+        private_targets = _private_gedcom_targets(reference)
+        if not private_targets:
+            continue
+        matched = next(
+            (exception for exception in exceptions if _matches_exception(reference, exception)),
+            None,
+        )
+        if matched is not None:
+            used_exceptions.add(matched)
+            continue
+        for target in private_targets:
+            violations.append(
+                Violation(
+                    path=reference.path,
+                    line=reference.line,
+                    code="ARCH501",
+                    message=(
+                        f"repository consumer {reference.importer!r} imports private GEDCOM "
+                        f"module {target!r}; use a declared façade symbol or add one exact "
+                        "implementation-characterization exception with a removal lifecycle"
+                    ),
+                )
+            )
+
+    if require_all_exceptions:
+        for exception in set(exceptions) - used_exceptions:
+            violations.append(
+                Violation(
+                    path=repository_root,
+                    line=1,
+                    code="ARCH502",
+                    message=(
+                        f"characterization import exception is stale or expanded: "
+                        f"{exception.importer!r} -> {exception.imported!r} {exception.names!r} "
+                        f"(owner: {exception.owner}; removal: {exception.lifecycle})"
+                    ),
+                )
+            )
+
+    return ArchitectureReport(
+        violations=tuple(
+            sorted(
+                violations,
+                key=lambda item: (str(item.path), item.line, item.code, item.message),
+            )
+        ),
+        used_exceptions=frozenset(used_exceptions),
     )
 
 
@@ -649,18 +872,23 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    report = check_tree(args.root)
-    if report.violations:
-        for violation in report.violations:
+    source_report = check_tree(args.root)
+    repository_root = args.root.resolve().parents[1]
+    consumer_report = check_repository_consumers(repository_root)
+    violations = source_report.violations + consumer_report.violations
+    if violations:
+        for violation in violations:
             print(violation.format(args.root), file=sys.stderr)
         print(
-            f"architecture contract check failed: {len(report.violations)} violation(s)",
+            f"architecture contract check failed: {len(violations)} violation(s)",
             file=sys.stderr,
         )
         return 1
     print(
         "architecture contract check passed "
-        f"({len(report.used_exceptions)} temporary exception(s), all exact and live)"
+        f"({len(source_report.used_exceptions)} dependency exception(s), "
+        f"{len(consumer_report.used_exceptions)} characterization import exception(s); "
+        "all exact and live)"
     )
     return 0
 

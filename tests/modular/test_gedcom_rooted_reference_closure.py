@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from ancestryllm.gedcom.engine import XREF_RE, parse_gedcom_line, validate_gedcom_555
+from ancestryllm.gedcom.parser import parse_gedcom_line, validate_gedcom_555
 from ancestryllm.gedcom.service import GedcomService
+
+XREF_RE = re.compile(r"@[^@\s]+@")
 
 
 def _write_reference_graph(path: Path) -> None:

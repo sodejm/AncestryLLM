@@ -101,6 +101,52 @@ The checker enforces these rules:
 Characterization tests may import private modules to preserve shipped behavior.
 That test access does not make a private kernel an application or adapter API.
 
+## CORE-24 GEDCOM consumer migration inventory
+
+At the CORE-24 baseline (`5ac6f195b6218d86633e7de8275297df3a0bf283`),
+eleven test modules imported `gedcom.engine` or `gedcom.incremental` directly:
+the cancellation, file-ingress, provider-boundary, rooted-closure, incremental,
+incremental-cancellation, RootsMagic-export, adversarial, duplicate-benchmark,
+merge, and quality suites. The duplicate-performance, merge, quality, and
+adversarial suites also reached underscore-prefixed helpers through façade
+module aliases. The application service and terminal command paths already
+entered through supported GEDCOM façades; there is no implemented FastAPI or
+Electron consumer in this release line.
+
+After the migration, ordinary consumers and tests import only the parser,
+serialization, graph, identity, quality, service, and sync façades. Exactly
+three #160 characterization imports remain in
+`CHARACTERIZATION_IMPORT_EXCEPTIONS`:
+
+| Characterization importer | Private seam and test purpose | Owner and removal trigger |
+|---|---|---|
+| `tests.modular.test_file_ingress` | `gedcom.engine`; inject an atomic-write failure below publication | GEDCOM publication characterization; remove when publication has a typed failure-injection port. |
+| `tests.modular.test_incremental` | package `engine` and `incremental`; preserve initialization, update, rebase, rollback, and recovery behavior | Incremental-sync characterization; remove with the concrete compatibility kernel after its callers migrate. |
+| `tests.modular.test_incremental_cancellation_boundaries` | `gedcom.incremental`; exercise implementation-only traversal checkpoints | Incremental cancellation characterization; remove when public sync operations represent those boundaries. |
+
+The repository scan rejects every other consumer import of the two private
+modules (`ARCH501`), rejects a stale exception (`ARCH502`), and rejects direct
+or alias-based access to underscore-prefixed façade members (`ARCH503`). The
+test fixtures that prove those diagnostics are source strings, not live
+private consumers.
+
+The production compatibility gateways are deliberately narrower than the
+consumer surface:
+
+| Public owner | Retained implementation gateway | Verified behavior | Removal trigger |
+|---|---|---|---|
+| `gedcom.parser` | `gedcom.engine` ingestion | parser, ingress, service, and incremental characterization | Move concrete path-backed ingress orchestration behind a permanent application port. |
+| `gedcom.serialization` | `gedcom.engine` publication | deterministic serialization, atomic bundle publication, rollback, and recovery | Move concrete publication and typed failure injection behind the publication boundary. |
+| `gedcom.sync` | `gedcom.engine` and `gedcom.incremental` concrete adapters | #160 initialization, idempotency, update, rebase, tombstone, cancellation, rollback, and recovery | Replace the legacy concrete adapter while retaining the public sync and `sync_kernel` contracts. |
+
+`PUBLIC_FACADE_INTERNAL_GATEWAYS` separately records the exact graph, identity,
+quality, and compatibility-kernel implementation composition. Those imports
+are owner-internal, may not be used by consumers, and disappear as physical
+ownership is consolidated; stable consumer names remain limited to literal
+`__all__` inventories. The migration also removes the unused engine
+`load_gedcom` shim and its private argument-parser/CLI path. The supported
+one-shot CLI and REPL continue to dispatch through the application executor.
+
 ## Public façade lifecycle
 
 `PUBLIC_FACADE_MODULES` is the executable façade inventory. Each listed module
@@ -160,4 +206,7 @@ actionable codes.
 Before accepting a boundary migration, rerun the core-contract
 characterization suite, inspect the dependency diff, remove dead exceptions
 and shims, and complete the canonical `make test`, `make lint`,
-`make typecheck`, and uninterrupted `make security` gates.
+`make typecheck`, and uninterrupted `make security` gates. CORE-24 records its
+before/after characterization evidence against the baseline above and keeps
+provider-`none`, loss-minimal preservation, deterministic conflict handling,
+and rollback-safe publication under their existing regression coverage.

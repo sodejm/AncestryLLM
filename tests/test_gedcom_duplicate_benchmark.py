@@ -16,7 +16,7 @@ from collections import Counter
 
 import pytest
 
-from ancestryllm.gedcom import engine as gm
+from ancestryllm.gedcom import identity as gm
 
 RUN_BENCHMARKS = os.getenv("ANCESTRYLLM_RUN_DUPLICATE_BENCHMARKS") == "1"
 

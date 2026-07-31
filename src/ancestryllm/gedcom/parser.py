@@ -24,8 +24,8 @@ def iter_gedcom_records(
     """Stream records through the bounded file-ingress compatibility adapter.
 
     Verified callers: ``gedcom.service``, ``gedcom.incremental``, and existing
-    parser-façade tests. CORE-24 (#166) owns retiring the private-engine shim
-    after file-ingress orchestration has a permanent application boundary.
+    parser-façade tests. Retire the private-engine gateway after file-ingress
+    orchestration has a permanent application boundary.
     """
     from ancestryllm.gedcom.engine import iter_gedcom_records as _iter_records
 
@@ -41,9 +41,9 @@ def load_sources(
 ) -> list[ParsedSource]:
     """Load path-backed sources through the bounded compatibility adapter.
 
-    Verified callers: ``gedcom.service`` and ``gedcom.incremental``. CORE-24
-    (#166) owns retiring the private-engine shim after ingress orchestration is
-    extracted from the document kernel.
+    Verified callers: ``gedcom.service`` and ``gedcom.incremental``. Retire the
+    private-engine gateway after ingress orchestration is extracted from the
+    document kernel.
     """
     from ancestryllm.gedcom.engine import load_sources as _load_sources
 

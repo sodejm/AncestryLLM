@@ -26,7 +26,7 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.core.jobs import JobManager, JobState
-from ancestryllm.gedcom.engine import parse_gedcom_line, validate_gedcom_555
+from ancestryllm.gedcom.parser import parse_gedcom_line, validate_gedcom_555
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file

@@ -598,12 +598,17 @@ loops. `GedcomService` imports only the stable public seams:
   Compatibility updates default to `--provider none`, and rebase never invokes
   a provider.
 
-The pure synchronization boundary is implemented by #165. The historical
-incremental synchronizer and publication compatibility paths remain for #166.
-The public façade, operation-purity, and exact-gateway checks prevent new
-consumers from increasing that migration debt. Exact internal façade gateways
-permit operation modules and the compatibility publication kernel to share
-private implementation helpers without making those helpers supported API.
+The pure synchronization boundary is implemented by #165. CORE-24 (#166)
+migrates ordinary application and test consumers away from the historical
+incremental synchronizer and publication kernel. Three exact #160
+characterization imports remain to exercise atomic-write failure injection,
+the retained concrete incremental adapter, and its internal cancellation
+boundaries; each has a named owner, test purpose, and removal trigger in
+`docs/ARCHITECTURE_CONTRACTS.md`. The public façade, operation-purity, and
+exact-gateway checks prevent new consumers from increasing that compatibility
+surface. Exact internal façade gateways permit operation modules and the
+compatibility publication kernel to share private implementation helpers
+without making those helpers supported API.
 
 ### Merge and serialization flow
 
@@ -802,8 +807,8 @@ installed local hooks.
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Public mapping/export boundary and typed no-publication document are implemented for core tables with explicit loss reports. | Publication remains in the compatibility exporter, and coverage is incomplete for every RootsMagic table/version. |
-| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and pure synchronization contracts are physically separated behind enforced public façades and broadly characterized with fictional regression tests. | The historical publication compatibility path remains pending #166. |
-| Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; #160 initialization, idempotency, rebase, tombstone, and rollback behavior remains characterized offline. | The legacy incremental module still owns the concrete adapters and publication implementation pending #166; multi-generation and broad non-person paths need release evidence. |
+| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and pure synchronization contracts are physically separated behind enforced public façades and broadly characterized with fictional regression tests. CORE-24 migrates ordinary consumers to those façades and removes the dead private engine CLI and loader shims. | Publication remains a bounded compatibility implementation behind the serialization façade until a typed publication port owns atomic-write failure injection. |
+| Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; #160 initialization, idempotency, rebase, tombstone, and rollback behavior remains characterized offline. CORE-24 limits direct private imports to exact characterization exceptions. | The legacy module still owns the concrete adapter behind the public sync façade; multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside `0.3.0`. |
