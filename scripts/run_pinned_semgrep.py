@@ -46,11 +46,11 @@ RULE_BUNDLES = (
         # same 151-rule set. Both remain byte-pinned; every other response fails.
         revisions=(
             RuleRevision(
-                sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
+                sha256="6c5830b3c92994be81404c599c7d5595538aa8d6036fb8042eb3861e6608638d",
                 size=487_962,
             ),
             RuleRevision(
-                sha256="084e9272b4297bbdc7afcd0b8ece70816f2e9c9973639b26eab2c071456ccc6b",
+                sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
                 size=432_695,
             ),
         ),
