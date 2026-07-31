@@ -1542,7 +1542,7 @@ def test_merge_bundle_rolls_back_both_existing_outputs_when_report_publish_fails
             raise OSError("fictional second-artifact failure")
         original_replace(source, destination)
 
-    monkeypatch.setattr(gedcom_service_module.os, "replace", fail_first_report_replace)
+    monkeypatch.setattr(os, "replace", fail_first_report_replace)
 
     with pytest.raises(OSError, match="second-artifact failure"):
         GedcomService().merge(
