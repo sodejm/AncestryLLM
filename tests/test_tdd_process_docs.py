@@ -53,6 +53,17 @@ def test_behavior_issue_forms_require_acceptance_tests_and_validation() -> None:
     assert not (ISSUE_TEMPLATE_ROOT / "feature_request.md").exists()
 
 
+def test_bug_report_stays_within_github_issue_form_input_limit() -> None:
+    form = _read(ISSUE_TEMPLATE_ROOT / "bug_report.yml")
+    editable_inputs = [
+        line
+        for line in form.splitlines()
+        if line.startswith("  - type: ") and line != "  - type: markdown"
+    ]
+
+    assert len(editable_inputs) <= 10
+
+
 def test_pull_request_template_requests_auditable_tdd_evidence() -> None:
     pull_request_template = _read(ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md")
 

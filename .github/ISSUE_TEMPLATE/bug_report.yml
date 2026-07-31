@@ -15,8 +15,8 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: Describe the defect and its user impact.
-      placeholder: When ..., AncestryLLM ... instead of ...
+      description: Describe the actual behavior, stable error codes, and user impact.
+      placeholder: When ..., AncestryLLM actually ... instead of ...
     validations:
       required: true
 
@@ -37,14 +37,6 @@ body:
     attributes:
       label: Expected behavior
       description: State the observable result that should occur.
-    validations:
-      required: true
-
-  - type: textarea
-    id: actual-behavior
-    attributes:
-      label: Actual behavior
-      description: State what occurs instead, including stable error codes where relevant.
     validations:
       required: true
 
@@ -120,14 +112,11 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Sanitized logs or screenshots
-      description: Remove secrets, paths, person details, and genealogy data before attaching.
-
-  - type: textarea
-    id: additional-context
-    attributes:
-      label: Additional context
-      description: Add related issues, references, or implementation constraints.
+      label: Sanitized evidence and context
+      description: |
+        Add sanitized logs or screenshots, related issues, references, and
+        implementation constraints. Remove secrets, paths, person details,
+        and genealogy data before attaching evidence.
 
   - type: checkboxes
     id: readiness
