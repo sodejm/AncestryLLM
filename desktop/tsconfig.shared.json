@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.base.json","compilerOptions":{"lib":["ES2022"],"types":[]},"include":["src/shared-contract/**/*.ts","src/mock-bridge/**/*.ts"],"exclude":["src/**/*.test.ts"]}
