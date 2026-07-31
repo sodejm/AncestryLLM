@@ -62,14 +62,8 @@ PRIVATE_MODULE_OWNERS: Final[dict[str, str]] = {
 # supported façades above. Feature services are deliberately absent: they must
 # consume public contracts even when they share the same package owner.
 PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
-    "ancestryllm.gedcom.engine": frozenset(
-        {
-            "ancestryllm.gedcom.parser",
-            "ancestryllm.gedcom.serialization",
-            "ancestryllm.gedcom.sync",
-        }
-    ),
-    "ancestryllm.gedcom.incremental": frozenset({"ancestryllm.gedcom.sync"}),
+    "ancestryllm.gedcom.engine": frozenset(),
+    "ancestryllm.gedcom.incremental": frozenset(),
     "ancestryllm.rootsmagic.exporter": frozenset(
         {"ancestryllm.rootsmagic", "ancestryllm.rootsmagic.export"}
     ),
@@ -101,24 +95,32 @@ PRIVATE_MODULE_GATEWAYS: Final[dict[str, frozenset[str]]] = {
     ),
 }
 
-# Public operation modules keep a small private implementation surface for
-# composing the compatibility kernel. These exact importers may use undeclared
+# Public owner modules keep a small private implementation surface for
+# composing physically owned behavior. These exact importers may use undeclared
 # symbols without turning those symbols into supported consumer API.
 PUBLIC_FACADE_INTERNAL_GATEWAYS: Final[dict[str, frozenset[str]]] = {
     "ancestryllm.gedcom.graph": frozenset(
         {
             "ancestryllm.gedcom.engine",
+            "ancestryllm.gedcom.parser",
             "ancestryllm.gedcom.quality",
+            "ancestryllm.gedcom.serialization",
+            "ancestryllm.gedcom.sync_gedcom",
         }
     ),
     "ancestryllm.gedcom.identity": frozenset(
         {
             "ancestryllm.gedcom.engine",
             "ancestryllm.gedcom.graph",
+            "ancestryllm.gedcom.parser",
             "ancestryllm.gedcom.quality",
+            "ancestryllm.gedcom.serialization",
+            "ancestryllm.gedcom.sync_gedcom",
         }
     ),
-    "ancestryllm.gedcom.quality": frozenset({"ancestryllm.gedcom.engine"}),
+    "ancestryllm.gedcom.quality": frozenset(
+        {"ancestryllm.gedcom.engine", "ancestryllm.gedcom.serialization"}
+    ),
 }
 
 ADAPTER_OWNERS: Final[dict[str, str]] = {
@@ -151,6 +153,7 @@ PURE_GEDCOM_OPERATION_MODULES: Final[frozenset[str]] = frozenset(
         "ancestryllm.gedcom.graph",
         "ancestryllm.gedcom.identity",
         "ancestryllm.gedcom.quality",
+        "ancestryllm.gedcom.sync_algorithms",
         "ancestryllm.gedcom.sync_kernel",
     }
 )
@@ -219,36 +222,27 @@ class ConsumerImportException:
     lifecycle: str
 
 
-# These tests deliberately exercise implementation seams captured by #160. They
-# are not consumer compatibility promises, and any import shape change makes the
-# exception stale instead of silently expanding the supported surface.
+# One test deliberately verifies each retained legacy import path. These are
+# compatibility promises, and any import shape change makes the exception stale
+# instead of silently expanding the supported surface.
 CHARACTERIZATION_IMPORT_EXCEPTIONS: Final[tuple[ConsumerImportException, ...]] = (
     ConsumerImportException(
-        importer="tests.modular.test_file_ingress",
+        importer="tests.modular.test_incremental",
         imported="ancestryllm.gedcom.engine",
         names=(),
-        owner="GEDCOM publication characterization",
-        issue="#160 / #166",
-        reason="Injects an atomic-write failure below the public publication boundary.",
-        lifecycle="Remove when the publication façade exposes a typed failure-injection port.",
+        owner="GEDCOM legacy import compatibility",
+        issue="#157 / #166",
+        reason="Verifies that the thin engine façade reexports its supported owner contract.",
+        lifecycle="Remove only in a breaking release after the legacy import is deprecated.",
     ),
     ConsumerImportException(
         importer="tests.modular.test_incremental",
-        imported="ancestryllm.gedcom",
-        names=("engine", "incremental"),
-        owner="incremental-sync characterization",
-        issue="#160 / #166",
-        reason="Characterizes the retained sync compatibility kernel and engine injection seam.",
-        lifecycle="Remove with the incremental compatibility kernel after callers migrate.",
-    ),
-    ConsumerImportException(
-        importer="tests.modular.test_incremental_cancellation_boundaries",
         imported="ancestryllm.gedcom.incremental",
         names=(),
-        owner="incremental cancellation characterization",
-        issue="#160 / #166",
-        reason="Checks cancellation inside implementation-only traversal boundaries.",
-        lifecycle="Remove when those boundaries are represented by public sync operations.",
+        owner="incremental legacy import compatibility",
+        issue="#157 / #166",
+        reason="Verifies that the thin incremental façade reexports its supported owner contracts.",
+        lifecycle="Remove only in a breaking release after the legacy import is deprecated.",
     ),
 )
 

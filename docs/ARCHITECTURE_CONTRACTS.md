@@ -1,6 +1,6 @@
 # Architecture ownership and dependency contracts
 
-Status: executable in the current Unreleased development tree.
+Status: executable in the 0.4.0 Unreleased development tree.
 `ARCHITECTURE.md` is the repository-wide source of truth; this page explains
 the checks that enforce its public façades, ownership boundaries, and
 current-versus-target graph.
@@ -61,7 +61,7 @@ flowchart TB
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
-| GEDCOM document model, physical-line parser, validator, deterministic line serializer, graph, identity, quality, service, and synchronization seams | pure document modules plus physically owned graph, identity, and quality operations behind declared façades; private compatibility access is limited by exact gateways (#163-#164) |
+| GEDCOM document model, bounded path parser, validator, deterministic line serializer, graph, identity, quality, service, synchronization, and publication seams | pure document modules plus physically owned parser, serialization, graph, identity, quality, synchronization-contract, algorithm, manifest, publication/recovery, operation, and legacy-argument modules behind declared façades; `engine` and `incremental` are import-only compatibility façades (#163-#166) |
 | RootsMagic immutable source/schema, typed query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `ancestryllm.application._rootsmagic` behind the `.query` façade, and `ancestryllm.rootsmagic.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |
 | Focused REPL compatibility and migration documentation | `docs/REPL_ARCHITECTURE.md` (#39) |
 | User, contributor, module-authoring, versioning, and release consistency | final cross-document pass (#179) |
@@ -89,10 +89,13 @@ The checker enforces these rules:
   adapters, runtime configuration, publication or secret storage, keyring, or
   provider implementations; optional intelligence enters through
   transport-neutral resolver ports;
-- private GEDCOM and RootsMagic compatibility modules may be imported only by
-  the exact importer modules declared in `PRIVATE_MODULE_GATEWAYS`; owner
-  package membership does not grant blanket access, and application services
-  cannot bypass the public façades;
+- private RootsMagic compatibility modules may be imported only by the exact
+  importer modules declared in `PRIVATE_MODULE_GATEWAYS`; owner package
+  membership does not grant blanket access, and application services cannot
+  bypass the public façades;
+- the GEDCOM `engine` and `incremental` import-only compatibility façades may be
+  imported only by the exact retained re-export assertions; ordinary
+  application and test consumers must import the physical owner modules;
 - an adapter cannot import a sibling adapter or become an application
   dependency;
 - imports from declared public façade modules must use names in their literal
@@ -113,16 +116,15 @@ module aliases. The application service and terminal command paths already
 entered through supported GEDCOM façades; there is no implemented FastAPI or
 Electron consumer in this release line.
 
-After the migration, ordinary consumers and tests import only the parser,
-serialization, graph, identity, quality, service, and sync façades. Exactly
-three #160 characterization imports remain in
-`CHARACTERIZATION_IMPORT_EXCEPTIONS`:
+After the migration, ordinary consumers and tests import only the physical
+parser, serialization, graph, identity, quality, service, synchronization, and
+publication owners. Exactly two compatibility imports remain in a single
+explicit test in `CHARACTERIZATION_IMPORT_EXCEPTIONS`:
 
 | Characterization importer | Private seam and test purpose | Owner and removal trigger |
 |---|---|---|
-| `tests.modular.test_file_ingress` | `gedcom.engine`; inject an atomic-write failure below publication | GEDCOM publication characterization; remove when publication has a typed failure-injection port. |
-| `tests.modular.test_incremental` | package `engine` and `incremental`; preserve initialization, update, rebase, rollback, and recovery behavior | Incremental-sync characterization; remove with the concrete compatibility kernel after its callers migrate. |
-| `tests.modular.test_incremental_cancellation_boundaries` | `gedcom.incremental`; exercise implementation-only traversal checkpoints | Incremental cancellation characterization; remove when public sync operations represent those boundaries. |
+| `tests.modular.test_incremental` | `gedcom.engine`; assert that the legacy import path re-exports its supported physical owner contract | Compatibility owner; remove in a breaking release after deprecation. |
+| `tests.modular.test_incremental` | `gedcom.incremental`; assert that the legacy import path re-exports its supported physical owner contract | Compatibility owner; remove in a breaking release after deprecation. |
 
 The repository scan rejects every other consumer import of the two private
 modules (`ARCH501`), rejects a stale exception (`ARCH502`), and rejects direct
@@ -130,22 +132,30 @@ or alias-based access to underscore-prefixed façade members (`ARCH503`). The
 test fixtures that prove those diagnostics are source strings, not live
 private consumers.
 
-The production compatibility gateways are deliberately narrower than the
-consumer surface:
+Production imports of both compatibility façades are empty. Their physical
+ownership is:
 
-| Public owner | Retained implementation gateway | Verified behavior | Removal trigger |
-|---|---|---|---|
-| `gedcom.parser` | `gedcom.engine` ingestion | parser, ingress, service, and incremental characterization | Move concrete path-backed ingress orchestration behind a permanent application port. |
-| `gedcom.serialization` | `gedcom.engine` publication | deterministic serialization, atomic bundle publication, rollback, and recovery | Move concrete publication and typed failure injection behind the publication boundary. |
-| `gedcom.sync` | `gedcom.engine` and `gedcom.incremental` concrete adapters | #160 initialization, idempotency, update, rebase, tombstone, cancellation, rollback, and recovery | Replace the legacy concrete adapter while retaining the public sync and `sync_kernel` contracts. |
+| Module | Physical responsibility |
+|---|---|
+| `gedcom.parser` | Bounded file ingress, envelope validation, and collision-free xref allocation. |
+| `gedcom.serialization` | Loss-minimal rendering, supported envelope normalization, and validation before staging. |
+| `gedcom.artifact_publication` | Single-artifact atomic text staging and rollback cleanup. |
+| `gedcom.sync_contracts` | Typed commands, results, coded errors, cancellation callbacks, and accounting. |
+| `gedcom.sync_algorithms` | Deterministic matching, reconciliation, rewriting, and report algorithms. |
+| `gedcom.sync_manifest` | Snapshot identity, ingress verification, and manifest validation. |
+| `gedcom.sync_publication` | Capability-safe generation publication, rollback, and recovery. |
+| `gedcom.sync_operations` | Typed update/rebase orchestration and stable error translation. |
+| `gedcom.sync_cli` | Legacy argument-vector translation to typed commands, without terminal I/O. |
+| `gedcom.sync_gedcom` | Narrow module-shaped GEDCOM dependency for supported composition and focused test doubles. |
+| `gedcom.sync` | Public application-port coordinator and supported typed/legacy entry points. |
+| `gedcom.engine`, `gedcom.incremental` | Import-only compatibility re-exports; no algorithms, adapters, or publication. |
 
-`PUBLIC_FACADE_INTERNAL_GATEWAYS` separately records the exact graph, identity,
-quality, and compatibility-kernel implementation composition. Those imports
-are owner-internal, may not be used by consumers, and disappear as physical
-ownership is consolidated; stable consumer names remain limited to literal
-`__all__` inventories. The migration also removes the unused engine
-`load_gedcom` shim and its private argument-parser/CLI path. The supported
-one-shot CLI and REPL continue to dispatch through the application executor.
+`PUBLIC_FACADE_INTERNAL_GATEWAYS` records exact physical-owner composition.
+Those imports are owner-internal and may not be used by consumers; stable
+consumer names remain limited to literal `__all__` inventories. The migration
+also removes the unused engine loader and private argument-parser/CLI paths.
+The supported one-shot CLI and REPL continue to dispatch through the
+application executor.
 
 ## Public façade lifecycle
 
@@ -179,10 +189,10 @@ identity, quality, serialization, service, and synchronization seams. The
 parser and serialization façades may re-export supported pure-kernel symbols,
 but consumers can depend on the declared implementation-module façades without
 reaching through a private engine. Graph traversal,
-identity/merge, and immutable quality analysis are also physically owned by
-their public operation modules. Exact internal façade gateways allow those
-implementations and the compatibility publication kernel to share private
-helpers without expanding the supported consumer API.
+identity/merge, immutable quality analysis, and publication are physically
+owned by focused modules. Exact internal owner gateways allow those
+implementations to share private helpers without expanding the supported
+consumer API.
 
 ## Temporary exception lifecycle
 
@@ -219,4 +229,6 @@ and shims, and complete the canonical `make test`, `make lint`,
 `make typecheck`, and uninterrupted `make security` gates. CORE-24 records its
 before/after characterization evidence against the baseline above and keeps
 provider-`none`, loss-minimal preservation, deterministic conflict handling,
-and rollback-safe publication under their existing regression coverage.
+and rollback-safe publication under their existing regression coverage. The
+current evidence records zero production imports of either compatibility
+façade and exactly two direct imports in one explicit re-export assertion.

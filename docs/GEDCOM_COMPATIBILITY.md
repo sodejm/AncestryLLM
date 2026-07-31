@@ -67,12 +67,13 @@ validate the publication result before crossing the atomic boundary and must
 not raise afterward. Failure to render structural progress after commit cannot
 turn an already published revision into a failed result.
 
-The current CLI and typed sync service entry points remain compatibility shims
-to the characterized incremental synchronizer. Issue #166 owns the concrete
-stage adapters, publication extraction, and obsolete compatibility-path
-removal. Until that migration is complete, the #160 offline baseline protects
-initialization, idempotency, rebase, tombstone non-resurrection, rollback
-metadata, and failed-publication preservation.
+The typed sync service and retained legacy argument-vector entry point dispatch
+through the public synchronization façade to the physically owned contract,
+algorithm, manifest, publication/recovery, and operation modules. The
+`engine` and `incremental` modules preserve historical import paths only; they
+own no algorithms, adapters, or publication. The #160 offline baseline
+continues to protect initialization, idempotency, rebase, tombstone
+non-resurrection, rollback metadata, and failed-publication preservation.
 
 ## Adversarial input dispositions
 

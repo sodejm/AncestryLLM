@@ -240,12 +240,16 @@ The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 ledger, abuse cases, evidence-backed residual-risk policy, and assurance gates
 are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-The GEDCOM publication engine and incremental synchronizer and the RootsMagic
-reader/export implementation predate the full modular split. Declared public
-façades define the supported boundaries while characterized compatibility
-kernels remain. The executable architecture checker allows private module
-imports only through exact named gateways, including inside each owner package;
-broad same-package access is not an exemption.
+GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
+publication/recovery, operation orchestration, and legacy argument translation
+now have focused physical owners. `gedcom.engine` and `gedcom.incremental` are
+import-only compatibility façades; production composition uses those owners
+directly. RootsMagic immutable source/schema access, query execution, pure
+mapping, and application-owned export publication also have focused physical
+owners. Legacy reader, schema, and exporter paths remain characterized aliases
+or compatibility façades. The executable architecture checker allows private
+module imports only through exact named gateways, including inside each owner
+package; broad same-package access is not an exemption.
 
 ## Startup, configuration, and composition
 
@@ -586,11 +590,11 @@ and MyHeritage imports require recorded manual smoke tests for every release.
 
 ### Kernel and façades
 
-`gedcom/engine.py` is now a smaller characterized compatibility kernel for
-source ingestion, collision-free pointer allocation, output assembly, and
-atomic publication. Its raw line/record representation remains authoritative
-so unknown tags and nested structures survive. Validation uses the same
-bounded streaming representation; there is no legacy secondary parser path.
+`gedcom/engine.py` is an import-only compatibility façade. It preserves
+established symbol paths but owns no algorithms, adapters, or artifact
+publication. `gedcom/incremental.py` is the equivalent import-only façade for
+the historical synchronizer. New production code imports the physical owner
+of each responsibility instead of either compatibility module.
 
 The operation modules physically own deterministic analysis and transformation
 behavior. They depend on the #163 document model and transport-neutral resolver
@@ -598,7 +602,8 @@ ports, not the private engine, UI adapters, configuration, providers, keyring,
 or publication infrastructure. Cancellation checkpoints remain inside bounded
 loops. `GedcomService` imports only the stable public seams:
 
-- `parser.py` re-exports parsing and validation primitives;
+- `parser.py` owns bounded path ingress, document-envelope validation, and
+  collision-free global xref assignment over the loss-minimal record model;
 - `identity.py` owns date normalization, identity evidence, bounded candidate
   discovery, similarity, optional resolver adjudication, and conservative
   record merge;
@@ -606,26 +611,36 @@ loops. `GedcomService` imports only the stable public seams:
   ancestor, or descendant subtree selection;
 - `quality.py` owns immutable deterministic findings, optional resolver
   annotations, and Markdown rendering;
-- `serialization.py` exposes supported versions and the writer;
+- `serialization.py` owns loss-minimal rendering and validation, delegating
+  single-artifact atomic staging to `artifact_publication.py`;
 - `service.py` provides merge, subtree, quality, and sync use cases;
 - `sync_kernel.py` owns path-free, immutable stage contracts and the
   deterministic synchronization coordinator;
+- `sync_contracts.py` owns typed commands, results, coded errors, and
+  accounting; `sync_algorithms.py` owns deterministic reconciliation;
+  `sync_manifest.py` owns snapshot identity and manifest validation;
+  `sync_publication.py` owns capability-safe generation publication, rollback,
+  and recovery; and `sync_operations.py` coordinates typed update and rebase
+  operations;
+- `sync_cli.py` translates the retained legacy argument vector to typed
+  commands without performing terminal I/O, and `sync_gedcom.py` supplies the
+  narrow module-shaped GEDCOM dependency used by supported entry points and
+  focused test doubles;
 - `sync.py` adapts shared application decision, cancellation, and progress
-  ports to that coordinator and retains the legacy incremental entry points.
+  ports to the pure coordinator and exposes the supported typed and legacy
+  synchronization entry points.
   Compatibility updates default to `--provider none`, and rebase never invokes
   a provider.
 
-The pure synchronization boundary is implemented by #165. CORE-24 (#166)
-migrates ordinary application and test consumers away from the historical
-incremental synchronizer and publication kernel. Three exact #160
-characterization imports remain to exercise atomic-write failure injection,
-the retained concrete incremental adapter, and its internal cancellation
-boundaries; each has a named owner, test purpose, and removal trigger in
-`docs/ARCHITECTURE_CONTRACTS.md`. The public façade, operation-purity, and
-exact-gateway checks prevent new consumers from increasing that compatibility
-surface. Exact internal façade gateways permit operation modules and the
-compatibility publication kernel to share private implementation helpers
-without making those helpers supported API.
+The pure synchronization boundary is implemented by #165, and CORE-24 (#166)
+has physically extracted the concrete behavior from the two historical
+modules. Ordinary production and test consumers now target the physical owner
+modules. Exactly two imports remain in one explicit compatibility assertion
+that verifies the retained `engine` and `incremental` re-exports; neither is a
+production dependency. The public-façade, operation-purity, exact-gateway, and
+stale-exception checks prevent growth of that compatibility surface. Exact
+internal owner gateways permit physical owner modules to compose private
+helpers without making those helpers supported consumer API.
 
 ### Merge and serialization flow
 
@@ -660,9 +675,10 @@ invent or remove finding IDs.
 
 ### Incremental update and rebase
 
-`gedcom/incremental.py` implements manifest-backed synchronization of website
-snapshots. It has its own stable `SyncError`/exit-code contract because it was
-migrated from a standalone operational tool.
+The supported synchronization façade and its split owners implement
+manifest-backed synchronization of website snapshots. The retained import
+façade preserves the stable `SyncError`/exit-code contract that originated in
+the standalone operational tool.
 
 An update:
 
@@ -704,13 +720,13 @@ publication result before crossing the boundary and must not raise afterward.
 Structural progress failures after a successful commit therefore cannot
 invalidate or misreport the immutable publication.
 
-The existing `sync.py` CLI/service functions remain compatibility shims to
-`gedcom.incremental` while #166 supplies the concrete stage adapters and removes
-obsolete publication paths. The #160 characterization baseline continues to
-cover offline initialization, idempotency, rebase, tombstone non-resurrection,
-rollback metadata, and failed-publication preservation during that migration.
-Broader non-person remapping and multi-generation vendor replacement still need
-release evidence before the subsystem should be described as fully hardened.
+The `sync.py` CLI/service functions now dispatch directly to the split contract,
+algorithm, manifest, publication, and operation owners. The #160
+characterization baseline continues to cover offline initialization,
+idempotency, rebase, tombstone non-resurrection, rollback metadata, and
+failed-publication preservation. Broader non-person remapping and
+multi-generation vendor replacement still need release evidence before the
+subsystem should be described as fully hardened.
 
 ## Supporting application services
 
@@ -796,18 +812,16 @@ Tests are intentionally split by risk:
   encrypted storage, prompt/research services, RootsMagic export, and basic
   incremental sync;
 - `tests/test_gedcom_merge.py` and `tests/test_gedcom_quality.py` characterize
-  the operation modules, compatibility publication kernel, and preservation
-  behavior;
+  the operation modules, owned publication adapters, and preservation behavior;
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
 - Wiki tests cover validation, deterministic mirroring, deletion, no-op
   behavior, commits, and workflow structure;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
-Strict type checking currently exempts `gedcom/engine.py` and
-`gedcom/incremental.py`, and Ruff carries targeted exceptions for those files.
-This is acknowledged migration debt. New modular code must remain fully typed,
-and changes to the kernel require focused regression tests rather than expanding
-the exception surface.
+The import-only compatibility façades and their physical owner modules are
+covered by the standard strict type and Ruff gates without targeted exceptions.
+Changes to a physical owner require focused regression tests and may not expand
+the exact compatibility-import surface.
 
 The pre-commit configuration adds gitleaks, private-key detection, large-file
 checks, format/whitespace checks, and a no-direct-commit-to-`main` guard. CI and
@@ -824,8 +838,8 @@ installed local hooks.
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Reusable mapping boundary and typed no-publication document are implemented for core tables with explicit loss reports; validation and rollback-safe publication are application-owned behind compatibility façades that preserve public imports. | Coverage is incomplete for every RootsMagic table/version. |
-| GEDCOM merge and quality | The document model, physical-line parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and pure synchronization contracts are physically separated behind enforced public façades and broadly characterized with fictional regression tests. CORE-24 migrates ordinary consumers to those façades and removes the dead private engine CLI and loader shims. | Publication remains a bounded compatibility implementation behind the serialization façade until a typed publication port owns atomic-write failure injection. |
-| Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; #160 initialization, idempotency, rebase, tombstone, and rollback behavior remains characterized offline. CORE-24 limits direct private imports to exact characterization exceptions. | The legacy module still owns the concrete adapter behind the public sync façade; multi-generation and broad non-person paths need release evidence. |
+| GEDCOM merge and quality | The document model, bounded path parser, validator, line serializer, graph traversal, identity/merge operations, immutable quality analysis, and atomic text publication adapter are physically separated behind enforced façades and broadly characterized with fictional regression tests. `engine.py` is import-only compatibility. | Continue preservation and external-interoperability evidence; do not restore algorithms or publication ownership to the compatibility façade. |
+| Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed; no FastAPI route or Electron runtime is implemented. | The explicit #50–#59 dependency gate remains unsatisfied, including open #54–#57; #60 stays outside the current release scope. |

@@ -18,7 +18,7 @@ import pytest
 
 import ancestryllm.core.ingress as ingress_module
 import ancestryllm.core.publication as publication_module
-import ancestryllm.gedcom.engine as gedcom_engine
+import ancestryllm.gedcom.artifact_publication as gedcom_artifact_publication
 import ancestryllm.gedcom.service as gedcom_service_module
 import ancestryllm.rootsmagic.exporter as exporter_module
 from ancestryllm.core.config import AppConfig
@@ -1542,7 +1542,7 @@ def test_merge_bundle_rolls_back_both_existing_outputs_when_report_publish_fails
             raise OSError("fictional second-artifact failure")
         original_replace(source, destination)
 
-    monkeypatch.setattr(gedcom_engine.os, "replace", fail_first_report_replace)
+    monkeypatch.setattr(os, "replace", fail_first_report_replace)
 
     with pytest.raises(OSError, match="second-artifact failure"):
         GedcomService().merge(
@@ -2453,7 +2453,7 @@ def test_reserved_writer_never_clobbers_a_foreign_staging_replacement(
 
     with pytest.raises(OSError, match="reservation was replaced"):
         if writer_kind == "gedcom":
-            gedcom_engine._atomic_write_text(staged, "writer payload\n")
+            gedcom_artifact_publication.stage_text_atomically(staged, "writer payload\n")
         else:
             RootsMagicExporter._atomic_write(staged, "writer payload\n")
 
@@ -2534,7 +2534,7 @@ def test_reserved_writers_retry_identity_cleanup_after_lifecycle_failure(
 
     with pytest.raises(OSError, match=f"fictional {failure_phase} failure"):
         if writer_kind == "gedcom":
-            gedcom_engine._atomic_write_text(staged, "fictional payload\n")
+            gedcom_artifact_publication.stage_text_atomically(staged, "fictional payload\n")
         else:
             RootsMagicExporter._atomic_write(staged, "fictional payload\n")
 
