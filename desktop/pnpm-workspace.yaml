@@ -1,0 +1,11 @@
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+ignoredBuiltDependencies:
+  - electron-winstaller
+  - libxmljs2
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  libxmljs2: false
