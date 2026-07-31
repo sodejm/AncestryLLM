@@ -160,6 +160,15 @@ def _canonical_json(value: object) -> str:
     )
 
 
+def _validate_serialized_size(value: object) -> str:
+    """Return canonical JSON after enforcing the aggregate contract bound."""
+
+    encoded = _canonical_json(value)
+    if len(encoded.encode("utf-8")) > MAX_SYNC_JSON_BYTES:
+        raise ValueError("Serialized sync contract exceeds its bounded size.")
+    return encoded
+
+
 def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -172,10 +181,7 @@ class SyncValue:
     def to_json(self) -> str:
         """Return canonical JSON with stable key and collection ordering."""
 
-        encoded = _canonical_json(self)
-        if len(encoded.encode("utf-8")) > MAX_SYNC_JSON_BYTES:
-            raise ValueError("Serialized sync contract exceeds its bounded size.")
-        return encoded
+        return _validate_serialized_size(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +274,7 @@ class SyncRequest(SyncValue):
             set(decision_ids)
         ):
             raise ValueError("replayed_decisions must have unique IDs in deterministic order.")
+        _validate_serialized_size(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +364,30 @@ class SyncDelta(SyncValue):
             _validate_ref("provenance_ref", reference)
 
 
+def _delta_sort_key(delta: SyncDelta) -> tuple[object, ...]:
+    """Return the canonical ordering key while preserving duplicate deltas."""
+
+    return (
+        delta.kind.value,
+        delta.subject_ref,
+        delta.before_sha256 or "",
+        delta.after_sha256 or "",
+        delta.provenance_refs,
+    )
+
+
+def _action_id(operation_id: str, sequence: int, delta: SyncDelta) -> str:
+    """Return the deterministic identity for one sequenced plan action."""
+
+    return "action:" + _digest(
+        {
+            "operation_id": operation_id,
+            "sequence": sequence,
+            "delta": delta,
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SyncDecisionRequest(SyncValue):
     """One explicit plan decision with stable coded options."""
@@ -365,6 +396,7 @@ class SyncDecisionRequest(SyncValue):
     decision_code: str
     subject_refs: tuple[str, ...]
     option_ids: tuple[str, ...]
+    destructive_option_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_decision_id("decision_id", self.decision_id)
@@ -379,10 +411,16 @@ class SyncDecisionRequest(SyncValue):
             raise ValueError("subject_refs must be unique and deterministically ordered.")
         if self.option_ids != tuple(sorted(set(self.option_ids))):
             raise ValueError("option_ids must be unique and deterministically ordered.")
+        if self.destructive_option_ids != tuple(sorted(set(self.destructive_option_ids))):
+            raise ValueError("destructive_option_ids must be unique and deterministically ordered.")
+        if not set(self.destructive_option_ids).issubset(self.option_ids):
+            raise ValueError("destructive_option_ids must be declared decision options.")
         for reference in self.subject_refs:
             _validate_ref("subject_ref", reference)
         for option_id in self.option_ids:
             _validate_code("option_id", option_id)
+        for option_id in self.destructive_option_ids:
+            _validate_code("destructive_option_id", option_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,33 +483,24 @@ class SyncLossReport(SyncValue):
     def __post_init__(self) -> None:
         if len(self.entries) > MAX_ITEMS:
             raise ValueError("Loss report exceeds its bounded size.")
-        expected = tuple(
-            sorted(
-                set(self.entries),
-                key=lambda item: (
-                    item.loss_code,
-                    item.subject_refs,
-                    item.item_count,
-                ),
-            )
-        )
-        if self.entries != expected:
-            raise ValueError("Loss entries must be unique and deterministically ordered.")
+        keys = tuple((item.loss_code, item.subject_refs) for item in self.entries)
+        if keys != tuple(sorted(keys)) or len(keys) != len(set(keys)):
+            raise ValueError("Loss entries must be aggregated and deterministically ordered.")
 
     @classmethod
     def create(cls, entries: tuple[SyncLossEntry, ...]) -> SyncLossReport:
         """Normalize stage output into a deterministic report."""
 
+        if len(entries) > MAX_ITEMS:
+            raise ValueError("Loss report exceeds its bounded size.")
+        totals: dict[tuple[str, tuple[str, ...]], int] = {}
+        for entry in entries:
+            key = (entry.loss_code, entry.subject_refs)
+            totals[key] = totals.get(key, 0) + entry.item_count
         return cls(
             tuple(
-                sorted(
-                    set(entries),
-                    key=lambda item: (
-                        item.loss_code,
-                        item.subject_refs,
-                        item.item_count,
-                    ),
-                )
+                SyncLossEntry(loss_code, item_count, subject_refs)
+                for (loss_code, subject_refs), item_count in sorted(totals.items())
             )
         )
 
@@ -513,6 +542,16 @@ class SyncPlan(SyncValue):
             raise ValueError("Sync plan exceeds its bounded size.")
         if tuple(entry.sequence for entry in self.entries) != tuple(range(len(self.entries))):
             raise ValueError("Plan entries must have contiguous deterministic sequence values.")
+        for entry in self.entries:
+            delta = SyncDelta(
+                entry.subject_ref,
+                entry.kind,
+                entry.before_sha256,
+                entry.after_sha256,
+                entry.provenance_refs,
+            )
+            if entry.action_id != _action_id(self.operation_id, entry.sequence, delta):
+                raise ValueError("action_id does not match the deterministic plan action content.")
         if self.decisions != tuple(sorted(self.decisions, key=lambda item: item.decision_id)):
             raise ValueError("Plan decisions must be deterministically ordered.")
         decision_ids = tuple(item.decision_id for item in self.decisions)
@@ -546,28 +585,10 @@ class SyncPlan(SyncValue):
     ) -> SyncPlan:
         """Normalize comparison output into a content-addressed plan."""
 
-        ordered_deltas = tuple(
-            sorted(
-                output.deltas,
-                key=lambda item: (
-                    item.kind.value,
-                    item.subject_ref,
-                    item.before_sha256 or "",
-                    item.after_sha256 or "",
-                    item.provenance_refs,
-                ),
-            )
-        )
+        ordered_deltas = tuple(sorted(output.deltas, key=_delta_sort_key))
         entries = tuple(
             SyncPlanEntry(
-                action_id="action:"
-                + _digest(
-                    {
-                        "operation_id": operation_id,
-                        "sequence": sequence,
-                        "delta": delta,
-                    }
-                ),
+                action_id=_action_id(operation_id, sequence, delta),
                 sequence=sequence,
                 subject_ref=delta.subject_ref,
                 kind=delta.kind,
@@ -760,6 +781,9 @@ class SyncKernelResult(SyncValue):
         if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE}:
             if self.plan is None or self.decisions:
                 raise ValueError("Non-publication success requires an undecided plan.")
+        if self.outcome is SyncOutcome.NO_CHANGE and self.plan is not None:
+            if self.plan.entries or self.plan.decisions:
+                raise ValueError("No-change results require an empty plan.")
 
     @property
     def committed(self) -> bool:
@@ -922,7 +946,8 @@ class SyncKernel:
         snapshot_state: SyncSnapshotState | None = None
         plan: SyncPlan | None = None
         staged: SyncStagedApplication | None = None
-        selected: tuple[SyncDecisionSelection, ...] = ()
+        selected: list[SyncDecisionSelection] = []
+        application_attempted = False
         current_stage = SyncStage.SNAPSHOT
 
         def emit(
@@ -991,7 +1016,9 @@ class SyncKernel:
             emit(current_stage, SyncEventPhase.STARTED, "SYNC_PLANNING_STARTED")
             checkpoint()
             output = self._planning.plan(snapshot_state, deltas, request.options)
-            if tuple(output.deltas) != tuple(deltas):
+            if tuple(sorted(output.deltas, key=_delta_sort_key)) != tuple(
+                sorted(deltas, key=_delta_sort_key)
+            ):
                 raise SyncStageError("SYNC_PLAN_DELTA_MISMATCH")
             plan = SyncPlan.create(
                 operation_id=request.operation_id,
@@ -1034,7 +1061,7 @@ class SyncKernel:
 
             current_stage = SyncStage.DECISION
             emit(current_stage, SyncEventPhase.STARTED, "SYNC_DECISION_STARTED")
-            selected = self._resolve_decisions(request, plan, checkpoint)
+            self._resolve_decisions(request, plan, checkpoint, selected)
             emit(
                 current_stage,
                 SyncEventPhase.COMPLETED,
@@ -1045,7 +1072,8 @@ class SyncKernel:
             current_stage = SyncStage.APPLICATION
             emit(current_stage, SyncEventPhase.STARTED, "SYNC_APPLICATION_STARTED")
             checkpoint()
-            staged = self._application.stage(snapshot_state, plan, selected)
+            application_attempted = True
+            staged = self._application.stage(snapshot_state, plan, tuple(selected))
             if staged.plan_id != plan.plan_id:
                 raise SyncStageError("SYNC_STAGED_PLAN_MISMATCH")
             checkpoint()
@@ -1077,7 +1105,7 @@ class SyncKernel:
                 request.operation_id,
                 SyncOutcome.COMMITTED,
                 plan,
-                selected,
+                tuple(selected),
                 publication,
                 None,
                 None,
@@ -1104,14 +1132,14 @@ class SyncKernel:
             if recovery is None:
                 code = "SYNC_RECOVERY_FAILED"
             elif not recovery.prior_revision_preserved or (
-                staged is not None and not recovery.staged_state_removed
+                application_attempted and not recovery.staged_state_removed
             ):
                 code = "SYNC_RECOVERY_INCOMPLETE"
             return SyncKernelResult(
                 request.operation_id,
                 SyncOutcome.CANCELLED if cancelled else SyncOutcome.FAILED,
                 plan,
-                selected,
+                tuple(selected),
                 None,
                 recovery,
                 code,
@@ -1124,13 +1152,13 @@ class SyncKernel:
         request: SyncRequest,
         plan: SyncPlan,
         checkpoint: Callable[[], None],
-    ) -> tuple[SyncDecisionSelection, ...]:
+        selections: list[SyncDecisionSelection],
+    ) -> None:
         declared = {item.decision_id: item for item in plan.decisions}
         replayed = {item.decision_id: item for item in request.replayed_decisions}
         unknown = set(replayed) - set(declared)
         if unknown:
             raise SyncStageError("SYNC_DECISION_UNKNOWN")
-        selections: list[SyncDecisionSelection] = []
         for decision in plan.decisions:
             checkpoint()
             selection = replayed.get(decision.decision_id)
@@ -1142,7 +1170,6 @@ class SyncKernel:
                 raise SyncStageError("SYNC_DECISION_OPTION_INVALID")
             selections.append(selection)
             checkpoint()
-        return tuple(selections)
 
     def _recover(
         self,

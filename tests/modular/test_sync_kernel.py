@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 
+import ancestryllm.gedcom.sync_kernel as sync_kernel_module
 from ancestryllm.application.dto import (
     DecisionKind,
     DecisionOption,
@@ -87,6 +88,7 @@ def _decision() -> SyncDecisionRequest:
         "SYNC_MANUAL_DELETION",
         ("record:I1",),
         ("ACCEPT", "KEEP"),
+        ("ACCEPT",),
     )
 
 
@@ -209,7 +211,7 @@ class _Harness:
             "recovery:fixture",
             self.prior_preserved,
             (
-                context.staging_ref is not None
+                context.staging_ref is not None or context.failed_stage is SyncStage.APPLICATION
                 if self.staged_removed is None
                 else self.staged_removed
             ),
@@ -351,6 +353,43 @@ def test_plan_is_content_addressed_and_independent_of_delta_order() -> None:
     ]
 
 
+def test_loss_report_aggregates_duplicate_logical_categories() -> None:
+    report = SyncLossReport.create(
+        (
+            SyncLossEntry("SYNC_UNSUPPORTED_TAG", 2, ("record:I1",)),
+            SyncLossEntry("SYNC_UNSUPPORTED_TAG", 3, ("record:I1",)),
+        )
+    )
+
+    assert report.entries == (SyncLossEntry("SYNC_UNSUPPORTED_TAG", 5, ("record:I1",)),)
+    with pytest.raises(ValueError, match="aggregated"):
+        SyncLossReport(
+            (
+                SyncLossEntry("SYNC_UNSUPPORTED_TAG", 2, ("record:I1",)),
+                SyncLossEntry("SYNC_UNSUPPORTED_TAG", 3, ("record:I1",)),
+            )
+        )
+
+
+def test_reconstructed_plan_rejects_an_action_id_that_does_not_match_content() -> None:
+    state = SyncSnapshotState.create(
+        state_ref="state:fixture",
+        master=_document(),
+        manifest=None,
+        snapshots=(_snapshot(),),
+    )
+    plan = SyncPlan.create(
+        operation_id="operation:fixture",
+        options=SyncOptions(SyncOperation.UPDATE),
+        input_fingerprint=state.input_fingerprint,
+        output=SyncPlanningOutput((_delta(),)),
+    )
+    tampered = replace(plan.entries[0], action_id="action:different")
+
+    with pytest.raises(ValueError, match="action_id"):
+        replace(plan, entries=(tampered,))
+
+
 def test_plan_identity_includes_every_plan_affecting_option() -> None:
     state = SyncSnapshotState.create(
         state_ref="state:fixture",
@@ -460,6 +499,42 @@ def test_no_change_is_repeatable_and_never_stages_or_publishes() -> None:
     assert first.plan is not None
     assert first.plan.entries == ()
     assert set(harness.calls) == {"snapshot", "comparison", "planning"}
+
+
+def test_no_change_result_rejects_a_nonempty_plan() -> None:
+    dry_run = _kernel(_Harness()).execute(_request(dry_run=True))
+
+    with pytest.raises(ValueError, match="No-change"):
+        replace(dry_run, outcome=SyncOutcome.NO_CHANGE)
+
+
+def test_planning_may_return_the_same_delta_multiset_in_a_different_order() -> None:
+    class ReorderedPlanning(_Harness):
+        def plan(
+            self,
+            snapshot: SyncSnapshotState,
+            deltas: tuple[SyncDelta, ...],
+            options: SyncOptions,
+        ) -> SyncPlanningOutput:
+            del snapshot, options
+            self.calls.append("planning")
+            return SyncPlanningOutput(tuple(reversed(deltas)), self.decision_requests)
+
+    harness = ReorderedPlanning(
+        deltas=(
+            _delta("record:I1", SyncChangeKind.UPDATE),
+            _delta("record:I2", SyncChangeKind.CREATE),
+        )
+    )
+
+    result = _kernel(harness).execute(_request())
+
+    assert result.outcome is SyncOutcome.COMMITTED
+    assert result.plan is not None
+    assert tuple(entry.kind for entry in result.plan.entries) == (
+        SyncChangeKind.CREATE,
+        SyncChangeKind.UPDATE,
+    )
 
 
 def test_dry_run_returns_plan_without_deciding_staging_or_publishing() -> None:
@@ -598,6 +673,19 @@ def test_recovery_failure_and_incomplete_recovery_are_explicit() -> None:
     assert not incomplete.recovery.prior_revision_preserved
 
 
+def test_failed_application_attempt_requires_explicit_staging_cleanup() -> None:
+    result = _kernel(
+        _Harness(
+            fail_stage=SyncStage.APPLICATION,
+            staged_removed=False,
+        )
+    ).execute(_request())
+
+    assert result.error_code == "SYNC_RECOVERY_INCOMPLETE"
+    assert result.recovery is not None
+    assert not result.recovery.staged_state_removed
+
+
 def test_staged_state_cleanup_is_required_for_complete_recovery() -> None:
     result = _kernel(
         _Harness(
@@ -628,6 +716,38 @@ def test_unknown_or_invalid_replayed_decisions_fail_before_application() -> None
         assert result.failed_stage is SyncStage.DECISION
         assert "application" not in harness.calls
         assert "commit" not in harness.calls
+
+
+def test_completed_decisions_are_retained_when_a_later_decision_is_cancelled() -> None:
+    first = SyncDecisionRequest(
+        "decision:first",
+        "SYNC_SELECT",
+        ("record:I1",),
+        ("KEEP",),
+    )
+    second = SyncDecisionRequest(
+        "decision:second",
+        "SYNC_SELECT",
+        ("record:I2",),
+        ("KEEP",),
+    )
+
+    class CancelSecondDecision(_Harness):
+        def __init__(self) -> None:
+            super().__init__(decisions=(first, second))
+            self.decision_count = 0
+
+        def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection:
+            self.calls.append("decision")
+            self.decision_count += 1
+            if self.decision_count == 2:
+                raise SyncCancelled()
+            return SyncDecisionSelection(request.decision_id, "KEEP")
+
+    result = _kernel(CancelSecondDecision()).execute(_request())
+
+    assert result.outcome is SyncOutcome.CANCELLED
+    assert result.decisions == (SyncDecisionSelection("decision:first", "KEEP"),)
 
 
 def test_recovery_metadata_and_events_cannot_contain_paths_or_payload_fields() -> None:
@@ -717,6 +837,15 @@ def test_decision_options_are_bounded_to_the_application_port_limit() -> None:
         )
 
 
+def test_sync_request_enforces_aggregate_serialized_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sync_kernel_module, "MAX_SYNC_JSON_BYTES", 1)
+
+    with pytest.raises(ValueError, match="Serialized sync contract"):
+        _request()
+
+
 def test_application_coordinator_maps_decisions_and_structural_progress() -> None:
     harness = _Harness()
     decisions = _ApplicationDecisionPort()
@@ -739,6 +868,25 @@ def test_application_coordinator_maps_decisions_and_structural_progress() -> Non
     assert [update.stage for update in progress.updates] == [event.code for event in result.events]
     assert all(update.operation == "GEDCOM_SYNC" for update in progress.updates)
     assert all(update.artifact_id is None for update in progress.updates)
+
+
+def test_application_coordinator_uses_explicit_destructive_option_metadata() -> None:
+    decision = SyncDecisionRequest(
+        "decision:tombstone",
+        "SYNC_TOMBSTONE",
+        ("record:I1",),
+        ("APPLY", "DELETE_RECORD"),
+        ("APPLY",),
+    )
+    harness = _Harness(decisions=(decision,))
+    decisions = _ApplicationDecisionPort(DecisionResponse("decision:tombstone", "DELETE_RECORD"))
+
+    result = _coordinator(harness, decisions=decisions).execute(_request())
+
+    assert result.outcome is SyncOutcome.COMMITTED
+    assert tuple(
+        (option.option_id, option.destructive) for option in decisions.requests[0].options
+    ) == (("APPLY", True), ("DELETE_RECORD", False))
 
 
 def test_application_coordinator_maps_conflict_decisions() -> None:
@@ -799,6 +947,10 @@ def test_application_cancellation_port_uses_the_coded_cancelled_outcome() -> Non
         (
             DecisionResponse("decision:different", "KEEP"),
             "SYNC_DECISION_ID_MISMATCH",
+        ),
+        (
+            DecisionResponse("decision:manual-deletion", "KEEP:LOCAL"),
+            "SYNC_DECISION_OPTION_INVALID",
         ),
     ),
 )

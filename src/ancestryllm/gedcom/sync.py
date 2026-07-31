@@ -89,16 +89,6 @@ class _ApplicationDecisionStage:
             return DecisionKind.SELECT
         return DecisionKind.CONFIRM
 
-    @staticmethod
-    def _is_destructive(request: SyncDecisionRequest, option_id: str) -> bool:
-        if option_id in {"DELETE", "DISCARD", "REMOVE", "TOMBSTONE"}:
-            return True
-        return "DELETION" in request.decision_code and option_id in {
-            "ACCEPT",
-            "APPLY",
-            "CONFIRM",
-        }
-
     def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection:
         try:
             response = self._port.decide(
@@ -111,7 +101,7 @@ class _ApplicationDecisionStage:
                         DecisionOption(
                             option_id=option_id,
                             label_code=option_id,
-                            destructive=self._is_destructive(request, option_id),
+                            destructive=option_id in request.destructive_option_ids,
                         )
                         for option_id in request.option_ids
                     ),
@@ -125,6 +115,8 @@ class _ApplicationDecisionStage:
             raise SyncCancelled()
         if response.option_id is None:
             raise SyncStageError("SYNC_DECISION_RESPONSE_INVALID")
+        if response.option_id not in request.option_ids:
+            raise SyncStageError("SYNC_DECISION_OPTION_INVALID")
         return SyncDecisionSelection(response.decision_id, response.option_id)
 
 
