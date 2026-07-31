@@ -18,11 +18,28 @@ _SPEC.loader.exec_module(verifier)
 
 
 def _configuration() -> dict[str, object]:
+    """Published v0.4 schema fixture retained for compatibility coverage."""
     return {
         "schema_version": 1,
         "release": "0.4.0",
         "milestone": {"number": 3, "title": "0.4.0 Genealogy Core Facades"},
         "tracker": {"number": 193, "label": "release-tracker"},
+    }
+
+
+def _project_configuration() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "release": "0.5.0",
+        "project": {
+            "owner": "sodejm",
+            "number": 2,
+            "title": "AncestryLLM Feature Releases",
+            "iteration": "v0.5.0 — Foundation",
+            "priority": "P0",
+            "status": "Done",
+            "validation": "Verified",
+        },
     }
 
 
@@ -39,12 +56,27 @@ def test_accepts_exact_release_control_configuration() -> None:
     assert configuration.tracker_label == "release-tracker"
 
 
+def test_accepts_project_native_release_configuration() -> None:
+    configuration = verifier.validate_release_configuration(
+        _project_configuration(),
+        expected_version="0.5.0",
+    )
+
+    assert configuration.release == "0.5.0"
+    assert configuration.project_owner == "sodejm"
+    assert configuration.project_number == 2
+    assert configuration.project_iteration == "v0.5.0 — Foundation"
+    assert configuration.project_priority == "P0"
+    assert configuration.project_status == "Done"
+    assert configuration.project_validation == "Verified"
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     (
         ({"release": "0.3.0"}, "does not match"),
         ({"release": "0.3"}, "stable SemVer"),
-        ({"schema_version": 2}, "schema_version"),
+        ({"schema_version": 3}, "schema_version"),
         ({"unexpected": True}, "keys are invalid"),
         (
             {"milestone": {"number": True, "title": "0.4.0 Genealogy Core Facades"}},
@@ -65,6 +97,36 @@ def test_rejects_mismatched_or_malformed_configuration(
             configuration,
             expected_version="0.4.0",
         )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ({"project": {"owner": "sodejm"}}, "project keys are invalid"),
+        (
+            {
+                "project": {
+                    "owner": "sodejm",
+                    "number": 2,
+                    "title": "AncestryLLM Feature Releases",
+                    "iteration": "v0.5.0 — Foundation",
+                    "priority": "P0",
+                    "status": "Done",
+                    "validation": "Verified\n",
+                }
+            },
+            "trimmed string",
+        ),
+    ),
+)
+def test_rejects_malformed_project_native_configuration(
+    mutation: dict[str, object], message: str
+) -> None:
+    configuration = _project_configuration()
+    configuration.update(mutation)
+
+    with pytest.raises(ValueError, match=message):
+        verifier.validate_release_configuration(configuration, expected_version="0.5.0")
 
 
 def test_cli_rejects_invalid_json(tmp_path: Path) -> None:

@@ -19,7 +19,7 @@ jobs:
     permissions:
       actions: read # required to locate and download release-readiness evidence
       contents: read # required to verify the tag and release commit
-      issues: read # required to recheck milestone closure
+      issues: read # required to recheck Project issue dependencies
     outputs:
       version: ${{ steps.release.outputs.version }}
       commit: ${{ steps.release.outputs.commit }}
@@ -53,22 +53,26 @@ jobs:
           python scripts/verify_release_configuration.py \
             --config .github/release-config.json \
             --version "$version"
-          milestone_number="$(jq -r '.milestone.number' .github/release-config.json)"
-          milestone_title="$(jq -r '.milestone.title' .github/release-config.json)"
-          tracker_number="$(jq -r '.tracker.number' .github/release-config.json)"
-          tracker_label="$(jq -r '.tracker.label' .github/release-config.json)"
-          milestone_json="$(
-            gh api "repos/$GITHUB_REPOSITORY/milestones/$milestone_number"
-          )"
-          test "$(jq -r '.number' <<<"$milestone_json")" = "$milestone_number"
-          test "$(jq -r '.title' <<<"$milestone_json")" = "$milestone_title"
-          test "$(jq -r '.state' <<<"$milestone_json")" = "open"
-          gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/issues?milestone=$milestone_number&state=open&per_page=100" |
-            jq 'add // []' |
-            python scripts/verify_release_milestone.py \
-              --tracker-number "$tracker_number" \
-              --tracker-label "$tracker_label"
+          project_owner="$(jq -r '.project.owner' .github/release-config.json)"
+          project_number="$(jq -r '.project.number' .github/release-config.json)"
+          project_title="$(jq -r '.project.title' .github/release-config.json)"
+          project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
+          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
+          project_status="$(jq -r '.project.status' .github/release-config.json)"
+          project_validation="$(jq -r '.project.validation' .github/release-config.json)"
+          project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
+          gh api graphql --paginate --slurp \
+            -f query="$project_query" \
+            -f owner="$project_owner" \
+            -F number="$project_number" |
+            python scripts/verify_release_project.py \
+              --project-owner "$project_owner" \
+              --project-number "$project_number" \
+              --project-title "$project_title" \
+              --iteration "$project_iteration" \
+              --priority "$project_priority" \
+              --status "$project_status" \
+              --validation "$project_validation"
           git fetch --no-tags origin main
           test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$TAG_COMMIT"
           test "$(git rev-parse origin/main)" = "$TAG_COMMIT"

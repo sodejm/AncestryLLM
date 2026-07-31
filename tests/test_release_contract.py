@@ -62,14 +62,21 @@ def test_package_version_is_one_stable_semver_value() -> None:
     )
 
 
-def test_release_configuration_names_the_exact_0_4_control_plane() -> None:
+def test_release_configuration_names_the_project_native_v0_5_control_plane() -> None:
     configuration = _release_configuration()
 
     assert configuration == {
-        "schema_version": 1,
-        "release": str(_project()["version"]),
-        "milestone": {"number": 3, "title": "0.4.0 Genealogy Core Facades"},
-        "tracker": {"number": 193, "label": "release-tracker"},
+        "schema_version": 2,
+        "release": "0.5.0",
+        "project": {
+            "owner": "sodejm",
+            "number": 2,
+            "title": "AncestryLLM Feature Releases",
+            "iteration": "v0.5.0 — Foundation",
+            "priority": "P0",
+            "status": "Done",
+            "validation": "Verified",
+        },
     }
 
 
@@ -104,8 +111,7 @@ def test_module_entry_point_reports_the_same_version() -> None:
 
 
 def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
-    configuration = _release_configuration()
-    version = str(configuration["release"])
+    version = str(_project()["version"])
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     versioning = (ROOT / "docs/VERSIONING.md").read_text(encoding="utf-8")
     releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
@@ -126,7 +132,12 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "branch/worktree lifecycle audit input" in releasing
     assert "docs/release-notes/<version>.md" in releasing
     assert "PyPI: unavailable" in releasing
-    assert "release-tracker" in releasing
+    assert "GitHub Project 2" in releasing
+    assert "Release iteration" in releasing
+    assert "v0.5.0 — Foundation" in releasing
+    assert "macOS 15/26" in releasing
+    assert "Windows 11" in releasing
+    assert "Ubuntu 24.04" in releasing
     assert "`sodejm` as the required reviewer" in releasing
     assert "self-approval must remain permitted" in releasing
     assert "Hosted control verification checklist" in releasing
@@ -311,20 +322,21 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
         assert duplicate_gate not in release
 
 
-def test_release_workflows_enforce_tracker_exception_and_paginate() -> None:
+def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     for workflow in (readiness, release):
         assert "verify_release_configuration.py" in workflow
         assert "--config .github/release-config.json" in workflow
-        assert "verify_release_milestone.py" in workflow
-        assert '--tracker-number "$tracker_number"' in workflow
-        assert '--tracker-label "$tracker_label"' in workflow
-        assert 'gh api "repos/$GITHUB_REPOSITORY/milestones/$milestone_number"' in workflow
-        assert 'test "$(jq -r \'.state\' <<<"$milestone_json")" = "open"' in workflow
+        assert "verify_release_project.py" in workflow
+        assert "projectV2(number: $number)" in workflow
+        assert "blockedBy(first: 100)" in workflow
+        assert '--project-owner "$project_owner"' in workflow
         assert "--paginate --slurp" in workflow
-        assert "--tracker-number 133" not in workflow
+        assert "verify_release_milestone.py" not in workflow
+        assert "/milestones/" not in workflow
+        assert "release-tracker" not in workflow
         assert "$version CLI" not in workflow
         assert "$EXPECTED_VERSION CLI" not in workflow
 
@@ -359,6 +371,7 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
         "scripts/verify_release_assets.py",
         "scripts/verify_release_configuration.py",
         "scripts/verify_release_milestone.py",
+        "scripts/verify_release_project.py",
     ),
 )
 def test_release_helpers_expose_non_mutating_help(script: str) -> None:

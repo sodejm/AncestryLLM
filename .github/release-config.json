@@ -1,12 +1,13 @@
 {
-  "schema_version": 1,
-  "release": "0.4.0",
-  "milestone": {
-    "number": 3,
-    "title": "0.4.0 Genealogy Core Facades"
-  },
-  "tracker": {
-    "number": 193,
-    "label": "release-tracker"
+  "schema_version": 2,
+  "release": "0.5.0",
+  "project": {
+    "owner": "sodejm",
+    "number": 2,
+    "title": "AncestryLLM Feature Releases",
+    "iteration": "v0.5.0 — Foundation",
+    "priority": "P0",
+    "status": "Done",
+    "validation": "Verified"
   }
 }
