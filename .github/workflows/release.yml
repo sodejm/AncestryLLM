@@ -33,6 +33,7 @@ jobs:
         name: Verify SemVer, package, tag signature, main, and readiness
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
           TAG_COMMIT: ${{ github.sha }}
         run: |
@@ -61,7 +62,11 @@ jobs:
           project_status="$(jq -r '.project.status' .github/release-config.json)"
           project_validation="$(jq -r '.project.validation' .github/release-config.json)"
           project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
-          gh api graphql --paginate --slurp \
+          test -n "$PROJECT_READ_TOKEN" || {
+            echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
+            exit 1
+          }
+          GH_TOKEN="$PROJECT_READ_TOKEN" gh api graphql --paginate --slurp \
             -f query="$project_query" \
             -f owner="$project_owner" \
             -F number="$project_number" |

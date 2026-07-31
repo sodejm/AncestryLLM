@@ -1,0 +1,70 @@
+name: Release Project gate proof
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/release-config.json
+      - .github/workflows/release-project-gate-proof.yml
+      - .github/workflows/release-readiness.yml
+      - .github/workflows/release.yml
+      - docs/RELEASING.md
+      - scripts/verify_release_project.py
+      - tests/test_release_contract.py
+      - tests/test_verify_release_project.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-project-gate-proof-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: prove exact-main Project gate access
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact main commit and private Project gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+          python scripts/verify_release_configuration.py \
+            --config .github/release-config.json \
+            --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          project_owner="$(jq -r '.project.owner' .github/release-config.json)"
+          project_number="$(jq -r '.project.number' .github/release-config.json)"
+          project_title="$(jq -r '.project.title' .github/release-config.json)"
+          project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
+          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
+          project_status="$(jq -r '.project.status' .github/release-config.json)"
+          project_validation="$(jq -r '.project.validation' .github/release-config.json)"
+          project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
+          test -n "$PROJECT_READ_TOKEN" || {
+            echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
+            exit 1
+          }
+          GH_TOKEN="$PROJECT_READ_TOKEN" gh api graphql --paginate --slurp \
+            -f query="$project_query" \
+            -f owner="$project_owner" \
+            -F number="$project_number" |
+            python scripts/verify_release_project.py \
+              --project-owner "$project_owner" \
+              --project-number "$project_number" \
+              --project-title "$project_title" \
+              --iteration "$project_iteration" \
+              --priority "$project_priority" \
+              --status "$project_status" \
+              --validation "$project_validation"

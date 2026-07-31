@@ -18,6 +18,22 @@ evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
 iteration, currently `v0.5.0 — Foundation`, is authoritative for future
 release readiness.
 
+### Private Project read token
+
+Project 2 is private. Configure the repository Actions secret
+`ANCESTRYLLM_PROJECT_READ_TOKEN` with a classic personal access token for an
+account that can view the Project and has only the `read:project` scope needed
+for this query. The release workflows retain `github.token` for repository and
+Actions operations, but supply the named secret only to the Project GraphQL
+read. A missing or unusable secret fails the Project gate closed.
+
+`Release Project gate proof` runs only for a path-scoped push to `main`, checks
+that the checkout and `origin/main` are the triggering commit, and then runs
+the same query-only verifier. It has no pull-request or manual trigger, so a
+fork or Dependabot pull request cannot receive the secret. After this change
+is merged, its exact-main run is the hosted proof; do not create the secret in
+a pull request or place the token in repository files.
+
 ## v0.5.0 supported offline shell
 
 v0.5.0 is a supported offline three-OS Electron shell on macOS 15/26 (arm64

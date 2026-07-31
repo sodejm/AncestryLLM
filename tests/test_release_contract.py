@@ -134,6 +134,9 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "PyPI: unavailable" in releasing
     assert "GitHub Project 2" in releasing
     assert "Release iteration" in releasing
+    assert "ANCESTRYLLM_PROJECT_READ_TOKEN" in releasing
+    assert "read:project" in releasing
+    assert "fork or Dependabot pull request cannot receive the secret" in releasing
     assert "v0.5.0 — Foundation" in releasing
     assert "P0 is reserved for work that must complete before publication" in releasing
     assert "verifier has no issue-number exception" in releasing
@@ -341,6 +344,27 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
         assert "release-tracker" not in workflow
         assert "$version CLI" not in workflow
         assert "$EXPECTED_VERSION CLI" not in workflow
+
+
+def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_proof() -> None:
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    proof = (ROOT / ".github/workflows/release-project-gate-proof.yml").read_text(
+        encoding="utf-8"
+    )
+
+    for workflow in (readiness, release, proof):
+        assert "PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}" in workflow
+        assert 'test -n "$PROJECT_READ_TOKEN"' in workflow
+        assert 'GH_TOKEN="$PROJECT_READ_TOKEN" gh api graphql --paginate --slurp' in workflow
+        assert "GH_TOKEN: ${{ github.token }}" in workflow
+        assert "verify_release_project.py" in workflow
+
+    assert "push:" in proof
+    assert "branches: [main]" in proof
+    assert "pull_request:" not in proof
+    assert "workflow_dispatch:" not in proof
+    assert 'test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"' in proof
 
 
 def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> None:
