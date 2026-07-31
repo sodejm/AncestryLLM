@@ -22,7 +22,7 @@ is the appropriate target for automation and disposable environments.
 
 | Event | Required work |
 |---|---|
-| Pull request | Tests on Python 3.12-3.14; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs only when a workflow changes. |
+| Pull request | An early `uv lock --check` gate; tests on Python 3.12-3.14; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs only when a workflow changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner has no pull-request or push range, so it scans the repository history. |
 | Release readiness | The exhaustive release-candidate gate. Its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
