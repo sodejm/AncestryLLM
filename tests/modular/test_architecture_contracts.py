@@ -201,6 +201,14 @@ def test_every_declared_public_facade_has_a_literal_bound_allowlist() -> None:
     assert not facade_errors
 
 
+def test_pure_gedcom_document_contracts_are_declared_public_facades() -> None:
+    assert {
+        "ancestryllm.gedcom.model",
+        "ancestryllm.gedcom.serializer",
+        "ancestryllm.gedcom.validator",
+    } <= set(PUBLIC_FACADE_MODULES)
+
+
 def test_transport_neutral_layers_accept_stdlib_and_inward_dependencies(
     tmp_path: Path,
 ) -> None:

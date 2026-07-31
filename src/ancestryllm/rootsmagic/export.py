@@ -1,10 +1,12 @@
-"""RootsMagic-to-GEDCOM mapping and atomic publication boundary."""
+"""Public RootsMagic export façade with legacy publication compatibility."""
 
-from ancestryllm.rootsmagic.exporter import (
+from ancestryllm.rootsmagic.exporter import RootsMagicExporter, RootsMagicExportResult
+from ancestryllm.rootsmagic.mapping import (
     ExportReport,
-    RootsMagicExporter,
-    RootsMagicExportResult,
     RootsMagicGedcomDocument,
+    RootsMagicLossReport,
+    RootsMagicMapper,
+    RootsMagicUnmappedColumns,
 )
 
 __all__ = [
@@ -12,4 +14,7 @@ __all__ = [
     "RootsMagicExportResult",
     "RootsMagicExporter",
     "RootsMagicGedcomDocument",
+    "RootsMagicLossReport",
+    "RootsMagicMapper",
+    "RootsMagicUnmappedColumns",
 ]

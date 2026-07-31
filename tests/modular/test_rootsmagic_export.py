@@ -26,7 +26,9 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.core.jobs import JobManager, JobState
+from ancestryllm.gedcom.model import GedcomDocument, GedcomParseError
 from ancestryllm.gedcom.parser import parse_gedcom_line, validate_gedcom_555
+from ancestryllm.gedcom.validator import validate_gedcom_document
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file
@@ -57,6 +59,7 @@ def test_header_only_sqlite_input_fails_stably_across_query_and_export(
 ) -> None:
     tree = tmp_path / "private-corrupt.rmtree"
     tree.write_bytes(b"SQLite format 3\x00" + (b"\x00" * 256))
+    source_hash = sha256_file(tree)
     output = tmp_path / "existing.ged"
     output.write_bytes(b"sentinel\n")
     reader = RootsMagicReader([tmp_path])
@@ -71,6 +74,7 @@ def test_header_only_sqlite_input_fails_stably_across_query_and_export(
     assert str(tree) not in query_error.value.render()
     assert str(tree) not in export_error.value.render()
     assert output.read_bytes() == b"sentinel\n"
+    assert sha256_file(tree) == source_hash
     assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
@@ -124,19 +128,83 @@ def _exporter(tmp_path: Path) -> RootsMagicExporter:
     return RootsMagicExporter(RootsMagicReader([tmp_path]))
 
 
-def test_mapping_returns_validated_document_without_publishing(
+def test_mapping_returns_serializable_typed_document_without_publishing(
     tmp_path: Path,
     export_tree: Path,
 ) -> None:
     before = {path.name for path in tmp_path.iterdir()}
+    source_hash = sha256_file(export_tree)
 
     document = _exporter(tmp_path).map(export_tree, living="include")
 
-    assert document.source_path == export_tree
+    assert isinstance(document.document, GedcomDocument)
+    assert document.source_ref.startswith("rootsmagic:sha256:")
+    assert not hasattr(document, "source_path")
+    assert not hasattr(document, "source_fingerprint")
     assert document.lines[0] == "0 HEAD"
     assert document.lines[-1] == "0 TRLR"
     assert document.report.people_written == 8
+    payload = json.loads(document.to_json())
+    assert payload["document"]["version"] == "5.5.5"
+    assert payload["source_ref"] == document.source_ref
+    assert str(export_tree) not in document.to_json()
+    assert document.to_json() == document.to_json()
+    validate_gedcom_document(document.document)
+    assert sha256_file(export_tree) == source_hash
     assert {path.name for path in tmp_path.iterdir()} == before
+
+
+def test_publication_validation_failure_is_coded_and_preserves_prior_artifacts(
+    tmp_path: Path,
+    export_tree: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "existing.ged"
+    report = output.with_suffix(".export.md")
+    output.write_text("prior fictional GEDCOM\n", encoding="utf-8")
+    report.write_text("prior fictional report\n", encoding="utf-8")
+    source_hash = sha256_file(export_tree)
+
+    def reject_document(_document: GedcomDocument, **_kwargs: object) -> None:
+        raise GedcomParseError("private mapper detail must not escape")
+
+    monkeypatch.setattr(exporter_module, "validate_gedcom_document", reject_document)
+
+    with pytest.raises(AncestryError) as raised:
+        _exporter(tmp_path).export(export_tree, output, living="include")
+
+    assert raised.value.code == "GEDCOM_VALIDATION_FAILED"
+    assert "private mapper detail" not in raised.value.render()
+    assert output.read_text(encoding="utf-8") == "prior fictional GEDCOM\n"
+    assert report.read_text(encoding="utf-8") == "prior fictional report\n"
+    assert sha256_file(export_tree) == source_hash
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def test_prepublication_cancellation_preserves_source_and_prior_artifacts(
+    tmp_path: Path,
+    export_tree: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "existing.ged"
+    report = output.with_suffix(".export.md")
+    output.write_text("prior fictional GEDCOM\n", encoding="utf-8")
+    report.write_text("prior fictional report\n", encoding="utf-8")
+    source_hash = sha256_file(export_tree)
+
+    monkeypatch.setattr(
+        exporter_module,
+        "cancellation_checkpoint",
+        Mock(side_effect=CancellationError("fictional cancellation")),
+    )
+
+    with pytest.raises(CancellationError):
+        _exporter(tmp_path).export(export_tree, output, living="include")
+
+    assert output.read_text(encoding="utf-8") == "prior fictional GEDCOM\n"
+    assert report.read_text(encoding="utf-8") == "prior fictional report\n"
+    assert sha256_file(export_tree) == source_hash
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
 @pytest.mark.parametrize("sidecar_suffix", ("-shm", "-journal"))

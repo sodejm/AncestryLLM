@@ -5,7 +5,32 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 
-from ancestryllm.gedcom.model import GedcomLine, GedcomParseError, parse_gedcom_line
+from ancestryllm.gedcom.model import (
+    GedcomDocument,
+    GedcomLine,
+    GedcomParseError,
+    parse_gedcom_line,
+)
+
+
+def validate_gedcom_document(
+    document: GedcomDocument,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+) -> None:
+    """Validate one supported typed document without filesystem access."""
+
+    if document.version == "5.5.5":
+        validate_gedcom_555(document.lines, checkpoint=checkpoint)
+        return
+    if document.version != "5.5.1":
+        raise GedcomParseError(f"Unsupported GEDCOM version: {document.version}")
+    version_lines = [index for index, line in enumerate(document.lines) if line == "2 VERS 5.5.1"]
+    if len(version_lines) != 1:
+        raise GedcomParseError("GEDCOM 5.5.1 output must declare its version exactly once")
+    compatible = list(document.lines)
+    compatible[version_lines[0]] = "2 VERS 5.5.5"
+    validate_gedcom_555(compatible, checkpoint=checkpoint)
 
 
 def validate_gedcom_555(
@@ -77,4 +102,4 @@ def validate_gedcom_555(
         raise GedcomParseError(f"Expected HEAD.CHAR UTF-8, found {head_charset or '(missing)'}")
 
 
-__all__ = ["validate_gedcom_555"]
+__all__ = ["validate_gedcom_555", "validate_gedcom_document"]

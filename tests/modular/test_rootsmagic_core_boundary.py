@@ -5,17 +5,51 @@ from __future__ import annotations
 import ast
 import dataclasses
 import hashlib
+import importlib
 import json
 import sqlite3
 from pathlib import Path
 
+import ancestryllm.rootsmagic.exporter as exporter_compatibility
+import ancestryllm.rootsmagic.mapping as mapping_implementation
 import ancestryllm.rootsmagic.reader as reader_compatibility
+import ancestryllm.rootsmagic.service as service_boundary
 import ancestryllm.rootsmagic.source as source_implementation
+from ancestryllm.rootsmagic import RootsMagicExportResult as PackageExportResult
 from ancestryllm.rootsmagic.core import DatabaseSchema, RootsMagicReader
+from ancestryllm.rootsmagic.export import (
+    RootsMagicExporter as PublicRootsMagicExporter,
+)
+from ancestryllm.rootsmagic.export import (
+    RootsMagicExportResult as PublicRootsMagicExportResult,
+)
+from ancestryllm.rootsmagic.export import (
+    RootsMagicMapper,
+)
+from ancestryllm.rootsmagic.export import (
+    __all__ as export_api,
+)
+
+application_export = importlib.import_module("ancestryllm.application._rootsmagic_export")
+RootsMagicExporter = application_export.RootsMagicExporter
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
 
 
 def test_legacy_reader_import_aliases_the_physical_source_module() -> None:
@@ -23,7 +57,7 @@ def test_legacy_reader_import_aliases_the_physical_source_module() -> None:
     assert RootsMagicReader.__module__ == "ancestryllm.rootsmagic.source"
 
 
-def test_query_core_has_no_adapter_policy_or_publication_imports() -> None:
+def test_reusable_rootsmagic_core_has_no_adapter_policy_or_publication_imports() -> None:
     package = Path(source_implementation.__file__).parent
     forbidden_roots = {
         "ancestryllm.application",
@@ -40,18 +74,8 @@ def test_query_core_has_no_adapter_policy_or_publication_imports() -> None:
         "rich",
     }
 
-    for name in ("core.py", "schema.py", "source.py"):
-        tree = ast.parse((package / name).read_text(encoding="utf-8"))
-        imported = {
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        } | {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
-        }
+    for name in ("core.py", "mapping.py", "schema.py", "source.py"):
+        imported = _imported_modules(package / name)
         assert not {
             dependency
             for dependency in imported
@@ -60,6 +84,28 @@ def test_query_core_has_no_adapter_policy_or_publication_imports() -> None:
                 for forbidden in forbidden_roots
             )
         }
+
+
+def test_rootsmagic_publication_is_owned_by_the_application_boundary() -> None:
+    assert RootsMagicMapper.__module__ == "ancestryllm.rootsmagic.mapping"
+    assert RootsMagicExporter.__module__ == "ancestryllm.application._rootsmagic_export"
+    assert issubclass(RootsMagicExporter, RootsMagicMapper)
+    assert exporter_compatibility is application_export
+    assert PackageExportResult is application_export.RootsMagicExportResult
+    assert service_boundary.RootsMagicExporter is RootsMagicExporter
+    assert PublicRootsMagicExporter is RootsMagicExporter
+    assert PublicRootsMagicExportResult is application_export.RootsMagicExportResult
+    assert "RootsMagicMapper" in export_api
+    assert "RootsMagicExporter" in export_api
+    assert "RootsMagicExportResult" in export_api
+
+    imported = _imported_modules(Path(application_export.__file__))
+    assert "ancestryllm.core.publication" in imported
+    assert "ancestryllm.gedcom.validator" in imported
+    assert "ancestryllm.rootsmagic.mapping" in imported
+    assert "ancestryllm.core.publication" not in _imported_modules(
+        Path(mapping_implementation.__file__)
+    )
 
 
 def test_schema_and_query_dtos_are_deterministic_json_safe_and_immutable(

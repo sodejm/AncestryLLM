@@ -1,6 +1,6 @@
 # Architecture ownership and dependency contracts
 
-Status: executable in the post-0.3 Unreleased development tree.
+Status: executable in the current Unreleased development tree.
 `ARCHITECTURE.md` is the repository-wide source of truth; this page explains
 the checks that enforce its public façades, ownership boundaries, and
 current-versus-target graph.
@@ -163,12 +163,20 @@ an implementation detail does not require a compatibility shim unless that
 detail was already in a declared façade.
 
 The Unreleased RootsMagic public inventory includes the package façade plus
-`core`, `query`, and `export`. The private `source` and `schema` modules own the
+`core`, `query`, and `export`. The reusable mapper lives in the physical
+`mapping` implementation;
+validation and atomic publication are owned by the private application
+exporter. The public `export` façade preserves its declared mapper, exporter,
+and result imports, while `rootsmagic.exporter` remains a compatibility alias.
+The private `source` and `schema` modules own the
 implementation behind `core`; `reader` and `schema_adapter` retain import
-compatibility but are not alternate public contracts. The GEDCOM inventory exposes parser, graph,
+compatibility but are not alternate public contracts. The GEDCOM inventory
+exposes the pure `model`,
+`serializer`, and `validator` modules directly alongside parser, graph,
 identity, quality, serialization, service, and synchronization seams. The
-parser and serialization façades re-export a physically separate pure document
-model, validator, and deterministic line serializer. Graph traversal,
+parser and serialization façades may re-export supported pure-kernel symbols,
+but consumers can depend on the declared implementation-module façades without
+reaching through a private engine. Graph traversal,
 identity/merge, and immutable quality analysis are also physically owned by
 their public operation modules. Exact internal façade gateways allow those
 implementations and the compatibility publication kernel to share private
