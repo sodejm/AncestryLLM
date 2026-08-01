@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY_ROOT / "scripts" / "ancestryll-runner-secrets-helper.sh"
@@ -25,6 +28,56 @@ VARIABLE_VALUES = {
     "WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT": "A" * 40,
     "LINUX_GPG_SIGNING_FINGERPRINT": "B" * 40,
 }
+
+APPLE_DEVELOPER_ID_SHA1 = "A" * 40
+
+
+def _write_fake_apple_tools(path: Path, identities: str) -> None:
+    (path / "security").write_text(
+        f"""#!/bin/sh
+set -eu
+
+if [ "$*" = "find-identity -v -p codesigning" ]; then
+  cat <<'EOF'
+{identities}
+EOF
+  exit 0
+fi
+
+printf 'unexpected fake security call: %s\n' "$*" >&2
+exit 2
+""",
+        encoding="utf-8",
+    )
+    (path / "security").chmod((path / "security").stat().st_mode | stat.S_IXUSR)
+
+    (path / "xcrun").write_text(
+        """#!/bin/sh
+set -eu
+
+[ "$1" = swift ] || exit 2
+shift
+[ -f "$1" ] || exit 2
+shift
+[ "$1" = --identity-name ] || exit 2
+identity_name=$2
+shift 2
+[ "$1" = --output ] || exit 2
+output=$2
+IFS= read -r password
+[ -n "$password" ] || exit 2
+printf 'fictional selected PKCS12 payload\n' > "$output"
+printf '%s' "$identity_name" > "$FAKE_GH_STATE/apple-identity-name"
+""",
+        encoding="utf-8",
+    )
+    (path / "xcrun").chmod((path / "xcrun").stat().st_mode | stat.S_IXUSR)
+
+
+def _valid_keychain_identities() -> str:
+    return f"""  1) {"D" * 40} "Apple Development: Fictional Developer (ZYXWVUTSRQ)"
+  2) {APPLE_DEVELOPER_ID_SHA1} "Developer ID Application: Fictional Developer ({VARIABLE_VALUES["APPLE_TEAM_ID"]})"
+     2 valid identities found"""
 
 
 def _write_fake_gh(path: Path) -> None:
@@ -89,18 +142,18 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     _write_fake_gh(fake_bin / "gh")
+    _write_fake_apple_tools(fake_bin, _valid_keychain_identities())
 
     state = tmp_path / "state"
     state.mkdir()
 
     payloads = []
-    for index in range(5):
+    for index in range(4):
         payload = tmp_path / f"payload-{index}.bin"
         payload.write_bytes(f"fictional signing payload {index}\n".encode())
         payloads.append(payload)
 
     private_values = [
-        "apple-certificate-password",
         "apple-api-key-id",
         "apple-api-issuer",
         "windows-certificate-password",
@@ -109,7 +162,12 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     prompt_input = [*(str(path) for path in payloads)]
     for value in private_values:
         prompt_input.extend((value, value))
-    prompt_input.extend(VARIABLE_VALUES.values())
+    prompt_input.extend(
+        (
+            VARIABLE_VALUES["WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT"],
+            VARIABLE_VALUES["LINUX_GPG_SIGNING_FINGERPRINT"],
+        )
+    )
     prompt_input.append("UPLOAD")
 
     environment = os.environ.copy()
@@ -127,6 +185,9 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     assert {path.name for path in (state / "secrets").iterdir()} == SECRET_NAMES
+    assert (state / "apple-identity-name").read_text(encoding="utf-8") == (
+        "Developer ID Application: Fictional Developer (ABCDEFGHIJ)"
+    )
 
     expected_variables = dict(VARIABLE_VALUES)
     expected_variables["LINUX_GPG_PUBLIC_KEY_BASE64"] = (
@@ -175,7 +236,12 @@ def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> 
     environment["FAKE_GH_STATE"] = str(state)
 
     result = subprocess.run(
-        [str(HELPER), "--dry-run"],
+        [
+            str(HELPER),
+            "--dry-run",
+            "--apple-certificate-file",
+            str(REPOSITORY_ROOT / "pyproject.toml"),
+        ],
         cwd=REPOSITORY_ROOT,
         env=environment,
         input=f"{REPOSITORY_ROOT / 'pyproject.toml'}\n",
@@ -186,3 +252,89 @@ def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> 
 
     assert result.returncode != 0
     assert "Credential source files must be stored outside the repository" in result.stderr
+
+
+def test_helper_fails_when_keychain_has_no_valid_developer_id_application(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_gh(fake_bin / "gh")
+    _write_fake_apple_tools(
+        fake_bin,
+        f"""  1) {"D" * 40} "Apple Development: Fictional Developer (ZYXWVUTSRQ)"
+     1 valid identities found""",
+    )
+
+    state = tmp_path / "state"
+    state.mkdir()
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    environment["FAKE_GH_STATE"] = str(state)
+
+    result = subprocess.run(
+        [str(HELPER), "--dry-run"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        input="",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "No valid Developer ID Application identity" in result.stderr
+    assert not (state / "apple-identity-name").exists()
+
+
+def test_helper_fails_closed_for_multiple_developer_id_application_identities(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_gh(fake_bin / "gh")
+    _write_fake_apple_tools(
+        fake_bin,
+        f"""  1) {APPLE_DEVELOPER_ID_SHA1} "Developer ID Application: First Developer (ABCDEFGHIJ)"
+  2) {"B" * 40} "Developer ID Application: Second Developer (KLMNOPQRST)"
+     2 valid identities found""",
+    )
+
+    state = tmp_path / "state"
+    state.mkdir()
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    environment["FAKE_GH_STATE"] = str(state)
+
+    result = subprocess.run(
+        [str(HELPER), "--dry-run"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        input="",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Multiple valid Developer ID Application identities" in result.stderr
+    assert not (state / "apple-identity-name").exists()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires the macOS SDK")
+def test_apple_identity_exporter_typechecks(tmp_path: Path) -> None:
+    exporter = REPOSITORY_ROOT / "scripts" / "export-apple-signing-identity.swift"
+    environment = os.environ.copy()
+    environment["CLANG_MODULE_CACHE_PATH"] = str(tmp_path / "module-cache")
+    environment["SWIFT_MODULE_CACHE_PATH"] = str(tmp_path / "module-cache")
+
+    result = subprocess.run(
+        ["xcrun", "swiftc", "-typecheck", str(exporter)],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

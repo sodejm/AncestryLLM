@@ -6,13 +6,20 @@ hosted application deployment.
 
 ## Reconfigure desktop signing from macOS
 
-The repository helper creates the five required Base64 payloads from existing
-signing files, validates every generated payload with a byte-for-byte decode
-round trip, securely collects the remaining values, uploads all nine private
-environment secrets and four public repository variables, and verifies the
-result. It does **not** issue Apple or Windows certificates, create an Apple
-notary API key, create GPG keys, or provision a Windows virtual machine. Those
-assets must be obtained through their approved issuers before running it.
+The repository helper searches the current macOS user's keychain for exactly
+one valid `Developer ID Application` identity, exports only that identity,
+generates a strong one-time PKCS#12 password, and derives the Apple Team ID.
+It ignores Xcode's Apple Development and Apple Distribution identities because
+they cannot sign a Developer ID release distributed through GitHub. The helper
+then creates and validates all five required Base64 payloads, securely collects
+the remaining values, uploads all nine private environment secrets and four
+public repository variables, and verifies the result.
+
+The helper does **not** issue Apple or Windows certificates, create an Apple
+notary API key, create GPG keys, or provision a Windows virtual machine. The
+Developer ID identity, notary API key, Windows identity, and GPG keys must exist
+before it runs. The Apple notary credentials are used only to notarize a
+GitHub-distributed application; this flow does not upload to the App Store.
 
 ### Destination and exact configuration
 
@@ -45,8 +52,11 @@ The following values and procedures are intentionally not stored in this
 repository. Obtain them through the project's approved credential-management
 process before reconfiguration:
 
-- `[APPLE_CERTIFICATE_SOURCE_FILE]`: the original Developer ID certificate
-  payload and its `APPLE_CERTIFICATE_PASSWORD`.
+- One valid `Developer ID Application` certificate and private key in the
+  current macOS user's unlocked keychain. Xcode or the Apple developer profile
+  may install this identity. The helper derives `APPLE_TEAM_ID`, exports the
+  identity into its private temporary directory, and generates
+  `APPLE_CERTIFICATE_PASSWORD`; neither value needs to be supplied manually.
 - `[APPLE_API_KEY_SOURCE_FILE]`: the original Apple notary API private-key
   payload, plus `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`.
 - `[WINDOWS_CERTIFICATE_SOURCE_FILE]`: the original Authenticode certificate
@@ -54,8 +64,7 @@ process before reconfiguration:
 - `[LINUX_GPG_PRIVATE_KEY_SOURCE_FILE]` and
   `[LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]`: matching exported GPG key payloads,
   plus `LINUX_GPG_PASSPHRASE`.
-- `APPLE_TEAM_ID`, the complete
-  `WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT`, and the complete
+- The complete `WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT` and the complete
   `LINUX_GPG_SIGNING_FINGERPRINT`.
 - `[GH_INSTALL_COMMAND]` if GitHub CLI is not already installed, and the
   project's approved `[GH_AUTHENTICATION_METHOD]`. The repository does not
@@ -65,36 +74,62 @@ process before reconfiguration:
   ephemeral Windows 11 runner. No authorized provider or provisioning command
   is defined in the repository, so the signing helper cannot create it.
 
-No environment variables are required by the helper. All paths and values are
-entered interactively so private values do not appear in command arguments or
-shell history. The helper generates only temporary Base64 representations; it
-never generates or replaces the original signing identities.
+No environment variables are required by the helper. All remaining paths and
+values are entered interactively so private values do not appear in command
+arguments or shell history. The helper generates only the temporary Apple
+PKCS#12 export, its password, and temporary Base64 representations. It never
+generates, replaces, or removes the keychain identity or any user-supplied
+source file.
+
+If the correct identity cannot be made available in the current keychain, the
+explicit fallback `--apple-certificate-file [APPLE_CERTIFICATE_SOURCE_FILE]`
+accepts an existing PKCS#12 file outside the repository. That mode also prompts
+for its password and `APPLE_TEAM_ID`.
 
 ### macOS prerequisites and secure preparation
 
 1. Use a trusted macOS account and terminal. Disable shell tracing before any
    credential work with `set +x`.
-2. Store every certificate, API key, and GPG source file in a private location
-   outside the AncestryLLM checkout. The helper rejects repository-local
-   sources, including paths reached through symbolic links. Repository ignore
-   rules cover common signing formats as a second line of defense, and the
-   repository-safety gate rejects them even if they are force-added.
-3. Confirm `/bin/bash`, `/usr/bin/base64`, `awk`, `chmod`, `cmp`, `grep`,
-   `mktemp`, `realpath`, `rm`, and `tr` are available. These are standard
-   macOS tools.
-4. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
+2. Unlock the current user's login keychain. Confirm that Keychain Access shows
+   a `Developer ID Application` certificate with its private key, or run this
+   read-only check:
+
+   ```sh
+   security find-identity -v -p codesigning
+   ```
+
+   Exactly one valid line beginning with `Developer ID Application:` must be
+   present. Apple Development and Apple Distribution lines do not count. If
+   macOS asks whether the helper may access the private key during export,
+   verify the selected identity and allow access for that run.
+3. Store the Apple notary API key, Windows certificate, and GPG source files in
+   a private location outside the AncestryLLM checkout. The helper rejects
+   repository-local sources, including paths reached through symbolic links.
+   Repository ignore rules cover common signing formats as a second line of
+   defense, and the repository-safety gate rejects them even if force-added.
+4. Confirm `/bin/bash`, `/usr/bin/base64`, `/usr/bin/security`, `awk`, `chmod`,
+   `cmp`, `grep`, `mktemp`, `openssl`, `realpath`, `rm`, `tr`, and `uname` are
+   available. Install Xcode Command Line Tools if `xcrun` and Swift are not
+   already available:
+
+   ```sh
+   xcode-select --install
+   ```
+
+   The exporter uses Apple's Security framework and sends the generated
+   PKCS#12 password through standard input, not a command argument.
+5. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
    present. Authenticate using `[GH_AUTHENTICATION_METHOD]`; the account must
    be authorized to read `sodejm/AncestryLLM`, update its Actions environment
    secrets, and update repository Actions variables.
-5. Confirm `desktop-signing` already exists and has the protections required
+6. Confirm `desktop-signing` already exists and has the protections required
    by [the release runbook](RELEASING.md#one-time-repository-setup). The helper
    does not create or alter environment protection rules.
-6. Put the five original signing payloads outside the repository in a secure
-   directory. Restrict each file before use, for example:
+7. Put the four remaining original signing payloads outside the repository in
+   a secure directory. Restrict each file before use, for example:
 
    ```sh
-   chmod 600 [APPLE_CERTIFICATE_SOURCE_FILE] \
-     [APPLE_API_KEY_SOURCE_FILE] \
+   chmod 600 [APPLE_API_KEY_SOURCE_FILE] \
      [WINDOWS_CERTIFICATE_SOURCE_FILE] \
      [LINUX_GPG_PRIVATE_KEY_SOURCE_FILE] \
      [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]
@@ -115,11 +150,22 @@ chmod 700 scripts/ancestryll-runner-secrets-helper.sh
 ./scripts/ancestryll-runner-secrets-helper.sh --dry-run
 ```
 
-Supply the five original file paths, five private text values, and three
-public identity values when prompted. The helper asks for every private text
-value twice. A dry run checks authentication, repository access, file
-readability, non-empty values, Base64 round trips, and public-identity formats,
-then exits without changing GitHub.
+The default run discovers and exports the Apple identity first. Supply four
+remaining source paths, four private text values, and the Windows and Linux
+public identity values when prompted. The helper asks for every user-supplied
+private text value twice. A dry run checks authentication, repository access,
+keychain discovery and export, file readability, non-empty values, Base64 round
+trips, and public-identity formats, then exits without changing GitHub.
+
+For the explicit manual fallback, run:
+
+```sh
+./scripts/ancestryll-runner-secrets-helper.sh --dry-run \
+  --apple-certificate-file [APPLE_CERTIFICATE_SOURCE_FILE]
+```
+
+This fallback prompts for the PKCS#12 password and Apple Team ID in addition to
+the remaining values. The certificate file must remain outside the repository.
 
 ### Upload and verify
 
@@ -170,6 +216,14 @@ If setup fails:
   environment-secret, and variable permissions.
 - unreadable or empty file: correct its path or permissions; do not weaken
   permissions beyond what is required for the current user.
+- no valid Developer ID identity: use Xcode or the Apple developer profile to
+  install a `Developer ID Application` certificate and its private key in the
+  current user's keychain, then repeat the read-only identity check.
+- multiple valid Developer ID identities: remove or archive obsolete identities
+  through the approved keychain process, or use the explicit PKCS#12 fallback.
+- keychain export failure: unlock the login keychain, confirm the certificate
+  has its private key, and allow private-key access when macOS prompts. The
+  helper stops without uploading if export fails.
 - Base64 round-trip failure: stop and replace the affected source file from
   the approved issuer or backup.
 - upload failure: the script stops immediately. Rerun `--upload`; successful

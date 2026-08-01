@@ -2,9 +2,11 @@
 
 # Prepare, validate, and upload the exact AncestryLLM desktop-signing values.
 #
-# This helper intentionally does not obtain signing certificates or keys and
-# does not provision or register a Windows runner. Those inputs and commands
-# are not part of the supplied configuration contract.
+# On macOS the default Apple certificate source is one valid Developer ID
+# Application identity in the current user's keychain. The helper exports only
+# that selected identity, creates a strong one-time PKCS#12 password, and
+# derives the Apple Team ID from the certificate name. A user-supplied PKCS#12
+# file remains available as an explicit fallback.
 
 set -euo pipefail
 set +x
@@ -14,13 +16,25 @@ readonly REPOSITORY='sodejm/AncestryLLM'
 readonly SIGNING_ENVIRONMENT='desktop-signing'
 
 MODE='dry-run'
+APPLE_CERTIFICATE_MODE='keychain'
+APPLE_CERTIFICATE_SOURCE_ARGUMENT=''
 TEMP_DIRECTORY=''
 REPOSITORY_ROOT=''
+APPLE_IDENTITY_EXPORTER=''
 
 usage() {
   printf '%s\n' \
     'Usage:' \
     '  scripts/ancestryll-runner-secrets-helper.sh [--dry-run|--upload]' \
+    '    [--apple-certificate-file PATH]' \
+    '' \
+    'Apple certificate source:' \
+    '  By default, discover exactly one valid Developer ID Application identity' \
+    '  in the current macOS keychain, export only that identity, generate its' \
+    '  PKCS#12 password, and derive APPLE_TEAM_ID.' \
+    '  --apple-certificate-file PATH' \
+    '             Use an existing PKCS#12 file instead. Its password and Team ID' \
+    '             are collected interactively.' \
     '' \
     'Modes:' \
     '  --dry-run  Validate tools, authentication, inputs, and generated data.' \
@@ -42,6 +56,8 @@ cleanup() {
   APPLE_API_ISSUER=''
   WINDOWS_CERTIFICATE_PASSWORD=''
   LINUX_GPG_PASSPHRASE=''
+  APPLE_CERTIFICATE_SOURCE_ARGUMENT=''
+  APPLE_IDENTITY_NAME=''
 
   if [ -n "$TEMP_DIRECTORY" ] && [ -d "$TEMP_DIRECTORY" ]; then
     case "$TEMP_DIRECTORY" in
@@ -63,13 +79,19 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-for argument in "$@"; do
-  case "$argument" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --dry-run)
       MODE='dry-run'
       ;;
     --upload)
       MODE='upload'
+      ;;
+    --apple-certificate-file)
+      shift
+      [ "$#" -gt 0 ] || fail '--apple-certificate-file requires a path'
+      APPLE_CERTIFICATE_MODE='file'
+      APPLE_CERTIFICATE_SOURCE_ARGUMENT=$1
       ;;
     --help|-h)
       usage
@@ -77,50 +99,63 @@ for argument in "$@"; do
       ;;
     *)
       usage >&2
-      fail "Unknown argument: $argument"
+      fail "Unknown argument: $1"
       ;;
   esac
+  shift
 done
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command is missing: $1"
 }
 
+validate_credential_source_file() {
+  local description=$1
+  local supplied_path=$2
+  local canonical_path=''
+
+  [ -n "$supplied_path" ] || fail "$description requires a path"
+  [ -f "$supplied_path" ] || fail "Not a regular file: $supplied_path"
+  [ -r "$supplied_path" ] || fail "File is not readable: $supplied_path"
+  [ -s "$supplied_path" ] || fail "File is empty: $supplied_path"
+
+  canonical_path=$(realpath "$supplied_path") \
+    || fail "Could not resolve source file path: $supplied_path"
+  case "$canonical_path" in
+    "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
+      fail 'Credential source files must be stored outside the repository'
+      ;;
+  esac
+
+  REPLY=$canonical_path
+}
+
 prompt_readable_file() {
   local description=$1
   local supplied_path=''
-  local canonical_path=''
 
   while :; do
     printf '%s: ' "$description" >&2
     IFS= read -r supplied_path || fail "Input ended while reading $description"
 
-    [ -n "$supplied_path" ] || {
+    if [ -z "$supplied_path" ]; then
       printf 'A path is required.\n' >&2
       continue
-    }
-    [ -f "$supplied_path" ] || {
+    fi
+    if [ ! -f "$supplied_path" ]; then
       printf 'Not a regular file: %s\n' "$supplied_path" >&2
       continue
-    }
-    [ -r "$supplied_path" ] || {
+    fi
+    if [ ! -r "$supplied_path" ]; then
       printf 'File is not readable: %s\n' "$supplied_path" >&2
       continue
-    }
-    [ -s "$supplied_path" ] || {
+    fi
+    if [ ! -s "$supplied_path" ]; then
       printf 'File is empty: %s\n' "$supplied_path" >&2
       continue
-    }
+    fi
 
-    canonical_path=$(realpath "$supplied_path") \
-      || fail "Could not resolve source file path: $supplied_path"
-    case "$canonical_path" in
-      "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
-        fail 'Credential source files must be stored outside the repository'
-        ;;
-    esac
-
-    REPLY=$canonical_path
+    validate_credential_source_file "$description" "$supplied_path"
     return 0
   done
 }
@@ -165,6 +200,59 @@ prompt_public_value() {
   IFS= read -r supplied_value || fail "Input ended while reading $description"
   [ -n "$supplied_value" ] || fail "$description cannot be empty"
   printf -v "$destination_variable" '%s' "$supplied_value"
+}
+
+discover_apple_developer_id_identity() {
+  local identity_output=''
+  local identity_pattern='^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-Fa-f]{40}[[:space:]]+"(Developer ID Application: .+ \(([A-Z0-9]{10})\))"$'
+  local identity_count=0
+  local line=''
+
+  identity_output=$(security find-identity -v -p codesigning 2>/dev/null) \
+    || fail 'Could not inspect code-signing identities in the macOS keychain'
+
+  while IFS= read -r line; do
+    if [[ $line =~ $identity_pattern ]]; then
+      identity_count=$((identity_count + 1))
+      APPLE_IDENTITY_NAME=${BASH_REMATCH[1]}
+      APPLE_TEAM_ID=${BASH_REMATCH[2]}
+    fi
+  done <<< "$identity_output"
+  identity_output=''
+
+  case "$identity_count" in
+    0)
+      fail 'No valid Developer ID Application identity was found in the macOS keychain'
+      ;;
+    1)
+      ;;
+    *)
+      fail 'Multiple valid Developer ID Application identities were found; use --apple-certificate-file with an explicitly exported PKCS#12 file'
+      ;;
+  esac
+}
+
+export_apple_keychain_identity() {
+  APPLE_CERTIFICATE_SOURCE_FILE="$TEMP_DIRECTORY/apple-certificate.p12"
+  APPLE_CERTIFICATE_PASSWORD=$(openssl rand -base64 48 | tr -d '\r\n') \
+    || fail 'Could not generate the Apple PKCS#12 password'
+  [ "${#APPLE_CERTIFICATE_PASSWORD}" -ge 32 ] \
+    || fail 'Generated Apple PKCS#12 password was unexpectedly short'
+
+  mkdir -m 700 "$TEMP_DIRECTORY/swift-module-cache"
+  if ! printf '%s\n' "$APPLE_CERTIFICATE_PASSWORD" \
+    | CLANG_MODULE_CACHE_PATH="$TEMP_DIRECTORY/swift-module-cache" \
+      SWIFT_MODULE_CACHE_PATH="$TEMP_DIRECTORY/swift-module-cache" \
+      xcrun swift "$APPLE_IDENTITY_EXPORTER" \
+        --identity-name "$APPLE_IDENTITY_NAME" \
+        --output "$APPLE_CERTIFICATE_SOURCE_FILE" >/dev/null
+  then
+    fail 'Could not export the selected Developer ID Application identity; unlock the keychain, allow private-key access, and retry'
+  fi
+
+  [ -s "$APPLE_CERTIFICATE_SOURCE_FILE" ] \
+    || fail 'The exported Apple PKCS#12 payload was empty'
+  chmod 600 "$APPLE_CERTIFICATE_SOURCE_FILE"
 }
 
 encode_and_validate() {
@@ -248,36 +336,79 @@ require_command awk
 require_command chmod
 require_command cmp
 require_command grep
+require_command mkdir
 require_command mktemp
 require_command realpath
 require_command rm
 require_command tr
+require_command uname
 require_command /usr/bin/base64
 
 REPOSITORY_ROOT=$(realpath "$(dirname "${BASH_SOURCE[0]}")/..") \
   || fail 'Could not resolve the repository root'
+APPLE_IDENTITY_EXPORTER="$REPOSITORY_ROOT/scripts/export-apple-signing-identity.swift"
 
 gh auth status >/dev/null 2>&1 \
   || fail 'GitHub CLI is not authenticated. Use the approved authentication method, then retry.'
 gh repo view "$REPOSITORY" >/dev/null 2>&1 \
   || fail "Cannot access repository $REPOSITORY with the current GitHub CLI authorization."
 
+if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
+  require_command security
+  require_command xcrun
+  require_command openssl
+  [ "$(uname -s)" = 'Darwin' ] \
+    || fail 'Automatic Apple identity discovery requires macOS'
+  [ -f "$APPLE_IDENTITY_EXPORTER" ] \
+    || fail 'The Apple keychain identity exporter is missing from the repository'
+fi
+
 TEMP_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/ancestryllm-runner-secrets.XXXXXX") \
   || fail 'Could not create a secure temporary directory'
 chmod 700 "$TEMP_DIRECTORY"
+
+APPLE_CERTIFICATE_PASSWORD=''
+APPLE_API_KEY_ID=''
+APPLE_API_ISSUER=''
+WINDOWS_CERTIFICATE_PASSWORD=''
+LINUX_GPG_PASSPHRASE=''
+APPLE_TEAM_ID=''
+APPLE_IDENTITY_NAME=''
+WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT=''
+LINUX_GPG_SIGNING_FINGERPRINT=''
 
 printf '%s\n' \
   "Destination repository: $REPOSITORY" \
   "Secret environment: $SIGNING_ENVIRONMENT" \
   "Mode: $MODE" \
-  '' \
-  'Supply the original, unencoded payload files. This helper creates temporary' \
-  'Base64 representations and validates them by decoding and byte-comparing.' \
-  'It does not create or retrieve certificates, API keys, or GPG keys.' \
   ''
 
-prompt_readable_file 'Path to [APPLE_CERTIFICATE_SOURCE_FILE]'
-APPLE_CERTIFICATE_SOURCE_FILE=$REPLY
+if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
+  printf '%s\n' \
+    'Apple certificate source: current macOS keychain' \
+    'Searching for one valid Developer ID Application identity...'
+  discover_apple_developer_id_identity
+  export_apple_keychain_identity
+  printf '%s\n' \
+    'Selected and exported exactly one valid Developer ID Application identity.' \
+    'Generated its temporary PKCS#12 password and derived APPLE_TEAM_ID.' \
+    ''
+else
+  printf '%s\n' \
+    'Apple certificate source: explicit PKCS#12 file' \
+    ''
+  validate_credential_source_file \
+    'APPLE_CERTIFICATE_SOURCE_FILE' "$APPLE_CERTIFICATE_SOURCE_ARGUMENT"
+  APPLE_CERTIFICATE_SOURCE_FILE=$REPLY
+fi
+
+printf '%s\n' \
+  'Supply the remaining original, unencoded payload files. This helper creates' \
+  'temporary Base64 representations and validates them by decoding and' \
+  'byte-comparing. It does not create Apple notary API keys, Windows' \
+  'certificates, or GPG keys.' \
+  ''
+
 prompt_readable_file 'Path to [APPLE_API_KEY_SOURCE_FILE]'
 APPLE_API_KEY_SOURCE_FILE=$REPLY
 prompt_readable_file 'Path to [WINDOWS_CERTIFICATE_SOURCE_FILE]'
@@ -304,26 +435,24 @@ encode_and_validate "$LINUX_GPG_PRIVATE_KEY_SOURCE_FILE" \
 encode_and_validate "$LINUX_GPG_PUBLIC_KEY_SOURCE_FILE" \
   "$LINUX_GPG_PUBLIC_KEY_BASE64_FILE" "$TEMP_DIRECTORY/linux-public.decoded"
 
-APPLE_CERTIFICATE_PASSWORD=''
-APPLE_API_KEY_ID=''
-APPLE_API_ISSUER=''
-WINDOWS_CERTIFICATE_PASSWORD=''
-LINUX_GPG_PASSPHRASE=''
-APPLE_TEAM_ID=''
-WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT=''
-LINUX_GPG_SIGNING_FINGERPRINT=''
-
-prompt_secret_twice 'APPLE_CERTIFICATE_PASSWORD' APPLE_CERTIFICATE_PASSWORD
+if [ "$APPLE_CERTIFICATE_MODE" = 'file' ]; then
+  prompt_secret_twice 'APPLE_CERTIFICATE_PASSWORD' APPLE_CERTIFICATE_PASSWORD
+fi
 prompt_secret_twice 'APPLE_API_KEY_ID' APPLE_API_KEY_ID
 prompt_secret_twice 'APPLE_API_ISSUER' APPLE_API_ISSUER
 prompt_secret_twice 'WINDOWS_CERTIFICATE_PASSWORD' WINDOWS_CERTIFICATE_PASSWORD
 prompt_secret_twice 'LINUX_GPG_PASSPHRASE' LINUX_GPG_PASSPHRASE
 
-prompt_public_value 'APPLE_TEAM_ID (10 characters)' APPLE_TEAM_ID
+if [ "$APPLE_CERTIFICATE_MODE" = 'file' ]; then
+  prompt_public_value 'APPLE_TEAM_ID (10 uppercase letters or digits)' APPLE_TEAM_ID
+fi
 case "$APPLE_TEAM_ID" in
-  ??????????) ;;
-  *) fail 'APPLE_TEAM_ID must contain exactly 10 characters' ;;
+  *[!A-Z0-9]*|'')
+    fail 'APPLE_TEAM_ID must contain only uppercase letters or digits'
+    ;;
 esac
+[ "${#APPLE_TEAM_ID}" -eq 10 ] \
+  || fail 'APPLE_TEAM_ID must contain exactly 10 characters'
 
 prompt_public_value \
   'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT (40 hexadecimal characters)' \
@@ -353,13 +482,20 @@ case "${#LINUX_GPG_SIGNING_FINGERPRINT}" in
   *) fail 'LINUX_GPG_SIGNING_FINGERPRINT must contain 40 or 64 characters' ;;
 esac
 
+printf '%s\n' '' 'Validated without displaying values:'
+if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
+  printf '%s\n' \
+    '  1 selected Apple Developer ID Application keychain identity' \
+    '  4 remaining non-empty source payload files' \
+    '  1 generated Apple PKCS#12 password and 4 twice-confirmed private values'
+else
+  printf '%s\n' \
+    '  5 non-empty source payload files' \
+    '  5 twice-confirmed private text values'
+fi
 printf '%s\n' \
-  '' \
-  'Validated without displaying values:' \
-  '  5 non-empty source payload files' \
   '  5 Base64 encode/decode byte-for-byte round trips' \
-  '  5 non-empty, twice-confirmed private text values' \
-  '  APPLE_TEAM_ID length' \
+  '  APPLE_TEAM_ID syntax and length' \
   '  Windows certificate thumbprint length and hexadecimal syntax' \
   '  Linux signing fingerprint length and hexadecimal syntax'
 
