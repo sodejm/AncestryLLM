@@ -48,8 +48,11 @@ class JobSnapshot:
     finished_at: str | None
     resource_keys: tuple[str, ...]
     result: Any = None
+    outcome_summary: str | None = None
+    next_action: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    error_remediation: str | None = None
     progress: ProgressEvent | None = None
     cancellation_requested_at: str | None = None
     cancellation_pending: bool = False
@@ -113,6 +116,16 @@ class JobReporter:
             self.job_id,
             ProgressEvent(operation, _timestamp(), completed, total),
         )
+
+    def set_outcome(self, summary: str, *, next_action: str) -> None:
+        """Retain a redacted, transport-neutral success summary and next action."""
+
+        if not summary.strip():
+            raise ValueError("Job outcome summary must not be empty.")
+        if not next_action.strip():
+            raise ValueError("Job next action must not be empty.")
+        self.check_cancelled()
+        self._manager._report_outcome(self.job_id, summary, next_action)
 
 
 class JobManager:
@@ -247,15 +260,23 @@ class JobManager:
                         if isinstance(exc, AncestryError):
                             code = exc.code
                             message = self._redact(exc.message)
+                            remediation = self._redact(
+                                exc.remediation
+                                or "Review the coded failure before retrying manually."
+                            )
                         else:
                             code = "JOB_FAILED"
                             message = "The background job failed."
+                            remediation = "Review the coded failure before retrying manually."
                         self._transition(
                             job_id,
                             JobState.FAILED,
                             finished_at=_timestamp(),
                             error_code=code,
                             error_message=message,
+                            error_remediation=remediation,
+                            outcome_summary=None,
+                            next_action=None,
                         )
                 else:
                     self._transition(
@@ -281,11 +302,39 @@ class JobManager:
                 state = JobState.CANCELLED
                 changes.update(
                     result=None,
+                    outcome_summary=None,
+                    next_action=None,
                     error_code="JOB_CANCELLED",
                     error_message=self._cancellation_message(record.cancellation_was_deferred),
+                    error_remediation=None,
                     cancellation_requested_at=record.cancellation_accepted_at,
                     cancellation_pending=False,
                     cancellation_deferred_by=None,
+                )
+            elif state is JobState.COMPLETED:
+                result = changes.get("result")
+                changes.setdefault(
+                    "outcome_summary",
+                    current.outcome_summary
+                    or (
+                        "The background job completed and retained its result."
+                        if result is not None
+                        else "The background job completed."
+                    ),
+                )
+                changes.setdefault(
+                    "next_action",
+                    current.next_action
+                    or (
+                        "Inspect the retained job result."
+                        if result is not None
+                        else "No follow-up action is required."
+                    ),
+                )
+                changes.update(
+                    error_code=None,
+                    error_message=None,
+                    error_remediation=None,
                 )
             values = {
                 "job_id": current.job_id,
@@ -296,8 +345,11 @@ class JobManager:
                 "finished_at": current.finished_at,
                 "resource_keys": current.resource_keys,
                 "result": current.result,
+                "outcome_summary": current.outcome_summary,
+                "next_action": current.next_action,
                 "error_code": current.error_code,
                 "error_message": current.error_message,
+                "error_remediation": current.error_remediation,
                 "progress": current.progress,
                 "cancellation_requested_at": current.cancellation_requested_at,
                 "cancellation_pending": current.cancellation_pending,
@@ -349,8 +401,11 @@ class JobManager:
             JobState.CANCELLED,
             finished_at=_timestamp(),
             result=None,
+            outcome_summary=None,
+            next_action=None,
             error_code="JOB_CANCELLED",
             error_message=self._cancellation_message(was_deferred),
+            error_remediation=None,
             cancellation_requested_at=state.requested_at,
             cancellation_pending=False,
             cancellation_deferred_by=None,
@@ -378,6 +433,19 @@ class JobManager:
                     completed=event.completed,
                     total=event.total,
                 ),
+            )
+            snapshot = record.snapshot
+        self._notify(snapshot)
+
+    def _report_outcome(self, job_id: str, summary: str, next_action: str) -> None:
+        with self._lock:
+            record = self._records[job_id]
+            if record.snapshot.state not in {JobState.QUEUED, JobState.RUNNING}:
+                return
+            record.snapshot = replace(
+                record.snapshot,
+                outcome_summary=self._redact(summary),
+                next_action=self._redact(next_action),
             )
             snapshot = record.snapshot
         self._notify(snapshot)
@@ -478,8 +546,11 @@ class JobManager:
                     state=JobState.CANCELLED,
                     finished_at=_timestamp(),
                     result=None,
+                    outcome_summary=None,
+                    next_action=None,
                     error_code="JOB_CANCELLED",
                     error_message="The queued background job was cancelled.",
+                    error_remediation=None,
                     cancellation_requested_at=record.cancellation_accepted_at,
                     cancellation_pending=False,
                     cancellation_deferred_by=None,

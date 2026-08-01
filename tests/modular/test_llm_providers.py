@@ -564,21 +564,48 @@ class RateLimitError(Exception):
     response = SimpleNamespace(status_code=429, headers={"retry-after": "120"})
 
 
+class InvalidRequestError(Exception):
+    status_code = 400
+
+
 @pytest.mark.parametrize(
-    ("exc", "expected_code"),
+    ("exc", "expected_code", "guidance"),
     [
-        (TimeoutError(), "PROVIDER_TIMEOUT"),
-        (RateLimitError(), "PROVIDER_RATE_LIMITED"),
-        (ConnectionError(), "PROVIDER_TRANSIENT"),
+        (TimeoutError(), "PROVIDER_TIMEOUT", "connectivity and provider status"),
+        (RateLimitError(), "PROVIDER_RATE_LIMITED", "wait before retrying manually"),
+        (ConnectionError(), "PROVIDER_TRANSIENT", "network connectivity and provider status"),
+        (InvalidRequestError(), "PROVIDER_REQUEST_FAILED", "provider configuration"),
     ],
 )
-def test_provider_errors_have_stable_codes(exc: Exception, expected_code: str) -> None:
+def test_provider_errors_have_stable_actionable_guidance(
+    exc: Exception,
+    expected_code: str,
+    guidance: str,
+) -> None:
     error = normalize_provider_error(exc, "test")
 
     assert error.code == expected_code
     assert "provider detail" not in error.message
+    assert error.remediation is not None
+    assert guidance in error.remediation
+    assert "No further retry will be attempted automatically." in error.remediation
     if expected_code == "PROVIDER_RATE_LIMITED":
         assert error.details["retry_after_seconds"] == 60.0
+
+
+def test_provider_stream_timeout_guidance_accounts_for_partial_output() -> None:
+    error = normalize_provider_error(
+        TimeoutError(),
+        "test",
+        streaming=True,
+        stream_started=True,
+    )
+
+    assert error.code == "PROVIDER_STREAM_TIMEOUT"
+    assert error.remediation is not None
+    assert "partial output" in error.remediation
+    assert "safe to duplicate" in error.remediation
+    assert "No further retry will be attempted automatically." in error.remediation
 
 
 class AuditSession:

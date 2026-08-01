@@ -188,7 +188,7 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
     shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with create_pipe_input() as pipe:
-        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
         prompts = iter((KeyboardInterrupt(), "exit"))
 
         async def next_prompt(_prompt: str) -> str:
@@ -200,6 +200,8 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
         monkeypatch.setattr(application.session, "prompt_async", next_prompt)
 
         assert asyncio.run(application.run_async()) == 0
+
+    assert "No active background job to cancel; Ctrl-C acknowledged." in stdout.getvalue()
 
 
 def test_ctrl_c_requests_foreground_cancellation_without_terminating_repl(
@@ -1262,6 +1264,10 @@ def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt
 
     assert completed.state.value == "completed"
     assert completed.result == {"exit_code": 0, "output": [{"rows": 1}]}
+    assert completed.outcome_summary == "Saved 1 command result."
+    assert completed.next_action == "Run jobs show j000001 to inspect the saved result."
+    assert "Outcome: Saved 1 command result." in stdout.getvalue()
+    assert "Next: Run jobs show j000001 to inspect the saved result." in stdout.getvalue()
     assert worker_identifiers == [worker_identifiers[0]]
     assert worker_identifiers[0] != loop_identifier
 
