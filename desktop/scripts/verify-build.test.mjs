@@ -5,8 +5,9 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { inspectBuild } from './verify-build.mjs'
 
-test('build inspection rejects source maps, remote assets, credentials, and updater metadata', async () => {
+test('build inspection rejects development copy, source maps, remote assets, credentials, and updater metadata', async () => {
   for (const [name, contents] of [
+    ['renderer.js', 'const heading = "Component gallery"'],
     ['app.js.map', '{}'],
     ['app.js', 'fetch("https://remote.invalid/api")'],
     ['index.html', '<script src="https://remote.invalid/app.js"></script>'],
