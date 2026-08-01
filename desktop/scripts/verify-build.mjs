@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 const prohibitedNames = [/\.map$/i, /^latest.*\.ya?ml$/i, /credential/i, /^\.env/i]
 const prohibitedContent = [
+  /Component gallery/i,
   /sourceMappingURL=/i,
   /\bfetch\s*\(\s*['"]https?:\/\//i,
   /\bnew\s+(?:EventSource|WebSocket|XMLHttpRequest)\s*\(/i,
@@ -37,5 +38,5 @@ export async function inspectBuild(root) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const count = await inspectBuild(new URL('../out', import.meta.url).pathname)
-  console.log(`Verified ${count} build artifacts: no source maps, embedded remote network endpoints, credentials, or updater metadata.`)
+  console.log(`Verified ${count} build artifacts: no development-only gallery copy, source maps, embedded remote network endpoints, credentials, or updater metadata.`)
 }

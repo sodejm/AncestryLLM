@@ -5,6 +5,8 @@ main process. Issue #226 adds the narrow typed bridge that lets the renderer
 read sanitized control state without becoming a sidecar client. Neither change
 exposes genealogy, job, chat, provider, cloud-account, updater, or generic
 command routes; the sidecar is not a domain-data transport.
+The [desktop shell guide](DESKTOP_SHELL.md) defines the supported 0.5.0 user
+surface, installation model, and sanitized recovery contract.
 
 ## Native targets and release evidence
 
@@ -22,8 +24,10 @@ equivalent Electron resources directory on Windows and Linux.
 The workflow smoke-tests the native executable before packaging and verifies
 the exact packaged resource afterwards. A system Python installation is not
 used at runtime. CI output is an unsigned, unpacked verification artifact, not
-a supported release. Signing, notarization, installers, updates, and final
-Windows 11 execution evidence remain separately owned release work.
+a supported release. Supported distribution requires a manually installed,
+signed installer plus applicable notarization, provenance, installation,
+target-execution, and packaged assurance gates. Version 0.5.0 has no updater,
+update feed, background update channel, or staged rollout.
 
 ## Private lifecycle
 
@@ -107,5 +111,6 @@ node desktop/scripts/verify-sidecar.mjs darwin-arm64 desktop/release
 ```
 
 Choose the exact native target; cross-built sidecars are rejected. A desktop
-support or `0.5.0` release claim also requires the release tracker, signing,
-platform execution, and packaged assurance gates to pass.
+support or `0.5.0` release claim also requires the release tracker, signed
+installer, platform execution, installation, and packaged assurance gates to
+pass. Unsigned CI artifacts do not satisfy those gates.

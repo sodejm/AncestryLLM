@@ -18,12 +18,15 @@ The published `0.4.0` runtime is a single-user, local-first Python application
 for genealogy research. It combines deterministic RootsMagic and GEDCOM
 workflows with optional LLM assistance. Isolated `0.5.0` work adds an
 authenticated FastAPI control adapter for health and capability discovery, a
-UI-only Electron shell, and native packaged-sidecar build and supervision.
-These components are not release evidence or a supported production desktop:
-the API exposes no genealogy, provider, domain, or generic command-dispatch
+UI-only Electron shell with Home, Diagnostics, a sanitized capability summary,
+and local visual Settings, and native packaged-sidecar build and supervision.
+The API exposes no genealogy, provider, domain, or generic command-dispatch
 route. The exact six-method renderer bridge uses deterministic fictional data
 in development; packaged Electron main alone may call the authenticated fixed
-capabilities route.
+capabilities route. A supported desktop release requires a target-matched,
+manually installed signed installer and all release assurance gates. Unsigned
+CI artifacts and unpacked development builds are verification inputs only.
+Version 0.5.0 has no updater or background update channel.
 
 There is no supported production browser, public/LAN, or multi-user runtime.
 ADR-0025 accepts the packaged local Electron direction and later private domain
@@ -78,10 +81,12 @@ flowchart LR
     LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
     ControlAPI["Versioned FastAPI control adapter\nhealth/capabilities in 0.5.0 source"]
-    Future["Electron and domain API adapters\nlater roadmap"]
+    Desktop["Bounded Electron shell\n0.5.0 control surface"]
+    Future["Desktop domain API adapters\nlater roadmap"]
 
     Operator --> CLI
     Operator --> Console
+    Operator --> Desktop
     CLI --> Specs
     Console --> Specs
     CLI --> Terminal
@@ -98,6 +103,7 @@ flowchart LR
     Services --> GED
     Services --> LocalLLM
     Services --> Cloud
+    Desktop --> ControlAPI
     ControlAPI --> Specs
     ControlAPI --> Contracts
     ControlAPI --> Executor
@@ -152,7 +158,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its sandboxed renderer, exact six-method typed bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, private native-sidecar supervisor and authenticated fixed-route capabilities client, bounded main-owned durable preferences, local fuse/ASAR inspection, and unsigned unpacked package assembly are implemented. Genealogy integration, supported distribution packages, signing, and updates are not. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported release still requires a target-matched manually installed signed installer and all release assurance gates; unsigned artifacts are not supported distribution packages. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -177,7 +183,8 @@ flowchart TB
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
     External["SQLCipher, keyring, RootsMagic, GEDCOM, provider SDKs"]
     ControlAPI["0.5.0 source-level control adapter\nFastAPI health/capabilities"]
-    Future["Later-roadmap adapters\nElectron and domain API routes"]
+    Desktop["0.5.0 bounded Electron adapter\ncontrol surface"]
+    Future["Later-roadmap adapters\ndesktop domain API routes"]
 
     Adapters --> Specs
     Adapters --> Contracts
@@ -192,6 +199,7 @@ flowchart TB
     Aggregate --> Contracts
     Infra --> Contracts
     Infra --> External
+    Desktop --> ControlAPI
     ControlAPI --> Specs
     ControlAPI --> Contracts
     ControlAPI --> Executor
@@ -231,24 +239,29 @@ any sibling-adapter import without an explicit, reviewed exception record.
 ### Accepted desktop adapter
 
 The desktop target is governed by
-[`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md).
-It is accepted architecture but is not part of the current release until its
-dependency and assurance gates pass.
+[`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md),
+and the bounded 0.5.0 user contract is documented in
+[`docs/DESKTOP_SHELL.md`](docs/DESKTOP_SHELL.md). The source implementation
+includes Home, Diagnostics, a sanitized capability summary, and local visual
+Settings only. A supported release claim still requires its distribution and
+target-assurance gates to pass.
 
 - The sandboxed renderer is untrusted presentation and input. It receives no
   Node.js, Electron, filesystem, network, keyring, provider, database, shell, or
   unrestricted path capability.
 - A static typed preload bridge calls an Electron main-process
-  backend-for-frontend. Main validates the sender/frame/origin, mediates opaque
-  file grants, supervises the sidecar, and proxies only declared endpoints.
+  backend-for-frontend. Main validates the sender/frame/origin, supervises the
+  sidecar, and proxies only declared endpoints. Opaque file grants belong to a
+  later domain adapter and are not exposed by the 0.5.0 shell.
 - The current bridge is frozen to `getAppInfo`, `getStartupDiagnostics`,
   `getCapabilities`, `retrySidecar`, `getPreferences`, and `updatePreferences`.
   Preference updates carry the renderer-visible revision; main owns the storage
-  boundary and rejects stale updates. Durable storage remains separate work.
+  boundary and rejects stale updates.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
   lifecycle plus a bounded single-flight manual retry. Bootstrap material,
-  ports, paths, raw errors, and stacks never cross preload or renderer IPC.
+  ports, tokens, endpoints, executable or preference-file paths, stderr, raw
+  sidecar or bridge errors, and stacks never cross preload or renderer IPC.
 - A loopback-only FastAPI sidecar authenticates every request before body
   parsing and adapts versioned DTOs to application services. The source-level
   Issue #11 foundation and Issue #225 packaged runtime implement only
@@ -260,6 +273,11 @@ dependency and assurance gates pass.
   do not move into the renderer or main process.
 - Offline-first behavior remains mandatory: `provider=none` opens no network
   socket even when provider credentials and SDKs exist.
+- Supported distribution is a manually installed signed installer for macOS 15
+  and 26 on arm64 and x64, Windows 11 on x64, or Ubuntu 24.04 on x64 after the
+  applicable release gates pass. Unsigned CI artifacts and unpacked builds are
+  verification inputs only. Version 0.5.0 has no updater, update feed,
+  background update channel, or staged rollout.
 
 The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 5.0.0 requirements and NIST SP 800-218 SSDF practices. The control IDs, STRIDE
@@ -880,7 +898,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, a browser-typed React renderer shell, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain route, generic command route, signed installer, updater, or supported desktop package exists. | Complete the production shell, signing/distribution, Windows 11 execution, and exact-head assurance work before making a `0.5.0` support or release claim. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim requires a target-matched manually installed signed installer and all signing, notarization where applicable, provenance, installation, platform-execution, packaged-assurance, and exact-head gates. Unsigned CI artifacts are verification inputs only. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

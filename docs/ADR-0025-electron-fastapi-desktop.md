@@ -50,7 +50,30 @@ or compatibility commitment to third parties. The renderer gets no direct
 filesystem, network, keyring, provider, database, shell, Electron, or Node.js
 capability.
 
-### Product requirements
+### Version 0.5.0 implemented shell profile
+
+This ADR defines the broader accepted desktop target architecture. The
+implemented 0.5.0 profile is intentionally narrower: Home, Diagnostics, a
+sanitized capability summary, and local visual Settings only. It has no
+genealogy, file or folder, GEDCOM or RootsMagic, job, chat, provider or
+credential, cloud or account, domain-dispatch, updater, or background-channel
+surface. See the [desktop shell guide](DESKTOP_SHELL.md) for the supported
+surface and recovery contract.
+
+The 0.5.0 preload bridge exposes exactly `getAppInfo`,
+`getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
+and `updatePreferences`. The renderer never receives the sidecar port, bearer,
+endpoint, executable or preference-file path, stderr, raw sidecar or bridge
+errors, or stack traces. Electron main is the sole authenticated sidecar
+client.
+
+Supported 0.5.0 distribution uses manually installed signed installers after
+the platform-specific release gates pass. Unsigned CI artifacts and unpacked
+development builds are verification inputs, not supported releases. There is
+no updater, update feed, background update channel, or staged rollout in this
+version.
+
+### Target desktop product requirements
 
 - Launch is local and uses **no in-app authentication**. The signed-in OS user
   is the operator; that assumption does not authorize renderer or loopback
@@ -66,7 +89,7 @@ capability.
 - RootsMagic inputs remain immutable. GEDCOM and backup publications remain
   atomic and loss behavior remains visible.
 
-### MVP navigation and capability language
+### Target MVP navigation and capability language
 
 MVP navigation is driven by a typed `CapabilityManifest`, not by renderer
 probing of databases, keyrings, providers, files, or networks:
@@ -93,11 +116,11 @@ Capability distinctions use text and icons as well as color:
   when product context requires it. They are absent from dispatch and cannot
   be enabled through renderer state.
 
-The MVP contains the secure application shell, diagnostics, settings/consent,
-chat, task handling, and GEDCOM workflows. Existing-module desktop parity may
-follow. Retrieval, full family-tree editing/writeback, executable plugins,
-third-party UI code, and general-purpose network access are Post-MVP and require
-their own renewed architecture-risk gate.
+The target MVP contains the secure application shell, diagnostics,
+settings/consent, chat, task handling, and GEDCOM workflows. Existing-module
+desktop parity may follow. Retrieval, full family-tree editing/writeback,
+executable plugins, third-party UI code, and general-purpose network access are
+Post-MVP and require their own renewed architecture-risk gate.
 
 ## Process and trust-boundary inventory
 

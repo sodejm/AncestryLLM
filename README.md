@@ -5,10 +5,14 @@ deterministic RootsMagic and GEDCOM workflows with optional, explicitly selected
 LLM providers. The one-shot CLI and prompt-toolkit/Rich REPL are the only
 implemented product surfaces in 0.4.0. They derive commands from the same
 `CommandSpec` metadata and dispatch through the shared `CommandExecutor` into
-transport-neutral application services. Isolated 0.5.0 work includes a private
-FastAPI health/capability adapter plus native packaged-sidecar build and Electron
-supervision. Domain API routes and supported desktop distribution remain unshipped;
-the internal adapter is not a public API.
+transport-neutral application services. Version 0.5.0 adds a bounded offline
+Electron shell with Home, Diagnostics, a sanitized capability summary, and
+local visual Settings only, backed by a private packaged sidecar. It has no
+genealogy, file, job, chat, provider, cloud-account, or updater surface. A
+supported desktop release is a manually installed signed installer; unsigned
+CI artifacts and unpacked development builds are verification inputs, not
+supported releases. The internal adapter is not a public API, and later domain
+adapters must reuse the existing service surface.
 
 ## Documentation
 
@@ -81,6 +85,7 @@ The dependency graph is locked in `uv.lock`. Never commit real family trees,
 GEDCOM exports, databases, logs, reports, secrets, or research-person data.
 
 Read [the architecture](https://github.com/sodejm/AncestryLLM/blob/main/ARCHITECTURE.md),
+[desktop shell guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md),
 [desktop ADR](https://github.com/sodejm/AncestryLLM/blob/main/docs/ADR-0025-electron-fastapi-desktop.md),
 [CLI guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CLI.md),
 [privacy and consent](https://github.com/sodejm/AncestryLLM/blob/main/docs/PRIVACY_AND_CONSENT.md),

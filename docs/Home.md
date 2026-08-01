@@ -13,11 +13,16 @@ Start with the [CLI reference](CLI.md) for one-shot commands or the
 [interactive console guide](CONSOLE.md). In 0.4.0 these are the only
 implemented product surfaces: both use the same command specification,
 transport-neutral executor, application DTOs, and genealogy services. The
-unshipped 0.5.0 work includes a control-only FastAPI sidecar and Electron
-supervisor; later domain adapters must reuse that service surface rather than
-define another command or domain layer. The pages below
-cover versioning, privacy controls, providers, GEDCOM interoperability,
-backups, release operations, and security practices.
+0.5.0 scope adds a bounded, offline Electron shell with Home, Diagnostics, a
+sanitized capability summary, and local visual Settings only. It uses a
+private control-only sidecar and has no genealogy, files, jobs, chat,
+providers, cloud accounts, or updater surface. The
+[desktop shell guide](DESKTOP_SHELL.md) defines its supported targets, manual
+signed-installer model, unsigned-artifact distinction, and sanitized recovery
+contract. Later domain adapters must reuse the existing service surface rather
+than define another command or domain layer. The pages below cover versioning,
+privacy controls, providers, GEDCOM interoperability, backups, release
+operations, and security practices.
 
 All user-selected files are governed by the shared
 [bounded file-ingress policy](FILE_INGRESS.md), including byte and record
@@ -34,8 +39,8 @@ links. The canonical source remains unchanged.
 
 Use the sidebar to navigate the complete published documentation set.
 
-The accepted later-roadmap local desktop direction, process boundaries, MVP
-scope, and secure development gates are defined in the
+The bounded 0.5.0 shell and accepted later-roadmap desktop direction, process
+boundaries, target MVP scope, and secure development gates are defined in the
 [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md). Its
 OWASP Top 10:2025 and NIST SP 800-218 control evidence is maintained in the
 [threat model](THREAT_MODEL.md), and the implemented control lifecycle is in
