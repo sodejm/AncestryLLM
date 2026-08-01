@@ -107,10 +107,10 @@ for its password and `APPLE_TEAM_ID`.
    repository-local sources, including paths reached through symbolic links.
    Repository ignore rules cover common signing formats as a second line of
    defense, and the repository-safety gate rejects them even if force-added.
-4. Confirm `/bin/bash`, `/usr/bin/base64`, `/usr/bin/security`, `awk`, `chmod`,
-   `cmp`, `grep`, `mktemp`, `openssl`, `realpath`, `rm`, `tr`, and `uname` are
-   available. Install Xcode Command Line Tools if `xcrun` and Swift are not
-   already available:
+4. Confirm `/bin/bash`, `/usr/bin/base64`, `/usr/bin/python3`,
+   `/usr/bin/security`, `awk`, `chmod`, `cmp`, `grep`, `mktemp`, `openssl`,
+   `realpath`, `rm`, `tr`, and `uname` are available. Install Xcode Command
+   Line Tools if `xcrun` and Swift are not already available:
 
    ```sh
    xcode-select --install
@@ -144,11 +144,17 @@ for its password and `APPLE_TEAM_ID`.
      [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]
    ```
 
-   Do not place these files, their Base64 encodings, passwords, key IDs,
-   issuer IDs, or passphrases in this repository, a shell command, a log, or a
-   clipboard manager. The script disables shell tracing, masks private text
-   entry, uses a mode-`0700` temporary directory and mode-`0600` files, and
-   removes generated material on exit.
+   Each source must be a non-empty regular file owned by root or the current
+   user, with exact mode `0400` or `0600`; the final source path must not be a
+   symbolic link. Do not place these files, their Base64 encodings, passwords,
+   key IDs, issuer IDs, or passphrases in this repository, a shell command, a
+   log, or a clipboard manager. The script disables shell tracing, masks
+   private text entry, and uses a mode-`0700` temporary directory. It securely
+   opens each user-supplied path exactly once with no-follow semantics,
+   validates the open descriptor, copies it directly into a mode-`0600`
+   snapshot, and then uses only that snapshot. If the open file changes while
+   it is copied, the helper aborts and removes the incomplete snapshot. All
+   generated material is removed on exit.
 
 ### Generate and validate without uploading
 
@@ -172,8 +178,9 @@ remaining source paths, four private text values, and the Windows and Linux
 public identity values when prompted. The helper asks for every user-supplied
 private text value twice. A dry run checks the fixed `github.com` host, the
 exact authenticated `sodejm` account, the canonical repository identity,
-keychain discovery and export, file readability, non-empty values, Base64 round
-trips, and public-identity formats, then exits without changing GitHub.
+keychain discovery and export, descriptor-bound credential snapshots, non-empty
+values, Base64 round trips, and public-identity formats, then exits without
+changing GitHub.
 
 For the explicit manual fallback, run:
 
@@ -236,8 +243,10 @@ If setup fails:
   alternate `GH_HOST`, reauthenticate `sodejm` on `github.com` using
   `[GH_AUTHENTICATION_METHOD]`, and confirm that account's repository,
   environment-secret, and variable permissions.
-- unreadable or empty file: correct its path or permissions; do not weaken
-  permissions beyond what is required for the current user.
+- rejected credential source: use a non-empty regular file outside the
+  repository, owned by root or the current user, with exact mode `0400` or
+  `0600`; do not use a symbolic link. If the source changed during its
+  descriptor-bound copy, stop other writers before retrying.
 - no valid Developer ID identity: use Xcode or the Apple developer profile to
   install a `Developer ID Application` certificate and its private key in the
   current user's keychain, then repeat the read-only identity check.

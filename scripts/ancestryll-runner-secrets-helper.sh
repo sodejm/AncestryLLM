@@ -27,6 +27,7 @@ GH_EXECUTABLE=''
 TEMP_DIRECTORY=''
 REPOSITORY_ROOT=''
 APPLE_IDENTITY_EXPORTER=''
+CREDENTIAL_SNAPSHOT_HELPER=''
 
 usage() {
   printf '%s\n' \
@@ -213,29 +214,28 @@ run_gh() {
   GH_HOST=$GITHUB_HOST PATH=$MINIMAL_COMMAND_PATH "$GH_EXECUTABLE" "$@"
 }
 
-validate_credential_source_file() {
+snapshot_credential_source_file() {
   local description=$1
   local supplied_path=$2
-  local canonical_path=''
+  local snapshot_name=$3
+  local snapshot_path="$TEMP_DIRECTORY/$snapshot_name"
 
-  [ -n "$supplied_path" ] || fail "$description requires a path"
-  [ -f "$supplied_path" ] || fail "Not a regular file: $supplied_path"
-  [ -r "$supplied_path" ] || fail "File is not readable: $supplied_path"
-  [ -s "$supplied_path" ] || fail "File is empty: $supplied_path"
+  [ -n "$supplied_path" ] || {
+    printf 'ERROR: %s requires a path\n' "$description" >&2
+    return 1
+  }
+  /usr/bin/python3 "$CREDENTIAL_SNAPSHOT_HELPER" \
+    --source "$supplied_path" \
+    --destination "$snapshot_path" \
+    --repository-root "$REPOSITORY_ROOT" \
+    || return 1
 
-  canonical_path=$(realpath "$supplied_path") \
-    || fail "Could not resolve source file path: $supplied_path"
-  case "$canonical_path" in
-    "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
-      fail 'Credential source files must be stored outside the repository'
-      ;;
-  esac
-
-  REPLY=$canonical_path
+  REPLY=$snapshot_path
 }
 
 prompt_readable_file() {
   local description=$1
+  local snapshot_name=$2
   local supplied_path=''
 
   while :; do
@@ -246,21 +246,12 @@ prompt_readable_file() {
       printf 'A path is required.\n' >&2
       continue
     fi
-    if [ ! -f "$supplied_path" ]; then
-      printf 'Not a regular file: %s\n' "$supplied_path" >&2
-      continue
+    if snapshot_credential_source_file \
+      "$description" "$supplied_path" "$snapshot_name"
+    then
+      return 0
     fi
-    if [ ! -r "$supplied_path" ]; then
-      printf 'File is not readable: %s\n' "$supplied_path" >&2
-      continue
-    fi
-    if [ ! -s "$supplied_path" ]; then
-      printf 'File is empty: %s\n' "$supplied_path" >&2
-      continue
-    fi
-
-    validate_credential_source_file "$description" "$supplied_path"
-    return 0
+    printf 'The credential source was rejected; try again.\n' >&2
   done
 }
 
@@ -442,17 +433,21 @@ require_command cmp
 require_command grep
 require_command mkdir
 require_command mktemp
-require_command realpath
 require_command rm
 require_command tr
 require_command uname
 require_command /usr/bin/base64
+require_command /usr/bin/python3
 
 resolve_trusted_gh
 
-REPOSITORY_ROOT=$(realpath "$(dirname "${BASH_SOURCE[0]}")/..") \
+REPOSITORY_ROOT=$(/bin/realpath \
+  "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/..") \
   || fail 'Could not resolve the repository root'
 APPLE_IDENTITY_EXPORTER="$REPOSITORY_ROOT/scripts/export-apple-signing-identity.swift"
+CREDENTIAL_SNAPSHOT_HELPER="$REPOSITORY_ROOT/scripts/snapshot_credential_file.py"
+[ -f "$CREDENTIAL_SNAPSHOT_HELPER" ] && [ ! -L "$CREDENTIAL_SNAPSHOT_HELPER" ] \
+  || fail 'The credential snapshot helper is missing or is a symbolic link'
 
 GH_VERSION=$(run_gh --version) \
   || fail "Could not execute the trusted GitHub CLI: $GH_EXECUTABLE"
@@ -520,25 +515,32 @@ else
   printf '%s\n' \
     'Apple certificate source: explicit PKCS#12 file' \
     ''
-  validate_credential_source_file \
-    'APPLE_CERTIFICATE_SOURCE_FILE' "$APPLE_CERTIFICATE_SOURCE_ARGUMENT"
+  snapshot_credential_source_file \
+    'APPLE_CERTIFICATE_SOURCE_FILE' \
+    "$APPLE_CERTIFICATE_SOURCE_ARGUMENT" \
+    'apple-certificate.snapshot' \
+    || fail 'APPLE_CERTIFICATE_SOURCE_FILE could not be snapshotted securely'
   APPLE_CERTIFICATE_SOURCE_FILE=$REPLY
 fi
 
 printf '%s\n' \
-  'Supply the remaining original, unencoded payload files. This helper creates' \
-  'temporary Base64 representations and validates them by decoding and' \
-  'byte-comparing. It does not create Apple notary API keys, Windows' \
-  'certificates, or GPG keys.' \
+  'Supply the remaining original, unencoded payload files. The helper opens' \
+  'each source once, immediately creates a private descriptor-bound snapshot,' \
+  'then uses only that snapshot for Base64 and byte-comparison validation.' \
+  'It does not create Apple notary API keys, Windows certificates, or GPG keys.' \
   ''
 
-prompt_readable_file 'Path to [APPLE_API_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [APPLE_API_KEY_SOURCE_FILE]' 'apple-api-key.snapshot'
 APPLE_API_KEY_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [WINDOWS_CERTIFICATE_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [WINDOWS_CERTIFICATE_SOURCE_FILE]' 'windows-certificate.snapshot'
 WINDOWS_CERTIFICATE_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [LINUX_GPG_PRIVATE_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [LINUX_GPG_PRIVATE_KEY_SOURCE_FILE]' 'linux-private.snapshot'
 LINUX_GPG_PRIVATE_KEY_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]' 'linux-public.snapshot'
 LINUX_GPG_PUBLIC_KEY_SOURCE_FILE=$REPLY
 
 APPLE_CERTIFICATE_BASE64_FILE="$TEMP_DIRECTORY/apple-certificate.b64"
@@ -609,11 +611,11 @@ printf '%s\n' '' 'Validated without displaying values:'
 if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
   printf '%s\n' \
     '  1 selected Apple Developer ID Application keychain identity' \
-    '  4 remaining non-empty source payload files' \
+    '  4 descriptor-bound private source snapshots' \
     '  1 generated Apple PKCS#12 password and 4 twice-confirmed private values'
 else
   printf '%s\n' \
-    '  5 non-empty source payload files' \
+    '  5 descriptor-bound private source snapshots' \
     '  5 twice-confirmed private text values'
 fi
 printf '%s\n' \

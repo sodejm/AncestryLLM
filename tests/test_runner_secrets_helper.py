@@ -15,8 +15,7 @@ APPROVED_GITHUB_ACCOUNT = "sodejm"
 REPOSITORY = "sodejm/AncestryLLM"
 SIGNING_ENVIRONMENT = "desktop-signing"
 UPLOAD_CONFIRMATION = (
-    f"UPLOAD {GITHUB_HOST}/{REPOSITORY} {SIGNING_ENVIRONMENT} "
-    f"AS {APPROVED_GITHUB_ACCOUNT}"
+    f"UPLOAD {GITHUB_HOST}/{REPOSITORY} {SIGNING_ENVIRONMENT} AS {APPROVED_GITHUB_ACCOUNT}"
 )
 
 SECRET_NAMES = {
@@ -182,6 +181,7 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     for index in range(4):
         payload = tmp_path / f"payload-{index}.bin"
         payload.write_bytes(f"fictional signing payload {index}\n".encode())
+        payload.chmod(0o600)
         payloads.append(payload)
 
     private_values = [
@@ -244,10 +244,7 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     assert calls
     assert all(call.split("\t", maxsplit=1)[0] == GITHUB_HOST for call in calls)
     assert any("auth status --hostname github.com" in call for call in calls)
-    assert (
-        f"Authenticated GitHub account: {APPROVED_GITHUB_ACCOUNT}"
-        in combined_output
-    )
+    assert f"Authenticated GitHub account: {APPROVED_GITHUB_ACCOUNT}" in combined_output
 
 
 def test_helper_help_uses_the_comma_free_name() -> None:
@@ -523,9 +520,7 @@ def test_helper_rejects_an_unapproved_authenticated_account(tmp_path: Path) -> N
     )
 
     assert result.returncode != 0
-    assert (
-        "Authenticated GitHub account is attacker; expected sodejm" in result.stderr
-    )
+    assert "Authenticated GitHub account is attacker; expected sodejm" in result.stderr
 
 
 def test_helper_rejects_a_mismatched_repository_identity(tmp_path: Path) -> None:
