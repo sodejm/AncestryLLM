@@ -21,6 +21,28 @@ These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
 zoomed layouts.
 
+## First run and revisit
+
+The first supported launch opens a bounded welcome on **Home**. It explains
+that AncestryLLM runs locally, that this release is the offline control shell,
+that updates are installed manually, and that **Diagnostics** contains the
+sanitized runtime status. It asks for no account, provider, API key, genealogy
+data, or cloud consent.
+
+**Continue** records only the main-process-owned `onboardingCompleted`
+preference. A new application process skips the welcome after a valid refreshed
+preference snapshot reports completion; the flag is not exposed in **Settings**.
+Conflict, unavailable, corrupt, unsupported, or invalid preference responses
+fail closed and keep the welcome gated with a stable sanitized code and bounded
+**Try again**, **Diagnostics**, or restart recovery. The renderer never repairs
+or overwrites invalid preference storage.
+
+Completed users can select **Review welcome** on **Home**. Review is temporary
+renderer state: **Back to Home** neither creates a route nor changes a
+preference. Keyboard focus begins on the welcome heading, reduced-motion
+preferences are respected, and degraded runtime state does not block navigation
+to **Diagnostics** or its bounded retry.
+
 The 0.5.0 shell has no genealogy, file or folder, GEDCOM or RootsMagic, job,
 chat, provider or credential, cloud or account, domain-dispatch, updater, or
 background-channel surface. Those exclusions apply to navigation and hidden
@@ -76,3 +98,14 @@ When the bundled runtime is unavailable, keep recovery bounded and generic:
 Generic recovery text is part of the security boundary: the capability summary
 and diagnostics must not turn private runtime state into renderer-visible
 details.
+
+## Verification boundary
+
+`make desktop-e2e` builds the production renderer and launches it in Electron
+with a deterministic fictional mock bridge. The flow proves welcome completion,
+renderer reload, revisit, degraded startup, retry, and destination access. A
+separate `FilePreferencesStore` unit test proves that completion survives a
+fresh store instance, which models a new application process. This E2E gate
+does not launch a signed installer or the literal packaged executable; package
+inspection and target-specific signed-installer execution remain separate
+release gates.

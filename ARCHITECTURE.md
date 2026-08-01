@@ -19,7 +19,8 @@ for genealogy research. It combines deterministic RootsMagic and GEDCOM
 workflows with optional LLM assistance. Isolated `0.5.0` work adds an
 authenticated FastAPI control adapter for health and capability discovery, a
 UI-only Electron shell with Home, Diagnostics, a sanitized capability summary,
-and local visual Settings, and native packaged-sidecar build and supervision.
+local visual Settings, and a bounded first-run Home welcome, plus native
+packaged-sidecar build and supervision.
 The API exposes no genealogy, provider, domain, or generic command-dispatch
 route. The exact six-method renderer bridge uses deterministic fictional data
 in development; packaged Electron main alone may call the authenticated fixed
@@ -158,7 +159,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported release still requires a target-matched manually installed signed installer and all release assurance gates; unsigned artifacts are not supported distribution packages. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported release still requires a target-matched manually installed signed installer and all release assurance gates; unsigned artifacts are not supported distribution packages. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -243,7 +244,8 @@ The desktop target is governed by
 and the bounded 0.5.0 user contract is documented in
 [`docs/DESKTOP_SHELL.md`](docs/DESKTOP_SHELL.md). The source implementation
 includes Home, Diagnostics, a sanitized capability summary, and local visual
-Settings only. A supported release claim still requires its distribution and
+Settings, plus a bounded first-run Home welcome and temporary Home-based
+welcome review. A supported release claim still requires its distribution and
 target-assurance gates to pass.
 
 - The sandboxed renderer is untrusted presentation and input. It receives no
@@ -256,7 +258,9 @@ target-assurance gates to pass.
 - The current bridge is frozen to `getAppInfo`, `getStartupDiagnostics`,
   `getCapabilities`, `retrySidecar`, `getPreferences`, and `updatePreferences`.
   Preference updates carry the renderer-visible revision; main owns the storage
-  boundary and rejects stale updates.
+  boundary and rejects stale updates. The renderer advances past onboarding
+  only after a fresh valid preference snapshot reports completion; malformed,
+  unavailable, or conflicting state remains gated.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
   lifecycle plus a bounded single-flight manual retry. Bootstrap material,
@@ -898,7 +902,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim requires a target-matched manually installed signed installer and all signing, notarization where applicable, provenance, installation, platform-execution, packaged-assurance, and exact-head gates. Unsigned CI artifacts are verification inputs only. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim requires a target-matched manually installed signed installer and all signing, notarization where applicable, provenance, installation, platform-execution, packaged-assurance, and exact-head gates. Unsigned CI artifacts are verification inputs only. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

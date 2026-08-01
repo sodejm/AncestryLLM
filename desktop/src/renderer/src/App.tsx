@@ -66,12 +66,15 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 function Shell() {
   const [route, setRoute] = useState<Route>(routeFromHash)
+  const [reviewingWelcome, setReviewingWelcome] = useState(false)
+  const [onboardingFailure, setOnboardingFailure] = useState<BridgeErrorCode | null>(null)
   const [preferenceUpdatePending, setPreferenceUpdatePending] = useState(false)
   const [preferenceFailure, setPreferenceFailure] = useState<BridgeErrorCode | null>(null)
   const [retryPending, setRetryPending] = useState(false)
   const [retryFailure, setRetryFailure] = useState<BridgeErrorCode | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const startupAlert = useRef<HTMLDivElement>(null)
+  const onboardingAlert = useRef<HTMLDivElement>(null)
   const preferenceAlert = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const appInfo = useQuery({ queryKey: ['app-info'], queryFn: () => ancestryBridge().getAppInfo() })
@@ -85,10 +88,6 @@ function Shell() {
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
-
-  useEffect(() => {
-    heading.current?.focus()
-  }, [route])
 
   useEffect(() => {
     if (startup.isError || (startup.data && !startup.data.ok)) startupAlert.current?.focus()
@@ -107,6 +106,18 @@ function Shell() {
   const appData = appInfo.data?.ok ? appInfo.data.data : undefined
   const capabilityData = capabilities.data?.ok ? capabilities.data.data : undefined
   const preferenceData = preferences.data?.ok ? preferences.data.data : undefined
+  const showWelcome = route === 'home'
+    && !preferences.isPending
+    && (!preferenceData?.onboardingCompleted || reviewingWelcome)
+
+  useEffect(() => {
+    if (startup.isError || (startup.data && !startup.data.ok)) return
+    heading.current?.focus()
+  }, [preferences.isPending, route, showWelcome, startup.data, startup.isError])
+
+  useEffect(() => {
+    if (onboardingFailure) onboardingAlert.current?.focus()
+  }, [onboardingFailure])
 
   useEffect(() => {
     if (!preferenceData) return
@@ -134,6 +145,29 @@ function Shell() {
       }
     } catch {
       setPreferenceFailure('INTERNAL_ERROR')
+    } finally {
+      setPreferenceUpdatePending(false)
+    }
+  }
+
+  const completeOnboarding = async () => {
+    if (!preferenceData || preferenceUpdatePending) return
+    setPreferenceUpdatePending(true)
+    setOnboardingFailure(null)
+    try {
+      const updated = await ancestryBridge().updatePreferences({
+        expectedRevision: preferenceData.revision,
+        onboardingCompleted: true,
+      })
+      const refreshed = await preferences.refetch()
+      const refreshedData = refreshed.data?.ok ? refreshed.data.data : undefined
+      if (refreshedData?.onboardingCompleted === true) {
+        setReviewingWelcome(false)
+      } else {
+        setOnboardingFailure(updated.ok ? 'PREFERENCES_UNAVAILABLE' : updated.error.code)
+      }
+    } catch {
+      setOnboardingFailure('INTERNAL_ERROR')
     } finally {
       setPreferenceUpdatePending(false)
     }
@@ -186,7 +220,52 @@ function Shell() {
         </div>
       </div>}
 
-      {route === 'home' && <>
+      {route === 'home' && preferences.isPending && <p role="status">Loading welcome…</p>}
+
+      {showWelcome && <section className="welcome" aria-labelledby="welcome-title">
+        <h1 id="welcome-title" ref={heading} tabIndex={-1}>Welcome to AncestryLLM</h1>
+        <p className="lead">Your desktop control shell stays local to this device.</p>
+        <div className="welcome-grid">
+          <section className="summary-card" aria-labelledby="welcome-private">
+            <h2 id="welcome-private">Private and offline</h2>
+            <p>No account, provider, API key, genealogy data, or cloud consent is requested here.</p>
+          </section>
+          <section className="summary-card" aria-labelledby="welcome-scope">
+            <h2 id="welcome-scope">What this shell supports</h2>
+            <p>Use Home for a local status overview and Diagnostics for startup recovery.</p>
+          </section>
+          <section className="summary-card" aria-labelledby="welcome-recovery">
+            <h2 id="welcome-recovery">Recovery and updates</h2>
+            <p>Updates are installed manually. Diagnostics remains available if the desktop service cannot start.</p>
+            <a href="#/diagnostics">Open Diagnostics</a>
+          </section>
+        </div>
+        {(onboardingFailure || (!preferenceData && preferenceQueryCode)) && <div
+          ref={onboardingAlert}
+          tabIndex={-1}
+          role="alert"
+          className="error welcome-error"
+        >
+          <AlertTriangle aria-hidden="true" />
+          <div>
+            <strong>{onboardingFailure ? 'Welcome progress was not saved.' : 'Welcome progress is temporarily unavailable.'}</strong>
+            <p className="error-code">Code: {onboardingFailure ?? preferenceQueryCode}</p>
+            <p>Open Diagnostics or restart AncestryLLM.</p>
+          </div>
+        </div>}
+        <div className="welcome-actions">
+          {reviewingWelcome
+            ? <Button variant="quiet" onClick={() => setReviewingWelcome(false)}>Back to Home</Button>
+            : <Button
+                disabled={!preferenceData || preferenceUpdatePending}
+                onClick={() => { void completeOnboarding() }}
+              >
+                {preferenceUpdatePending ? 'Saving…' : onboardingFailure ? 'Try again' : 'Continue to Home'}
+              </Button>}
+        </div>
+      </section>}
+
+      {route === 'home' && !preferences.isPending && !showWelcome && <>
         <h1 ref={heading} tabIndex={-1}>Home</h1>
         <p className="lead">A calm overview of this desktop shell.</p>
         <div className="summary-grid">
@@ -217,6 +296,9 @@ function Shell() {
               : `${capabilityData.modules.length} local control ${capabilityData.modules.length === 1 ? 'module is' : 'modules are'} available.`}</p>}
             {(capabilities.isError || (capabilities.data && !capabilities.data.ok)) && <p>Capabilities are unavailable while the desktop service recovers.</p>}
           </section>
+        </div>
+        <div className="home-actions">
+          <Button variant="quiet" onClick={() => setReviewingWelcome(true)}>Review welcome</Button>
         </div>
       </>}
 

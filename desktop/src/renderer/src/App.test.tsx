@@ -5,14 +5,206 @@ import type { AncestryBridge } from '../../shared-contract/desktop'
 import { createMockAncestryBridge } from '../../mock-bridge/desktop'
 import { App } from './App'
 
+async function createCompletedBridge(mode: Parameters<typeof createMockAncestryBridge>[0] = 'success') {
+  const bridge = createMockAncestryBridge(mode)
+  await bridge.updatePreferences({ expectedRevision: 0, onboardingCompleted: true })
+  return bridge
+}
+
 describe('accessible desktop shell', () => {
   beforeEach(() => {
     window.location.hash = '#/'
     delete document.documentElement.dataset.theme
     delete document.documentElement.dataset.reducedMotion
   })
-  it('supports keyboard navigation across Home, Diagnostics, and Settings', async () => {
+
+  it('presents a focused, bounded offline welcome on first launch', async () => {
     const bridge = createMockAncestryBridge('success')
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+
+    const heading = await screen.findByRole('heading', { name: 'Welcome to AncestryLLM' })
+    expect(heading).toHaveFocus()
+    expect(screen.getByText('Your desktop control shell stays local to this device.')).toBeVisible()
+    expect(screen.getByText(/No account, provider, API key, genealogy data, or cloud consent is requested here/i)).toBeVisible()
+    expect(screen.getByText(/Updates are installed manually/i)).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Open Diagnostics' })).toHaveAttribute('href', '#/diagnostics')
+    expect(screen.getByRole('button', { name: 'Continue to Home' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: 'Application' })).not.toBeInTheDocument()
+  })
+
+  it('completes onboarding with the visible revision and reveals Home', async () => {
+    const base = createMockAncestryBridge('success')
+    const updatePreferences = vi.fn((request) => base.updatePreferences(request))
+    const bridge: AncestryBridge = { ...base, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    expect(updatePreferences).toHaveBeenCalledWith({ expectedRevision: 0, onboardingCompleted: true })
+    expect(await screen.findByRole('heading', { name: 'Home' })).toHaveFocus()
+    expect(screen.getByRole('heading', { name: 'Application' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Welcome to AncestryLLM' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the welcome usable and renders only fixed recovery guidance when completion fails', async () => {
+    const base = createMockAncestryBridge('success')
+    const updatePreferences = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'PREFERENCES_UNAVAILABLE',
+        message: 'token=super-secret at /Users/example/preferences.json',
+        remediation: 'Connect to port 43117 and inspect stderr.',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveFocus()
+    expect(alert).toHaveTextContent('Welcome progress was not saved.')
+    expect(alert).toHaveTextContent('Code: PREFERENCES_UNAVAILABLE')
+    expect(alert).toHaveTextContent('Open Diagnostics or restart AncestryLLM.')
+    expect(alert).not.toHaveTextContent(/super-secret|preferences\.json|43117|stderr/i)
+    expect(screen.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('converges after a completion conflict only when refreshed preferences are complete', async () => {
+    const base = createMockAncestryBridge('success')
+    const getPreferences = vi.fn()
+      .mockImplementationOnce(() => base.getPreferences())
+      .mockResolvedValue({
+        ok: true,
+        protocolVersion: '1',
+        data: {
+          colorScheme: 'system',
+          reducedMotion: false,
+          onboardingCompleted: true,
+          schemaVersion: 1,
+          revision: 1,
+        },
+      })
+    const updatePreferences = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'PREFERENCES_CONFLICT',
+        message: 'stale details that must not render',
+        remediation: 'raw remediation that must not render',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, getPreferences, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    expect(await screen.findByRole('heading', { name: 'Home' })).toBeVisible()
+    expect(getPreferences).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/stale details|raw remediation/i)).not.toBeInTheDocument()
+  })
+
+  it('stays on the welcome when a conflict refresh remains incomplete', async () => {
+    const base = createMockAncestryBridge('success')
+    const updatePreferences = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'PREFERENCES_CONFLICT',
+        message: 'stale details that must not render',
+        remediation: 'raw remediation that must not render',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: PREFERENCES_CONFLICT')
+    expect(screen.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Home' })).not.toBeInTheDocument()
+  })
+
+  it('stays on the welcome when a conflict refresh is unavailable', async () => {
+    const base = createMockAncestryBridge('success')
+    const getPreferences = vi.fn()
+      .mockImplementationOnce(() => base.getPreferences())
+      .mockResolvedValue({
+        ok: false,
+        protocolVersion: '1',
+        error: {
+          code: 'PREFERENCES_UNAVAILABLE',
+          message: 'raw unavailable details',
+          remediation: 'raw unavailable remediation',
+        },
+      })
+    const updatePreferences = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'PREFERENCES_CONFLICT',
+        message: 'stale details that must not render',
+        remediation: 'raw remediation that must not render',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, getPreferences, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: PREFERENCES_CONFLICT')
+    expect(screen.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Home' })).not.toBeInTheDocument()
+  })
+
+  it('does not unlock from a malformed successful update when refresh is incomplete', async () => {
+    const base = createMockAncestryBridge('success')
+    const malformed = {
+      ok: true,
+      protocolVersion: '1',
+      data: { onboardingCompleted: true },
+    } as unknown as Awaited<ReturnType<AncestryBridge['updatePreferences']>>
+    const updatePreferences = vi.fn().mockResolvedValue(malformed)
+    const bridge: AncestryBridge = { ...base, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue to Home' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: PREFERENCES_UNAVAILABLE')
+    expect(screen.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Home' })).not.toBeInTheDocument()
+  })
+
+  it('lets a completed user revisit the welcome without writing preferences or changing routes', async () => {
+    const base = createMockAncestryBridge('success')
+    await base.updatePreferences({ expectedRevision: 0, onboardingCompleted: true })
+    const updatePreferences = vi.fn((request) => base.updatePreferences(request))
+    const bridge: AncestryBridge = { ...base, updatePreferences }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Review welcome' }))
+
+    expect(await screen.findByRole('heading', { name: 'Welcome to AncestryLLM' })).toHaveFocus()
+    expect(window.location.hash).toBe('#/')
+    expect(screen.getByRole('button', { name: 'Back to Home' })).toBeVisible()
+    expect(updatePreferences).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to Home' }))
+    expect(await screen.findByRole('heading', { name: 'Home' })).toHaveFocus()
+    expect(updatePreferences).not.toHaveBeenCalled()
+  })
+  it('supports keyboard navigation across Home, Diagnostics, and Settings', async () => {
+    const bridge = await createCompletedBridge()
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
     expect(await screen.findByRole('heading', { name: 'Home' })).toBeVisible()
@@ -25,7 +217,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('renders the bounded production Home summary without development or domain surfaces', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const getAppInfo = vi.fn(() => base.getAppInfo())
     const getCapabilities = vi.fn(() => base.getCapabilities())
     const bridge: AncestryBridge = { ...base, getAppInfo, getCapabilities }
@@ -47,7 +239,7 @@ describe('accessible desktop shell', () => {
     expect(getCapabilities).toHaveBeenCalledTimes(1)
   })
   it('renders a focused degraded diagnostic without leaking internals', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const bridge: AncestryBridge = {
       ...base,
       getStartupDiagnostics: vi.fn().mockResolvedValue({
@@ -65,7 +257,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('maps bridge failures to stable coded guidance without rendering bridge detail', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const bridge: AncestryBridge = {
       ...base,
       getStartupDiagnostics: vi.fn().mockResolvedValue({
@@ -90,19 +282,19 @@ describe('accessible desktop shell', () => {
   })
 
   it('updates preferences with the last renderer-visible revision', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const update = vi.fn((request) => base.updatePreferences(request))
     const bridge: AncestryBridge = { ...base, updatePreferences: update }
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'dark' }))
-    expect(update).toHaveBeenCalledWith({ expectedRevision: 0, colorScheme: 'dark' })
+    expect(update).toHaveBeenCalledWith({ expectedRevision: 1, colorScheme: 'dark' })
   })
 
   it('applies the persisted color scheme when a renderer opens', async () => {
     const bridge = createMockAncestryBridge('success')
-    await bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark' })
+    await bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark', onboardingCompleted: true })
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
@@ -111,7 +303,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('persists reduced motion and applies it to the document root', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const update = vi.fn((request) => base.updatePreferences(request))
     const bridge: AncestryBridge = { ...base, updatePreferences: update }
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
@@ -120,12 +312,12 @@ describe('accessible desktop shell', () => {
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
     await userEvent.click(await screen.findByRole('checkbox', { name: 'Reduce motion' }))
 
-    expect(update).toHaveBeenCalledWith({ expectedRevision: 0, reducedMotion: true })
+    expect(update).toHaveBeenCalledWith({ expectedRevision: 1, reducedMotion: true })
     await waitFor(() => expect(document.documentElement.dataset.reducedMotion).toBe('true'))
   })
 
   it('shows fixed preference recovery guidance without rendering bridge detail', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const updatePreferences = vi.fn().mockResolvedValue({
       ok: false,
       protocolVersion: '1',
@@ -150,7 +342,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('does not reuse a stale revision while a preference update is pending', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     let resolveFirst: ((value: Awaited<ReturnType<AncestryBridge['updatePreferences']>>) => void) | undefined
     const firstUpdate = new Promise<Awaited<ReturnType<AncestryBridge['updatePreferences']>>>((resolve) => { resolveFirst = resolve })
     const update = vi.fn()
@@ -164,15 +356,15 @@ describe('accessible desktop shell', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'light' }))
     expect(update).toHaveBeenCalledTimes(1)
 
-    const saved = await base.updatePreferences({ expectedRevision: 0, colorScheme: 'dark' })
+    const saved = await base.updatePreferences({ expectedRevision: 1, colorScheme: 'dark' })
     resolveFirst?.(saved)
     await waitFor(() => expect(screen.getByRole('group', { name: 'Theme' })).not.toBeDisabled())
     await userEvent.click(screen.getByRole('radio', { name: 'light' }))
-    expect(update).toHaveBeenLastCalledWith({ expectedRevision: 1, colorScheme: 'light' })
+    expect(update).toHaveBeenLastCalledWith({ expectedRevision: 2, colorScheme: 'light' })
   })
 
   it('offers one bounded retry for degraded diagnostics and renders the result', async () => {
-    const base = createMockAncestryBridge('degraded')
+    const base = await createCompletedBridge('degraded')
     let resolveRetry: ((value: Awaited<ReturnType<AncestryBridge['retrySidecar']>>) => void) | undefined
     const retryResult = new Promise<Awaited<ReturnType<AncestryBridge['retrySidecar']>>>((resolve) => { resolveRetry = resolve })
     const retrySidecar = vi.fn(() => retryResult)
@@ -191,7 +383,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('gives restart guidance instead of another retry when recovery is exhausted', async () => {
-    const base = createMockAncestryBridge('degraded')
+    const base = await createCompletedBridge('degraded')
     const bridge: AncestryBridge = {
       ...base,
       getStartupDiagnostics: vi.fn().mockResolvedValue({
@@ -216,7 +408,7 @@ describe('accessible desktop shell', () => {
   })
 
   it('refreshes diagnostics when the diagnostics route opens', async () => {
-    const base = createMockAncestryBridge('success')
+    const base = await createCompletedBridge()
     const degraded = await createMockAncestryBridge('degraded').getStartupDiagnostics()
     const getStartupDiagnostics = vi.fn()
       .mockImplementationOnce(() => base.getStartupDiagnostics())

@@ -121,8 +121,15 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
     const page = await app.firstWindow()
     const main = page.getByRole('main')
 
-    await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeFocused()
     await expectProductionNavigation(page)
+    await expect(main.getByText('Your desktop control shell stays local to this device.', { exact: true })).toBeVisible()
+    await expect(main.getByText(/No account, provider, API key, genealogy data, or cloud consent is requested here/i)).toBeVisible()
+    await expect(main.getByText(/Updates are installed manually/i)).toBeVisible()
+    await expect(main.getByRole('link', { name: 'Open Diagnostics' })).toHaveAttribute('href', '#/diagnostics')
+    await main.getByRole('button', { name: 'Continue to Home' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Home' })).toBeFocused()
     await expect(main.getByRole('heading', { name: 'Application' })).toBeVisible()
     await expect(main.getByText('AncestryLLM', { exact: true })).toBeVisible()
     await expect(main.getByText('0.5.0-dev', { exact: true })).toBeVisible()
@@ -133,6 +140,11 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
     await expect(main.getByText('No control capabilities are currently available.', { exact: true })).toBeVisible()
     await expectNoUnsupportedSurfaces(page)
     await expectBoundedBridgeAndSecurity(app, page)
+
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Home' })).toBeFocused()
+    await expect(main.getByRole('button', { name: 'Review welcome' })).toBeVisible()
+    await expect(main.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toHaveCount(0)
 
     await page.getByRole('link', { name: 'Diagnostics' }).press('Enter')
     await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
@@ -162,13 +174,10 @@ test('built degraded shell offers one bounded recovery and renders the ready res
     const page = await app.firstWindow()
     const main = page.getByRole('main')
 
-    await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeFocused()
     await expectProductionNavigation(page)
-    await expect(main.getByRole('heading', { name: 'Startup state' })).toBeVisible()
-    await expect(main.getByText('Degraded', { exact: true })).toBeVisible()
-    await expectNoUnsupportedSurfaces(page)
 
-    await page.getByRole('link', { name: 'Diagnostics' }).click()
+    await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
     await expect(main.getByText('Degraded', { exact: true })).toBeVisible()
     const recovery = main.getByRole('alert')
@@ -180,6 +189,13 @@ test('built degraded shell offers one bounded recovery and renders the ready res
     await expect(main.getByText('Ready', { exact: true })).toBeVisible()
     await expect(main.getByRole('alert')).toHaveCount(0)
     await expect(main.getByRole('button', { name: 'Retry desktop service' })).toHaveCount(0)
+    await expectNoUnsupportedSurfaces(page)
+
+    await page.getByRole('link', { name: 'Home' }).click()
+    await expect(page.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeFocused()
+    await main.getByRole('button', { name: 'Continue to Home' }).click()
+    await expect(page.getByRole('heading', { name: 'Home' })).toBeFocused()
+    await expect(main.getByText('Ready', { exact: true })).toBeVisible()
     await expectNoUnsupportedSurfaces(page)
   } finally {
     await app.close()
