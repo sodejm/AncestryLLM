@@ -165,7 +165,9 @@ def _serializable_value(value: object) -> object:
         return {
             str(key): _serializable_value(item) for key, item in asdict(cast(Any, value)).items()
         }
-    if isinstance(value, Path | UUID):
+    if isinstance(value, Path):
+        raise TypeError("Command results must not contain Path host objects.")
+    if isinstance(value, UUID):
         return str(value)
     if isinstance(value, dt.datetime | dt.date | dt.time):
         return value.isoformat()

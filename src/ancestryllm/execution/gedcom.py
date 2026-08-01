@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
-from ancestryllm.application.results import MarkdownResult
+from ancestryllm.application.results import FileArtifactResult, MarkdownResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.execution.common import (
@@ -19,6 +20,9 @@ from ancestryllm.execution.common import (
     text,
     text_values,
 )
+
+_GEDCOM_MEDIA_TYPE = "text/vnd.familysearch.gedcom"
+_REPORT_MEDIA_TYPE = "text/markdown"
 
 
 class GedcomExecutor:
@@ -37,11 +41,13 @@ class GedcomExecutor:
         )
         action = invocation.key.action
         if action == "merge":
-            merge_result = service.merge(
+            output_path = path(invocation, "output")
+            quality_path = optional_path(invocation, "quality_report")
+            service.merge(
                 [Path(item) for item in text_values(invocation, "inputs")],
-                path(invocation, "output"),
+                output_path,
                 root_person=optional_text(invocation, "root_person"),
-                quality_path=optional_path(invocation, "quality_report"),
+                quality_path=quality_path,
                 gedcom_version=text(invocation, "gedcom_version"),
                 provider_id=text(invocation, "provider"),
                 model=text(invocation, "model"),
@@ -51,21 +57,43 @@ class GedcomExecutor:
                 ),
                 threshold=integer(invocation, "similarity_threshold"),
             )
-            return CommandOutcome(structured_result(merge_result))
+            related = (
+                ((quality_path, "quality_report", _REPORT_MEDIA_TYPE),)
+                if quality_path is not None
+                else ()
+            )
+            return CommandOutcome(
+                _file_artifact_result(
+                    output_path,
+                    operation="gedcom.merge",
+                    artifact_type="gedcom_merge",
+                    media_type=_GEDCOM_MEDIA_TYPE,
+                    related=related,
+                )
+            )
         if action == "subtree":
-            subtree_result = service.subtree(
+            output_path = path(invocation, "output")
+            service.subtree(
                 path(invocation, "input"),
-                path(invocation, "output"),
+                output_path,
                 root_person=text(invocation, "root_person"),
                 scope=text(invocation, "scope"),
                 generations=optional_integer(invocation, "generations"),
                 gedcom_version=text(invocation, "gedcom_version"),
             )
-            return CommandOutcome(structured_result(subtree_result))
+            return CommandOutcome(
+                _file_artifact_result(
+                    output_path,
+                    operation="gedcom.subtree",
+                    artifact_type="gedcom_subtree",
+                    media_type=_GEDCOM_MEDIA_TYPE,
+                )
+            )
         if action == "quality":
-            quality_result = service.quality(
+            output_path = path(invocation, "output")
+            service.quality(
                 path(invocation, "input"),
-                path(invocation, "output"),
+                output_path,
                 root_person=text(invocation, "root_person"),
                 provider_id=text(invocation, "provider"),
                 model=text(invocation, "model"),
@@ -74,7 +102,14 @@ class GedcomExecutor:
                     optional_text(invocation, "consent"),
                 ),
             )
-            return CommandOutcome(structured_result(quality_result))
+            return CommandOutcome(
+                _file_artifact_result(
+                    output_path,
+                    operation="gedcom.quality",
+                    artifact_type="quality_report",
+                    media_type=_REPORT_MEDIA_TYPE,
+                )
+            )
         sync_result = service.sync(
             [
                 text(invocation, "sync_command"),
@@ -88,6 +123,36 @@ class GedcomExecutor:
             ),
             exit_code=sync_result.exit_code,
         )
+
+
+def _file_artifact_result(
+    output: Path,
+    *,
+    operation: str,
+    artifact_type: str,
+    media_type: str,
+    related: tuple[tuple[Path, str, str], ...] = (),
+) -> FileArtifactResult:
+    registry = _ArtifactRegistry()
+    output_grant = registry.grant_output(
+        output,
+        operation=operation,
+        artifact_type=artifact_type,
+        media_type=media_type,
+    )
+    related_refs = []
+    for path_value, related_type, related_media_type in related:
+        grant = registry.grant_output(
+            path_value,
+            operation=operation,
+            artifact_type=related_type,
+            media_type=related_media_type,
+        )
+        related_refs.append(registry.describe_output(grant, operation=operation))
+    return FileArtifactResult(
+        registry.describe_output(output_grant, operation=operation),
+        related_artifacts=tuple(related_refs),
+    )
 
 
 __all__ = ["GedcomExecutor"]

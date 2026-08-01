@@ -80,7 +80,13 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "rootsmagic",
             "list",
             (),
-            OpaqueArtifactExpectation((("rootsmagic_tree", "application/vnd.sqlite3"),)),
+            [
+                {
+                    "tree_ref": fictional_files["rootsmagic"].name,
+                    "label": fictional_files["rootsmagic"].stem,
+                    "immutable": True,
+                }
+            ],
         ),
         CommandCase(
             "rootsmagic",
@@ -113,19 +119,31 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             "gedcom",
             "merge",
             (gedcom, "--output", output, "--quality-report", report),
-            {"module": "gedcom", "action": "merge"},
+            OpaqueArtifactExpectation(
+                (
+                    ("gedcom_merge", "text/vnd.familysearch.gedcom"),
+                    ("quality_report", "text/markdown"),
+                ),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
             "subtree",
             (gedcom, "--output", output, "--root-person", "Ada Example"),
-            {"module": "gedcom", "action": "subtree"},
+            OpaqueArtifactExpectation(
+                (("gedcom_subtree", "text/vnd.familysearch.gedcom"),),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
             "quality",
             (gedcom, "--output", report, "--root-person", "Ada Example"),
-            {"module": "gedcom", "action": "quality"},
+            OpaqueArtifactExpectation(
+                (("quality_report", "text/markdown"),),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
@@ -288,21 +306,40 @@ def mocked_action_services(
         return SimpleNamespace(output_path=output, report_path=report)
 
     monkeypatch.setattr(RootsMagicService, "export", export_rootsmagic)
-    monkeypatch.setattr(
-        GedcomService,
-        "merge",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "merge"},
-    )
-    monkeypatch.setattr(
-        GedcomService,
-        "subtree",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "subtree"},
-    )
-    monkeypatch.setattr(
-        GedcomService,
-        "quality",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "quality"},
-    )
+
+    def merge_gedcom(
+        _self: GedcomService,
+        _inputs: list[Path],
+        output: Path,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        quality_report = kwargs["quality_path"]
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        if quality_report is not None:
+            quality_report.write_text("# Fictional quality report\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output, quality_path=quality_report)
+
+    def subtree_gedcom(
+        _self: GedcomService,
+        _source: Path,
+        output: Path,
+        **_kwargs: Any,
+    ) -> SimpleNamespace:
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output)
+
+    def quality_gedcom(
+        _self: GedcomService,
+        _source: Path,
+        output: Path,
+        **_kwargs: Any,
+    ) -> Path:
+        output.write_text("# Fictional quality report\n", encoding="utf-8")
+        return output
+
+    monkeypatch.setattr(GedcomService, "merge", merge_gedcom)
+    monkeypatch.setattr(GedcomService, "subtree", subtree_gedcom)
+    monkeypatch.setattr(GedcomService, "quality", quality_gedcom)
     monkeypatch.setattr(
         GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
     )
@@ -380,8 +417,10 @@ def _assert_expected(actual: Any, expected: Any) -> None:
         return
     if expected.file_result:
         assert isinstance(actual, dict)
-        assert set(actual) == {"artifact", "related_artifacts"}
-        artifacts = [actual["artifact"], *actual["related_artifacts"]]
+        if set(actual) == {"artifact", "related_artifacts"}:
+            artifacts = [actual["artifact"], *actual["related_artifacts"]]
+        else:
+            artifacts = [actual]
     else:
         assert isinstance(actual, list)
         artifacts = actual

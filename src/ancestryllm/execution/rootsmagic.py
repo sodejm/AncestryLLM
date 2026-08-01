@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ancestryllm.application._artifacts import _ArtifactRegistry
-from ancestryllm.application.dto import ArtifactRef
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.application.operations import TreeRecord
 from ancestryllm.application.results import FileArtifactResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -19,19 +19,10 @@ from ancestryllm.execution.common import (
     text,
 )
 
-_LIST_OPERATION = "rootsmagic.list"
 _EXPORT_OPERATION = "rootsmagic.export"
-_ROOTSMAGIC_MEDIA_TYPE = "application/vnd.sqlite3"
 _GEDCOM_MEDIA_TYPE = "text/vnd.familysearch.gedcom"
 _REPORT_MEDIA_TYPE = "text/markdown"
-_ARTIFACT_COLUMNS = (
-    "artifact_id",
-    "media_type",
-    "artifact_type",
-    "size_bytes",
-    "status",
-    "sha256",
-)
+_TREE_COLUMNS = ("tree_ref", "label", "immutable")
 
 
 class RootsMagicExecutor:
@@ -43,19 +34,25 @@ class RootsMagicExecutor:
 
         service = RootsMagicService(self._context.config, self._context.llm)
         if invocation.key.action == "list":
-            registry = _ArtifactRegistry()
-            artifacts = []
+            records: list[dict[str, object]] = []
+            seen_refs: set[str] = set()
             for tree in service.list_trees():
-                grant = registry.grant_input(
-                    tree,
-                    operation=_LIST_OPERATION,
-                    media_type=_ROOTSMAGIC_MEDIA_TYPE,
-                    artifact_type="rootsmagic_tree",
+                record = TreeRecord(
+                    tree_ref=tree.name,
+                    label=tree.stem,
+                    immutable=True,
                 )
-                artifacts.append(
-                    _artifact_record(registry.describe_input(grant, operation=_LIST_OPERATION))
+                if record.tree_ref in seen_refs:
+                    continue
+                seen_refs.add(record.tree_ref)
+                records.append(
+                    {
+                        "tree_ref": record.tree_ref,
+                        "label": record.label,
+                        "immutable": record.immutable,
+                    }
                 )
-            return CommandOutcome(table_result(_ARTIFACT_COLUMNS, artifacts))
+            return CommandOutcome(table_result(_TREE_COLUMNS, records))
         if invocation.key.action == "query":
             sql = optional_text(invocation, "sql")
             if sql is not None:
@@ -114,17 +111,6 @@ class RootsMagicExecutor:
                 ),
             )
         )
-
-
-def _artifact_record(artifact: ArtifactRef) -> dict[str, object]:
-    return {
-        "artifact_id": artifact.artifact_id,
-        "media_type": artifact.media_type,
-        "artifact_type": artifact.artifact_type,
-        "size_bytes": artifact.size_bytes,
-        "status": artifact.status,
-        "sha256": artifact.sha256,
-    }
 
 
 __all__ = ["RootsMagicExecutor"]

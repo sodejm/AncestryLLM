@@ -15,7 +15,9 @@ from ancestryllm.application.errors import error_envelope
 from ancestryllm.application.results import (
     CommandResult,
     ErrorResult,
+    FileArtifactResult,
     MarkdownResult,
+    StructuredResult,
     SuccessResult,
     TableResult,
     WarningResult,
@@ -31,7 +33,7 @@ def to_plain(value: Any) -> Any:
     if is_dataclass(value):
         return {key: to_plain(item) for key, item in asdict(cast(Any, value)).items()}
     if isinstance(value, Path):
-        return str(value)
+        raise TypeError("Presentation values must not contain Path host objects.")
     if isinstance(value, dict):
         return {str(key): to_plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
@@ -54,8 +56,8 @@ class PresentationAdapter:
         return cls(Console(file=file, force_terminal=False, color_system=None, highlight=False))
 
     def render(self, value: Any, *, json_output: bool = False) -> None:
-        plain = to_plain(value)
         if json_output:
+            plain = to_plain(value)
             self.console.file.write(json.dumps(plain, indent=2, sort_keys=True))
             self.console.file.write("\n")
         elif isinstance(value, MarkdownResult):
@@ -68,8 +70,14 @@ class PresentationAdapter:
             self.console.print(Text(f"[{value.code}] {value.message}", style="bold yellow"))
         elif isinstance(value, ErrorResult):
             self._render_error_envelope(value.error)
+        elif isinstance(value, StructuredResult):
+            self._render_structured(value)
+        elif isinstance(value, FileArtifactResult):
+            self._render_file_artifact(value)
+        elif isinstance(value, CommandResult):
+            raise TypeError(f"Unsupported CommandResult type: {type(value).__name__}.")
         else:
-            self._render_plain(plain)
+            self._render_plain(to_plain(value))
 
     def render_error(self, error: AncestryError) -> None:
         self.render(ErrorResult(error_envelope(error)))
@@ -84,6 +92,12 @@ class PresentationAdapter:
         if error.remediation:
             message += f"\nHow to fix: {error.remediation}"
         self.console.print(Text(message, style="bold red"))
+
+    def _render_structured(self, result: StructuredResult) -> None:
+        self._render_plain(result.to_serializable())
+
+    def _render_file_artifact(self, result: FileArtifactResult) -> None:
+        self._render_plain(result.to_serializable())
 
     def _render_plain(self, plain: Any) -> None:
         if isinstance(plain, str):

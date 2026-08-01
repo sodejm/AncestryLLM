@@ -4,8 +4,13 @@ from io import StringIO
 
 import pytest
 
-from ancestryllm.application.dto import ErrorEnvelope
-from ancestryllm.application.results import ErrorResult, WarningResult
+from ancestryllm.application.dto import ArtifactRef, ArtifactStatus, ErrorEnvelope
+from ancestryllm.application.results import (
+    ErrorResult,
+    FileArtifactResult,
+    StructuredResult,
+    WarningResult,
+)
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.core.errors import AncestryError
 
@@ -71,7 +76,52 @@ def test_render_error_routes_through_the_declared_error_result(
     assert isinstance(rendered[0], ErrorResult)
 
 
-def test_to_plain_converts_paths_without_rendering_them() -> None:
+def test_to_plain_rejects_paths_instead_of_rendering_host_details() -> None:
     from pathlib import Path
 
-    assert to_plain({"output": Path("report.json")}) == {"output": "report.json"}
+    with pytest.raises(TypeError, match="Path"):
+        to_plain({"output": Path("report.json")})
+
+
+def test_adapter_explicitly_routes_structured_and_file_artifact_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = StringIO()
+    adapter = PresentationAdapter.for_file(output)
+    routed: list[tuple[str, object]] = []
+    artifact = ArtifactRef(
+        artifact_id=f"art_{'a' * 32}",
+        media_type="text/plain",
+        artifact_type="report",
+        size_bytes=12,
+        status=ArtifactStatus.READY,
+        sha256="b" * 64,
+    )
+
+    monkeypatch.setattr(
+        adapter,
+        "_render_structured",
+        lambda result: routed.append(("structured", result)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_render_file_artifact",
+        lambda result: routed.append(("file_artifact", result)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_render_plain",
+        lambda _plain: pytest.fail("declared results must not use shape-based fallback"),
+    )
+
+    structured = StructuredResult({"count": 2})
+    file_artifact = FileArtifactResult(artifact)
+    adapter.render(structured)
+    adapter.render(file_artifact)
+
+    assert routed == [
+        ("structured", structured),
+        ("file_artifact", file_artifact),
+    ]
