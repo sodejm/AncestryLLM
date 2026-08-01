@@ -17,6 +17,7 @@ from ancestryllm.core.commands import (
 )
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.help import render_action_help, render_command_help, render_root_help
 from ancestryllm.core.modules import ModuleRegistry
 
 
@@ -252,19 +253,31 @@ class SessionRouter:
         )
 
     def _help(self, tokens: tuple[str, ...]) -> str:
-        if len(tokens) > 1:
-            raise AncestryError("REPL_USAGE_ERROR", "Usage: help [COMMAND]", exit_code=2)
+        if len(tokens) > 2:
+            raise AncestryError("REPL_USAGE_ERROR", "Usage: help [MODULE [ACTION]]", exit_code=2)
         if not tokens:
             return (
+                f"{render_root_help()}\n"
                 "Root commands: modules, use MODULE, jobs [list|show ID|cancel ID], "
-                "help [COMMAND], exit, quit. "
+                "help MODULE ACTION, exit, quit. "
                 "Enabled module commands can also be run directly."
             )
         command = tokens[0]
         if command in COMMAND_SPECIFICATIONS:
             specification = COMMAND_SPECIFICATIONS[command]
-            actions = ", ".join(action.name for action in specification.actions)
-            return f"{specification.name}: {specification.help}\nActions: {actions}"
+            if len(tokens) == 1:
+                return render_command_help(specification)
+            action_name = tokens[1]
+            try:
+                action = specification.route(action_name).action
+            except KeyError as exc:
+                raise AncestryError(
+                    "REPL_HELP_UNKNOWN",
+                    f"No help is available for: {command} {action_name}",
+                    f"Run `help {command}` to list available actions.",
+                    exit_code=2,
+                ) from exc
+            return render_action_help(command, action)
         if command == "jobs":
             return (
                 "jobs [list|show JOB_ID|cancel JOB_ID]: inspect background job state, "

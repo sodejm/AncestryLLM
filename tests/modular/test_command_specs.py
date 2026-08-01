@@ -155,6 +155,25 @@ def test_cli_help_is_rendered_from_command_specifications(capsys) -> None:
         assert argument.help in help_text
 
 
+def test_cli_help_explains_console_entrypoint_and_action_safe_example(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.build_parser().parse_args(["--help"])
+    assert raised.value.code == 0
+    root_help = capsys.readouterr().out
+    assert "Run `ancestry` with no arguments to start the interactive console." in root_help
+    assert "ancestry --json database diagnose" in root_help
+
+    with pytest.raises(SystemExit) as raised:
+        cli.build_parser().parse_args(["gedcom", "merge", "--help"])
+    assert raised.value.code == 0
+    action_help = capsys.readouterr().out
+    assert "INPUTS" in action_help
+    assert "--output" in action_help
+    assert "default: 5.5.5" in action_help
+    assert "5.5.1" in action_help
+    assert "Example: ancestry gedcom merge input.ged --output output.ged" in action_help
+
+
 def test_reading_specs_and_building_help_do_not_load_disabled_modules(
     app_context: AppContext, monkeypatch
 ) -> None:
@@ -179,3 +198,11 @@ def test_modules_json_keeps_legacy_descriptor_shape(app_context: AppContext, cap
         "required_services",
     }
     assert gedcom["actions"] == ["merge", "subtree", "quality", "sync"]
+
+
+def test_cli_reference_includes_read_only_database_diagnostics() -> None:
+    documentation = (Path(__file__).parents[2] / "docs" / "CLI.md").read_text(encoding="utf-8")
+
+    assert "`database` | `backup DESTINATION`, `diagnose`" in documentation
+    assert "`database diagnose`" in documentation
+    assert "[setup diagnostics](SETUP_DIAGNOSTICS.md)" in documentation

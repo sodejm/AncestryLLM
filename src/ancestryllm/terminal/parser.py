@@ -24,6 +24,12 @@ from ancestryllm.core.commands import (
     DispatchKey,
 )
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.help import (
+    argument_help,
+    argument_metavar,
+    render_action_example,
+    render_root_help,
+)
 
 _ARGUMENT_TYPES: dict[ArgumentType, type[str] | type[int] | type[float] | type[Path]] = {
     ArgumentType.STRING: str,
@@ -43,7 +49,7 @@ _CONTROL_FIELDS = frozenset({"command", "action", "config", "json", "dispatch_ke
 
 def _add_argument(target: Any, specification: ArgumentSpec) -> None:
     names = specification.flags or (specification.name,)
-    options: dict[str, Any] = {"help": specification.help}
+    options: dict[str, Any] = {"help": argument_help(specification)}
     if specification.action is not ArgumentAction.STORE:
         options["action"] = specification.action.value
     else:
@@ -60,8 +66,8 @@ def _add_argument(target: Any, specification: ArgumentSpec) -> None:
         options["choices"] = specification.choices
     if specification.cardinality is not None:
         options["nargs"] = _ARGUMENT_CARDINALITIES[specification.cardinality]
-    if specification.metavar is not None:
-        options["metavar"] = specification.metavar
+    if specification.action is ArgumentAction.STORE:
+        options["metavar"] = argument_metavar(specification)
     target.add_argument(*names, **options)
 
 
@@ -81,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ancestry",
         description="Unified one-shot command line and entry point for the interactive console.",
+        epilog=render_root_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     for argument in GLOBAL_ARGUMENTS:
@@ -90,7 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser = commands.add_parser(command.name, help=command.help)
         actions = command_parser.add_subparsers(dest="action", required=True)
         for route in command.routes:
-            action_parser = actions.add_parser(route.action.name, help=route.action.help)
+            action_parser = actions.add_parser(
+                route.action.name,
+                help=route.action.help,
+                description=route.action.help,
+                epilog=(f"Example: ancestry {render_action_example(command.name, route.action)}"),
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+            )
             action_parser.set_defaults(dispatch_key=route.key)
             _add_action_arguments(action_parser, route.action)
     return parser
@@ -217,15 +231,42 @@ def parse_repl_invocation(tokens: Sequence[str]) -> ParsedInvocation:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             namespace = parser.parse_args(normalized_tokens)
     except SystemExit as exc:
-        rendered = (stderr.getvalue() or stdout.getvalue()).strip()
-        detail = rendered.splitlines()[-1] if rendered else "Invalid command arguments."
+        help_route = _repl_help_route(normalized_tokens)
+        target = help_route.removeprefix("help").strip()
+        detail = f"Invalid arguments for {target}." if target else "Invalid command arguments."
         raise AncestryError(
             "REPL_USAGE_ERROR",
             detail,
-            "Use `help` or inspect the one-shot command help for the accepted arguments.",
+            f"Run `{help_route}` for syntax and options.",
             exit_code=2 if exc.code else 0,
         ) from exc
     return ParsedInvocation(tuple(normalized_tokens), namespace)
+
+
+def _repl_help_route(tokens: Sequence[str]) -> str:
+    """Find a known help route without copying user-supplied values into errors."""
+
+    index = 0
+    while index < len(tokens):
+        option_or_command = tokens[index]
+        if option_or_command == "--json":
+            index += 1
+            continue
+        if option_or_command == "--config":
+            index += 2
+            continue
+        break
+    if index >= len(tokens):
+        return "help"
+    command_name = tokens[index]
+    specification = COMMAND_SPECIFICATIONS.get(command_name)
+    if specification is None:
+        return "help"
+    if index + 1 < len(tokens):
+        action_name = tokens[index + 1]
+        if any(action.name == action_name for action in specification.actions):
+            return f"help {command_name} {action_name}"
+    return f"help {command_name}"
 
 
 __all__ = [

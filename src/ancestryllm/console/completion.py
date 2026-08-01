@@ -185,7 +185,13 @@ class _SpecCompleter(Completer):
         if command == "use":
             return self._enabled_modules() if len(completed) == 1 else ()
         if command == "help":
-            return self._first_tokens() if len(completed) == 1 else ()
+            if len(completed) == 1:
+                return self._help_targets()
+            if len(completed) == 2:
+                specification = COMMAND_SPECIFICATIONS.get(completed[1])
+                if specification is not None and self._command_is_available(completed[1]):
+                    return tuple(action.name for action in specification.actions)
+            return ()
         if command == "jobs":
             return ("cancel", "list", "show") if len(completed) == 1 else ()
         if command == "show" and self._router.active_module:
@@ -209,6 +215,11 @@ class _SpecCompleter(Completer):
 
     def _enabled_modules(self) -> tuple[str, ...]:
         return _normalized_names(self._router.enabled_modules)
+
+    def _help_targets(self) -> tuple[str, ...]:
+        targets = {name for name in COMMAND_SPECIFICATIONS if self._command_is_available(name)}
+        targets.add("jobs")
+        return _normalized_names(targets)
 
     def _command_is_available(self, command: str) -> bool:
         return command not in BUILTIN_MODULES or command in self._router.enabled_modules
