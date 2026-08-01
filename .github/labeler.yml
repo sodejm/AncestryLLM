@@ -1,0 +1,18 @@
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "desktop/e2e/**"
+          - "desktop/**/*.test.*"
+
+contracts:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/ancestryllm/api/**"
+          - "desktop/src/shared-contract/**"
