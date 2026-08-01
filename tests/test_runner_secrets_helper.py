@@ -33,6 +33,17 @@ APPLE_DEVELOPER_ID_SHA1 = "A" * 40
 
 
 def _write_fake_apple_tools(path: Path, identities: str) -> None:
+    (path / "uname").write_text(
+        """#!/bin/sh
+set -eu
+
+[ "$*" = "-s" ] || exit 2
+printf 'Darwin\\n'
+""",
+        encoding="utf-8",
+    )
+    (path / "uname").chmod((path / "uname").stat().st_mode | stat.S_IXUSR)
+
     (path / "security").write_text(
         f"""#!/bin/sh
 set -eu
