@@ -78,9 +78,18 @@ assurance gates in the [release runbook](RELEASING.md).
 
 Unsigned CI artifacts and unpacked development builds are verification inputs,
 not supported releases or evidence of successful signing, notarization, or
-installation. Version 0.5.0 has no updater, update feed, background update
-channel, or staged rollout. Updating and rolling back mean manually installing
-the appropriate complete, signed installer.
+installation. For an install or upgrade, quit AncestryLLM; download the
+target-matched full installer and `SHA256SUMS` from the same immutable release;
+verify its digest and platform signature; install it over the current
+application; relaunch; and confirm the version and healthy Diagnostics. Ubuntu
+also requires the adjacent `.deb.asc` detached GPG signature. Application files
+are replaced while OS-managed AncestryLLM data and configuration directories
+are retained.
+
+Version 0.5.0 has no updater feed, no background update, no staged rollout, and
+no automatic rollback. It publishes no `latest*.yml` or blockmap. Updating and
+rolling back mean manually installing an appropriate complete, signed
+installer whose checksum and platform signature still verify.
 
 ## Sanitized diagnostics and recovery
 

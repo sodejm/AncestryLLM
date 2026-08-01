@@ -128,6 +128,8 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
   // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup. Chromium
   // state remains isolated by --user-data-dir and the explicit app-data paths.
   if (process.platform !== 'darwin') environment.HOME = isolatedHome
+  const packagedRuntimePath = process.env.ANCESTRYLLM_PACKAGED_RUNTIME_PATH
+  if (packagedRuntimePath !== undefined) environment.PATH = packagedRuntimePath
   return environment
 }
 
