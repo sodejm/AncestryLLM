@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
+PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
 
 
 def _job(workflow: str, job: str) -> str:
@@ -13,6 +15,18 @@ def _job(workflow: str, job: str) -> str:
     body = workflow.split(marker, maxsplit=1)[1]
     next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\n", body)
     return body[: next_job.start()] if next_job else body
+
+
+def test_pull_request_labeler_has_the_config_file_it_loads() -> None:
+    workflow = PR_LABELER_PATH.read_text(encoding="utf-8")
+
+    assert "configuration-path: .github/labeler.yml" in workflow
+    assert PR_LABELER_CONFIG_PATH.is_file()
+
+    config = PR_LABELER_CONFIG_PATH.read_text(encoding="utf-8")
+    for repository_label in ("documentation:", "testing:", "contracts:"):
+        assert repository_label in config
+    assert "any-glob-to-any-file:" in config
 
 
 def test_ci_separates_tests_from_single_run_quality_checks() -> None:
