@@ -1,5 +1,7 @@
 ## AncestryLLM documentation
 
+- [Documentation site](https://sodejm.github.io/AncestryLLM/)
+- [GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki)
 - [Home](Home.md)
 - [CLI reference](CLI.md)
 - [Interactive console guide](CONSOLE.md)

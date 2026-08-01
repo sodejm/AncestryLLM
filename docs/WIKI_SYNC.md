@@ -1,14 +1,26 @@
 # Wiki synchronization
 
-The Markdown files under `docs/` are the canonical source for the project wiki.
-The `Sync Wiki` workflow validates them and runs the same local command used by
-maintainers:
+The Markdown files under `docs/` are the canonical source for the project
+documentation. The [GitHub Pages site](https://sodejm.github.io/AncestryLLM/)
+and `Sync Wiki` workflows publish two views of that source. Neither published
+target is an independent source of truth.
+
+The Pages workflow first creates an isolated Jekyll-ready staging tree. It adds
+only build metadata and Pages-style local links to that copy; it never changes
+the canonical Markdown:
+
+```console
+python scripts/prepare_pages_source.py --source docs --destination /path/to/pages-source
+```
+
+The `Sync Wiki` workflow validates the canonical source and runs the same local
+command used by maintainers:
 
 ```console
 python scripts/sync_wiki_docs.py --source docs --destination /path/to/wiki-checkout
 ```
 
-## Managed scope
+## GitHub Wiki managed scope
 
 Every regular `*.md` file below the source directory is copied to the top level
 of the wiki checkout using its basename. For example, `docs/guides/CLI.md` maps

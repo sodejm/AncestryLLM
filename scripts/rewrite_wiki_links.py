@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})")
@@ -35,27 +35,29 @@ def _rewrite_destination(destination: str) -> str:
     return f"{wiki_target}{match.group('title')}"
 
 
-def _rewrite_links(fragment: str) -> str:
+def _rewrite_links(fragment: str, rewrite_destination: Callable[[str], str]) -> str:
     def replace(match: re.Match[str]) -> str:
-        destination = _rewrite_destination(match.group("destination"))
+        destination = rewrite_destination(match.group("destination"))
         return f"{match.group('prefix')}{destination}{match.group('suffix')}"
 
     return _MARKDOWN_LINK.sub(replace, fragment)
 
 
-def _rewrite_line(line: str) -> str:
+def _rewrite_line(line: str, rewrite_destination: Callable[[str], str]) -> str:
     rewritten: list[str] = []
     cursor = 0
     for match in _INLINE_CODE.finditer(line):
-        rewritten.append(_rewrite_links(line[cursor : match.start()]))
+        rewritten.append(_rewrite_links(line[cursor : match.start()], rewrite_destination))
         rewritten.append(match.group(0))
         cursor = match.end()
-    rewritten.append(_rewrite_links(line[cursor:]))
+    rewritten.append(_rewrite_links(line[cursor:], rewrite_destination))
     return "".join(rewritten)
 
 
-def rewrite_wiki_links(markdown: str) -> str:
-    """Return Markdown whose local page links use extensionless Wiki targets."""
+def rewrite_markdown_link_destinations(
+    markdown: str, rewrite_destination: Callable[[str], str]
+) -> str:
+    """Rewrite ordinary Markdown links without changing code or image examples."""
     rewritten: list[str] = []
     fence_marker: str | None = None
     for line in markdown.splitlines(keepends=True):
@@ -65,7 +67,7 @@ def rewrite_wiki_links(markdown: str) -> str:
                 fence_marker = fence.group("marker")
                 rewritten.append(line)
             else:
-                rewritten.append(_rewrite_line(line))
+                rewritten.append(_rewrite_line(line, rewrite_destination))
             continue
 
         rewritten.append(line)
@@ -76,6 +78,11 @@ def rewrite_wiki_links(markdown: str) -> str:
         ):
             fence_marker = None
     return "".join(rewritten)
+
+
+def rewrite_wiki_links(markdown: str) -> str:
+    """Return Markdown whose local page links use extensionless Wiki targets."""
+    return rewrite_markdown_link_destinations(markdown, _rewrite_destination)
 
 
 def rewrite_wiki_directory(wiki: Path) -> None:

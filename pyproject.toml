@@ -81,7 +81,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/sodejm/AncestryLLM"
-Documentation = "https://github.com/sodejm/AncestryLLM/wiki"
+Documentation = "https://sodejm.github.io/AncestryLLM/"
 Repository = "https://github.com/sodejm/AncestryLLM"
 Issues = "https://github.com/sodejm/AncestryLLM/issues"
 Changelog = "https://github.com/sodejm/AncestryLLM/blob/main/CHANGELOG.md"

@@ -1,12 +1,10 @@
-# Sample workflow for building and deploying a Jekyll site to GitHub Pages
-name: Deploy Jekyll with GitHub Pages dependencies preinstalled
+# Build and deploy the canonical documentation source to GitHub Pages.
+name: Deploy documentation site
 
 on:
-  # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 # Build jobs only need repository read access. Deployment credentials are scoped
@@ -14,14 +12,12 @@ on:
 permissions:
   contents: read
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+# Allow only one deployment; do not interrupt a publication in progress.
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
-  # Build job
   build:
     name: Build GitHub Pages site
     runs-on: ubuntu-latest
@@ -32,15 +28,18 @@ jobs:
           persist-credentials: false
       - name: Setup Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Prepare canonical documentation for Pages
+        run: python scripts/prepare_pages_source.py --source docs --destination _pages_source
       - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@b17adeeb81fb58d2030d37e192ce269deffcb723 # v1
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
         with:
-          source: ./
+          source: ./_pages_source
           destination: ./_site
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: ./_site
 
-  # Deployment job
   deploy:
     name: Deploy GitHub Pages site
     environment:
