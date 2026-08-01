@@ -1,0 +1,6 @@
+# CI-only overlay for an unpublished unpacked verification application.
+# Re-sign the fuse-mutated macOS bundle ad hoc so the hosted runner can launch
+# it. Release identity and notarization evidence remain external work (#231).
+extends: ./electron-builder.yml
+mac:
+  identity: "-"

@@ -19,7 +19,9 @@ private control-only sidecar and has no genealogy, files, jobs, chat,
 providers, cloud accounts, or updater surface. The
 [desktop shell guide](DESKTOP_SHELL.md) defines its supported targets, manual
 signed-installer model, unsigned-artifact distinction, and sanitized recovery
-contract. Later domain adapters must reuse the existing service surface rather
+contract. The [desktop verification guide](DESKTOP_VERIFICATION.md) defines the
+exact-head hosted matrix, machine-readable evidence, and external release
+blockers. Later domain adapters must reuse the existing service surface rather
 than define another command or domain layer. The pages below cover versioning,
 privacy controls, providers, GEDCOM interoperability, backups, release
 operations, and security practices.

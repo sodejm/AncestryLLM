@@ -105,7 +105,11 @@ details.
 with a deterministic fictional mock bridge. The flow proves welcome completion,
 renderer reload, revisit, degraded startup, retry, and destination access. A
 separate `FilePreferencesStore` unit test proves that completion survives a
-fresh store instance, which models a new application process. This E2E gate
-does not launch a signed installer or the literal packaged executable; package
-inspection and target-specific signed-installer execution remain separate
-release gates.
+fresh store instance, which models a new application process.
+
+The exact-head [desktop verification gate](DESKTOP_VERIFICATION.md) separately
+assembles and launches the literal unpublished unpacked executable on six
+hosted runner rows, exercises healthy first run, durable settings, corrupt
+preferences, accessibility and hardening controls, and inspects the packaged
+fuses. It does not launch a signed installer. Signing, manual installation, and
+actual Windows 11 execution remain separate release gates.

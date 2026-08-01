@@ -1,73 +1,69 @@
-name: Desktop sidecar packages
+name: Desktop verification
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - ".github/workflows/desktop-sidecar.yml"
-      - "desktop/**"
-      - "scripts/build_sidecar.py"
-      - "scripts/sidecar_entry.py"
-      - "scripts/smoke_sidecar.py"
-      - "src/ancestryllm/api/**"
-      - "pyproject.toml"
-      - "uv.lock"
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/desktop-sidecar.yml"
-      - "desktop/**"
-      - "scripts/build_sidecar.py"
-      - "scripts/sidecar_entry.py"
-      - "scripts/smoke_sidecar.py"
-      - "src/ancestryllm/api/**"
-      - "pyproject.toml"
-      - "uv.lock"
   workflow_dispatch:
 
 concurrency:
-  group: desktop-sidecar-${{ github.workflow }}-${{ github.ref }}
+  group: desktop-verification-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
-  native-package:
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS 15 arm64
-            runner: macos-15
-            target: darwin-arm64
-            package_args: --mac --dir --arm64
-          - name: macOS 15 x64
-            runner: macos-15-intel
-            target: darwin-x64
-            package_args: --mac --dir --x64
-          - name: macOS 26 arm64
-            runner: macos-26
-            target: darwin-arm64
-            package_args: --mac --dir --arm64
-          - name: macOS 26 x64
-            runner: macos-26-intel
-            target: darwin-x64
-            package_args: --mac --dir --x64
-          - name: Windows x64
-            runner: windows-2025
-            target: win32-x64
-            package_args: --win --dir --x64
-          - name: Ubuntu 24.04 x64
-            runner: ubuntu-24.04
-            target: linux-x64
-            package_args: --linux --dir --x64
-    runs-on: ${{ matrix.runner }}
+  changes:
+    name: Desktop change classifier
+    runs-on: ubuntu-24.04
+    outputs:
+      desktop: ${{ steps.classify.outputs.desktop }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Verify and classify the exact head
+        id: classify
+        shell: bash
+        env:
+          BASE_HEAD: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          desktop=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            desktop=false
+            while IFS= read -r changed_file; do
+              case "$changed_file" in
+                .github/workflows/desktop-sidecar.yml|desktop/*|scripts/build_sidecar.py|scripts/sidecar_entry.py|scripts/smoke_sidecar.py|src/ancestryllm/api/*|tests/api/*|tests/test_desktop_workflow_contract.py|docs/DESKTOP_VERIFICATION.md|ARCHITECTURE.md|pyproject.toml|uv.lock)
+                  desktop=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASE_HEAD" "$EXPECTED_HEAD")
+          fi
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+
+  desktop-security:
+    name: Desktop contract and security
+    needs: changes
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -77,7 +73,176 @@ jobs:
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"
-      - name: Install locked toolchains
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv sync --locked --all-extras
+          pnpm --dir desktop install --frozen-lockfile
+      - name: Verify API and workflow contracts
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: |
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/api-contract.json" \
+            --gate apiContractPassed \
+            --gate authBeforeParsingPassed \
+            --gate domainRoutesAbsentPassed \
+            --gate providerNoneNetworkFreePassed \
+            --gate redactionPassed \
+            -- uv run pytest tests/api tests/test_desktop_workflow_contract.py
+      - name: Verify desktop source
+        shell: bash
+        run: |
+          pnpm --dir desktop run lint
+          pnpm --dir desktop run typecheck
+      - name: Verify desktop tests
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/desktop-tests.json"
+          --gate ipcSenderValidationPassed
+          -- pnpm --dir desktop run test
+      - name: Verify production build inspection
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/build-inspection.json"
+          --gate buildInspectionPassed
+          -- pnpm --dir desktop run build
+      - name: Verify dependency audit
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/audit.json"
+          --gate auditPassed
+          -- pnpm --dir desktop run audit
+      - name: Verify secret scan
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/secrets.json"
+          --gate secretsPassed
+          -- pnpm --dir desktop run check:secrets
+      - name: Generate and bind the software inventory
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+          SECURITY_ROOT: desktop/verification/security
+        run: |
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/sbom.json" \
+            --gate sbomGeneratedPassed \
+            --artifact sbom=desktop/sbom.cdx.json \
+            -- pnpm --dir desktop sbom
+          cp desktop/sbom.cdx.json "$SECURITY_ROOT/sbom.cdx.json"
+      - name: Record security evidence
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+          SECURITY_ROOT: desktop/verification/security
+        run: |
+          node desktop/scripts/verification-evidence.mjs security \
+            --git-head "$EXPECTED_HEAD" \
+            --sbom "$SECURITY_ROOT/sbom.cdx.json" \
+            --receipts "$RECEIPTS_DIR" \
+            --output "$SECURITY_ROOT/security.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-evidence-security
+          path: desktop/verification
+          if-no-files-found: error
+
+  native-package:
+    name: ${{ matrix.name }}
+    needs: changes
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS 15 arm64
+            runner: macos-15
+            sidecar_target: darwin-arm64
+            expected_os: "macOS 15"
+            actual_os: "macOS 15"
+            arch: arm64
+            package_boundary: unpacked-native
+            package_args: --mac --dir --arm64
+          - name: macOS 15 x64
+            runner: macos-15-intel
+            sidecar_target: darwin-x64
+            expected_os: "macOS 15"
+            actual_os: "macOS 15"
+            arch: x64
+            package_boundary: unpacked-native
+            package_args: --mac --dir --x64
+          - name: macOS 26 arm64
+            runner: macos-26
+            sidecar_target: darwin-arm64
+            expected_os: "macOS 26"
+            actual_os: "macOS 26"
+            arch: arm64
+            package_boundary: unpacked-native
+            package_args: --mac --dir --arm64
+          - name: macOS 26 x64
+            runner: macos-26-intel
+            sidecar_target: darwin-x64
+            expected_os: "macOS 26"
+            actual_os: "macOS 26"
+            arch: x64
+            package_boundary: unpacked-native
+            package_args: --mac --dir --x64
+          - name: Windows 11 x64 hosted approximation
+            runner: windows-2025
+            sidecar_target: win32-x64
+            expected_os: "Windows 11"
+            actual_os: "Windows Server 2025"
+            arch: x64
+            package_boundary: unpacked-native
+            package_args: --win --dir --x64
+          - name: Ubuntu 24.04 x64
+            runner: ubuntu-24.04
+            sidecar_target: linux-x64
+            expected_os: "Ubuntu 24.04"
+            actual_os: "Ubuntu 24.04"
+            arch: x64
+            package_boundary: unpacked-native
+            package_args: --linux --dir --x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "26.5.0"
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: "11.9.0"
+      - name: Install locked dependencies
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check uv==0.12.0
@@ -86,27 +251,150 @@ jobs:
       - name: Build and smoke-test native sidecar
         shell: bash
         env:
-          NATIVE_TARGET: ${{ matrix.target }}
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
         run: |
-          uv run python scripts/build_sidecar.py --expected-target "$NATIVE_TARGET"
-          executable="desktop/build/sidecar/$NATIVE_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
-          if [[ "$NATIVE_TARGET" == "win32-x64" ]]; then executable="$executable.exe"; fi
-          uv run python scripts/smoke_sidecar.py "$executable"
-      - name: Build Electron application
+          uv run python scripts/build_sidecar.py --expected-target "$SIDECAR_TARGET"
+          sidecar_executable="desktop/build/sidecar/$SIDECAR_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
+          if [[ "$SIDECAR_TARGET" == "win32-x64" ]]; then sidecar_executable="$sidecar_executable.exe"; fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --gate sidecarSmokePassed \
+            -- uv run python scripts/smoke_sidecar.py "$sidecar_executable"
+      - name: Build production Electron application
         shell: bash
-        run: pnpm --dir desktop build
-      - name: Assemble unpacked native application
+        run: pnpm --dir desktop run build
+      - name: Assemble unpublished unpacked native application
         shell: bash
         env:
           PACKAGE_ARGS: ${{ matrix.package_args }}
-        run: pnpm --dir desktop exec electron-builder --config electron-builder.yml $PACKAGE_ARGS
+        run: pnpm --dir desktop exec electron-builder --config electron-builder.verification.yml $PACKAGE_ARGS
       - name: Verify packaged sidecar resource
         shell: bash
         env:
-          NATIVE_TARGET: ${{ matrix.target }}
-        run: node desktop/scripts/verify-sidecar.mjs "$NATIVE_TARGET" desktop/release
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+        run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release
+      - name: Exercise the packaged application
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs)"
+          mkdir -p "$ROW_ROOT"
+          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
+          export ANCESTRYLLM_PACKAGED_METRICS="$ROW_ROOT/packaged-metrics.json"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            node desktop/scripts/verification-receipt.mjs \
+              --git-head "$EXPECTED_HEAD" \
+              --output "$RECEIPTS_DIR/packaged-runtime.json" \
+              --gate packageRuntimePassed \
+              --gate rendererZeroEgressCanaryPassed \
+              --gate normalLaunchDebugSurfaceAbsentPassed \
+              --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
+              -- xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged
+          else
+            node desktop/scripts/verification-receipt.mjs \
+              --git-head "$EXPECTED_HEAD" \
+              --output "$RECEIPTS_DIR/packaged-runtime.json" \
+              --gate packageRuntimePassed \
+              --gate rendererZeroEgressCanaryPassed \
+              --gate normalLaunchDebugSurfaceAbsentPassed \
+              --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
+              -- pnpm --dir desktop run test:e2e:packaged
+          fi
+      - name: Inspect packaged Electron fuses
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --gate fusesInspectedPassed \
+            --artifact fuseInspection="$ROW_ROOT/fuse-inspection.json" \
+            -- node desktop/scripts/inspect-package-fuses.mjs --output "$ROW_ROOT/fuse-inspection.json"
+      - name: Record target evidence
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          ACTUAL_OS: ${{ matrix.actual_os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          PACKAGE_BOUNDARY: ${{ matrix.package_boundary }}
+          VERIFICATION_RUNNER: ${{ matrix.runner }}
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          node desktop/scripts/verification-evidence.mjs target \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$SIDECAR_TARGET" \
+            --expected-os "$EXPECTED_OS" \
+            --actual-os "$ACTUAL_OS" \
+            --arch "$TARGET_ARCH" \
+            --package-boundary "$PACKAGE_BOUNDARY" \
+            --metrics "$ROW_ROOT/packaged-metrics.json" \
+            --fuse-inspection "$ROW_ROOT/fuse-inspection.json" \
+            --receipts "$RECEIPTS_DIR" \
+            --output "$ROW_ROOT/target.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ancestryllm-desktop-${{ matrix.target }}-${{ matrix.runner }}
-          path: desktop/release/
+          name: desktop-evidence-${{ matrix.runner }}
+          path: desktop/verification
+          if-no-files-found: error
+
+  desktop-gate:
+    name: Desktop gate
+    if: ${{ always() }}
+    needs: [changes, desktop-security, native-package]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate prerequisite results
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DESKTOP_CHANGED: ${{ needs.changes.outputs.desktop }}
+          SECURITY_RESULT: ${{ needs.desktop-security.result }}
+          PACKAGE_RESULT: ${{ needs.native-package.result }}
+        run: |
+          test "$CHANGES_RESULT" = "success"
+          if [[ "$DESKTOP_CHANGED" == "true" ]]; then
+            test "$SECURITY_RESULT" = "success"
+            test "$PACKAGE_RESULT" = "success"
+          else
+            test "$DESKTOP_CHANGED" = "false"
+            test "$SECURITY_RESULT" = "skipped"
+            test "$PACKAGE_RESULT" = "skipped"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.desktop == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact head
+        if: needs.changes.outputs.desktop == 'true'
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: needs.changes.outputs.desktop == 'true'
+        with:
+          node-version: "26.5.0"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.changes.outputs.desktop == 'true'
+        with:
+          pattern: desktop-evidence-*
+          merge-multiple: true
+          path: evidence
+      - name: Aggregate exact-head evidence
+        if: needs.changes.outputs.desktop == 'true'
+        shell: bash
+        run: node desktop/scripts/verification-evidence.mjs aggregate --git-head "$EXPECTED_HEAD" --root evidence --output desktop-evidence.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: needs.changes.outputs.desktop == 'true'
+        with:
+          name: desktop-evidence-aggregate
+          path: desktop-evidence.json
           if-no-files-found: error

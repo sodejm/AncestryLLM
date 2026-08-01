@@ -13,6 +13,12 @@ const prohibitedContent = [
   /@import\s+(?:url\()?\s*['"]?https?:\/\//i,
   /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY/i,
 ]
+const prohibitedProductionFixtureContent = [
+  /createMockAncestryBridge/,
+  /ANCESTRYLLM_DESKTOP_FIXTURE/,
+  /ANCESTRYLLM_DESKTOP_SECURITY_E2E/,
+  /__ancestryllmSecurityStateForTests/,
+]
 async function files(root) { return (await readdir(root, { withFileTypes: true })).flatMap((entry) => entry.isDirectory() ? [] : [join(root, entry.name)]) }
 async function walk(root) {
   const entries = await readdir(root, { withFileTypes: true }); const output = []
@@ -22,7 +28,7 @@ async function walk(root) {
   }
   return output
 }
-export async function inspectBuild(root) {
+export async function inspectBuild(root, { allowFixtures = false } = {}) {
   const all = await walk(root)
   for (const file of all) {
     const name = file.split('/').at(-1)
@@ -31,12 +37,19 @@ export async function inspectBuild(root) {
       const content = await readFile(file, 'utf8')
       const match = prohibitedContent.find((pattern) => pattern.test(content))
       if (match) throw new Error(`Prohibited build content in ${name}: ${match.source}`)
+      const fixtureMatch = allowFixtures
+        ? undefined
+        : prohibitedProductionFixtureContent.find((pattern) => pattern.test(content))
+      if (fixtureMatch) throw new Error(`Prohibited production fixture content in ${name}: ${fixtureMatch.source}`)
     }
   }
   if ((await files(root)).length === 0 && all.length === 0) throw new Error('Build output is empty')
   return all.length
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const count = await inspectBuild(new URL('../out', import.meta.url).pathname)
+  const count = await inspectBuild(
+    new URL('../out', import.meta.url).pathname,
+    { allowFixtures: process.argv.includes('--fixture') },
+  )
   console.log(`Verified ${count} build artifacts: no development-only gallery copy, source maps, embedded remote network endpoints, credentials, or updater metadata.`)
 }

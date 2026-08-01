@@ -38,6 +38,13 @@ workflow. A filtered-out workflow may never create its required check. Path
 classification happens inside the workflow so the aggregate gate always
 reports a conclusion.
 
+The desktop workflow applies the same pattern through the stable `Desktop
+gate`. Its source-security job and six native unpublished-package rows emit
+exact-head machine-readable evidence. The Windows hosted row executes on
+Windows Server 2025 and is not Windows 11 release evidence; signed installers
+and actual Windows 11 execution remain external blockers. See the
+[desktop verification guide](DESKTOP_VERIFICATION.md).
+
 ## Ruleset migration for the pull-request matrix
 
 The pull-request install-matrix reduction must be introduced in two phases.

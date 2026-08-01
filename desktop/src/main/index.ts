@@ -3,32 +3,27 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
-  dialog,
   ipcMain,
   protocol,
   session,
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron'
-import { createMockAncestryBridge } from '../mock-bridge/desktop'
 import type { AncestryBridge } from '../shared-contract/desktop'
-import { createDesktopControlBridge } from './desktop-control'
 import { registerDesktopIpcHandlers } from './ipc-handlers'
-import { FilePreferencesStore } from './preferences-store'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
   APP_ENTRY_URL,
   APP_SCHEME_PRIVILEGES,
   assertSecureWebPreferences,
   createAppProtocolHandler,
-  createRuntimeSecurityState,
   secureWebPreferences,
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
-import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
-import { createSidecarCapabilitiesClient } from './sidecar-client'
-import { resolveSidecarExecutable, SidecarSupervisor } from './sidecar-supervisor'
+import { startRuntimeBridge } from './runtime-bridge'
+import type { SidecarSupervisor } from './sidecar-supervisor'
 import { installSingleInstanceGuard } from './single-instance'
+import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
 
 app.enableSandbox()
 const primaryInstance = installSingleInstanceGuard({
@@ -41,10 +36,7 @@ if (primaryInstance) {
   protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
 }
 
-const fixture = process.env.ANCESTRYLLM_DESKTOP_FIXTURE
-let bridge: AncestryBridge = createMockAncestryBridge(
-  fixture === 'degraded' || fixture === 'unavailable' ? fixture : 'success',
-)
+let bridge: AncestryBridge | undefined
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -70,6 +62,7 @@ function trustedSender(event: IpcMainInvokeEvent): boolean {
 }
 
 function denyWebContentsCapabilities(contents: WebContents): void {
+  installKeyboardZoom(contents as unknown as KeyboardZoomTarget)
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('will-navigate', (event) => event.preventDefault())
   contents.on('will-redirect', (event) => event.preventDefault())
@@ -79,7 +72,6 @@ function denyWebContentsCapabilities(contents: WebContents): void {
   })
 }
 
-const configuredPreferences = new WeakMap<WebContents, ReturnType<typeof secureWebPreferences>>()
 let pendingWindowPreferences: ReturnType<typeof secureWebPreferences> | null = null
 
 if (primaryInstance) {
@@ -95,18 +87,12 @@ if (primaryInstance) {
       return
     }
     assertSecureWebPreferences(preferences, isProductionRenderer())
-    configuredPreferences.set(contents, preferences)
     denyWebContentsCapabilities(contents)
   })
 }
 
-function runtimeSecurityState(window: BrowserWindow) {
-  const preferences = configuredPreferences.get(window.webContents)
-  if (!preferences) throw new Error('Unregistered BrowserWindow')
-  return createRuntimeSecurityState(window.webContents.getURL(), preferences, isProductionRenderer())
-}
-
 function registerIpcHandlers(): void {
+  if (!bridge) throw new Error('Runtime bridge is unavailable.')
   registerDesktopIpcHandlers(
     ipcMain,
     bridge,
@@ -136,55 +122,15 @@ function createWindow(): void {
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 
-async function startPackagedSidecar(): Promise<void> {
-  if (!app.isPackaged) return
-  const preferences = new FilePreferencesStore(app.getPath('userData'))
-  sidecarSupervisor = new SidecarSupervisor({
-    appBuild: app.getVersion(),
-    executablePath: resolveSidecarExecutable(process.resourcesPath, process.platform, process.arch),
-    launch: launchNativeSidecar,
-    probe: probeNativeSidecar,
-    startupTimeoutMs: 10_000,
-    maxRestarts: 2,
-    maxManualRetries: 1,
-    onFatal: () => {
-      dialog.showErrorBox(
-        'AncestryLLM sidecar unavailable',
-        'The private service is unavailable. This window will remain open for diagnostics; restart AncestryLLM or reinstall the application if the problem continues.',
-      )
-    },
-  })
-  bridge = createDesktopControlBridge({
-    appInfo: {
-      applicationName: 'AncestryLLM',
-      appVersion: app.getVersion(),
-      buildChannel: 'packaged',
-    },
-    supervisor: sidecarSupervisor,
-    capabilitiesClient: createSidecarCapabilitiesClient({ session: () => sidecarSupervisor?.session() }),
-    preferences,
-  })
-  await sidecarSupervisor.start()
-}
-
 if (primaryInstance) {
   app.whenReady().then(async () => {
-    await startPackagedSidecar().catch(() => undefined)
+    const runtime = await startRuntimeBridge()
+    bridge = runtime.bridge
+    sidecarSupervisor = runtime.supervisor
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     registerIpcHandlers()
     createWindow()
-    if (process.env.ANCESTRYLLM_DESKTOP_SECURITY_E2E === '1') {
-      Object.defineProperty(globalThis, '__ancestryllmSecurityStateForTests', {
-        configurable: false,
-        value: () => {
-          const window = BrowserWindow.getAllWindows()[0]
-          if (!window) throw new Error('No BrowserWindow')
-          return runtimeSecurityState(window)
-        },
-        writable: false,
-      })
-    }
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
   })
   app.on('before-quit', (event) => {
