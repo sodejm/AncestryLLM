@@ -1,9 +1,10 @@
 # Packaged desktop sidecar
 
 Issue #225 adds the control-only native sidecar used by the packaged Electron
-main process. It does not expose genealogy, job, chat, provider, cloud-account,
-or generic command routes. The renderer continues to use fictional fixtures;
-the sidecar is not a domain-data transport.
+main process. Issue #226 adds the narrow typed bridge that lets the renderer
+read sanitized control state without becoming a sidecar client. Neither change
+exposes genealogy, job, chat, provider, cloud-account, updater, or generic
+command routes; the sidecar is not a domain-data transport.
 
 ## Native targets and release evidence
 
@@ -53,8 +54,19 @@ internal client may acquire the authenticated session only while its lifecycle
 is `ready`; the session is cleared before restart, failure, or shutdown. The
 interface also exposes sanitized lifecycle diagnostics and one application-
 lifetime manual retry. Concurrent retry requests share a single launch attempt,
-and an exhausted retry is a deterministic no-op. None of these controls is an
-IPC channel or preload/renderer API.
+and an exhausted retry is a deterministic no-op. Electron main uses the session
+only for authenticated `/api/v1/capabilities` requests. The bridge exposes the
+result, sanitized diagnostics, and retry outcome, but never the session, bearer,
+port, or raw HTTP data.
+
+The frozen `window.ancestry` surface contains exactly `getAppInfo`,
+`getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
+and `updatePreferences`. Main validates the sender, argument count, preference
+update schema, and runtime response schema before a value crosses IPC; preload
+validates again before exposing the result to the renderer. Preference updates
+require the last renderer-visible non-negative revision and return a coded
+conflict when it is stale. Main owns this storage boundary; durable preference
+persistence is separate work.
 
 ## Diagnostics and recovery
 

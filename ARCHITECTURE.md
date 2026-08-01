@@ -21,7 +21,9 @@ authenticated FastAPI control adapter for health and capability discovery, a
 UI-only Electron shell, and native packaged-sidecar build and supervision.
 These components are not release evidence or a supported production desktop:
 the API exposes no genealogy, provider, domain, or generic command-dispatch
-route, and the renderer bridge still exercises deterministic fictional data.
+route. The exact six-method renderer bridge uses deterministic fictional data
+in development; packaged Electron main alone may call the authenticated fixed
+capabilities route.
 
 There is no supported production browser, public/LAN, or multi-user runtime.
 ADR-0025 accepts the packaged local Electron direction and later private domain
@@ -150,7 +152,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its sandboxed renderer, typed mock bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, private native-sidecar supervisor, local fuse/ASAR inspection, and unsigned unpacked package assembly are implemented. Genealogy integration, supported distribution packages, signing, and updates are not. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its sandboxed renderer, exact six-method typed bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, private native-sidecar supervisor and authenticated fixed-route capabilities client, local fuse/ASAR inspection, and unsigned unpacked package assembly are implemented. Genealogy integration, durable preferences, supported distribution packages, signing, and updates are not. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
@@ -239,6 +241,10 @@ dependency and assurance gates pass.
 - A static typed preload bridge calls an Electron main-process
   backend-for-frontend. Main validates the sender/frame/origin, mediates opaque
   file grants, supervises the sidecar, and proxies only declared endpoints.
+- The current bridge is frozen to `getAppInfo`, `getStartupDiagnostics`,
+  `getCapabilities`, `retrySidecar`, `getPreferences`, and `updatePreferences`.
+  Preference updates carry the renderer-visible revision; main owns the storage
+  boundary and rejects stale updates. Durable storage remains separate work.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
   lifecycle plus a bounded single-flight manual retry. Bootstrap material,
@@ -871,7 +877,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, a browser-typed React renderer shell, a typed versioned mock bridge, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, and Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly. No genealogy integration, domain route, generic command route, signed installer, updater, or supported desktop package exists. | Complete the separately owned domain bridge, shell, signing/distribution, Windows 11 execution, and exact-head assurance work before making a `0.5.0` support or release claim. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, a browser-typed React renderer shell, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, and Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly. No genealogy integration, durable preferences, domain route, generic command route, signed installer, updater, or supported desktop package exists. | Complete the separately owned preferences, production shell, signing/distribution, Windows 11 execution, and exact-head assurance work before making a `0.5.0` support or release claim. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

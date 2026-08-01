@@ -2,15 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('returns the same deeply frozen fictional success fixture', async () => {
+  it('exposes exactly six deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
-    expect(await bridge.startup()).toEqual(await bridge.startup())
-    expect(await bridge.startup()).toMatchObject({ ok: true, protocolVersion: '1' })
-    expect(Object.isFrozen(await bridge.startup())).toBe(true)
+    expect(Object.keys(bridge).sort()).toEqual([
+      'getAppInfo',
+      'getCapabilities',
+      'getPreferences',
+      'getStartupDiagnostics',
+      'retrySidecar',
+      'updatePreferences',
+    ])
+    expect(await bridge.getStartupDiagnostics()).toEqual(await bridge.getStartupDiagnostics())
+    expect(Object.isFrozen(await bridge.getCapabilities())).toBe(true)
   })
-  it('returns a deterministic sanitized failure fixture', async () => {
-    const result = await createMockAncestryBridge('failure').startup()
-    expect(result).toEqual({ ok: false, protocolVersion: '1', error: { code: 'DESKTOP_UNAVAILABLE', message: 'Desktop diagnostics are temporarily unavailable.', remediation: 'Restart AncestryLLM.' } })
-    expect(JSON.stringify(result)).not.toMatch(/path|token|secret|trace/i)
+
+  it('supports degraded, retry, unavailable-sidecar, and revision-conflict fixtures', async () => {
+    const bridge = createMockAncestryBridge('unavailable')
+    expect(await bridge.getStartupDiagnostics()).toMatchObject({ ok: true, data: { state: 'degraded' } })
+    expect(await bridge.getCapabilities()).toMatchObject({ ok: false, error: { code: 'SIDECAR_UNAVAILABLE' } })
+    expect(await bridge.retrySidecar()).toMatchObject({ ok: true, data: { state: 'ready' } })
+    expect(await bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark' })).toMatchObject({ ok: true, data: { revision: 1 } })
+    expect(await bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'light' })).toMatchObject({ ok: false, error: { code: 'PREFERENCES_CONFLICT' } })
   })
 })

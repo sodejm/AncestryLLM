@@ -1,9 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { desktopChannels, type AncestryBridge, type DesktopTheme } from '../shared-contract/desktop'
-import { parseBridgeResult, parseTheme } from '../shared-contract/runtime'
+import { desktopChannels, type AncestryBridge, type PreferenceUpdate } from '../shared-contract/desktop'
+import {
+  parseAppInfoResult,
+  parseCapabilitiesResult,
+  parsePreferenceUpdate,
+  parsePreferencesResult,
+  parseStartupDiagnosticsResult,
+} from '../shared-contract/runtime'
 
 const ancestry: AncestryBridge = Object.freeze({
-  startup: async () => parseBridgeResult(await ipcRenderer.invoke(desktopChannels.startup)),
-  setTheme: async (theme: DesktopTheme) => parseBridgeResult(await ipcRenderer.invoke(desktopChannels.setTheme, parseTheme(theme))),
+  getAppInfo: async () => parseAppInfoResult(await ipcRenderer.invoke(desktopChannels.getAppInfo)),
+  getStartupDiagnostics: async () => parseStartupDiagnosticsResult(await ipcRenderer.invoke(desktopChannels.getStartupDiagnostics)),
+  getCapabilities: async () => parseCapabilitiesResult(await ipcRenderer.invoke(desktopChannels.getCapabilities)),
+  retrySidecar: async () => parseStartupDiagnosticsResult(await ipcRenderer.invoke(desktopChannels.retrySidecar)),
+  getPreferences: async () => parsePreferencesResult(await ipcRenderer.invoke(desktopChannels.getPreferences)),
+  updatePreferences: async (update: PreferenceUpdate) => parsePreferencesResult(
+    await ipcRenderer.invoke(desktopChannels.updatePreferences, parsePreferenceUpdate(update)),
+  ),
 })
+
 contextBridge.exposeInMainWorld('ancestry', ancestry)
