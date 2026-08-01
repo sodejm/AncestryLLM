@@ -17,6 +17,19 @@ export default defineConfig({
   renderer: {
     root: resolve('src/renderer'),
     plugins: [react(), tailwindcss()],
-    build: { sourcemap: false, assetsInlineLimit: 0 },
+    build: {
+      sourcemap: false,
+      assetsInlineLimit: 0,
+      cssCodeSplit: false,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'assets/index.js',
+          chunkFileNames: 'assets/[name].js',
+          assetFileNames: (assetInfo) => assetInfo.names.some((name) => name.endsWith('.css'))
+            ? 'assets/index.css'
+            : 'assets/[name][extname]',
+        },
+      },
+    },
   },
 })

@@ -9,7 +9,7 @@ describe('renderer location policy', () => {
       developmentUrl: 'https://attacker.invalid/app',
       isPackaged: true,
       rendererPath,
-    })).toEqual({ kind: 'file', value: rendererPath })
+    })).toEqual({ kind: 'url', value: 'app://bundle/index.html' })
 
     expect(isTrustedRendererUrl({
       developmentUrl: 'https://attacker.invalid/app',
@@ -34,18 +34,18 @@ describe('renderer location policy', () => {
     })).toBe(true)
   })
 
-  it('trusts the selected local renderer when unpackaged without a development server', () => {
+  it('uses the production app route when unpackaged without a development server', () => {
     expect(resolveRendererTarget({
       developmentUrl: undefined,
       isPackaged: false,
       rendererPath,
-    })).toEqual({ kind: 'file', value: rendererPath })
+    })).toEqual({ kind: 'url', value: 'app://bundle/index.html' })
 
     expect(isTrustedRendererUrl({
       developmentUrl: undefined,
       isPackaged: false,
       rendererPath,
-      senderUrl: 'file:///application/out/renderer/index.html#home',
+      senderUrl: 'app://bundle/index.html#home',
     })).toBe(true)
     expect(isTrustedRendererUrl({
       developmentUrl: undefined,
@@ -55,13 +55,25 @@ describe('renderer location policy', () => {
     })).toBe(false)
   })
 
-  it('trusts only the exact local renderer file in packaged mode', () => {
+  it('trusts only the fixed app origin and entry document in packaged mode', () => {
+    expect(isTrustedRendererUrl({
+      developmentUrl: undefined,
+      isPackaged: true,
+      rendererPath,
+      senderUrl: 'app://bundle/index.html#home',
+    })).toBe(true)
     expect(isTrustedRendererUrl({
       developmentUrl: undefined,
       isPackaged: true,
       rendererPath,
       senderUrl: 'file:///application/out/renderer/index.html#home',
-    })).toBe(true)
+    })).toBe(false)
+    expect(isTrustedRendererUrl({
+      developmentUrl: undefined,
+      isPackaged: true,
+      rendererPath,
+      senderUrl: 'app://bundle/other.html',
+    })).toBe(false)
     expect(isTrustedRendererUrl({
       developmentUrl: undefined,
       isPackaged: true,
