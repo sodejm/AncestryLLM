@@ -1,26 +1,30 @@
-# Wiki synchronization operations and recovery
+# Documentation publishing, Wiki synchronization, and recovery
 
 The Markdown files under `docs/` are the canonical source for the AncestryLLM
-GitHub Wiki. The `Sync Wiki` workflow publishes that source to the separate
-`sodejm/AncestryLLM.wiki.git` repository. Direct edits to managed Wiki pages are
-temporary: the next successful synchronization replaces or removes them to
-match `docs/`.
+documentation site and GitHub Wiki. The GitHub Pages workflow builds the
+published site, and the `Sync Wiki` workflow publishes that source to the
+separate `sodejm/AncestryLLM.wiki.git` repository. Direct edits to managed Wiki
+pages are temporary: the next successful synchronization replaces or removes
+them to match `docs/`.
 
 For the managed-file rules and local synchronization command, see the
 [wiki synchronization design](WIKI_SYNC.md).
 
 ## Automatic publication
 
-A push to `main` that changes a path under `docs/` starts the workflow
-automatically. The normal publication path is therefore:
+A push to `main` deploys the documentation site. A push that changes a path
+under `docs/` also starts Wiki synchronization. The normal publication path is
+therefore:
 
 1. Make documentation changes on a dedicated branch.
 2. Run the validation commands described below.
 3. Merge the reviewed pull request into `main`.
-4. Verify the resulting workflow run and Wiki commit before closing the issue.
+4. Verify the Pages deployment, resulting site, and Wiki commit before closing
+   the issue.
 
-Changes only to the workflow or synchronization scripts do not match the
-`docs/**` path filter. Use a manual dispatch after those changes reach `main`.
+Changes only to the Wiki workflow or synchronization scripts do not match the
+`docs/**` path filter. Use a manual Wiki dispatch after those changes reach
+`main`.
 
 ## Manual dispatch
 
@@ -51,9 +55,13 @@ gh run watch "$run_id" --repo sodejm/AncestryLLM --compact --exit-status
 
 ## Verify a publication
 
-Record the source SHA, workflow run URL, and resulting Wiki commit SHA in the
-issue or release evidence. Do not copy credentials or complete raw logs into an
-issue.
+Record the source SHA, Pages and Wiki workflow run URLs, published site URL,
+and resulting Wiki commit SHA in the issue or release evidence. Do not copy
+credentials or complete raw logs into an issue.
+
+Open the [published documentation site](https://sodejm.github.io/AncestryLLM/)
+after the Pages deployment and verify the changed page, sidebar, and internal
+links before completing the Wiki checks below.
 
 1. Resolve the current `main` SHA and its matching run:
 

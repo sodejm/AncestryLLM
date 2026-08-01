@@ -91,18 +91,20 @@ generation. Record findings as fixed, evidence-backed false positives, or
 permitted time-bounded residual risks. Never waive a finding silently; expired
 exceptions and untriaged Critical/High findings fail the gate.
 
-## Documentation and wiki publishing
+## Documentation, Pages, and Wiki publishing
 
 The Markdown files under `docs/` are the authoritative source for documentation
-published to the AncestryLLM GitHub Wiki. Make documentation changes in `docs/`
-on a focused branch and submit them through the normal pull-request workflow.
-The wiki is a generated publishing target, not a second documentation source.
+published to the [AncestryLLM documentation site](https://sodejm.github.io/AncestryLLM/)
+and GitHub Wiki. Make documentation changes in `docs/` on a focused branch and
+submit them through the normal pull-request workflow. Pages and the Wiki are
+generated publishing targets, not separate documentation sources.
 
-All version-controlled Markdown files under `docs/` are in synchronization
-scope, including the wiki home and navigation sources. Generated wiki pages
-must not be copied back into the repository or included as generated artifacts
-in a pull request. Removing a source page from `docs/` means its managed wiki
-page will also be removed by synchronization.
+All version-controlled Markdown files under `docs/` are in publishing scope,
+including the home and navigation sources. The Pages build creates an isolated
+staging copy and Wiki synchronization generates the managed Wiki pages; neither
+output must be copied back into the repository or included in a pull request.
+Removing a source page from `docs/` means its managed Wiki page will also be
+removed by synchronization.
 
 Do not edit a managed GitHub Wiki page directly. A direct edit is allowed only
 when a documented recovery procedure explicitly requires it; reproduce any

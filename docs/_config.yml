@@ -1,0 +1,8 @@
+title: AncestryLLM documentation
+description: Local-first genealogy research documentation
+url: "https://sodejm.github.io"
+baseurl: "/AncestryLLM"
+theme: jekyll-theme-cayman
+markdown: kramdown
+kramdown:
+  input: GFM

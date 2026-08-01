@@ -4,6 +4,11 @@ AncestryLLM is a local-first command-line tool for genealogy research. It
 combines deterministic RootsMagic and GEDCOM workflows with optional,
 explicitly selected LLM providers.
 
+The canonical source is this `docs/` directory. It is published to the
+[AncestryLLM documentation site](https://sodejm.github.io/AncestryLLM/) and the
+[GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki); the Wiki remains
+available, but neither published view is an independent documentation source.
+
 Start with the [CLI reference](CLI.md) for one-shot commands or the
 [interactive console guide](CONSOLE.md). In 0.4.0 these are the only
 implemented product surfaces: both use the same command specification,
@@ -22,9 +27,10 @@ budgets, race detection, output alias rejection, and transactional publication.
 
 Documentation links use relative Markdown filenames (for example,
 `[Console guide](CONSOLE.md)`). This keeps links valid from this `docs/`
-directory in the repository. During synchronization, local `.md` targets are
-published as extensionless GitHub Wiki page links so navigation remains in the
-Wiki UI.
+directory in the repository. The Pages build rewrites local links only in its
+generated staging directory, from `.md` targets to site paths. Wiki
+synchronization rewrites the same local targets to extensionless Wiki page
+links. The canonical source remains unchanged.
 
 Use the sidebar to navigate the complete published documentation set.
 

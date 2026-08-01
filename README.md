@@ -10,6 +10,14 @@ FastAPI health/capability adapter plus native packaged-sidecar build and Electro
 supervision. Domain API routes and supported desktop distribution remain unshipped;
 the internal adapter is not a public API.
 
+## Documentation
+
+The canonical documentation in `docs/` is published to the
+[AncestryLLM documentation site](https://sodejm.github.io/AncestryLLM/). The
+[GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki) remains available as
+another published view of the same source; do not treat it as a separate source
+of truth.
+
 ## Install and start
 
 Python 3.12 through 3.14 and a working OS credential store are required. Install

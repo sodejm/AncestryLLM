@@ -1,0 +1,20 @@
+---
+layout: default
+---
+<div class="documentation-shell">
+  <aside class="documentation-navigation" aria-label="Documentation navigation">
+    {% capture sidebar %}{% include sidebar.md %}{% endcapture %}
+    {{ sidebar | markdownify }}
+  </aside>
+  <main class="documentation-content" id="main-content">
+    {{ content }}
+  </main>
+</div>
+
+<style>
+  .documentation-shell { display: grid; gap: 2rem; grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr); }
+  .documentation-navigation { font-size: 0.9rem; }
+  .documentation-navigation ul { margin: 0; padding-left: 1.2rem; }
+  .documentation-content { min-width: 0; }
+  @media (max-width: 48rem) { .documentation-shell { display: block; } .documentation-navigation { margin-bottom: 2rem; } }
+</style>

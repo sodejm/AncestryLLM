@@ -154,9 +154,9 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
 | `desktop/` | UI-only Electron adapter governed by ADR-0025. Its sandboxed renderer, exact six-method typed bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, private native-sidecar supervisor and authenticated fixed-route capabilities client, local fuse/ASAR inspection, and unsigned unpacked package assembly are implemented. Genealogy integration, durable preferences, supported distribution packages, signing, and updates are not. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
-| `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
-| `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
-| `.github/` | CI, security analysis, dependency updates, issue/PR policy, and Wiki publication. |
+| `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
+| `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
+| `.github/` | CI, security analysis, dependency updates, issue/PR policy, and documentation publication. |
 | `pyproject.toml`, `uv.lock`, `Makefile` | Package contract, locked dependency graph, tool policy, and supported developer commands. |
 
 `family_trees/` is a local-only data boundary. Its contents and generated
@@ -806,6 +806,9 @@ plugins:
 - `validate_wiki_docs.py`, `rewrite_wiki_links.py`,
   `sync_wiki_docs.py`, and `commit_wiki_changes.py` validate, flatten, rewrite,
   mirror, and commit the canonical `docs/` tree into the separate GitHub Wiki.
+- `prepare_pages_source.py` validates the same canonical documentation and
+  creates an isolated Jekyll staging tree with layout metadata and Pages-style
+  local links. It never changes `docs/`.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -815,8 +818,8 @@ workflow serializes publications and exposes credentials only during clone and
 push.
 
 `ARCHITECTURE.md` remains at the repository root and is not currently included
-in the generated Wiki scope. Operator guides in `docs/` are the Wiki source;
-this file governs code structure and architectural decisions.
+in either generated documentation scope. Operator guides in `docs/` source both
+published views; this file governs code structure and architectural decisions.
 
 ## Verification and delivery architecture
 
@@ -849,8 +852,8 @@ Tests are intentionally split by risk:
 - `tests/test_gedcom_merge.py` and `tests/test_gedcom_quality.py` characterize
   the operation modules, owned publication adapters, and preservation behavior;
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
-- Wiki tests cover validation, deterministic mirroring, deletion, no-op
-  behavior, commits, and workflow structure;
+- Documentation tests cover Pages staging, Wiki validation, deterministic
+  mirroring, deletion, no-op behavior, commits, and workflow structure;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
 The import-only compatibility façades and their physical owner modules are
@@ -913,7 +916,7 @@ Use these paths when extending the system:
 | GEDCOM behavior | façade plus kernel as necessary, fictional fixtures | Loss-minimal preservation, stable pointers, conflicts/citations/families, atomic output, 5.5.5 and fallback impact. |
 | RootsMagic behavior | reader/exporter/service | Source remains hash-identical, bounded query, no write path, loss report. |
 | Cloud data use | module service, `GenerationRequest`, consent docs/tests | Correct data classes, purpose/model/module grant, minimization, retention, network-offline test. |
-| Documentation page | `docs/`, sidebar if needed, Wiki tests | Unique flattened basename, safe links, deterministic sync. |
+| Documentation page | `docs/`, sidebar if needed, publishing tests | Unique flattened basename, safe links, deterministic Pages staging and Wiki sync. |
 
 ## Architecture governance
 
