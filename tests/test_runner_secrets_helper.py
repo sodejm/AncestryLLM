@@ -96,7 +96,10 @@ def _write_fake_gh(path: Path) -> None:
         """#!/bin/sh
 set -eu
 
-case "$1:$2" in
+case "${1-}:${2-}" in
+  --version:)
+    printf 'gh version 2.96.0 (fictional test build)\n'
+    ;;
   auth:status|repo:view)
     exit 0
     ;;
@@ -185,7 +188,7 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
     environment["FAKE_GH_STATE"] = str(state)
     result = subprocess.run(
-        [str(HELPER), "--upload"],
+        [str(HELPER), "--upload", "--gh-executable", str(fake_bin / "gh")],
         cwd=REPOSITORY_ROOT,
         env=environment,
         input="\n".join(prompt_input) + "\n",
@@ -250,6 +253,8 @@ def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> 
         [
             str(HELPER),
             "--dry-run",
+            "--gh-executable",
+            str(fake_bin / "gh"),
             "--apple-certificate-file",
             str(REPOSITORY_ROOT / "pyproject.toml"),
         ],
@@ -284,7 +289,12 @@ def test_helper_fails_when_keychain_has_no_valid_developer_id_application(
     environment["FAKE_GH_STATE"] = str(state)
 
     result = subprocess.run(
-        [str(HELPER), "--dry-run"],
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(fake_bin / "gh"),
+        ],
         cwd=REPOSITORY_ROOT,
         env=environment,
         input="",
@@ -318,7 +328,12 @@ def test_helper_fails_closed_for_multiple_developer_id_application_identities(
     environment["FAKE_GH_STATE"] = str(state)
 
     result = subprocess.run(
-        [str(HELPER), "--dry-run"],
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(fake_bin / "gh"),
+        ],
         cwd=REPOSITORY_ROOT,
         env=environment,
         input="",
@@ -330,6 +345,99 @@ def test_helper_fails_closed_for_multiple_developer_id_application_identities(
     assert result.returncode != 0
     assert "Multiple valid Developer ID Application identities" in result.stderr
     assert not (state / "apple-identity-name").exists()
+
+
+def test_helper_never_executes_a_path_shadowing_github_cli(tmp_path: Path) -> None:
+    trusted_bin = tmp_path / "trusted-bin"
+    trusted_bin.mkdir()
+    trusted_gh = trusted_bin / "gh"
+    _write_fake_gh(trusted_gh)
+
+    hostile_bin = tmp_path / "hostile-bin"
+    hostile_bin.mkdir()
+    hostile_marker = tmp_path / "hostile-gh-ran"
+    hostile_gh = hostile_bin / "gh"
+    hostile_gh.write_text(
+        f"#!/bin/sh\nprintf compromised > {hostile_marker}\nexit 97\n",
+        encoding="utf-8",
+    )
+    hostile_gh.chmod(hostile_gh.stat().st_mode | stat.S_IXUSR)
+
+    state = tmp_path / "state"
+    state.mkdir()
+    environment = os.environ.copy()
+    environment["PATH"] = f"{hostile_bin}:{environment['PATH']}"
+    environment["FAKE_GH_STATE"] = str(state)
+
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(trusted_gh),
+            "--apple-certificate-file",
+            str(REPOSITORY_ROOT / "pyproject.toml"),
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 97
+    assert not hostile_marker.exists()
+    assert f"GitHub CLI executable: {trusted_gh.resolve()}" in result.stdout
+    assert "gh version 2.96.0 (fictional test build)" in result.stdout
+
+
+def test_helper_rejects_an_explicit_github_cli_symlink(tmp_path: Path) -> None:
+    trusted_bin = tmp_path / "trusted-bin"
+    trusted_bin.mkdir()
+    trusted_gh = trusted_bin / "gh"
+    _write_fake_gh(trusted_gh)
+    gh_symlink = tmp_path / "gh-symlink"
+    gh_symlink.symlink_to(trusted_gh)
+
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(gh_symlink),
+        ],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "GitHub CLI executable must not be a symbolic link" in result.stderr
+
+
+def test_helper_rejects_github_cli_under_a_writable_parent(tmp_path: Path) -> None:
+    writable_bin = tmp_path / "writable-bin"
+    writable_bin.mkdir()
+    writable_bin.chmod(0o777)
+    candidate = writable_bin / "gh"
+    _write_fake_gh(candidate)
+
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(candidate),
+        ],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "GitHub CLI path has untrusted permissions" in result.stderr
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires the macOS SDK")

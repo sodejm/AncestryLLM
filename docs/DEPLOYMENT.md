@@ -121,7 +121,12 @@ for its password and `APPLE_TEAM_ID`.
 5. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
    present. Authenticate using `[GH_AUTHENTICATION_METHOD]`; the account must
    be authorized to read `sodejm/AncestryLLM`, update its Actions environment
-   secrets, and update repository Actions variables.
+   secrets, and update repository Actions variables. The helper never resolves
+   `gh` from `PATH`. It checks fixed installation locations and executes the
+   canonical file with a minimal `PATH`. If the reviewed CLI is elsewhere,
+   pass its absolute, canonical, non-symlink path with `--gh-executable`. The
+   executable and every canonical parent must be owned by root or the current
+   user and must not be group- or world-writable.
 6. Confirm `desktop-signing` already exists and has the protections required
    by [the release runbook](RELEASING.md#one-time-repository-setup). The helper
    does not create or alter environment protection rules.
@@ -148,6 +153,14 @@ From the repository root:
 ```sh
 chmod 700 scripts/ancestryll-runner-secrets-helper.sh
 ./scripts/ancestryll-runner-secrets-helper.sh --dry-run
+```
+
+If the approved GitHub CLI is outside a fixed installation location, use the
+canonical path that you reviewed:
+
+```sh
+./scripts/ancestryll-runner-secrets-helper.sh --dry-run \
+  --gh-executable /reviewed/canonical/path/to/gh
 ```
 
 The default run discovers and exports the Apple identity first. Supply four
@@ -177,7 +190,8 @@ After a successful dry run, repeat the prompts in upload mode:
 
 Review the destination summary and type the exact confirmation `UPLOAD` only
 when ready. Existing values with the same names will be replaced. The helper
-uses the following GitHub CLI operations internally:
+prints the canonical GitHub CLI path and version before authentication, then
+uses that exact executable for the following operations:
 
 ```sh
 gh secret set [SECRET_NAME] -R sodejm/AncestryLLM -e desktop-signing
