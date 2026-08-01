@@ -5,11 +5,46 @@ publishing uses GitHub Actions OIDC Trusted Publishing; API tokens and local
 uploads are prohibited.
 
 Repository release coordinates are defined in
-`.github/release-config.json`. Its stable package version, exact milestone
-number and title, and exact tracker number and label are one reviewed release
-control. `scripts/verify_release_configuration.py` requires that configuration
-to match `pyproject.toml`; readiness and publication use the configured values
-instead of inferring a milestone or tracker from a version string.
+`.github/release-config.json`. Its stable package version and GitHub Project 2
+release fields are one reviewed release control. The Project fields are the
+owner, Project number and title, `Release iteration`, `Priority`, `Status`, and
+`Validation`; no successor tracker issue is required. The configuration
+verifier requires the release version to match `pyproject.toml` at release time,
+and readiness and publication use the configured Project values instead of
+inferring release state from an issue number or version string.
+
+The published v0.4.0 release continues to use its preserved milestone/tracker
+evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
+iteration, currently `v0.5.0 — Foundation`, is authoritative for future
+release readiness.
+
+### Private Project read token
+
+Project 2 is private. Configure the repository Actions secret
+`ANCESTRYLLM_PROJECT_READ_TOKEN` with a classic personal access token for an
+account that can view the Project and has only the `read:project` scope needed
+for this query. The release workflows retain `github.token` for repository and
+Actions operations, but supply the named secret only to the Project GraphQL
+read. A missing or unusable secret fails the Project gate closed.
+
+`Release Project gate proof` runs only for a path-scoped push to `main`, checks
+that the checkout and `origin/main` are the triggering commit, validates the
+configured release coordinates, and performs the authenticated Project query.
+It verifies pagination and target-iteration field schema without claiming that
+the in-development iteration is ready to release; a deterministic regression
+then proves the strict verifier rejects an open P0 item. `Release readiness`
+and the tag workflow continue to use the strict live gate. The proof has no
+pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
+After this change is merged, its exact-main run is the hosted proof; do not
+create the secret in a pull request or place the token in repository files.
+
+## v0.5.0 supported offline shell
+
+v0.5.0 is a supported offline three-OS Electron shell on macOS 15/26 (arm64
+and x64), Windows 11 (x64), and Ubuntu 24.04 (x64). Its release scope is Home,
+Diagnostics, Settings, capability onboarding, and a private loopback sidecar,
+distributed as signed manual installers. It excludes genealogy jobs, chat
+providers, cloud accounts, updater behavior, and background release channels.
 
 ## One-time repository setup
 
@@ -36,9 +71,9 @@ TestPyPI before the first production release.
 
 ### Hosted control verification checklist
 
-Before the readiness run, verify and record each control in the tracker issue
-named by `.github/release-config.json`, with the verifier, date, and a
-settings-page link or redacted screenshot:
+Before the readiness run, verify and record each control in the selected
+GitHub Project 2 release evidence, with the verifier, date, and a settings-page
+link or redacted screenshot:
 
 - the `main` ruleset requires the named CI and CodeQL checks, signed commits,
   resolved review conversations, and blocks force pushes and deletion;
@@ -57,15 +92,21 @@ self-approval; do not make that change during the one-maintainer release.
 
 ## Prepare and approve
 
-1. Complete every issue and pull request in the exact configured release
-   milestone without bypassing checks, except for exactly one open,
-   non-pull-request issue: the configured tracker, carrying the configured
-   `release-tracker` label. Any other open issue or pull request, another issue
-   with that label, a missing label on the configured tracker, or multiple
-   tracker exceptions blocks readiness and release. Both workflows paginate the
-   full milestone result before applying this rule. Close an item only after
-   its implementation, documentation, regression tests, dead-code review, and
-   required hosted checks are complete.
+1. Complete every P0 GitHub Issue in the exact configured GitHub Project 2
+   `Release iteration`. A selected P0 issue must be closed with Project
+   `Status: Done` and `Validation: Verified`. The workflow reads canonical
+   Issue content by repository and issue number, rather than a Project item's
+   cached display title. Every item that explicitly names the configured
+   `Release iteration` must provide all four configured Project fields; legacy
+   items outside that iteration may be incomplete. It paginates the Project
+   item connection and follows native `blockedBy` dependencies: an open
+   dependency blocks release, while a closed historical or externally tracked
+   dependency outside the selected iteration is accepted. A dependency in the
+   selected iteration must be `Done` and `Verified`. A truncated dependency
+   response, missing Project access, malformed target-iteration field, or
+   duplicate target-iteration item also blocks release. Close an item only
+   after its implementation, documentation, regression tests, dead-code
+   review, and required hosted checks are complete.
 2. For every candidate release branch and worktree, first confirm a clean
    status with `git status --short`, then audit reachability and unique commits
    with `git rev-list --left-right --count main...<branch>` and
@@ -88,8 +129,10 @@ self-approval; do not make that change during the one-maintainer release.
 4. Approve and merge a release-only preparation PR through the protected
    `main` ruleset, after required checks pass and conversations are resolved.
 5. Run the release-configuration verifier and confirm the exact configured
-   milestone has no open issues or pull requests except the single configured
-   `release-tracker` issue.
+   GitHub Project 2 P0 gate: every selected issue is `Done` and `Verified`, and
+   each dependency in the selected iteration is closed and verified. Closed
+   historical dependencies outside that iteration do not need to be added to
+   the release Project.
 6. Run `Release readiness` with the exact `main` commit and semantic version,
    and affirm the branch/worktree lifecycle audit input, backed by the
    documented reachability, unique-commit, cleanup, and preservation record.
@@ -102,14 +145,20 @@ the `pypi` environment deployment. For this one-maintainer release, that final
 approval may be self-approval by the workflow initiator. A separate explicit
 approval is required for the GitHub-only fallback described below.
 
-The workflow rechecks the exact configured milestone and tracker, permits only
-that `release-tracker` exception, and refuses every other open item. Local
-worktrees are machine-specific, so their cleanup is an explicit operator
-attestation recorded in the evidence bundle.
+The workflow rechecks the exact configured GitHub Project 2 release gate and
+refuses any incomplete selected P0 item or target-iteration dependency. Closed
+historical dependencies outside that iteration are accepted. Local worktrees
+are machine-specific, so their cleanup is an explicit operator attestation
+recorded in the evidence bundle.
+
+P0 is reserved for work that must complete before publication. An umbrella,
+roadmap, or tracker designed to close after the release must be P1 or outside
+the selected iteration; the verifier has no issue-number exception. This keeps
+the P0 gate fail-closed while retaining post-release follow-up in Project 2.
 The readiness workflow is the authoritative product-quality and security gate.
 It records the exact commit, run URL, and complete gate inventory in
-`gates.json`. The tag workflow rechecks milestone closure, requires that exact
-approved record, deterministically rebuilds the distributions and SBOM, and
+`gates.json`. The tag workflow rechecks the Project-native release gate,
+requires that exact approved record, deterministically rebuilds the distributions and SBOM, and
 compares the distribution hashes with the readiness build before any artifact
 is published. It does not repeat pytest, lint, type checking, dependency audit,
 or Semgrep after accepting the exact successful readiness evidence.
