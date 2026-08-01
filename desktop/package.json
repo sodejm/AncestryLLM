@@ -1,0 +1,94 @@
+{
+  "name": "ancestryllm-desktop",
+  "version": "0.5.0-dev",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": "26.5.0",
+    "pnpm": "11.9.0"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.shared.json --pretty false && tsc -p tsconfig.main.json --pretty false && tsc -p tsconfig.preload.json --pretty false && tsc -p tsconfig.renderer.json --pretty false && tsc -p tsconfig.test.json --pretty false",
+    "test": "vitest run && node --test scripts/*.test.mjs",
+    "build": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs",
+    "test:e2e": "pnpm build && playwright test",
+    "audit": "pnpm audit --audit-level high",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "sbom": "pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --sbom-type application --out sbom.cdx.json",
+    "security": "pnpm audit --audit-level high && pnpm check:secrets && pnpm run sbom",
+    "package": "pnpm build && node scripts/verify-sidecar.mjs && electron-builder --dir",
+    "test:security": "pnpm package && vitest run src/main/security-policy.test.ts src/main/session-policy.test.ts src/main/external-links.test.ts && node scripts/inspect-package-fuses.mjs"
+  },
+  "build": {
+    "appId": "org.ancestryllm.desktop",
+    "productName": "AncestryLLM",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/sidecar",
+        "to": "sidecar"
+      }
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": false
+    }
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "1.3.3",
+    "@tanstack/react-query": "5.101.4",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "0.468.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwind-merge": "3.6.0"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.2",
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.62.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "26.0.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "4.7.0",
+    "corepack": "0.34.0",
+    "electron": "39.8.1",
+    "electron-builder": "26.15.3",
+    "electron-builder-squirrel-windows": "26.15.3",
+    "electron-vite": "3.1.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "eslint-plugin-react-refresh": "0.4.26",
+    "globals": "15.15.0",
+    "jsdom": "26.1.0",
+    "playwright": "1.62.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0",
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
+  }
+}

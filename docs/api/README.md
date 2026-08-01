@@ -28,13 +28,14 @@ proxy headers. Runtime OpenAPI and interactive documentation routes are
 disabled.
 
 The bearer and paired build identities are immutable constructor inputs for a
-private supervisor channel. The supervisor must generate a fresh, URL-safe
-bearer with at least 256 bits of entropy for every launch and deliver it over
-private stdin, not arguments, environment, files, or renderer-visible state.
-Issue #11 validates that contract but does not implement the supervisor,
-private-stdin bootstrap, packaged process lifecycle, or Electron application.
-The optional lifecycle hook gives that future supervisor explicit async startup
-and shutdown boundaries.
+private supervisor channel. Issue #225 implements that packaged channel: the
+Electron main process generates a fresh URL-safe 256-bit bearer for every
+launch and delivers it through bounded private stdin, not arguments,
+environment, files, or renderer-visible state. The sidecar binds an ephemeral
+IPv4 loopback port and emits token-free readiness metadata; Electron verifies
+the paired build and a token-derived health proof before opening the packaged
+window. See [Packaged desktop sidecar](../DESKTOP_SIDECAR.md) for lifecycle,
+diagnostics, native targets, and remaining release gates.
 
 ## Deterministic OpenAPI
 
