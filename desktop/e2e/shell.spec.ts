@@ -5,6 +5,7 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test'
+import { PRODUCTION_CSP } from '../src/main/security-policy'
 
 const bridgeMethods = [
   'getAppInfo',
@@ -21,7 +22,6 @@ async function launchShell(fixture: 'success' | 'degraded' = 'success') {
     env: {
       ...process.env,
       ANCESTRYLLM_DESKTOP_FIXTURE: fixture,
-      ANCESTRYLLM_DESKTOP_SECURITY_E2E: '1',
     },
   })
 }
@@ -59,13 +59,36 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
     }
   })).toEqual({ frozen: true, methods: bridgeMethods })
 
-  const securityState = await app.evaluate(() => (
-    globalThis as unknown as { __ancestryllmSecurityStateForTests(): unknown }
-  ).__ancestryllmSecurityStateForTests())
+  const securityState = await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) throw new Error('No BrowserWindow')
+    const preferences = (window.webContents as unknown as {
+      getLastWebPreferences(): {
+        contextIsolation?: boolean
+        nodeIntegration?: boolean
+        nodeIntegrationInWorker?: boolean
+        nodeIntegrationInSubFrames?: boolean
+        sandbox?: boolean
+        webSecurity?: boolean
+        webviewTag?: boolean
+        devTools?: boolean
+      }
+    }).getLastWebPreferences()
+    return {
+      rendererUrl: window.webContents.getURL(),
+      contextIsolation: preferences.contextIsolation,
+      nodeIntegration: preferences.nodeIntegration,
+      nodeIntegrationInWorker: preferences.nodeIntegrationInWorker,
+      nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames,
+      sandbox: preferences.sandbox,
+      webSecurity: preferences.webSecurity,
+      webviewTag: preferences.webviewTag,
+      devTools: preferences.devTools,
+      devToolsOpen: window.webContents.isDevToolsOpened(),
+    }
+  })
   expect(securityState).toEqual({
-    mode: 'production',
     rendererUrl: 'app://bundle/index.html',
-    contentSecurityPolicy: "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
     contextIsolation: true,
     nodeIntegration: false,
     nodeIntegrationInWorker: false,
@@ -74,14 +97,16 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
     webSecurity: true,
     webviewTag: false,
     devTools: false,
-    permissionsDenied: true,
-    navigationDenied: true,
-    childWindowsDenied: true,
-    downloadsDenied: true,
-    serviceWorkersAllowed: false,
-    bypassCsp: false,
+    devToolsOpen: false,
   })
 
+  const response = await page.reload()
+  expect(await response?.headerValue('content-security-policy')).toBe(PRODUCTION_CSP)
+
+  const externalRequests: string[] = []
+  page.on('request', (request) => {
+    if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())
+  })
   const deniedCapabilities = await page.evaluate(async () => {
     let fetchBlocked = false
     try { await fetch('https://example.invalid/') } catch { fetchBlocked = true }
@@ -113,6 +138,7 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
     serviceWorkerBlocked: true,
     childWindowBlocked: true,
   })
+  expect(externalRequests).toEqual([])
 }
 
 test('built shell exposes the bounded production Home, Diagnostics, and Settings surfaces', async () => {

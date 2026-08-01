@@ -20,3 +20,17 @@ test('build inspection rejects development copy, source maps, remote assets, cre
     await assert.rejects(inspectBuild(join(root, 'out')))
   }
 })
+
+test('production build inspection rejects fixture bridge and test-hook machinery', async () => {
+  for (const contents of [
+    'createMockAncestryBridge("success")',
+    'process.env.ANCESTRYLLM_DESKTOP_FIXTURE',
+    'process.env.ANCESTRYLLM_DESKTOP_SECURITY_E2E',
+    'globalThis.__ancestryllmSecurityStateForTests = () => ({})',
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+    await mkdir(join(root, 'out'))
+    await writeFile(join(root, 'out', 'index.js'), contents)
+    await assert.rejects(inspectBuild(join(root, 'out')))
+  }
+})

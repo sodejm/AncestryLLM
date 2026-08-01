@@ -3,8 +3,16 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
+const fixtureBuild = ['dev', 'build:e2e'].includes(process.env.npm_lifecycle_event ?? '')
+
 export default defineConfig({
-  main: { plugins: [externalizeDepsPlugin()], build: { sourcemap: false } },
+  main: {
+    plugins: [externalizeDepsPlugin()],
+    ...(fixtureBuild
+      ? { resolve: { alias: { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') } } }
+      : {}),
+    build: { sourcemap: false },
+  },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
