@@ -34,6 +34,9 @@ function Shell() {
   useEffect(() => { if (route === 'diagnostics') void refetchStartup() }, [refetchStartup, route])
   const result: BridgeResult<StartupDiagnostics> | undefined = startup.data
   const preferenceData = preferences.data?.ok ? preferences.data.data : undefined
+  useEffect(() => {
+    if (preferenceData) document.documentElement.dataset.theme = preferenceData.colorScheme
+  }, [preferenceData])
   const status = result?.ok
     ? ({ starting: 'Starting', ready: 'Ready', degraded: 'Degraded', stopped: 'Stopped' } as const)[result.data.state]
     : 'Unavailable'
@@ -44,7 +47,6 @@ function Shell() {
       const updated = await ancestryBridge().updatePreferences({ expectedRevision: preferenceData.revision, colorScheme })
       if (updated.ok) {
         queryClient.setQueryData(['preferences'], updated)
-        document.documentElement.dataset.theme = updated.data.colorScheme
         await preferences.refetch()
       }
     } finally {

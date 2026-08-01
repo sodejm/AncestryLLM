@@ -6,7 +6,10 @@ import { createMockAncestryBridge } from '../../mock-bridge/desktop'
 import { App } from './App'
 
 describe('accessible desktop shell', () => {
-  beforeEach(() => { window.location.hash = '#/' })
+  beforeEach(() => {
+    window.location.hash = '#/'
+    delete document.documentElement.dataset.theme
+  })
   it('supports keyboard navigation across Home, Diagnostics, and Settings', async () => {
     const bridge = createMockAncestryBridge('success')
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
@@ -46,6 +49,16 @@ describe('accessible desktop shell', () => {
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'dark' }))
     expect(update).toHaveBeenCalledWith({ expectedRevision: 0, colorScheme: 'dark' })
+  })
+
+  it('applies the persisted color scheme when a renderer opens', async () => {
+    const bridge = createMockAncestryBridge('success')
+    await bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark' })
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    expect(await screen.findByRole('radio', { name: 'dark' })).toBeChecked()
+    expect(document.documentElement.dataset.theme).toBe('dark')
   })
 
   it('does not reuse a stale revision while a preference update is pending', async () => {
