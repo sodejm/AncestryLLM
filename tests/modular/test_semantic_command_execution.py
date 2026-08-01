@@ -45,25 +45,61 @@ def test_generic_structured_and_table_results_reject_host_paths() -> None:
         table_result(("output",), ({"output": Path("private.ged")},))
 
 
+def test_database_backup_returns_a_path_free_file_artifact(
+    tmp_path: Path,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "PRIVATE-HOST-PATH" / "encrypted-backup.db"
+    destination.parent.mkdir()
+
+    def backup(_self: object, selected_destination: Path) -> None:
+        assert selected_destination == destination.resolve()
+        selected_destination.write_bytes(b"fictional encrypted backup")
+
+    monkeypatch.setattr(type(app_context.database), "backup", backup)
+
+    outcome = DatabaseExecutor(app_context)(_invocation(["database", "backup", str(destination)]))
+    serialized = outcome.result.to_serializable()
+
+    assert isinstance(outcome.result, FileArtifactResult)
+    assert isinstance(serialized, dict)
+    assert serialized["artifact_type"] == "encrypted_database_backup"
+    assert serialized["media_type"] == "application/octet-stream"
+    assert serialized["status"] == "ready"
+    assert str(destination) not in json.dumps(serialized)
+    assert "PRIVATE-HOST-PATH" not in json.dumps(serialized)
+
+
 def test_rootsmagic_list_returns_stable_consumable_tree_records(
     tmp_path: Path,
     app_context: AppContext,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tree = tmp_path / "Fictional.rmtree"
-    tree.write_bytes(b"fictional rootsmagic database")
-    selected_refs: list[str] = []
+    first_tree = tmp_path / "PRIVATE-FIRST-ROOT" / "Fictional.rmtree"
+    second_tree = tmp_path / "PRIVATE-SECOND-ROOT" / "Fictional.rmtree"
+    first_tree.parent.mkdir()
+    second_tree.parent.mkdir()
+    first_tree.write_bytes(b"first fictional rootsmagic database")
+    second_tree.write_bytes(b"second fictional rootsmagic database")
+    trees = [first_tree, second_tree]
+    selected_trees: list[Path] = []
     monkeypatch.setattr(
         "ancestryllm.rootsmagic.service.RootsMagicService.list_trees",
-        lambda _self: [tree],
-    )
-    monkeypatch.setattr(
-        "ancestryllm.rootsmagic.service.RootsMagicService.query_sql",
-        lambda _self, tree_ref, _sql: selected_refs.append(tree_ref) or {"rows": []},
+        lambda _self: trees,
     )
 
-    def export(_self: object, tree_ref: str, output: Path, **kwargs: object) -> object:
-        selected_refs.append(tree_ref)
+    def query_sql(_self: object, selected_tree: Path, _sql: str) -> dict[str, list[object]]:
+        selected_trees.append(selected_tree)
+        return {"rows": []}
+
+    monkeypatch.setattr(
+        "ancestryllm.rootsmagic.service.RootsMagicService.query_sql",
+        query_sql,
+    )
+
+    def export(_self: object, selected_tree: Path, output: Path, **kwargs: object) -> object:
+        selected_trees.append(selected_tree)
         report = kwargs["report_path"]
         assert isinstance(report, Path)
         output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
@@ -77,39 +113,42 @@ def test_rootsmagic_list_returns_stable_consumable_tree_records(
 
     outcome = RootsMagicExecutor(app_context)(_invocation(["rootsmagic", "list"]))
     serialized = outcome.result.to_serializable()
+    repeated = RootsMagicExecutor(app_context)(_invocation(["rootsmagic", "list"])).result
 
     assert isinstance(outcome.result, TableResult)
     assert isinstance(serialized, list)
-    assert serialized == [
-        {
-            "tree_ref": "Fictional.rmtree",
-            "label": "Fictional",
-            "immutable": True,
-        }
-    ]
-    assert str(tree) not in json.dumps(serialized)
+    assert len(serialized) == 2
+    assert repeated.to_serializable() == serialized
+    assert [record["label"] for record in serialized] == ["Fictional", "Fictional"]
+    assert all(record["immutable"] is True for record in serialized)
+    tree_refs = [record["tree_ref"] for record in serialized]
+    assert all(isinstance(tree_ref, str) and tree_ref.startswith("tree_") for tree_ref in tree_refs)
+    assert len(set(tree_refs)) == 2
+    serialized_json = json.dumps(serialized)
+    assert str(first_tree.parent) not in serialized_json
+    assert str(second_tree.parent) not in serialized_json
 
-    tree_ref = serialized[0]["tree_ref"]
-    assert isinstance(tree_ref, str)
-    RootsMagicExecutor(app_context)(
-        _invocation(["rootsmagic", "query", "--tree", tree_ref, "--sql", "SELECT 1"])
-    )
-    RootsMagicExecutor(app_context)(
-        _invocation(
-            [
-                "rootsmagic",
-                "export",
-                "--tree",
-                tree_ref,
-                "--output",
-                str(tmp_path / "family.ged"),
-                "--report",
-                str(tmp_path / "family.export.md"),
-            ]
+    for index, (tree_ref, expected_tree) in enumerate(zip(tree_refs, trees, strict=True)):
+        RootsMagicExecutor(app_context)(
+            _invocation(["rootsmagic", "query", "--tree", tree_ref, "--sql", "SELECT 1"])
         )
-    )
+        RootsMagicExecutor(app_context)(
+            _invocation(
+                [
+                    "rootsmagic",
+                    "export",
+                    "--tree",
+                    tree_ref,
+                    "--output",
+                    str(tmp_path / f"family-{index}.ged"),
+                    "--report",
+                    str(tmp_path / f"family-{index}.export.md"),
+                ]
+            )
+        )
+        assert selected_trees[-2:] == [expected_tree, expected_tree]
 
-    assert selected_refs == [tree_ref, tree_ref]
+    assert selected_trees == [first_tree, first_tree, second_tree, second_tree]
 
 
 @pytest.mark.parametrize("action", ("merge", "subtree", "quality"))

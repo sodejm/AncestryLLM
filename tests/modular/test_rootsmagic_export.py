@@ -892,20 +892,8 @@ def test_export_result_json_preserves_the_public_field_set(
         living="include",
     )
 
-    plain = to_plain(result)
-
-    assert set(plain) == {"output_path", "report_path", "report"}
-    assert set(plain["report"]) == {
-        "profile",
-        "destination",
-        "people_read",
-        "people_written",
-        "families_written",
-        "living_omitted",
-        "mapped_tables",
-        "unmapped_tables",
-        "unmapped_columns",
-    }
+    with pytest.raises(TypeError, match="must not contain Path host objects"):
+        to_plain(result)
 
 
 @pytest.mark.parametrize("destination", ["generic", "ancestry", "geni", "myheritage"])

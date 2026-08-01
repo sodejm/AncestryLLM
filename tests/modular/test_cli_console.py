@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -23,6 +24,10 @@ from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
+
+
+def _expected_tree_ref(tree: Path) -> str:
+    return f"tree_{hashlib.sha256(os.fsencode(str(tree.resolve(strict=True)))).hexdigest()}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +87,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
             (),
             [
                 {
-                    "tree_ref": fictional_files["rootsmagic"].name,
+                    "tree_ref": _expected_tree_ref(fictional_files["rootsmagic"]),
                     "label": fictional_files["rootsmagic"].stem,
                     "immutable": True,
                 }
@@ -265,7 +270,15 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
         ),
         CommandCase("modules", "disable", ("ocr",), "Disabled module: ocr"),
         CommandCase("modules", "enable", ("ocr",), "Enabled module: ocr"),
-        CommandCase("database", "backup", (backup,), f"Encrypted backup created: {backup}"),
+        CommandCase(
+            "database",
+            "backup",
+            (backup,),
+            OpaqueArtifactExpectation(
+                (("encrypted_database_backup", "application/octet-stream"),),
+                file_result=True,
+            ),
+        ),
         CommandCase(
             "database",
             "diagnose",
@@ -901,6 +914,41 @@ def test_secret_values_never_reach_one_shot_status_output(
 def test_database_diagnostics_are_available_as_json(app_context: AppContext, capsys) -> None:
     assert main(["--json", "database", "diagnose"], app_context) == 0
     assert '"code": "SQLCIPHER_READY"' in capsys.readouterr().out
+
+
+def test_database_json_results_hide_host_paths(
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_parent = tmp_path / "PRIVATE-HOST-DATABASE-PATH"
+    private_parent.mkdir()
+    backup_path = private_parent / "encrypted-backup.db"
+
+    def backup(_self: object, destination: Path) -> None:
+        destination.write_bytes(b"fictional encrypted backup")
+
+    monkeypatch.setattr(type(app_context.database), "backup", backup)
+
+    assert main(["--json", "database", "backup", str(backup_path)], app_context) == 0
+    backup_output = capsys.readouterr().out
+    backup_result = json.loads(backup_output)
+    _assert_artifact_ref(
+        backup_result,
+        artifact_type="encrypted_database_backup",
+        media_type="application/octet-stream",
+    )
+    assert str(private_parent) not in backup_output
+    assert "PRIVATE-HOST-DATABASE-PATH" not in backup_output
+
+    app_context.database.path = private_parent / "missing" / "workspace.db"
+    assert main(["--json", "database", "diagnose"], app_context) == 0
+    diagnostic_output = capsys.readouterr().out
+    diagnostic_result = json.loads(diagnostic_output)
+    assert "DATABASE_DIRECTORY_MISSING" in {item["code"] for item in diagnostic_result}
+    assert str(private_parent) not in diagnostic_output
+    assert "PRIVATE-HOST-DATABASE-PATH" not in diagnostic_output
 
 
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
