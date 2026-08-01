@@ -57,13 +57,11 @@ class PresentationAdapter:
 
     def render(self, value: Any, *, json_output: bool = False) -> None:
         if json_output:
-            plain = to_plain(value)
-            self.console.file.write(json.dumps(plain, indent=2, sort_keys=True))
-            self.console.file.write("\n")
+            self._print_text(json.dumps(to_plain(value), indent=2, sort_keys=True))
         elif isinstance(value, MarkdownResult):
-            self.console.file.write(value.markdown)
+            self._print_text(value.markdown, end="")
         elif isinstance(value, SuccessResult):
-            self.console.print(value.message)
+            self._print_text(value.message)
         elif isinstance(value, TableResult):
             self._render_table(value)
         elif isinstance(value, WarningResult):
@@ -85,7 +83,7 @@ class PresentationAdapter:
     def _render_table(self, result: TableResult) -> None:
         for row in result.rows:
             item = dict(zip(result.columns, row, strict=True))
-            self.console.print(json.dumps(item, sort_keys=True))
+            self._print_text(json.dumps(item, sort_keys=True))
 
     def _render_error_envelope(self, error: ErrorEnvelope) -> None:
         message = f"[{error.code}] {error.message}"
@@ -101,14 +99,25 @@ class PresentationAdapter:
 
     def _render_plain(self, plain: Any) -> None:
         if isinstance(plain, str):
-            self.console.print(plain)
+            self._print_text(plain)
         elif isinstance(plain, list):
             for item in plain:
-                self.console.print(
+                self._print_text(
                     item if isinstance(item, str) else json.dumps(item, sort_keys=True)
                 )
         else:
-            self.console.print(json.dumps(plain, indent=2, sort_keys=True))
+            self._print_text(json.dumps(plain, indent=2, sort_keys=True))
+
+    def _print_text(self, value: str, *, end: str = "\n") -> None:
+        """Render literal application text without interpreting Rich markup."""
+
+        self.console.print(
+            Text(value),
+            end=end,
+            no_wrap=True,
+            overflow="ignore",
+            crop=False,
+        )
 
 
 __all__ = ["PresentationAdapter", "to_plain"]
