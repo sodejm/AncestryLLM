@@ -10,6 +10,7 @@ from typing import Protocol
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.operations import TreeRecord
+from ancestryllm.application.ports import ProgressPort
 from ancestryllm.application.results import FileArtifactResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -91,13 +92,23 @@ def _resolve_tree_ref(service: _TreeLister, selection: str) -> str | Path:
 
 
 class RootsMagicExecutor:
-    def __init__(self, context: AppContext) -> None:
+    def __init__(
+        self,
+        context: AppContext,
+        *,
+        progress: ProgressPort | None = None,
+    ) -> None:
         self._context = context
+        self._progress = progress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
         from ancestryllm.rootsmagic.service import RootsMagicService
 
-        service = RootsMagicService(self._context.config, self._context.llm)
+        service = RootsMagicService(
+            self._context.config,
+            self._context.llm,
+            progress=self._progress,
+        )
         if invocation.key.action == "list":
             records: list[dict[str, object]] = []
             for _tree, record in _tree_entries(service.list_trees()):

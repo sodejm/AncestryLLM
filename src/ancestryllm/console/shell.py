@@ -15,6 +15,7 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 
+from ancestryllm.application._compat import _CurrentProgressAdapter
 from ancestryllm.application.results import CommandResult, FileArtifactResult
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
@@ -369,8 +370,21 @@ class ReplApplication:
             if isinstance(result, FileArtifactResult):
                 artifact_count += 1 + len(result.related_artifacts)
 
-        exit_code = dispatch(namespace, self.context, emit=capture)
+        exit_code = dispatch(
+            namespace,
+            self.context,
+            emit=capture,
+            progress=_CurrentProgressAdapter(reporter),
+        )
         reporter.check_cancelled()
+        if exit_code != 0:
+            raise AncestryError(
+                "COMMAND_EXIT_NONZERO",
+                "The background command did not complete successfully.",
+                "Review the command and retry after correcting the failure.",
+                exit_code=exit_code,
+                details={"exit_code": exit_code},
+            )
         if artifact_count:
             noun = "artifact reference" if artifact_count == 1 else "artifact references"
             reporter.set_outcome(
