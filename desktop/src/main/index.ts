@@ -28,9 +28,18 @@ import { installSessionPolicy } from './session-policy'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
 import { createSidecarCapabilitiesClient } from './sidecar-client'
 import { resolveSidecarExecutable, SidecarSupervisor } from './sidecar-supervisor'
+import { installSingleInstanceGuard } from './single-instance'
 
 app.enableSandbox()
-protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
+const primaryInstance = installSingleInstanceGuard({
+  requestLock: () => app.requestSingleInstanceLock(),
+  quit: () => app.quit(),
+  onSecondInstance: (listener) => { app.on('second-instance', listener) },
+  primaryWindow: () => BrowserWindow.getAllWindows()[0],
+})
+if (primaryInstance) {
+  protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
+}
 
 const fixture = process.env.ANCESTRYLLM_DESKTOP_FIXTURE
 let bridge: AncestryBridge = createMockAncestryBridge(
@@ -73,21 +82,23 @@ function denyWebContentsCapabilities(contents: WebContents): void {
 const configuredPreferences = new WeakMap<WebContents, ReturnType<typeof secureWebPreferences>>()
 let pendingWindowPreferences: ReturnType<typeof secureWebPreferences> | null = null
 
-app.on('web-contents-created', (_event, contents) => {
-  const preferences = pendingWindowPreferences
-  if (contents.getType() === 'window' && !preferences) {
-    contents.close({ waitForBeforeUnload: false })
-    app.exit(1)
-    return
-  }
-  if (!preferences) {
-    if (isProductionRenderer()) contents.close({ waitForBeforeUnload: false })
-    return
-  }
-  assertSecureWebPreferences(preferences, isProductionRenderer())
-  configuredPreferences.set(contents, preferences)
-  denyWebContentsCapabilities(contents)
-})
+if (primaryInstance) {
+  app.on('web-contents-created', (_event, contents) => {
+    const preferences = pendingWindowPreferences
+    if (contents.getType() === 'window' && !preferences) {
+      contents.close({ waitForBeforeUnload: false })
+      app.exit(1)
+      return
+    }
+    if (!preferences) {
+      if (isProductionRenderer()) contents.close({ waitForBeforeUnload: false })
+      return
+    }
+    assertSecureWebPreferences(preferences, isProductionRenderer())
+    configuredPreferences.set(contents, preferences)
+    denyWebContentsCapabilities(contents)
+  })
+}
 
 function runtimeSecurityState(window: BrowserWindow) {
   const preferences = configuredPreferences.get(window.webContents)
@@ -156,35 +167,37 @@ async function startPackagedSidecar(): Promise<void> {
   await sidecarSupervisor.start()
 }
 
-app.whenReady().then(async () => {
-  await startPackagedSidecar().catch(() => undefined)
-  await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
-  installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
-  registerIpcHandlers()
-  createWindow()
-  if (process.env.ANCESTRYLLM_DESKTOP_SECURITY_E2E === '1') {
-    Object.defineProperty(globalThis, '__ancestryllmSecurityStateForTests', {
-      configurable: false,
-      value: () => {
-        const window = BrowserWindow.getAllWindows()[0]
-        if (!window) throw new Error('No BrowserWindow')
-        return runtimeSecurityState(window)
-      },
-      writable: false,
-    })
-  }
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-})
-app.on('before-quit', (event) => {
-  if (shutdownAuthorized || (!sidecarSupervisor && !shutdownPromise)) return
-  event.preventDefault()
-  if (!shutdownPromise && sidecarSupervisor) {
-    const supervisor = sidecarSupervisor
-    sidecarSupervisor = undefined
-    shutdownPromise = supervisor.stop().finally(() => {
-      shutdownAuthorized = true
-      app.quit()
-    })
-  }
-})
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+if (primaryInstance) {
+  app.whenReady().then(async () => {
+    await startPackagedSidecar().catch(() => undefined)
+    await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
+    installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
+    registerIpcHandlers()
+    createWindow()
+    if (process.env.ANCESTRYLLM_DESKTOP_SECURITY_E2E === '1') {
+      Object.defineProperty(globalThis, '__ancestryllmSecurityStateForTests', {
+        configurable: false,
+        value: () => {
+          const window = BrowserWindow.getAllWindows()[0]
+          if (!window) throw new Error('No BrowserWindow')
+          return runtimeSecurityState(window)
+        },
+        writable: false,
+      })
+    }
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  })
+  app.on('before-quit', (event) => {
+    if (shutdownAuthorized || (!sidecarSupervisor && !shutdownPromise)) return
+    event.preventDefault()
+    if (!shutdownPromise && sidecarSupervisor) {
+      const supervisor = sidecarSupervisor
+      sidecarSupervisor = undefined
+      shutdownPromise = supervisor.stop().finally(() => {
+        shutdownAuthorized = true
+        app.quit()
+      })
+    }
+  })
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+}

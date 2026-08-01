@@ -82,6 +82,22 @@ describe('FilePreferencesStore', () => {
     await expect(store.get()).resolves.toMatchObject({ revision: 1 })
   })
 
+  it('serializes same-path writes across store instances', async () => {
+    const directory = await temporaryDirectory()
+    const firstStore = new FilePreferencesStore(directory)
+    const secondStore = new FilePreferencesStore(directory)
+
+    const writes = await Promise.allSettled([
+      firstStore.update({ expectedRevision: 0, colorScheme: 'dark' }),
+      secondStore.update({ expectedRevision: 0, reducedMotion: true }),
+    ])
+
+    expect(writes.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = writes.find((result) => result.status === 'rejected')
+    expect(rejected).toMatchObject({ status: 'rejected', reason: expect.any(PreferencesConflictError) })
+    await expect(new FilePreferencesStore(directory).get()).resolves.toMatchObject({ revision: 1 })
+  })
+
   it('returns defaults for corrupt data and refuses to overwrite it with path-free diagnostics', async () => {
     const directory = await temporaryDirectory()
     const file = join(directory, 'preferences.json')

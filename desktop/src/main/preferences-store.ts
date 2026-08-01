@@ -6,6 +6,7 @@ import type { LocalPreferences, PreferenceUpdate } from '../shared-contract/desk
 
 const PREFERENCES_FILE_NAME = 'preferences.json'
 const MAX_PREFERENCES_BYTES = 8_192
+const pendingByFile = new Map<string, Promise<void>>()
 
 export type PreferencesDiagnosticCode =
   | 'PREFERENCES_FILE_MISSING'
@@ -169,11 +170,21 @@ function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.ino !== 0n && right.ino !== 0n && left.dev === right.dev && left.ino === right.ino
 }
 
+function serializeFileOperation<T>(file: string, operation: () => Promise<T>): Promise<T> {
+  const previous = pendingByFile.get(file) ?? Promise.resolve()
+  const result = previous.then(operation, operation)
+  const settled = result.then(() => undefined, () => undefined)
+  pendingByFile.set(file, settled)
+  void settled.then(() => {
+    if (pendingByFile.get(file) === settled) pendingByFile.delete(file)
+  })
+  return result
+}
+
 export class FilePreferencesStore implements PreferencesStore {
   private readonly directory: string
   private readonly file: string
   private readonly onDiagnostic: PreferencesDiagnosticSink
-  private pending: Promise<void> = Promise.resolve()
 
   constructor(directory: string, onDiagnostic: PreferencesDiagnosticSink = () => undefined) {
     if (!isAbsolute(directory)) throw new PreferencesStorageError('PREFERENCES_UNSAFE_STORAGE')
@@ -211,9 +222,7 @@ export class FilePreferencesStore implements PreferencesStore {
   }
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.pending.then(operation, operation)
-    this.pending = result.then(() => undefined, () => undefined)
-    return result
+    return serializeFileOperation(this.file, operation)
   }
 
   private diagnostic(code: PreferencesDiagnosticCode): void {
