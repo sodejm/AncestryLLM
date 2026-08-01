@@ -105,6 +105,11 @@ path only inside the owning process. Results return an `ArtifactRef` containing
 an unpredictable identity, media type, artifact type, status, bounded size,
 and optional digest—not a path.
 
+Command results preserve that rule: tabular artifact listings contain only
+`ArtifactRef` fields, and file-producing commands return a primary artifact
+plus any related artifacts as opaque references. Terminal adapters render
+those references but do not recover or expose their adapter-owned paths.
+
 Output publication is staged, claimed, cancellation-checked, and atomically
 published through the hardened publication helpers. Cancellation before
 publication removes the staged artifact and preserves any previous

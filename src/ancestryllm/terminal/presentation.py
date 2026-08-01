@@ -10,7 +10,16 @@ from typing import Any, TextIO, cast
 from rich.console import Console
 from rich.text import Text
 
-from ancestryllm.application.results import CommandResult, MarkdownResult
+from ancestryllm.application.dto import ErrorEnvelope
+from ancestryllm.application.errors import error_envelope
+from ancestryllm.application.results import (
+    CommandResult,
+    ErrorResult,
+    MarkdownResult,
+    SuccessResult,
+    TableResult,
+    WarningResult,
+)
 from ancestryllm.core.errors import AncestryError
 
 
@@ -51,7 +60,33 @@ class PresentationAdapter:
             self.console.file.write("\n")
         elif isinstance(value, MarkdownResult):
             self.console.file.write(value.markdown)
-        elif isinstance(plain, str):
+        elif isinstance(value, SuccessResult):
+            self.console.print(value.message)
+        elif isinstance(value, TableResult):
+            self._render_table(value)
+        elif isinstance(value, WarningResult):
+            self.console.print(Text(f"[{value.code}] {value.message}", style="bold yellow"))
+        elif isinstance(value, ErrorResult):
+            self._render_error_envelope(value.error)
+        else:
+            self._render_plain(plain)
+
+    def render_error(self, error: AncestryError) -> None:
+        self.render(ErrorResult(error_envelope(error)))
+
+    def _render_table(self, result: TableResult) -> None:
+        for row in result.rows:
+            item = dict(zip(result.columns, row, strict=True))
+            self.console.print(json.dumps(item, sort_keys=True))
+
+    def _render_error_envelope(self, error: ErrorEnvelope) -> None:
+        message = f"[{error.code}] {error.message}"
+        if error.remediation:
+            message += f"\nHow to fix: {error.remediation}"
+        self.console.print(Text(message, style="bold red"))
+
+    def _render_plain(self, plain: Any) -> None:
+        if isinstance(plain, str):
             self.console.print(plain)
         elif isinstance(plain, list):
             for item in plain:
@@ -60,9 +95,6 @@ class PresentationAdapter:
                 )
         else:
             self.console.print(json.dumps(plain, indent=2, sort_keys=True))
-
-    def render_error(self, error: AncestryError) -> None:
-        self.console.print(Text(error.render(), style="bold red"))
 
 
 __all__ = ["PresentationAdapter", "to_plain"]

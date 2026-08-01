@@ -6,7 +6,17 @@ from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.modules import ModuleRegistry
-from ancestryllm.execution.common import descriptor_payload, structured_result, text
+from ancestryllm.execution.common import descriptor_payload, table_result, text
+
+_MODULE_COLUMNS = (
+    "module_id",
+    "name",
+    "summary",
+    "actions",
+    "implementation",
+    "configuration",
+    "required_services",
+)
 
 
 class ModulesExecutor:
@@ -17,8 +27,9 @@ class ModulesExecutor:
         action = invocation.key.action
         if action == "list":
             return CommandOutcome(
-                structured_result(
-                    [descriptor_payload(item) for item in self._registry.descriptors()]
+                table_result(
+                    _MODULE_COLUMNS,
+                    (descriptor_payload(item) for item in self._registry.descriptors()),
                 )
             )
         elif action == "enable":

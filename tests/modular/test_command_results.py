@@ -34,6 +34,17 @@ def _artifact() -> ArtifactRef:
     )
 
 
+def _related_artifact() -> ArtifactRef:
+    return ArtifactRef(
+        artifact_id=f"art_{'c' * 32}",
+        media_type="text/markdown",
+        artifact_type="export_report",
+        size_bytes=24,
+        status=ArtifactStatus.READY,
+        sha256="d" * 64,
+    )
+
+
 @pytest.mark.parametrize(
     ("result", "expected"),
     (
@@ -100,6 +111,18 @@ def test_every_declared_command_result_has_a_strict_json_value(
 def test_structured_results_reject_host_objects_at_the_application_boundary() -> None:
     with pytest.raises(TypeError, match="JSON-compatible"):
         StructuredResult({"path": Path("private.ged")})  # type: ignore[dict-item]
+
+
+def test_file_artifact_result_can_describe_a_path_free_related_artifact() -> None:
+    result = FileArtifactResult(_artifact(), related_artifacts=(_related_artifact(),))
+
+    serialized = result.to_serializable()
+
+    assert serialized == {
+        "artifact": _artifact().to_serializable(),
+        "related_artifacts": [_related_artifact().to_serializable()],
+    }
+    assert "private" not in json.dumps(serialized)
 
 
 def test_command_outcome_requires_one_declared_result_contract() -> None:

@@ -148,12 +148,20 @@ class MarkdownResult(CommandResult):
 
 @dataclass(frozen=True, slots=True)
 class FileArtifactResult(CommandResult):
-    """An opaque file artifact reference without a host filesystem path."""
+    """Opaque primary and related file artifacts without host filesystem paths."""
 
     kind: ClassVar[ResultKind] = ResultKind.FILE_ARTIFACT
     artifact: ArtifactRef
+    related_artifacts: tuple[ArtifactRef, ...] = ()
 
     def to_serializable(self) -> JSONValue:
+        if self.related_artifacts:
+            return {
+                "artifact": self.artifact.to_serializable(),
+                "related_artifacts": [
+                    artifact.to_serializable() for artifact in self.related_artifacts
+                ],
+            }
         return self.artifact.to_serializable()
 
 

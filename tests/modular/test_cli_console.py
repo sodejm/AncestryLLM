@@ -37,6 +37,12 @@ class CommandCase:
         return [self.module, self.action, *self.arguments]
 
 
+@dataclass(frozen=True, slots=True)
+class OpaqueArtifactExpectation:
+    artifacts: tuple[tuple[str, str], ...]
+    file_result: bool = False
+
+
 @pytest.fixture
 def fictional_files(tmp_path: Path) -> dict[str, Path]:
     gedcom = tmp_path / "fictional-tree.ged"
@@ -48,9 +54,12 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
     ocr.write_text("Ada Example was born in Fiction County.", encoding="utf-8")
     schema = tmp_path / "fictional-schema.json"
     schema.write_text('{"type": "object"}', encoding="utf-8")
+    rootsmagic = tmp_path / "fictional-tree.rmtree"
+    rootsmagic.write_bytes(b"fictional RootsMagic database")
     return {
         "gedcom": gedcom,
         "ocr": ocr,
+        "rootsmagic": rootsmagic,
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
@@ -67,7 +76,12 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
     schema = str(fictional_files["schema"])
     backup = str(fictional_files["backup"])
     return (
-        CommandCase("rootsmagic", "list", (), {"module": "rootsmagic", "action": "list"}),
+        CommandCase(
+            "rootsmagic",
+            "list",
+            (),
+            OpaqueArtifactExpectation((("rootsmagic_tree", "application/vnd.sqlite3"),)),
+        ),
         CommandCase(
             "rootsmagic",
             "query",
@@ -87,7 +101,13 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
                 "--living",
                 "redact",
             ),
-            {"module": "rootsmagic", "action": "export"},
+            OpaqueArtifactExpectation(
+                (
+                    ("gedcom_export", "text/vnd.familysearch.gedcom"),
+                    ("export_report", "text/markdown"),
+                ),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
@@ -238,24 +258,36 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
 
 
 @pytest.fixture
-def mocked_action_services(app_context: AppContext, monkeypatch: pytest.MonkeyPatch) -> None:
+def mocked_action_services(
+    app_context: AppContext,
+    fictional_files: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from ancestryllm.gedcom.service import GedcomService
     from ancestryllm.ocr.service import OcrService
     from ancestryllm.rootsmagic.service import RootsMagicService
 
     monkeypatch.setattr(
-        RootsMagicService, "list_trees", lambda _self: {"module": "rootsmagic", "action": "list"}
+        RootsMagicService, "list_trees", lambda _self: [fictional_files["rootsmagic"]]
     )
     monkeypatch.setattr(
         RootsMagicService,
         "query_sql",
         lambda _self, *_args, **_kwargs: {"module": "rootsmagic", "action": "query"},
     )
-    monkeypatch.setattr(
-        RootsMagicService,
-        "export",
-        lambda _self, *_args, **_kwargs: {"module": "rootsmagic", "action": "export"},
-    )
+
+    def export_rootsmagic(
+        _self: RootsMagicService,
+        _tree: str,
+        output: Path,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        report = kwargs["report_path"] or output.resolve().with_suffix(".export.md")
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        report.write_text("# Fictional export report\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output, report_path=report)
+
+    monkeypatch.setattr(RootsMagicService, "export", export_rootsmagic)
     monkeypatch.setattr(
         GedcomService,
         "merge",
@@ -315,6 +347,53 @@ def _expected_value(case: CommandCase, context: AppContext) -> Any:
     return case.expected(context) if callable(case.expected) else case.expected
 
 
+def _assert_artifact_ref(
+    value: Any,
+    *,
+    artifact_type: str,
+    media_type: str,
+) -> None:
+    assert isinstance(value, dict)
+    assert set(value) == {
+        "artifact_id",
+        "media_type",
+        "artifact_type",
+        "size_bytes",
+        "status",
+        "sha256",
+    }
+    assert value["artifact_id"].startswith("art_")
+    assert len(value["artifact_id"]) == 68
+    assert value["artifact_type"] == artifact_type
+    assert value["media_type"] == media_type
+    assert isinstance(value["size_bytes"], int)
+    assert value["size_bytes"] > 0
+    assert value["status"] == "ready"
+    assert isinstance(value["sha256"], str)
+    assert len(value["sha256"]) == 64
+    assert all(character in "0123456789abcdef" for character in value["sha256"])
+
+
+def _assert_expected(actual: Any, expected: Any) -> None:
+    if not isinstance(expected, OpaqueArtifactExpectation):
+        assert actual == to_plain(expected)
+        return
+    if expected.file_result:
+        assert isinstance(actual, dict)
+        assert set(actual) == {"artifact", "related_artifacts"}
+        artifacts = [actual["artifact"], *actual["related_artifacts"]]
+    else:
+        assert isinstance(actual, list)
+        artifacts = actual
+    assert len(artifacts) == len(expected.artifacts)
+    for artifact, (artifact_type, media_type) in zip(artifacts, expected.artifacts, strict=True):
+        _assert_artifact_ref(
+            artifact,
+            artifact_type=artifact_type,
+            media_type=media_type,
+        )
+
+
 def test_action_matrix_covers_every_shipped_module_action(
     command_cases: tuple[CommandCase, ...],
 ) -> None:
@@ -349,8 +428,8 @@ def test_one_shot_returns_expected_dtos_for_every_action(
 
     assert main(["--json", *case.tokens], app_context) == 0
 
-    expected = [to_plain(_expected_value(case, app_context))]
-    assert rendered == expected
+    assert len(rendered) == 1
+    _assert_expected(rendered[0], _expected_value(case, app_context))
     assert secret_value not in json.dumps(rendered, ensure_ascii=False)
 
 
@@ -368,7 +447,7 @@ def test_every_action_serializes_json_and_repl_routes_direct_and_module_context(
     for case in command_cases:
         assert main(["--json", *case.tokens], app_context) == 0
         stdout, stderr = capsys.readouterr()
-        assert json.loads(stdout) == to_plain(_expected_value(case, app_context))
+        _assert_expected(json.loads(stdout), _expected_value(case, app_context))
         assert stderr == ""
         router = SessionRouter(app_context)
         direct = router.route_tokens(tuple(case.tokens))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from enum import Enum
@@ -13,7 +13,7 @@ from uuid import UUID
 
 from ancestryllm.application.dto import JSONValue
 from ancestryllm.application.executor import CommandInvocation
-from ancestryllm.application.results import StructuredResult
+from ancestryllm.application.results import StructuredResult, TableResult
 from ancestryllm.core.commands import ModuleDescriptor
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -192,6 +192,19 @@ def structured_result(value: object) -> StructuredResult:
     return StructuredResult(cast(JSONValue, _serializable_value(value)))
 
 
+def table_result(
+    columns: tuple[str, ...],
+    records: Iterable[Mapping[str, object]],
+) -> TableResult:
+    """Declare tabular records while preserving their established JSON shape."""
+
+    rows = tuple(
+        tuple(cast(JSONValue, _serializable_value(record.get(column))) for column in columns)
+        for record in records
+    )
+    return TableResult(columns=columns, rows=rows)
+
+
 __all__ = [
     "boolean",
     "consent",
@@ -204,6 +217,7 @@ __all__ = [
     "optional_text",
     "path",
     "structured_result",
+    "table_result",
     "text",
     "text_values",
 ]

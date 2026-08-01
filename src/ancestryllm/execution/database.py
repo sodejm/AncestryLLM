@@ -5,7 +5,9 @@ from __future__ import annotations
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
 from ancestryllm.core.context import AppContext
-from ancestryllm.execution.common import path, structured_result
+from ancestryllm.execution.common import path, table_result
+
+_DIAGNOSTIC_COLUMNS = ("code", "status", "message", "remediation")
 
 
 class DatabaseExecutor:
@@ -17,8 +19,9 @@ class DatabaseExecutor:
             from ancestryllm.storage.diagnostics import diagnose_storage
 
             return CommandOutcome(
-                structured_result(
-                    diagnose_storage(self._context.database.path, self._context.secrets)
+                table_result(
+                    _DIAGNOSTIC_COLUMNS,
+                    diagnose_storage(self._context.database.path, self._context.secrets),
                 )
             )
         destination = path(invocation, "destination")
