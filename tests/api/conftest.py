@@ -15,6 +15,7 @@ from ancestryllm.api import (
     create_app,
 )
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
+from ancestryllm.application.results import StructuredResult
 from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescriptor
 
 
@@ -27,7 +28,7 @@ class FixtureRegistry:
 
 
 def _complete(invocation: CommandInvocation) -> CommandOutcome:
-    return CommandOutcome(value={"dispatch_key": invocation.key.value})
+    return CommandOutcome(StructuredResult({"dispatch_key": invocation.key.value}))
 
 
 @pytest.fixture

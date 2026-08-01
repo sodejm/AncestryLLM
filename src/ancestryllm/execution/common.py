@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import datetime as dt
+from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
+from decimal import Decimal
+from enum import Enum
 from pathlib import Path
-from typing import Final, TypeVar, cast
+from typing import Any, Final, TypeVar, cast
+from uuid import UUID
 
+from ancestryllm.application.dto import JSONValue
 from ancestryllm.application.executor import CommandInvocation
+from ancestryllm.application.results import StructuredResult
 from ancestryllm.core.commands import ModuleDescriptor
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -150,6 +158,40 @@ def descriptor_payload(descriptor: ModuleDescriptor) -> dict[str, object]:
     }
 
 
+def _serializable_value(value: object) -> object:
+    """Normalize established service values before they cross the command boundary."""
+
+    if is_dataclass(value):
+        return {
+            str(key): _serializable_value(item) for key, item in asdict(cast(Any, value)).items()
+        }
+    if isinstance(value, Path | UUID):
+        return str(value)
+    if isinstance(value, dt.datetime | dt.date | dt.time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Enum):
+        return _serializable_value(value.value)
+    if isinstance(value, Mapping):
+        return {str(key): _serializable_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_serializable_value(item) for item in value]
+    table = getattr(value, "__table__", None)
+    columns = getattr(table, "columns", None)
+    if columns is not None:
+        return {
+            str(column.name): _serializable_value(getattr(value, column.name)) for column in columns
+        }
+    return value
+
+
+def structured_result(value: object) -> StructuredResult:
+    """Declare a strict structured result for a legacy service return value."""
+
+    return StructuredResult(cast(JSONValue, _serializable_value(value)))
+
+
 __all__ = [
     "boolean",
     "consent",
@@ -161,6 +203,7 @@ __all__ = [
     "optional_path",
     "optional_text",
     "path",
+    "structured_result",
     "text",
     "text_values",
 ]

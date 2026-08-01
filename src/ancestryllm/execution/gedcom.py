@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.application.results import MarkdownResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.execution.common import (
@@ -14,6 +15,7 @@ from ancestryllm.execution.common import (
     optional_path,
     optional_text,
     path,
+    structured_result,
     text,
     text_values,
 )
@@ -49,7 +51,7 @@ class GedcomExecutor:
                 ),
                 threshold=integer(invocation, "similarity_threshold"),
             )
-            return CommandOutcome(merge_result)
+            return CommandOutcome(structured_result(merge_result))
         if action == "subtree":
             subtree_result = service.subtree(
                 path(invocation, "input"),
@@ -59,7 +61,7 @@ class GedcomExecutor:
                 generations=optional_integer(invocation, "generations"),
                 gedcom_version=text(invocation, "gedcom_version"),
             )
-            return CommandOutcome(subtree_result)
+            return CommandOutcome(structured_result(subtree_result))
         if action == "quality":
             quality_result = service.quality(
                 path(invocation, "input"),
@@ -72,7 +74,7 @@ class GedcomExecutor:
                     optional_text(invocation, "consent"),
                 ),
             )
-            return CommandOutcome(quality_result)
+            return CommandOutcome(structured_result(quality_result))
         sync_result = service.sync(
             [
                 text(invocation, "sync_command"),
@@ -80,9 +82,11 @@ class GedcomExecutor:
             ]
         )
         return CommandOutcome(
-            sync_result if invocation.json_output else None,
+            MarkdownResult(
+                sync_result.output,
+                structured=structured_result(sync_result),
+            ),
             exit_code=sync_result.exit_code,
-            plain_text=None if invocation.json_output else sync_result.output,
         )
 
 

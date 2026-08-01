@@ -11,6 +11,7 @@ from ancestryllm.execution.common import (
     optional_path,
     optional_text,
     path,
+    structured_result,
     text,
 )
 
@@ -24,7 +25,7 @@ class RootsMagicExecutor:
 
         service = RootsMagicService(self._context.config, self._context.llm)
         if invocation.key.action == "list":
-            return CommandOutcome(service.list_trees())
+            return CommandOutcome(structured_result(service.list_trees()))
         if invocation.key.action == "query":
             sql = optional_text(invocation, "sql")
             if sql is not None:
@@ -47,19 +48,21 @@ class RootsMagicExecutor:
                         optional_text(invocation, "consent"),
                     ),
                 )
-            return CommandOutcome(value)
+            return CommandOutcome(structured_result(value))
         return CommandOutcome(
-            service.export(
-                text(invocation, "tree"),
-                path(invocation, "output"),
-                profile=text(invocation, "profile"),
-                gedcom_version=text(invocation, "gedcom_version"),
-                destination=text(invocation, "destination"),
-                root_person_id=optional_text(invocation, "root_person_id"),
-                scope=text(invocation, "scope"),
-                generations=optional_integer(invocation, "generations"),
-                living=text(invocation, "living"),
-                report_path=optional_path(invocation, "report"),
+            structured_result(
+                service.export(
+                    text(invocation, "tree"),
+                    path(invocation, "output"),
+                    profile=text(invocation, "profile"),
+                    gedcom_version=text(invocation, "gedcom_version"),
+                    destination=text(invocation, "destination"),
+                    root_person_id=optional_text(invocation, "root_person_id"),
+                    scope=text(invocation, "scope"),
+                    generations=optional_integer(invocation, "generations"),
+                    living=text(invocation, "living"),
+                    report_path=optional_path(invocation, "report"),
+                )
             )
         )
 

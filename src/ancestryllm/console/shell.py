@@ -15,6 +15,7 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 
+from ancestryllm.application.results import CommandResult
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
 from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
@@ -358,9 +359,9 @@ class ReplApplication:
         output: list[object] = []
         reporter.update(f"{namespace.command} {namespace.action}")
 
-        def capture(value: object, _json_output: bool = False) -> None:
+        def capture(result: CommandResult, _json_output: bool = False) -> None:
             reporter.check_cancelled()
-            plain = to_plain(value)
+            plain = to_plain(result)
             output.append(redact_object(plain, self.context.secrets.redact))
 
         exit_code = dispatch(namespace, self.context, emit=capture)

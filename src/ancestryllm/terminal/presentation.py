@@ -10,12 +10,15 @@ from typing import Any, TextIO, cast
 from rich.console import Console
 from rich.text import Text
 
+from ancestryllm.application.results import CommandResult, MarkdownResult
 from ancestryllm.core.errors import AncestryError
 
 
 def to_plain(value: Any) -> Any:
     """Convert supported results to serializable values without rendering them."""
 
+    if isinstance(value, CommandResult):
+        return value.to_serializable()
     if is_dataclass(value):
         return {key: to_plain(item) for key, item in asdict(cast(Any, value)).items()}
     if isinstance(value, Path):
@@ -46,6 +49,8 @@ class PresentationAdapter:
         if json_output:
             self.console.file.write(json.dumps(plain, indent=2, sort_keys=True))
             self.console.file.write("\n")
+        elif isinstance(value, MarkdownResult):
+            self.console.file.write(value.markdown)
         elif isinstance(plain, str):
             self.console.print(plain)
         elif isinstance(plain, list):

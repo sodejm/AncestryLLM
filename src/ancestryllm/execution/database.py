@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.application.results import SuccessResult
 from ancestryllm.core.context import AppContext
-from ancestryllm.execution.common import path
+from ancestryllm.execution.common import path, structured_result
 
 
 class DatabaseExecutor:
@@ -16,11 +17,13 @@ class DatabaseExecutor:
             from ancestryllm.storage.diagnostics import diagnose_storage
 
             return CommandOutcome(
-                diagnose_storage(self._context.database.path, self._context.secrets)
+                structured_result(
+                    diagnose_storage(self._context.database.path, self._context.secrets)
+                )
             )
         destination = path(invocation, "destination")
         self._context.database.backup(destination.expanduser().resolve())
-        return CommandOutcome(f"Encrypted backup created: {destination}")
+        return CommandOutcome(SuccessResult(f"Encrypted backup created: {destination}"))
 
 
 __all__ = ["DatabaseExecutor"]

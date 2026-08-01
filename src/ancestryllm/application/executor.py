@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final, Iterable, Protocol, TypeAlias, cast
 
 from ancestryllm.application.dto import SecretGrantRef
+from ancestryllm.application.results import CommandResult, StructuredResult
 from ancestryllm.core.commands import DispatchKey
 from ancestryllm.core.errors import AncestryError
 
@@ -65,11 +66,12 @@ class CommandInvocation:
 class CommandOutcome:
     """Presentation-neutral command output and process status."""
 
-    value: object = None
+    result: CommandResult = field(default_factory=lambda: StructuredResult(None))
     exit_code: int = 0
-    plain_text: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.result, CommandResult):
+            raise TypeError("Command outcomes require a declared CommandResult.")
         if not 0 <= self.exit_code <= 255:
             raise ValueError("Command exit codes must be between 0 and 255.")
 
@@ -119,6 +121,7 @@ __all__ = [
     "CommandHandler",
     "CommandInvocation",
     "CommandOutcome",
+    "CommandResult",
     "CommandScalar",
     "CommandValue",
 ]
