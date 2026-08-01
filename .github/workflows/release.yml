@@ -24,6 +24,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       commit: ${{ steps.release.outputs.commit }}
       readiness_run: ${{ steps.release.outputs.readiness_run }}
+      desktop_run: ${{ steps.release.outputs.desktop_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,9 +102,56 @@ jobs:
           test "$(jq -r '.release' approved/gates.json)" = "$version"
           test "$(jq -r '.commit' approved/gates.json)" = "$TAG_COMMIT"
           test "$(jq -r '[.gates[].status == "verified"] | all' approved/gates.json)" = "true"
+          desktop_run="$(
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/desktop-sidecar.yml/runs?event=workflow_dispatch&status=success&head_sha=$TAG_COMMIT&per_page=10" \
+              --jq '.workflow_runs[0].id'
+          )"
+          test -n "$desktop_run"
+          mkdir approved-desktop
+          gh run download "$desktop_run" --repo "$GITHUB_REPOSITORY" \
+            --name desktop-evidence-aggregate --dir approved-desktop
+          python - "$TAG_COMMIT" approved-desktop/desktop-evidence.json <<'PY'
+          import json
+          import sys
+
+          commit, path = sys.argv[1:]
+          with open(path, encoding="utf-8") as handle:
+              evidence = json.load(handle)
+          assert evidence["schemaVersion"] == 2
+          assert evidence["kind"] == "aggregate"
+          assert evidence["gitHead"] == commit
+          assert evidence["status"] == "passed-with-release-blockers"
+          assert evidence["releaseSupported"] is False
+          assert evidence["blockers"] == {
+              "signedInstaller": True,
+              "windows11Execution": True,
+              "trackedBy": "#231",
+          }
+          expected = {
+              ("macos-15", "darwin-arm64", "macOS 15", "macOS 15", "arm64"),
+              ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
+              ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64"),
+              ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64"),
+              ("windows-2025", "win32-x64", "Windows 11", "Windows Server 2025", "x64"),
+              ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64"),
+          }
+          actual = {
+              (
+                  row["runner"],
+                  row["sidecarTarget"],
+                  row["expectedOs"],
+                  row["actualOs"],
+                  row["arch"],
+              )
+              for row in evidence["targets"]
+          }
+          assert actual == expected
+          assert evidence["security"]["status"] == "passed"
+          PY
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
           echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
+          echo "desktop_run=$desktop_run" >> "$GITHUB_OUTPUT"
 
   build:
     name: build release once
@@ -145,12 +193,402 @@ jobs:
           cp approved/interoperability.json dist/interoperability.json
           cp approved/release-evidence.md dist/readiness-evidence.md
           cp "docs/release-notes/$VERSION.md" dist/release-notes.md
-      - name: Create final evidence manifest
+      - name: Create provisional Python evidence manifest
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          python scripts/create_release_evidence.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --run-url "$RUN_URL" \
+            --artifacts dist \
+            --gates dist/gates.json \
+            --findings dist/findings-dispositions.json \
+            --interoperability dist/interoperability.json \
+            --output dist/release-evidence.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-release-distributions
+          path: dist/
+          if-no-files-found: error
+
+  desktop-installers:
+    name: signed desktop installer (${{ matrix.sidecar_target }})
+    needs: [validate, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            runs_on: '"macos-15"'
+            sidecar_target: darwin-arm64
+            expected_os: "macOS 15"
+            arch: arm64
+            installer_target: dmg
+            package_args: --mac --arm64
+          - runner: macos-15-intel
+            runs_on: '"macos-15-intel"'
+            sidecar_target: darwin-x64
+            expected_os: "macOS 15"
+            arch: x64
+            installer_target: dmg
+            package_args: --mac --x64
+          - runner: ancestryllm-windows-11
+            runs_on: '["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]'
+            sidecar_target: win32-x64
+            expected_os: "Windows 11"
+            arch: x64
+            installer_target: nsis
+            package_args: --win --x64
+          - runner: ubuntu-24.04
+            runs_on: '"ubuntu-24.04"'
+            sidecar_target: linux-x64
+            expected_os: "Ubuntu 24.04"
+            arch: x64
+            installer_target: deb
+            package_args: --linux --x64
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    permissions:
+      contents: read
+    env:
+      EXPECTED_HEAD: ${{ needs.validate.outputs.commit }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - name: Verify exact installer head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "26.5.0"
+          package-manager-cache: false
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: "11.9.0"
+      - name: Install locked release dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv sync --locked --all-extras
+          pnpm --dir desktop install --frozen-lockfile
+      - name: Build and smoke-test the native sidecar
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+        run: |
+          uv run python scripts/build_sidecar.py --expected-target "$SIDECAR_TARGET"
+          sidecar_executable="desktop/build/sidecar/$SIDECAR_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
+          if [[ "$SIDECAR_TARGET" == "win32-x64" ]]; then sidecar_executable="$sidecar_executable.exe"; fi
+          uv run python scripts/smoke_sidecar.py "$sidecar_executable"
+      - name: Build the production Electron application
+        shell: bash
+        run: pnpm --dir desktop run build
+      - name: Build, sign, and notarize macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: |
+          test -n "$APPLE_CERTIFICATE_BASE64"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_API_KEY_BASE64"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          signing_dir="$RUNNER_TEMP/ancestryllm-desktop-signing"
+          install -d -m 700 "$signing_dir"
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$signing_dir/certificate.p12"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
+          chmod 600 "$signing_dir"/*
+          export CSC_LINK="$signing_dir/certificate.p12"
+          export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
+          export APPLE_API_KEY="$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
+          read -r -a package_args <<< "$PACKAGE_ARGS"
+          pnpm --dir desktop exec electron-builder \
+            --config electron-builder.release.yml \
+            "${package_args[@]}" --publish never \
+            --config.extraMetadata.version="$VERSION"
+      - name: Remove temporary macOS signing credentials
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/ancestryllm-desktop-signing"
+      - name: Build and Authenticode-sign Windows NSIS installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw 'WINDOWS_CERTIFICATE_BASE64 is required' }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD is required' }
+          $signingDirectory = Join-Path $env:RUNNER_TEMP 'ancestryllm-desktop-signing'
+          New-Item -ItemType Directory -Force -Path $signingDirectory | Out-Null
+          $certificate = Join-Path $signingDirectory 'certificate.pfx'
+          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $env:CSC_LINK = $certificate
+          $env:CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
+          $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+          pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never "--config.extraMetadata.version=$env:VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "electron-builder exited $LASTEXITCODE" }
+      - name: Remove temporary Windows signing credentials
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-desktop-signing') -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Build Ubuntu DEB
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: |
+          read -r -a package_args <<< "$PACKAGE_ARGS"
+          pnpm --dir desktop exec electron-builder \
+            --config electron-builder.release.yml \
+            "${package_args[@]}" --publish never \
+            --config.extraMetadata.version="$VERSION"
+      - id: installer
+        name: Locate the one bounded installer
+        shell: bash
+        env:
+          INSTALLER_TARGET: ${{ matrix.installer_target }}
+        run: |
+          shopt -s nullglob
+          case "$INSTALLER_TARGET" in
+            dmg) installers=(desktop/release-installers/*.dmg) ;;
+            nsis) installers=(desktop/release-installers/*.exe) ;;
+            deb) installers=(desktop/release-installers/*.deb) ;;
+            *) echo "unsupported installer target: $INSTALLER_TARGET" >&2; exit 1 ;;
+          esac
+          test "${#installers[@]}" -eq 1
+          echo "path=${installers[0]}" >> "$GITHUB_OUTPUT"
+      - name: Verify bundled sidecar resource
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+        run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-installers
+      - name: Verify and install signed macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          mount_point="$RUNNER_TEMP/ancestryllm-dmg"
+          installed_app="$RUNNER_TEMP/AncestryLLM.app"
+          mkdir "$mount_point"
+          hdiutil attach "$INSTALLER" -nobrowse -readonly -mountpoint "$mount_point"
+          mounted_apps=("$mount_point"/*.app)
+          test "${#mounted_apps[@]}" -eq 1
+          codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
+          codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
+          grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
+          spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
+          xcrun stapler validate "$INSTALLER"
+          ditto "${mounted_apps[0]}" "$installed_app"
+          export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
+          pnpm --dir desktop run test:e2e:packaged -- \
+            --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+      - name: Unmount macOS installer
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if mount | grep -Fq "$RUNNER_TEMP/ancestryllm-dmg"; then
+            hdiutil detach "$RUNNER_TEMP/ancestryllm-dmg"
+          fi
+      - name: Verify, install, and exercise signed Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-installed'
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
+          $application = Join-Path $installRoot 'ancestryllm.exe'
+          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
+          if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
+          $env:ANCESTRYLLM_PACKAGED_APP = $application
+          pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
+      - name: Remove temporary Windows installation
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-installed') -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Sign, verify, install, and exercise Ubuntu application
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          LINUX_GPG_PRIVATE_KEY_BASE64: ${{ secrets.LINUX_GPG_PRIVATE_KEY_BASE64 }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+          LINUX_GPG_SIGNING_FINGERPRINT: ${{ secrets.LINUX_GPG_SIGNING_FINGERPRINT }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          test -n "$LINUX_GPG_PRIVATE_KEY_BASE64"
+          test -n "$LINUX_GPG_PASSPHRASE"
+          test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
+          expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          case "$expected_fingerprint" in
+            *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
+          esac
+          case "${#expected_fingerprint}" in
+            40|64) ;;
+            *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
+          esac
+          signing_home="$RUNNER_TEMP/ancestryllm-signing-gnupg"
+          verification_home="$RUNNER_TEMP/ancestryllm-verification-gnupg"
+          install -d -m 700 "$signing_home" "$verification_home"
+          printf '%s' "$LINUX_GPG_PRIVATE_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/ancestryllm-release-key.asc"
+          GNUPGHOME="$signing_home" gpg --batch --import "$RUNNER_TEMP/ancestryllm-release-key.asc"
+          GNUPGHOME="$signing_home" gpg --batch --with-colons --fingerprint --list-secret-keys | \
+            awk -F: '$1 == "fpr" { print toupper($10) }' | grep -Fxq "$expected_fingerprint"
+          GNUPGHOME="$signing_home" gpg --batch --armor --export "$expected_fingerprint" \
+            > "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          test -s "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          GNUPGHOME="$verification_home" gpg --batch --import \
+            "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
+            echo "verification keyring unexpectedly contains a private key" >&2
+            exit 1
+          fi
+          printf '%s' "$LINUX_GPG_PASSPHRASE" | GNUPGHOME="$signing_home" \
+            gpg --detach-sign --armor --batch --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --local-user "$expected_fingerprint!" "$INSTALLER"
+          GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
+            "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+          grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
+            "$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+          sudo dpkg -i "$INSTALLER"
+          dpkg-query --show ancestryllm-desktop
+          test -x /opt/AncestryLLM/ancestryllm
+          export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
+          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged -- \
+            --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+      - name: Remove temporary Ubuntu signing and installation state
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo dpkg -r ancestryllm-desktop 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/ancestryllm-signing-gnupg" \
+            "$RUNNER_TEMP/ancestryllm-verification-gnupg"
+          rm -f "$RUNNER_TEMP/ancestryllm-release-key.asc" \
+            "$RUNNER_TEMP/ancestryllm-release-public-key.asc" \
+            "$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+      - name: Generate target SBOM and exact-head evidence
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          pnpm --dir desktop pkg set version="$VERSION"
+          pnpm --dir desktop sbom
+          row_dir="desktop-release-row"
+          mkdir "$row_dir"
+          installer_name="$(basename "$INSTALLER")"
+          cp "$INSTALLER" "$row_dir/$installer_name"
+          sbom="$row_dir/desktop-sbom-$SIDECAR_TARGET.json"
+          cp desktop/sbom.cdx.json "$sbom"
+          signature_args=()
+          gates=(
+            exactHeadPassed
+            installerBuiltPassed
+            installedRuntimePassed
+            runtimeIsolationPassed
+            sbomGeneratedPassed
+            sidecarHandshakePassed
+          )
+          case "$SIDECAR_TARGET" in
+            darwin-*)
+              gates+=(codeSignaturePassed gatekeeperPassed hardenedRuntimePassed notarizationPassed staplingPassed)
+              ;;
+            win32-x64)
+              gates+=(authenticodePassed)
+              ;;
+            linux-x64)
+              cp "$INSTALLER.asc" "$row_dir/$installer_name.asc"
+              signature_args=(--signature "$row_dir/$installer_name.asc")
+              gates+=(gpgSignaturePassed)
+              ;;
+            *) echo "unsupported release target: $SIDECAR_TARGET" >&2; exit 1 ;;
+          esac
+          gate_args=()
+          for gate in "${gates[@]}"; do gate_args+=(--gate "$gate"); done
+          uv run python scripts/assemble_desktop_release.py target \
+            --git-head "$EXPECTED_HEAD" \
+            --version "$VERSION" \
+            --target "$SIDECAR_TARGET" \
+            --expected-os "$EXPECTED_OS" \
+            --arch "$TARGET_ARCH" \
+            --installer "$row_dir/$installer_name" \
+            "${signature_args[@]}" \
+            --sbom "$sbom" \
+            "${gate_args[@]}" \
+            --output "$row_dir/desktop-target-evidence.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-installer-${{ matrix.sidecar_target }}
+          path: desktop-release-row/
+          if-no-files-found: error
+
+  desktop-evidence-aggregate:
+    name: aggregate bounded desktop release
+    needs: [validate, build, desktop-installers]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-release-distributions
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-installer-*
+          path: desktop-installer-evidence
+      - name: Aggregate exact installers, evidence, and SBOMs
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
+          python scripts/assemble_desktop_release.py aggregate \
+            --git-head "$COMMIT_SHA" \
+            --version "$VERSION" \
+            --input-dir desktop-installer-evidence \
+            --output-dir dist
+          test -f dist/desktop-artifact-manifest.json
+          test -f dist/desktop-sbom.json
+          test -f dist/desktop-exact-head-evidence.json
           python scripts/create_release_evidence.py \
             --version "$VERSION" \
             --commit "$COMMIT_SHA" \
@@ -169,7 +607,7 @@ jobs:
 
   publish-build-provenance:
     name: publish build provenance
-    needs: [validate, build]
+    needs: [validate, desktop-evidence-aggregate]
     runs-on: ubuntu-latest
     permissions:
       attestations: write # required to persist build provenance
@@ -186,7 +624,7 @@ jobs:
 
   draft-github-release:
     name: prepare draft GitHub Release
-    needs: [validate, build, publish-build-provenance]
+    needs: [validate, desktop-evidence-aggregate, publish-build-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create and attach assets to the draft release
@@ -228,7 +666,7 @@ jobs:
 
   publish-testpypi:
     name: publish TestPyPI
-    needs: [validate, build, publish-build-provenance, draft-github-release]
+    needs: [validate, desktop-evidence-aggregate, publish-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -251,7 +689,7 @@ jobs:
 
   verify-testpypi:
     name: verify TestPyPI
-    needs: [validate, build, publish-testpypi]
+    needs: [validate, desktop-evidence-aggregate, publish-testpypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -283,7 +721,7 @@ jobs:
 
   publish-pypi:
     name: publish PyPI
-    needs: [validate, build, draft-github-release, verify-testpypi]
+    needs: [validate, desktop-evidence-aggregate, draft-github-release, verify-testpypi]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -305,7 +743,7 @@ jobs:
 
   verify-pypi-hashes:
     name: verify PyPI hashes and PEP 740 attestations
-    needs: [validate, build, publish-pypi]
+    needs: [validate, desktop-evidence-aggregate, publish-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,7 +841,7 @@ jobs:
 
   publish-github-release:
     name: publish immutable GitHub Release
-    needs: [validate, build, draft-github-release, verify-pypi-hashes, verify-pypi-install]
+    needs: [validate, desktop-evidence-aggregate, draft-github-release, verify-pypi-hashes, verify-pypi-install]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to publish the prepared GitHub Release

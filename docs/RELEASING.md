@@ -40,11 +40,13 @@ create the secret in a pull request or place the token in repository files.
 
 ## v0.5.0 supported offline shell
 
-v0.5.0 is a supported offline three-OS Electron shell on macOS 15/26 (arm64
-and x64), Windows 11 (x64), and Ubuntu 24.04 (x64). Its release scope is Home,
-Diagnostics, Settings, capability onboarding, and a private loopback sidecar,
-distributed as signed manual installers. It excludes genealogy jobs, chat
-providers, cloud accounts, updater behavior, and background release channels.
+v0.5.0 is a supported offline three-OS Electron shell. The signed-installer
+release matrix is macOS 15 arm64, macOS 15 x64, Windows 11 x64, and Ubuntu
+24.04 x64. The matching-architecture DMGs cover the supported macOS 15/26
+range. Its release scope is Home, Diagnostics, Settings,
+capability onboarding, and a private loopback sidecar, distributed as signed
+manual full installers. It excludes genealogy jobs, chat providers, cloud
+accounts, updater behavior, and background release channels.
 
 ## One-time repository setup
 
@@ -62,8 +64,25 @@ providers, cloud accounts, updater behavior, and background release channels.
    `sodejm/AncestryLLM`, workflow `release.yml`, and the matching environment.
    Keep publishing OIDC-only; no API token or token secret is a permitted
    fallback.
-5. Enable GitHub immutable releases.
-6. Enable automatic deletion of merged pull-request branches.
+5. Configure the release-signing Actions secrets. Use
+   `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
+   `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` for the
+   Developer ID identity and Apple notary API key;
+   `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` for the
+   Authenticode identity; and `LINUX_GPG_PRIVATE_KEY_BASE64` and
+   `LINUX_GPG_PASSPHRASE` for the detached Debian-package signature. Set
+   `LINUX_GPG_SIGNING_FINGERPRINT` to the complete fingerprint of the exact
+   Linux signing key or signing subkey; the workflow signs with that identity
+   and verifies in a separate public-key-only keyring. Grant each credential
+   only the purpose named here, rotate it outside the workflow, and never put
+   its decoded value in an artifact or repository file.
+6. Register a dedicated self-hosted Windows 11 x64 runner with the exact
+   labels `self-hosted`, `Windows`, `X64`, and
+   `ancestryllm-windows-11`. Restrict repository and runner administration to
+   the release maintainer and keep the machine patched and dedicated to this
+   trusted tag workflow.
+7. Enable GitHub immutable releases.
+8. Enable automatic deletion of merged pull-request branches.
 
 These hosted controls are not created or changed by the repository workflows.
 An authorized maintainer must approve and verify each one in GitHub, PyPI, and
@@ -83,6 +102,8 @@ link or redacted screenshot:
 - the TestPyPI and PyPI Trusted Publishers match repository
   `sodejm/AncestryLLM`, workflow `release.yml`, and their exact environments,
   and no API-token publishing secret or fallback is configured; and
+- the nine release-signing secrets and the dedicated Windows 11 runner are
+  configured, access-restricted, and current; and
 - GitHub immutable releases and automatic pull-request branch deletion are
   enabled.
 
@@ -136,7 +157,11 @@ self-approval; do not make that change during the one-maintainer release.
 6. Run `Release readiness` with the exact `main` commit and semantic version,
    and affirm the branch/worktree lifecycle audit input, backed by the
    documented reachability, unique-commit, cleanup, and preservation record.
-7. Review the evidence artifact and confirm every required job succeeded.
+7. Confirm the successful exact-head `Desktop sidecar` aggregate is for the
+   same commit and contains all six unpublished native-package rows. This is
+   an input to the signed-installer gate, not signed-installer evidence by
+   itself.
+8. Review the evidence artifact and confirm every required job succeeded.
 
 At the exact approval points, a maintainer approves the release-preparation PR;
 the readiness operator attests the cleanup audit and approves its evidence; the
@@ -162,6 +187,28 @@ requires that exact approved record, deterministically rebuilds the distribution
 compares the distribution hashes with the readiness build before any artifact
 is published. It does not repeat pytest, lint, type checking, dependency audit,
 or Semgrep after accepting the exact successful readiness evidence.
+
+The tag workflow is the only installer publisher. Before the final release
+distribution can be assembled or any release asset can be published, it
+requires all four signed-installer rows:
+
+| Release row | Installer | Required native verification |
+|---|---|---|
+| macOS 15 arm64 | DMG | Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| macOS 15 x64 | DMG | Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| Windows 11 x64 | NSIS EXE | valid Authenticode signature and install/launch on the dedicated Windows 11 runner |
+| Ubuntu 24.04 x64 | DEB plus `.deb.asc` | detached GPG signature verification and install/launch on clean Ubuntu 24.04 |
+
+Every row builds and smoke-tests the matching native sidecar, installs or
+mounts the complete installer, launches the installed application with no
+system Python, Node.js, or pnpm available on `PATH`, and emits an exact-head
+receipt and CycloneDX SBOM. The aggregator rejects a missing row, failed gate,
+wrong commit or version, duplicate asset name, malformed SBOM, symlink, or
+digest mismatch. Only after aggregation does the workflow regenerate the
+complete `release-evidence.md`, create the one `SHA256SUMS` file, and attest
+`dist/*`, so the evidence manifest, checksums, and provenance cover the Python
+wheel and sdist together with every desktop installer, detached signature,
+combined SBOM, desktop manifest, and exact-head evidence document.
 
 ## Tag and publish
 
@@ -195,7 +242,31 @@ the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. After production PyPI publishing,
 the supported platform/Python wheel-and-sdist install smoke matrix runs before
 the immutable GitHub Release. The attached `SHA256SUMS` covers
-every release asset except the checksum file itself.
+every release asset except the checksum file itself. No other workflow or
+manual upload may publish an installer.
+
+### Verify a downloaded installer
+
+Download the target-matched full installer and the release's `SHA256SUMS` from
+the same immutable GitHub Release. Verify the checksum before opening the
+installer. On macOS, also inspect the Developer ID signature, require
+Gatekeeper acceptance, and confirm notarization/stapling. On Windows, require
+a valid Authenticode signature. On Ubuntu, download the `.deb.asc` alongside
+the DEB and verify its detached GPG signature with the documented release key.
+Do not install when any identity, digest, or signature check fails.
+
+### Manual upgrade and rollback
+
+Quit AncestryLLM, download and verify the new target-matched full installer,
+then install it over the existing application and relaunch. The installer
+replaces application files but retains the OS-managed AncestryLLM data and
+configuration directories. Confirm the displayed version and healthy
+Diagnostics after relaunch. Recovery or rollback uses the same process with a
+previous full installer whose signature and checksum still verify.
+
+v0.5.0 has no updater feed, no background update, no staged rollout, and no
+automatic rollback. Do not publish `latest*.yml`, blockmaps, or another update
+channel, and do not represent manual reinstall behavior as an updater.
 
 ## Failure and recovery
 

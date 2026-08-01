@@ -32,6 +32,37 @@ aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
 Workflow-level path filters are not used: the in-workflow classifier may skip
 the expensive jobs, but `Desktop gate` still reports a result.
 
+## Signed installer release matrix
+
+The tag-triggered release workflow consumes the successful six-row aggregate
+for the exact tag commit, then runs the smaller publication matrix below. This
+is the only matrix that may establish signed-installer support:
+
+| Runner | Sidecar | Supported target | Installer |
+|---|---|---|---|
+| `macos-15` | `darwin-arm64` | macOS 15 arm64 | signed and notarized DMG |
+| `macos-15-intel` | `darwin-x64` | macOS 15 x64 | signed and notarized DMG |
+| `ancestryllm-windows-11` | `win32-x64` | Windows 11 x64 | Authenticode-signed NSIS EXE |
+| `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 x64 | DEB with detached GPG signature |
+
+Each row must use the matching native sidecar, install or mount the full
+installer, and launch the installed application with an empty runtime `PATH`.
+That last check prevents an installed bundle from silently depending on a
+system Python, Node.js, or pnpm. macOS requires `codesign` verification,
+hardened runtime with the reviewed minimal entitlements, Gatekeeper acceptance,
+notarization, and stapling. Windows requires a valid Authenticode result and
+real Windows 11 install/launch. Ubuntu requires detached-signature verification
+in a clean keyring before DEB install/launch.
+
+Every target receipt binds the full commit SHA, stable version, OS,
+architecture, successful named gates, and SHA-256 identity of its installer,
+SBOM, and Linux signature where applicable. Aggregation requires all four rows
+and copies only digest-matched regular files into the release directory. It
+also emits `desktop-exact-head-evidence.json`,
+`desktop-artifact-manifest.json`, and one combined `desktop-sbom.json` before
+the release workflow regenerates `release-evidence.md`, creates `SHA256SUMS`,
+and records build provenance over the entire release asset set.
+
 ## What the hosted gate proves
 
 The source and security job uses locked Python and pnpm dependencies and
@@ -172,16 +203,16 @@ cross-platform integrity observation.
 ## Release boundary and follow-up
 
 Issue #230 establishes cross-platform verification for the unpublished
-package boundary. It does not create or approve a signed installer. Supported
-release claims still require target-matched, manually installed signed
-installers, macOS notarization where applicable, provenance, and execution on
-the actual supported operating systems under the
-[release runbook](RELEASING.md).
+package boundary. It does not create or approve a signed installer. The #231
+tag-release layer consumes that exact-head input and establishes a release
+claim only when every target-matched, manually installed signed installer,
+macOS notarization check, provenance step, and actual supported-OS execution
+passes under the [release runbook](RELEASING.md). A local build, a hosted
+Windows Server row, or an incomplete tag run cannot substitute for that proof.
 
-Signed installer and actual Windows 11 evidence are external release blockers
-tracked by #231. This verification work also does not close the broader
-adversarial assurance issue #131. CI success must not be used to synthesize
-either missing proof.
+This verification work does not close the broader adversarial assurance issue
+#131 or the release-coordination tracker #132. CI success must not be used to
+synthesize missing external proof.
 
 ## Local reproduction
 

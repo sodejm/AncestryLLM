@@ -243,7 +243,10 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--notes-file dist/release-notes.md" in release
     assert "subject-path: dist/*" in release
     assert "verify_codeql_sarif.py --directory codeql-sarif" in readiness
-    assert "needs: [validate, build, publish-build-provenance, draft-github-release]" in release
+    assert (
+        "needs: [validate, desktop-evidence-aggregate, publish-build-provenance, "
+        "draft-github-release]" in release
+    )
     assert "verified-pypi-distributions" in release
     assert "verified-pypi-attestations" in release
     assert "artifact: [wheel, sdist]" in release
@@ -258,7 +261,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         release,
-    ) == ["uv==0.12.0", "uv==0.12.0"]
+    ) == ["uv==0.12.0", "uv==0.12.0", "uv==0.12.0"]
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         readiness,
