@@ -86,6 +86,9 @@ accounts, updater behavior, and background release channels.
    the public key into a fresh keyring. Grant each private credential only the
    purpose named here, rotate it outside the workflow, and never put its
    decoded value in an artifact or repository file.
+   Follow the repeatable macOS setup and verification procedure in
+   [`DEPLOYMENT.md`](DEPLOYMENT.md#reconfigure-desktop-signing-from-macos);
+   do not construct ad hoc upload commands containing private values.
 6. Register an ephemeral self-hosted Windows 11 x64 runner with the exact
    labels `self-hosted`, `Windows`, `X64`, and
    `ancestryllm-windows-11`. Each job must receive a clean one-job VM that is
