@@ -10,6 +10,14 @@ import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY_ROOT / "scripts" / "ancestryll-runner-secrets-helper.sh"
+GITHUB_HOST = "github.com"
+APPROVED_GITHUB_ACCOUNT = "sodejm"
+REPOSITORY = "sodejm/AncestryLLM"
+SIGNING_ENVIRONMENT = "desktop-signing"
+UPLOAD_CONFIRMATION = (
+    f"UPLOAD {GITHUB_HOST}/{REPOSITORY} {SIGNING_ENVIRONMENT} "
+    f"AS {APPROVED_GITHUB_ACCOUNT}"
+)
 
 SECRET_NAMES = {
     "APPLE_CERTIFICATE_BASE64",
@@ -95,13 +103,22 @@ def _write_fake_gh(path: Path) -> None:
     path.write_text(
         """#!/bin/sh
 set -eu
+printf '%s\\t%s\\n' "${GH_HOST-}" "$*" >> "$FAKE_GH_STATE/gh-calls"
 
 case "${1-}:${2-}" in
   --version:)
     printf 'gh version 2.96.0 (fictional test build)\n'
     ;;
-  auth:status|repo:view)
+  auth:status)
     exit 0
+    ;;
+  api:--hostname)
+    [ "$3" = github.com ] || exit 2
+    [ "$4" = user ] || exit 2
+    printf '%s\n' "${FAKE_GH_ACCOUNT:-sodejm}"
+    ;;
+  repo:view)
+    printf '%s\n' "${FAKE_GH_REPOSITORY:-sodejm/AncestryLLM}"
     ;;
   secret:set)
     name=$3
@@ -182,7 +199,7 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
             VARIABLE_VALUES["LINUX_GPG_SIGNING_FINGERPRINT"],
         )
     )
-    prompt_input.append("UPLOAD")
+    prompt_input.append(UPLOAD_CONFIRMATION)
 
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -223,6 +240,14 @@ def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> N
     combined_output = result.stdout + result.stderr
     assert "UPLOAD COMPLETE" in combined_output
     assert all(value not in combined_output for value in private_values)
+    calls = (state / "gh-calls").read_text(encoding="utf-8").splitlines()
+    assert calls
+    assert all(call.split("\t", maxsplit=1)[0] == GITHUB_HOST for call in calls)
+    assert any("auth status --hostname github.com" in call for call in calls)
+    assert (
+        f"Authenticated GitHub account: {APPROVED_GITHUB_ACCOUNT}"
+        in combined_output
+    )
 
 
 def test_helper_help_uses_the_comma_free_name() -> None:
@@ -438,6 +463,101 @@ def test_helper_rejects_github_cli_under_a_writable_parent(tmp_path: Path) -> No
 
     assert result.returncode != 0
     assert "GitHub CLI path has untrusted permissions" in result.stderr
+
+
+def test_helper_rejects_an_alternate_github_host_before_authentication(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    trusted_gh = fake_bin / "gh"
+    _write_fake_gh(trusted_gh)
+    state = tmp_path / "state"
+    state.mkdir()
+
+    environment = os.environ.copy()
+    environment["GH_HOST"] = "attacker.example"
+    environment["FAKE_GH_STATE"] = str(state)
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(trusted_gh),
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "GH_HOST must be unset or exactly github.com" in result.stderr
+    assert not (state / "gh-calls").exists()
+
+
+def test_helper_rejects_an_unapproved_authenticated_account(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    trusted_gh = fake_bin / "gh"
+    _write_fake_gh(trusted_gh)
+    state = tmp_path / "state"
+    state.mkdir()
+
+    environment = os.environ.copy()
+    environment["FAKE_GH_STATE"] = str(state)
+    environment["FAKE_GH_ACCOUNT"] = "attacker"
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(trusted_gh),
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "Authenticated GitHub account is attacker; expected sodejm" in result.stderr
+    )
+
+
+def test_helper_rejects_a_mismatched_repository_identity(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    trusted_gh = fake_bin / "gh"
+    _write_fake_gh(trusted_gh)
+    state = tmp_path / "state"
+    state.mkdir()
+
+    environment = os.environ.copy()
+    environment["FAKE_GH_STATE"] = str(state)
+    environment["FAKE_GH_REPOSITORY"] = "attacker/AncestryLLM"
+    result = subprocess.run(
+        [
+            str(HELPER),
+            "--dry-run",
+            "--gh-executable",
+            str(trusted_gh),
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "GitHub reported repository attacker/AncestryLLM; expected sodejm/AncestryLLM"
+        in result.stderr
+    )
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires the macOS SDK")

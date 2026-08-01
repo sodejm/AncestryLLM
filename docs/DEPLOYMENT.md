@@ -119,14 +119,18 @@ for its password and `APPLE_TEAM_ID`.
    The exporter uses Apple's Security framework and sends the generated
    PKCS#12 password through standard input, not a command argument.
 5. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
-   present. Authenticate using `[GH_AUTHENTICATION_METHOD]`; the account must
-   be authorized to read `sodejm/AncestryLLM`, update its Actions environment
-   secrets, and update repository Actions variables. The helper never resolves
-   `gh` from `PATH`. It checks fixed installation locations and executes the
-   canonical file with a minimal `PATH`. If the reviewed CLI is elsewhere,
-   pass its absolute, canonical, non-symlink path with `--gh-executable`. The
-   executable and every canonical parent must be owned by root or the current
-   user and must not be group- or world-writable.
+   present. Authenticate `sodejm` on `github.com` using
+   `[GH_AUTHENTICATION_METHOD]`; that exact account must be authorized to read
+   `sodejm/AncestryLLM`, update its Actions environment secrets, and update
+   repository Actions variables. The helper rejects an inherited `GH_HOST`
+   other than `github.com`, binds every CLI call to that host, and verifies the
+   authenticated account and repository identity before collecting any
+   credentials. It never resolves `gh` from `PATH`. It checks fixed
+   installation locations and executes the canonical file with a minimal
+   `PATH`. If the reviewed CLI is elsewhere, pass its absolute, canonical,
+   non-symlink path with `--gh-executable`. The executable and every canonical
+   parent must be owned by root or the current user and must not be group- or
+   world-writable.
 6. Confirm `desktop-signing` already exists and has the protections required
    by [the release runbook](RELEASING.md#one-time-repository-setup). The helper
    does not create or alter environment protection rules.
@@ -166,7 +170,8 @@ canonical path that you reviewed:
 The default run discovers and exports the Apple identity first. Supply four
 remaining source paths, four private text values, and the Windows and Linux
 public identity values when prompted. The helper asks for every user-supplied
-private text value twice. A dry run checks authentication, repository access,
+private text value twice. A dry run checks the fixed `github.com` host, the
+exact authenticated `sodejm` account, the canonical repository identity,
 keychain discovery and export, file readability, non-empty values, Base64 round
 trips, and public-identity formats, then exits without changing GitHub.
 
@@ -188,10 +193,12 @@ After a successful dry run, repeat the prompts in upload mode:
 ./scripts/ancestryll-runner-secrets-helper.sh --upload
 ```
 
-Review the destination summary and type the exact confirmation `UPLOAD` only
-when ready. Existing values with the same names will be replaced. The helper
-prints the canonical GitHub CLI path and version before authentication, then
-uses that exact executable for the following operations:
+Review the destination summary and type the exact confirmation
+`UPLOAD github.com/sodejm/AncestryLLM desktop-signing AS sodejm` only when
+ready. Existing values with the same names will be replaced. The helper prints
+the fixed host, approved authenticated account, canonical GitHub CLI path, and
+version before authentication, then uses that exact executable for the
+following operations:
 
 ```sh
 gh secret set [SECRET_NAME] -R sodejm/AncestryLLM -e desktop-signing
@@ -225,8 +232,9 @@ If setup fails:
 
 - `Required command is missing`: install that prerequisite, then rerun dry
   run.
-- authentication or repository-access failure: reauthenticate using
-  `[GH_AUTHENTICATION_METHOD]` and confirm the account's repository,
+- host, account, authentication, or repository-identity failure: unset an
+  alternate `GH_HOST`, reauthenticate `sodejm` on `github.com` using
+  `[GH_AUTHENTICATION_METHOD]`, and confirm that account's repository,
   environment-secret, and variable permissions.
 - unreadable or empty file: correct its path or permissions; do not weaken
   permissions beyond what is required for the current user.

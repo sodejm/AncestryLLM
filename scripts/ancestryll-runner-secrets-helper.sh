@@ -12,9 +12,12 @@ set -euo pipefail
 set +x
 umask 077
 
+readonly GITHUB_HOST='github.com'
+readonly APPROVED_GITHUB_ACCOUNT='sodejm'
 readonly REPOSITORY='sodejm/AncestryLLM'
 readonly SIGNING_ENVIRONMENT='desktop-signing'
 readonly MINIMAL_COMMAND_PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+readonly UPLOAD_CONFIRMATION="UPLOAD $GITHUB_HOST/$REPOSITORY $SIGNING_ENVIRONMENT AS $APPROVED_GITHUB_ACCOUNT"
 
 MODE='dry-run'
 APPLE_CERTIFICATE_MODE='keychain'
@@ -116,6 +119,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+case "${GH_HOST-}" in
+  ''|"$GITHUB_HOST") ;;
+  *) fail "GH_HOST must be unset or exactly $GITHUB_HOST" ;;
+esac
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command is missing: $1"
 }
@@ -202,7 +210,7 @@ resolve_trusted_gh() {
 }
 
 run_gh() {
-  PATH=$MINIMAL_COMMAND_PATH "$GH_EXECUTABLE" "$@"
+  GH_HOST=$GITHUB_HOST PATH=$MINIMAL_COMMAND_PATH "$GH_EXECUTABLE" "$@"
 }
 
 validate_credential_source_file() {
@@ -454,10 +462,17 @@ printf '%s\n' \
   "GitHub CLI identity: $GH_VERSION"
 GH_VERSION=''
 
-run_gh auth status >/dev/null 2>&1 \
+run_gh auth status --hostname "$GITHUB_HOST" >/dev/null 2>&1 \
   || fail 'GitHub CLI is not authenticated. Use the approved authentication method, then retry.'
-run_gh repo view "$REPOSITORY" >/dev/null 2>&1 \
+ACTIVE_GITHUB_ACCOUNT=$(run_gh api --hostname "$GITHUB_HOST" user --jq '.login') \
+  || fail "Could not determine the authenticated account on $GITHUB_HOST."
+[ "$ACTIVE_GITHUB_ACCOUNT" = "$APPROVED_GITHUB_ACCOUNT" ] \
+  || fail "Authenticated GitHub account is $ACTIVE_GITHUB_ACCOUNT; expected $APPROVED_GITHUB_ACCOUNT"
+OBSERVED_REPOSITORY=$(run_gh repo view "$REPOSITORY" \
+  --json nameWithOwner --jq '.nameWithOwner') \
   || fail "Cannot access repository $REPOSITORY with the current GitHub CLI authorization."
+[ "$OBSERVED_REPOSITORY" = "$REPOSITORY" ] \
+  || fail "GitHub reported repository $OBSERVED_REPOSITORY; expected $REPOSITORY"
 
 if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
   require_command security
@@ -484,6 +499,8 @@ WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT=''
 LINUX_GPG_SIGNING_FINGERPRINT=''
 
 printf '%s\n' \
+  "GitHub host: $GITHUB_HOST" \
+  "Authenticated GitHub account: $ACTIVE_GITHUB_ACCOUNT" \
   "Destination repository: $REPOSITORY" \
   "Secret environment: $SIGNING_ENVIRONMENT" \
   "Mode: $MODE" \
@@ -618,9 +635,10 @@ printf '%s\n' \
   "The following operation will update 9 environment secrets in $SIGNING_ENVIRONMENT" \
   "and 4 repository variables in $REPOSITORY." \
   'Existing values with these names will be replaced.' \
-  'Type UPLOAD to continue:'
+  "Type $UPLOAD_CONFIRMATION to continue:"
 IFS= read -r confirmation || fail 'Input ended before confirmation'
-[ "$confirmation" = 'UPLOAD' ] || fail 'Upload cancelled; confirmation did not match UPLOAD'
+[ "$confirmation" = "$UPLOAD_CONFIRMATION" ] \
+  || fail "Upload cancelled; confirmation did not match $UPLOAD_CONFIRMATION"
 
 upload_secret_file APPLE_CERTIFICATE_BASE64 "$APPLE_CERTIFICATE_BASE64_FILE"
 upload_secret_value APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
