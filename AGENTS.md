@@ -50,5 +50,8 @@
   from the Feature Release project's scope, priority, and dependency order, then add
   the issue to that iteration on the release calendar. If project access prevents the
   assignment, report the issue and intended iteration explicitly.
+- After submitting a pull request (PR), wait up to 5 minutes for checks to complete
+  and for any code review comments to appear. If review comments appear, resolve each
+  one by either validating/fixing the issue or adding a clear justification.
 - Before completion, check behavior, tests, documentation, dead code, and relevant quality/security gates.
 - Link and close an issue only when the change fully satisfies its acceptance criteria.
