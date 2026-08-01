@@ -12,8 +12,9 @@ import {
 } from 'electron'
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
 import type { AncestryBridge } from '../shared-contract/desktop'
-import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
+import { createDesktopControlBridge } from './desktop-control'
 import { registerDesktopIpcHandlers } from './ipc-handlers'
+import { FilePreferencesStore } from './preferences-store'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
   APP_ENTRY_URL,
@@ -35,7 +36,6 @@ const fixture = process.env.ANCESTRYLLM_DESKTOP_FIXTURE
 let bridge: AncestryBridge = createMockAncestryBridge(
   fixture === 'degraded' || fixture === 'unavailable' ? fixture : 'success',
 )
-const preferences = new MemoryPreferencesStore()
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -127,6 +127,7 @@ function createWindow(): void {
 
 async function startPackagedSidecar(): Promise<void> {
   if (!app.isPackaged) return
+  const preferences = new FilePreferencesStore(app.getPath('userData'))
   sidecarSupervisor = new SidecarSupervisor({
     appBuild: app.getVersion(),
     executablePath: resolveSidecarExecutable(process.resourcesPath, process.platform, process.arch),

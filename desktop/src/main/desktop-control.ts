@@ -5,13 +5,16 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
-  type LocalPreferences,
   type PreferenceUpdate,
   type StartupDiagnostics,
   type StartupFailure,
   type StartupState,
 } from '../shared-contract/desktop'
 import type { SidecarDiagnostics, SidecarLifecycleState } from './sidecar-supervisor'
+import { PreferencesConflictError, type PreferencesStore } from './preferences-store'
+
+export { MemoryPreferencesStore, PreferencesConflictError } from './preferences-store'
+export type { PreferencesStore } from './preferences-store'
 
 export interface SidecarControlPort {
   diagnostics(): Readonly<SidecarDiagnostics>
@@ -22,50 +25,8 @@ export interface CapabilitiesClient {
   getCapabilities(): Promise<CapabilityManifest>
 }
 
-export interface PreferencesStore {
-  get(): Promise<Readonly<LocalPreferences>>
-  update(update: PreferenceUpdate): Promise<Readonly<LocalPreferences>>
-}
-
-export class PreferencesConflictError extends Error {
-  constructor() {
-    super('Preference revision conflict.')
-    this.name = 'PreferencesConflictError'
-  }
-}
-
-const DEFAULT_PREFERENCES: Readonly<LocalPreferences> = Object.freeze({
-  colorScheme: 'system',
-  reducedMotion: false,
-  onboardingCompleted: false,
-  schemaVersion: 1,
-  revision: 0,
-})
-
 function frozen<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value)
-}
-
-export class MemoryPreferencesStore implements PreferencesStore {
-  private current: Readonly<LocalPreferences> = DEFAULT_PREFERENCES
-
-  get(): Promise<Readonly<LocalPreferences>> {
-    return Promise.resolve(this.current)
-  }
-
-  update(update: PreferenceUpdate): Promise<Readonly<LocalPreferences>> {
-    if (update.expectedRevision !== this.current.revision) {
-      return Promise.reject(new PreferencesConflictError())
-    }
-    this.current = frozen({
-      colorScheme: update.colorScheme ?? this.current.colorScheme,
-      reducedMotion: update.reducedMotion ?? this.current.reducedMotion,
-      onboardingCompleted: update.onboardingCompleted ?? this.current.onboardingCompleted,
-      schemaVersion: 1,
-      revision: this.current.revision + 1,
-    })
-    return Promise.resolve(this.current)
-  }
 }
 
 function success<T extends object>(data: Readonly<T>): BridgeResult<T> {

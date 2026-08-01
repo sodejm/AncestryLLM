@@ -65,8 +65,13 @@ and `updatePreferences`. Main validates the sender, argument count, preference
 update schema, and runtime response schema before a value crosses IPC; preload
 validates again before exposing the result to the renderer. Preference updates
 require the last renderer-visible non-negative revision and return a coded
-conflict when it is stale. Main owns this storage boundary; durable preference
-persistence is separate work.
+conflict when it is stale. Packaged main persists the exact bounded preference
+schema in `preferences.json` beneath Electron's OS app-data directory. Writes
+are validated, serialized, and atomically replace the file without following a
+preference-file symlink. Missing and supported legacy data use safe defaults;
+corrupt and unsupported data produce stable path-free diagnostics and are not
+silently overwritten. The renderer receives neither the storage path nor any
+additional storage capability.
 
 ## Diagnostics and recovery
 
