@@ -1,0 +1,112 @@
+name: Desktop sidecar packages
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop-sidecar.yml"
+      - "desktop/**"
+      - "scripts/build_sidecar.py"
+      - "scripts/sidecar_entry.py"
+      - "scripts/smoke_sidecar.py"
+      - "src/ancestryllm/api/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop-sidecar.yml"
+      - "desktop/**"
+      - "scripts/build_sidecar.py"
+      - "scripts/sidecar_entry.py"
+      - "scripts/smoke_sidecar.py"
+      - "src/ancestryllm/api/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-sidecar-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS 15 arm64
+            runner: macos-15
+            target: darwin-arm64
+            package_args: --mac --dir --arm64
+          - name: macOS 15 x64
+            runner: macos-15-intel
+            target: darwin-x64
+            package_args: --mac --dir --x64
+          - name: macOS 26 arm64
+            runner: macos-26
+            target: darwin-arm64
+            package_args: --mac --dir --arm64
+          - name: macOS 26 x64
+            runner: macos-26-intel
+            target: darwin-x64
+            package_args: --mac --dir --x64
+          - name: Windows x64
+            runner: windows-2025
+            target: win32-x64
+            package_args: --win --dir --x64
+          - name: Ubuntu 24.04 x64
+            runner: ubuntu-24.04
+            target: linux-x64
+            package_args: --linux --dir --x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "26.5.0"
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: "11.9.0"
+      - name: Install locked toolchains
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check uv==0.12.0
+          uv sync --locked --all-extras
+          pnpm --dir desktop install --frozen-lockfile
+      - name: Build and smoke-test native sidecar
+        shell: bash
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: |
+          uv run python scripts/build_sidecar.py --expected-target "$NATIVE_TARGET"
+          executable="desktop/build/sidecar/$NATIVE_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
+          if [[ "$NATIVE_TARGET" == "win32-x64" ]]; then executable="$executable.exe"; fi
+          uv run python scripts/smoke_sidecar.py "$executable"
+      - name: Build Electron application
+        shell: bash
+        run: pnpm --dir desktop build
+      - name: Assemble unpacked native application
+        shell: bash
+        env:
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: pnpm --dir desktop exec electron-builder --config electron-builder.yml $PACKAGE_ARGS
+      - name: Verify packaged sidecar resource
+        shell: bash
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: node desktop/scripts/verify-sidecar.mjs "$NATIVE_TARGET" desktop/release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ancestryllm-desktop-${{ matrix.target }}-${{ matrix.runner }}
+          path: desktop/release/
+          if-no-files-found: error

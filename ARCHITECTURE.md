@@ -16,17 +16,16 @@ privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
 The published `0.4.0` runtime is a single-user, local-first Python application
 for genealogy research. It combines deterministic RootsMagic and GEDCOM
-workflows with optional LLM assistance. Isolated `0.5.0` work adds a
-source-level authenticated FastAPI control adapter for health and capability
-discovery plus a UI-only Electron developer scaffold. These components are not
-release evidence or a supported production desktop: the API exposes no
-genealogy, provider, domain, or generic command-dispatch route, and the desktop
-exercises only the sandboxed renderer/preload/main boundary with deterministic
-fictional data.
+workflows with optional LLM assistance. Isolated `0.5.0` work adds an
+authenticated FastAPI control adapter for health and capability discovery, a
+UI-only Electron shell, and native packaged-sidecar build and supervision.
+These components are not release evidence or a supported production desktop:
+the API exposes no genealogy, provider, domain, or generic command-dispatch
+route, and the renderer bridge still exercises deterministic fictional data.
 
 There is no supported production browser, public/LAN, or multi-user runtime.
-ADR-0025 accepts a later packaged local Electron adapter and additional private
-FastAPI routes; it does not accept a public/LAN API, browser client, or
+ADR-0025 accepts the packaged local Electron direction and later private domain
+routes; it does not accept a public/LAN API, browser client, or
 multi-user server. The one-shot CLI and interactive console remain the
 implemented genealogy-capable user-facing adapters. Every adapter must consume
 the same application contracts and services without depending on terminal
@@ -151,7 +150,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron developer scaffold governed by ADR-0025. Its sandboxed renderer, typed mock bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, and local fuse/ASAR package inspection are implemented; genealogy services, the authenticated sidecar, supported distribution packaging, signing, and updates are not. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its sandboxed renderer, typed mock bridge, hardened main-process shell, fixed local protocol/CSP, global session/window denials, private native-sidecar supervisor, local fuse/ASAR inspection, and unsigned unpacked package assembly are implemented. Genealogy integration, supported distribution packages, signing, and updates are not. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the GitHub Wiki. |
@@ -240,10 +239,15 @@ dependency and assurance gates pass.
 - A static typed preload bridge calls an Electron main-process
   backend-for-frontend. Main validates the sender/frame/origin, mediates opaque
   file grants, supervises the sidecar, and proxies only declared endpoints.
+- The supervisor retains authenticated session coordinates only in Electron
+  main, grants them only while ready, and otherwise exposes a sanitized degraded
+  lifecycle plus a bounded single-flight manual retry. Bootstrap material,
+  ports, paths, raw errors, and stacks never cross preload or renderer IPC.
 - A loopback-only FastAPI sidecar authenticates every request before body
   parsing and adapts versioned DTOs to application services. The source-level
-  Issue #11 foundation implements only authenticated health and capability
-  discovery; domain routers remain separately owned future work. It does not
+  Issue #11 foundation and Issue #225 packaged runtime implement only
+  authenticated health and capability discovery; domain routers remain
+  separately owned future work. It does not
   import CLI or console presentation and is not a public API.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
@@ -867,7 +871,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, a browser-typed React renderer shell, a typed versioned mock bridge, a fixed `app://` asset/CSP boundary, global session/window denials, and fuse/ASAR package inspection. No supervisor, packaged sidecar, genealogy integration, domain route, generic command route, or supported desktop package exists. | Complete the separately owned sidecar, bridge, shell, packaging, and exact-head assurance work before making a `0.5.0` support or release claim. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, a browser-typed React renderer shell, a typed versioned mock bridge, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, and Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly. No genealogy integration, domain route, generic command route, signed installer, updater, or supported desktop package exists. | Complete the separately owned domain bridge, shell, signing/distribution, Windows 11 execution, and exact-head assurance work before making a `0.5.0` support or release claim. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

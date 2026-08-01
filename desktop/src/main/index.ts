@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   protocol,
   session,
@@ -22,6 +23,8 @@ import {
   secureWebPreferences,
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
+import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
+import { resolveSidecarExecutable, SidecarSupervisor } from './sidecar-supervisor'
 
 app.enableSandbox()
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
@@ -30,6 +33,9 @@ const bridge = createMockAncestryBridge(process.env.ANCESTRYLLM_DESKTOP_FIXTURE 
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
+let sidecarSupervisor: SidecarSupervisor | undefined
+let shutdownAuthorized = false
+let shutdownPromise: Promise<void> | undefined
 
 function rendererPolicy() {
   return {
@@ -112,7 +118,28 @@ function createWindow(): void {
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 
+async function startPackagedSidecar(): Promise<void> {
+  if (!app.isPackaged) return
+  sidecarSupervisor = new SidecarSupervisor({
+    appBuild: app.getVersion(),
+    executablePath: resolveSidecarExecutable(process.resourcesPath, process.platform, process.arch),
+    launch: launchNativeSidecar,
+    probe: probeNativeSidecar,
+    startupTimeoutMs: 10_000,
+    maxRestarts: 2,
+    maxManualRetries: 1,
+    onFatal: () => {
+      dialog.showErrorBox(
+        'AncestryLLM sidecar unavailable',
+        'The private service is unavailable. This window will remain open for diagnostics; restart AncestryLLM or reinstall the application if the problem continues.',
+      )
+    },
+  })
+  await sidecarSupervisor.start()
+}
+
 app.whenReady().then(async () => {
+  await startPackagedSidecar().catch(() => undefined)
   await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
   installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
   registerIpcHandlers()
@@ -130,5 +157,16 @@ app.whenReady().then(async () => {
   }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
-
+app.on('before-quit', (event) => {
+  if (shutdownAuthorized || (!sidecarSupervisor && !shutdownPromise)) return
+  event.preventDefault()
+  if (!shutdownPromise && sidecarSupervisor) {
+    const supervisor = sidecarSupervisor
+    sidecarSupervisor = undefined
+    shutdownPromise = supervisor.stop().finally(() => {
+      shutdownAuthorized = true
+      app.quit()
+    })
+  }
+})
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

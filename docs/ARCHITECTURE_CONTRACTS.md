@@ -19,8 +19,9 @@ The repository distinguishes four states deliberately:
 The shared command specifications, transport-neutral application contracts,
 shared `CommandExecutor`, and service-owned genealogy aggregate (#44) are
 implemented. The isolated Issue #11 slice implements authenticated FastAPI
-health and capability discovery over those contracts. The Electron application
-and FastAPI domain routers remain later-roadmap adapters.
+health and capability discovery over those contracts. Issue #225 packages and
+supervises that control-only sidecar from Electron main. The renderer's domain
+bridge and FastAPI domain routers remain later-roadmap adapters.
 
 ## Dependency graph and owners
 
