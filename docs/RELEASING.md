@@ -55,7 +55,12 @@ accounts, updater behavior, and background release channels.
    force pushes and deletion.
 2. Enforce tag immutability with a ruleset for `v*.*.*`: prevent tag update and
    deletion, and restrict creation to the maintainer.
-3. Create GitHub environments `testpypi` and `pypi`. For the current
+3. Create GitHub environments `desktop-signing`, `testpypi`, and `pypi`.
+   Protect `desktop-signing` with required maintainer approval and allow it
+   only from the protected `main` branch. Store every installer-signing secret
+   there so only the reviewed, manually dispatched pre-tag job can receive
+   signing credentials. The tag-triggered import and publication jobs must
+   never receive those credentials. For the current
    one-maintainer release, configure `sodejm` as the required reviewer for
    `pypi`; self-approval must remain permitted so the production deployment
    does not deadlock. Requiring a reviewer other than the workflow initiator is
@@ -70,17 +75,24 @@ accounts, updater behavior, and background release channels.
    Developer ID identity and Apple notary API key;
    `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` for the
    Authenticode identity; and `LINUX_GPG_PRIVATE_KEY_BASE64` and
-   `LINUX_GPG_PASSPHRASE` for the detached Debian-package signature. Set
-   `LINUX_GPG_SIGNING_FINGERPRINT` to the complete fingerprint of the exact
-   Linux signing key or signing subkey; the workflow signs with that identity
-   and verifies in a separate public-key-only keyring. Grant each credential
-   only the purpose named here, rotate it outside the workflow, and never put
-   its decoded value in an artifact or repository file.
-6. Register a dedicated self-hosted Windows 11 x64 runner with the exact
+   `LINUX_GPG_PASSPHRASE` for the detached Debian-package signature. Configure
+   repository Actions variables `APPLE_TEAM_ID`,
+   `WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT`,
+   `LINUX_GPG_SIGNING_FINGERPRINT`, and `LINUX_GPG_PUBLIC_KEY_BASE64` with the
+   approved public signer identities and Linux public key. Use the complete
+   certificate thumbprint and complete Linux signing-key or signing-subkey
+   fingerprint. Builder and validation jobs both fail unless the observed
+   signer matches the approved public identity; Linux validation imports only
+   the public key into a fresh keyring. Grant each private credential only the
+   purpose named here, rotate it outside the workflow, and never put its
+   decoded value in an artifact or repository file.
+6. Register an ephemeral self-hosted Windows 11 x64 runner with the exact
    labels `self-hosted`, `Windows`, `X64`, and
-   `ancestryllm-windows-11`. Restrict repository and runner administration to
-   the release maintainer and keep the machine patched and dedicated to this
-   trusted tag workflow.
+   `ancestryllm-windows-11`. Each job must receive a clean one-job VM that is
+   automatically destroyed after completion. Restrict its runner group to the
+   trusted `desktop-sidecar.yml` exact-`main` workflow and `release.yml`, and
+   restrict repository and runner administration to the release maintainer.
+   Neither workflow accepts pull-request heads on this runner.
 7. Enable GitHub immutable releases.
 8. Enable automatic deletion of merged pull-request branches.
 
@@ -99,11 +111,15 @@ link or redacted screenshot:
 - the `v*.*.*` tag ruleset restricts creation and blocks update and deletion;
 - the `pypi` environment has `sodejm` as the required reviewer, while
   self-approval remains enabled for the current one-maintainer release;
+- the `desktop-signing` environment requires maintainer approval, is limited
+  to the protected `main` branch, contains the installer-signing secrets, and
+  is not used by any tag-triggered job;
 - the TestPyPI and PyPI Trusted Publishers match repository
   `sodejm/AncestryLLM`, workflow `release.yml`, and their exact environments,
   and no API-token publishing secret or fallback is configured; and
-- the nine release-signing secrets and the dedicated Windows 11 runner are
-  configured, access-restricted, and current; and
+- the nine private release-signing secrets, four public signer-identity
+  variables, and ephemeral one-job Windows 11 runner are configured,
+  access-restricted where appropriate, and current; and
 - GitHub immutable releases and automatic pull-request branch deletion are
   enabled.
 
@@ -183,28 +199,35 @@ the P0 gate fail-closed while retaining post-release follow-up in Project 2.
 The readiness workflow is the authoritative product-quality and security gate.
 It records the exact commit, run URL, and complete gate inventory in
 `gates.json`. The tag workflow rechecks the Project-native release gate,
-requires that exact approved record, deterministically rebuilds the distributions and SBOM, and
-compares the distribution hashes with the readiness build before any artifact
-is published. It does not repeat pytest, lint, type checking, dependency audit,
-or Semgrep after accepting the exact successful readiness evidence.
+requires that exact approved record, and imports the successful pre-tag
+`desktop-release-distributions` artifact for the tag commit. It verifies the
+GitHub Actions artifact digest plus the artifact's internal manifest and
+checksums before any asset is published. It never rebuilds signed installers
+after the tag is pushed and does not repeat pytest, lint, type checking,
+dependency audit, or Semgrep after accepting the exact successful readiness
+and installer evidence.
 
-The tag workflow is the only installer publisher. Before the final release
-distribution can be assembled or any release asset can be published, it
+The tag workflow is the only installer publisher. The signed installers are
+built and validated by a manually dispatched pre-tag run, but cannot be
+published until the v0.4.0 release is complete and the v0.5.0 tag gates pass.
+Before the final release distribution can be assembled or any release asset can be published, it
 requires all four signed-installer rows:
 
 | Release row | Installer | Required native verification |
 |---|---|---|
-| macOS 15 arm64 | DMG | Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| macOS 15 x64 | DMG | Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| Windows 11 x64 | NSIS EXE | valid Authenticode signature and install/launch on the dedicated Windows 11 runner |
-| Ubuntu 24.04 x64 | DEB plus `.deb.asc` | detached GPG signature verification and install/launch on clean Ubuntu 24.04 |
+| macOS 15 arm64 | DMG | approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| macOS 15 x64 | DMG | approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| Windows 11 x64 | NSIS EXE | approved certificate thumbprint, valid Authenticode signature, and install/launch on an ephemeral one-job Windows 11 runner |
+| Ubuntu 24.04 x64 | DEB plus `.deb.asc` | detached GPG signature from the approved public-key fingerprint and install/launch on clean Ubuntu 24.04 |
 
 Every row builds and smoke-tests the matching native sidecar, installs or
 mounts the complete installer, launches the installed application with no
 system Python, Node.js, or pnpm available on `PATH`, and emits an exact-head
 receipt and CycloneDX SBOM. The aggregator rejects a missing row, failed gate,
 wrong commit or version, duplicate asset name, malformed SBOM, symlink, or
-digest mismatch. Only after aggregation does the workflow regenerate the
+digest mismatch. Native validation receipts also bind the canonical actual OS
+derived from the host probe; aggregation and tag import require the exact six
+intended-and-actual OS rows. Only after aggregation does the workflow regenerate the
 complete `release-evidence.md`, create the one `SHA256SUMS` file, and attest
 `dist/*`, so the evidence manifest, checksums, and provenance cover the Python
 wheel and sdist together with every desktop installer, detached signature,
@@ -221,17 +244,30 @@ release commit first with `git log --show-signature -1`, then:
 ```bash
 release_version="$(jq -er '.release' .github/release-config.json)"
 release_tag="v${release_version}"
+desktop_release_run="<successful pre-tag release workflow run ID>"
+desktop_release_artifact="<desktop-release-distributions artifact ID>"
+desktop_release_digest="sha256:<GitHub Actions artifact SHA-256>"
 .venv/bin/python scripts/verify_release_configuration.py \
   --config .github/release-config.json \
   --version "${release_version}"
-git tag -s "${release_tag}" HEAD -m "AncestryLLM ${release_version}"
+git tag -s "${release_tag}" HEAD \
+  -m "AncestryLLM ${release_version}" \
+  -m "Desktop-Release-Run-ID: ${desktop_release_run}" \
+  -m "Desktop-Release-Artifact-ID: ${desktop_release_artifact}" \
+  -m "Desktop-Release-Artifact-Digest: ${desktop_release_digest}"
 git tag -v "${release_tag}"
 git push origin "${release_tag}"
 ```
 
 Push only the release tag. The tag-triggered workflow verifies the signed,
-annotated tag and exact readiness evidence; deterministically rebuilds and
-attests the artifacts; prepares a draft GitHub
+annotated tag, exact readiness evidence, and exact pre-tag installer artifact;
+the three `Desktop-Release-*` tag-message fields are mandatory and bind the
+approval to one successful manual release-workflow run, one artifact ID, and
+GitHub's exact SHA-256 artifact digest. Obtain them from that run's summary and
+independently confirm them in the Actions artifact metadata before signing.
+The summary normalizes the upload-artifact output to the required
+`sha256:<64 lowercase hex>` form; do not remove the `sha256:` prefix.
+The workflow then attests the combined artifacts; prepares a draft GitHub
 Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
 not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
 artifact hashes; and pauses for required production approval. Production PyPI

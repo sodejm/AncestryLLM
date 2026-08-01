@@ -30,6 +30,15 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
         assert f"arch: {arch}" in workflow
         assert f"installer_target: {installer_target}" in workflow
 
+    for runner, sidecar_target, expected_os, arch in (
+        ("macos-26", "darwin-arm64", "macOS 26", "arm64"),
+        ("macos-26-intel", "darwin-x64", "macOS 26", "x64"),
+    ):
+        assert runner in workflow
+        assert f"sidecar_target: {sidecar_target}" in workflow
+        assert f'expected_os: "{expected_os}"' in workflow
+        assert f"arch: {arch}" in workflow
+
     assert "desktop-installers:" in workflow
     assert "electron-builder.release.yml" in workflow
     assert "scripts/smoke_sidecar.py" in workflow
@@ -40,12 +49,69 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "stapler validate" in workflow
     assert "gpg --detach-sign" in workflow
     assert "--status-fd 1 --verify" in workflow
-    assert "LINUX_GPG_SIGNING_FINGERPRINT: ${{ secrets.LINUX_GPG_SIGNING_FINGERPRINT }}" in workflow
+    assert workflow.count("APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}") >= 2
+    assert (
+        workflow.count(
+            "WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT: "
+            "${{ vars.WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT }}"
+        )
+        >= 2
+    )
+    assert (
+        workflow.count("LINUX_GPG_SIGNING_FINGERPRINT: ${{ vars.LINUX_GPG_SIGNING_FINGERPRINT }}")
+        >= 2
+    )
+    assert "LINUX_GPG_PUBLIC_KEY_BASE64: ${{ vars.LINUX_GPG_PUBLIC_KEY_BASE64 }}" in workflow
+    assert 'grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID"' in workflow
+    assert "$signature.SignerCertificate.Thumbprint" in workflow
+    assert "$applicationSignature.SignerCertificate.Thumbprint" in workflow
     assert "ancestryllm-signing-gnupg" in workflow
     assert "ancestryllm-verification-gnupg" in workflow
+    assert "ancestryllm-public-verification-gnupg" in workflow
     assert '--local-user "$expected_fingerprint!"' in workflow
     assert "--status-fd 1 --verify" in workflow
     assert 'grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint "' in workflow
+    assert "verification keyring unexpectedly contains a private key" in workflow
+
+
+def test_release_workflow_separates_pretag_installer_gates_from_tag_publication() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "release_version:" in workflow
+    assert "commit_sha:" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "desktop-installer-validation:" in workflow
+    assert "desktop-release-distributions" in workflow
+    assert "import-desktop-release-distributions:" in workflow
+    assert "Desktop-Release-Run-ID:" in workflow
+    assert "Desktop-Release-Artifact-ID:" in workflow
+    assert "Desktop-Release-Artifact-Digest:" in workflow
+    assert "steps.desktop_release.outputs.artifact-digest" in workflow
+    assert "/actions/artifacts/$APPROVED_ARTIFACT/zip" in workflow
+    assert 'test "$(jq -r \'.name\' "$metadata")" = "$EXPECTED_NAME"' in workflow
+    assert "desktop artifact manifest digest mismatch" in workflow
+    assert "github.rest.actions.downloadArtifact" not in workflow
+    assert "compression-level: 0" in workflow
+    assert "environment: desktop-signing" in workflow
+    assert "assemble-release-distributions:" in workflow
+    assert "release-distributions" in workflow
+
+    tag_import = workflow.index("  import-desktop-release-distributions:")
+    tag_assemble = workflow.index("  assemble-release-distributions:")
+    assert tag_import < tag_assemble
+    for publisher in (
+        "publish-build-provenance",
+        "draft-github-release",
+        "publish-testpypi",
+        "publish-pypi",
+        "publish-github-release",
+    ):
+        job = workflow[workflow.index(f"  {publisher}:") :]
+        preamble = job.split("runs-on:", maxsplit=1)[0]
+        assert "assemble-release-distributions" in preamble
+        assert "github.event_name == 'push'" in preamble
 
 
 def test_release_packaging_is_signed_manual_full_installer_only() -> None:
@@ -88,10 +154,29 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
     assert "subject-path: dist/*" in workflow
     assert "generate_release_checksums.py --directory dist" in workflow
     assert 'test "$(git rev-parse HEAD)" = "$COMMIT_SHA"' in workflow
-    aggregate = workflow.index("assemble_desktop_release.py aggregate")
-    final_manifest = workflow.index("scripts/create_release_evidence.py", aggregate)
-    checksums = workflow.index("generate_release_checksums.py --directory dist", aggregate)
-    assert aggregate < final_manifest < checksums
+    assert "RAW_ARTIFACT_DIGEST: ${{ steps.desktop_release.outputs.artifact-digest }}" in workflow
+    assert 'ARTIFACT_DIGEST="sha256:${RAW_ARTIFACT_DIGEST,,}"' in workflow
+    assert '[[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]' in workflow
+    assert "Desktop-Release-Artifact-Digest: $ARTIFACT_DIGEST" in workflow
+    assert "id: macos-host" in workflow
+    assert "id: windows-host" in workflow
+    assert "id: linux-host" in workflow
+    assert workflow.count('echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"') >= 2
+    assert '"actual_os=$actualOs" >> $env:GITHUB_OUTPUT' in workflow
+    assert "steps.macos-host.outputs.actual_os" in workflow
+    assert "steps.windows-host.outputs.actual_os" in workflow
+    assert "steps.linux-host.outputs.actual_os" in workflow
+    assert '--actual-os "$ACTUAL_OS"' in workflow
+    assert "--gate operatingSystemPassed" in workflow
+    desktop_aggregate = workflow.index("assemble_desktop_release.py aggregate")
+    desktop_checksums = workflow.index(
+        "generate_release_checksums.py --directory dist", desktop_aggregate
+    )
+    tag_assemble = workflow.index("  assemble-release-distributions:")
+    final_manifest = workflow.index("scripts/create_release_evidence.py", tag_assemble)
+    final_checksums = workflow.index("generate_release_checksums.py --directory dist", tag_assemble)
+    assert desktop_aggregate < desktop_checksums < tag_assemble
+    assert tag_assemble < final_manifest < final_checksums
     for publisher in (
         "publish-build-provenance",
         "draft-github-release",
@@ -100,7 +185,11 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
         "publish-github-release",
     ):
         job = workflow[workflow.index(f"  {publisher}:") :]
-        assert "desktop-evidence-aggregate" in job.split("runs-on:", maxsplit=1)[0]
+        assert "assemble-release-distributions" in job.split("runs-on:", maxsplit=1)[0]
+
+    tag_import = workflow[workflow.index("  import-desktop-release-distributions:") :]
+    assert 'row["actualOs"]' in tag_import
+    assert '("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64")' in tag_import
 
 
 def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> None:

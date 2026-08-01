@@ -4,18 +4,28 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Stable SemVer to package without publishing
+        required: true
+        type: string
+      commit_sha:
+        description: Exact full commit SHA from origin/main to package
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.event_name }}-${{ inputs.commit_sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
   validate:
-    name: validate signed release tag
-    runs-on: ubuntu-latest
+    name: validate release request
+    runs-on: ubuntu-24.04
     permissions:
       actions: read # required to locate and download release-readiness evidence
       contents: read # required to verify the tag and release commit
@@ -25,28 +35,70 @@ jobs:
       commit: ${{ steps.release.outputs.commit }}
       readiness_run: ${{ steps.release.outputs.readiness_run }}
       desktop_run: ${{ steps.release.outputs.desktop_run }}
+      desktop_release_run: ${{ steps.release.outputs.desktop_release_run }}
+      desktop_release_artifact: ${{ steps.release.outputs.desktop_release_artifact }}
+      desktop_release_digest: ${{ steps.release.outputs.desktop_release_digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.commit_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - id: release
-        name: Verify SemVer, package, tag signature, main, and readiness
+        name: Verify exact release identity and permitted boundary
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_READ_TOKEN: ${{ secrets.ANCESTRYLLM_PROJECT_READ_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
           TAG_COMMIT: ${{ github.sha }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+          REQUESTED_COMMIT: ${{ inputs.commit_sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          version="${TAG_NAME#v}"
+          if test "$EVENT_NAME" = "workflow_dispatch"; then
+            version="$REQUESTED_VERSION"
+            commit="$REQUESTED_COMMIT"
+          else
+            version="${TAG_NAME#v}"
+            commit="$TAG_COMMIT"
+          fi
           python - "$version" <<'PY'
           import re
+          import sys
+
+          expected = sys.argv[1]
+          if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", expected):
+              raise SystemExit("release version is not stable SemVer")
+          PY
+          test "${#commit}" -eq 40
+          case "$commit" in *[!0-9a-f]*) echo "commit_sha must be lowercase hexadecimal" >&2; exit 1 ;; esac
+          test "$GITHUB_SHA" = "$commit"
+          test "$(git rev-parse HEAD)" = "$commit"
+          project_owner="$(jq -r '.project.owner' .github/release-config.json)"
+          project_number="$(jq -r '.project.number' .github/release-config.json)"
+          project_title="$(jq -r '.project.title' .github/release-config.json)"
+          project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
+          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
+          project_status="$(jq -r '.project.status' .github/release-config.json)"
+          project_validation="$(jq -r '.project.validation' .github/release-config.json)"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$commit"
+          test "$(jq -r '.release' .github/release-config.json)" = "$version"
+          desktop_version="$(jq -r '.version' desktop/package.json)"
+          test "$desktop_version" = "$version" || test "$desktop_version" = "$version-dev"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+          if test "$EVENT_NAME" = "workflow_dispatch"; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python - "$version" <<'PY'
           import sys
           import tomllib
 
           expected = sys.argv[1]
-          if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", expected):
-              raise SystemExit("release tag is not stable SemVer")
           with open("pyproject.toml", "rb") as handle:
               actual = str(tomllib.load(handle)["project"]["version"])
           if actual != expected:
@@ -55,13 +107,6 @@ jobs:
           python scripts/verify_release_configuration.py \
             --config .github/release-config.json \
             --version "$version"
-          project_owner="$(jq -r '.project.owner' .github/release-config.json)"
-          project_number="$(jq -r '.project.number' .github/release-config.json)"
-          project_title="$(jq -r '.project.title' .github/release-config.json)"
-          project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
-          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
-          project_status="$(jq -r '.project.status' .github/release-config.json)"
-          project_validation="$(jq -r '.project.validation' .github/release-config.json)"
           project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
           test -n "$PROJECT_READ_TOKEN" || {
             echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
@@ -79,18 +124,54 @@ jobs:
               --priority "$project_priority" \
               --status "$project_status" \
               --validation "$project_validation"
-          git fetch --no-tags origin main
-          test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$TAG_COMMIT"
-          test "$(git rev-parse origin/main)" = "$TAG_COMMIT"
+          test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$commit"
           ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME")"
           test "$(jq -r '.object.type' <<<"$ref_json")" = "tag"
           tag_object="$(jq -r '.object.sha' <<<"$ref_json")"
           tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object")"
           test "$(jq -r '.verification.verified' <<<"$tag_json")" = "true"
-          test "$(jq -r '.object.sha' <<<"$tag_json")" = "$TAG_COMMIT"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(jq -r '.object.sha' <<<"$tag_json")" = "$commit"
+          tag_message="$RUNNER_TEMP/desktop-release-tag-message.txt"
+          approval_json="$RUNNER_TEMP/desktop-release-approval.json"
+          jq -r '.message' <<<"$tag_json" > "$tag_message"
+          python - "$tag_message" "$approval_json" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          message_path, output_path = map(Path, sys.argv[1:])
+          message = message_path.read_text(encoding="utf-8")
+          fields = {
+              "runId": r"Desktop-Release-Run-ID: ([1-9]\d*)",
+              "artifactId": r"Desktop-Release-Artifact-ID: ([1-9]\d*)",
+              "artifactDigest": r"Desktop-Release-Artifact-Digest: (sha256:[0-9a-f]{64})",
+          }
+          result: dict[str, int | str] = {}
+          for name, pattern in fields.items():
+              matches = re.findall(rf"(?m)^{pattern}$", message)
+              if len(matches) != 1:
+                  raise SystemExit(f"signed tag must contain exactly one {pattern!r} line")
+              result[name] = matches[0] if name == "artifactDigest" else int(matches[0])
+          output_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+          PY
+          desktop_release_run="$(jq -r '.runId' "$approval_json")"
+          desktop_release_artifact="$(jq -r '.artifactId' "$approval_json")"
+          desktop_release_digest="$(jq -r '.artifactDigest' "$approval_json")"
+          approved_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_release_run")"
+          release_workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml" --jq '.id')"
+          test "$(jq -r '.workflow_id' <<<"$approved_run")" = "$release_workflow_id"
+          test "$(jq -r '.event' <<<"$approved_run")" = "workflow_dispatch"
+          test "$(jq -r '.status' <<<"$approved_run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$approved_run")" = "success"
+          test "$(jq -r '.head_sha' <<<"$approved_run")" = "$commit"
+          approved_artifact="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$desktop_release_artifact")"
+          test "$(jq -r '.workflow_run.id' <<<"$approved_artifact")" = "$desktop_release_run"
+          test "$(jq -r '.name' <<<"$approved_artifact")" = "desktop-release-distributions-$version-$commit"
+          test "$(jq -r '.expired' <<<"$approved_artifact")" = "false"
+          test "$(jq -r '.digest' <<<"$approved_artifact")" = "$desktop_release_digest"
           readiness_run="$(
-            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-readiness.yml/runs?event=workflow_dispatch&status=success&head_sha=$TAG_COMMIT&per_page=10" \
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-readiness.yml/runs?event=workflow_dispatch&status=success&head_sha=$commit&per_page=10" \
               --jq '.workflow_runs[0].id'
           )"
           test -n "$readiness_run"
@@ -98,19 +179,19 @@ jobs:
           gh run download "$readiness_run" --repo "$GITHUB_REPOSITORY" \
             --name release-evidence --dir approved
           grep -F -- "- Version: \`$version\`" approved/release-evidence.md
-          grep -F -- "- Commit: \`$TAG_COMMIT\`" approved/release-evidence.md
+          grep -F -- "- Commit: \`$commit\`" approved/release-evidence.md
           test "$(jq -r '.release' approved/gates.json)" = "$version"
-          test "$(jq -r '.commit' approved/gates.json)" = "$TAG_COMMIT"
+          test "$(jq -r '.commit' approved/gates.json)" = "$commit"
           test "$(jq -r '[.gates[].status == "verified"] | all' approved/gates.json)" = "true"
           desktop_run="$(
-            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/desktop-sidecar.yml/runs?event=workflow_dispatch&status=success&head_sha=$TAG_COMMIT&per_page=10" \
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/desktop-sidecar.yml/runs?event=workflow_dispatch&status=success&head_sha=$commit&per_page=10" \
               --jq '.workflow_runs[0].id'
           )"
           test -n "$desktop_run"
           mkdir approved-desktop
           gh run download "$desktop_run" --repo "$GITHUB_REPOSITORY" \
             --name desktop-evidence-aggregate --dir approved-desktop
-          python - "$TAG_COMMIT" approved-desktop/desktop-evidence.json <<'PY'
+          python - "$commit" approved-desktop/desktop-evidence.json <<'PY'
           import json
           import sys
 
@@ -120,19 +201,15 @@ jobs:
           assert evidence["schemaVersion"] == 2
           assert evidence["kind"] == "aggregate"
           assert evidence["gitHead"] == commit
-          assert evidence["status"] == "passed-with-release-blockers"
-          assert evidence["releaseSupported"] is False
-          assert evidence["blockers"] == {
-              "signedInstaller": True,
-              "windows11Execution": True,
-              "trackedBy": "#231",
-          }
+          assert evidence["status"] == "passed"
+          assert evidence["platformValidated"] is True
+          assert evidence["publicationRequirements"] == {"signedInstaller": True}
           expected = {
               ("macos-15", "darwin-arm64", "macOS 15", "macOS 15", "arm64"),
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
               ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64"),
               ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64"),
-              ("windows-2025", "win32-x64", "Windows 11", "Windows Server 2025", "x64"),
+              ("ancestryllm-windows-11", "win32-x64", "Windows 11", "Windows 11", "x64"),
               ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64"),
           }
           actual = {
@@ -146,15 +223,19 @@ jobs:
               for row in evidence["targets"]
           }
           assert actual == expected
-          assert evidence["security"]["status"] == "passed"
+          assert all(row["platformValidated"] is True for row in evidence["targets"])
           PY
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "commit=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
           echo "desktop_run=$desktop_run" >> "$GITHUB_OUTPUT"
+          echo "desktop_release_run=$desktop_release_run" >> "$GITHUB_OUTPUT"
+          echo "desktop_release_artifact=$desktop_release_artifact" >> "$GITHUB_OUTPUT"
+          echo "desktop_release_digest=$desktop_release_digest" >> "$GITHUB_OUTPUT"
 
   build:
     name: build release once
+    if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
     permissions:
@@ -216,7 +297,8 @@ jobs:
 
   desktop-installers:
     name: signed desktop installer (${{ matrix.sidecar_target }})
-    needs: [validate, build]
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -235,8 +317,8 @@ jobs:
             arch: x64
             installer_target: dmg
             package_args: --mac --x64
-          - runner: ancestryllm-windows-11
-            runs_on: '["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]'
+          - runner: windows-2025
+            runs_on: '"windows-2025"'
             sidecar_target: win32-x64
             expected_os: "Windows 11"
             arch: x64
@@ -250,6 +332,7 @@ jobs:
             installer_target: deb
             package_args: --linux --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    environment: desktop-signing
     permissions:
       contents: read
     env:
@@ -383,9 +466,23 @@ jobs:
         shell: bash
         env:
           INSTALLER: ${{ steps.installer.outputs.path }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
+          case "$APPLE_TEAM_ID" in
+            ??????????) ;;
+            *)
+              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+              exit 1
+              ;;
+          esac
+          case "$APPLE_TEAM_ID" in
+            *[!A-Z0-9]*)
+              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+              exit 1
+              ;;
+          esac
           mount_point="$RUNNER_TEMP/ancestryllm-dmg"
           installed_app="$RUNNER_TEMP/AncestryLLM.app"
           mkdir "$mount_point"
@@ -394,6 +491,7 @@ jobs:
           test "${#mounted_apps[@]}" -eq 1
           codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
           codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
+          grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-details.txt"
           grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
           spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
           xcrun stapler validate "$INSTALLER"
@@ -413,12 +511,16 @@ jobs:
         shell: pwsh
         env:
           INSTALLER: ${{ steps.installer.outputs.path }}
+          WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT }}
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
+          $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
           $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
           $signature = Get-AuthenticodeSignature -LiteralPath $installer
           if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
+          if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-installed'
           $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
@@ -426,6 +528,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
           $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
           if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
+          if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
@@ -440,7 +543,7 @@ jobs:
           INSTALLER: ${{ steps.installer.outputs.path }}
           LINUX_GPG_PRIVATE_KEY_BASE64: ${{ secrets.LINUX_GPG_PRIVATE_KEY_BASE64 }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
-          LINUX_GPG_SIGNING_FINGERPRINT: ${{ secrets.LINUX_GPG_SIGNING_FINGERPRINT }}
+          LINUX_GPG_SIGNING_FINGERPRINT: ${{ vars.LINUX_GPG_SIGNING_FINGERPRINT }}
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
@@ -552,9 +655,704 @@ jobs:
           path: desktop-release-row/
           if-no-files-found: error
 
-  desktop-evidence-aggregate:
-    name: aggregate bounded desktop release
-    needs: [validate, build, desktop-installers]
+  desktop-installer-validation:
+    name: validate signed installer (${{ matrix.runner }})
+    if: github.event_name == 'workflow_dispatch'
+    needs: [validate, desktop-installers]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            runs_on: '"macos-15"'
+            sidecar_target: darwin-arm64
+            expected_os: "macOS 15"
+            arch: arm64
+            installer_target: dmg
+          - runner: macos-15-intel
+            runs_on: '"macos-15-intel"'
+            sidecar_target: darwin-x64
+            expected_os: "macOS 15"
+            arch: x64
+            installer_target: dmg
+          - runner: macos-26
+            runs_on: '"macos-26"'
+            sidecar_target: darwin-arm64
+            expected_os: "macOS 26"
+            arch: arm64
+            installer_target: dmg
+          - runner: macos-26-intel
+            runs_on: '"macos-26-intel"'
+            sidecar_target: darwin-x64
+            expected_os: "macOS 26"
+            arch: x64
+            installer_target: dmg
+          - runner: ancestryllm-windows-11
+            # This label must resolve only to an ephemeral one-job runner.
+            runs_on: '["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]'
+            sidecar_target: win32-x64
+            expected_os: "Windows 11"
+            arch: x64
+            installer_target: nsis
+          - runner: ubuntu-24.04
+            runs_on: '"ubuntu-24.04"'
+            sidecar_target: linux-x64
+            expected_os: "Ubuntu 24.04"
+            arch: x64
+            installer_target: deb
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    permissions:
+      actions: read # required to download the exact signed-installer artifact from this run
+      contents: read # required to verify and exercise the exact release commit
+    env:
+      EXPECTED_HEAD: ${{ needs.validate.outputs.commit }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - name: Verify exact validation head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "26.5.0"
+          package-manager-cache: false
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: "11.9.0"
+      - name: Install locked desktop test dependencies
+        shell: bash
+        run: pnpm --dir desktop install --frozen-lockfile
+      - id: source
+        name: Download and verify the exact signed-installer artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: desktop-installer-${{ matrix.sidecar_target }}
+        run: |
+          metadata="$RUNNER_TEMP/desktop-installer-artifacts.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$ARTIFACT_NAME&per_page=100" \
+            > "$metadata"
+          test "$(jq --arg name "$ARTIFACT_NAME" '[.artifacts[] | select(.name == $name and .expired == false)] | length' "$metadata")" -eq 1
+          artifact_id="$(jq -r --arg name "$ARTIFACT_NAME" '.artifacts[] | select(.name == $name and .expired == false) | .id' "$metadata")"
+          artifact_digest="$(jq -r --arg name "$ARTIFACT_NAME" '.artifacts[] | select(.name == $name and .expired == false) | .digest' "$metadata")"
+          python - "$artifact_id" "$artifact_digest" <<'PY'
+          import re
+          import sys
+
+          artifact_id, digest = sys.argv[1:]
+          assert re.fullmatch(r"[1-9]\d*", artifact_id)
+          assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+          PY
+          archive="$RUNNER_TEMP/desktop-installer-source.zip"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            --output "$archive"
+          python - "$archive" "$artifact_digest" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          archive, expected = sys.argv[1:]
+          actual = "sha256:" + hashlib.sha256(Path(archive).read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"artifact archive digest {actual} != {expected}")
+          PY
+          mkdir desktop-installer-source
+          python - "$archive" desktop-installer-source <<'PY'
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive, destination = Path(sys.argv[1]), Path(sys.argv[2])
+          with zipfile.ZipFile(archive) as bundle:
+              names: set[str] = set()
+              for member in bundle.infolist():
+                  name = member.filename
+                  path = PurePosixPath(name)
+                  mode = member.external_attr >> 16
+                  if (
+                      not name
+                      or "\\" in name
+                      or path.is_absolute()
+                      or ".." in path.parts
+                      or name in names
+                      or stat.S_ISLNK(mode)
+                  ):
+                      raise SystemExit(f"unsafe artifact archive member: {name!r}")
+                  names.add(name)
+              bundle.extractall(destination)
+          PY
+          echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
+          echo "artifact_digest=$artifact_digest" >> "$GITHUB_OUTPUT"
+      - id: installer
+        name: Locate the one previously signed installer
+        shell: bash
+        env:
+          INSTALLER_TARGET: ${{ matrix.installer_target }}
+        run: |
+          shopt -s globstar nullglob
+          case "$INSTALLER_TARGET" in
+            dmg) installers=(desktop-installer-source/**/*.dmg) ;;
+            nsis) installers=(desktop-installer-source/**/*.exe) ;;
+            deb) installers=(desktop-installer-source/**/*.deb) ;;
+            *) echo "unsupported installer target: $INSTALLER_TARGET" >&2; exit 1 ;;
+          esac
+          test "${#installers[@]}" -eq 1
+          echo "path=${installers[0]}" >> "$GITHUB_OUTPUT"
+      - id: macos-host
+        name: Verify supported macOS version
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          actual_os="macOS $(sw_vers -productVersion | cut -d. -f1)"
+          test "$actual_os" = "$EXPECTED_OS"
+          echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
+      - id: windows-host
+        name: Verify exact Windows 11 host
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          $caption = (Get-CimInstance Win32_OperatingSystem).Caption
+          if ($caption -notmatch 'Windows 11') { throw "expected Windows 11, found $caption" }
+          $actualOs = 'Windows 11'
+          if ($actualOs -ne $env:EXPECTED_OS) {
+            throw "expected $env:EXPECTED_OS, found $caption"
+          }
+          "actual_os=$actualOs" >> $env:GITHUB_OUTPUT
+      - id: linux-host
+        name: Verify exact Ubuntu 24.04 host
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          source /etc/os-release
+          test "$ID" = ubuntu
+          actual_os="Ubuntu $VERSION_ID"
+          test "$actual_os" = "$EXPECTED_OS"
+          echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
+      - name: Verify and exercise signed macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          case "$APPLE_TEAM_ID" in
+            ??????????) ;;
+            *)
+              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+              exit 1
+              ;;
+          esac
+          case "$APPLE_TEAM_ID" in
+            *[!A-Z0-9]*)
+              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+              exit 1
+              ;;
+          esac
+          mount_point="$RUNNER_TEMP/ancestryllm-validation-dmg"
+          installed_app="$RUNNER_TEMP/AncestryLLM.app"
+          mkdir "$mount_point"
+          hdiutil attach "$INSTALLER" -nobrowse -readonly -mountpoint "$mount_point"
+          mounted_apps=("$mount_point"/*.app)
+          test "${#mounted_apps[@]}" -eq 1
+          codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
+          codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-validation-details.txt"
+          grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-validation-details.txt"
+          spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
+          xcrun stapler validate "$INSTALLER"
+          ditto "${mounted_apps[0]}" "$installed_app"
+          export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
+          pnpm --dir desktop run test:e2e:packaged -- \
+            --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+      - name: Unmount macOS validation installer
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if mount | grep -Fq "$RUNNER_TEMP/ancestryllm-validation-dmg"; then
+            hdiutil detach "$RUNNER_TEMP/ancestryllm-validation-dmg"
+          fi
+      - name: Verify and exercise signed Windows 11 application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
+          $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
+          if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed'
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
+          $application = Join-Path $installRoot 'ancestryllm.exe'
+          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
+          if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
+          if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          $env:ANCESTRYLLM_PACKAGED_APP = $application
+          pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
+      - name: Remove temporary Windows validation installation
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed') -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Verify, install, and exercise signed Ubuntu application
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          LINUX_GPG_PUBLIC_KEY_BASE64: ${{ vars.LINUX_GPG_PUBLIC_KEY_BASE64 }}
+          LINUX_GPG_SIGNING_FINGERPRINT: ${{ vars.LINUX_GPG_SIGNING_FINGERPRINT }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          test -n "$LINUX_GPG_PUBLIC_KEY_BASE64"
+          test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
+          expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          case "$expected_fingerprint" in
+            *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
+          esac
+          case "${#expected_fingerprint}" in
+            40|64) ;;
+            *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
+          esac
+          test -s "$INSTALLER.asc"
+          verification_home="$RUNNER_TEMP/ancestryllm-public-verification-gnupg"
+          install -d -m 700 "$verification_home"
+          printf '%s' "$LINUX_GPG_PUBLIC_KEY_BASE64" | base64 --decode \
+            > "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          GNUPGHOME="$verification_home" gpg --batch --import \
+            "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
+            echo "verification keyring unexpectedly contains a private key" >&2
+            exit 1
+          fi
+          GNUPGHOME="$verification_home" gpg --batch --with-colons --fingerprint --list-keys | \
+            awk -F: '$1 == "fpr" { print toupper($10) }' | grep -Fxq "$expected_fingerprint"
+          GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
+            "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
+          grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
+            "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
+          sudo dpkg -i "$INSTALLER"
+          dpkg-query --show ancestryllm-desktop
+          test -x /opt/AncestryLLM/ancestryllm
+          export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
+          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged -- \
+            --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+      - name: Remove temporary Ubuntu validation installation
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo dpkg -r ancestryllm-desktop 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/ancestryllm-public-verification-gnupg"
+          rm -f "$RUNNER_TEMP/ancestryllm-release-public-key.asc" \
+            "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
+      - name: Record exact installer validation receipt
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          VALIDATION_RUNNER: ${{ matrix.runner }}
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          ACTUAL_OS: ${{ steps.macos-host.outputs.actual_os || steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          SOURCE_ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+          SOURCE_ARTIFACT_DIGEST: ${{ steps.source.outputs.artifact_digest }}
+        run: |
+          row_dir="desktop-validation-row"
+          mkdir "$row_dir"
+          installer_name="$(basename "$INSTALLER")"
+          cp "$INSTALLER" "$row_dir/$installer_name"
+          python scripts/assemble_desktop_release.py validation-receipt \
+            --git-head "$EXPECTED_HEAD" \
+            --version "$VERSION" \
+            --runner "$VALIDATION_RUNNER" \
+            --target "$SIDECAR_TARGET" \
+            --expected-os "$EXPECTED_OS" \
+            --actual-os "$ACTUAL_OS" \
+            --arch "$TARGET_ARCH" \
+            --installer "$row_dir/$installer_name" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --source-artifact-id "$SOURCE_ARTIFACT_ID" \
+            --source-artifact-digest "$SOURCE_ARTIFACT_DIGEST" \
+            --gate exactHeadPassed \
+            --gate installedRuntimePassed \
+            --gate operatingSystemPassed \
+            --gate runtimeIsolationPassed \
+            --gate sidecarHandshakePassed \
+            --output "$row_dir/desktop-validation-receipt.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-validation-${{ matrix.runner }}
+          path: desktop-validation-row/
+          if-no-files-found: error
+
+  desktop-release-aggregate:
+    name: aggregate validated desktop release candidate
+    if: github.event_name == 'workflow_dispatch'
+    needs: [validate, desktop-installers, desktop-installer-validation]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # required to verify and aggregate this run's installer and validation artifacts
+      contents: read # required to inspect the exact release commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-installer-*
+          path: desktop-installer-evidence
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-validation-*
+          path: desktop-validation-evidence
+      - name: Verify receipt provenance against this exact workflow run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/release-run-artifacts.json"
+          python - "$RUNNER_TEMP/release-run-artifacts.json" \
+            desktop-validation-evidence "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$COMMIT_SHA" "$VERSION" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          metadata_path, receipts_dir, run_id, run_attempt, commit, version = sys.argv[1:]
+          artifacts = json.loads(Path(metadata_path).read_text(encoding="utf-8"))["artifacts"]
+          by_id = {item["id"]: item for item in artifacts}
+          if len(by_id) != len(artifacts):
+              raise SystemExit("release workflow returned duplicate artifact IDs")
+
+          target_names = {
+              "desktop-installer-darwin-arm64",
+              "desktop-installer-darwin-x64",
+              "desktop-installer-win32-x64",
+              "desktop-installer-linux-x64",
+          }
+          validation_names = {
+              "desktop-validation-macos-15",
+              "desktop-validation-macos-15-intel",
+              "desktop-validation-macos-26",
+              "desktop-validation-macos-26-intel",
+              "desktop-validation-ancestryllm-windows-11",
+              "desktop-validation-ubuntu-24.04",
+          }
+          names = [item["name"] for item in artifacts if not item["expired"]]
+          for expected in target_names | validation_names:
+              if names.count(expected) != 1:
+                  raise SystemExit(f"expected exactly one unexpired workflow artifact {expected}")
+
+          receipts = sorted(Path(receipts_dir).rglob("desktop-validation-receipt.json"))
+          if len(receipts) != len(validation_names):
+              raise SystemExit("desktop validation receipt matrix is incomplete")
+          runners: set[str] = set()
+          source_names: set[str] = set()
+          for path in receipts:
+              receipt = json.loads(path.read_text(encoding="utf-8"))
+              if receipt["gitHead"] != commit or receipt["version"] != version:
+                  raise SystemExit(f"validation receipt {path} has the wrong release identity")
+              runner = receipt["runner"]
+              if runner in runners:
+                  raise SystemExit(f"duplicate validation receipt for {runner}")
+              runners.add(runner)
+              workflow = receipt["workflow"]
+              if workflow["runId"] != int(run_id) or workflow["runAttempt"] != int(run_attempt):
+                  raise SystemExit(f"validation receipt {runner} belongs to another workflow run")
+              source = by_id.get(workflow["sourceArtifactId"])
+              expected_name = f"desktop-installer-{receipt['target']}"
+              if source is None or source["name"] != expected_name or source["expired"]:
+                  raise SystemExit(f"validation receipt {runner} names an invalid source artifact")
+              if source["digest"] != workflow["sourceArtifactDigest"]:
+                  raise SystemExit(f"validation receipt {runner} source digest is stale")
+              if not re.fullmatch(r"sha256:[0-9a-f]{64}", source["digest"]):
+                  raise SystemExit(f"validation receipt {runner} source digest is invalid")
+              source_names.add(source["name"])
+          if source_names != target_names:
+              raise SystemExit("validation receipts do not cover every signed installer artifact")
+          PY
+      - name: Aggregate exact installers, validation evidence, and SBOMs
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
+          python scripts/assemble_desktop_release.py aggregate \
+            --git-head "$COMMIT_SHA" \
+            --version "$VERSION" \
+            --input-dir desktop-installer-evidence \
+            --validation-dir desktop-validation-evidence \
+            --output-dir dist
+          test -f dist/desktop-artifact-manifest.json
+          test -f dist/desktop-sbom.json
+          test -f dist/desktop-exact-head-evidence.json
+          python scripts/generate_release_checksums.py --directory dist
+      - id: desktop_release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-release-distributions-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.commit }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Record the signed-tag approval coordinates
+        env:
+          ARTIFACT_ID: ${{ steps.desktop_release.outputs.artifact-id }}
+          RAW_ARTIFACT_DIGEST: ${{ steps.desktop_release.outputs.artifact-digest }}
+        run: |
+          if [[ "$RAW_ARTIFACT_DIGEST" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+            ARTIFACT_DIGEST="sha256:${RAW_ARTIFACT_DIGEST,,}"
+          else
+            ARTIFACT_DIGEST="${RAW_ARTIFACT_DIGEST,,}"
+          fi
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            echo "### Approved desktop release candidate"
+            echo
+            echo 'Add these exact lines to the signed annotated release tag:'
+            echo '```text'
+            echo "Desktop-Release-Run-ID: $GITHUB_RUN_ID"
+            echo "Desktop-Release-Artifact-ID: $ARTIFACT_ID"
+            echo "Desktop-Release-Artifact-Digest: $ARTIFACT_DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  import-desktop-release-distributions:
+    name: import approved desktop release candidate
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # required to download the exact approved workflow artifact by ID
+      contents: read # required to verify the signed tag and release commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Download the exact approved artifact without name fallback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_RUN: ${{ needs.validate.outputs.desktop_release_run }}
+          APPROVED_ARTIFACT: ${{ needs.validate.outputs.desktop_release_artifact }}
+          APPROVED_DIGEST: ${{ needs.validate.outputs.desktop_release_digest }}
+          EXPECTED_NAME: desktop-release-distributions-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.commit }}
+        run: |
+          metadata="$RUNNER_TEMP/approved-desktop-artifact.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$APPROVED_ARTIFACT" > "$metadata"
+          test "$(jq -r '.workflow_run.id' "$metadata")" = "$APPROVED_RUN"
+          test "$(jq -r '.name' "$metadata")" = "$EXPECTED_NAME"
+          test "$(jq -r '.expired' "$metadata")" = "false"
+          test "$(jq -r '.digest' "$metadata")" = "$APPROVED_DIGEST"
+          archive="$RUNNER_TEMP/approved-desktop-release.zip"
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$APPROVED_ARTIFACT/zip" \
+            --output "$archive"
+          python - "$archive" "$APPROVED_DIGEST" imported <<'PY'
+          import hashlib
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive, expected, destination = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+          actual = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"approved artifact archive digest {actual} != {expected}")
+          destination.mkdir()
+          with zipfile.ZipFile(archive) as bundle:
+              names: set[str] = set()
+              for member in bundle.infolist():
+                  name = member.filename
+                  path = PurePosixPath(name)
+                  mode = member.external_attr >> 16
+                  if (
+                      not name
+                      or "\\" in name
+                      or path.is_absolute()
+                      or ".." in path.parts
+                      or name in names
+                      or stat.S_ISLNK(mode)
+                  ):
+                      raise SystemExit(f"unsafe approved artifact member: {name!r}")
+                  names.add(name)
+              bundle.extractall(destination)
+          PY
+      - name: Verify approved desktop inventory and exact-head evidence
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          APPROVED_RUN: ${{ needs.validate.outputs.desktop_release_run }}
+          APPROVED_ARTIFACT: ${{ needs.validate.outputs.desktop_release_artifact }}
+          APPROVED_DIGEST: ${{ needs.validate.outputs.desktop_release_digest }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          python scripts/verify_release_assets.py --expected imported --actual imported
+          python - imported "$VERSION" "$COMMIT_SHA" <<'PY'
+          import hashlib
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          root, version, commit = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+          entries = list(root.iterdir())
+          if any(path.is_symlink() or not path.is_file() for path in entries):
+              raise SystemExit("approved desktop artifact must contain only direct regular files")
+          manifest = json.loads((root / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
+          evidence = json.loads((root / "desktop-exact-head-evidence.json").read_text(encoding="utf-8"))
+          if (
+              manifest.get("schemaVersion") != 1
+              or manifest.get("version") != version
+              or manifest.get("gitHead") != commit
+          ):
+              raise SystemExit("desktop artifact manifest has the wrong release identity")
+          if (
+              evidence.get("schemaVersion") != 2
+              or evidence.get("version") != version
+              or evidence.get("gitHead") != commit
+          ):
+              raise SystemExit("desktop exact-head evidence has the wrong release identity")
+          if evidence.get("status") != "passed" or evidence.get("platformValidated") is not True:
+              raise SystemExit("desktop exact-head evidence is not publication eligible")
+          artifacts = manifest.get("artifacts")
+          if not isinstance(artifacts, list):
+              raise SystemExit("desktop artifact manifest is malformed")
+          artifact_names = {row.get("name") for row in artifacts if isinstance(row, dict)}
+          if len(artifact_names) != len(artifacts) or not all(
+              isinstance(name, str) and Path(name).name == name for name in artifact_names
+          ):
+              raise SystemExit("desktop artifact manifest contains unsafe or duplicate names")
+          reserved_names = {
+              "desktop-artifact-manifest.json",
+              "desktop-exact-head-evidence.json",
+              "desktop-sbom.json",
+              "SHA256SUMS",
+          }
+          if artifact_names & reserved_names:
+              raise SystemExit("desktop artifact manifest collides with release metadata")
+          for row in artifacts:
+              if set(row) != {"name", "bytes", "sha256"}:
+                  raise SystemExit("desktop artifact manifest row is malformed")
+              path = root / row["name"]
+              byte_count = row["bytes"]
+              digest = row["sha256"]
+              if (
+                  isinstance(byte_count, bool)
+                  or not isinstance(byte_count, int)
+                  or byte_count < 0
+                  or not isinstance(digest, str)
+                  or not re.fullmatch(r"[0-9a-f]{64}", digest)
+              ):
+                  raise SystemExit("desktop artifact manifest row is malformed")
+              actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if path.stat().st_size != byte_count or actual_digest != digest:
+                  raise SystemExit(f"desktop artifact manifest digest mismatch: {path.name}")
+          expected_files = artifact_names | {
+              "desktop-artifact-manifest.json",
+              "desktop-exact-head-evidence.json",
+              "desktop-sbom.json",
+              "SHA256SUMS",
+          }
+          if {path.name for path in entries} != expected_files:
+              raise SystemExit("approved desktop artifact inventory is not manifest exact")
+          expected_validations = {
+              ("macos-15", "darwin-arm64", "macOS 15", "macOS 15", "arm64"),
+              ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
+              ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64"),
+              ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64"),
+              ("ancestryllm-windows-11", "win32-x64", "Windows 11", "Windows 11", "x64"),
+              ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64"),
+          }
+          validation_rows = evidence.get("validations", [])
+          if not isinstance(validation_rows, list) or len(validation_rows) != len(
+              expected_validations
+          ):
+              raise SystemExit("approved desktop validation matrix is incomplete")
+          actual_validations = {
+              (
+                  row["runner"],
+                  row["target"],
+                  row["expectedOs"],
+                  row["actualOs"],
+                  row["arch"],
+              )
+              for row in validation_rows
+              if isinstance(row, dict)
+          }
+          if len(actual_validations) != len(validation_rows) or actual_validations != (
+              expected_validations
+          ):
+              raise SystemExit("approved desktop validation matrix is incomplete")
+          PY
+          mv imported/SHA256SUMS imported/desktop-aggregate-SHA256SUMS
+          python - imported/desktop-approved-artifact.json <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          payload = {
+              "schemaVersion": 1,
+              "status": "approved",
+              "version": os.environ["VERSION"],
+              "gitHead": os.environ["COMMIT_SHA"],
+              "signedTag": os.environ["TAG_NAME"],
+              "workflowRunId": int(os.environ["APPROVED_RUN"]),
+              "artifactId": int(os.environ["APPROVED_ARTIFACT"]),
+              "artifactDigest": os.environ["APPROVED_DIGEST"],
+          }
+          Path(sys.argv[1]).write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: imported-desktop-release-distributions
+          path: imported/
+          if-no-files-found: error
+
+  assemble-release-distributions:
+    name: assemble immutable Python and desktop release distributions
+    if: github.event_name == 'push'
+    needs: [validate, build, import-desktop-release-distributions]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -569,26 +1367,38 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: python-release-distributions
-          path: dist
+          path: python-release
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: desktop-installer-*
-          path: desktop-installer-evidence
-      - name: Aggregate exact installers, evidence, and SBOMs
+          name: imported-desktop-release-distributions
+          path: desktop-release
+      - name: Merge exact release assets and regenerate final evidence
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
-          python scripts/assemble_desktop_release.py aggregate \
-            --git-head "$COMMIT_SHA" \
-            --version "$VERSION" \
-            --input-dir desktop-installer-evidence \
-            --output-dir dist
-          test -f dist/desktop-artifact-manifest.json
-          test -f dist/desktop-sbom.json
-          test -f dist/desktop-exact-head-evidence.json
+          python - python-release desktop-release dist <<'PY'
+          import shutil
+          import sys
+          from pathlib import Path
+
+          python_dir, desktop_dir, output_dir = map(Path, sys.argv[1:])
+          output_dir.mkdir()
+          for source_dir, skipped in (
+              (python_dir, {"SHA256SUMS", "release-evidence.md"}),
+              (desktop_dir, set()),
+          ):
+              for source in source_dir.iterdir():
+                  if source.name in skipped:
+                      continue
+                  if source.is_symlink() or not source.is_file() or source.name.startswith("."):
+                      raise SystemExit(f"unsupported release input: {source}")
+                  destination = output_dir / source.name
+                  if destination.exists():
+                      raise SystemExit(f"release asset collision: {source.name}")
+                  shutil.copyfile(source, destination)
+          PY
           python scripts/create_release_evidence.py \
             --version "$VERSION" \
             --commit "$COMMIT_SHA" \
@@ -599,6 +1409,7 @@ jobs:
             --interoperability dist/interoperability.json \
             --output dist/release-evidence.md
           python scripts/generate_release_checksums.py --directory dist
+          python scripts/verify_release_assets.py --expected dist --actual dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-distributions
@@ -607,7 +1418,8 @@ jobs:
 
   publish-build-provenance:
     name: publish build provenance
-    needs: [validate, desktop-evidence-aggregate]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions]
     runs-on: ubuntu-latest
     permissions:
       attestations: write # required to persist build provenance
@@ -624,7 +1436,8 @@ jobs:
 
   draft-github-release:
     name: prepare draft GitHub Release
-    needs: [validate, desktop-evidence-aggregate, publish-build-provenance]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-build-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create and attach assets to the draft release
@@ -666,7 +1479,8 @@ jobs:
 
   publish-testpypi:
     name: publish TestPyPI
-    needs: [validate, desktop-evidence-aggregate, publish-build-provenance, draft-github-release]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -689,7 +1503,8 @@ jobs:
 
   verify-testpypi:
     name: verify TestPyPI
-    needs: [validate, desktop-evidence-aggregate, publish-testpypi]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-testpypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -721,7 +1536,8 @@ jobs:
 
   publish-pypi:
     name: publish PyPI
-    needs: [validate, desktop-evidence-aggregate, draft-github-release, verify-testpypi]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, draft-github-release, verify-testpypi]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -743,7 +1559,8 @@ jobs:
 
   verify-pypi-hashes:
     name: verify PyPI hashes and PEP 740 attestations
-    needs: [validate, desktop-evidence-aggregate, publish-pypi]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -797,6 +1614,7 @@ jobs:
 
   verify-pypi-install:
     name: verify PyPI ${{ matrix.artifact }} install (${{ matrix.os }}, ${{ matrix.python }})
+    if: github.event_name == 'push'
     needs: [validate, verify-pypi-hashes]
     strategy:
       fail-fast: false
@@ -841,7 +1659,8 @@ jobs:
 
   publish-github-release:
     name: publish immutable GitHub Release
-    needs: [validate, desktop-evidence-aggregate, draft-github-release, verify-pypi-hashes, verify-pypi-install]
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, draft-github-release, verify-pypi-hashes, verify-pypi-install]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to publish the prepared GitHub Release

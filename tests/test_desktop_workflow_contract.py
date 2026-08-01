@@ -16,6 +16,12 @@ def _workflow() -> str:
 def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
     workflow = _workflow()
 
+    assert "commit_sha:" in workflow
+    assert "inputs.commit_sha || github.sha" in workflow
+    assert "pull_request:" not in workflow
+    assert "github.event.pull_request" not in workflow
+    assert "git fetch --no-tags origin main" in workflow
+    assert 'test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"' in workflow
     assert "paths:" not in workflow
     assert "changes:" in workflow
     assert "desktop-security:" in workflow
@@ -24,7 +30,6 @@ def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
     assert "name: Desktop gate" in workflow
     assert "if: ${{ always() }}" in workflow
     assert "needs: [changes, desktop-security, native-package]" in workflow
-    assert "github.event.pull_request.head.sha || github.sha" in workflow
     assert "git rev-parse HEAD" in workflow
     assert "verification-evidence.mjs aggregate" in workflow
 
@@ -37,7 +42,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64"),
         ("macos-26", "darwin-arm64", "macOS 26", "arm64"),
         ("macos-26-intel", "darwin-x64", "macOS 26", "x64"),
-        ("windows-2025", "win32-x64", "Windows 11", "x64"),
+        ("ancestryllm-windows-11", "win32-x64", "Windows 11", "x64"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64"),
     )
     for runner, sidecar_target, expected_os, arch in expected_rows:
@@ -46,7 +51,23 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         assert f'expected_os: "{expected_os}"' in workflow
         assert f"arch: {arch}" in workflow
 
-    assert 'actual_os: "Windows Server 2025"' in workflow
+    assert "matrix.actual_os" not in workflow
+    assert "actual_os:" not in workflow
+    assert "id: macos-host" in workflow
+    assert 'actual_os="macOS $(sw_vers -productVersion | cut -d. -f1)"' in workflow
+    assert "id: windows-host" in workflow
+    assert "Get-CimInstance Win32_OperatingSystem" in workflow
+    assert "id: linux-host" in workflow
+    assert "source /etc/os-release" in workflow
+    assert (
+        "ACTUAL_OS: ${{ steps.macos-host.outputs.actual_os || "
+        "steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}" in workflow
+    )
+    assert 'runs_on: \'["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]\'' in workflow
+    assert "ephemeral one-job runner" in workflow
+    assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow
+    assert "windows-2025" not in workflow
+    assert "Windows Server 2025" not in workflow
     assert "package_boundary: unpacked-native" in workflow
     assert "release_supported:" not in workflow
     assert "--release-supported" not in workflow
@@ -118,11 +139,11 @@ def test_verification_document_covers_external_release_blockers() -> None:
     assert VERIFICATION_DOC.exists()
     document = VERIFICATION_DOC.read_text(encoding="utf-8")
 
-    assert "Windows Server 2025" in document
     assert "Windows 11" in document
-    assert "releaseSupported" in document
+    assert "platformValidated" in document
     assert "unpacked-native" in document
     assert "signed installer" in document
     assert "ad hoc" in document
     assert "#231" in document
     assert "#131" in document
+    assert "Windows Server 2025" not in document

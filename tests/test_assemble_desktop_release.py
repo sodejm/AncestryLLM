@@ -157,6 +157,7 @@ def test_aggregate_binds_exact_matrix_assets_evidence_and_combined_sbom(
 
     assert completed.returncode == 0, completed.stderr
     evidence = json.loads((output / "desktop-exact-head-evidence.json").read_text(encoding="utf-8"))
+    assert evidence["schemaVersion"] == 2
     assert evidence["status"] == "passed"
     assert evidence["gitHead"] == GIT_HEAD
     assert {row["target"] for row in evidence["targets"]} == set(TARGETS)

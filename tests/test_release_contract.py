@@ -244,9 +244,12 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "subject-path: dist/*" in release
     assert "verify_codeql_sarif.py --directory codeql-sarif" in readiness
     assert (
-        "needs: [validate, desktop-evidence-aggregate, publish-build-provenance, "
+        "needs: [validate, assemble-release-distributions, publish-build-provenance, "
         "draft-github-release]" in release
     )
+    assert "import-desktop-release-distributions:" in release
+    assert "Desktop-Release-Artifact-ID:" in release
+    assert "Desktop-Release-Artifact-Digest:" in release
     assert "verified-pypi-distributions" in release
     assert "verified-pypi-attestations" in release
     assert "artifact: [wheel, sdist]" in release

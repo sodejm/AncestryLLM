@@ -2,30 +2,30 @@
 
 The `Desktop gate` is the always-reported aggregate for changes that can affect
 the bounded 0.5.0 Electron shell. It binds source, security, native sidecar, and
-unpublished packaged-runtime evidence to the exact pull-request head. The gate
+unpublished packaged-runtime evidence to the exact protected `main` commit. The gate
 does not publish a release and must not be interpreted as installer, signing,
 notarization, or end-user platform approval.
 
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`
-application on each hosted runner below. The assembled application exists only
+application on each exact supported runner below. The assembled application exists only
 inside that job; CI uploads its JSON evidence and SBOM, not the application
 tree.
 
-| Hosted runner | Bundled sidecar | Intended target | Executed OS | Architecture | `releaseSupported` |
+| Runner | Bundled sidecar | Intended target | Executed OS | Architecture | `platformValidated` |
 |---|---|---|---|---|---|
 | `macos-15` | `darwin-arm64` | macOS 15 | macOS 15 | arm64 | `true` |
 | `macos-15-intel` | `darwin-x64` | macOS 15 | macOS 15 | x64 | `true` |
 | `macos-26` | `darwin-arm64` | macOS 26 | macOS 26 | arm64 | `true` |
 | `macos-26-intel` | `darwin-x64` | macOS 26 | macOS 26 | x64 | `true` |
-| `windows-2025` | `win32-x64` | Windows 11 | Windows Server 2025 | x64 | `false` |
+| `ancestryllm-windows-11` | `win32-x64` | Windows 11 | Windows 11 | x64 | `true` |
 | `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 | Ubuntu 24.04 | x64 | `true` |
 
-The hosted `windows-2025` runner is Windows Server 2025, not Windows 11. Its
-row proves native Windows packaging and runtime behavior on the hosted server
-environment, so it deliberately records `releaseSupported: false`. A real
-Windows 11 execution remains an external release blocker.
+The Windows row runs only on an ephemeral one-job self-hosted Windows 11 x64
+runner that is destroyed after the job. It never accepts pull-request code and
+cannot be replaced by a hosted server approximation. The aggregate records
+`platformValidated: true` only after all six exact rows pass.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
@@ -34,9 +34,9 @@ the expensive jobs, but `Desktop gate` still reports a result.
 
 ## Signed installer release matrix
 
-The tag-triggered release workflow consumes the successful six-row aggregate
-for the exact tag commit, then runs the smaller publication matrix below. This
-is the only matrix that may establish signed-installer support:
+The manually dispatched pre-tag release workflow builds the four
+signed-installer rows below for one full commit SHA and stable version. This is
+the only build matrix that may establish signed-installer support:
 
 | Runner | Sidecar | Supported target | Installer |
 |---|---|---|---|
@@ -50,18 +50,38 @@ installer, and launch the installed application with an empty runtime `PATH`.
 That last check prevents an installed bundle from silently depending on a
 system Python, Node.js, or pnpm. macOS requires `codesign` verification,
 hardened runtime with the reviewed minimal entitlements, Gatekeeper acceptance,
-notarization, and stapling. Windows requires a valid Authenticode result and
-real Windows 11 install/launch. Ubuntu requires detached-signature verification
-in a clean keyring before DEB install/launch.
+notarization, stapling, and the configured Apple Team ID. Windows requires a
+valid Authenticode result from the configured certificate thumbprint and real
+Windows 11 install/launch. Ubuntu requires detached-signature verification
+against the configured public key and complete fingerprint in a clean,
+public-key-only keyring before DEB install/launch. These public signer identities
+are enforced again by the validation jobs, independently of the signing jobs.
+
+Validation then runs those four immutable installer artifacts in all six exact
+supported environments: macOS 15 arm64 and x64, macOS 26 arm64 and x64,
+Windows 11 x64, and Ubuntu 24.04 x64. The macOS 26 rows download and validate
+the same matching-architecture DMGs built on macOS 15; no second installer is
+built. The Windows validation must run on an ephemeral one-job self-hosted
+Windows 11 runner. Every validation receipt binds the source Actions artifact ID and
+digest as well as the installed file digest, so an approximation or rebuilt
+copy cannot substitute for the approved installer. It also records the
+canonical actual OS derived from the successful native host probe and requires
+that value to match the intended OS before setting `operatingSystemPassed`.
 
 Every target receipt binds the full commit SHA, stable version, OS,
 architecture, successful named gates, and SHA-256 identity of its installer,
 SBOM, and Linux signature where applicable. Aggregation requires all four rows
 and copies only digest-matched regular files into the release directory. It
 also emits `desktop-exact-head-evidence.json`,
-`desktop-artifact-manifest.json`, and one combined `desktop-sbom.json` before
-the release workflow regenerates `release-evidence.md`, creates `SHA256SUMS`,
-and records build provenance over the entire release asset set.
+`desktop-artifact-manifest.json`, one combined `desktop-sbom.json`, and the
+desktop-only `SHA256SUMS`. The artifact is uploaded without recompression so
+its reported digest can be approved. A later tag run imports that exact
+immutable `desktop-release-distributions` artifact, verifies GitHub's artifact
+digest plus the internal manifest and checksums, and never rebuilds the signed
+installers after the tag is pushed. The tag run then combines those imported
+files with the Python distributions, regenerates the final
+`release-evidence.md` and one release-wide `SHA256SUMS`, and records build
+provenance over the complete release asset set.
 
 ## What the hosted gate proves
 
@@ -179,15 +199,14 @@ that result, and requires bounded termination of its verification process.
 A target document records the runner, sidecar target, intended and actual OS,
 architecture, `packageBoundary: "unpacked-native"`,
 `artifactKind: "unpublished-unpacked-native"`, `signingVerified: false`,
-`releaseSupported`, packaged-runtime controls, and the bounded performance
+`platformValidated`, packaged-runtime controls, and the bounded performance
 measurements. A security document records explicit boolean gate results and
 the SBOM byte count and SHA-256 digest. The aggregate requires exactly six
 targets and one security document from the same full commit SHA.
 
-Because release blockers remain, a successful aggregate uses
-`status: "passed-with-release-blockers"` and `releaseSupported: false`. Its
-blocker object identifies both signed-installer evidence and real Windows 11
-execution and points to issue #231.
+A successful aggregate uses `status: "passed"` and
+`platformValidated: true`. Its `publicationRequirements` object still requires
+the separate signed installer evidence tracked by #231.
 
 Evidence files are written once. A pre-existing output, malformed schema,
 failed boolean, invalid metric, nonzero renderer egress count, unexpected
@@ -204,11 +223,11 @@ cross-platform integrity observation.
 
 Issue #230 establishes cross-platform verification for the unpublished
 package boundary. It does not create or approve a signed installer. The #231
-tag-release layer consumes that exact-head input and establishes a release
+pre-tag layer consumes that exact-head input and establishes a signed-installer
 claim only when every target-matched, manually installed signed installer,
 macOS notarization check, provenance step, and actual supported-OS execution
-passes under the [release runbook](RELEASING.md). A local build, a hosted
-Windows Server row, or an incomplete tag run cannot substitute for that proof.
+passes under the [release runbook](RELEASING.md). A local build, a different
+Windows runner, or an incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
 #131 or the release-coordination tracker #132. CI success must not be used to
