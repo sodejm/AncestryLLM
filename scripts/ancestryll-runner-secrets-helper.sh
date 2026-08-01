@@ -263,7 +263,7 @@ encode_and_validate() {
   /usr/bin/base64 < "$source_file" > "$encoded_file"
   [ -s "$encoded_file" ] || fail "Base64 output is empty for $source_file"
 
-  /usr/bin/base64 -D < "$encoded_file" > "$decoded_file" \
+  /usr/bin/base64 -d < "$encoded_file" > "$decoded_file" \
     || fail "Generated Base64 could not be decoded for $source_file"
   cmp -s "$source_file" "$decoded_file" \
     || fail "Base64 round-trip validation failed for $source_file"
