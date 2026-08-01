@@ -11,6 +11,7 @@ import {
 
 type ContractProperty = {
   const?: string
+  pattern?: string
   minimum?: number
   maximum?: number
   minLength?: number
@@ -129,6 +130,41 @@ describe('runtime bridge validation', () => {
         const manifest = mutableManifest()
         item.set(manifest, item.value(length))
         expect(() => parseCapabilitiesResult(capabilityResult(manifest))).toThrow('Invalid bridge response')
+      }
+    }
+
+    const patterns = [
+      {
+        schema: 'CapabilityModule',
+        property: 'module_id',
+        candidates: ['tree', 'tree.summary', 'tree:summary-1', 'tree_summary', 'tree/summary', 'tree summary', 'árbol'],
+        set: (manifest: MutableManifest, value: string) => { firstModule(manifest).module_id = value },
+      },
+      {
+        schema: 'CapabilityAction',
+        property: 'name',
+        candidates: ['summary', 'tree.summary', 'tree:summary-1', 'tree_summary', 'tree/summary', 'tree summary', 'árbol'],
+        set: (manifest: MutableManifest, value: string) => { firstAction(manifest).name = value },
+      },
+      {
+        schema: 'CapabilityAction',
+        property: 'dispatch_key',
+        candidates: ['tree.summary', 'tree-1.summary_2', 'tree', 'tree.summary.detail', 'tree:summary', 'tree/summary', 'tree summary'],
+        set: (manifest: MutableManifest, value: string) => { firstAction(manifest).dispatch_key = value },
+      },
+    ]
+    for (const item of patterns) {
+      const { pattern } = contractProperty(item.schema, item.property)
+      expect(pattern).toBeTypeOf('string')
+      const contractPattern = new RegExp(pattern as string)
+      expect(item.candidates.some((candidate) => contractPattern.test(candidate))).toBe(true)
+      expect(item.candidates.some((candidate) => !contractPattern.test(candidate))).toBe(true)
+      for (const candidate of item.candidates) {
+        const manifest = mutableManifest()
+        item.set(manifest, candidate)
+        const assertion = expect(() => parseCapabilitiesResult(capabilityResult(manifest)))
+        if (contractPattern.test(candidate)) assertion.not.toThrow()
+        else assertion.toThrow('Invalid bridge response')
       }
     }
 
