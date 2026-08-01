@@ -154,12 +154,16 @@ untrusted even when they originated locally.
 - Deny unexpected navigation, new windows, permissions, downloads, remote
   content, and packaged developer tools. A dedicated main-process operation may
   open an allowlisted `https:` destination only after explicit user intent and
-  displays the destination first.
+  displays the destination first. It is not a general renderer bridge method;
+  any renderer-facing link workflow requires a separately reviewed bounded
+  contract.
 - Render provider Markdown through an AST allowlist with raw HTML and images
   disabled. Never use `dangerouslySetInnerHTML`.
 - Disable Electron features and fuses that expose Node execution or inspection;
   enable ASAR integrity and only-load-from-ASAR where supported. Packaged tests
-  verify the actual fuse and window state.
+  verify the actual fuse and window state. The desktop security gate inspects
+  the built `app.asar`, all eight declared fuses, and supported integrity
+  metadata rather than trusting build configuration alone.
 
 ### Sidecar and internal API
 

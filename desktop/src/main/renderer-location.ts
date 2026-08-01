@@ -1,4 +1,4 @@
-import { pathToFileURL } from 'node:url'
+import { APP_ENTRY_URL } from './security-policy'
 
 interface RendererPolicy {
   developmentUrl: string | undefined
@@ -11,14 +11,14 @@ interface RendererTrustPolicy extends RendererPolicy {
 }
 
 export type RendererTarget =
-  | { kind: 'file'; value: string }
-  | { kind: 'url'; value: string }
+  { kind: 'url'; value: string }
 
 export function resolveRendererTarget(policy: RendererPolicy): RendererTarget {
+  void policy.rendererPath
   if (!policy.isPackaged && policy.developmentUrl) {
     return { kind: 'url', value: policy.developmentUrl }
   }
-  return { kind: 'file', value: policy.rendererPath }
+  return { kind: 'url', value: APP_ENTRY_URL }
 }
 
 export function isTrustedRendererUrl(policy: RendererTrustPolicy): boolean {
@@ -31,12 +31,10 @@ export function isTrustedRendererUrl(policy: RendererTrustPolicy): boolean {
   candidate.hash = ''
 
   const target = resolveRendererTarget(policy)
-  if (target.kind === 'file') {
-    return candidate.href === pathToFileURL(target.value).href
-  }
-
   try {
-    return candidate.origin === new URL(target.value).origin
+    const expected = new URL(target.value)
+    if (expected.protocol === 'app:') return candidate.href === expected.href
+    return candidate.origin === expected.origin
   } catch {
     return false
   }

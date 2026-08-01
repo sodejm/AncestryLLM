@@ -21,6 +21,7 @@ desktop-e2e:
 
 desktop-security:
 	@pnpm --dir desktop security
+	@pnpm --dir desktop test:security
 
 setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
