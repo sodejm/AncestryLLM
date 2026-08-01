@@ -161,3 +161,28 @@ def test_helper_help_uses_the_comma_free_name() -> None:
 
     assert "ancestryll-runner-secrets-helper.sh" in result.stdout
     assert "ancestryll,-runner-secrets-helper.sh" not in result.stdout
+
+
+def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_gh(fake_bin / "gh")
+
+    state = tmp_path / "state"
+    state.mkdir()
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    environment["FAKE_GH_STATE"] = str(state)
+
+    result = subprocess.run(
+        [str(HELPER), "--dry-run"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        input=f"{REPOSITORY_ROOT / 'pyproject.toml'}\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Credential source files must be stored outside the repository" in result.stderr

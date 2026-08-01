@@ -74,16 +74,22 @@ never generates or replaces the original signing identities.
 
 1. Use a trusted macOS account and terminal. Disable shell tracing before any
    credential work with `set +x`.
-2. Confirm `/bin/bash`, `/usr/bin/base64`, `awk`, `chmod`, `cmp`, `grep`,
-   `mktemp`, `rm`, and `tr` are available. These are standard macOS tools.
-3. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
+2. Store every certificate, API key, and GPG source file in a private location
+   outside the AncestryLLM checkout. The helper rejects repository-local
+   sources, including paths reached through symbolic links. Repository ignore
+   rules cover common signing formats as a second line of defense, and the
+   repository-safety gate rejects them even if they are force-added.
+3. Confirm `/bin/bash`, `/usr/bin/base64`, `awk`, `chmod`, `cmp`, `grep`,
+   `mktemp`, `realpath`, `rm`, and `tr` are available. These are standard
+   macOS tools.
+4. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
    present. Authenticate using `[GH_AUTHENTICATION_METHOD]`; the account must
    be authorized to read `sodejm/AncestryLLM`, update its Actions environment
    secrets, and update repository Actions variables.
-4. Confirm `desktop-signing` already exists and has the protections required
+5. Confirm `desktop-signing` already exists and has the protections required
    by [the release runbook](RELEASING.md#one-time-repository-setup). The helper
    does not create or alter environment protection rules.
-5. Put the five original signing payloads outside the repository in a secure
+6. Put the five original signing payloads outside the repository in a secure
    directory. Restrict each file before use, for example:
 
    ```sh

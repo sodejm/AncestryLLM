@@ -15,6 +15,7 @@ readonly SIGNING_ENVIRONMENT='desktop-signing'
 
 MODE='dry-run'
 TEMP_DIRECTORY=''
+REPOSITORY_ROOT=''
 
 usage() {
   printf '%s\n' \
@@ -88,6 +89,7 @@ require_command() {
 prompt_readable_file() {
   local description=$1
   local supplied_path=''
+  local canonical_path=''
 
   while :; do
     printf '%s: ' "$description" >&2
@@ -110,7 +112,15 @@ prompt_readable_file() {
       continue
     }
 
-    REPLY=$supplied_path
+    canonical_path=$(realpath "$supplied_path") \
+      || fail "Could not resolve source file path: $supplied_path"
+    case "$canonical_path" in
+      "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
+        fail 'Credential source files must be stored outside the repository'
+        ;;
+    esac
+
+    REPLY=$canonical_path
     return 0
   done
 }
@@ -239,9 +249,13 @@ require_command chmod
 require_command cmp
 require_command grep
 require_command mktemp
+require_command realpath
 require_command rm
 require_command tr
 require_command /usr/bin/base64
+
+REPOSITORY_ROOT=$(realpath "$(dirname "${BASH_SOURCE[0]}")/..") \
+  || fail 'Could not resolve the repository root'
 
 gh auth status >/dev/null 2>&1 \
   || fail 'GitHub CLI is not authenticated. Use the approved authentication method, then retry.'
