@@ -372,7 +372,9 @@ def test_slow_fake_provider_keeps_prompt_loop_responsive_and_cancellable(
         context: AppContext,
         *,
         emit,
+        progress,
     ) -> int:
+        del progress
         assert context is app_context
         assert (namespace.command, namespace.action) == ("rootsmagic", "query")
         assert namespace.provider == "fictional-provider"

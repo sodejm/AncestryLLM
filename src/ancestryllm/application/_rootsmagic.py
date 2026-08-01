@@ -63,7 +63,12 @@ class RootsMagicQueryService:
     def query_sql(self, tree: str | Path, sql: str) -> QueryResult:
         """Preserve the current core result API for terminal compatibility."""
 
-        return self.reader.query(self.reader.resolve_tree(tree), sql)
+        self._cancellation.check_cancelled()
+        self._progress.emit(ProgressEvent("rootsmagic.query", "start", 0))
+        result = self._query_sql(tree, sql)
+        self._cancellation.check_cancelled()
+        self._progress.emit(ProgressEvent("rootsmagic.query", "complete", 1))
+        return result
 
     def query_question(
         self,
@@ -76,14 +81,19 @@ class RootsMagicQueryService:
     ) -> QueryResult:
         """Preserve the current provider-assisted core result API."""
 
-        return self._query_question(
+        self._cancellation.check_cancelled()
+        self._progress.emit(ProgressEvent("rootsmagic.query", "start", 0))
+        result = self._query_question(
             tree,
             question,
             provider_id=provider_id,
             model=model,
             consent=consent,
-            emit_provider_progress=False,
+            emit_provider_progress=True,
         )
+        self._cancellation.check_cancelled()
+        self._progress.emit(ProgressEvent("rootsmagic.query", "complete", 2))
+        return result
 
     def execute(
         self,
@@ -117,7 +127,7 @@ class RootsMagicQueryService:
         self._progress.emit(ProgressEvent("rootsmagic.query", "start", 0))
 
         if request.sql is not None:
-            result = self.query_sql(request.tree_ref, request.sql)
+            result = self._query_sql(request.tree_ref, request.sql)
             mode_code = "direct_sql"
             provider_id = "none"
             completion_sequence = 1
@@ -162,6 +172,9 @@ class RootsMagicQueryService:
         )
         self._progress.emit(ProgressEvent("rootsmagic.query", "complete", completion_sequence))
         return boundary
+
+    def _query_sql(self, tree: str | Path, sql: str) -> QueryResult:
+        return self.reader.query(self.reader.resolve_tree(tree), sql)
 
     @staticmethod
     def _validate_request(request: RootsMagicQueryRequest) -> None:

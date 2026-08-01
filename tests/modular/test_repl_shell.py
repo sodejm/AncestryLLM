@@ -29,6 +29,8 @@ from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileKind
 from ancestryllm.core.jobs import JobSnapshot
+from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
+from ancestryllm.llm.policy import ConsentGrant
 
 
 @dataclass(frozen=True)
@@ -188,7 +190,7 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
     shell_module, app_context: AppContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with create_pipe_input() as pipe:
-        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
         prompts = iter((KeyboardInterrupt(), "exit"))
 
         async def next_prompt(_prompt: str) -> str:
@@ -200,6 +202,8 @@ def test_default_shell_recovers_from_interrupt_then_accepts_exit(
         monkeypatch.setattr(application.session, "prompt_async", next_prompt)
 
         assert asyncio.run(application.run_async()) == 0
+
+    assert "No active background job to cancel; Ctrl-C acknowledged." in stdout.getvalue()
 
 
 def test_ctrl_c_requests_foreground_cancellation_without_terminating_repl(
@@ -214,8 +218,9 @@ def test_ctrl_c_requests_foreground_cancellation_without_terminating_repl(
         _context: AppContext,
         *,
         emit,
+        progress,
     ) -> int:
-        del emit
+        del emit, progress
         started.set()
         for _ in range(300):
             cancellation_checkpoint()
@@ -564,8 +569,9 @@ def test_missing_rootsmagic_question_uses_multiline_editor_and_preserves_markdow
             _context: AppContext,
             *,
             emit,
+            progress,
         ) -> int:
-            del emit
+            del emit, progress
             captured.append(namespace)
             return 0
 
@@ -1229,7 +1235,9 @@ def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt
         context: AppContext,
         *,
         emit,
+        progress,
     ) -> int:
+        del progress
         assert namespace.command == "rootsmagic"
         assert namespace.action == "query"
         assert context is app_context
@@ -1262,8 +1270,132 @@ def test_slow_command_runs_as_inspectable_background_job_without_blocking_prompt
 
     assert completed.state.value == "completed"
     assert completed.result == {"exit_code": 0, "output": [{"rows": 1}]}
+    assert completed.outcome_summary == "Saved 1 command result."
+    assert completed.next_action == "Run jobs show j000001 to inspect the saved result."
+    assert "Outcome: Saved 1 command result." in stdout.getvalue()
+    assert "Next: Run jobs show j000001 to inspect the saved result." in stdout.getvalue()
     assert worker_identifiers == [worker_identifiers[0]]
     assert worker_identifiers[0] != loop_identifier
+
+
+def test_rootsmagic_provider_progress_reaches_job_state_without_private_payloads(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = tmp_path / "PRIVATE-TREE-PATH.rmtree"
+    _write_repl_rootsmagic_tree(tree)
+    app_context.config.family_tree_dirs = [tmp_path]
+    private_question = "PRIVATE-QUESTION-PAYLOAD"
+    private_sql = "SELECT PersonID AS PRIVATE_SQL_PAYLOAD FROM PersonTable"
+    private_provider_payload = "PRIVATE-PROVIDER-PAYLOAD"
+    private_secret = "PRIVATE-SECRET-PAYLOAD"
+    app_context.secrets.set("fictional.api_key", private_secret)
+
+    def generate(
+        request: GenerationRequest,
+        consent: ConsentGrant | None = None,
+    ) -> GenerationResult:
+        del consent
+        return GenerationResult(
+            provider_id=request.provider_id,
+            model=request.model,
+            text=private_provider_payload,
+            parsed={"sql": private_sql},
+        )
+
+    monkeypatch.setattr(app_context.llm, "generate", generate)
+    observed: list[JobSnapshot] = []
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        unsubscribe = application.jobs.subscribe(observed.append)
+        asyncio.run(
+            application.execute_line(
+                " ".join(
+                    (
+                        "rootsmagic query",
+                        f"--tree {shlex.quote(str(tree))}",
+                        f"--question {shlex.quote(private_question)}",
+                        "--provider fixture --model fixture-model",
+                    )
+                )
+            )
+        )
+        completed = application.jobs.wait("j000001", timeout=2)
+        unsubscribe()
+        application.jobs.shutdown()
+
+    assert completed.state.value == "completed"
+    operations: list[str] = []
+    for snapshot in observed:
+        if snapshot.progress is None:
+            continue
+        operation = snapshot.progress.operation
+        if not operation.startswith("rootsmagic.query."):
+            continue
+        if not operations or operations[-1] != operation:
+            operations.append(operation)
+    assert operations == [
+        "rootsmagic.query.start",
+        "rootsmagic.query.provider_complete",
+        "rootsmagic.query.complete",
+    ]
+    assert completed.progress is not None
+    assert completed.progress.operation == "rootsmagic.query.complete"
+    retained_progress = json.dumps(
+        [
+            {
+                "operation": snapshot.progress.operation,
+                "completed": snapshot.progress.completed,
+                "total": snapshot.progress.total,
+            }
+            for snapshot in observed
+            if snapshot.progress is not None
+        ]
+    )
+    for private_value in (
+        str(tree),
+        private_question,
+        private_sql,
+        private_provider_payload,
+        private_secret,
+    ):
+        assert private_value not in retained_progress
+
+
+def test_background_nonzero_dispatch_is_retained_as_safe_failure(
+    shell_module,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_payload = "PRIVATE-NONZERO-PAYLOAD"
+
+    def fake_dispatch(
+        _namespace: argparse.Namespace,
+        _context: AppContext,
+        *,
+        emit,
+        **_kwargs: object,
+    ) -> int:
+        emit({"private": private_payload}, False)
+        return 7
+
+    with create_pipe_input() as pipe:
+        application, _stdout, _stderr = _application(shell_module, app_context, pipe)
+        monkeypatch.setattr(shell_module, "dispatch", fake_dispatch)
+        asyncio.run(application.execute_line("rootsmagic query --tree fictional --sql 'SELECT 1'"))
+        failed = application.jobs.wait("j000001", timeout=2)
+        application.jobs.shutdown()
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "COMMAND_EXIT_NONZERO"
+    assert failed.error_message == "The background command did not complete successfully."
+    assert failed.error_remediation == "Review the command and retry after correcting the failure."
+    assert failed.result is None
+    assert failed.outcome_summary is None
+    assert failed.next_action is None
+    assert private_payload not in repr(failed)
 
 
 def test_malformed_gedcom_background_job_fails_with_sanitized_coded_error(
@@ -1312,8 +1444,9 @@ def test_sync_service_error_marks_repl_job_failed(
         _context: AppContext,
         *,
         emit,
+        progress,
     ) -> int:
-        del emit
+        del emit, progress
         assert (namespace.command, namespace.action) == ("gedcom", "sync")
         raise AncestryError(
             "MANIFEST_INVALID",

@@ -89,18 +89,40 @@ class JobProgressDisplay:
                     Text(f"{completed}/{total}"),
                 )
             else:
-                indicator = Spinner("dots", text="working")
+                indicator = Spinner("dots", text="indeterminate")
             table.add_row(snapshot.job_id, operation, indicator)
         return table
 
     @staticmethod
     def _summary(snapshot: JobSnapshot) -> Text:
         if snapshot.state is JobState.COMPLETED:
-            return Text(f"{snapshot.job_id} completed: {snapshot.name}", style="green")
+            outcome = snapshot.outcome_summary or "The background job completed."
+            next_action = snapshot.next_action or (
+                f"Run jobs show {snapshot.job_id} to inspect the retained job state."
+            )
+            return Text(
+                f"{snapshot.job_id} completed: {snapshot.name}\n"
+                f"Outcome: {outcome}\n"
+                f"Next: {next_action}",
+                style="green",
+            )
         if snapshot.state is JobState.CANCELLED:
-            return Text(f"{snapshot.job_id} cancelled: {snapshot.name}", style="yellow")
+            outcome = snapshot.error_message or "The background job was cancelled."
+            return Text(
+                f"{snapshot.job_id} cancelled: {snapshot.name}\n"
+                f"Outcome: {outcome}\n"
+                f"Next: Run jobs show {snapshot.job_id} for retained job state.",
+                style="yellow",
+            )
+        outcome = snapshot.error_message or "The background job failed."
+        remediation = snapshot.error_remediation or (
+            "Review the coded failure before retrying manually."
+        )
         return Text(
-            f"{snapshot.job_id} failed ({snapshot.error_code or 'JOB_FAILED'}): {snapshot.name}",
+            f"{snapshot.job_id} failed ({snapshot.error_code or 'JOB_FAILED'}): {snapshot.name}\n"
+            f"Outcome: {outcome}\n"
+            f"Next: {remediation}\n"
+            f"Inspect: Run jobs show {snapshot.job_id} for retained job state.",
             style="bold red",
         )
 

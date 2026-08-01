@@ -131,11 +131,19 @@ def normalize_provider_error(
             return ProviderError(
                 "PROVIDER_STREAM_TIMEOUT",
                 f"The {provider_id} stream timed out after output began.",
+                (
+                    "Review the partial output and retry manually only if the operation is safe "
+                    "to duplicate. No further retry will be attempted automatically."
+                ),
                 details=details,
             )
         return ProviderError(
             "PROVIDER_TIMEOUT",
             f"The {provider_id} request timed out before output began.",
+            (
+                "Check connectivity and provider status, then retry manually. "
+                "No further retry will be attempted automatically."
+            ),
             details=details,
         )
 
@@ -143,6 +151,10 @@ def normalize_provider_error(
         return ProviderError(
             "PROVIDER_RATE_LIMITED",
             f"The {provider_id} provider rate-limited the request.",
+            (
+                "Check provider capacity and wait before retrying manually. "
+                "No further retry will be attempted automatically."
+            ),
             details=details,
         )
 
@@ -163,6 +175,10 @@ def normalize_provider_error(
         return ProviderError(
             "PROVIDER_TRANSIENT",
             f"The {provider_id} provider is temporarily unavailable.",
+            (
+                "Check network connectivity and provider status, then retry manually. "
+                "No further retry will be attempted automatically."
+            ),
             details=details,
         )
 
@@ -170,5 +186,9 @@ def normalize_provider_error(
     return ProviderError(
         "PROVIDER_REQUEST_FAILED",
         f"The {provider_id} {operation} failed.",
+        (
+            "Review provider configuration and credentials before retrying manually. "
+            "No further retry will be attempted automatically."
+        ),
         details=details,
     )

@@ -17,7 +17,11 @@ def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> No
         completed = manager.submit("successful operation", lambda: {"ok": True})
 
         def fail() -> None:
-            raise AncestryError("FICTIONAL_FAILURE", f"provider rejected {secret}")
+            raise AncestryError(
+                "FICTIONAL_FAILURE",
+                f"provider rejected {secret}",
+                f"Check connectivity without exposing {secret}, then retry manually.",
+            )
 
         failed = manager.submit("failed operation", fail)
         completed_snapshot = manager.wait(completed.job_id, timeout=2)
@@ -32,8 +36,37 @@ def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> No
     assert failed_snapshot.state is JobState.FAILED
     assert failed_snapshot.error_code == "FICTIONAL_FAILURE"
     assert failed_snapshot.error_message == "provider rejected X"
+    assert failed_snapshot.error_remediation == (
+        "Check connectivity without exposing X, then retry manually."
+    )
     assert secret not in repr(failed_snapshot)
     assert [item.job_id for item in manager.list(JobState.FAILED)] == [failed.job_id]
+
+
+def test_job_reporter_retains_redacted_actionable_outcome() -> None:
+    secret = "fictional-outcome-secret"
+    manager = JobManager(
+        max_workers=1,
+        max_pending=1,
+        redact=lambda text: text.replace(secret, "[REDACTED]"),
+    )
+
+    def work(reporter: JobReporter) -> dict[str, str]:
+        reporter.set_outcome(
+            f"Created an artifact reference for {secret}.",
+            next_action=f"Inspect the saved result without exposing {secret}.",
+        )
+        return {"artifact_id": "artifact-001"}
+
+    try:
+        job = manager.submit_with_progress("actionable outcome", work)
+        completed = manager.wait(job.job_id, timeout=2)
+    finally:
+        manager.shutdown()
+
+    assert completed.outcome_summary == "Created an artifact reference for [REDACTED]."
+    assert completed.next_action == ("Inspect the saved result without exposing [REDACTED].")
+    assert secret not in repr(completed)
 
 
 def test_job_manager_serializes_same_resource_but_allows_different_resources() -> None:

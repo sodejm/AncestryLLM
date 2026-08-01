@@ -9,6 +9,7 @@ from ancestryllm.application.executor import (
     CommandInvocation,
     CommandOutcome,
 )
+from ancestryllm.application.ports import ProgressPort
 from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS, DispatchKey
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -51,13 +52,15 @@ class _EnabledModuleExecutor:
 def create_command_executor(
     context: AppContext,
     grants: SecretGrantRegistry,
+    *,
+    progress: ProgressPort | None = None,
 ) -> CommandExecutor:
     """Compose one handler per family from the single command specification."""
 
     ingress = FileIngressPolicy(context.config.file_ingress)
     families: dict[str, CommandHandler] = {
         "modules": ModulesExecutor(context),
-        "rootsmagic": RootsMagicExecutor(context),
+        "rootsmagic": RootsMagicExecutor(context, progress=progress),
         "gedcom": GedcomExecutor(context, ingress),
         "prompts": PromptsExecutor(context, ingress),
         "people": PeopleExecutor(context),

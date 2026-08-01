@@ -15,7 +15,8 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from ancestryllm.application.results import CommandResult
+from ancestryllm.application._compat import _CurrentProgressAdapter
+from ancestryllm.application.results import CommandResult, FileArtifactResult
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.history import SecureHistory
 from ancestryllm.console.multiline import AsyncPrompt, MultilineEditor
@@ -297,6 +298,7 @@ class ReplApplication:
     def _cancel_foreground(self) -> None:
         snapshot = self.jobs.cancel_foreground()
         if snapshot is None:
+            self.presenter.render("No active background job to cancel; Ctrl-C acknowledged.")
             return
         self.presenter.render(
             {
@@ -357,15 +359,50 @@ class ReplApplication:
         reporter: JobReporter,
     ) -> dict[str, object]:
         output: list[object] = []
+        artifact_count = 0
         reporter.update(f"{namespace.command} {namespace.action}")
 
         def capture(result: CommandResult, _json_output: bool = False) -> None:
+            nonlocal artifact_count
             reporter.check_cancelled()
             plain = to_plain(result)
             output.append(redact_object(plain, self.context.secrets.redact))
+            if isinstance(result, FileArtifactResult):
+                artifact_count += 1 + len(result.related_artifacts)
 
-        exit_code = dispatch(namespace, self.context, emit=capture)
+        exit_code = dispatch(
+            namespace,
+            self.context,
+            emit=capture,
+            progress=_CurrentProgressAdapter(reporter),
+        )
         reporter.check_cancelled()
+        if exit_code != 0:
+            raise AncestryError(
+                "COMMAND_EXIT_NONZERO",
+                "The background command did not complete successfully.",
+                "Review the command and retry after correcting the failure.",
+                exit_code=exit_code,
+                details={"exit_code": exit_code},
+            )
+        if artifact_count:
+            noun = "artifact reference" if artifact_count == 1 else "artifact references"
+            reporter.set_outcome(
+                f"Saved {artifact_count} {noun}.",
+                next_action=(f"Run jobs show {reporter.job_id} to inspect the saved {noun}."),
+            )
+        elif output:
+            result_count = len(output)
+            noun = "command result" if result_count == 1 else "command results"
+            reporter.set_outcome(
+                f"Saved {result_count} {noun}.",
+                next_action=f"Run jobs show {reporter.job_id} to inspect the saved result.",
+            )
+        else:
+            reporter.set_outcome(
+                "The command completed without a saved result.",
+                next_action=(f"Run jobs show {reporter.job_id} to inspect the retained job state."),
+            )
         return {"exit_code": exit_code, "output": output}
 
     def _resource_keys(self, namespace: argparse.Namespace) -> tuple[str, ...]:
