@@ -8,13 +8,21 @@
 name: Labeler
 on: [pull_request_target]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
+    name: Apply pull request labels
 
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: write
+      contents: read # Read label configuration from the base repository.
+      pull-requests: write # Apply labels to the pull request.
 
     steps:
     - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v4
