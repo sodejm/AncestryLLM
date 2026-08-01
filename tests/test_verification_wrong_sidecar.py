@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from ancestryllm.api.contracts import API_CONTRACT
+from ancestryllm.api.sidecar import SIDECAR_BUILD
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_wrong_build_sidecar_emits_only_an_incompatible_readiness_frame() -> None:
+    launch = {
+        "contract": API_CONTRACT,
+        "app_build": SIDECAR_BUILD,
+        "bearer_token": "verification-only-token",
+    }
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / "scripts" / "verification_wrong_sidecar.py")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(json.dumps(launch) + "\n", timeout=5)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        stdout, stderr = process.communicate(timeout=5)
+
+    readiness = json.loads(stdout.splitlines()[0])
+    assert readiness == {
+        "contract": API_CONTRACT,
+        "sidecar_build": f"{SIDECAR_BUILD}-verification-mismatch",
+        "port": 1,
+    }
+    assert stderr == ""

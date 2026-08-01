@@ -1,4 +1,4 @@
-import { app, dialog } from 'electron'
+import { app } from 'electron'
 import type { AncestryBridge } from '../shared-contract/desktop'
 import { createDesktopControlBridge } from './desktop-control'
 import { FilePreferencesStore } from './preferences-store'
@@ -25,12 +25,6 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
     startupTimeoutMs: 10_000,
     maxRestarts: 2,
     maxManualRetries: 1,
-    onFatal: () => {
-      dialog.showErrorBox(
-        'AncestryLLM sidecar unavailable',
-        'The private service is unavailable. This window will remain open for diagnostics; restart AncestryLLM or reinstall the application if the problem continues.',
-      )
-    },
   })
   const bridge = createDesktopControlBridge({
     appInfo: {

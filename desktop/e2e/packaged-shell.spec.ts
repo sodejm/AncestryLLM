@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
   chromium,
@@ -15,6 +15,11 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
+const packagedAttachTimeoutMs = 45_000
+const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
+const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
+const mismatchEvidencePath = process.env.ANCESTRYLLM_MISMATCH_EVIDENCE
+const wrongBuildSidecarPath = process.env.ANCESTRYLLM_WRONG_BUILD_SIDECAR
 const execFileAsync = promisify(execFile)
 
 const bridgeMethods = [
@@ -47,6 +52,26 @@ type ProcessRecord = Readonly<{
   rssBytes: number
   commandLine: string
 }>
+
+type StartupDiagnostics = Readonly<{
+  state: 'starting' | 'ready' | 'degraded' | 'stopped'
+  failure: 'startup_failed' | 'startup_timeout' | 'incompatible_build' | 'crash_loop' | null
+  automaticRestartsRemaining: number
+  manualRetriesRemaining: number
+}>
+
+type PackageCopy = Readonly<{
+  executablePath: string
+  packageRoot: string
+  sidecarPath: string
+}>
+
+const READY_DIAGNOSTICS: StartupDiagnostics = Object.freeze({
+  state: 'ready',
+  failure: null,
+  automaticRestartsRemaining: 2,
+  manualRetriesRemaining: 1,
+})
 
 const DEBUG_ARGUMENT = /(?:^|\s)--(?:remote-debugging(?:-address|-port|-pipe)?|inspect(?:-brk)?)(?:=|\s|$)/
 
@@ -220,24 +245,26 @@ async function closePackaged(result: LaunchResult): Promise<void> {
   const exited = waitForProcessExit(result.process, 15_000)
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(result.browserEndpoint)
-    let commandSent = false
     const timer = setTimeout(() => {
       socket.close()
-      reject(new Error('Timed out sending Browser.close to the packaged CDP endpoint.'))
+      reject(new Error('Timed out connecting to the packaged CDP endpoint for clean quit.'))
     }, 5_000)
-    const finish = (): void => {
+    const commandSent = (): void => {
       clearTimeout(timer)
       resolve()
     }
     socket.addEventListener('open', () => {
-      commandSent = true
-      socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
+      try {
+        socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
+        commandSent()
+      } catch (error) {
+        clearTimeout(timer)
+        reject(error)
+      }
     }, { once: true })
-    socket.addEventListener('message', finish, { once: true })
-    socket.addEventListener('close', finish, { once: true })
     socket.addEventListener('error', () => {
-      if (commandSent) finish()
-      else reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
+      clearTimeout(timer)
+      reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
     }, { once: true })
   })
   const status = await exited
@@ -248,12 +275,14 @@ async function closePackaged(result: LaunchResult): Promise<void> {
 async function launchPackaged(
   root: string,
   expectedHeading: RegExp,
-  phase: 'cold' | 'warm' | 'corrupt-preferences',
+  phase: string,
+  applicationExecutable: string = executablePath ?? '',
+  expectedDiagnostics: StartupDiagnostics = READY_DIAGNOSTICS,
 ): Promise<LaunchResult> {
-  if (!executablePath) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
+  if (!applicationExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const startedAt = Date.now()
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
-  const child = spawn(executablePath, [
+  const child = spawn(applicationExecutable, [
     ...automationArguments,
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0',
@@ -270,7 +299,10 @@ async function launchPackaged(
     const loggedEndpoint = await waitForDevToolsEndpoint(child)
     const endpoint = await verifiedDevToolsEndpoint(loggedEndpoint)
     try {
-      browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 })
+      // A deliberately unavailable sidecar consumes the supervisor's bounded
+      // startup attempts before Electron creates the renderer. Keep this
+      // verifier-only timeout longer than that production retry window.
+      browser = await chromium.connectOverCDP(endpoint, { timeout: packagedAttachTimeoutMs })
     } catch (error) {
       throw new Error(
         `Packaged CDP attach failed after a successful /json/version probe: ${error instanceof Error ? error.message : String(error)}`,
@@ -279,16 +311,13 @@ async function launchPackaged(
     }
     const context = browser.contexts()[0]
     if (!context) throw new Error('Packaged CDP session has no browser context.')
-    const page = context.pages()[0] ?? await context.waitForEvent('page', { timeout: 15_000 })
+    const page = context.pages()[0] ?? await context.waitForEvent('page', {
+      timeout: packagedAttachTimeoutMs,
+    })
     await page.waitForLoadState('domcontentloaded')
     await expect(page.getByRole('heading', { name: expectedHeading })).toBeVisible()
     const launchMs = Date.now() - startedAt
-    await expect.poll(async () => page.evaluate(async () => {
-      const result = await (window as unknown as {
-        ancestry: { getStartupDiagnostics(): Promise<{ ok: boolean; data?: { state: string } }> }
-      }).ancestry.getStartupDiagnostics()
-      return result.ok ? result.data?.state : 'unavailable'
-    }), { timeout: 15_000 }).toBe('ready')
+    await expectStartupDiagnostics(page, expectedDiagnostics)
     const readyMs = Date.now() - startedAt
     return {
       browser,
@@ -307,6 +336,143 @@ async function launchPackaged(
       { cause: error },
     )
   }
+}
+
+async function startupDiagnostics(page: Page): Promise<StartupDiagnostics> {
+  return page.evaluate(async () => {
+    const result = await (window as unknown as {
+      ancestry: {
+        getStartupDiagnostics(): Promise<{
+          ok: boolean
+          data?: StartupDiagnostics
+          error?: { code: string }
+        }>
+      }
+    }).ancestry.getStartupDiagnostics()
+    if (!result.ok || !result.data) {
+      throw new Error(`Could not read packaged startup diagnostics: ${result.error?.code ?? 'unknown'}`)
+    }
+    return result.data
+  })
+}
+
+async function expectStartupDiagnostics(
+  page: Page,
+  expected: StartupDiagnostics,
+): Promise<void> {
+  await expect.poll(
+    async () => startupDiagnostics(page),
+    { timeout: 30_000 },
+  ).toEqual(expected)
+}
+
+function packageRootForExecutable(applicationExecutable: string): string {
+  let current = resolve(applicationExecutable)
+  if (process.platform !== 'darwin') return dirname(current)
+  while (dirname(current) !== current) {
+    if (basename(current).endsWith('.app')) return current
+    current = dirname(current)
+  }
+  throw new Error(`Packaged macOS executable is not inside an app bundle: ${applicationExecutable}`)
+}
+
+function packagedSidecarPath(packageRoot: string): string {
+  const target = `${process.platform}-${process.arch}`
+  const resources = process.platform === 'darwin'
+    ? join(packageRoot, 'Contents', 'Resources')
+    : join(packageRoot, 'resources')
+  const suffix = process.platform === 'win32' ? '.exe' : ''
+  return join(
+    resources,
+    'sidecar',
+    target,
+    'ancestryllm-sidecar',
+    `ancestryllm-sidecar${suffix}`,
+  )
+}
+
+async function copyPackagedApplication(root: string): Promise<PackageCopy> {
+  if (!executablePath) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
+  const sourcePackageRoot = packageRootForExecutable(executablePath)
+  const packageRoot = join(root, basename(sourcePackageRoot))
+  if (process.platform === 'darwin') {
+    // Preserve framework symlinks and bundle metadata so the disposable copy
+    // remains eligible for ad-hoc re-signing after its sidecar is mutated.
+    await execFileAsync('ditto', ['--noqtn', sourcePackageRoot, packageRoot])
+  } else {
+    await cp(sourcePackageRoot, packageRoot, { recursive: true, preserveTimestamps: true })
+  }
+  return {
+    executablePath: join(packageRoot, relative(sourcePackageRoot, resolve(executablePath))),
+    packageRoot,
+    sidecarPath: packagedSidecarPath(packageRoot),
+  }
+}
+
+async function signVerificationPackage(packageRoot: string): Promise<void> {
+  if (process.platform !== 'darwin') return
+  await execFileAsync('codesign', ['--force', '--deep', '--sign', '-', packageRoot], {
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  })
+}
+
+async function writeFaultEvidence(
+  path: string,
+  scenario: 'sidecar-withhold-retry' | 'sidecar-restart-exhaustion-quit' | 'sidecar-version-mismatch',
+  observations: Record<string, boolean | number | string>,
+): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-fault-evidence',
+    scenario,
+    status: 'passed',
+    packageCopy: true,
+    productionFaultHookUsed: false,
+    observations,
+  }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+}
+
+async function expectSafeDiagnosticsAlert(page: Page): Promise<void> {
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
+  const alert = page.getByRole('alert')
+  await expect(alert).toBeVisible()
+  await expect(alert).not.toContainText(/token|secret|stderr|\.json|[/\\](?:Users|home|AppData)[/\\]/i)
+}
+
+async function sidecarPid(
+  applicationPid: number,
+  copiedSidecarPath: string,
+  excluded: ReadonlySet<number> = new Set(),
+): Promise<number> {
+  let observed = -1
+  await expect.poll(async () => {
+    const tree = descendantProcessTree(await processSnapshot(), applicationPid)
+    const sidecar = tree.find((record) => (
+      !excluded.has(record.pid) && record.commandLine.includes(copiedSidecarPath)
+    ))
+    observed = sidecar?.pid ?? -1
+    return observed > 0
+  }, { timeout: 30_000 }).toBe(true)
+  return observed
+}
+
+async function killProcess(pid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    await execFileAsync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    return
+  }
+  process.kill(pid, 'SIGKILL')
+}
+
+async function expectProcessAbsent(pid: number): Promise<void> {
+  await expect.poll(
+    async () => (await processSnapshot()).some((record) => record.pid === pid),
+    { timeout: 15_000 },
+  ).toBe(false)
 }
 
 async function processSnapshot(): Promise<ProcessRecord[]> {
@@ -571,10 +737,11 @@ async function expectAccessibleShell(page: Page): Promise<void> {
 }
 
 test.describe('unpublished unpacked native package', () => {
-  test.skip(!executablePath || !metricsPath, 'Packaged executable and metrics output are required')
-  test.describe.configure({ mode: 'serial', timeout: 180_000 })
+  test.skip(!executablePath, 'Packaged executable is required')
+  test.describe.configure({ mode: 'serial', timeout: 300_000 })
 
   test('exercises first run, persistence, corrupt preferences, security, and resource evidence', async () => {
+    test.skip(!metricsPath, 'Packaged metrics output is required')
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-packaged-'))
     let running: LaunchResult | undefined
     try {
@@ -649,6 +816,187 @@ test.describe('unpublished unpacked native package', () => {
         rssBytes,
         rendererOutboundRequests: 0,
       }, null, 2)}\n`, { flag: 'wx' })
+    } finally {
+      if (running) await forceClosePackaged(running)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('withholds and restores the packaged sidecar through Diagnostics retry', async () => {
+    test.skip(!withholdEvidencePath, 'Withhold/retry evidence output is required')
+    if (!withholdEvidencePath) throw new Error('ANCESTRYLLM_WITHHOLD_EVIDENCE is required')
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-withheld-sidecar-'))
+    let running: LaunchResult | undefined
+    try {
+      const copied = await copyPackagedApplication(root)
+      const withheld = join(root, basename(copied.sidecarPath))
+      await rename(copied.sidecarPath, withheld)
+      await signVerificationPackage(copied.packageRoot)
+
+      const degraded: StartupDiagnostics = {
+        state: 'degraded',
+        failure: 'startup_failed',
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+      }
+      running = await launchPackaged(
+        join(root, 'user-data'),
+        /Welcome to AncestryLLM/,
+        'withheld-sidecar',
+        copied.executablePath,
+        degraded,
+      )
+      await expectSafeDiagnosticsAlert(running.page)
+      await expect(running.page.getByRole('alert')).toContainText('The desktop service did not start.')
+
+      await rename(withheld, copied.sidecarPath)
+      await running.page.getByRole('button', { name: 'Retry desktop service' }).click()
+      await expectStartupDiagnostics(running.page, {
+        state: 'ready',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 0,
+      })
+      await expect(running.page.getByRole('alert')).toHaveCount(0)
+      await closePackaged(running)
+      running = undefined
+      await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
+        failure: 'startup_failed',
+        automaticRestartsRemaining: 0,
+        manualRetriesRemainingBefore: 1,
+        recoveredState: 'ready',
+        cleanExit: true,
+      })
+    } finally {
+      if (running) await forceClosePackaged(running)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit', async () => {
+    test.skip(!restartEvidencePath, 'Restart/exhaustion evidence output is required')
+    if (!restartEvidencePath) throw new Error('ANCESTRYLLM_RESTART_EVIDENCE is required')
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-killed-sidecar-'))
+    let running: LaunchResult | undefined
+    try {
+      const copied = await copyPackagedApplication(root)
+      await signVerificationPackage(copied.packageRoot)
+      running = await launchPackaged(
+        join(root, 'user-data'),
+        /Welcome to AncestryLLM/,
+        'killed-sidecar',
+        copied.executablePath,
+      )
+      if (!running.process.pid) throw new Error('Packaged app PID is unavailable.')
+      const killed = new Set<number>()
+
+      const first = await sidecarPid(running.process.pid, copied.sidecarPath, killed)
+      killed.add(first)
+      await killProcess(first)
+      await expectStartupDiagnostics(running.page, {
+        state: 'ready',
+        failure: null,
+        automaticRestartsRemaining: 1,
+        manualRetriesRemaining: 1,
+      })
+
+      const second = await sidecarPid(running.process.pid, copied.sidecarPath, killed)
+      killed.add(second)
+      await killProcess(second)
+      await expectStartupDiagnostics(running.page, {
+        state: 'ready',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+      })
+
+      const third = await sidecarPid(running.process.pid, copied.sidecarPath, killed)
+      killed.add(third)
+      await killProcess(third)
+      await expectStartupDiagnostics(running.page, {
+        state: 'degraded',
+        failure: 'crash_loop',
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+      })
+      await expectSafeDiagnosticsAlert(running.page)
+      await expect(running.page.getByRole('alert')).toContainText('The desktop service stopped repeatedly.')
+
+      await running.page.getByRole('button', { name: 'Retry desktop service' }).click()
+      await expectStartupDiagnostics(running.page, {
+        state: 'ready',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 0,
+      })
+      const retried = await sidecarPid(running.process.pid, copied.sidecarPath, killed)
+      await closePackaged(running)
+      running = undefined
+      await expectProcessAbsent(retried)
+      await writeFaultEvidence(restartEvidencePath, 'sidecar-restart-exhaustion-quit', {
+        automaticRestartCount: 2,
+        exhaustedFailure: 'crash_loop',
+        manualRetriesRemainingBefore: 1,
+        manualRetryState: 'ready',
+        activeSidecarExitedOnQuit: true,
+        cleanExit: true,
+      })
+    } finally {
+      if (running) await forceClosePackaged(running)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a target-native wrong-build packaged sidecar', async () => {
+    test.skip(
+      !mismatchEvidencePath || !wrongBuildSidecarPath,
+      'Mismatch evidence output and wrong-build sidecar are required',
+    )
+    if (!mismatchEvidencePath || !wrongBuildSidecarPath) {
+      throw new Error('ANCESTRYLLM_MISMATCH_EVIDENCE and ANCESTRYLLM_WRONG_BUILD_SIDECAR are required')
+    }
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-wrong-build-sidecar-'))
+    let running: LaunchResult | undefined
+    try {
+      const copied = await copyPackagedApplication(root)
+      await copyFile(wrongBuildSidecarPath, copied.sidecarPath)
+      if (process.platform !== 'win32') await chmod(copied.sidecarPath, 0o755)
+      await signVerificationPackage(copied.packageRoot)
+
+      running = await launchPackaged(
+        join(root, 'user-data'),
+        /Welcome to AncestryLLM/,
+        'wrong-build-sidecar',
+        copied.executablePath,
+        {
+          state: 'degraded',
+          failure: 'incompatible_build',
+          automaticRestartsRemaining: 2,
+          manualRetriesRemaining: 1,
+        },
+      )
+      await expectSafeDiagnosticsAlert(running.page)
+      await expect(running.page.getByRole('alert')).toContainText(
+        'The desktop service is not compatible with this build.',
+      )
+      await running.page.getByRole('button', { name: 'Retry desktop service' }).click()
+      await expectStartupDiagnostics(running.page, {
+        state: 'degraded',
+        failure: 'incompatible_build',
+        automaticRestartsRemaining: 2,
+        manualRetriesRemaining: 0,
+      })
+      await forceClosePackaged(running)
+      expect(running.process.exitCode !== null || running.process.signalCode !== null).toBe(true)
+      running = undefined
+      await writeFaultEvidence(mismatchEvidencePath, 'sidecar-version-mismatch', {
+        failure: 'incompatible_build',
+        automaticRestartsRemaining: 2,
+        manualRetriesRemainingBefore: 1,
+        manualRetryFailure: 'incompatible_build',
+        manualRetriesRemainingAfter: 0,
+        verificationProcessTerminated: true,
+      })
     } finally {
       if (running) await forceClosePackaged(running)
       await rm(root, { recursive: true, force: true })

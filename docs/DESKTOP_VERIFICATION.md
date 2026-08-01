@@ -57,7 +57,9 @@ Each native row then:
    narrow and 200%-zoom layouts, contrast, and reduced motion;
 6. records cold-launch, warm-launch, readiness, process-RSS, and renderer
    outbound-request measurements; and
-7. inspects the packaged Electron fuses and ASAR boundary.
+7. exercises sidecar absence/recovery, crash-loop exhaustion/retry/quit, and
+   app/sidecar build mismatch against verification-only package copies; and
+8. inspects the packaged Electron fuses and ASAR boundary.
 
 The packaged Playwright pass attaches through an ephemeral CDP endpoint bound
 to `127.0.0.1` solely so the harness can inspect and close the unpublished
@@ -88,11 +90,21 @@ and service-worker activity and requires zero outbound requests. The separate
 API security tests prove the `provider=none` sidecar policy. Together these are
 bounded automated controls; they are not a claim of OS-level packet capture.
 
-Degraded startup, bounded retry, sidecar crash-loop supervision, sidecar/app
-version mismatch, and renderer-visible sanitization are exercised by
-deterministic source or unit tests. They are intentionally not induced through
-a production environment variable or a production renderer hook. That keeps
-fixture machinery out of the application that is packaged and scanned.
+Each native row now makes disposable copies of the assembled package for three
+black-box fault scenarios. It temporarily withholds and restores the real
+packaged sidecar to prove degraded Diagnostics and successful manual retry;
+kills the real sidecar child repeatedly to prove automatic restart, bounded
+exhaustion, manual recovery, and child cleanup on quit; and substitutes a
+separately built target-native verification sidecar whose reported build cannot
+match the application build. macOS copies are ad hoc re-signed only after the
+verification mutation. None of these disposable copies is a release artifact.
+
+The harness changes only those verification package copies and observes the
+same packaged UI and process boundaries used by a normal launch. Production
+code has no fault environment variable, test IPC, renderer hook, or alternate
+sidecar registry. Renderer-visible diagnostics remain sanitized: the scenarios
+assert coded states and retry counters without exposing ports, tokens, paths,
+process IDs, or stderr.
 
 The performance policy is versioned as `desktop-unpacked-v1` and is a hard gate,
 not an informational benchmark:
@@ -122,6 +134,16 @@ stdout and stderr digests, the named gates that command can establish, and
 digests for any consumed artifact such as the SBOM, metrics, or fuse inspection.
 Evidence generation rejects a missing, duplicate, failed, wrong-head, or
 digest-mismatched receipt.
+
+The three packaged-sidecar fault scenarios have independent receipt gates and
+write exact-schema observation documents. Target evidence binds each document
+by byte count and SHA-256 to its receipt; the mismatch receipt additionally
+binds the target-native wrong-build executable. Aggregation revalidates those
+documents and bindings instead of accepting a workflow-provided success flag.
+The crash-loop scenario owns the graceful application-quit assertion and proves
+that the active real sidecar exits with it. The wrong-build scenario instead
+proves `incompatible_build`, consumes the one manual retry without weakening
+that result, and requires bounded termination of its verification process.
 
 A target document records the runner, sidecar target, intended and actual OS,
 architecture, `packageBoundary: "unpacked-native"`,

@@ -17,6 +17,7 @@ const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
 const EVIDENCE_SCHEMA_VERSION = 2
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
+const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
 const METRIC_NAMES = Object.freeze([
   'coldLaunchMs',
   'warmLaunchMs',
@@ -216,6 +217,76 @@ function validatedFuseInspection(value, target) {
   })
 }
 
+const FAULT_SCENARIOS = Object.freeze({
+  packagedSidecarWithholdRetryPassed: Object.freeze({
+    name: 'sidecar-withhold-retry',
+    artifact: 'withholdEvidence',
+    observations: Object.freeze({
+      failure: 'startup_failed',
+      automaticRestartsRemaining: 0,
+      manualRetriesRemainingBefore: 1,
+      recoveredState: 'ready',
+      cleanExit: true,
+    }),
+  }),
+  packagedSidecarRestartExhaustionQuitPassed: Object.freeze({
+    name: 'sidecar-restart-exhaustion-quit',
+    artifact: 'restartEvidence',
+    observations: Object.freeze({
+      automaticRestartCount: 2,
+      exhaustedFailure: 'crash_loop',
+      manualRetriesRemainingBefore: 1,
+      manualRetryState: 'ready',
+      activeSidecarExitedOnQuit: true,
+      cleanExit: true,
+    }),
+  }),
+  packagedSidecarVersionMismatchPassed: Object.freeze({
+    name: 'sidecar-version-mismatch',
+    artifact: 'mismatchEvidence',
+    observations: Object.freeze({
+      failure: 'incompatible_build',
+      automaticRestartsRemaining: 2,
+      manualRetriesRemainingBefore: 1,
+      manualRetryFailure: 'incompatible_build',
+      manualRetriesRemainingAfter: 0,
+      verificationProcessTerminated: true,
+    }),
+  }),
+})
+
+function validatedFaultEvidence(value, expected) {
+  assert.deepEqual(
+    Object.keys(value ?? {}).sort(),
+    [
+      'kind',
+      'observations',
+      'packageCopy',
+      'productionFaultHookUsed',
+      'scenario',
+      'schemaVersion',
+      'status',
+    ],
+    `${expected.name} fault evidence must use the exact schema`,
+  )
+  assert.equal(value.schemaVersion, 1, `${expected.name} fault evidence has an unsupported schema`)
+  assert.equal(value.kind, FAULT_EVIDENCE_KIND, `${expected.name} fault evidence has the wrong kind`)
+  assert.equal(value.scenario, expected.name, `${expected.name} fault evidence has the wrong scenario`)
+  assert.equal(value.status, 'passed', `${expected.name} fault evidence did not pass`)
+  assert.equal(value.packageCopy, true, `${expected.name} did not mutate a verification-only package copy`)
+  assert.equal(value.productionFaultHookUsed, false, `${expected.name} used a production fault hook`)
+  assert.deepEqual(value.observations, expected.observations, `${expected.name} observations are incomplete`)
+  return Object.freeze({
+    schemaVersion: value.schemaVersion,
+    kind: value.kind,
+    scenario: value.scenario,
+    status: value.status,
+    packageCopy: value.packageCopy,
+    productionFaultHookUsed: value.productionFaultHookUsed,
+    observations: Object.freeze({ ...value.observations }),
+  })
+}
+
 function validateTargetRow(input) {
   const expected = TARGET_ROWS[input.runner]
   assert.ok(expected, `Unsupported runner: ${input.runner}`)
@@ -233,6 +304,18 @@ export function createTargetEvidence(input) {
   const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead)
   const metricsArtifact = artifactDigest(input.metricsBytes)
   const fuseInspectionArtifact = artifactDigest(input.fuseInspectionBytes)
+  const faultArtifacts = Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([gate, scenario]) => {
+    const bytes = input[`${scenario.artifact}Bytes`]
+    const document = input[scenario.artifact]
+    const artifact = artifactDigest(bytes)
+    validatedFaultEvidence(document, scenario)
+    assertArtifactBound(derived.receipts[gate], 'faultEvidence', artifact, scenario.name)
+    return [scenario.artifact, artifact]
+  }))
+  validateDigest(
+    derived.receipts.packagedSidecarVersionMismatchPassed.artifacts?.wrongBuildSidecar,
+    'sidecar-version-mismatch receipt artifact wrongBuildSidecar',
+  )
   assertArtifactBound(derived.receipts.packageRuntimePassed, 'metrics', metricsArtifact, 'packaged runtime metrics')
   assertArtifactBound(derived.receipts.fusesInspectedPassed, 'fuseInspection', fuseInspectionArtifact, 'fuse inspection')
   const performance = performanceEvidence(input.runner, input.metrics)
@@ -259,7 +342,15 @@ export function createTargetEvidence(input) {
     performancePassed: performance.passed,
     gates: derived.gates,
     receipts: derived.receipts,
-    artifacts: Object.freeze({ metrics: metricsArtifact, fuseInspection: fuseInspectionArtifact }),
+    artifacts: Object.freeze({
+      metrics: metricsArtifact,
+      fuseInspection: fuseInspectionArtifact,
+      ...faultArtifacts,
+    }),
+    faultScenarios: Object.freeze(Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([, scenario]) => [
+      scenario.name,
+      validatedFaultEvidence(input[scenario.artifact], scenario),
+    ]))),
     performance,
     inspection,
   })
@@ -345,6 +436,22 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   validateDigest(value.artifacts?.fuseInspection, `${value.runner} fuse inspection artifact`)
   assertArtifactBound(receipts.packageRuntimePassed, 'metrics', value.artifacts.metrics, `${value.runner} packaged runtime metrics`)
   assertArtifactBound(receipts.fusesInspectedPassed, 'fuseInspection', value.artifacts.fuseInspection, `${value.runner} fuse inspection`)
+
+  for (const [gate, scenario] of Object.entries(FAULT_SCENARIOS)) {
+    const artifact = value.artifacts?.[scenario.artifact]
+    validateDigest(artifact, `${value.runner} ${scenario.name} fault evidence artifact`)
+    assertArtifactBound(receipts[gate], 'faultEvidence', artifact, `${value.runner} ${scenario.name}`)
+    const artifactFile = findArtifactFile(files, artifact, `${value.runner} ${scenario.name} fault evidence artifact`)
+    assert.deepEqual(
+      value.faultScenarios?.[scenario.name],
+      validatedFaultEvidence(artifactFile.value, scenario),
+      `${value.runner} ${scenario.name} evidence differs from its downloaded artifact`,
+    )
+  }
+  validateDigest(
+    receipts.packagedSidecarVersionMismatchPassed.artifacts?.wrongBuildSidecar,
+    `${value.runner} sidecar-version-mismatch receipt artifact wrongBuildSidecar`,
+  )
 
   const metricsFile = findArtifactFile(files, value.artifacts.metrics, `${value.runner} metrics artifact`)
   assert.deepEqual(metricsFile.value, value.performance?.observed, `${value.runner} observed metrics differ from the downloaded metrics artifact`)
@@ -459,7 +566,7 @@ export async function runCli([command, ...args]) {
   const common = new Set(['git-head', 'output'])
   let allowed
   if (command === 'target') {
-    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'package-boundary', 'metrics', 'fuse-inspection', 'receipts'])
+    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'mismatch-evidence', 'receipts'])
   } else if (command === 'security') {
     allowed = new Set([...common, 'sbom', 'receipts'])
   } else if (command === 'aggregate') {
@@ -476,6 +583,9 @@ export async function runCli([command, ...args]) {
   if (command === 'target') {
     const metricsBytes = await readFile(required(values, 'metrics'))
     const fuseInspectionBytes = await readFile(required(values, 'fuse-inspection'))
+    const withholdEvidenceBytes = await readFile(required(values, 'withhold-evidence'))
+    const restartEvidenceBytes = await readFile(required(values, 'restart-evidence'))
+    const mismatchEvidenceBytes = await readFile(required(values, 'mismatch-evidence'))
     evidence = createTargetEvidence({
       gitHead: requestedHead,
       runner: required(values, 'runner'),
@@ -488,6 +598,12 @@ export async function runCli([command, ...args]) {
       metricsBytes,
       fuseInspection: JSON.parse(fuseInspectionBytes.toString('utf8')),
       fuseInspectionBytes,
+      withholdEvidence: JSON.parse(withholdEvidenceBytes.toString('utf8')),
+      withholdEvidenceBytes,
+      restartEvidence: JSON.parse(restartEvidenceBytes.toString('utf8')),
+      restartEvidenceBytes,
+      mismatchEvidence: JSON.parse(mismatchEvidenceBytes.toString('utf8')),
+      mismatchEvidenceBytes,
       receiptRecords: await loadVerificationReceipts(required(values, 'receipts'), requestedHead),
     })
   } else if (command === 'security') {

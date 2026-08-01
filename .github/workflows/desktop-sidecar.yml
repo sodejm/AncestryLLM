@@ -42,7 +42,7 @@ jobs:
             desktop=false
             while IFS= read -r changed_file; do
               case "$changed_file" in
-                .github/workflows/desktop-sidecar.yml|desktop/*|scripts/build_sidecar.py|scripts/sidecar_entry.py|scripts/smoke_sidecar.py|src/ancestryllm/api/*|tests/api/*|tests/test_desktop_workflow_contract.py|docs/DESKTOP_VERIFICATION.md|ARCHITECTURE.md|pyproject.toml|uv.lock)
+                .github/workflows/desktop-sidecar.yml|desktop/*|scripts/build_sidecar.py|scripts/build_verification_sidecar.py|scripts/sidecar_entry.py|scripts/smoke_sidecar.py|scripts/verification_wrong_sidecar.py|src/ancestryllm/api/*|tests/api/*|tests/test_build_verification_sidecar.py|tests/test_desktop_workflow_contract.py|tests/test_verification_wrong_sidecar.py|docs/DESKTOP_VERIFICATION.md|ARCHITECTURE.md|pyproject.toml|uv.lock)
                   desktop=true
                   break
                   ;;
@@ -92,7 +92,7 @@ jobs:
             --gate domainRoutesAbsentPassed \
             --gate providerNoneNetworkFreePassed \
             --gate redactionPassed \
-            -- uv run pytest tests/api tests/test_desktop_workflow_contract.py
+            -- uv run python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_verification_wrong_sidecar.py
       - name: Verify desktop source
         shell: bash
         run: |
@@ -262,6 +262,10 @@ jobs:
             --output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --gate sidecarSmokePassed \
             -- uv run python scripts/smoke_sidecar.py "$sidecar_executable"
+          uv run python scripts/build_verification_sidecar.py --expected-target "$SIDECAR_TARGET"
+          wrong_build_sidecar="desktop/build/verification-sidecar/$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"
+          if [[ "$SIDECAR_TARGET" == "win32-x64" ]]; then wrong_build_sidecar="$wrong_build_sidecar.exe"; fi
+          echo "ANCESTRYLLM_WRONG_BUILD_SIDECAR=$wrong_build_sidecar" >> "$GITHUB_ENV"
       - name: Build production Electron application
         shell: bash
         run: pnpm --dir desktop run build
@@ -285,25 +289,42 @@ jobs:
           mkdir -p "$ROW_ROOT"
           export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
           export ANCESTRYLLM_PACKAGED_METRICS="$ROW_ROOT/packaged-metrics.json"
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            node desktop/scripts/verification-receipt.mjs \
-              --git-head "$EXPECTED_HEAD" \
-              --output "$RECEIPTS_DIR/packaged-runtime.json" \
-              --gate packageRuntimePassed \
-              --gate rendererZeroEgressCanaryPassed \
-              --gate normalLaunchDebugSurfaceAbsentPassed \
-              --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
-              -- xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged
-          else
-            node desktop/scripts/verification-receipt.mjs \
-              --git-head "$EXPECTED_HEAD" \
-              --output "$RECEIPTS_DIR/packaged-runtime.json" \
-              --gate packageRuntimePassed \
-              --gate rendererZeroEgressCanaryPassed \
-              --gate normalLaunchDebugSurfaceAbsentPassed \
-              --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
-              -- pnpm --dir desktop run test:e2e:packaged
-          fi
+          export ANCESTRYLLM_WITHHOLD_EVIDENCE="$ROW_ROOT/sidecar-withhold-retry.json"
+          export ANCESTRYLLM_RESTART_EVIDENCE="$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
+          export ANCESTRYLLM_MISMATCH_EVIDENCE="$ROW_ROOT/sidecar-version-mismatch.json"
+          package_launcher=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --gate packageRuntimePassed \
+            --gate rendererZeroEgressCanaryPassed \
+            --gate normalLaunchDebugSurfaceAbsentPassed \
+            --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+              --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --gate packagedSidecarWithholdRetryPassed \
+            --artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+              --grep "withholds and restores the packaged sidecar through Diagnostics retry"
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --gate packagedSidecarRestartExhaustionQuitPassed \
+            --artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE" \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+              --grep "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit"
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/packaged-sidecar-version-mismatch.json" \
+            --gate packagedSidecarVersionMismatchPassed \
+            --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
+            --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+              --grep "rejects a target-native wrong-build packaged sidecar"
       - name: Inspect packaged Electron fuses
         shell: bash
         env:
@@ -338,6 +359,9 @@ jobs:
             --package-boundary "$PACKAGE_BOUNDARY" \
             --metrics "$ROW_ROOT/packaged-metrics.json" \
             --fuse-inspection "$ROW_ROOT/fuse-inspection.json" \
+            --withhold-evidence "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
+            --restart-evidence "$ANCESTRYLLM_RESTART_EVIDENCE" \
+            --mismatch-evidence "$ANCESTRYLLM_MISMATCH_EVIDENCE" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

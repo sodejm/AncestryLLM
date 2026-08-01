@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
+RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 
 
 def _workflow() -> str:
@@ -75,6 +76,42 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     builder = VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
     assert "extends: ./electron-builder.yml" in builder
     assert 'identity: "-"' in builder
+
+
+def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
+    workflow = _workflow()
+
+    assert "scripts/build_verification_sidecar.py" in workflow
+    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" in workflow
+    assert "packaged-sidecar-withhold-retry.json" in workflow
+    assert "--gate packagedSidecarWithholdRetryPassed" in workflow
+    assert '--artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE"' in workflow
+    assert "packaged-sidecar-restart-exhaustion-quit.json" in workflow
+    assert "--gate packagedSidecarRestartExhaustionQuitPassed" in workflow
+    assert '--artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE"' in workflow
+    assert "packaged-sidecar-version-mismatch.json" in workflow
+    assert "--gate packagedSidecarVersionMismatchPassed" in workflow
+    assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
+    assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
+
+    production_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "desktop" / "src").rglob("*"))
+        if path.is_file()
+    )
+    assert "ANCESTRYLLM_WITHHOLD_EVIDENCE" not in production_sources
+    assert "ANCESTRYLLM_RESTART_EVIDENCE" not in production_sources
+    assert "ANCESTRYLLM_MISMATCH_EVIDENCE" not in production_sources
+    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" not in production_sources
+
+
+def test_fatal_sidecar_startup_uses_the_renderer_diagnostics_recovery_surface() -> None:
+    runtime_bridge = RUNTIME_BRIDGE.read_text(encoding="utf-8")
+
+    assert "onFatal:" not in runtime_bridge
+    assert "import { app } from 'electron'" in runtime_bridge
+    assert "dialog.showMessageBox" not in runtime_bridge
+    assert "dialog.showErrorBox" not in runtime_bridge
 
 
 def test_verification_document_covers_external_release_blockers() -> None:

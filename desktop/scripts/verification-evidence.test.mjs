@@ -94,11 +94,49 @@ function fuseInspection(platform) {
   }
 }
 
+function faultEvidence(scenario, observations) {
+  return {
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-fault-evidence',
+    scenario,
+    status: 'passed',
+    packageCopy: true,
+    productionFaultHookUsed: false,
+    observations,
+  }
+}
+
 function targetFixture(row, observed = metrics) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch] = row
   const metricsBytes = encoded(observed)
   const inspection = fuseInspection(TARGET_ROWS[runner].platform)
   const fuseInspectionBytes = encoded(inspection)
+  const withholdEvidence = faultEvidence('sidecar-withhold-retry', {
+    failure: 'startup_failed',
+    automaticRestartsRemaining: 0,
+    manualRetriesRemainingBefore: 1,
+    recoveredState: 'ready',
+    cleanExit: true,
+  })
+  const restartEvidence = faultEvidence('sidecar-restart-exhaustion-quit', {
+    automaticRestartCount: 2,
+    exhaustedFailure: 'crash_loop',
+    manualRetriesRemainingBefore: 1,
+    manualRetryState: 'ready',
+    activeSidecarExitedOnQuit: true,
+    cleanExit: true,
+  })
+  const mismatchEvidence = faultEvidence('sidecar-version-mismatch', {
+    failure: 'incompatible_build',
+    automaticRestartsRemaining: 2,
+    manualRetriesRemainingBefore: 1,
+    manualRetryFailure: 'incompatible_build',
+    manualRetriesRemainingAfter: 0,
+    verificationProcessTerminated: true,
+  })
+  const withholdEvidenceBytes = encoded(withholdEvidence)
+  const restartEvidenceBytes = encoded(restartEvidence)
+  const mismatchEvidenceBytes = encoded(mismatchEvidence)
   const runtimeReceipt = receiptRecord(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed', 'normalLaunchDebugSurfaceAbsentPassed'],
     { metrics: digest(metricsBytes) },
@@ -110,7 +148,32 @@ function targetFixture(row, observed = metrics) {
     { fuseInspection: digest(fuseInspectionBytes) },
     ['node', 'scripts/inspect-package-fuses.mjs'],
   )
-  const receiptRecords = [runtimeReceipt, sidecarReceipt, fuseReceipt]
+  const withholdReceipt = receiptRecord(
+    ['packagedSidecarWithholdRetryPassed'],
+    { faultEvidence: digest(withholdEvidenceBytes) },
+    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'withholds'],
+  )
+  const restartReceipt = receiptRecord(
+    ['packagedSidecarRestartExhaustionQuitPassed'],
+    { faultEvidence: digest(restartEvidenceBytes) },
+    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'restarts'],
+  )
+  const mismatchReceipt = receiptRecord(
+    ['packagedSidecarVersionMismatchPassed'],
+    {
+      faultEvidence: digest(mismatchEvidenceBytes),
+      wrongBuildSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
+    },
+    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'wrong-build'],
+  )
+  const receiptRecords = [
+    runtimeReceipt,
+    sidecarReceipt,
+    fuseReceipt,
+    withholdReceipt,
+    restartReceipt,
+    mismatchReceipt,
+  ]
   const evidence = createTargetEvidence({
     gitHead,
     runner,
@@ -123,9 +186,23 @@ function targetFixture(row, observed = metrics) {
     metricsBytes,
     fuseInspection: inspection,
     fuseInspectionBytes,
+    withholdEvidence,
+    withholdEvidenceBytes,
+    restartEvidence,
+    restartEvidenceBytes,
+    mismatchEvidence,
+    mismatchEvidenceBytes,
     receiptRecords,
   })
-  return { evidence, metricsBytes, fuseInspectionBytes, receiptRecords }
+  return {
+    evidence,
+    metricsBytes,
+    fuseInspectionBytes,
+    withholdEvidenceBytes,
+    restartEvidenceBytes,
+    mismatchEvidenceBytes,
+    receiptRecords,
+  }
 }
 
 function securityFixture() {
@@ -167,6 +244,12 @@ test('target evidence derives gates and the Windows release boundary only from e
     metricsBytes: fixture.metricsBytes,
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
+    withholdEvidenceBytes: fixture.withholdEvidenceBytes,
+    restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
+    restartEvidenceBytes: fixture.restartEvidenceBytes,
+    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
+    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /releaseSupported is derived/)
 })
@@ -205,6 +288,12 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: Buffer.from('{}'),
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
+    withholdEvidenceBytes: fixture.withholdEvidenceBytes,
+    restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
+    restartEvidenceBytes: fixture.restartEvidenceBytes,
+    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
+    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /not the artifact produced/)
 
@@ -230,6 +319,12 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: linuxFixture.metricsBytes,
     fuseInspection: wrong,
     fuseInspectionBytes: wrongBytes,
+    withholdEvidence: JSON.parse(linuxFixture.withholdEvidenceBytes),
+    withholdEvidenceBytes: linuxFixture.withholdEvidenceBytes,
+    restartEvidence: JSON.parse(linuxFixture.restartEvidenceBytes),
+    restartEvidenceBytes: linuxFixture.restartEvidenceBytes,
+    mismatchEvidence: JSON.parse(linuxFixture.mismatchEvidenceBytes),
+    mismatchEvidenceBytes: linuxFixture.mismatchEvidenceBytes,
     receiptRecords: records,
   }), /not-applicable/)
 })
@@ -266,6 +361,9 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
     await writeFile(join(runnerRoot, 'evidence.json'), encoded(fixture.evidence))
     await writeFile(join(runnerRoot, 'metrics.json'), fixture.metricsBytes)
     await writeFile(join(runnerRoot, 'fuse-inspection.json'), fixture.fuseInspectionBytes)
+    await writeFile(join(runnerRoot, 'sidecar-withhold-retry.json'), fixture.withholdEvidenceBytes)
+    await writeFile(join(runnerRoot, 'sidecar-restart-exhaustion-quit.json'), fixture.restartEvidenceBytes)
+    await writeFile(join(runnerRoot, 'sidecar-version-mismatch.json'), fixture.mismatchEvidenceBytes)
     for (const [index, receipt] of fixture.receiptRecords.entries()) {
       await writeFile(join(runnerRoot, `receipt-${index}.json`), receipt.raw)
     }

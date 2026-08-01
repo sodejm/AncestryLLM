@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 import {
+  TARGET_RECEIPT_GATES,
   parseReceiptArguments,
   runVerificationCommand,
   validateVerificationReceipt,
@@ -14,6 +15,19 @@ import {
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = new URL('../../', import.meta.url).pathname
+
+test('target receipts require each packaged sidecar fault scenario explicitly', () => {
+  assert.deepEqual(TARGET_RECEIPT_GATES, [
+    'packageRuntimePassed',
+    'sidecarSmokePassed',
+    'fusesInspectedPassed',
+    'rendererZeroEgressCanaryPassed',
+    'normalLaunchDebugSurfaceAbsentPassed',
+    'packagedSidecarWithholdRetryPassed',
+    'packagedSidecarRestartExhaustionQuitPassed',
+    'packagedSidecarVersionMismatchPassed',
+  ])
+})
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')

@@ -16,6 +16,9 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
   'fusesInspectedPassed',
   'rendererZeroEgressCanaryPassed',
   'normalLaunchDebugSurfaceAbsentPassed',
+  'packagedSidecarWithholdRetryPassed',
+  'packagedSidecarRestartExhaustionQuitPassed',
+  'packagedSidecarVersionMismatchPassed',
 ])
 export const SECURITY_RECEIPT_GATES = Object.freeze([
   'auditPassed',
