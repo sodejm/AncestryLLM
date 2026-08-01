@@ -1,0 +1,33 @@
+appId: org.ancestryllm.desktop
+productName: AncestryLLM
+executableName: ancestryllm
+asar: true
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: build/sidecar
+    to: sidecar
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+mac:
+  target:
+    - dir
+  category: public.app-category.productivity
+  identity: null
+win:
+  target:
+    - dir
+linux:
+  target:
+    - dir
+  category: Utility

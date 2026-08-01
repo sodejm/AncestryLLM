@@ -1,6 +1,6 @@
 # AncestryLLM desktop scaffold
 
-This directory is the UI-only Electron adapter for the future localhost service boundary. It intentionally implements no genealogy domain behavior and does not access files, databases, provider credentials, the network, or operating-system services from the renderer. The versioned `window.ancestry` bridge currently serves deterministic fictional fixtures only.
+This directory contains the UI-only Electron adapter and the packaged control-sidecar supervisor. It intentionally implements no genealogy domain behavior and does not access files, databases, provider credentials, the network, or operating-system services from the renderer. The versioned `window.ancestry` bridge continues to serve deterministic fictional fixtures only.
 
 ## Reproducible setup and gates
 
@@ -15,11 +15,11 @@ make desktop-e2e
 make desktop-security
 ```
 
-`desktop-check` runs lint, separated main/preload/renderer type checks, unit tests, and a source-map-free build inspection. `desktop-e2e` launches the actual built Electron app. `desktop-security` runs the high-severity dependency audit, source secret scan, produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory package, and inspects the resulting `app.asar`, eight packaged Electron fuses, and supported ASAR-integrity metadata. No updater or signing credentials are configured in this scaffold.
+`desktop-check` runs lint, separated main/preload/renderer type checks, unit tests, and a source-map-free build inspection. `desktop-e2e` launches the actual built Electron app. `desktop-security` runs the high-severity dependency audit, source secret scan, produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory package after verifying the native sidecar resource, and inspects the resulting `app.asar`, eight packaged Electron fuses, and supported ASAR-integrity metadata. No updater or signing credentials are configured in this scaffold.
 
 ## Architecture
 
-The renderer has browser-only TypeScript types and imports. The sandboxed preload exposes the frozen, bounded, async `window.ancestry` API after runtime validation. Main validates IPC senders, serves a fixed `app://bundle` asset/MIME manifest under a restrictive CSP, and globally denies permissions, downloads, child windows, webviews, unexpected navigation, and packaged developer tools. Replace the fictional main-process mock with a transport adapter only after the localhost sidecar application-service contract exists; do not place domain logic in Electron.
+The renderer has browser-only TypeScript types and imports. The sandboxed preload exposes the frozen, bounded, async `window.ancestry` API after runtime validation. Main validates IPC senders, serves a fixed `app://bundle` asset/MIME manifest under a restrictive CSP, and globally denies permissions, downloads, child windows, webviews, unexpected navigation, and packaged developer tools. In packaged builds, main privately starts and verifies the control-only native sidecar. Startup failure leaves a sanitized degraded diagnostics state; authenticated session details and bounded manual retry remain main-only and are never added to IPC or the preload bridge. See [the lifecycle and diagnostics guide](../docs/DESKTOP_SIDECAR.md). A later domain transport adapter must consume the application-service contract; do not place domain logic in Electron.
 
 The allowlisted external-link helper is main-process-internal and testable: it accepts only exact `https://github.com` destinations without credentials or a custom port, displays the normalized destination, defaults to cancel, and opens only after explicit confirmation. It is deliberately not part of `window.ancestry`; a renderer-facing external-link workflow requires its own separately reviewed contract.
 

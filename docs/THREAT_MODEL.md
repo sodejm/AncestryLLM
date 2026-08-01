@@ -4,14 +4,15 @@
 
 The 0.4.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
 shared command, application-service, and genealogy-core contracts. The isolated
-0.5.0 Issue #11 slice adds source-level authenticated FastAPI health and
-capability routes, strict version/error contracts, fail-closed loopback server
-configuration, and a deterministic OpenAPI artifact. It does not implement an
-Electron application, sidecar supervisor/bootstrap lifecycle, renderer or
-preload bridge, domain API routes, desktop packaging, plugins, or an update
-channel. The diagrams, controls, abuse cases, and gates below define both this
-partial foundation and accepted later-roadmap requirements; source-level
-implementation alone is not evidence that a packaged control has passed. Each
+0.5.0 Issue #11 slice adds authenticated FastAPI health and capability routes,
+strict version/error contracts, fail-closed loopback server configuration, and
+a deterministic OpenAPI artifact. Issue #225 adds private-stdin bootstrap,
+bounded Electron supervision, native sidecar smoke tests, and unsigned unpacked
+package verification. It does not implement domain API routes, a renderer
+domain bridge, signed installers, plugins, or an update channel. The diagrams,
+controls, abuse cases, and gates below define both this partial runtime and
+accepted later-roadmap requirements; implementation alone is not evidence that
+every packaged assurance control has passed. Each
 adapter must reuse the implemented service contracts and complete its named
 verification before a planned control can be treated as effective.
 
@@ -155,10 +156,12 @@ The isolated 0.5.0 foundation implements and tests the source-level subset of
   OpenAPI generation, and network-free `provider=none` discovery have focused
   negative tests.
 
-Private-stdin bootstrap, Electron supervision, connect-first/replay/timing
-evidence, process-tree cleanup, packaged assertions, and every domain route are
-still pending. Because those controls and packaged evidence are incomplete, the
-residual-risk ledger below is not reduced by this source-level foundation.
+Private-stdin bootstrap, Electron supervision, token-derived readiness, bounded
+restart/shutdown behavior, and native packaged-resource assertions have focused
+tests. Broader connect-first/replay/timing evidence, signed-package and
+process-tree assurance, final platform execution, and every domain route are
+still pending. Because that release evidence is incomplete, the residual-risk
+ledger below is not reduced by this implementation alone.
 
 ## STRIDE boundary ledger
 
@@ -211,7 +214,7 @@ or release evidence, never private payloads.
 | ID | Abuse case | Inherent risk | Controls, owner, gate, and planned negative test | Evidence-backed residual risk |
 |---|---|---|---|---|
 | `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy. The risk rating is not reduced while #101 sender/race coverage and the #131 adversarial suite remain pending. |
-| `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, and process-tree cleanup. | Not reduced: the source-level API foundation exists, but supervisor, replay/timing, process-cleanup, and packaged evidence remain pending. |
+| `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, and process-tree cleanup. | Not reduced: private bootstrap and bounded supervision are implemented, but replay/timing, process-tree, signed-package, and final platform evidence remain pending. |
 | `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Not reduced: implementation and packaged evidence pending. |
 | `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Not reduced: worker and packaged evidence pending. |
 | `AB-05` | Model Markdown uses HTML, SVG, handlers, schemes, images, links, or copied content to execute or exfiltrate. | High / Critical | `TM-R02`, `TM-L02`; #112, #131; G2. Negative: AST allowlist tests for script, HTML, SVG, URI, image, copy, external-link, and CSP cases. | Not reduced: renderer and packaged XSS evidence pending. |

@@ -5,10 +5,10 @@ deterministic RootsMagic and GEDCOM workflows with optional, explicitly selected
 LLM providers. The one-shot CLI and prompt-toolkit/Rich REPL are the only
 implemented product surfaces in 0.4.0. They derive commands from the same
 `CommandSpec` metadata and dispatch through the shared `CommandExecutor` into
-transport-neutral application services. Isolated 0.5.0 work includes a source-level
-private FastAPI health/capability foundation over those contracts. Electron, domain
-API routes, and desktop packaging remain unshipped; the internal adapter is not a
-public API.
+transport-neutral application services. Isolated 0.5.0 work includes a private
+FastAPI health/capability adapter plus native packaged-sidecar build and Electron
+supervision. Domain API routes and supported desktop distribution remain unshipped;
+the internal adapter is not a public API.
 
 ## Install and start
 
