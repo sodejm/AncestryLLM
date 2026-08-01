@@ -81,6 +81,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" in workflow
     assert "verification-receipt.mjs" in workflow
+    assert workflow.count("verification-receipt.mjs") == workflow.count("--allow-output")
     assert "inspect-package-fuses.mjs --output" in workflow
     assert "pnpm --dir desktop run check:secrets" in workflow
     assert "pnpm --dir desktop sbom" in workflow

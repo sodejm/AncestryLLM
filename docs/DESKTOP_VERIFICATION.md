@@ -183,7 +183,10 @@ not workflow-supplied success booleans. Each receipt records the full Git SHA
 before and after its command, the exact executable and arguments, exit status,
 stdout and stderr digests, the named gates that command can establish, and
 digests for any consumed artifact such as the SBOM, metrics, or fuse inspection.
-Evidence generation rejects a missing, duplicate, failed, wrong-head, or
+The wrapper also requires a clean source tree before and after the command and
+binds deterministic staged, tracked-worktree, and non-ignored untracked state.
+Only declared generated-output paths may change. Evidence generation rejects a
+missing, duplicate, failed, wrong-head, legacy unbound, workspace-mutating, or
 digest-mismatched receipt.
 
 The three packaged-sidecar fault scenarios have independent receipt gates and
