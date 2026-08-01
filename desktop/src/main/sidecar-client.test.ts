@@ -1,3 +1,4 @@
+import { createServer } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 import { SidecarClientError, createSidecarCapabilitiesClient } from './sidecar-client'
@@ -35,4 +36,32 @@ describe('main-only sidecar capabilities client', () => {
       await expect(client.getCapabilities()).rejects.toBeInstanceOf(SidecarClientError)
     }
   })
+
+  it('enforces a wall-clock deadline even while a response trickles data', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.write('{')
+      const trickle = setInterval(() => response.write(' '), 100)
+      const finish = setTimeout(() => response.end('}'), 3_500)
+      response.on('close', () => {
+        clearInterval(trickle)
+        clearTimeout(finish)
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({ session: () => ({ ...session, port: address.port }) })
+    const startedAt = Date.now()
+    try {
+      await expect(client.getCapabilities()).rejects.toEqual(new SidecarClientError('request_failed'))
+      expect(Date.now() - startedAt).toBeLessThan(3_400)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 5_000)
 })

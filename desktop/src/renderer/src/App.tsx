@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Heart, Home as HomeIcon, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AncestryBridge, BridgeResult, DesktopColorScheme, StartupDiagnostics } from '../../shared-contract/desktop'
@@ -19,24 +19,50 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 }
 function Shell() {
   const [route, setRoute] = useState<Route>(routeFromHash)
+  const [preferenceUpdatePending, setPreferenceUpdatePending] = useState(false)
+  const [retryPending, setRetryPending] = useState(false)
+  const [retryFailed, setRetryFailed] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const alert = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
   const startup = useQuery({ queryKey: ['startup-diagnostics'], queryFn: () => ancestryBridge().getStartupDiagnostics() })
   const preferences = useQuery({ queryKey: ['preferences'], queryFn: () => ancestryBridge().getPreferences() })
+  const refetchStartup = startup.refetch
   useEffect(() => { const update = () => setRoute(routeFromHash()); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
   useEffect(() => { heading.current?.focus() }, [route])
   useEffect(() => { if (startup.data && !startup.data.ok) alert.current?.focus() }, [startup.data])
+  useEffect(() => { if (route === 'diagnostics') void refetchStartup() }, [refetchStartup, route])
   const result: BridgeResult<StartupDiagnostics> | undefined = startup.data
   const preferenceData = preferences.data?.ok ? preferences.data.data : undefined
   const status = result?.ok
     ? ({ starting: 'Starting', ready: 'Ready', degraded: 'Degraded', stopped: 'Stopped' } as const)[result.data.state]
     : 'Unavailable'
   const updateColorScheme = async (colorScheme: DesktopColorScheme) => {
-    if (!preferenceData) return
-    const updated = await ancestryBridge().updatePreferences({ expectedRevision: preferenceData.revision, colorScheme })
-    if (updated.ok) {
-      document.documentElement.dataset.theme = updated.data.colorScheme
-      await preferences.refetch()
+    if (!preferenceData || preferenceUpdatePending) return
+    setPreferenceUpdatePending(true)
+    try {
+      const updated = await ancestryBridge().updatePreferences({ expectedRevision: preferenceData.revision, colorScheme })
+      if (updated.ok) {
+        queryClient.setQueryData(['preferences'], updated)
+        document.documentElement.dataset.theme = updated.data.colorScheme
+        await preferences.refetch()
+      }
+    } finally {
+      setPreferenceUpdatePending(false)
+    }
+  }
+  const retrySidecar = async () => {
+    if (retryPending) return
+    setRetryPending(true)
+    setRetryFailed(false)
+    try {
+      const retried = await ancestryBridge().retrySidecar()
+      queryClient.setQueryData(['startup-diagnostics'], retried)
+      setRetryFailed(!retried.ok)
+    } catch {
+      setRetryFailed(true)
+    } finally {
+      setRetryPending(false)
     }
   }
   return <div className="app-shell">
@@ -46,8 +72,8 @@ function Shell() {
       {startup.isPending && <p role="status">Preparing your workspace…</p>}
       {(startup.isError || (result && !result.ok)) && <div ref={alert} tabIndex={-1} role="alert" className="error"><AlertTriangle aria-hidden="true"/><div><strong>Desktop diagnostics are temporarily unavailable.</strong><p>Restart AncestryLLM.</p></div></div>}
       {route === 'home' && <><h1 ref={heading} tabIndex={-1}>Home</h1><p>Your private family history workspace.</p><Gallery/></>}
-      {route === 'diagnostics' && <><h1 ref={heading} tabIndex={-1}>Diagnostics</h1><p>Status: <span className="badge">{status}</span></p><p>No family records leave this device.</p></>}
-      {route === 'settings' && <><h1 ref={heading} tabIndex={-1}>Settings</h1>{preferences.isPending && <p role="status">Loading preferences…</p>}<fieldset disabled={!preferenceData}><legend>Theme</legend>{(['system','light','dark'] as DesktopColorScheme[]).map((colorScheme) => <label key={colorScheme}><input type="radio" name="theme" checked={preferenceData?.colorScheme === colorScheme} onChange={() => { void updateColorScheme(colorScheme) }}/>{colorScheme}</label>)}</fieldset></>}
+      {route === 'diagnostics' && <><h1 ref={heading} tabIndex={-1}>Diagnostics</h1><p>Status: <span className="badge">{status}</span></p><p>No family records leave this device.</p>{result?.ok && result.data.state === 'degraded' && <div role="alert" className="error"><AlertTriangle aria-hidden="true"/><div><strong>Desktop service needs attention.</strong><p>Retry the local service once, or restart AncestryLLM if the problem continues.</p>{result.data.manualRetriesRemaining > 0 ? <Button disabled={retryPending} onClick={() => { void retrySidecar() }}>{retryPending ? 'Retrying…' : 'Retry desktop service'}</Button> : <p>Restart AncestryLLM to try again.</p>}</div></div>}{retryFailed && <p role="alert">The desktop service could not be restarted. Restart AncestryLLM.</p>}</>}
+      {route === 'settings' && <><h1 ref={heading} tabIndex={-1}>Settings</h1>{preferences.isPending && <p role="status">Loading preferences…</p>}<fieldset disabled={!preferenceData || preferenceUpdatePending}><legend>Theme</legend>{(['system','light','dark'] as DesktopColorScheme[]).map((colorScheme) => <label key={colorScheme}><input type="radio" name="theme" checked={preferenceData?.colorScheme === colorScheme} onChange={() => { void updateColorScheme(colorScheme) }}/>{colorScheme}</label>)}</fieldset></>}
     </main>
   </div>
 }

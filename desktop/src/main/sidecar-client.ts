@@ -1,4 +1,4 @@
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { DESKTOP_PROTOCOL_VERSION, type CapabilityManifest } from '../shared-contract/desktop'
 import { parseCapabilitiesResult } from '../shared-contract/runtime'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
@@ -32,6 +32,16 @@ function requestFixedRoute(
   path: typeof CAPABILITIES_PATH,
 ): Promise<SidecarHttpResponse> {
   return new Promise((resolve, reject) => {
+    let responseStream: IncomingMessage | undefined
+    let settled = false
+    const finish = <T>(callback: (value: T) => void, value: T) => {
+      if (settled) return
+      settled = true
+      clearTimeout(deadline)
+      callback(value)
+    }
+    const resolveOnce = (value: SidecarHttpResponse) => finish(resolve, value)
+    const rejectOnce = (error: unknown) => finish(reject, error)
     const request = httpRequest({
       hostname: sidecar.host,
       port: sidecar.port,
@@ -47,9 +57,10 @@ function requestFixedRoute(
       },
       timeout: REQUEST_TIMEOUT_MS,
     }, (response) => {
+      responseStream = response
       const chunks: Buffer[] = []
       let bytes = 0
-      response.on('error', reject)
+      response.on('error', rejectOnce)
       response.on('data', (chunk: Buffer | string) => {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
         bytes += buffer.length
@@ -60,7 +71,7 @@ function requestFixedRoute(
         chunks.push(buffer)
       })
       response.on('end', () => {
-        resolve({
+        resolveOnce({
           statusCode: response.statusCode ?? 0,
           contentType: Array.isArray(response.headers['content-type'])
             ? (response.headers['content-type'][0] ?? '')
@@ -70,7 +81,13 @@ function requestFixedRoute(
       })
     })
     request.on('timeout', () => request.destroy(new SidecarClientError('request_failed')))
-    request.on('error', reject)
+    request.on('error', rejectOnce)
+    const deadline = setTimeout(() => {
+      const error = new SidecarClientError('request_failed')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }, REQUEST_TIMEOUT_MS)
     request.end()
   })
 }
