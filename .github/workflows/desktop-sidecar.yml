@@ -1,11 +1,14 @@
 name: Desktop verification
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full immutable commit SHA to verify
+        required: true
+        type: string
 
 concurrency:
   group: desktop-verification-${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +18,7 @@ permissions:
   contents: read
 
 env:
-  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  EXPECTED_HEAD: ${{ inputs.commit_sha || github.sha }}
 
 jobs:
   changes:
@@ -26,30 +29,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify and classify the exact head
         id: classify
         shell: bash
-        env:
-          BASE_HEAD: ${{ github.event.pull_request.base.sha }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
+          git fetch --no-tags origin main
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          desktop=true
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            desktop=false
-            while IFS= read -r changed_file; do
-              case "$changed_file" in
-                .github/workflows/desktop-sidecar.yml|desktop/*|scripts/build_sidecar.py|scripts/build_verification_sidecar.py|scripts/sidecar_entry.py|scripts/smoke_sidecar.py|scripts/verification_wrong_sidecar.py|src/ancestryllm/api/*|tests/api/*|tests/test_build_verification_sidecar.py|tests/test_desktop_workflow_contract.py|tests/test_verification_wrong_sidecar.py|docs/DESKTOP_VERIFICATION.md|ARCHITECTURE.md|pyproject.toml|uv.lock)
-                  desktop=true
-                  break
-                  ;;
-              esac
-            done < <(git diff --name-only "$BASE_HEAD" "$EXPECTED_HEAD")
-          fi
-          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"
+          echo "desktop=true" >> "$GITHUB_OUTPUT"
 
   desktop-security:
     name: Desktop contract and security
@@ -59,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
       - name: Verify exact head
         shell: bash
@@ -178,61 +168,98 @@ jobs:
         include:
           - name: macOS 15 arm64
             runner: macos-15
+            runs_on: '["macos-15"]'
             sidecar_target: darwin-arm64
             expected_os: "macOS 15"
-            actual_os: "macOS 15"
             arch: arm64
             package_boundary: unpacked-native
             package_args: --mac --dir --arm64
           - name: macOS 15 x64
             runner: macos-15-intel
+            runs_on: '["macos-15-intel"]'
             sidecar_target: darwin-x64
             expected_os: "macOS 15"
-            actual_os: "macOS 15"
             arch: x64
             package_boundary: unpacked-native
             package_args: --mac --dir --x64
           - name: macOS 26 arm64
             runner: macos-26
+            runs_on: '["macos-26"]'
             sidecar_target: darwin-arm64
             expected_os: "macOS 26"
-            actual_os: "macOS 26"
             arch: arm64
             package_boundary: unpacked-native
             package_args: --mac --dir --arm64
           - name: macOS 26 x64
             runner: macos-26-intel
+            runs_on: '["macos-26-intel"]'
             sidecar_target: darwin-x64
             expected_os: "macOS 26"
-            actual_os: "macOS 26"
             arch: x64
             package_boundary: unpacked-native
             package_args: --mac --dir --x64
-          - name: Windows 11 x64 hosted approximation
-            runner: windows-2025
+          - name: Windows 11 x64
+            runner: ancestryllm-windows-11
+            # This label must resolve only to an ephemeral one-job runner.
+            runs_on: '["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]'
             sidecar_target: win32-x64
             expected_os: "Windows 11"
-            actual_os: "Windows Server 2025"
             arch: x64
             package_boundary: unpacked-native
             package_args: --win --dir --x64
           - name: Ubuntu 24.04 x64
             runner: ubuntu-24.04
+            runs_on: '["ubuntu-24.04"]'
             sidecar_target: linux-x64
             expected_os: "Ubuntu 24.04"
-            actual_os: "Ubuntu 24.04"
             arch: x64
             package_boundary: unpacked-native
             package_args: --linux --dir --x64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
       - name: Verify exact head
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - id: macos-host
+        name: Verify supported macOS version
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          actual_os="macOS $(sw_vers -productVersion | cut -d. -f1)"
+          test "$actual_os" = "$EXPECTED_OS"
+          echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
+      - id: windows-host
+        name: Verify exact Windows 11 host
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          $caption = (Get-CimInstance Win32_OperatingSystem).Caption
+          if ($caption -notmatch 'Windows 11') { throw "expected Windows 11, found $caption" }
+          $actualOs = 'Windows 11'
+          if ($actualOs -ne $env:EXPECTED_OS) {
+            throw "expected $env:EXPECTED_OS, found $caption"
+          }
+          "actual_os=$actualOs" >> $env:GITHUB_OUTPUT
+      - id: linux-host
+        name: Verify exact Ubuntu 24.04 host
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+        run: |
+          source /etc/os-release
+          test "$ID" = ubuntu
+          actual_os="Ubuntu $VERSION_ID"
+          test "$actual_os" = "$EXPECTED_OS"
+          echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -342,7 +369,7 @@ jobs:
         env:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
           EXPECTED_OS: ${{ matrix.expected_os }}
-          ACTUAL_OS: ${{ matrix.actual_os }}
+          ACTUAL_OS: ${{ steps.macos-host.outputs.actual_os || steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}
           TARGET_ARCH: ${{ matrix.arch }}
           PACKAGE_BOUNDARY: ${{ matrix.package_boundary }}
           VERIFICATION_RUNNER: ${{ matrix.runner }}
@@ -396,7 +423,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.desktop == 'true'
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
       - name: Verify exact head
         if: needs.changes.outputs.desktop == 'true'

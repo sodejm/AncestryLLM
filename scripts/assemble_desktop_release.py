@@ -15,12 +15,20 @@ from typing import Any
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+ARTIFACT_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMON_GATES = {
     "exactHeadPassed",
     "installerBuiltPassed",
     "installedRuntimePassed",
     "runtimeIsolationPassed",
     "sbomGeneratedPassed",
+    "sidecarHandshakePassed",
+}
+VALIDATION_GATES = {
+    "exactHeadPassed",
+    "installedRuntimePassed",
+    "operatingSystemPassed",
+    "runtimeIsolationPassed",
     "sidecarHandshakePassed",
 }
 TARGETS = {
@@ -59,6 +67,38 @@ TARGETS = {
         "arch": "x64",
         "extension": ".deb",
         "gates": {"gpgSignaturePassed"},
+    },
+}
+VALIDATION_ENVIRONMENTS = {
+    "macos-15": {
+        "target": "darwin-arm64",
+        "expected_os": "macOS 15",
+        "arch": "arm64",
+    },
+    "macos-15-intel": {
+        "target": "darwin-x64",
+        "expected_os": "macOS 15",
+        "arch": "x64",
+    },
+    "macos-26": {
+        "target": "darwin-arm64",
+        "expected_os": "macOS 26",
+        "arch": "arm64",
+    },
+    "macos-26-intel": {
+        "target": "darwin-x64",
+        "expected_os": "macOS 26",
+        "arch": "x64",
+    },
+    "ancestryllm-windows-11": {
+        "target": "win32-x64",
+        "expected_os": "Windows 11",
+        "arch": "x64",
+    },
+    "ubuntu-24.04": {
+        "target": "linux-x64",
+        "expected_os": "Ubuntu 24.04",
+        "arch": "x64",
     },
 }
 AGGREGATE_OUTPUTS = {
@@ -113,6 +153,12 @@ def _validate_identity(git_head: str, version: str) -> None:
         raise ValueError("git head must be a lowercase 40-character commit SHA")
     if not SEMVER.fullmatch(version):
         raise ValueError("version must be stable SemVer")
+
+
+def _positive_integer(value: int, label: str) -> int:
+    if value < 1:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
 
 
 def create_target(args: argparse.Namespace) -> None:
@@ -172,6 +218,63 @@ def create_target(args: argparse.Namespace) -> None:
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def create_validation_receipt(args: argparse.Namespace) -> None:
+    """Record one supported runner's validation of exact installer bytes."""
+
+    _validate_identity(args.git_head, args.version)
+    configuration = VALIDATION_ENVIRONMENTS.get(args.runner)
+    if configuration is None:
+        raise ValueError(f"unsupported desktop validation runner: {args.runner}")
+    if (
+        args.target != configuration["target"]
+        or args.expected_os != configuration["expected_os"]
+        or args.actual_os != configuration["expected_os"]
+        or args.arch != configuration["arch"]
+    ):
+        raise ValueError("runner does not match the supported validation matrix")
+
+    gates = set(args.gate)
+    missing = VALIDATION_GATES - gates
+    unexpected = gates - VALIDATION_GATES
+    if missing:
+        raise ValueError(f"missing required validation gate: {sorted(missing)[0]}")
+    if unexpected:
+        raise ValueError(f"unexpected validation gates: {sorted(unexpected)}")
+
+    installer = _regular_file(args.installer, "validation installer")
+    target_configuration = TARGETS[args.target]
+    if installer.suffix.lower() != target_configuration["extension"]:
+        raise ValueError("validation installer extension does not match the supported target")
+    run_id = _positive_integer(args.workflow_run_id, "workflow run ID")
+    run_attempt = _positive_integer(args.workflow_run_attempt, "workflow run attempt")
+    artifact_id = _positive_integer(args.source_artifact_id, "source artifact ID")
+    if not ARTIFACT_DIGEST.fullmatch(args.source_artifact_digest):
+        raise ValueError("source artifact digest must be a lowercase sha256 digest")
+
+    payload = {
+        "schemaVersion": 1,
+        "status": "passed",
+        "gitHead": args.git_head,
+        "version": args.version,
+        "runner": args.runner,
+        "target": args.target,
+        "expectedOs": args.expected_os,
+        "actualOs": args.actual_os,
+        "arch": args.arch,
+        "gates": {gate: True for gate in sorted(gates)},
+        "installer": _artifact(installer),
+        "workflow": {
+            "runId": run_id,
+            "runAttempt": run_attempt,
+            "sourceArtifactId": artifact_id,
+            "sourceArtifactDigest": args.source_artifact_digest,
+        },
+    }
+    _refuse_existing_output(args.output)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _find_adjacent(evidence_path: Path, artifact: dict[str, Any], label: str) -> Path:
     name = artifact.get("name")
     if not isinstance(name, str) or Path(name).name != name:
@@ -223,6 +326,86 @@ def _target_component(
             copied_children.append(copied_child)
         copied["components"] = copied_children
     return copied, references
+
+
+def _validated_environments(
+    validation_dir: Path,
+    git_head: str,
+    version: str,
+    targets: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    receipt_paths = sorted(validation_dir.rglob("desktop-validation-receipt.json"))
+    if len(receipt_paths) != len(VALIDATION_ENVIRONMENTS):
+        raise ValueError(
+            f"expected {len(VALIDATION_ENVIRONMENTS)} desktop validation receipt files"
+        )
+
+    validations: dict[str, dict[str, Any]] = {}
+    for receipt_path in receipt_paths:
+        payload = _load_object(receipt_path, "desktop validation receipt")
+        runner = payload.get("runner")
+        if runner not in VALIDATION_ENVIRONMENTS or runner in validations:
+            raise ValueError(f"unexpected or duplicate desktop validation runner: {runner!r}")
+        if payload.get("schemaVersion") != 1 or payload.get("status") != "passed":
+            raise ValueError(f"desktop validation runner {runner} did not pass")
+        if payload.get("gitHead") != git_head or payload.get("version") != version:
+            raise ValueError(
+                f"desktop validation runner {runner} is not bound to the release identity"
+            )
+        configuration = VALIDATION_ENVIRONMENTS[runner]
+        if (
+            payload.get("target") != configuration["target"]
+            or payload.get("expectedOs") != configuration["expected_os"]
+            or payload.get("actualOs") != configuration["expected_os"]
+            or payload.get("arch") != configuration["arch"]
+        ):
+            raise ValueError(
+                f"desktop validation runner {runner} does not match the supported matrix"
+            )
+        if payload.get("gates") != {gate: True for gate in sorted(VALIDATION_GATES)}:
+            raise ValueError(
+                f"desktop validation runner {runner} has incomplete verification gates"
+            )
+        workflow = payload.get("workflow")
+        if not isinstance(workflow, dict) or set(workflow) != {
+            "runId",
+            "runAttempt",
+            "sourceArtifactId",
+            "sourceArtifactDigest",
+        }:
+            raise ValueError(
+                f"desktop validation runner {runner} workflow provenance is incomplete"
+            )
+        for key, label in (
+            ("runId", "workflow run ID"),
+            ("runAttempt", "workflow run attempt"),
+            ("sourceArtifactId", "source artifact ID"),
+        ):
+            value = workflow.get(key)
+            if not isinstance(value, int):
+                raise ValueError(f"desktop validation runner {runner} {label} is invalid")
+            _positive_integer(value, label)
+        digest = workflow.get("sourceArtifactDigest")
+        if not isinstance(digest, str) or not ARTIFACT_DIGEST.fullmatch(digest):
+            raise ValueError(
+                f"desktop validation runner {runner} source artifact digest is invalid"
+            )
+        installer = payload.get("installer")
+        if not isinstance(installer, dict):
+            raise ValueError(f"desktop validation runner {runner} installer must be an object")
+        _find_adjacent(receipt_path, installer, f"{runner}.installer")
+
+        target = configuration["target"]
+        target_installer = targets[target]["artifacts"]["installer"]
+        if installer != target_installer:
+            raise ValueError(
+                f"desktop validation runner {runner} is not bound to the target installer digest"
+            )
+        validations[runner] = payload
+
+    if set(validations) != set(VALIDATION_ENVIRONMENTS):
+        raise ValueError("desktop validation environment matrix is incomplete")
+    return [validations[runner] for runner in sorted(validations)]
 
 
 def aggregate(args: argparse.Namespace) -> None:
@@ -354,6 +537,11 @@ def aggregate(args: argparse.Namespace) -> None:
 
     if set(targets) != set(TARGETS):
         raise ValueError("desktop release target matrix is incomplete")
+    validations = (
+        _validated_environments(args.validation_dir, args.git_head, args.version, targets)
+        if args.validation_dir is not None
+        else None
+    )
     if args.output_dir.is_symlink():
         raise ValueError("release output directory must not be a symlink")
     destinations = [
@@ -367,12 +555,15 @@ def aggregate(args: argparse.Namespace) -> None:
         shutil.copyfile(source, args.output_dir / name)
 
     evidence = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "passed",
         "gitHead": args.git_head,
         "version": args.version,
         "targets": [targets[target] for target in sorted(targets)],
     }
+    if validations is not None:
+        evidence["platformValidated"] = True
+        evidence["validations"] = validations
     manifest = {
         "schemaVersion": 1,
         "gitHead": args.git_head,
@@ -429,10 +620,31 @@ def _parser() -> argparse.ArgumentParser:
     target.add_argument("--output", required=True, type=Path)
     target.set_defaults(handler=create_target)
 
+    validation = subparsers.add_parser(
+        "validation-receipt",
+        help="record one supported runner's validation of exact installer bytes",
+    )
+    validation.add_argument("--git-head", required=True)
+    validation.add_argument("--version", required=True)
+    validation.add_argument("--runner", required=True)
+    validation.add_argument("--target", required=True)
+    validation.add_argument("--expected-os", required=True)
+    validation.add_argument("--actual-os", required=True)
+    validation.add_argument("--arch", required=True)
+    validation.add_argument("--installer", required=True, type=Path)
+    validation.add_argument("--workflow-run-id", required=True, type=int)
+    validation.add_argument("--workflow-run-attempt", required=True, type=int)
+    validation.add_argument("--source-artifact-id", required=True, type=int)
+    validation.add_argument("--source-artifact-digest", required=True)
+    validation.add_argument("--gate", action="append", default=[])
+    validation.add_argument("--output", required=True, type=Path)
+    validation.set_defaults(handler=create_validation_receipt)
+
     aggregate_parser = subparsers.add_parser("aggregate", help="aggregate the exact release matrix")
     aggregate_parser.add_argument("--git-head", required=True)
     aggregate_parser.add_argument("--version", required=True)
     aggregate_parser.add_argument("--input-dir", required=True, type=Path)
+    aggregate_parser.add_argument("--validation-dir", type=Path)
     aggregate_parser.add_argument("--output-dir", required=True, type=Path)
     aggregate_parser.set_defaults(handler=aggregate)
     return parser

@@ -42,12 +42,12 @@ const macAndLinuxCeilings = ceilings(30_000, 20_000, 45_000, 1_610_612_736)
 const windowsCeilings = ceilings(45_000, 30_000, 60_000, 2_147_483_648)
 
 export const TARGET_ROWS = Object.freeze({
-  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', releaseSupported: true, ceilings: macAndLinuxCeilings }),
-  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', releaseSupported: true, ceilings: macAndLinuxCeilings }),
-  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', releaseSupported: true, ceilings: macAndLinuxCeilings }),
-  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', releaseSupported: true, ceilings: macAndLinuxCeilings }),
-  'windows-2025': Object.freeze({ sidecarTarget: 'win32-x64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows Server 2025', arch: 'x64', releaseSupported: false, ceilings: windowsCeilings }),
-  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', releaseSupported: true, ceilings: macAndLinuxCeilings }),
+  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'ancestryllm-windows-11': Object.freeze({ sidecarTarget: 'win32-x64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'x64', platformValidated: true, ceilings: windowsCeilings }),
+  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
 })
 
 function exactHead(value, label = 'gitHead') {
@@ -294,7 +294,7 @@ function validateTargetRow(input) {
     assert.equal(input[field], expected[field], `${field} does not match the supported target row`)
   }
   assert.equal(input.packageBoundary, 'unpacked-native', 'packageBoundary must be unpacked-native')
-  assert.equal(input.releaseSupported, undefined, 'releaseSupported is derived from the executed target and must not be supplied')
+  assert.equal(input.platformValidated, undefined, 'platformValidated is derived from the executed target and must not be supplied')
   return expected
 }
 
@@ -331,7 +331,7 @@ export function createTargetEvidence(input) {
     actualOs: input.actualOs,
     arch: input.arch,
     packageBoundary: input.packageBoundary,
-    releaseSupported: expected.releaseSupported,
+    platformValidated: expected.platformValidated,
     artifactKind: 'unpublished-unpacked-native',
     signingVerified: false,
     packageRuntime: derived.gates.packageRuntimePassed,
@@ -421,7 +421,7 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
     assert.equal(value[field], expected[field], `${value.runner} ${field} does not match the supported target row`)
   }
   assert.equal(value.packageBoundary, 'unpacked-native')
-  assert.equal(value.releaseSupported, expected.releaseSupported, `${value.runner} releaseSupported is not derived from the executed target`)
+  assert.equal(value.platformValidated, expected.platformValidated, `${value.runner} platformValidated is not derived from the executed target`)
   assert.equal(value.artifactKind, 'unpublished-unpacked-native')
   assert.equal(value.signingVerified, false)
   const receipts = validateDerivedReceipts(value, TARGET_RECEIPT_GATES, gitHead, receiptRecords)
@@ -511,14 +511,12 @@ export async function aggregateEvidence(root, requestedHead) {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     kind: 'aggregate',
     gitHead,
-    status: 'passed-with-release-blockers',
-    releaseSupported: false,
+    status: 'passed',
+    platformValidated: true,
     targets: Object.freeze(targets.sort((left, right) => left.runner.localeCompare(right.runner))),
     security: checkedSecurity,
-    blockers: Object.freeze({
+    publicationRequirements: Object.freeze({
       signedInstaller: true,
-      windows11Execution: true,
-      trackedBy: '#231',
     }),
   })
 }

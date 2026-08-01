@@ -5,6 +5,21 @@
 .env.*
 !.env.example
 
+# Signing credentials and encoded key/certificate exports. Source material for
+# the release helper must live outside the repository; these rules are a final
+# guard against accidentally copying it into a checkout.
+/secure/
+/secrets/
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.asc
+*.gpg
+*.b64
+*.mobileprovision
+
 # RootsMagic / genealogy databases are private personal data.
 *.rmtree
 *.rmgc

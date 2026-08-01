@@ -24,7 +24,7 @@ const rows = [
   ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64'],
   ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64'],
   ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64'],
-  ['windows-2025', 'win32-x64', 'Windows 11', 'Windows Server 2025', 'x64'],
+  ['ancestryllm-windows-11', 'win32-x64', 'Windows 11', 'Windows 11', 'x64'],
   ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64'],
 ]
 
@@ -219,9 +219,9 @@ function securityFixture() {
   }
 }
 
-test('target evidence derives gates and the Windows release boundary only from exact receipts and its row', () => {
-  const { evidence } = targetFixture(rows.find(([runner]) => runner === 'windows-2025'))
-  assert.equal(evidence.releaseSupported, false)
+test('target evidence derives gates and the real Windows 11 platform boundary only from exact receipts and its row', () => {
+  const { evidence } = targetFixture(rows.find(([runner]) => runner === 'ancestryllm-windows-11'))
+  assert.equal(evidence.platformValidated, true)
   assert.equal(evidence.artifactKind, 'unpublished-unpacked-native')
   assert.equal(evidence.packageRuntime, true)
   assert.equal(evidence.rendererZeroEgressCanary, true)
@@ -239,7 +239,7 @@ test('target evidence derives gates and the Windows release boundary only from e
     actualOs: rows[0][3],
     arch: rows[0][4],
     packageBoundary: 'unpacked-native',
-    releaseSupported: false,
+    platformValidated: false,
     metrics,
     metricsBytes: fixture.metricsBytes,
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
@@ -251,7 +251,7 @@ test('target evidence derives gates and the Windows release boundary only from e
     mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
     mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
-  }), /releaseSupported is derived/)
+  }), /platformValidated is derived/)
 })
 
 test('target evidence records every observed value, ceiling, and check and rejects exceeded or missing metrics', () => {
@@ -377,20 +377,20 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
 
   const aggregate = await aggregateEvidence(root, gitHead)
   assert.equal(aggregate.targets.length, 6)
-  assert.equal(aggregate.releaseSupported, false)
-  assert.equal(aggregate.status, 'passed-with-release-blockers')
-  assert.equal(aggregate.blockers.windows11Execution, true)
+  assert.equal(aggregate.platformValidated, true)
+  assert.equal(aggregate.status, 'passed')
+  assert.deepEqual(aggregate.publicationRequirements, { signedInstaller: true })
 
-  await writeFile(join(targetsRoot, 'windows-2025', 'evidence.json'), encoded({
-    ...aggregate.targets.find((target) => target.runner === 'windows-2025'),
-    releaseSupported: true,
+  await writeFile(join(targetsRoot, 'ancestryllm-windows-11', 'evidence.json'), encoded({
+    ...aggregate.targets.find((target) => target.runner === 'ancestryllm-windows-11'),
+    platformValidated: false,
   }))
-  await assert.rejects(aggregateEvidence(root, gitHead), /releaseSupported/)
+  await assert.rejects(aggregateEvidence(root, gitHead), /platformValidated/)
 })
 
-test('target evidence CLI rejects literal release booleans', async () => {
+test('target evidence CLI rejects literal platform-validation booleans', async () => {
   await assert.rejects(runCli([
     'target',
-    '--release-supported', 'true',
-  ]), /Unknown evidence option: --release-supported/)
+    '--platform-validated', 'true',
+  ]), /Unknown evidence option: --platform-validated/)
 })
