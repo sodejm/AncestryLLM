@@ -37,21 +37,26 @@ describe('FilePreferencesStore', () => {
     expect(diagnostics).toEqual([{ code: 'PREFERENCES_FILE_MISSING' }])
   })
 
-  it('persists only the bounded schema and survives a store restart', async () => {
+  it('persists completed onboarding in the bounded schema and survives a store restart', async () => {
     const directory = await temporaryDirectory()
     const store = new FilePreferencesStore(directory)
 
-    await expect(store.update({ expectedRevision: 0, colorScheme: 'dark', reducedMotion: true })).resolves.toEqual({
+    await expect(store.update({
+      expectedRevision: 0,
       colorScheme: 'dark',
       reducedMotion: true,
-      onboardingCompleted: false,
+      onboardingCompleted: true,
+    })).resolves.toEqual({
+      colorScheme: 'dark',
+      reducedMotion: true,
+      onboardingCompleted: true,
       schemaVersion: 1,
       revision: 1,
     })
     await expect(new FilePreferencesStore(directory).get()).resolves.toEqual({
       colorScheme: 'dark',
       reducedMotion: true,
-      onboardingCompleted: false,
+      onboardingCompleted: true,
       schemaVersion: 1,
       revision: 1,
     })

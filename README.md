@@ -7,12 +7,14 @@ implemented product surfaces in 0.4.0. They derive commands from the same
 `CommandSpec` metadata and dispatch through the shared `CommandExecutor` into
 transport-neutral application services. Version 0.5.0 adds a bounded offline
 Electron shell with Home, Diagnostics, a sanitized capability summary, and
-local visual Settings only, backed by a private packaged sidecar. It has no
-genealogy, file, job, chat, provider, cloud-account, or updater surface. A
-supported desktop release is a manually installed signed installer; unsigned
-CI artifacts and unpacked development builds are verification inputs, not
-supported releases. The internal adapter is not a public API, and later domain
-adapters must reuse the existing service surface.
+local visual Settings only, backed by a private packaged sidecar. The first
+launch presents a bounded local welcome that asks for no account, provider,
+credential, genealogy data, or cloud consent. It has no genealogy, file, job,
+chat, provider, cloud-account, or updater surface. A supported desktop release
+is a manually installed signed installer; unsigned CI artifacts and unpacked
+development builds are verification inputs, not supported releases. The
+internal adapter is not a public API, and later domain adapters must reuse the
+existing service surface.
 
 ## Documentation
 
