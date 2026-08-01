@@ -11,8 +11,15 @@ test('packaged shell exposes only the bounded bridge and keyboard navigation', a
     expect(await page.evaluate(() => typeof (globalThis as { process?: unknown }).process)).toBe('undefined')
     expect(await page.evaluate(() => {
       const ancestry = (window as unknown as { ancestry: object }).ancestry
-      return ['securityState', 'openExternalLink'].filter((key) => key in ancestry)
-    })).toEqual([])
+      return Object.keys(ancestry).sort()
+    })).toEqual([
+      'getAppInfo',
+      'getCapabilities',
+      'getPreferences',
+      'getStartupDiagnostics',
+      'retrySidecar',
+      'updatePreferences',
+    ])
     const securityState = await app.evaluate(() => (
       globalThis as unknown as { __ancestryllmSecurityStateForTests(): unknown }
     ).__ancestryllmSecurityStateForTests())

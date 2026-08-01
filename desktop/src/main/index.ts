@@ -11,8 +11,9 @@ import {
   type WebContents,
 } from 'electron'
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
-import { desktopChannels } from '../shared-contract/desktop'
-import { parseTheme } from '../shared-contract/runtime'
+import type { AncestryBridge } from '../shared-contract/desktop'
+import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
+import { registerDesktopIpcHandlers } from './ipc-handlers'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
   APP_ENTRY_URL,
@@ -24,12 +25,17 @@ import {
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
+import { createSidecarCapabilitiesClient } from './sidecar-client'
 import { resolveSidecarExecutable, SidecarSupervisor } from './sidecar-supervisor'
 
 app.enableSandbox()
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
 
-const bridge = createMockAncestryBridge(process.env.ANCESTRYLLM_DESKTOP_FIXTURE === 'failure' ? 'failure' : 'success')
+const fixture = process.env.ANCESTRYLLM_DESKTOP_FIXTURE
+let bridge: AncestryBridge = createMockAncestryBridge(
+  fixture === 'degraded' || fixture === 'unavailable' ? fixture : 'success',
+)
+const preferences = new MemoryPreferencesStore()
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -90,10 +96,11 @@ function runtimeSecurityState(window: BrowserWindow) {
 }
 
 function registerIpcHandlers(): void {
-  const rejectUntrusted = () => Promise.reject(new Error('Untrusted IPC sender'))
-  ipcMain.handle(desktopChannels.startup, (event) => trustedSender(event) ? bridge.startup() : rejectUntrusted())
-  ipcMain.handle(desktopChannels.setTheme, (event, theme: unknown) =>
-    trustedSender(event) ? bridge.setTheme(parseTheme(theme)) : rejectUntrusted())
+  registerDesktopIpcHandlers(
+    ipcMain,
+    bridge,
+    (event) => trustedSender(event as IpcMainInvokeEvent),
+  )
 }
 
 function createWindow(): void {
@@ -134,6 +141,16 @@ async function startPackagedSidecar(): Promise<void> {
         'The private service is unavailable. This window will remain open for diagnostics; restart AncestryLLM or reinstall the application if the problem continues.',
       )
     },
+  })
+  bridge = createDesktopControlBridge({
+    appInfo: {
+      applicationName: 'AncestryLLM',
+      appVersion: app.getVersion(),
+      buildChannel: 'packaged',
+    },
+    supervisor: sidecarSupervisor,
+    capabilitiesClient: createSidecarCapabilitiesClient({ session: () => sidecarSupervisor?.session() }),
+    preferences,
   })
   await sidecarSupervisor.start()
 }
