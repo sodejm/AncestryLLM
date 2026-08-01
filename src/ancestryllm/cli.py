@@ -7,8 +7,9 @@ import getpass
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Callable, Sequence
 
+from ancestryllm.application.results import CommandResult
 from ancestryllm.core.commands import ModuleDescriptor
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
@@ -28,15 +29,15 @@ def _descriptor_payload(descriptor: ModuleDescriptor) -> dict[str, object]:
     return descriptor_payload(descriptor)
 
 
-def _emit(value: Any, json_output: bool = False) -> None:
-    PresentationAdapter().render(value, json_output=json_output)
+def _emit(result: CommandResult, json_output: bool = False) -> None:
+    PresentationAdapter().render(result, json_output=json_output)
 
 
 def dispatch(
     args: argparse.Namespace,
     context: AppContext,
     *,
-    emit: Callable[[Any, bool], None] = _emit,
+    emit: Callable[[CommandResult, bool], None] = _emit,
 ) -> int:
     """Preserve the shipped CLI seam while delegating to the shared executor."""
 

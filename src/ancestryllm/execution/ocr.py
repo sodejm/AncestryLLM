@@ -5,7 +5,7 @@ from __future__ import annotations
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind
-from ancestryllm.execution.common import consent, optional_text, path, text
+from ancestryllm.execution.common import consent, optional_text, path, structured_result, text
 
 
 class OcrExecutor:
@@ -18,13 +18,15 @@ class OcrExecutor:
 
         source = self._ingress.read_text(path(invocation, "input"), FileKind.OCR)
         return CommandOutcome(
-            OcrService(self._context.llm).extract(
-                source,
-                provider_id=text(invocation, "provider"),
-                model=text(invocation, "model"),
-                consent=consent(
-                    self._context,
-                    optional_text(invocation, "consent"),
+            structured_result(
+                OcrService(self._context.llm).extract(
+                    source,
+                    provider_id=text(invocation, "provider"),
+                    model=text(invocation, "model"),
+                    consent=consent(
+                        self._context,
+                        optional_text(invocation, "consent"),
+                    ),
                 ),
             )
         )

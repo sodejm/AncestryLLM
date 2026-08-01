@@ -221,8 +221,11 @@ The intended dependency rules are:
 - Services do not import `prompt_toolkit`, Rich, or console modules. They return
   typed values through the application contracts and raise stable,
   transport-neutral failures at the application boundary.
-- Presentation converts dataclasses, SQLAlchemy rows, paths, and collections to
-  plain values. `--json` and human output represent the same result.
+- Focused executors normalize service returns into declared transport-neutral
+  command result contracts for status text, tables, Markdown, file artifacts,
+  warnings, errors, and structured compatibility values. Presentation adapters
+  render those contracts without guessing result semantics; `--json` uses each
+  result's strict-JSON representation.
 - Provider adapters implement generation only. They cannot discover modules,
   execute tools, or select themselves because a credential exists.
 - Repositories are small SQLAlchemy session boundaries. They do not perform
@@ -378,10 +381,12 @@ described in
 
 The REPL is a sibling adapter over the same executor and application services
 as the one-shot CLI. The transport-neutral DTO, port, artifact, operation,
-invocation, outcome, executor, and stable-error boundary is implemented under
-`application/`. The migration removed the earlier CLI/REPL dependency
-inversions while retaining one-shot grammar, JSON serialization, stable coded
-errors, consent authorization, and network-free `provider=none` behavior.
+invocation, declared result/event, outcome, executor, and stable-error boundary
+is implemented under `application/`. Long-running operations publish bounded,
+strict-JSON progress events through `ProgressPort`, with no UI dependency. The
+migration removed the earlier CLI/REPL dependency inversions while retaining
+one-shot grammar, JSON serialization, stable coded errors, consent
+authorization, and network-free `provider=none` behavior.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in

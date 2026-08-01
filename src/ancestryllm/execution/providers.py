@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.application.results import SuccessResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.execution.common import (
     boolean,
     key_values,
     number,
+    structured_result,
     text,
     text_values,
 )
@@ -46,8 +48,8 @@ class ProvidersExecutor:
         else:
             name = text(invocation, "name")
             self._context.provider_profiles.revoke_consent(name)
-            value = f"Revoked consent: {name}"
-        return CommandOutcome(value)
+            return CommandOutcome(SuccessResult(f"Revoked consent: {name}"))
+        return CommandOutcome(structured_result(value))
 
 
 __all__ = ["ProvidersExecutor"]

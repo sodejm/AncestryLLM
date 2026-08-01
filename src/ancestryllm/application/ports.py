@@ -9,10 +9,10 @@ from ancestryllm.application.dto import (
     DecisionResponse,
     IdentityResolutionRequest,
     IdentityResolutionResult,
-    ProgressUpdate,
     QualityResolutionRequest,
     QualityResolutionResult,
 )
+from ancestryllm.application.events import ProgressEvent
 
 
 @runtime_checkable
@@ -27,7 +27,7 @@ class CancellationPort(Protocol):
 class ProgressPort(Protocol):
     """Receive bounded structural progress without private operation inputs."""
 
-    def emit(self, update: ProgressUpdate) -> None:
+    def emit(self, event: ProgressEvent) -> None:
         """Publish one validated progress update."""
 
 
@@ -75,8 +75,8 @@ class DiscardProgress:
 
     __slots__ = ()
 
-    def emit(self, update: ProgressUpdate) -> None:
-        del update
+    def emit(self, event: ProgressEvent) -> None:
+        del event
 
 
 __all__ = [

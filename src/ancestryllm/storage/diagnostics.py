@@ -68,7 +68,7 @@ def _path_diagnostics(path: Path) -> list[StorageDiagnostic]:
             StorageDiagnostic(
                 "DATABASE_DIRECTORY_MISSING",
                 "warning",
-                f"Workspace directory does not exist yet: {parent}",
+                "The configured workspace directory does not exist yet.",
                 "Create the directory with owner-only permissions before first use.",
             )
         )
@@ -78,7 +78,7 @@ def _path_diagnostics(path: Path) -> list[StorageDiagnostic]:
             StorageDiagnostic(
                 "DATABASE_DIRECTORY_UNWRITABLE",
                 "error",
-                f"Workspace directory is not writable: {parent}",
+                "The configured workspace directory is not writable.",
                 "Choose a writable local directory owned by the current user.",
             )
         )

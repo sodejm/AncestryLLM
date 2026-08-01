@@ -13,7 +13,7 @@ import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Self, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Self, TypeAlias, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 CONTRACT_VERSION = "ancestryllm.application/0.3"
 MAX_BOUNDARY_JSON_BYTES = 1_048_576
@@ -22,6 +22,7 @@ MAX_TEXT_LENGTH = 65_536
 MAX_PROGRESS_TOTAL = 1_000_000_000
 
 Scalar = str | int | float | bool | None
+JSONValue: TypeAlias = Scalar | list["JSONValue"] | dict[str, "JSONValue"]
 _BoundaryT = TypeVar("_BoundaryT", bound="BoundaryDTO")
 
 
@@ -29,6 +30,11 @@ class BoundaryDTO:
     """Marker and deterministic JSON codec for transport-neutral DTOs."""
 
     __slots__ = ()
+
+    def to_serializable(self) -> JSONValue:
+        """Return the strict-JSON value represented by this boundary object."""
+
+        return cast(JSONValue, _encode(self))
 
     def to_json(self) -> str:
         """Serialize with stable ordering and strict JSON scalar behavior."""
@@ -568,6 +574,7 @@ __all__ = [
     "IdentityCandidate",
     "IdentityResolutionRequest",
     "IdentityResolutionResult",
+    "JSONValue",
     "NamedValue",
     "ProgressUpdate",
     "ProviderSelection",

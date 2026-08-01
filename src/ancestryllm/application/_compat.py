@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ancestryllm.application.dto import ProgressUpdate
+from ancestryllm.application.events import ProgressEvent
 from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 
@@ -51,7 +51,7 @@ class _CurrentProgressAdapter:
     def __init__(self, reporter: _LegacyReporter) -> None:
         self._reporter = reporter
 
-    def emit(self, update: ProgressUpdate) -> None:
+    def emit(self, update: ProgressEvent) -> None:
         self._reporter.update(
             f"{update.operation}.{update.stage}",
             completed=update.completed,

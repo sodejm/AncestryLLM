@@ -5,7 +5,7 @@ from __future__ import annotations
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.core.context import AppContext
 from ancestryllm.domain.models import LivingStatus
-from ancestryllm.execution.common import text
+from ancestryllm.execution.common import structured_result, text
 
 
 class PeopleExecutor:
@@ -23,7 +23,7 @@ class PeopleExecutor:
                 text(invocation, "notes"),
                 text(invocation, "workspace"),
             )
-        return CommandOutcome(value)
+        return CommandOutcome(structured_result(value))
 
 
 __all__ = ["PeopleExecutor"]

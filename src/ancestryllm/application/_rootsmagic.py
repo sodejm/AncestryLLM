@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ancestryllm.application.dto import ProgressUpdate
+from ancestryllm.application.events import ProgressEvent
 from ancestryllm.application.operations import (
     QueryExecutionRecord,
     QueryRow,
@@ -114,7 +114,7 @@ class RootsMagicQueryService:
 
         self._cancellation.check_cancelled()
         self._validate_request(request)
-        self._progress.emit(ProgressUpdate("rootsmagic.query", "start", 0))
+        self._progress.emit(ProgressEvent("rootsmagic.query", "start", 0))
 
         if request.sql is not None:
             result = self.query_sql(request.tree_ref, request.sql)
@@ -160,7 +160,7 @@ class RootsMagicQueryService:
             mode_code=mode_code,
             provider_id=provider_id,
         )
-        self._progress.emit(ProgressUpdate("rootsmagic.query", "complete", completion_sequence))
+        self._progress.emit(ProgressEvent("rootsmagic.query", "complete", completion_sequence))
         return boundary
 
     @staticmethod
@@ -262,7 +262,7 @@ class RootsMagicQueryService:
                     "The provider did not return one SQL query in the required response shape.",
                 )
             if emit_provider_progress:
-                self._progress.emit(ProgressUpdate("rootsmagic.query", "provider_complete", 1))
+                self._progress.emit(ProgressEvent("rootsmagic.query", "provider_complete", 1))
             self._cancellation.check_cancelled()
             return self.reader.query(
                 path,

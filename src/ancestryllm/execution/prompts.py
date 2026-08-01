@@ -11,6 +11,7 @@ from ancestryllm.execution.common import (
     optional_integer,
     optional_path,
     optional_text,
+    structured_result,
     text,
     text_values,
 )
@@ -24,7 +25,7 @@ class PromptsExecutor:
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
         action = invocation.key.action
         if action == "list":
-            return CommandOutcome(self._context.prompts.list())
+            return CommandOutcome(structured_result(self._context.prompts.list()))
         if action == "save":
             body = optional_text(invocation, "body")
             if body is None:
@@ -49,27 +50,33 @@ class PromptsExecutor:
             if schema is not None:
                 assert isinstance(schema, dict)
             return CommandOutcome(
-                self._context.prompts.save(
-                    text(invocation, "name"),
-                    text(invocation, "purpose"),
-                    body,
-                    list(text_values(invocation, "variable")),
-                    schema,
-                    list(text_values(invocation, "tag")),
+                structured_result(
+                    self._context.prompts.save(
+                        text(invocation, "name"),
+                        text(invocation, "purpose"),
+                        body,
+                        list(text_values(invocation, "variable")),
+                        schema,
+                        list(text_values(invocation, "tag")),
+                    )
                 )
             )
         if action == "show":
             return CommandOutcome(
-                self._context.prompts.get(
-                    text(invocation, "name"),
-                    optional_integer(invocation, "version"),
+                structured_result(
+                    self._context.prompts.get(
+                        text(invocation, "name"),
+                        optional_integer(invocation, "version"),
+                    )
                 )
             )
         return CommandOutcome(
-            self._context.prompts.render(
-                text(invocation, "name"),
-                key_values(text_values(invocation, "value")),
-                optional_integer(invocation, "version"),
+            structured_result(
+                self._context.prompts.render(
+                    text(invocation, "name"),
+                    key_values(text_values(invocation, "value")),
+                    optional_integer(invocation, "version"),
+                )
             )
         )
 

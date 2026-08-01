@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import builtins
+import json
 import sys
 import threading
 from pathlib import Path
@@ -136,12 +137,18 @@ def test_cancelled_backup_removes_unpublished_staging_file(
 
 
 def test_storage_diagnostics_are_read_only_and_serializable(tmp_path: Path) -> None:
-    path = tmp_path / "workspace.db"
+    private_parent = tmp_path / "PRIVATE-HOST-DIAGNOSTIC-PATH"
+    path = private_parent / "workspace.db"
 
     diagnostics = diagnose_storage(path, MemorySecretStore({}))
 
     assert path.exists() is False
     assert {item["code"] for item in diagnostics} >= {"SQLCIPHER_READY", "KEYRING_READY"}
+    assert "DATABASE_DIRECTORY_MISSING" in {item["code"] for item in diagnostics}
+    assert all(item["code"] and item["message"] for item in diagnostics)
+    serialized = json.dumps(diagnostics)
+    assert str(private_parent) not in serialized
+    assert "PRIVATE-HOST-DIAGNOSTIC-PATH" not in serialized
 
 
 def test_storage_diagnostics_report_keyring_failures_without_secret_values(tmp_path: Path) -> None:

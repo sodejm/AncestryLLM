@@ -10,8 +10,8 @@ from ancestryllm.application.dto import (
     DecisionKind,
     DecisionOption,
     DecisionRequest,
-    ProgressUpdate,
 )
+from ancestryllm.application.events import ProgressEvent
 from ancestryllm.application.ports import (
     CancellationPort,
     DecisionPort,
@@ -135,7 +135,7 @@ class _ApplicationEventStage:
         item_count = event.item_count if event.phase is SyncEventPhase.COMPLETED else None
         try:
             self._port.emit(
-                ProgressUpdate(
+                ProgressEvent(
                     operation="GEDCOM_SYNC",
                     stage=event.code,
                     sequence=event.sequence,

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from ancestryllm.application._secrets import SecretGrantRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
+from ancestryllm.application.results import SuccessResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.execution.common import optional_text, text
+from ancestryllm.execution.common import optional_text, structured_result, text
 
 _DEFAULT_NAMES = (
     "openai.api_key",
@@ -35,14 +36,16 @@ class SecretsExecutor:
                 )
             value = self._grants.consume(invocation.secret_grant, name)
             self._context.secrets.set(name, value)
-            return CommandOutcome(f"Stored secret reference: {name}")
+            return CommandOutcome(SuccessResult(f"Stored secret reference: {name}"))
         if action == "delete":
             name = text(invocation, "name")
             self._context.secrets.delete(name)
-            return CommandOutcome(f"Deleted secret reference: {name}")
+            return CommandOutcome(SuccessResult(f"Deleted secret reference: {name}"))
         requested = optional_text(invocation, "name")
         names = (requested,) if requested is not None else _DEFAULT_NAMES
-        return CommandOutcome({name: self._context.secrets.present(name) for name in names})
+        return CommandOutcome(
+            structured_result({name: self._context.secrets.present(name) for name in names})
+        )
 
 
 __all__ = ["SecretsExecutor"]

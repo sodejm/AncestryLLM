@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -25,6 +26,10 @@ from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
 
 
+def _expected_tree_ref(tree: Path) -> str:
+    return f"tree_{hashlib.sha256(os.fsencode(str(tree.resolve(strict=True)))).hexdigest()}"
+
+
 @dataclass(frozen=True, slots=True)
 class CommandCase:
     module: str
@@ -35,6 +40,12 @@ class CommandCase:
     @property
     def tokens(self) -> list[str]:
         return [self.module, self.action, *self.arguments]
+
+
+@dataclass(frozen=True, slots=True)
+class OpaqueArtifactExpectation:
+    artifacts: tuple[tuple[str, str], ...]
+    file_result: bool = False
 
 
 @pytest.fixture
@@ -48,9 +59,12 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
     ocr.write_text("Ada Example was born in Fiction County.", encoding="utf-8")
     schema = tmp_path / "fictional-schema.json"
     schema.write_text('{"type": "object"}', encoding="utf-8")
+    rootsmagic = tmp_path / "fictional-tree.rmtree"
+    rootsmagic.write_bytes(b"fictional RootsMagic database")
     return {
         "gedcom": gedcom,
         "ocr": ocr,
+        "rootsmagic": rootsmagic,
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
@@ -67,7 +81,18 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
     schema = str(fictional_files["schema"])
     backup = str(fictional_files["backup"])
     return (
-        CommandCase("rootsmagic", "list", (), {"module": "rootsmagic", "action": "list"}),
+        CommandCase(
+            "rootsmagic",
+            "list",
+            (),
+            [
+                {
+                    "tree_ref": _expected_tree_ref(fictional_files["rootsmagic"]),
+                    "label": fictional_files["rootsmagic"].stem,
+                    "immutable": True,
+                }
+            ],
+        ),
         CommandCase(
             "rootsmagic",
             "query",
@@ -87,25 +112,43 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
                 "--living",
                 "redact",
             ),
-            {"module": "rootsmagic", "action": "export"},
+            OpaqueArtifactExpectation(
+                (
+                    ("gedcom_export", "text/vnd.familysearch.gedcom"),
+                    ("export_report", "text/markdown"),
+                ),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
             "merge",
             (gedcom, "--output", output, "--quality-report", report),
-            {"module": "gedcom", "action": "merge"},
+            OpaqueArtifactExpectation(
+                (
+                    ("gedcom_merge", "text/vnd.familysearch.gedcom"),
+                    ("quality_report", "text/markdown"),
+                ),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
             "subtree",
             (gedcom, "--output", output, "--root-person", "Ada Example"),
-            {"module": "gedcom", "action": "subtree"},
+            OpaqueArtifactExpectation(
+                (("gedcom_subtree", "text/vnd.familysearch.gedcom"),),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
             "quality",
             (gedcom, "--output", report, "--root-person", "Ada Example"),
-            {"module": "gedcom", "action": "quality"},
+            OpaqueArtifactExpectation(
+                (("quality_report", "text/markdown"),),
+                file_result=True,
+            ),
         ),
         CommandCase(
             "gedcom",
@@ -227,7 +270,15 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
         ),
         CommandCase("modules", "disable", ("ocr",), "Disabled module: ocr"),
         CommandCase("modules", "enable", ("ocr",), "Enabled module: ocr"),
-        CommandCase("database", "backup", (backup,), f"Encrypted backup created: {backup}"),
+        CommandCase(
+            "database",
+            "backup",
+            (backup,),
+            OpaqueArtifactExpectation(
+                (("encrypted_database_backup", "application/octet-stream"),),
+                file_result=True,
+            ),
+        ),
         CommandCase(
             "database",
             "diagnose",
@@ -238,39 +289,70 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
 
 
 @pytest.fixture
-def mocked_action_services(app_context: AppContext, monkeypatch: pytest.MonkeyPatch) -> None:
+def mocked_action_services(
+    app_context: AppContext,
+    fictional_files: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from ancestryllm.gedcom.service import GedcomService
     from ancestryllm.ocr.service import OcrService
     from ancestryllm.rootsmagic.service import RootsMagicService
 
     monkeypatch.setattr(
-        RootsMagicService, "list_trees", lambda _self: {"module": "rootsmagic", "action": "list"}
+        RootsMagicService, "list_trees", lambda _self: [fictional_files["rootsmagic"]]
     )
     monkeypatch.setattr(
         RootsMagicService,
         "query_sql",
         lambda _self, *_args, **_kwargs: {"module": "rootsmagic", "action": "query"},
     )
-    monkeypatch.setattr(
-        RootsMagicService,
-        "export",
-        lambda _self, *_args, **_kwargs: {"module": "rootsmagic", "action": "export"},
-    )
-    monkeypatch.setattr(
-        GedcomService,
-        "merge",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "merge"},
-    )
-    monkeypatch.setattr(
-        GedcomService,
-        "subtree",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "subtree"},
-    )
-    monkeypatch.setattr(
-        GedcomService,
-        "quality",
-        lambda _self, *_args, **_kwargs: {"module": "gedcom", "action": "quality"},
-    )
+
+    def export_rootsmagic(
+        _self: RootsMagicService,
+        _tree: str,
+        output: Path,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        report = kwargs["report_path"] or output.resolve().with_suffix(".export.md")
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        report.write_text("# Fictional export report\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output, report_path=report)
+
+    monkeypatch.setattr(RootsMagicService, "export", export_rootsmagic)
+
+    def merge_gedcom(
+        _self: GedcomService,
+        _inputs: list[Path],
+        output: Path,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        quality_report = kwargs["quality_path"]
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        if quality_report is not None:
+            quality_report.write_text("# Fictional quality report\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output, quality_path=quality_report)
+
+    def subtree_gedcom(
+        _self: GedcomService,
+        _source: Path,
+        output: Path,
+        **_kwargs: Any,
+    ) -> SimpleNamespace:
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        return SimpleNamespace(output_path=output)
+
+    def quality_gedcom(
+        _self: GedcomService,
+        _source: Path,
+        output: Path,
+        **_kwargs: Any,
+    ) -> Path:
+        output.write_text("# Fictional quality report\n", encoding="utf-8")
+        return output
+
+    monkeypatch.setattr(GedcomService, "merge", merge_gedcom)
+    monkeypatch.setattr(GedcomService, "subtree", subtree_gedcom)
+    monkeypatch.setattr(GedcomService, "quality", quality_gedcom)
     monkeypatch.setattr(
         GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
     )
@@ -315,6 +397,55 @@ def _expected_value(case: CommandCase, context: AppContext) -> Any:
     return case.expected(context) if callable(case.expected) else case.expected
 
 
+def _assert_artifact_ref(
+    value: Any,
+    *,
+    artifact_type: str,
+    media_type: str,
+) -> None:
+    assert isinstance(value, dict)
+    assert set(value) == {
+        "artifact_id",
+        "media_type",
+        "artifact_type",
+        "size_bytes",
+        "status",
+        "sha256",
+    }
+    assert value["artifact_id"].startswith("art_")
+    assert len(value["artifact_id"]) == 68
+    assert value["artifact_type"] == artifact_type
+    assert value["media_type"] == media_type
+    assert isinstance(value["size_bytes"], int)
+    assert value["size_bytes"] > 0
+    assert value["status"] == "ready"
+    assert isinstance(value["sha256"], str)
+    assert len(value["sha256"]) == 64
+    assert all(character in "0123456789abcdef" for character in value["sha256"])
+
+
+def _assert_expected(actual: Any, expected: Any) -> None:
+    if not isinstance(expected, OpaqueArtifactExpectation):
+        assert actual == to_plain(expected)
+        return
+    if expected.file_result:
+        assert isinstance(actual, dict)
+        if set(actual) == {"artifact", "related_artifacts"}:
+            artifacts = [actual["artifact"], *actual["related_artifacts"]]
+        else:
+            artifacts = [actual]
+    else:
+        assert isinstance(actual, list)
+        artifacts = actual
+    assert len(artifacts) == len(expected.artifacts)
+    for artifact, (artifact_type, media_type) in zip(artifacts, expected.artifacts, strict=True):
+        _assert_artifact_ref(
+            artifact,
+            artifact_type=artifact_type,
+            media_type=media_type,
+        )
+
+
 def test_action_matrix_covers_every_shipped_module_action(
     command_cases: tuple[CommandCase, ...],
 ) -> None:
@@ -349,8 +480,8 @@ def test_one_shot_returns_expected_dtos_for_every_action(
 
     assert main(["--json", *case.tokens], app_context) == 0
 
-    expected = [to_plain(_expected_value(case, app_context))]
-    assert rendered == expected
+    assert len(rendered) == 1
+    _assert_expected(rendered[0], _expected_value(case, app_context))
     assert secret_value not in json.dumps(rendered, ensure_ascii=False)
 
 
@@ -368,7 +499,7 @@ def test_every_action_serializes_json_and_repl_routes_direct_and_module_context(
     for case in command_cases:
         assert main(["--json", *case.tokens], app_context) == 0
         stdout, stderr = capsys.readouterr()
-        assert json.loads(stdout) == to_plain(_expected_value(case, app_context))
+        _assert_expected(json.loads(stdout), _expected_value(case, app_context))
         assert stderr == ""
         router = SessionRouter(app_context)
         direct = router.route_tokens(tuple(case.tokens))
@@ -783,6 +914,41 @@ def test_secret_values_never_reach_one_shot_status_output(
 def test_database_diagnostics_are_available_as_json(app_context: AppContext, capsys) -> None:
     assert main(["--json", "database", "diagnose"], app_context) == 0
     assert '"code": "SQLCIPHER_READY"' in capsys.readouterr().out
+
+
+def test_database_json_results_hide_host_paths(
+    app_context: AppContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_parent = tmp_path / "PRIVATE-HOST-DATABASE-PATH"
+    private_parent.mkdir()
+    backup_path = private_parent / "encrypted-backup.db"
+
+    def backup(_self: object, destination: Path) -> None:
+        destination.write_bytes(b"fictional encrypted backup")
+
+    monkeypatch.setattr(type(app_context.database), "backup", backup)
+
+    assert main(["--json", "database", "backup", str(backup_path)], app_context) == 0
+    backup_output = capsys.readouterr().out
+    backup_result = json.loads(backup_output)
+    _assert_artifact_ref(
+        backup_result,
+        artifact_type="encrypted_database_backup",
+        media_type="application/octet-stream",
+    )
+    assert str(private_parent) not in backup_output
+    assert "PRIVATE-HOST-DATABASE-PATH" not in backup_output
+
+    app_context.database.path = private_parent / "missing" / "workspace.db"
+    assert main(["--json", "database", "diagnose"], app_context) == 0
+    diagnostic_output = capsys.readouterr().out
+    diagnostic_result = json.loads(diagnostic_output)
+    assert "DATABASE_DIRECTORY_MISSING" in {item["code"] for item in diagnostic_result}
+    assert str(private_parent) not in diagnostic_output
+    assert "PRIVATE-HOST-DATABASE-PATH" not in diagnostic_output
 
 
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:

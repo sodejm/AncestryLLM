@@ -3,23 +3,22 @@
 from __future__ import annotations
 
 import argparse
-import sys
-from typing import Any, Callable
+from typing import Callable
 
 from ancestryllm.application._secrets import SecretGrantRegistry
 from ancestryllm.application.executor import CommandOutcome
+from ancestryllm.application.results import CommandResult
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.runtime import create_command_executor
 from ancestryllm.terminal.parser import invocation_from_namespace
 from ancestryllm.terminal.presentation import PresentationAdapter
 
-Emit = Callable[[Any, bool], None]
-WritePlain = Callable[[str], object]
+Emit = Callable[[CommandResult, bool], None]
 
 
-def _emit(value: Any, json_output: bool = False) -> None:
-    PresentationAdapter().render(value, json_output=json_output)
+def _emit(result: CommandResult, json_output: bool = False) -> None:
+    PresentationAdapter().render(result, json_output=json_output)
 
 
 def dispatch(
@@ -28,7 +27,6 @@ def dispatch(
     *,
     emit: Emit = _emit,
     secret_value: str | None = None,
-    write_plain: WritePlain | None = None,
 ) -> int:
     """Translate terminal state once and execute it through the shared registry."""
 
@@ -52,10 +50,7 @@ def dispatch(
             secret_grant=secret_grant,
         )
         outcome: CommandOutcome = create_command_executor(context, grants).execute(invocation)
-        if outcome.plain_text is not None:
-            (write_plain or sys.stdout.write)(outcome.plain_text)
-        else:
-            emit(outcome.value, invocation.json_output)
+        emit(outcome.result, invocation.json_output)
         return outcome.exit_code
     finally:
         grants.revoke_all()
