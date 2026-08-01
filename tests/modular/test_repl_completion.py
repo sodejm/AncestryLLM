@@ -68,6 +68,17 @@ def test_root_and_active_module_contexts_are_distinct_and_disabled_modules_hidde
     assert _values(completer, "run s") == ["subtree", "sync"]
 
 
+def test_help_completion_guides_available_modules_and_nested_actions(
+    app_context: AppContext, tmp_path: Path
+) -> None:
+    app_context.config.enabled_modules = {"gedcom"}
+    _router, completer = _completion(app_context, tmp_path)
+
+    assert "gedcom" in _values(completer, "help ")
+    assert _values(completer, "help gedcom ") == ["merge", "quality", "subtree", "sync"]
+    assert _values(completer, "help gedcom m") == ["merge"]
+
+
 def test_job_control_completion_includes_cooperative_cancellation(
     app_context: AppContext, tmp_path: Path
 ) -> None:

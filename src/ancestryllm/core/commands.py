@@ -86,6 +86,7 @@ class ArgumentSpec:
     metavar: str | None = None
     sensitive: bool = False
     completion: CompletionKind = CompletionKind.NONE
+    example: str | None = None
 
     @property
     def positional(self) -> bool:
@@ -444,6 +445,7 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                         cardinality=ArgumentCardinality.ONE_OR_MORE,
                         sensitive=True,
                         completion=CompletionKind.FILE,
+                        example="input.ged",
                     ),
                     ArgumentSpec(
                         "output",
@@ -453,6 +455,7 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                         required=True,
                         sensitive=True,
                         completion=CompletionKind.FILE,
+                        example="output.ged",
                     ),
                     ArgumentSpec(
                         "root_person",

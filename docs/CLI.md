@@ -26,7 +26,7 @@ console keeps running and renders a safe REPL usage error.
 | `providers` | `list`, `create`, `consent`, `revoke` | Configure explicitly selected local/cloud profiles and cloud consent. |
 | `secrets` | `set`, `delete`, `status` | Manage OS-keyring secret references. |
 | `ocr` | `extract` | Extract structured data from an input text file through an approved provider. |
-| `database` | `backup DESTINATION` | Create an encrypted workspace backup. |
+| `database` | `backup DESTINATION`, `diagnose` | Create a backup or run read-only setup checks. |
 
 `modules` only enables or disables built-in modules. It never discovers or
 loads third-party code. Disabling a module prevents its actions from running in
@@ -34,6 +34,10 @@ both one-shot and console use; re-enable it explicitly before use. The first
 command using the research workspace creates
 an encrypted SQLCipher database; its random key is stored only in the OS
 credential store.
+
+Run `database diagnose` for privacy-safe, read-only SQLCipher and credential-store
+checks. The [setup diagnostics](SETUP_DIAGNOSTICS.md) guide explains its stable
+JSON output and remediation routes.
 
 ## Exit codes
 

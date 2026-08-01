@@ -20,6 +20,12 @@ def _error_code(callable_object, *args: object) -> str:
     return raised.value.code
 
 
+def _raised_error(callable_object, *args: object) -> AncestryError:
+    with pytest.raises(AncestryError) as raised:
+        callable_object(*args)
+    return raised.value
+
+
 def test_parser_preserves_quotes_escapes_name_values_repeated_flags_and_booleans() -> None:
     command = (
         'prompts render "fictional timeline" '
@@ -215,7 +221,62 @@ def test_router_direct_module_commands_and_parser_failures_use_shared_contract(
     assert result.invocation.namespace == build_parser().parse_args(list(result.invocation.tokens))
     assert _error_code(router.route, "gedcom fictional-action") == "REPL_USAGE_ERROR"
     assert _error_code(router.route, "exit now") == "REPL_USAGE_ERROR"
-    assert _error_code(router.route, "help gedcom extra") == "REPL_USAGE_ERROR"
+
+
+def test_repl_help_is_self_guiding_and_uses_nested_command_specs(
+    app_context: AppContext,
+) -> None:
+    router = SessionRouter(app_context)
+
+    root_help = router.route("help").value
+    assert "Run `ancestry` with no arguments to start the interactive console." in root_help
+    assert "help MODULE ACTION" in root_help
+    assert "database diagnose" in root_help
+
+    module_help = router.route("help gedcom").value
+    assert "GEDCOM operations" in module_help
+    assert "merge, subtree, quality, sync" in module_help
+    assert "help gedcom ACTION" in module_help
+
+    action_help = router.route("help gedcom merge").value
+    assert "Usage: gedcom merge INPUTS... --output OUTPUT" in action_help
+    assert "Required: INPUTS..., --output OUTPUT" in action_help
+    assert "--gedcom-version=5.5.5" in action_help
+    assert "--provider=none" in action_help
+    assert "--gedcom-version: 5.5.5, 5.5.1" in action_help
+    assert "Example: gedcom merge input.ged --output output.ged" in action_help
+
+    remainder_help = router.route("help gedcom sync").value
+    assert "Usage: gedcom sync SYNC_COMMAND" in remainder_help
+    assert "Required: SYNC_COMMAND" in remainder_help
+    assert "SYNC_ARGS" not in remainder_help
+    assert "Example: gedcom sync update" in remainder_help
+    assert build_parser().parse_args(["gedcom", "sync", "update"]).sync_args == []
+
+    exclusive_help = router.route("help rootsmagic query").value
+    assert "(--sql SQL | --question QUESTION)" in exclusive_help
+    assert "one of --sql SQL or --question QUESTION" in exclusive_help
+
+
+def test_repl_usage_help_route_is_specific_and_does_not_echo_values() -> None:
+    error = _raised_error(
+        parse_repl_invocation,
+        (
+            "gedcom",
+            "merge",
+            "private-input.ged",
+            "--output",
+            "private-output.ged",
+            "--unexpected",
+            "private-secret-value",
+        ),
+    )
+
+    assert error.code == "REPL_USAGE_ERROR"
+    assert error.remediation == "Run `help gedcom merge` for syntax and options."
+    assert "private-input.ged" not in error.render()
+    assert "private-output.ged" not in error.render()
+    assert "private-secret-value" not in error.render()
 
 
 def test_router_help_documents_live_job_progress(app_context: AppContext) -> None:
