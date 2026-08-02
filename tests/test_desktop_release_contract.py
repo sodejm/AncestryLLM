@@ -74,6 +74,37 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "verification keyring unexpectedly contains a private key" in workflow
 
 
+def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    signing_start = workflow.index("      - name: Sign Ubuntu installer\n")
+    verification_start = workflow.index(
+        "      - name: Verify, install, and exercise signed Ubuntu application\n"
+    )
+    cleanup_start = workflow.index(
+        "      - name: Remove temporary Ubuntu signing and installation state\n"
+    )
+    signing_step = workflow[signing_start:verification_start]
+    verification_step = workflow[verification_start:cleanup_start]
+
+    assert "LINUX_GPG_PRIVATE_KEY_BASE64" in signing_step
+    assert "LINUX_GPG_PASSPHRASE" in signing_step
+    assert "gpg --detach-sign" in signing_step
+    assert "trap cleanup_signing_material EXIT" in signing_step
+    assert 'gpgconf --homedir "$signing_home" --kill all' in signing_step
+    assert "pnpm" not in signing_step
+    assert "xvfb-run" not in signing_step
+    assert "sudo dpkg" not in signing_step
+
+    assert "LINUX_GPG_PRIVATE_KEY_BASE64" not in verification_step
+    assert "LINUX_GPG_PASSPHRASE" not in verification_step
+    assert "ancestryllm-release-key.asc" not in verification_step
+    assert "ancestryllm-signing-gnupg" not in verification_step
+    assert "--status-fd 1 --verify" in verification_step
+    assert "sudo dpkg -i" in verification_step
+    assert "xvfb-run --auto-servernum pnpm" in verification_step
+
+
 def test_release_workflow_separates_pretag_installer_gates_from_tag_publication() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

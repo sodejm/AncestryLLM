@@ -12,21 +12,28 @@ set -euo pipefail
 set +x
 umask 077
 
+readonly GITHUB_HOST='github.com'
+readonly APPROVED_GITHUB_ACCOUNT='sodejm'
 readonly REPOSITORY='sodejm/AncestryLLM'
 readonly SIGNING_ENVIRONMENT='desktop-signing'
+readonly MINIMAL_COMMAND_PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+readonly UPLOAD_CONFIRMATION="UPLOAD $GITHUB_HOST/$REPOSITORY $SIGNING_ENVIRONMENT AS $APPROVED_GITHUB_ACCOUNT"
 
 MODE='dry-run'
 APPLE_CERTIFICATE_MODE='keychain'
 APPLE_CERTIFICATE_SOURCE_ARGUMENT=''
+GH_EXECUTABLE_ARGUMENT=''
+GH_EXECUTABLE=''
 TEMP_DIRECTORY=''
 REPOSITORY_ROOT=''
 APPLE_IDENTITY_EXPORTER=''
+CREDENTIAL_SNAPSHOT_HELPER=''
 
 usage() {
   printf '%s\n' \
     'Usage:' \
     '  scripts/ancestryll-runner-secrets-helper.sh [--dry-run|--upload]' \
-    '    [--apple-certificate-file PATH]' \
+    '    [--apple-certificate-file PATH] [--gh-executable ABSOLUTE_PATH]' \
     '' \
     'Apple certificate source:' \
     '  By default, discover exactly one valid Developer ID Application identity' \
@@ -35,6 +42,9 @@ usage() {
     '  --apple-certificate-file PATH' \
     '             Use an existing PKCS#12 file instead. Its password and Team ID' \
     '             are collected interactively.' \
+    '  --gh-executable ABSOLUTE_PATH' \
+    '             Use this reviewed, canonical GitHub CLI executable. The path' \
+    '             itself must not be a symbolic link.' \
     '' \
     'Modes:' \
     '  --dry-run  Validate tools, authentication, inputs, and generated data.' \
@@ -93,6 +103,11 @@ while [ "$#" -gt 0 ]; do
       APPLE_CERTIFICATE_MODE='file'
       APPLE_CERTIFICATE_SOURCE_ARGUMENT=$1
       ;;
+    --gh-executable)
+      shift
+      [ "$#" -gt 0 ] || fail '--gh-executable requires an absolute path'
+      GH_EXECUTABLE_ARGUMENT=$1
+      ;;
     --help|-h)
       usage
       exit 0
@@ -105,33 +120,128 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+case "${GH_HOST-}" in
+  ''|"$GITHUB_HOST") ;;
+  *) fail "GH_HOST must be unset or exactly $GITHUB_HOST" ;;
+esac
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command is missing: $1"
 }
 
-validate_credential_source_file() {
-  local description=$1
-  local supplied_path=$2
-  local canonical_path=''
+canonical_path() {
+  /usr/bin/python3 -c \
+    'import os, sys; print(os.path.realpath(sys.argv[1]))' \
+    "$1"
+}
 
-  [ -n "$supplied_path" ] || fail "$description requires a path"
-  [ -f "$supplied_path" ] || fail "Not a regular file: $supplied_path"
-  [ -r "$supplied_path" ] || fail "File is not readable: $supplied_path"
-  [ -s "$supplied_path" ] || fail "File is empty: $supplied_path"
+path_owner_and_mode() {
+  local inspected_path=$1
 
-  canonical_path=$(realpath "$supplied_path") \
-    || fail "Could not resolve source file path: $supplied_path"
-  case "$canonical_path" in
-    "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
-      fail 'Credential source files must be stored outside the repository'
+  case "$(/usr/bin/uname -s)" in
+    Darwin)
+      /usr/bin/stat -f '%u %Lp' -- "$inspected_path"
+      ;;
+    Linux)
+      /usr/bin/stat -c '%u %a' -- "$inspected_path"
+      ;;
+    *)
+      fail 'Trusted GitHub CLI validation supports only macOS and Linux'
       ;;
   esac
+}
 
-  REPLY=$canonical_path
+validate_trusted_gh_path() {
+  local inspected_path=$GH_EXECUTABLE
+  local current_uid=''
+  local metadata=''
+  local owner_uid=''
+  local permission_mode=''
+
+  current_uid=$(/usr/bin/id -u) \
+    || fail 'Could not determine the current user while validating GitHub CLI'
+
+  while :; do
+    metadata=$(path_owner_and_mode "$inspected_path") \
+      || fail "Could not inspect GitHub CLI path component: $inspected_path"
+    owner_uid=${metadata%% *}
+    permission_mode=${metadata#* }
+
+    if [ "$owner_uid" != '0' ] && [ "$owner_uid" != "$current_uid" ]; then
+      fail "GitHub CLI path has an untrusted owner: $inspected_path"
+    fi
+    if (( (8#$permission_mode & 8#022) != 0 )); then
+      fail "GitHub CLI path has untrusted permissions: $inspected_path"
+    fi
+
+    [ "$inspected_path" != '/' ] || break
+    inspected_path=$(/usr/bin/dirname -- "$inspected_path") \
+      || fail "Could not inspect GitHub CLI parent path: $inspected_path"
+  done
+}
+
+resolve_trusted_gh() {
+  local candidate=''
+  local canonical_candidate=''
+
+  if [ -n "$GH_EXECUTABLE_ARGUMENT" ]; then
+    case "$GH_EXECUTABLE_ARGUMENT" in
+      /*) ;;
+      *) fail '--gh-executable requires an absolute path' ;;
+    esac
+    [ ! -L "$GH_EXECUTABLE_ARGUMENT" ] \
+      || fail 'GitHub CLI executable must not be a symbolic link'
+    canonical_candidate=$(canonical_path "$GH_EXECUTABLE_ARGUMENT") \
+      || fail "Could not resolve GitHub CLI executable: $GH_EXECUTABLE_ARGUMENT"
+    [ "$canonical_candidate" = "$GH_EXECUTABLE_ARGUMENT" ] \
+      || fail 'GitHub CLI executable must be a canonical path without symbolic links'
+  else
+    for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
+      if [ -x "$candidate" ]; then
+        canonical_candidate=$(canonical_path "$candidate") \
+          || fail "Could not resolve GitHub CLI executable: $candidate"
+        break
+      fi
+    done
+    [ -n "$canonical_candidate" ] \
+      || fail 'GitHub CLI was not found in a trusted default location; supply --gh-executable with its reviewed canonical path'
+  fi
+
+  [ -f "$canonical_candidate" ] \
+    || fail "GitHub CLI executable is not a regular file: $canonical_candidate"
+  [ -x "$canonical_candidate" ] \
+    || fail "GitHub CLI executable is not executable: $canonical_candidate"
+
+  GH_EXECUTABLE=$canonical_candidate
+  validate_trusted_gh_path
+}
+
+run_gh() {
+  GH_HOST=$GITHUB_HOST PATH=$MINIMAL_COMMAND_PATH "$GH_EXECUTABLE" "$@"
+}
+
+snapshot_credential_source_file() {
+  local description=$1
+  local supplied_path=$2
+  local snapshot_name=$3
+  local snapshot_path="$TEMP_DIRECTORY/$snapshot_name"
+
+  [ -n "$supplied_path" ] || {
+    printf 'ERROR: %s requires a path\n' "$description" >&2
+    return 1
+  }
+  /usr/bin/python3 "$CREDENTIAL_SNAPSHOT_HELPER" \
+    --source "$supplied_path" \
+    --destination "$snapshot_path" \
+    --repository-root "$REPOSITORY_ROOT" \
+    || return 1
+
+  REPLY=$snapshot_path
 }
 
 prompt_readable_file() {
   local description=$1
+  local snapshot_name=$2
   local supplied_path=''
 
   while :; do
@@ -142,21 +252,12 @@ prompt_readable_file() {
       printf 'A path is required.\n' >&2
       continue
     fi
-    if [ ! -f "$supplied_path" ]; then
-      printf 'Not a regular file: %s\n' "$supplied_path" >&2
-      continue
+    if snapshot_credential_source_file \
+      "$description" "$supplied_path" "$snapshot_name"
+    then
+      return 0
     fi
-    if [ ! -r "$supplied_path" ]; then
-      printf 'File is not readable: %s\n' "$supplied_path" >&2
-      continue
-    fi
-    if [ ! -s "$supplied_path" ]; then
-      printf 'File is empty: %s\n' "$supplied_path" >&2
-      continue
-    fi
-
-    validate_credential_source_file "$description" "$supplied_path"
-    return 0
+    printf 'The credential source was rejected; try again.\n' >&2
   done
 }
 
@@ -274,14 +375,15 @@ encode_and_validate() {
 upload_secret_file() {
   local name=$1
   local path=$2
-  gh secret set "$name" -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT" < "$path"
+  run_gh secret set "$name" -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT" \
+    < "$path"
 }
 
 upload_secret_value() {
   local name=$1
   local value=$2
   printf '%s' "$value" \
-    | gh secret set "$name" -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT"
+    | run_gh secret set "$name" -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT"
 }
 
 verify_expected_names() {
@@ -289,9 +391,9 @@ verify_expected_names() {
   local variable_names=''
   local name=''
 
-  secret_names=$(gh secret list -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT" \
+  secret_names=$(run_gh secret list -R "$REPOSITORY" -e "$SIGNING_ENVIRONMENT" \
     | awk '{print $1}')
-  variable_names=$(gh variable list -R "$REPOSITORY" | awk '{print $1}')
+  variable_names=$(run_gh variable list -R "$REPOSITORY" | awk '{print $1}')
 
   for name in \
     APPLE_CERTIFICATE_BASE64 \
@@ -324,34 +426,54 @@ verify_public_variable_value() {
   local expected_value=$2
   local observed_value=''
 
-  observed_value=$(gh variable get "$name" -R "$REPOSITORY" \
+  observed_value=$(run_gh variable get "$name" -R "$REPOSITORY" \
     --json value --jq '.value') \
     || fail "Could not read repository variable for verification: $name"
   [ "$observed_value" = "$expected_value" ] \
     || fail "Repository variable did not match the uploaded value: $name"
 }
 
-require_command gh
 require_command awk
 require_command chmod
 require_command cmp
 require_command grep
 require_command mkdir
 require_command mktemp
-require_command realpath
 require_command rm
 require_command tr
 require_command uname
 require_command /usr/bin/base64
+require_command /usr/bin/python3
 
-REPOSITORY_ROOT=$(realpath "$(dirname "${BASH_SOURCE[0]}")/..") \
+resolve_trusted_gh
+
+REPOSITORY_ROOT=$(canonical_path \
+  "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/..") \
   || fail 'Could not resolve the repository root'
 APPLE_IDENTITY_EXPORTER="$REPOSITORY_ROOT/scripts/export-apple-signing-identity.swift"
+CREDENTIAL_SNAPSHOT_HELPER="$REPOSITORY_ROOT/scripts/snapshot_credential_file.py"
+[ -f "$CREDENTIAL_SNAPSHOT_HELPER" ] && [ ! -L "$CREDENTIAL_SNAPSHOT_HELPER" ] \
+  || fail 'The credential snapshot helper is missing or is a symbolic link'
 
-gh auth status >/dev/null 2>&1 \
+GH_VERSION=$(run_gh --version) \
+  || fail "Could not execute the trusted GitHub CLI: $GH_EXECUTABLE"
+GH_VERSION=$(printf '%s\n' "$GH_VERSION" | /usr/bin/awk 'NR == 1 { print; exit }')
+printf '%s\n' \
+  "GitHub CLI executable: $GH_EXECUTABLE" \
+  "GitHub CLI identity: $GH_VERSION"
+GH_VERSION=''
+
+run_gh auth status --hostname "$GITHUB_HOST" >/dev/null 2>&1 \
   || fail 'GitHub CLI is not authenticated. Use the approved authentication method, then retry.'
-gh repo view "$REPOSITORY" >/dev/null 2>&1 \
+ACTIVE_GITHUB_ACCOUNT=$(run_gh api --hostname "$GITHUB_HOST" user --jq '.login') \
+  || fail "Could not determine the authenticated account on $GITHUB_HOST."
+[ "$ACTIVE_GITHUB_ACCOUNT" = "$APPROVED_GITHUB_ACCOUNT" ] \
+  || fail "Authenticated GitHub account is $ACTIVE_GITHUB_ACCOUNT; expected $APPROVED_GITHUB_ACCOUNT"
+OBSERVED_REPOSITORY=$(run_gh repo view "$REPOSITORY" \
+  --json nameWithOwner --jq '.nameWithOwner') \
   || fail "Cannot access repository $REPOSITORY with the current GitHub CLI authorization."
+[ "$OBSERVED_REPOSITORY" = "$REPOSITORY" ] \
+  || fail "GitHub reported repository $OBSERVED_REPOSITORY; expected $REPOSITORY"
 
 if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
   require_command security
@@ -378,6 +500,8 @@ WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT=''
 LINUX_GPG_SIGNING_FINGERPRINT=''
 
 printf '%s\n' \
+  "GitHub host: $GITHUB_HOST" \
+  "Authenticated GitHub account: $ACTIVE_GITHUB_ACCOUNT" \
   "Destination repository: $REPOSITORY" \
   "Secret environment: $SIGNING_ENVIRONMENT" \
   "Mode: $MODE" \
@@ -397,25 +521,32 @@ else
   printf '%s\n' \
     'Apple certificate source: explicit PKCS#12 file' \
     ''
-  validate_credential_source_file \
-    'APPLE_CERTIFICATE_SOURCE_FILE' "$APPLE_CERTIFICATE_SOURCE_ARGUMENT"
+  snapshot_credential_source_file \
+    'APPLE_CERTIFICATE_SOURCE_FILE' \
+    "$APPLE_CERTIFICATE_SOURCE_ARGUMENT" \
+    'apple-certificate.snapshot' \
+    || fail 'APPLE_CERTIFICATE_SOURCE_FILE could not be snapshotted securely'
   APPLE_CERTIFICATE_SOURCE_FILE=$REPLY
 fi
 
 printf '%s\n' \
-  'Supply the remaining original, unencoded payload files. This helper creates' \
-  'temporary Base64 representations and validates them by decoding and' \
-  'byte-comparing. It does not create Apple notary API keys, Windows' \
-  'certificates, or GPG keys.' \
+  'Supply the remaining original, unencoded payload files. The helper opens' \
+  'each source once, immediately creates a private descriptor-bound snapshot,' \
+  'then uses only that snapshot for Base64 and byte-comparison validation.' \
+  'It does not create Apple notary API keys, Windows certificates, or GPG keys.' \
   ''
 
-prompt_readable_file 'Path to [APPLE_API_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [APPLE_API_KEY_SOURCE_FILE]' 'apple-api-key.snapshot'
 APPLE_API_KEY_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [WINDOWS_CERTIFICATE_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [WINDOWS_CERTIFICATE_SOURCE_FILE]' 'windows-certificate.snapshot'
 WINDOWS_CERTIFICATE_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [LINUX_GPG_PRIVATE_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [LINUX_GPG_PRIVATE_KEY_SOURCE_FILE]' 'linux-private.snapshot'
 LINUX_GPG_PRIVATE_KEY_SOURCE_FILE=$REPLY
-prompt_readable_file 'Path to [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]'
+prompt_readable_file \
+  'Path to [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]' 'linux-public.snapshot'
 LINUX_GPG_PUBLIC_KEY_SOURCE_FILE=$REPLY
 
 APPLE_CERTIFICATE_BASE64_FILE="$TEMP_DIRECTORY/apple-certificate.b64"
@@ -486,11 +617,11 @@ printf '%s\n' '' 'Validated without displaying values:'
 if [ "$APPLE_CERTIFICATE_MODE" = 'keychain' ]; then
   printf '%s\n' \
     '  1 selected Apple Developer ID Application keychain identity' \
-    '  4 remaining non-empty source payload files' \
+    '  4 descriptor-bound private source snapshots' \
     '  1 generated Apple PKCS#12 password and 4 twice-confirmed private values'
 else
   printf '%s\n' \
-    '  5 non-empty source payload files' \
+    '  5 descriptor-bound private source snapshots' \
     '  5 twice-confirmed private text values'
 fi
 printf '%s\n' \
@@ -512,9 +643,10 @@ printf '%s\n' \
   "The following operation will update 9 environment secrets in $SIGNING_ENVIRONMENT" \
   "and 4 repository variables in $REPOSITORY." \
   'Existing values with these names will be replaced.' \
-  'Type UPLOAD to continue:'
+  "Type $UPLOAD_CONFIRMATION to continue:"
 IFS= read -r confirmation || fail 'Input ended before confirmation'
-[ "$confirmation" = 'UPLOAD' ] || fail 'Upload cancelled; confirmation did not match UPLOAD'
+[ "$confirmation" = "$UPLOAD_CONFIRMATION" ] \
+  || fail "Upload cancelled; confirmation did not match $UPLOAD_CONFIRMATION"
 
 upload_secret_file APPLE_CERTIFICATE_BASE64 "$APPLE_CERTIFICATE_BASE64_FILE"
 upload_secret_value APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
@@ -526,12 +658,12 @@ upload_secret_value WINDOWS_CERTIFICATE_PASSWORD "$WINDOWS_CERTIFICATE_PASSWORD"
 upload_secret_file LINUX_GPG_PRIVATE_KEY_BASE64 "$LINUX_GPG_PRIVATE_KEY_BASE64_FILE"
 upload_secret_value LINUX_GPG_PASSPHRASE "$LINUX_GPG_PASSPHRASE"
 
-gh variable set APPLE_TEAM_ID -R "$REPOSITORY" --body "$APPLE_TEAM_ID"
-gh variable set WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT \
+run_gh variable set APPLE_TEAM_ID -R "$REPOSITORY" --body "$APPLE_TEAM_ID"
+run_gh variable set WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT \
   -R "$REPOSITORY" --body "$WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT"
-gh variable set LINUX_GPG_SIGNING_FINGERPRINT \
+run_gh variable set LINUX_GPG_SIGNING_FINGERPRINT \
   -R "$REPOSITORY" --body "$LINUX_GPG_SIGNING_FINGERPRINT"
-gh variable set LINUX_GPG_PUBLIC_KEY_BASE64 \
+run_gh variable set LINUX_GPG_PUBLIC_KEY_BASE64 \
   -R "$REPOSITORY" < "$LINUX_GPG_PUBLIC_KEY_BASE64_FILE"
 
 verify_expected_names

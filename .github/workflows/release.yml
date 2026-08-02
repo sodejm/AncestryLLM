@@ -536,7 +536,7 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-installed') -Recurse -Force -ErrorAction SilentlyContinue
-      - name: Sign, verify, install, and exercise Ubuntu application
+      - name: Sign Ubuntu installer
         if: runner.os == 'Linux'
         shell: bash
         env:
@@ -544,8 +544,6 @@ jobs:
           LINUX_GPG_PRIVATE_KEY_BASE64: ${{ secrets.LINUX_GPG_PRIVATE_KEY_BASE64 }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           LINUX_GPG_SIGNING_FINGERPRINT: ${{ vars.LINUX_GPG_SIGNING_FINGERPRINT }}
-          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
-          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
           test -n "$LINUX_GPG_PRIVATE_KEY_BASE64"
           test -n "$LINUX_GPG_PASSPHRASE"
@@ -559,28 +557,68 @@ jobs:
             *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
           esac
           signing_home="$RUNNER_TEMP/ancestryllm-signing-gnupg"
-          verification_home="$RUNNER_TEMP/ancestryllm-verification-gnupg"
-          install -d -m 700 "$signing_home" "$verification_home"
-          printf '%s' "$LINUX_GPG_PRIVATE_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/ancestryllm-release-key.asc"
-          GNUPGHOME="$signing_home" gpg --batch --import "$RUNNER_TEMP/ancestryllm-release-key.asc"
+          private_key="$RUNNER_TEMP/ancestryllm-release-key.asc"
+          public_key="$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          cleanup_signing_material() {
+            unset LINUX_GPG_PRIVATE_KEY_BASE64 LINUX_GPG_PASSPHRASE
+            gpgconf --homedir "$signing_home" --kill all 2>/dev/null || true
+            rm -rf "$signing_home"
+            rm -f "$private_key"
+          }
+          trap cleanup_signing_material EXIT
+          install -d -m 700 "$signing_home"
+          umask 077
+          printf '%s' "$LINUX_GPG_PRIVATE_KEY_BASE64" | base64 --decode > "$private_key"
+          GNUPGHOME="$signing_home" gpg --batch --import "$private_key"
           GNUPGHOME="$signing_home" gpg --batch --with-colons --fingerprint --list-secret-keys | \
             awk -F: '$1 == "fpr" { print toupper($10) }' | grep -Fxq "$expected_fingerprint"
           GNUPGHOME="$signing_home" gpg --batch --armor --export "$expected_fingerprint" \
-            > "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
-          test -s "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
-          GNUPGHOME="$verification_home" gpg --batch --import \
-            "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+            > "$public_key"
+          test -s "$public_key"
+          printf '%s' "$LINUX_GPG_PASSPHRASE" | GNUPGHOME="$signing_home" \
+            gpg --detach-sign --armor --batch --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --local-user "$expected_fingerprint!" "$INSTALLER"
+          unset LINUX_GPG_PRIVATE_KEY_BASE64 LINUX_GPG_PASSPHRASE
+      - name: Verify, install, and exercise signed Ubuntu application
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.installer.outputs.path }}
+          LINUX_GPG_SIGNING_FINGERPRINT: ${{ vars.LINUX_GPG_SIGNING_FINGERPRINT }}
+          ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
+          ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
+        run: |
+          test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
+          expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          case "$expected_fingerprint" in
+            *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
+          esac
+          case "${#expected_fingerprint}" in
+            40|64) ;;
+            *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
+          esac
+          verification_home="$RUNNER_TEMP/ancestryllm-verification-gnupg"
+          public_key="$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+          gpg_status="$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+          cleanup_verification_material() {
+            gpgconf --homedir "$verification_home" --kill all 2>/dev/null || true
+            rm -rf "$verification_home"
+            rm -f "$public_key" "$gpg_status"
+          }
+          trap cleanup_verification_material EXIT
+          install -d -m 700 "$verification_home"
+          test -s "$public_key"
+          GNUPGHOME="$verification_home" gpg --batch --import "$public_key"
           if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
             echo "verification keyring unexpectedly contains a private key" >&2
             exit 1
           fi
-          printf '%s' "$LINUX_GPG_PASSPHRASE" | GNUPGHOME="$signing_home" \
-            gpg --detach-sign --armor --batch --yes --pinentry-mode loopback \
-              --passphrase-fd 0 --local-user "$expected_fingerprint!" "$INSTALLER"
           GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
-            "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+            "$INSTALLER.asc" "$INSTALLER" | tee "$gpg_status"
           grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
-            "$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+            "$gpg_status"
+          cleanup_verification_material
+          trap - EXIT
           sudo dpkg -i "$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm

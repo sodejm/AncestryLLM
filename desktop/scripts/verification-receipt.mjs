@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { access, lstat, mkdir, readFile, readdir, readlink, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 
 const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
 const ARTIFACT_NAME = /^[A-Za-z][A-Za-z0-9]*$/
 
-export const RECEIPT_SCHEMA_VERSION = 1
+export const RECEIPT_SCHEMA_VERSION = 2
 export const TARGET_RECEIPT_GATES = Object.freeze([
   'packageRuntimePassed',
   'sidecarSmokePassed',
@@ -75,6 +76,27 @@ function validateCommand(value) {
   return value
 }
 
+function validateWorkspace(value) {
+  assert.deepEqual(
+    Object.keys(value ?? {}).sort(),
+    ['after', 'algorithm', 'allowedOutputs', 'before', 'status'],
+    'receipt workspace must use the exact schema',
+  )
+  assert.equal(value.algorithm, 'git-workspace-v1', 'unsupported receipt workspace algorithm')
+  assert.equal(value.status, 'unchanged', 'verification workspace changed')
+  assert.equal(Array.isArray(value.allowedOutputs), true, 'receipt workspace allowedOutputs must be an array')
+  assert.equal(
+    value.allowedOutputs.every((item) => typeof item === 'string' && item.length > 0),
+    true,
+    'receipt workspace allowedOutputs must contain non-empty paths',
+  )
+  assert.deepEqual(value.allowedOutputs, [...new Set(value.allowedOutputs)].sort(), 'receipt workspace allowedOutputs must be unique and sorted')
+  validateDigest(value.before, 'receipt workspace before', { nonempty: true })
+  validateDigest(value.after, 'receipt workspace after', { nonempty: true })
+  assert.deepEqual(value.after, value.before, 'verification workspace changed')
+  return value
+}
+
 export function validateVerificationReceipt(value, requestedHead) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
@@ -89,6 +111,7 @@ export function validateVerificationReceipt(value, requestedHead) {
       'result',
       'schemaVersion',
       'status',
+      'workspace',
     ].sort(),
     'verification receipt must use the exact schema',
   )
@@ -122,13 +145,14 @@ export function validateVerificationReceipt(value, requestedHead) {
     assert.match(name, ARTIFACT_NAME, 'receipt artifact has an invalid name')
     validateDigest(artifact, `receipt artifact ${name}`)
   }
+  validateWorkspace(value.workspace)
   return value
 }
 
-async function gitHead(repositoryRoot) {
+async function captureCommand(executable, args, repositoryRoot) {
   const chunks = []
-  await new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('git', ['rev-parse', 'HEAD'], {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(executable, args, {
       cwd: repositoryRoot,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -138,11 +162,131 @@ async function gitHead(repositoryRoot) {
     child.stderr.on('data', (chunk) => { stderr += chunk })
     child.once('error', rejectPromise)
     child.once('close', (code, signal) => {
-      if (code === 0 && signal === null) resolvePromise()
-      else rejectPromise(new Error(`git rev-parse HEAD failed (${signal ?? code}): ${stderr.trim()}`))
+      if (code === 0 && signal === null) resolvePromise(Buffer.concat(chunks))
+      else rejectPromise(new Error(`${executable} ${args.join(' ')} failed (${signal ?? code}): ${stderr.trim()}`))
     })
   })
-  return Buffer.concat(chunks).toString('utf8').trim()
+}
+
+async function gitOutput(repositoryRoot, args) {
+  return captureCommand('git', args, repositoryRoot)
+}
+
+async function gitHead(repositoryRoot) {
+  return (await gitOutput(repositoryRoot, ['rev-parse', 'HEAD'])).toString('utf8').trim()
+}
+
+function nullSeparatedPaths(bytes) {
+  const value = bytes.toString('utf8')
+  if (value.length === 0) return []
+  assert.equal(value.endsWith('\0'), true, 'git path output was not NUL terminated')
+  return value.slice(0, -1).split('\0')
+}
+
+function repositoryPath(repositoryRoot, path, label, { outside = 'reject' } = {}) {
+  const absolutePath = isAbsolute(path) ? resolve(path) : resolve(repositoryRoot, path)
+  const relativePath = relative(repositoryRoot, absolutePath)
+  const isOutside = relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)
+  if (isOutside && outside === 'ignore') return undefined
+  assert.equal(isOutside, false, `${label} must stay inside the repository`)
+  assert.notEqual(relativePath, '', `${label} must not allow the repository root`)
+  return relativePath.split(sep).join('/')
+}
+
+function pathIsAllowed(path, allowedOutputs) {
+  return allowedOutputs.some((allowed) => path === allowed || path.startsWith(`${allowed}/`))
+}
+
+function fileKind(stat) {
+  if (stat.isFile()) return 'file'
+  if (stat.isSymbolicLink()) return 'symlink'
+  if (stat.isDirectory()) return 'directory'
+  return 'other'
+}
+
+async function untrackedEntry(repositoryRoot, path) {
+  const absolutePath = resolve(repositoryRoot, ...path.split('/'))
+  const stat = await lstat(absolutePath)
+  const kind = fileKind(stat)
+  let bytes
+  if (kind === 'file') bytes = await readFile(absolutePath)
+  else if (kind === 'symlink') bytes = Buffer.from(await readlink(absolutePath), 'utf8')
+  else bytes = Buffer.from(`${kind}:${stat.size}`, 'utf8')
+  return Object.freeze({ path, kind, mode: stat.mode & 0o777, digest: digest(bytes) })
+}
+
+async function captureWorkspaceState(repositoryRoot, allowedOutputs) {
+  const headBefore = await gitHead(repositoryRoot)
+  const indexDiff = await gitOutput(repositoryRoot, ['diff', '--cached', '--no-ext-diff', '--binary', '--full-index', '--no-renames', 'HEAD', '--'])
+  const worktreeDiff = await gitOutput(repositoryRoot, ['diff', '--no-ext-diff', '--binary', '--full-index', '--no-renames', '--'])
+  const indexFlags = await gitOutput(repositoryRoot, ['ls-files', '-v', '-z'])
+  const untrackedBytes = await gitOutput(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
+  const untrackedPaths = nullSeparatedPaths(untrackedBytes)
+    .filter((path) => !pathIsAllowed(path, allowedOutputs))
+    .sort()
+  const untracked = []
+  for (const path of untrackedPaths) untracked.push(await untrackedEntry(repositoryRoot, path))
+  const headAfter = await gitHead(repositoryRoot)
+  return Object.freeze({
+    gitHead: headBefore,
+    headAfter,
+    indexDiff: digest(indexDiff),
+    worktreeDiff: digest(worktreeDiff),
+    indexFlags: digest(indexFlags),
+    untracked: Object.freeze(untracked),
+  })
+}
+
+export async function workspaceSnapshot(
+  repositoryRoot,
+  expectedHead,
+  allowedOutputs,
+  capture = captureWorkspaceState,
+) {
+  let manifest
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const first = await capture(repositoryRoot, allowedOutputs)
+    const second = await capture(repositoryRoot, allowedOutputs)
+    if (first.gitHead !== first.headAfter || second.gitHead !== second.headAfter) continue
+    if (!isDeepStrictEqual(first, second)) continue
+    manifest = second
+    break
+  }
+  assert.notEqual(manifest, undefined, 'verification workspace did not remain stable while it was inspected')
+  assert.equal(
+    exactHead(manifest.gitHead, 'workspace gitHead'),
+    expectedHead,
+    'verification workspace left the requested exact head',
+  )
+  const bytes = Buffer.from(JSON.stringify(manifest), 'utf8')
+  return Object.freeze({
+    digest: digest(bytes),
+    dirty: manifest.indexDiff.bytes > 0 || manifest.worktreeDiff.bytes > 0 || manifest.untracked.length > 0,
+  })
+}
+
+async function normalizedAllowedOutputs(repositoryRoot, allowedOutputs, artifacts, outputPath) {
+  assert.equal(Array.isArray(allowedOutputs), true, 'allowedOutputs must be an array')
+  assert.equal(allowedOutputs.every((path) => typeof path === 'string' && path.length > 0), true, 'allowedOutputs must contain non-empty paths')
+  const normalized = allowedOutputs.map((path) => repositoryPath(repositoryRoot, path, 'allowed output'))
+  for (const [name, path] of Object.entries(artifacts)) {
+    const artifact = repositoryPath(repositoryRoot, path, `receipt artifact ${name}`, { outside: 'ignore' })
+    if (artifact !== undefined) normalized.push(artifact)
+  }
+  const receipt = repositoryPath(repositoryRoot, outputPath, 'receipt output', { outside: 'ignore' })
+  if (receipt !== undefined) normalized.push(receipt)
+  const unique = [...new Set(normalized)].sort()
+  assert.equal(unique.length, normalized.length, 'duplicate allowed output path')
+
+  const trackedPaths = nullSeparatedPaths(await gitOutput(repositoryRoot, ['ls-files', '-z']))
+  for (const output of unique) {
+    assert.equal(
+      trackedPaths.some((path) => path === output || path.startsWith(`${output}/`)),
+      false,
+      `allowed output overlaps tracked repository content: ${output}`,
+    )
+  }
+  return Object.freeze(unique)
 }
 
 async function ensureOutputAbsent(outputPath) {
@@ -153,6 +297,35 @@ async function ensureOutputAbsent(outputPath) {
     throw error
   }
   throw new Error(`Verification receipt already exists: ${outputPath}`)
+}
+
+async function existingAllowedOutputEntries(repositoryRoot, allowedOutputs) {
+  const entries = {}
+  for (const path of allowedOutputs) {
+    const repositoryRelativePath = repositoryPath(repositoryRoot, path, 'allowed output')
+    try {
+      const entry = await untrackedEntry(repositoryRoot, repositoryRelativePath)
+      assert.notEqual(entry.kind, 'directory', `allowed output must identify a file: ${repositoryRelativePath}`)
+      assert.notEqual(entry.kind, 'other', `allowed output must identify a regular file: ${repositoryRelativePath}`)
+      entries[repositoryRelativePath] = entry
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  return Object.freeze(entries)
+}
+
+async function existingArtifactDigests(repositoryRoot, artifacts) {
+  const digests = {}
+  for (const name of Object.keys(artifacts).sort()) {
+    const artifactPath = isAbsolute(artifacts[name]) ? artifacts[name] : resolve(repositoryRoot, artifacts[name])
+    try {
+      digests[name] = digest(await readFile(artifactPath))
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  return Object.freeze(digests)
 }
 
 function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
@@ -196,6 +369,7 @@ export async function runVerificationCommand({
   outputPath,
   gates,
   artifacts = {},
+  allowedOutputs = [],
   command,
   repositoryRoot = fileURLToPath(new URL('../../', import.meta.url)),
   forwardOutput = true,
@@ -214,18 +388,37 @@ export async function runVerificationCommand({
   }
 
   await ensureOutputAbsent(outputPath)
+  const allowedOutputEntriesBefore = await existingAllowedOutputEntries(repositoryRoot, allowedOutputs)
+  const artifactDigestsBefore = await existingArtifactDigests(repositoryRoot, artifacts)
   const headBefore = exactHead(await gitHead(repositoryRoot), 'headBefore')
   assert.equal(headBefore, expectedHead, 'verification command is not starting at the requested exact head')
+  const normalizedOutputs = await normalizedAllowedOutputs(repositoryRoot, allowedOutputs, artifacts, outputPath)
+  const workspaceBefore = await workspaceSnapshot(repositoryRoot, expectedHead, normalizedOutputs)
+  assert.equal(workspaceBefore.dirty, false, 'verification workspace must be clean before the command')
   const { command: executedCommand, result } = await executeCommand(command[0], command.slice(1), repositoryRoot, { forwardOutput })
   assert.equal(result.exitCode, 0, `verification command exited with code ${result.exitCode}`)
   assert.equal(result.signal, null, `verification command terminated by signal ${result.signal}`)
   const headAfter = exactHead(await gitHead(repositoryRoot), 'headAfter')
   assert.equal(headAfter, expectedHead, 'verification command changed or left the requested exact head')
+  const workspaceAfter = await workspaceSnapshot(repositoryRoot, expectedHead, normalizedOutputs)
+  assert.equal(workspaceAfter.dirty, false, 'verification workspace changed during the command')
+  assert.deepEqual(workspaceAfter.digest, workspaceBefore.digest, 'verification workspace changed during the command')
+  const allowedOutputEntriesAfter = await existingAllowedOutputEntries(repositoryRoot, allowedOutputs)
+  for (const [path, entry] of Object.entries(allowedOutputEntriesBefore)) {
+    assert.deepEqual(allowedOutputEntriesAfter[path], entry, `Pre-existing allowed output changed: ${path}`)
+  }
 
   const artifactDigests = {}
   for (const name of Object.keys(artifacts).sort()) {
     const artifactPath = isAbsolute(artifacts[name]) ? artifacts[name] : resolve(repositoryRoot, artifacts[name])
     artifactDigests[name] = digest(await readFile(artifactPath))
+    if (artifactDigestsBefore[name] !== undefined) {
+      assert.deepEqual(
+        artifactDigests[name],
+        artifactDigestsBefore[name],
+        `Pre-existing verification artifact changed: ${name}`,
+      )
+    }
   }
 
   const receipt = Object.freeze({
@@ -239,6 +432,13 @@ export async function runVerificationCommand({
     command: executedCommand,
     result,
     artifacts: Object.freeze(artifactDigests),
+    workspace: Object.freeze({
+      algorithm: 'git-workspace-v1',
+      allowedOutputs: normalizedOutputs,
+      before: workspaceBefore.digest,
+      after: workspaceAfter.digest,
+      status: 'unchanged',
+    }),
   })
   validateVerificationReceipt(receipt, expectedHead)
   await mkdir(dirname(outputPath), { recursive: true })
@@ -290,7 +490,7 @@ export function parseReceiptArguments(argv) {
   assert.equal(command.length > 0, true, 'Missing command after --')
   assert.equal(optionArgs.length % 2, 0, 'Receipt options must be --name value pairs')
 
-  const parsed = { gates: [], artifacts: {}, command }
+  const parsed = { gates: [], artifacts: {}, allowedOutputs: [], command }
   for (let index = 0; index < optionArgs.length; index += 2) {
     const name = optionArgs[index]
     const value = optionArgs[index + 1]
@@ -310,6 +510,8 @@ export function parseReceiptArguments(argv) {
     } else if (name === '--output') {
       assert.equal(parsed.outputPath, undefined, 'Duplicate --output')
       parsed.outputPath = value
+    } else if (name === '--allow-output') {
+      parsed.allowedOutputs.push(value)
     } else {
       throw new Error(`Unknown receipt option: ${name}`)
     }

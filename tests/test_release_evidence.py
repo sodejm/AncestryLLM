@@ -120,7 +120,11 @@ def test_finding_dispositions_require_owner_expiry_and_evidence() -> None:
     ]
 
     with pytest.raises(ValueError, match="owner"):
-        evidence._validate_findings(payload, "0.2.0")
+        evidence._validate_findings(
+            payload,
+            "0.2.0",
+            as_of=date(2026, 8, 1),
+        )
 
 
 def test_finding_dispositions_must_not_be_expired_at_readiness() -> None:

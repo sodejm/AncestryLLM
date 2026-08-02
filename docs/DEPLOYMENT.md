@@ -107,10 +107,10 @@ for its password and `APPLE_TEAM_ID`.
    repository-local sources, including paths reached through symbolic links.
    Repository ignore rules cover common signing formats as a second line of
    defense, and the repository-safety gate rejects them even if force-added.
-4. Confirm `/bin/bash`, `/usr/bin/base64`, `/usr/bin/security`, `awk`, `chmod`,
-   `cmp`, `grep`, `mktemp`, `openssl`, `realpath`, `rm`, `tr`, and `uname` are
-   available. Install Xcode Command Line Tools if `xcrun` and Swift are not
-   already available:
+4. Confirm `/bin/bash`, `/usr/bin/base64`, `/usr/bin/python3`,
+   `/usr/bin/security`, `awk`, `chmod`, `cmp`, `grep`, `mktemp`, `openssl`,
+   `realpath`, `rm`, `tr`, and `uname` are available. Install Xcode Command
+   Line Tools if `xcrun` and Swift are not already available:
 
    ```sh
    xcode-select --install
@@ -119,9 +119,18 @@ for its password and `APPLE_TEAM_ID`.
    The exporter uses Apple's Security framework and sends the generated
    PKCS#12 password through standard input, not a command argument.
 5. Install GitHub CLI with the approved `[GH_INSTALL_COMMAND]` if `gh` is not
-   present. Authenticate using `[GH_AUTHENTICATION_METHOD]`; the account must
-   be authorized to read `sodejm/AncestryLLM`, update its Actions environment
-   secrets, and update repository Actions variables.
+   present. Authenticate `sodejm` on `github.com` using
+   `[GH_AUTHENTICATION_METHOD]`; that exact account must be authorized to read
+   `sodejm/AncestryLLM`, update its Actions environment secrets, and update
+   repository Actions variables. The helper rejects an inherited `GH_HOST`
+   other than `github.com`, binds every CLI call to that host, and verifies the
+   authenticated account and repository identity before collecting any
+   credentials. It never resolves `gh` from `PATH`. It checks fixed
+   installation locations and executes the canonical file with a minimal
+   `PATH`. If the reviewed CLI is elsewhere, pass its absolute, canonical,
+   non-symlink path with `--gh-executable`. The executable and every canonical
+   parent must be owned by root or the current user and must not be group- or
+   world-writable.
 6. Confirm `desktop-signing` already exists and has the protections required
    by [the release runbook](RELEASING.md#one-time-repository-setup). The helper
    does not create or alter environment protection rules.
@@ -135,11 +144,17 @@ for its password and `APPLE_TEAM_ID`.
      [LINUX_GPG_PUBLIC_KEY_SOURCE_FILE]
    ```
 
-   Do not place these files, their Base64 encodings, passwords, key IDs,
-   issuer IDs, or passphrases in this repository, a shell command, a log, or a
-   clipboard manager. The script disables shell tracing, masks private text
-   entry, uses a mode-`0700` temporary directory and mode-`0600` files, and
-   removes generated material on exit.
+   Each source must be a non-empty regular file owned by root or the current
+   user, with exact mode `0400` or `0600`; the final source path must not be a
+   symbolic link. Do not place these files, their Base64 encodings, passwords,
+   key IDs, issuer IDs, or passphrases in this repository, a shell command, a
+   log, or a clipboard manager. The script disables shell tracing, masks
+   private text entry, and uses a mode-`0700` temporary directory. It securely
+   opens each user-supplied path exactly once with no-follow semantics,
+   validates the open descriptor, copies it directly into a mode-`0600`
+   snapshot, and then uses only that snapshot. If the open file changes while
+   it is copied, the helper aborts and removes the incomplete snapshot. All
+   generated material is removed on exit.
 
 ### Generate and validate without uploading
 
@@ -150,12 +165,22 @@ chmod 700 scripts/ancestryll-runner-secrets-helper.sh
 ./scripts/ancestryll-runner-secrets-helper.sh --dry-run
 ```
 
+If the approved GitHub CLI is outside a fixed installation location, use the
+canonical path that you reviewed:
+
+```sh
+./scripts/ancestryll-runner-secrets-helper.sh --dry-run \
+  --gh-executable /reviewed/canonical/path/to/gh
+```
+
 The default run discovers and exports the Apple identity first. Supply four
 remaining source paths, four private text values, and the Windows and Linux
 public identity values when prompted. The helper asks for every user-supplied
-private text value twice. A dry run checks authentication, repository access,
-keychain discovery and export, file readability, non-empty values, Base64 round
-trips, and public-identity formats, then exits without changing GitHub.
+private text value twice. A dry run checks the fixed `github.com` host, the
+exact authenticated `sodejm` account, the canonical repository identity,
+keychain discovery and export, descriptor-bound credential snapshots, non-empty
+values, Base64 round trips, and public-identity formats, then exits without
+changing GitHub.
 
 For the explicit manual fallback, run:
 
@@ -175,9 +200,12 @@ After a successful dry run, repeat the prompts in upload mode:
 ./scripts/ancestryll-runner-secrets-helper.sh --upload
 ```
 
-Review the destination summary and type the exact confirmation `UPLOAD` only
-when ready. Existing values with the same names will be replaced. The helper
-uses the following GitHub CLI operations internally:
+Review the destination summary and type the exact confirmation
+`UPLOAD github.com/sodejm/AncestryLLM desktop-signing AS sodejm` only when
+ready. Existing values with the same names will be replaced. The helper prints
+the fixed host, approved authenticated account, canonical GitHub CLI path, and
+version before authentication, then uses that exact executable for the
+following operations:
 
 ```sh
 gh secret set [SECRET_NAME] -R sodejm/AncestryLLM -e desktop-signing
@@ -211,11 +239,14 @@ If setup fails:
 
 - `Required command is missing`: install that prerequisite, then rerun dry
   run.
-- authentication or repository-access failure: reauthenticate using
-  `[GH_AUTHENTICATION_METHOD]` and confirm the account's repository,
+- host, account, authentication, or repository-identity failure: unset an
+  alternate `GH_HOST`, reauthenticate `sodejm` on `github.com` using
+  `[GH_AUTHENTICATION_METHOD]`, and confirm that account's repository,
   environment-secret, and variable permissions.
-- unreadable or empty file: correct its path or permissions; do not weaken
-  permissions beyond what is required for the current user.
+- rejected credential source: use a non-empty regular file outside the
+  repository, owned by root or the current user, with exact mode `0400` or
+  `0600`; do not use a symbolic link. If the source changed during its
+  descriptor-bound copy, stop other writers before retrying.
 - no valid Developer ID identity: use Xcode or the Apple developer profile to
   install a `Developer ID Application` certificate and its private key in the
   current user's keychain, then repeat the read-only identity check.

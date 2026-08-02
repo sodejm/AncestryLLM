@@ -81,6 +81,10 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" in workflow
     assert "verification-receipt.mjs" in workflow
+    assert "--allow-output desktop/verification/security" not in workflow
+    assert '--allow-output "$ROW_ROOT"' not in workflow
+    assert "--allow-output desktop/out" not in workflow
+    assert '--allow-output "$RECEIPTS_DIR/api-contract.json"' in workflow
     assert "inspect-package-fuses.mjs --output" in workflow
     assert "pnpm --dir desktop run check:secrets" in workflow
     assert "pnpm --dir desktop sbom" in workflow

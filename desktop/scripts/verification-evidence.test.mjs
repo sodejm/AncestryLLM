@@ -46,7 +46,7 @@ function digest(bytes) {
 
 function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
   const receipt = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: 'verification-receipt',
     status: 'passed',
     gitHead,
@@ -61,6 +61,13 @@ function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
       stderr: { sha256: createHash('sha256').update('').digest('hex'), bytes: 0 },
     },
     artifacts,
+    workspace: {
+      algorithm: 'git-workspace-v1',
+      allowedOutputs: [],
+      before: { sha256: 'e'.repeat(64), bytes: 128 },
+      after: { sha256: 'e'.repeat(64), bytes: 128 },
+      status: 'unchanged',
+    },
   }
   validateVerificationReceipt(receipt, gitHead)
   const raw = encoded(receipt)

@@ -2,6 +2,7 @@
 # /// script
 # requires-python = ">=3.12,<3.15"
 # dependencies = [
+#     "pyyaml==6.0.3",
 #     "semgrep==1.170.0",
 # ]
 # ///
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -19,6 +21,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
+
+import yaml
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,7 @@ class RuleBundle:
 
     name: str
     url: str
+    semantic_sha256: str
     revisions: tuple[RuleRevision, ...]
 
 
@@ -42,8 +47,10 @@ RULE_BUNDLES = (
     RuleBundle(
         name="python",
         url="https://semgrep.dev/c/p/python",
+        semantic_sha256="80eeb6e5e772926c4fb1e0c6dd49def6d197305127e002a6bdb24b35bf3e6b80",
         # Registry edges served these reviewed YAML and JSON encodings of the
-        # same 151-rule set. All remain byte-pinned; every other response fails.
+        # same 151-rule set. All remain byte-pinned and must also match the
+        # canonical semantic digest; every other response fails.
         revisions=(
             RuleRevision(
                 sha256="6c5830b3c92994be81404c599c7d5595538aa8d6036fb8042eb3861e6608638d",
@@ -62,10 +69,18 @@ RULE_BUNDLES = (
     RuleBundle(
         name="secrets",
         url="https://semgrep.dev/c/p/secrets",
+        semantic_sha256="58f2b776c275f1adad42aecf8ace71774632d95e1d81db717bc63aeeb12308fa",
+        # Registry edges served reviewed YAML and JSON encodings of the same
+        # 52-rule set. The raw pins constrain transport bytes while the shared
+        # semantic digest prevents a newly pinned encoding from changing rules.
         revisions=(
             RuleRevision(
                 sha256="139b35ad3442bc83d1f0864db82fa4fdc7e1f1ee4b5ac872bfbeb604c82c6518",
                 size=89_772,
+            ),
+            RuleRevision(
+                sha256="7c0b0163d7cbfe44f16cec78556662655bedeec1d41c6e091ddef5d85c1d5eff",
+                size=82_768,
             ),
         ),
     ),
@@ -84,6 +99,45 @@ def _validate_rule_url(url: str) -> None:
         or parsed.port not in (None, 443)
     ):
         raise ValueError(f"Semgrep rule URL is not trusted: {url}")
+
+
+def _semantic_rule_digest(payload: bytes) -> str:
+    """Hash a rule bundle after normalizing reviewed registry encodings."""
+    try:
+        document = yaml.safe_load(payload)
+    except (UnicodeDecodeError, yaml.YAMLError) as error:
+        raise ValueError("Semgrep rule bundle is not valid YAML or JSON") from error
+    if not isinstance(document, dict):
+        raise ValueError("Semgrep rule bundle must be a mapping")
+
+    rules = document.get("rules")
+    if not isinstance(rules, list):
+        raise ValueError("Semgrep rule bundle must contain a rules list")
+    rule_ids: list[str] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise ValueError("Semgrep rule bundle contains a non-mapping rule")
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id:
+            raise ValueError("Semgrep rule bundle contains a rule without an id")
+        rule_ids.append(rule_id)
+    if len(set(rule_ids)) != len(rule_ids):
+        raise ValueError("Semgrep rule bundle contains duplicate rule ids")
+
+    normalized = dict(document)
+    normalized.pop("missed", None)
+    normalized["rules"] = sorted(rules, key=lambda rule: rule["id"])
+    try:
+        canonical = json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise ValueError("Semgrep rule bundle cannot be normalized") from error
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
@@ -114,8 +168,18 @@ def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
         if matching_revisions and any(
             len(payload) == revision.size for revision in matching_revisions
         ):
-            destination.write_bytes(payload)
-            return
+            try:
+                semantic_digest = _semantic_rule_digest(payload)
+            except ValueError:
+                mismatch = "semantic content"
+                observations[-1] += ", semantic=invalid"
+                continue
+            if semantic_digest == bundle.semantic_sha256:
+                destination.write_bytes(payload)
+                return
+            mismatch = "semantic content"
+            observations[-1] += f", semantic_sha256={semantic_digest}"
+            continue
         mismatch = "size" if matching_revisions else "content hash"
 
     observed = "; ".join(dict.fromkeys(observations))
