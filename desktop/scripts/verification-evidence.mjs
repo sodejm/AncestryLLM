@@ -516,7 +516,7 @@ export async function aggregateEvidence(root, requestedHead) {
     targets: Object.freeze(targets.sort((left, right) => left.runner.localeCompare(right.runner))),
     security: checkedSecurity,
     publicationRequirements: Object.freeze({
-      signedInstaller: true,
+      desktopInstaller: true,
     }),
   })
 }

@@ -122,7 +122,7 @@ flowchart LR
 | `TM-D01` | Availability: bounded request/event/file sizes, queues, workers, memory/time/cost/token limits, cancellation, and deterministic overload errors. Public file boundaries use the typed limits and race checks in [bounded file ingress](FILE_INGRESS.md). |
 | `TM-P01` | Plugin isolation: signed declarative manifests/UI, deny-by-default WASI host capabilities, and no renderer/main/native/Python plugin code. |
 | `TM-P02` | Plugin provenance: signatures cover the canonical package tree; publisher trust/revocation, safe extraction, compatibility, permission-diff approval, and restricted-host identity are verified before activation. |
-| `TM-U01` | Supply chain and updates: reviewed lockfiles, SBOM/provenance, signed/notarized packages, sidecar manifests, verified update metadata, ASAR integrity where supported, and tested rollback. |
+| `TM-U01` | Supply chain and updates: reviewed lockfiles, SBOM/provenance, disclosed binary-signing mode, sidecar manifests, verified update metadata, ASAR integrity where supported, and tested rollback. Official 0.x binaries default to unsigned and may be locally self-signed; signed/notarized production packages become mandatory at v1.0.0. |
 | `TM-U02` | Update freshness: signed expiring metadata binds platform, application/sidecar versions, hashes, sizes, key identity, and monotonic release state; downgrade and freeze attempts fail closed. |
 | `TM-E01` | Event integrity: bounded sequenced streams, acknowledgement/backpressure, gap handling, terminal-state idempotency, startup reconciliation, and no automatic replay of side-effecting work after output begins. |
 

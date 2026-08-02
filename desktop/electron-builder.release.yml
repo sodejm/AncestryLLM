@@ -29,18 +29,22 @@ mac:
         - arm64
         - x64
   category: public.app-category.productivity
-  forceCodeSigning: true
+  # Pre-1.0 release builds are unsigned by default. The release workflow
+  # overrides this to true for v1.0.0 and later.
+  forceCodeSigning: false
   hardenedRuntime: true
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
-  notarize: true
+  notarize: false
 win:
   target:
     - target: nsis
       arch:
         - x64
   signAndEditExecutable: true
-  forceCodeSigning: true
+  # Pre-1.0 release builds are unsigned by default. The release workflow
+  # overrides this to true for v1.0.0 and later.
+  forceCodeSigning: false
 linux:
   target:
     - target: deb

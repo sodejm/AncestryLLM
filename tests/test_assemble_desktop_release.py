@@ -1,4 +1,4 @@
-"""Tests for fail-closed signed desktop release evidence assembly."""
+"""Tests for fail-closed desktop release evidence assembly."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
 GIT_HEAD = "a" * 40
-VERSION = "0.5.0"
+VERSION = "1.0.0"
 COMMON_GATES = (
     "exactHeadPassed",
     "installerBuiltPassed",
@@ -109,6 +109,8 @@ def _create_target(root: Path, target: str) -> tuple[Path, Path]:
         GIT_HEAD,
         "--version",
         VERSION,
+        "--signing-mode",
+        "trusted",
         "--target",
         target,
         "--expected-os",
@@ -157,11 +159,14 @@ def test_aggregate_binds_exact_matrix_assets_evidence_and_combined_sbom(
 
     assert completed.returncode == 0, completed.stderr
     evidence = json.loads((output / "desktop-exact-head-evidence.json").read_text(encoding="utf-8"))
-    assert evidence["schemaVersion"] == 2
+    assert evidence["schemaVersion"] == 3
     assert evidence["status"] == "passed"
     assert evidence["gitHead"] == GIT_HEAD
+    assert evidence["binarySigningMode"] == "trusted"
+    assert "requires production/trusted binary signing" in evidence["binarySigningDisclosure"]
     assert {row["target"] for row in evidence["targets"]} == set(TARGETS)
     manifest = json.loads((output / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["binarySigningDisclosure"] == evidence["binarySigningDisclosure"]
     expected_assets = {path.name for path in installers.values()} | {
         f"{installers['linux-x64'].name}.asc",
         *(f"desktop-{target}.cdx.json" for target in TARGETS),
@@ -266,6 +271,8 @@ def test_target_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> None:
         GIT_HEAD,
         "--version",
         VERSION,
+        "--signing-mode",
+        "trusted",
         "--target",
         target,
         "--expected-os",
@@ -289,6 +296,82 @@ def test_target_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> None:
     assert evidence.read_text(encoding="utf-8") == "preserve me\n"
 
 
+def test_pre_1_target_accepts_unsigned_build_without_signing_gates(tmp_path: Path) -> None:
+    installer = tmp_path / "AncestryLLM-0.5.0-win32-x64.exe"
+    installer.write_bytes(b"unsigned installer")
+    sbom = tmp_path / "sbom.json"
+    sbom.write_text(json.dumps({"bomFormat": "CycloneDX"}), encoding="utf-8")
+    evidence = tmp_path / "desktop-target-evidence.json"
+    arguments = [
+        "target",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        "0.5.0",
+        "--signing-mode",
+        "unsigned",
+        "--target",
+        "win32-x64",
+        "--expected-os",
+        "Windows 11",
+        "--arch",
+        "x64",
+        "--installer",
+        str(installer),
+        "--sbom",
+        str(sbom),
+        "--output",
+        str(evidence),
+    ]
+    for gate in COMMON_GATES:
+        arguments.extend(("--gate", gate))
+
+    completed = _run(*arguments)
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["binarySigningMode"] == "unsigned"
+    assert "authenticodePassed" not in payload["gates"]
+
+
+def test_pre_1_target_accepts_self_signed_build_with_limited_gates(tmp_path: Path) -> None:
+    installer = tmp_path / "AncestryLLM-0.5.0-darwin-arm64.dmg"
+    installer.write_bytes(b"self-signed installer")
+    sbom = tmp_path / "sbom.json"
+    sbom.write_text(json.dumps({"bomFormat": "CycloneDX"}), encoding="utf-8")
+    evidence = tmp_path / "desktop-target-evidence.json"
+    arguments = [
+        "target",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        "0.5.0",
+        "--signing-mode",
+        "self-signed",
+        "--target",
+        "darwin-arm64",
+        "--expected-os",
+        "macOS 15",
+        "--arch",
+        "arm64",
+        "--installer",
+        str(installer),
+        "--sbom",
+        str(sbom),
+        "--output",
+        str(evidence),
+    ]
+    for gate in (*COMMON_GATES, "codeSignaturePassed", "hardenedRuntimePassed"):
+        arguments.extend(("--gate", gate))
+
+    completed = _run(*arguments)
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["binarySigningMode"] == "self-signed"
+    assert "notarizationPassed" not in payload["gates"]
+
+
 def test_target_rejects_symlinked_installer(tmp_path: Path) -> None:
     installer = tmp_path / "real.deb"
     installer.write_bytes(b"installer")
@@ -302,6 +385,8 @@ def test_target_rejects_symlinked_installer(tmp_path: Path) -> None:
         GIT_HEAD,
         "--version",
         VERSION,
+        "--signing-mode",
+        "trusted",
         "--target",
         "linux-x64",
         "--expected-os",

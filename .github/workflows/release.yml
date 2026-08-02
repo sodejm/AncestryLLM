@@ -38,6 +38,7 @@ jobs:
       desktop_release_run: ${{ steps.release.outputs.desktop_release_run }}
       desktop_release_artifact: ${{ steps.release.outputs.desktop_release_artifact }}
       desktop_release_digest: ${{ steps.release.outputs.desktop_release_digest }}
+      binary_signing_mode: ${{ steps.release.outputs.binary_signing_mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,6 +88,8 @@ jobs:
           desktop_version="$(jq -r '.version' desktop/package.json)"
           test "$desktop_version" = "$version" || test "$desktop_version" = "$version-dev"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          binary_signing_mode="$(python scripts/release_signing_policy.py --version "$version")"
+          echo "binary_signing_mode=$binary_signing_mode" >> "$GITHUB_OUTPUT"
 
           if test "$EVENT_NAME" = "workflow_dispatch"; then
             echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -203,7 +206,7 @@ jobs:
           assert evidence["gitHead"] == commit
           assert evidence["status"] == "passed"
           assert evidence["platformValidated"] is True
-          assert evidence["publicationRequirements"] == {"signedInstaller": True}
+          assert evidence["publicationRequirements"] == {"desktopInstaller": True}
           expected = {
               ("macos-15", "darwin-arm64", "macOS 15", "macOS 15", "arm64"),
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
@@ -260,6 +263,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
           VERSION: ${{ needs.validate.outputs.version }}
+          BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
         run: |
           mkdir approved
           gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
@@ -274,6 +278,11 @@ jobs:
           cp approved/interoperability.json dist/interoperability.json
           cp approved/release-evidence.md dist/readiness-evidence.md
           cp "docs/release-notes/$VERSION.md" dist/release-notes.md
+          printf '\n\n' >> dist/release-notes.md
+          python scripts/release_signing_policy.py \
+            --version "$VERSION" \
+            --mode "$BINARY_SIGNING_MODE" \
+            --notice >> dist/release-notes.md
       - name: Create provisional Python evidence manifest
         env:
           VERSION: ${{ needs.validate.outputs.version }}
@@ -296,7 +305,7 @@ jobs:
           if-no-files-found: error
 
   desktop-installers:
-    name: signed desktop installer (${{ matrix.sidecar_target }})
+    name: desktop installer (${{ matrix.sidecar_target }})
     if: github.event_name == 'workflow_dispatch'
     needs: validate
     strategy:
@@ -332,12 +341,13 @@ jobs:
             installer_target: deb
             package_args: --linux --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
-    environment: desktop-signing
+    environment: ${{ needs.validate.outputs.binary_signing_mode == 'trusted' && 'desktop-signing' || 'desktop-prerelease' }}
     permissions:
       contents: read
     env:
       EXPECTED_HEAD: ${{ needs.validate.outputs.commit }}
       VERSION: ${{ needs.validate.outputs.version }}
+      BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -374,7 +384,7 @@ jobs:
       - name: Build the production Electron application
         shell: bash
         run: pnpm --dir desktop run build
-      - name: Build, sign, and notarize macOS DMG
+      - name: Build macOS DMG
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -385,29 +395,34 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           PACKAGE_ARGS: ${{ matrix.package_args }}
         run: |
-          test -n "$APPLE_CERTIFICATE_BASE64"
-          test -n "$APPLE_CERTIFICATE_PASSWORD"
-          test -n "$APPLE_API_KEY_BASE64"
-          test -n "$APPLE_API_KEY_ID"
-          test -n "$APPLE_API_ISSUER"
-          signing_dir="$RUNNER_TEMP/ancestryllm-desktop-signing"
-          install -d -m 700 "$signing_dir"
-          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$signing_dir/certificate.p12"
-          printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
-          chmod 600 "$signing_dir"/*
-          export CSC_LINK="$signing_dir/certificate.p12"
-          export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
-          export APPLE_API_KEY="$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
+          signing_args=()
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            test -n "$APPLE_CERTIFICATE_BASE64"
+            test -n "$APPLE_CERTIFICATE_PASSWORD"
+            test -n "$APPLE_API_KEY_BASE64"
+            test -n "$APPLE_API_KEY_ID"
+            test -n "$APPLE_API_ISSUER"
+            signing_dir="$RUNNER_TEMP/ancestryllm-desktop-signing"
+            install -d -m 700 "$signing_dir"
+            printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$signing_dir/certificate.p12"
+            printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
+            chmod 600 "$signing_dir"/*
+            export CSC_LINK="$signing_dir/certificate.p12"
+            export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
+            export APPLE_API_KEY="$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
+            signing_args+=(--config.mac.forceCodeSigning=true --config.mac.notarize=true)
+          fi
           read -r -a package_args <<< "$PACKAGE_ARGS"
           pnpm --dir desktop exec electron-builder \
             --config electron-builder.release.yml \
             "${package_args[@]}" --publish never \
+            "${signing_args[@]}" \
             --config.extraMetadata.version="$VERSION"
       - name: Remove temporary macOS signing credentials
         if: always() && runner.os == 'macOS'
         shell: bash
         run: rm -rf "$RUNNER_TEMP/ancestryllm-desktop-signing"
-      - name: Build and Authenticode-sign Windows NSIS installer
+      - name: Build Windows NSIS installer
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -415,16 +430,20 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           PACKAGE_ARGS: ${{ matrix.package_args }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw 'WINDOWS_CERTIFICATE_BASE64 is required' }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD is required' }
-          $signingDirectory = Join-Path $env:RUNNER_TEMP 'ancestryllm-desktop-signing'
-          New-Item -ItemType Directory -Force -Path $signingDirectory | Out-Null
-          $certificate = Join-Path $signingDirectory 'certificate.pfx'
-          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          $env:CSC_LINK = $certificate
-          $env:CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
+          $signingArgs = @()
+          if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw 'WINDOWS_CERTIFICATE_BASE64 is required' }
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD is required' }
+            $signingDirectory = Join-Path $env:RUNNER_TEMP 'ancestryllm-desktop-signing'
+            New-Item -ItemType Directory -Force -Path $signingDirectory | Out-Null
+            $certificate = Join-Path $signingDirectory 'certificate.pfx'
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+            $env:CSC_LINK = $certificate
+            $env:CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
+            $signingArgs = @('--config.win.forceCodeSigning=true')
+          }
           $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-          pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never "--config.extraMetadata.version=$env:VERSION"
+          pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
           if ($LASTEXITCODE -ne 0) { throw "electron-builder exited $LASTEXITCODE" }
       - name: Remove temporary Windows signing credentials
         if: always() && runner.os == 'Windows'
@@ -461,7 +480,7 @@ jobs:
         env:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
         run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-installers
-      - name: Verify and install signed macOS application
+      - name: Verify and install macOS application
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -470,31 +489,35 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          case "$APPLE_TEAM_ID" in
-            ??????????) ;;
-            *)
-              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
-              exit 1
-              ;;
-          esac
-          case "$APPLE_TEAM_ID" in
-            *[!A-Z0-9]*)
-              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
-              exit 1
-              ;;
-          esac
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            case "$APPLE_TEAM_ID" in
+              ??????????) ;;
+              *)
+                echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+                exit 1
+                ;;
+            esac
+            case "$APPLE_TEAM_ID" in
+              *[!A-Z0-9]*)
+                echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+                exit 1
+                ;;
+            esac
+          fi
           mount_point="$RUNNER_TEMP/ancestryllm-dmg"
           installed_app="$RUNNER_TEMP/AncestryLLM.app"
           mkdir "$mount_point"
           hdiutil attach "$INSTALLER" -nobrowse -readonly -mountpoint "$mount_point"
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
-          codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
-          codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
-          grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-details.txt"
-          grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
-          spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
-          xcrun stapler validate "$INSTALLER"
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
+            codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
+            grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-details.txt"
+            grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
+            spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
+            xcrun stapler validate "$INSTALLER"
+          fi
           ditto "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           pnpm --dir desktop run test:e2e:packaged -- \
@@ -506,7 +529,7 @@ jobs:
           if mount | grep -Fq "$RUNNER_TEMP/ancestryllm-dmg"; then
             hdiutil detach "$RUNNER_TEMP/ancestryllm-dmg"
           fi
-      - name: Verify, install, and exercise signed Windows application
+      - name: Verify, install, and exercise Windows application
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -515,20 +538,24 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
-          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
           $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
-          if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
+            $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+            if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
+            if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          }
           $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-installed'
           $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
-          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
-          if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
-          if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
+            $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
+            if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
+            if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
@@ -537,7 +564,7 @@ jobs:
         shell: pwsh
         run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-installed') -Recurse -Force -ErrorAction SilentlyContinue
       - name: Sign Ubuntu installer
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.BINARY_SIGNING_MODE == 'trusted'
         shell: bash
         env:
           INSTALLER: ${{ steps.installer.outputs.path }}
@@ -579,7 +606,7 @@ jobs:
             gpg --detach-sign --armor --batch --yes --pinentry-mode loopback \
               --passphrase-fd 0 --local-user "$expected_fingerprint!" "$INSTALLER"
           unset LINUX_GPG_PRIVATE_KEY_BASE64 LINUX_GPG_PASSPHRASE
-      - name: Verify, install, and exercise signed Ubuntu application
+      - name: Verify, install, and exercise Ubuntu application
         if: runner.os == 'Linux'
         shell: bash
         env:
@@ -588,37 +615,39 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
-          expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-          case "$expected_fingerprint" in
-            *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
-          esac
-          case "${#expected_fingerprint}" in
-            40|64) ;;
-            *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
-          esac
-          verification_home="$RUNNER_TEMP/ancestryllm-verification-gnupg"
-          public_key="$RUNNER_TEMP/ancestryllm-release-public-key.asc"
-          gpg_status="$RUNNER_TEMP/ancestryllm-gpg-status.txt"
-          cleanup_verification_material() {
-            gpgconf --homedir "$verification_home" --kill all 2>/dev/null || true
-            rm -rf "$verification_home"
-            rm -f "$public_key" "$gpg_status"
-          }
-          trap cleanup_verification_material EXIT
-          install -d -m 700 "$verification_home"
-          test -s "$public_key"
-          GNUPGHOME="$verification_home" gpg --batch --import "$public_key"
-          if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
-            echo "verification keyring unexpectedly contains a private key" >&2
-            exit 1
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
+            expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+            case "$expected_fingerprint" in
+              *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
+            esac
+            case "${#expected_fingerprint}" in
+              40|64) ;;
+              *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
+            esac
+            verification_home="$RUNNER_TEMP/ancestryllm-verification-gnupg"
+            public_key="$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+            gpg_status="$RUNNER_TEMP/ancestryllm-gpg-status.txt"
+            cleanup_verification_material() {
+              gpgconf --homedir "$verification_home" --kill all 2>/dev/null || true
+              rm -rf "$verification_home"
+              rm -f "$public_key" "$gpg_status"
+            }
+            trap cleanup_verification_material EXIT
+            install -d -m 700 "$verification_home"
+            test -s "$public_key"
+            GNUPGHOME="$verification_home" gpg --batch --import "$public_key"
+            if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
+              echo "verification keyring unexpectedly contains a private key" >&2
+              exit 1
+            fi
+            GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
+              "$INSTALLER.asc" "$INSTALLER" | tee "$gpg_status"
+            grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
+              "$gpg_status"
+            cleanup_verification_material
+            trap - EXIT
           fi
-          GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
-            "$INSTALLER.asc" "$INSTALLER" | tee "$gpg_status"
-          grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
-            "$gpg_status"
-          cleanup_verification_material
-          trap - EXIT
           sudo dpkg -i "$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
@@ -660,25 +689,28 @@ jobs:
             sbomGeneratedPassed
             sidecarHandshakePassed
           )
-          case "$SIDECAR_TARGET" in
-            darwin-*)
-              gates+=(codeSignaturePassed gatekeeperPassed hardenedRuntimePassed notarizationPassed staplingPassed)
-              ;;
-            win32-x64)
-              gates+=(authenticodePassed)
-              ;;
-            linux-x64)
-              cp "$INSTALLER.asc" "$row_dir/$installer_name.asc"
-              signature_args=(--signature "$row_dir/$installer_name.asc")
-              gates+=(gpgSignaturePassed)
-              ;;
-            *) echo "unsupported release target: $SIDECAR_TARGET" >&2; exit 1 ;;
-          esac
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            case "$SIDECAR_TARGET" in
+              darwin-*)
+                gates+=(codeSignaturePassed gatekeeperPassed hardenedRuntimePassed notarizationPassed staplingPassed)
+                ;;
+              win32-x64)
+                gates+=(authenticodePassed)
+                ;;
+              linux-x64)
+                cp "$INSTALLER.asc" "$row_dir/$installer_name.asc"
+                signature_args=(--signature "$row_dir/$installer_name.asc")
+                gates+=(gpgSignaturePassed)
+                ;;
+              *) echo "unsupported release target: $SIDECAR_TARGET" >&2; exit 1 ;;
+            esac
+          fi
           gate_args=()
           for gate in "${gates[@]}"; do gate_args+=(--gate "$gate"); done
           uv run python scripts/assemble_desktop_release.py target \
             --git-head "$EXPECTED_HEAD" \
             --version "$VERSION" \
+            --signing-mode "$BINARY_SIGNING_MODE" \
             --target "$SIDECAR_TARGET" \
             --expected-os "$EXPECTED_OS" \
             --arch "$TARGET_ARCH" \
@@ -694,7 +726,7 @@ jobs:
           if-no-files-found: error
 
   desktop-installer-validation:
-    name: validate signed installer (${{ matrix.runner }})
+    name: validate desktop installer (${{ matrix.runner }})
     if: github.event_name == 'workflow_dispatch'
     needs: [validate, desktop-installers]
     strategy:
@@ -740,11 +772,12 @@ jobs:
             installer_target: deb
     runs-on: ${{ fromJSON(matrix.runs_on) }}
     permissions:
-      actions: read # required to download the exact signed-installer artifact from this run
+      actions: read # required to download the exact installer artifact from this run
       contents: read # required to verify and exercise the exact release commit
     env:
       EXPECTED_HEAD: ${{ needs.validate.outputs.commit }}
       VERSION: ${{ needs.validate.outputs.version }}
+      BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -767,7 +800,7 @@ jobs:
         shell: bash
         run: pnpm --dir desktop install --frozen-lockfile
       - id: source
-        name: Download and verify the exact signed-installer artifact
+        name: Download and verify the exact installer artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -832,7 +865,7 @@ jobs:
           echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
           echo "artifact_digest=$artifact_digest" >> "$GITHUB_OUTPUT"
       - id: installer
-        name: Locate the one previously signed installer
+        name: Locate the one previously built installer
         shell: bash
         env:
           INSTALLER_TARGET: ${{ matrix.installer_target }}
@@ -882,7 +915,7 @@ jobs:
           actual_os="Ubuntu $VERSION_ID"
           test "$actual_os" = "$EXPECTED_OS"
           echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
-      - name: Verify and exercise signed macOS application
+      - name: Verify and exercise macOS application
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -891,30 +924,34 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          case "$APPLE_TEAM_ID" in
-            ??????????) ;;
-            *)
-              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
-              exit 1
-              ;;
-          esac
-          case "$APPLE_TEAM_ID" in
-            *[!A-Z0-9]*)
-              echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
-              exit 1
-              ;;
-          esac
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            case "$APPLE_TEAM_ID" in
+              ??????????) ;;
+              *)
+                echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+                exit 1
+                ;;
+            esac
+            case "$APPLE_TEAM_ID" in
+              *[!A-Z0-9]*)
+                echo "APPLE_TEAM_ID must be exactly 10 uppercase letters or digits" >&2
+                exit 1
+                ;;
+            esac
+          fi
           mount_point="$RUNNER_TEMP/ancestryllm-validation-dmg"
           installed_app="$RUNNER_TEMP/AncestryLLM.app"
           mkdir "$mount_point"
           hdiutil attach "$INSTALLER" -nobrowse -readonly -mountpoint "$mount_point"
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
-          codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
-          codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-validation-details.txt"
-          grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-validation-details.txt"
-          spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
-          xcrun stapler validate "$INSTALLER"
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
+            codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-validation-details.txt"
+            grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-validation-details.txt"
+            spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
+            xcrun stapler validate "$INSTALLER"
+          fi
           ditto "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           pnpm --dir desktop run test:e2e:packaged -- \
@@ -926,7 +963,7 @@ jobs:
           if mount | grep -Fq "$RUNNER_TEMP/ancestryllm-validation-dmg"; then
             hdiutil detach "$RUNNER_TEMP/ancestryllm-validation-dmg"
           fi
-      - name: Verify and exercise signed Windows 11 application
+      - name: Verify and exercise Windows 11 application
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -935,20 +972,24 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
-          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
           $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
-          if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
+            $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+            if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
+            if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          }
           $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed'
           $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
-          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
-          if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
-          if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
+            $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
+            if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
+            if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
@@ -956,7 +997,7 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed') -Recurse -Force -ErrorAction SilentlyContinue
-      - name: Verify, install, and exercise signed Ubuntu application
+      - name: Verify, install, and exercise Ubuntu application
         if: runner.os == 'Linux'
         shell: bash
         env:
@@ -966,33 +1007,35 @@ jobs:
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
-          test -n "$LINUX_GPG_PUBLIC_KEY_BASE64"
-          test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
-          expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-          case "$expected_fingerprint" in
-            *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
-          esac
-          case "${#expected_fingerprint}" in
-            40|64) ;;
-            *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
-          esac
-          test -s "$INSTALLER.asc"
-          verification_home="$RUNNER_TEMP/ancestryllm-public-verification-gnupg"
-          install -d -m 700 "$verification_home"
-          printf '%s' "$LINUX_GPG_PUBLIC_KEY_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
-          GNUPGHOME="$verification_home" gpg --batch --import \
-            "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
-          if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
-            echo "verification keyring unexpectedly contains a private key" >&2
-            exit 1
+          if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            test -n "$LINUX_GPG_PUBLIC_KEY_BASE64"
+            test -n "$LINUX_GPG_SIGNING_FINGERPRINT"
+            expected_fingerprint="$(printf '%s' "$LINUX_GPG_SIGNING_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+            case "$expected_fingerprint" in
+              *[!0-9A-F]*) echo "Linux signing fingerprint must contain only hexadecimal characters" >&2; exit 1 ;;
+            esac
+            case "${#expected_fingerprint}" in
+              40|64) ;;
+              *) echo "Linux signing fingerprint must be a complete 40- or 64-character fingerprint" >&2; exit 1 ;;
+            esac
+            test -s "$INSTALLER.asc"
+            verification_home="$RUNNER_TEMP/ancestryllm-public-verification-gnupg"
+            install -d -m 700 "$verification_home"
+            printf '%s' "$LINUX_GPG_PUBLIC_KEY_BASE64" | base64 --decode \
+              > "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+            GNUPGHOME="$verification_home" gpg --batch --import \
+              "$RUNNER_TEMP/ancestryllm-release-public-key.asc"
+            if GNUPGHOME="$verification_home" gpg --batch --with-colons --list-secret-keys | grep -q '^sec:'; then
+              echo "verification keyring unexpectedly contains a private key" >&2
+              exit 1
+            fi
+            GNUPGHOME="$verification_home" gpg --batch --with-colons --fingerprint --list-keys | \
+              awk -F: '$1 == "fpr" { print toupper($10) }' | grep -Fxq "$expected_fingerprint"
+            GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
+              "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
+            grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
+              "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
           fi
-          GNUPGHOME="$verification_home" gpg --batch --with-colons --fingerprint --list-keys | \
-            awk -F: '$1 == "fpr" { print toupper($10) }' | grep -Fxq "$expected_fingerprint"
-          GNUPGHOME="$verification_home" gpg --batch --status-fd 1 --verify \
-            "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
-          grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
-            "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
           sudo dpkg -i "$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
@@ -1139,12 +1182,13 @@ jobs:
                   raise SystemExit(f"validation receipt {runner} source digest is invalid")
               source_names.add(source["name"])
           if source_names != target_names:
-              raise SystemExit("validation receipts do not cover every signed installer artifact")
+              raise SystemExit("validation receipts do not cover every installer artifact")
           PY
       - name: Aggregate exact installers, validation evidence, and SBOMs
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
         run: |
           test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
           python scripts/assemble_desktop_release.py aggregate \
@@ -1257,6 +1301,7 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
           APPROVED_RUN: ${{ needs.validate.outputs.desktop_release_run }}
           APPROVED_ARTIFACT: ${{ needs.validate.outputs.desktop_release_artifact }}
           APPROVED_DIGEST: ${{ needs.validate.outputs.desktop_release_digest }}
@@ -1266,6 +1311,7 @@ jobs:
           python - imported "$VERSION" "$COMMIT_SHA" <<'PY'
           import hashlib
           import json
+          import os
           import re
           import sys
           from pathlib import Path
@@ -1277,15 +1323,17 @@ jobs:
           manifest = json.loads((root / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
           evidence = json.loads((root / "desktop-exact-head-evidence.json").read_text(encoding="utf-8"))
           if (
-              manifest.get("schemaVersion") != 1
+              manifest.get("schemaVersion") != 2
               or manifest.get("version") != version
               or manifest.get("gitHead") != commit
+              or manifest.get("binarySigningMode") != os.environ["BINARY_SIGNING_MODE"]
           ):
               raise SystemExit("desktop artifact manifest has the wrong release identity")
           if (
-              evidence.get("schemaVersion") != 2
+              evidence.get("schemaVersion") != 3
               or evidence.get("version") != version
               or evidence.get("gitHead") != commit
+              or evidence.get("binarySigningMode") != os.environ["BINARY_SIGNING_MODE"]
           ):
               raise SystemExit("desktop exact-head evidence has the wrong release identity")
           if evidence.get("status") != "passed" or evidence.get("platformValidated") is not True:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and aggregate fail-closed signed desktop release evidence."""
+"""Create and aggregate fail-closed desktop release evidence."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Any
+
+from release_signing_policy import signing_disclosure, validate_signing_mode
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -68,6 +70,12 @@ TARGETS = {
         "extension": ".deb",
         "gates": {"gpgSignaturePassed"},
     },
+}
+SELF_SIGNED_GATES = {
+    "darwin-arm64": {"codeSignaturePassed", "hardenedRuntimePassed"},
+    "darwin-x64": {"codeSignaturePassed", "hardenedRuntimePassed"},
+    "win32-x64": {"authenticodePassed"},
+    "linux-x64": {"gpgSignaturePassed"},
 }
 VALIDATION_ENVIRONMENTS = {
     "macos-15": {
@@ -161,8 +169,19 @@ def _positive_integer(value: int, label: str) -> int:
     return value
 
 
+def _required_gates(target: str, signing_mode: str) -> set[str]:
+    if signing_mode == "unsigned":
+        signing_gates: set[str] = set()
+    elif signing_mode == "self-signed":
+        signing_gates = SELF_SIGNED_GATES[target]
+    else:
+        signing_gates = set(TARGETS[target]["gates"])
+    return COMMON_GATES | signing_gates
+
+
 def create_target(args: argparse.Namespace) -> None:
     _validate_identity(args.git_head, args.version)
+    validate_signing_mode(args.version, args.signing_mode)
     configuration = TARGETS.get(args.target)
     if configuration is None:
         raise ValueError(f"unsupported desktop release target: {args.target}")
@@ -172,7 +191,7 @@ def create_target(args: argparse.Namespace) -> None:
         raise ValueError("architecture does not match the supported target matrix")
 
     gates = set(args.gate)
-    required = COMMON_GATES | set(configuration["gates"])
+    required = _required_gates(args.target, args.signing_mode)
     missing = required - gates
     unexpected = gates - required
     if missing:
@@ -192,7 +211,7 @@ def create_target(args: argparse.Namespace) -> None:
         "installer": _artifact(installer),
         "sbom": _artifact(sbom),
     }
-    if args.target == "linux-x64":
+    if args.target == "linux-x64" and args.signing_mode != "unsigned":
         if args.signature is None:
             raise ValueError("Linux release evidence requires a detached GPG signature")
         signature = _regular_file(args.signature, "detached GPG signature")
@@ -203,10 +222,11 @@ def create_target(args: argparse.Namespace) -> None:
         raise ValueError("only the Linux target accepts a detached signature artifact")
 
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "passed",
         "gitHead": args.git_head,
         "version": args.version,
+        "binarySigningMode": args.signing_mode,
         "target": args.target,
         "expectedOs": args.expected_os,
         "arch": args.arch,
@@ -426,24 +446,28 @@ def aggregate(args: argparse.Namespace) -> None:
         target = payload.get("target")
         if target not in TARGETS or target in targets:
             raise ValueError(f"unexpected or duplicate desktop target: {target!r}")
-        if payload.get("schemaVersion") != 1 or payload.get("status") != "passed":
+        if payload.get("schemaVersion") != 2 or payload.get("status") != "passed":
             raise ValueError(f"desktop target {target} evidence did not pass")
         if payload.get("gitHead") != args.git_head or payload.get("version") != args.version:
             raise ValueError(f"desktop target {target} is not bound to the release identity")
+        signing_mode = payload.get("binarySigningMode")
+        if not isinstance(signing_mode, str):
+            raise ValueError(f"desktop target {target} does not declare a binary-signing mode")
+        validate_signing_mode(args.version, signing_mode)
         configuration = TARGETS[target]
         if (
             payload.get("expectedOs") != configuration["expected_os"]
             or payload.get("arch") != configuration["arch"]
         ):
             raise ValueError(f"desktop target {target} does not match the supported matrix")
-        required = COMMON_GATES | set(configuration["gates"])
+        required = _required_gates(target, signing_mode)
         if payload.get("gates") != {gate: True for gate in sorted(required)}:
             raise ValueError(f"desktop target {target} has incomplete verification gates")
         artifacts = payload.get("artifacts")
         if not isinstance(artifacts, dict):
             raise ValueError(f"desktop target {target} artifacts must be an object")
         expected_artifacts = {"installer", "sbom"} | (
-            {"signature"} if target == "linux-x64" else set()
+            {"signature"} if target == "linux-x64" and signing_mode != "unsigned" else set()
         )
         if set(artifacts) != expected_artifacts:
             raise ValueError(f"desktop target {target} artifact inventory is incomplete")
@@ -537,6 +561,10 @@ def aggregate(args: argparse.Namespace) -> None:
 
     if set(targets) != set(TARGETS):
         raise ValueError("desktop release target matrix is incomplete")
+    signing_modes = {payload["binarySigningMode"] for payload in targets.values()}
+    if len(signing_modes) != 1:
+        raise ValueError("desktop release target matrix mixes binary-signing modes")
+    binary_signing_mode = signing_modes.pop()
     validations = (
         _validated_environments(args.validation_dir, args.git_head, args.version, targets)
         if args.validation_dir is not None
@@ -555,19 +583,23 @@ def aggregate(args: argparse.Namespace) -> None:
         shutil.copyfile(source, args.output_dir / name)
 
     evidence = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "status": "passed",
         "gitHead": args.git_head,
         "version": args.version,
+        "binarySigningMode": binary_signing_mode,
+        "binarySigningDisclosure": signing_disclosure(args.version, binary_signing_mode),
         "targets": [targets[target] for target in sorted(targets)],
     }
     if validations is not None:
         evidence["platformValidated"] = True
         evidence["validations"] = validations
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "gitHead": args.git_head,
         "version": args.version,
+        "binarySigningMode": binary_signing_mode,
+        "binarySigningDisclosure": signing_disclosure(args.version, binary_signing_mode),
         "artifacts": [
             {"name": name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
             for name, path in sorted(resolved_assets.items())
@@ -607,9 +639,14 @@ def aggregate(args: argparse.Namespace) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    target = subparsers.add_parser("target", help="create one signed-installer evidence row")
+    target = subparsers.add_parser("target", help="create one installer evidence row")
     target.add_argument("--git-head", required=True)
     target.add_argument("--version", required=True)
+    target.add_argument(
+        "--signing-mode",
+        required=True,
+        choices=("unsigned", "self-signed", "trusted"),
+    )
     target.add_argument("--target", required=True)
     target.add_argument("--expected-os", required=True)
     target.add_argument("--arch", required=True)

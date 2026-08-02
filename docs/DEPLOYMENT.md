@@ -4,6 +4,12 @@ AncestryLLM is local-first software. This document covers the hosted controls
 used to build and publish its desktop installers; it does not describe a
 hosted application deployment.
 
+Full production/trusted binary signing is intentionally deferred until the
+first full version release, v1.0.0. Official `0.x` releases default to unsigned
+binaries, so none of the signing credentials below are required to build or
+publish them. This procedure prepares the mandatory v1.0.0-and-later trusted
+signing environment; it does not change the signed-commit or signed-tag rules.
+
 ## Reconfigure desktop signing from macOS
 
 The repository helper searches the current macOS user's keychain for exactly

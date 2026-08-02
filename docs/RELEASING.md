@@ -38,14 +38,35 @@ pull-request or manual trigger, so a fork or Dependabot pull request cannot rece
 After this change is merged, its exact-main run is the hosted proof; do not
 create the secret in a pull request or place the token in repository files.
 
+## Binary-signing version boundary
+
+AncestryLLM will **not use full production or publicly trusted binary signing
+until the first full version release, v1.0.0**. Every stable `0.x` installer may
+therefore be unsigned or self-signed. The official release workflow defaults
+all `0.x` builds to `unsigned`; a self-signed `0.x` build is permitted only in a
+local or explicitly manual build. Trusted Developer ID, notarization,
+Authenticode, and release-key GPG signing credentials must not be used for an
+official pre-1.0 build.
+
+Starting with v1.0.0, full trusted platform signing is mandatory and unsigned
+or self-signed release binaries are rejected. This binary-signing boundary
+does not relax repository identity controls: signed commits and signed,
+annotated Git release tags remain required for every version, including `0.x`.
+
+Every pre-1.0 release must disclose its `binarySigningMode` in release evidence
+and release notes, warn that the operating system may show an unknown-publisher
+or equivalent prompt, and retain all checksum, SBOM, provenance, exact-head,
+installation, and installed-runtime gates. Deferring trusted signing is not a
+waiver of those gates.
+
 ## v0.5.0 supported offline shell
 
-v0.5.0 is a supported offline three-OS Electron shell. The signed-installer
-release matrix is macOS 15 arm64, macOS 15 x64, Windows 11 x64, and Ubuntu
-24.04 x64. The matching-architecture DMGs cover the supported macOS 15/26
-range. Its release scope is Home, Diagnostics, Settings,
-capability onboarding, and a private loopback sidecar, distributed as signed
-manual full installers. It excludes genealogy jobs, chat providers, cloud
+v0.5.0 is a supported offline three-OS Electron shell. Its installer matrix is
+macOS 15 arm64, macOS 15 x64, Windows 11 x64, and Ubuntu 24.04 x64. The
+matching-architecture DMGs cover the supported macOS 15/26 range. Its release
+scope is Home, Diagnostics, Settings, capability onboarding, and a private
+loopback sidecar, distributed as manual full installers under the pre-1.0
+binary-signing policy above. It excludes genealogy jobs, chat providers, cloud
 accounts, updater behavior, and background release channels.
 
 ## One-time repository setup
@@ -55,12 +76,15 @@ accounts, updater behavior, and background release channels.
    force pushes and deletion.
 2. Enforce tag immutability with a ruleset for `v*.*.*`: prevent tag update and
    deletion, and restrict creation to the maintainer.
-3. Create GitHub environments `desktop-signing`, `testpypi`, and `pypi`.
-   Protect `desktop-signing` with required maintainer approval and allow it
-   only from the protected `main` branch. Store every installer-signing secret
-   there so only the reviewed, manually dispatched pre-tag job can receive
-   signing credentials. The tag-triggered import and publication jobs must
-   never receive those credentials. For the current
+3. Create GitHub environments `desktop-prerelease`, `testpypi`, and `pypi`.
+   The `desktop-prerelease` environment is used only for unsigned official
+   `0.x` installer builds and contains no signing credentials. In preparation
+   for releasing v1.0.0, but not for any `0.x` release, create
+   `desktop-signing`, protect it with required maintainer approval, allow it
+   only from the protected `main` branch, and store every
+   installer-signing secret there. Only a reviewed v1.0.0-or-later manually
+   dispatched pre-tag job may receive those credentials. Tag-triggered import
+   and publication jobs must never receive them. For the current
    one-maintainer release, configure `sodejm` as the required reviewer for
    `pypi`; self-approval must remain permitted so the production deployment
    does not deadlock. Requiring a reviewer other than the workflow initiator is
@@ -69,7 +93,8 @@ accounts, updater behavior, and background release channels.
    `sodejm/AncestryLLM`, workflow `release.yml`, and the matching environment.
    Keep publishing OIDC-only; no API token or token secret is a permitted
    fallback.
-5. Configure the release-signing Actions secrets. Use
+5. Before releasing v1.0.0, configure the release-signing Actions secrets.
+   They are not required or permitted for any `0.x` release. Use
    `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` for the
    Developer ID identity and Apple notary API key;
@@ -81,11 +106,11 @@ accounts, updater behavior, and background release channels.
    `LINUX_GPG_SIGNING_FINGERPRINT`, and `LINUX_GPG_PUBLIC_KEY_BASE64` with the
    approved public signer identities and Linux public key. Use the complete
    certificate thumbprint and complete Linux signing-key or signing-subkey
-   fingerprint. Builder and validation jobs both fail unless the observed
-   signer matches the approved public identity; Linux validation imports only
-   the public key into a fresh keyring. Grant each private credential only the
-   purpose named here, rotate it outside the workflow, and never put its
-   decoded value in an artifact or repository file.
+   fingerprint. For v1.0.0 and later, builder and validation jobs both fail
+   unless the observed signer matches the approved public identity; Linux
+   validation imports only the public key into a fresh keyring. Grant each
+   private credential only the purpose named here, rotate it outside the
+   workflow, and never put its decoded value in an artifact or repository file.
    Follow the repeatable macOS setup and verification procedure in
    [`DEPLOYMENT.md`](DEPLOYMENT.md#reconfigure-desktop-signing-from-macos);
    do not construct ad hoc upload commands containing private values.
@@ -114,15 +139,16 @@ link or redacted screenshot:
 - the `v*.*.*` tag ruleset restricts creation and blocks update and deletion;
 - the `pypi` environment has `sodejm` as the required reviewer, while
   self-approval remains enabled for the current one-maintainer release;
-- the `desktop-signing` environment requires maintainer approval, is limited
-  to the protected `main` branch, contains the installer-signing secrets, and
-  is not used by any tag-triggered job;
+- for a v1.0.0-or-later release, the `desktop-signing` environment requires
+  maintainer approval, is limited to the protected `main` branch, contains the
+  installer-signing secrets, and is not used by any tag-triggered job; for a
+  `0.x` release, `desktop-prerelease` contains no signing credentials;
 - the TestPyPI and PyPI Trusted Publishers match repository
   `sodejm/AncestryLLM`, workflow `release.yml`, and their exact environments,
   and no API-token publishing secret or fallback is configured; and
-- the nine private release-signing secrets, four public signer-identity
-  variables, and ephemeral one-job Windows 11 runner are configured,
-  access-restricted where appropriate, and current; and
+- for v1.0.0 or later, the nine private release-signing secrets and four public
+  signer-identity variables are configured, access-restricted, and current;
+  the ephemeral one-job Windows 11 runner is required for every version; and
 - GitHub immutable releases and automatic pull-request branch deletion are
   enabled.
 
@@ -178,8 +204,7 @@ self-approval; do not make that change during the one-maintainer release.
    documented reachability, unique-commit, cleanup, and preservation record.
 7. Confirm the successful exact-head `Desktop sidecar` aggregate is for the
    same commit and contains all six unpublished native-package rows. This is
-   an input to the signed-installer gate, not signed-installer evidence by
-   itself.
+   an input to the installer gate, not release-installer evidence by itself.
 8. Review the evidence artifact and confirm every required job succeeded.
 
 At the exact approval points, a maintainer approves the release-preparation PR;
@@ -205,23 +230,26 @@ It records the exact commit, run URL, and complete gate inventory in
 requires that exact approved record, and imports the successful pre-tag
 `desktop-release-distributions` artifact for the tag commit. It verifies the
 GitHub Actions artifact digest plus the artifact's internal manifest and
-checksums before any asset is published. It never rebuilds signed installers
+checksums before any asset is published. It never rebuilds approved installers
 after the tag is pushed and does not repeat pytest, lint, type checking,
 dependency audit, or Semgrep after accepting the exact successful readiness
 and installer evidence.
 
-The tag workflow is the only installer publisher. The signed installers are
-built and validated by a manually dispatched pre-tag run, but cannot be
+The tag workflow is the only installer publisher. The installers are built and
+validated by a manually dispatched pre-tag run, but cannot be
 published until the v0.4.0 release is complete and the v0.5.0 tag gates pass.
 Before the final release distribution can be assembled or any release asset can be published, it
-requires all four signed-installer rows:
+requires all four installer rows. The `Required native verification` column is
+version-aware: `0.x` requires installation and installed-runtime execution but
+does not require a trusted signature; v1.0.0 and later additionally require the
+listed trusted-signing checks.
 
 | Release row | Installer | Required native verification |
 |---|---|---|
-| macOS 15 arm64 | DMG | approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| macOS 15 x64 | DMG | approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| Windows 11 x64 | NSIS EXE | approved certificate thumbprint, valid Authenticode signature, and install/launch on an ephemeral one-job Windows 11 runner |
-| Ubuntu 24.04 x64 | DEB plus `.deb.asc` | detached GPG signature from the approved public-key fingerprint and install/launch on clean Ubuntu 24.04 |
+| macOS 15 arm64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| macOS 15 x64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
+| Windows 11 x64 | NSIS EXE | install/launch on an ephemeral one-job Windows 11 runner; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
+| Ubuntu 24.04 x64 | DEB | install/launch on clean Ubuntu 24.04; at v1.0.0+, adjacent `.deb.asc` detached GPG signature from the approved public-key fingerprint |
 
 Every row builds and smoke-tests the matching native sidecar, installs or
 mounts the complete installer, launches the installed application with no
@@ -233,7 +261,7 @@ derived from the host probe; aggregation and tag import require the exact six
 intended-and-actual OS rows. Only after aggregation does the workflow regenerate the
 complete `release-evidence.md`, create the one `SHA256SUMS` file, and attest
 `dist/*`, so the evidence manifest, checksums, and provenance cover the Python
-wheel and sdist together with every desktop installer, detached signature,
+wheel and sdist together with every desktop installer, any required detached signature,
 combined SBOM, desktop manifest, and exact-head evidence document.
 
 ## Tag and publish
@@ -288,11 +316,13 @@ manual upload may publish an installer.
 
 Download the target-matched full installer and the release's `SHA256SUMS` from
 the same immutable GitHub Release. Verify the checksum before opening the
-installer. On macOS, also inspect the Developer ID signature, require
-Gatekeeper acceptance, and confirm notarization/stapling. On Windows, require
-a valid Authenticode signature. On Ubuntu, download the `.deb.asc` alongside
-the DEB and verify its detached GPG signature with the documented release key.
-Do not install when any identity, digest, or signature check fails.
+installer. For a `0.x` release, confirm the disclosed `binarySigningMode` and
+expect an operating-system unknown-publisher or equivalent prompt; do not infer
+a trusted identity from an unsigned or self-signed binary. For v1.0.0 and
+later, inspect the Developer ID signature and notarization/stapling on macOS,
+require a valid Authenticode signature on Windows, and verify Ubuntu's adjacent
+`.deb.asc` with the documented release key. Do not install when a required
+identity, digest, or signature check fails.
 
 ### Manual upgrade and rollback
 
@@ -301,7 +331,7 @@ then install it over the existing application and relaunch. The installer
 replaces application files but retains the OS-managed AncestryLLM data and
 configuration directories. Confirm the displayed version and healthy
 Diagnostics after relaunch. Recovery or rollback uses the same process with a
-previous full installer whose signature and checksum still verify.
+previous full installer whose checksum and version-required signature still verify.
 
 v0.5.0 has no updater feed, no background update, no staged rollout, and no
 automatic rollback. Do not publish `latest*.yml`, blockmaps, or another update
