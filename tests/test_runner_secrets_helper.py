@@ -4,7 +4,9 @@ import os
 import stat
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -37,6 +39,17 @@ VARIABLE_VALUES = {
 }
 
 APPLE_DEVELOPER_ID_SHA1 = "A" * 40
+
+
+@pytest.fixture
+def trusted_test_root() -> Iterator[Path]:
+    with TemporaryDirectory(
+        prefix="ancestryllm-runner-secrets-",
+        dir=Path.home(),
+    ) as directory:
+        path = Path(directory)
+        path.chmod(0o700)
+        yield path
 
 
 def _write_fake_apple_tools(path: Path, identities: str) -> None:
@@ -168,18 +181,18 @@ esac
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def test_helper_uploads_and_verifies_every_configured_value(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
+def test_helper_uploads_and_verifies_every_configured_value(trusted_test_root: Path) -> None:
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     _write_fake_gh(fake_bin / "gh")
     _write_fake_apple_tools(fake_bin, _valid_keychain_identities())
 
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
 
     payloads = []
     for index in range(4):
-        payload = tmp_path / f"payload-{index}.bin"
+        payload = trusted_test_root / f"payload-{index}.bin"
         payload.write_bytes(f"fictional signing payload {index}\n".encode())
         payload.chmod(0o600)
         payloads.append(payload)
@@ -260,12 +273,12 @@ def test_helper_help_uses_the_comma_free_name() -> None:
     assert "ancestryll,-runner-secrets-helper.sh" not in result.stdout
 
 
-def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
+def test_helper_rejects_credential_sources_inside_repository(trusted_test_root: Path) -> None:
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     _write_fake_gh(fake_bin / "gh")
 
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -293,9 +306,9 @@ def test_helper_rejects_credential_sources_inside_repository(tmp_path: Path) -> 
 
 
 def test_helper_fails_when_keychain_has_no_valid_developer_id_application(
-    tmp_path: Path,
+    trusted_test_root: Path,
 ) -> None:
-    fake_bin = tmp_path / "bin"
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     _write_fake_gh(fake_bin / "gh")
     _write_fake_apple_tools(
@@ -304,7 +317,7 @@ def test_helper_fails_when_keychain_has_no_valid_developer_id_application(
      1 valid identities found""",
     )
 
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -331,9 +344,9 @@ def test_helper_fails_when_keychain_has_no_valid_developer_id_application(
 
 
 def test_helper_fails_closed_for_multiple_developer_id_application_identities(
-    tmp_path: Path,
+    trusted_test_root: Path,
 ) -> None:
-    fake_bin = tmp_path / "bin"
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     _write_fake_gh(fake_bin / "gh")
     _write_fake_apple_tools(
@@ -343,7 +356,7 @@ def test_helper_fails_closed_for_multiple_developer_id_application_identities(
      2 valid identities found""",
     )
 
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -369,15 +382,15 @@ def test_helper_fails_closed_for_multiple_developer_id_application_identities(
     assert not (state / "apple-identity-name").exists()
 
 
-def test_helper_never_executes_a_path_shadowing_github_cli(tmp_path: Path) -> None:
-    trusted_bin = tmp_path / "trusted-bin"
+def test_helper_never_executes_a_path_shadowing_github_cli(trusted_test_root: Path) -> None:
+    trusted_bin = trusted_test_root / "trusted-bin"
     trusted_bin.mkdir()
     trusted_gh = trusted_bin / "gh"
     _write_fake_gh(trusted_gh)
 
-    hostile_bin = tmp_path / "hostile-bin"
+    hostile_bin = trusted_test_root / "hostile-bin"
     hostile_bin.mkdir()
-    hostile_marker = tmp_path / "hostile-gh-ran"
+    hostile_marker = trusted_test_root / "hostile-gh-ran"
     hostile_gh = hostile_bin / "gh"
     hostile_gh.write_text(
         f"#!/bin/sh\nprintf compromised > {hostile_marker}\nexit 97\n",
@@ -385,7 +398,7 @@ def test_helper_never_executes_a_path_shadowing_github_cli(tmp_path: Path) -> No
     )
     hostile_gh.chmod(hostile_gh.stat().st_mode | stat.S_IXUSR)
 
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
     environment = os.environ.copy()
     environment["PATH"] = f"{hostile_bin}:{environment['PATH']}"
@@ -413,12 +426,12 @@ def test_helper_never_executes_a_path_shadowing_github_cli(tmp_path: Path) -> No
     assert "gh version 2.96.0 (fictional test build)" in result.stdout
 
 
-def test_helper_rejects_an_explicit_github_cli_symlink(tmp_path: Path) -> None:
-    trusted_bin = tmp_path / "trusted-bin"
+def test_helper_rejects_an_explicit_github_cli_symlink(trusted_test_root: Path) -> None:
+    trusted_bin = trusted_test_root / "trusted-bin"
     trusted_bin.mkdir()
     trusted_gh = trusted_bin / "gh"
     _write_fake_gh(trusted_gh)
-    gh_symlink = tmp_path / "gh-symlink"
+    gh_symlink = trusted_test_root / "gh-symlink"
     gh_symlink.symlink_to(trusted_gh)
 
     result = subprocess.run(
@@ -438,8 +451,8 @@ def test_helper_rejects_an_explicit_github_cli_symlink(tmp_path: Path) -> None:
     assert "GitHub CLI executable must not be a symbolic link" in result.stderr
 
 
-def test_helper_rejects_github_cli_under_a_writable_parent(tmp_path: Path) -> None:
-    writable_bin = tmp_path / "writable-bin"
+def test_helper_rejects_github_cli_under_a_writable_parent(trusted_test_root: Path) -> None:
+    writable_bin = trusted_test_root / "writable-bin"
     writable_bin.mkdir()
     writable_bin.chmod(0o777)
     candidate = writable_bin / "gh"
@@ -463,13 +476,13 @@ def test_helper_rejects_github_cli_under_a_writable_parent(tmp_path: Path) -> No
 
 
 def test_helper_rejects_an_alternate_github_host_before_authentication(
-    tmp_path: Path,
+    trusted_test_root: Path,
 ) -> None:
-    fake_bin = tmp_path / "bin"
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     trusted_gh = fake_bin / "gh"
     _write_fake_gh(trusted_gh)
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
 
     environment = os.environ.copy()
@@ -494,12 +507,14 @@ def test_helper_rejects_an_alternate_github_host_before_authentication(
     assert not (state / "gh-calls").exists()
 
 
-def test_helper_rejects_an_unapproved_authenticated_account(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
+def test_helper_rejects_an_unapproved_authenticated_account(
+    trusted_test_root: Path,
+) -> None:
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     trusted_gh = fake_bin / "gh"
     _write_fake_gh(trusted_gh)
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
 
     environment = os.environ.copy()
@@ -523,12 +538,12 @@ def test_helper_rejects_an_unapproved_authenticated_account(tmp_path: Path) -> N
     assert "Authenticated GitHub account is attacker; expected sodejm" in result.stderr
 
 
-def test_helper_rejects_a_mismatched_repository_identity(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
+def test_helper_rejects_a_mismatched_repository_identity(trusted_test_root: Path) -> None:
+    fake_bin = trusted_test_root / "bin"
     fake_bin.mkdir()
     trusted_gh = fake_bin / "gh"
     _write_fake_gh(trusted_gh)
-    state = tmp_path / "state"
+    state = trusted_test_root / "state"
     state.mkdir()
 
     environment = os.environ.copy()

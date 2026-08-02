@@ -284,6 +284,7 @@ jobs:
       - name: Build and smoke-test native sidecar
         shell: bash
         env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
           RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
         run: |
@@ -293,7 +294,7 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/sidecar-smoke.json" \
-            --allow-output "desktop/verification/${{ matrix.runner }}" \
+            --allow-output "$ROW_ROOT" \
             --gate sidecarSmokePassed \
             -- uv run python scripts/smoke_sidecar.py "$sidecar_executable"
           uv run python scripts/build_verification_sidecar.py --expected-target "$SIDECAR_TARGET"

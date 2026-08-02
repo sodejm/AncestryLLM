@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import yaml
 
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "run_pinned_semgrep.py"
 
@@ -39,6 +41,24 @@ def _load_runner() -> ModuleType:
     return runner
 
 
+def _semantic_rule_sha256(payload: bytes) -> str:
+    document = yaml.safe_load(payload)
+    assert isinstance(document, dict)
+    rules = document.get("rules")
+    assert isinstance(rules, list)
+    normalized = dict(document)
+    normalized.pop("missed", None)
+    normalized["rules"] = sorted(rules, key=lambda rule: rule["id"])
+    canonical = json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
 @pytest.mark.parametrize(
     ("response_content", "response_url", "expected_error"),
     (
@@ -58,6 +78,7 @@ def test_rejects_changed_or_redirected_registry_content_before_writing_config(
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(expected),
         revisions=(
             runner.RuleRevision(
                 sha256=hashlib.sha256(expected).hexdigest(),
@@ -86,6 +107,7 @@ def test_rejects_changed_registry_size_before_writing_config(
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(payload),
         revisions=(
             runner.RuleRevision(
                 sha256=hashlib.sha256(payload).hexdigest(),
@@ -113,10 +135,14 @@ def test_accepts_each_reviewed_exact_bundle_revision(
     revision_index: int,
 ) -> None:
     runner = _load_runner()
-    payloads = (b"rules:\n- id: pinned\n", b'{"rules":[{"id":"pinned"}]}\n')
+    payloads = (
+        b"rules:\n- id: zed\n- id: alpha\n",
+        b'{"rules":[{"id":"alpha"},{"id":"zed"}],"missed":923}\n',
+    )
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(payloads[0]),
         revisions=tuple(
             runner.RuleRevision(
                 sha256=hashlib.sha256(payload).hexdigest(),
@@ -137,6 +163,40 @@ def test_accepts_each_reviewed_exact_bundle_revision(
     assert destination.read_bytes() == payloads[revision_index]
 
 
+def test_rejects_raw_pinned_bundle_with_changed_semantic_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = _load_runner()
+    reviewed = b"rules:\n- id: pinned\n  message: reviewed\n"
+    changed = b"rules:\n- id: pinned\n  message: changed\n"
+    bundle = runner.RuleBundle(
+        name="test",
+        url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(reviewed),
+        revisions=(
+            runner.RuleRevision(
+                sha256=hashlib.sha256(changed).hexdigest(),
+                size=len(changed),
+            ),
+        ),
+    )
+    calls = 0
+
+    def urlopen(request: object, timeout: int) -> _Download:
+        nonlocal calls
+        calls += 1
+        return _Download(changed, "https://semgrep.dev/c/p/test")
+
+    monkeypatch.setattr(runner.urllib.request, "urlopen", urlopen)
+    destination = tmp_path / "test.yml"
+
+    with pytest.raises(RuntimeError, match="semantic content differs"):
+        runner.download_rule_bundle(bundle, destination)
+
+    assert calls == 3
+    assert not destination.exists()
+
+
 def test_retries_transient_unreviewed_registry_content_before_accepting_reviewed_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -146,6 +206,7 @@ def test_retries_transient_unreviewed_registry_content_before_accepting_reviewed
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(reviewed),
         revisions=(
             runner.RuleRevision(
                 sha256=hashlib.sha256(reviewed).hexdigest(),
@@ -179,6 +240,7 @@ def test_reports_observed_content_after_bounded_registry_retries(
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(reviewed),
         revisions=(
             runner.RuleRevision(
                 sha256=hashlib.sha256(reviewed).hexdigest(),
@@ -231,6 +293,7 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
         runner.RuleBundle(
             name=name,
             url=url,
+            semantic_sha256=_semantic_rule_sha256(payloads[url]),
             revisions=(
                 runner.RuleRevision(
                     sha256=hashlib.sha256(payloads[url]).hexdigest(),
