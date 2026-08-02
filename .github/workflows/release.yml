@@ -520,7 +520,7 @@ jobs:
           fi
           ditto "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
-          pnpm --dir desktop run test:e2e:packaged -- \
+          pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Unmount macOS installer
         if: always() && runner.os == 'macOS'
@@ -557,7 +557,7 @@ jobs:
             if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
-          pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
@@ -652,7 +652,7 @@ jobs:
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
-          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged -- \
+          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu signing and installation state
         if: always() && runner.os == 'Linux'
@@ -954,7 +954,7 @@ jobs:
           fi
           ditto "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
-          pnpm --dir desktop run test:e2e:packaged -- \
+          pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Unmount macOS validation installer
         if: always() && runner.os == 'macOS'
@@ -991,7 +991,7 @@ jobs:
             if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
-          pnpm --dir desktop run test:e2e:packaged -- --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
@@ -1040,7 +1040,7 @@ jobs:
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
-          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged -- \
+          xvfb-run --auto-servernum pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu validation installation
         if: always() && runner.os == 'Linux'

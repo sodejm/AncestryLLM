@@ -1,5 +1,6 @@
 """Contract tests for the exact-head desktop verification workflow."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +130,22 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "ANCESTRYLLM_RESTART_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_MISMATCH_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" not in production_sources
+
+
+def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator() -> None:
+    workflow = _workflow()
+
+    expected_scenarios = (
+        "exercises first run, persistence, corrupt preferences, security, and resource evidence",
+        "withholds and restores the packaged sidecar through Diagnostics retry",
+        "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
+        "rejects a target-native wrong-build packaged sidecar",
+    )
+    assert workflow.count("test:e2e:packaged") == len(expected_scenarios)
+    for scenario in expected_scenarios:
+        assert workflow.count(f'--grep "{scenario}"') == 1
+
+    assert re.search(r"test:e2e:packaged --\s", workflow) is None
 
 
 def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandbox() -> None:
