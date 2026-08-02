@@ -18,7 +18,7 @@ sanitized capability summary, and local visual Settings only. It uses a
 private control-only sidecar and has no genealogy, files, jobs, chat,
 providers, cloud accounts, or updater surface. The
 [desktop shell guide](DESKTOP_SHELL.md) defines its supported targets, manual
-signed-installer model, unsigned-artifact distinction, and sanitized recovery
+installer model, pre-1.0 unsigned/self-signed policy, and sanitized recovery
 contract. The [desktop verification guide](DESKTOP_VERIFICATION.md) defines the
 exact-head hosted matrix, machine-readable evidence, and external release
 blockers. Later domain adapters must reuse the existing service surface rather

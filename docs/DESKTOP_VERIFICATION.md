@@ -32,30 +32,33 @@ aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
 Workflow-level path filters are not used: the in-workflow classifier may skip
 the expensive jobs, but `Desktop gate` still reports a result.
 
-## Signed installer release matrix
+## Installer release matrix and signing boundary
 
-The manually dispatched pre-tag release workflow builds the four
-signed-installer rows below for one full commit SHA and stable version. This is
-the only build matrix that may establish signed-installer support:
+The manually dispatched pre-tag release workflow builds the four installer
+rows below for one full commit SHA and stable version. AncestryLLM does not use
+full production/trusted binary signing before the first full version release,
+v1.0.0. Official `0.x` rows therefore use `binarySigningMode: "unsigned"`;
+local/manual `0.x` assembly may instead declare `self-signed`. Starting with
+v1.0.0, all rows must declare `trusted` and pass their platform signature gates.
 
 | Runner | Sidecar | Supported target | Installer |
 |---|---|---|---|
-| `macos-15` | `darwin-arm64` | macOS 15 arm64 | signed and notarized DMG |
-| `macos-15-intel` | `darwin-x64` | macOS 15 x64 | signed and notarized DMG |
-| `ancestryllm-windows-11` | `win32-x64` | Windows 11 x64 | Authenticode-signed NSIS EXE |
-| `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 x64 | DEB with detached GPG signature |
+| `macos-15` | `darwin-arm64` | macOS 15 arm64 | DMG; Developer ID signed and notarized at v1.0.0+ |
+| `macos-15-intel` | `darwin-x64` | macOS 15 x64 | DMG; Developer ID signed and notarized at v1.0.0+ |
+| `ancestryllm-windows-11` | `win32-x64` | Windows 11 x64 | NSIS EXE; Authenticode signed at v1.0.0+ |
+| `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 x64 | DEB; detached GPG signature at v1.0.0+ |
 
 Each row must use the matching native sidecar, install or mount the full
 installer, and launch the installed application with an empty runtime `PATH`.
 That last check prevents an installed bundle from silently depending on a
-system Python, Node.js, or pnpm. macOS requires `codesign` verification,
-hardened runtime with the reviewed minimal entitlements, Gatekeeper acceptance,
-notarization, stapling, and the configured Apple Team ID. Windows requires a
-valid Authenticode result from the configured certificate thumbprint and real
-Windows 11 install/launch. Ubuntu requires detached-signature verification
-against the configured public key and complete fingerprint in a clean,
-public-key-only keyring before DEB install/launch. These public signer identities
-are enforced again by the validation jobs, independently of the signing jobs.
+system Python, Node.js, or pnpm. At v1.0.0 and later, macOS additionally
+requires `codesign` verification, hardened runtime with the reviewed minimal
+entitlements, Gatekeeper acceptance, notarization, stapling, and the configured
+Apple Team ID. Windows additionally requires a valid Authenticode result from
+the configured certificate thumbprint. Ubuntu additionally requires detached-
+signature verification against the configured public key and complete
+fingerprint in a clean, public-key-only keyring. These v1.0.0+ public signer
+identities are enforced again by validation jobs independently of signing jobs.
 
 Validation then runs those four immutable installer artifacts in all six exact
 supported environments: macOS 15 arm64 and x64, macOS 26 arm64 and x64,
@@ -209,7 +212,9 @@ targets and one security document from the same full commit SHA.
 
 A successful aggregate uses `status: "passed"` and
 `platformValidated: true`. Its `publicationRequirements` object still requires
-the separate signed installer evidence tracked by #231.
+the separate desktop installer evidence tracked by #231. That evidence records
+the version-derived binary-signing mode; it does not require trusted signing
+for `0.x`.
 
 Evidence files are written once. A pre-existing output, malformed schema,
 failed boolean, invalid metric, nonzero renderer egress count, unexpected
@@ -224,13 +229,14 @@ cross-platform integrity observation.
 
 ## Release boundary and follow-up
 
-Issue #230 establishes cross-platform verification for the unpublished
-package boundary. It does not create or approve a signed installer. The #231
-pre-tag layer consumes that exact-head input and establishes a signed-installer
-claim only when every target-matched, manually installed signed installer,
-macOS notarization check, provenance step, and actual supported-OS execution
-passes under the [release runbook](RELEASING.md). A local build, a different
-Windows runner, or an incomplete pre-tag run cannot substitute for that proof.
+Issue #230 establishes cross-platform verification for the unpublished package
+boundary. It does not create or approve a release installer. The #231 pre-tag
+layer consumes that exact-head input and establishes an installer claim only
+when every target-matched installer is manually installed and exercised, and
+the provenance and actual supported-OS checks pass under the
+[release runbook](RELEASING.md). Trusted signature and macOS notarization checks
+join that claim at v1.0.0. A local build, a different Windows runner, or an
+incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
 #131 or the release-coordination tracker #132. CI success must not be used to

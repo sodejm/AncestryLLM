@@ -40,10 +40,12 @@ reports a conclusion.
 
 The desktop workflow applies the same pattern through the stable `Desktop
 gate`. Its source-security job and six native unpublished-package rows emit
-exact-head machine-readable evidence. The Windows hosted row executes on
-Windows Server 2025 and is not Windows 11 release evidence; signed installers
-and actual Windows 11 execution remain external blockers. See the
-[desktop verification guide](DESKTOP_VERIFICATION.md).
+exact-head machine-readable evidence. They do not establish production binary
+signing. Official 0.x releases default to unsigned installers and may produce
+self-signed installers only in local/manual runs; full trusted binary signing
+is deferred until and required starting with v1.0.0. Release validation still
+requires the exact installer bytes to install and execute on the supported OS
+matrix. See the [desktop verification guide](DESKTOP_VERIFICATION.md).
 
 ## Ruleset migration for the pull-request matrix
 

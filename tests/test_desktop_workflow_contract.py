@@ -146,7 +146,8 @@ def test_verification_document_covers_external_release_blockers() -> None:
     assert "Windows 11" in document
     assert "platformValidated" in document
     assert "unpacked-native" in document
-    assert "signed installer" in document
+    assert "binary-signing mode" in document
+    assert "v1.0.0" in document
     assert "ad hoc" in document
     assert "#231" in document
     assert "#131" in document

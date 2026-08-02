@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
 GIT_HEAD = "b" * 40
-VERSION = "0.5.0"
+VERSION = "1.0.0"
 WORKFLOW_RUN_ID = 123456789
 WORKFLOW_RUN_ATTEMPT = 1
 SOURCE_ARTIFACT_ID = 987654321
@@ -116,6 +116,8 @@ def _create_target(root: Path, target: str) -> Path:
         GIT_HEAD,
         "--version",
         VERSION,
+        "--signing-mode",
+        "trusted",
         "--target",
         target,
         "--expected-os",

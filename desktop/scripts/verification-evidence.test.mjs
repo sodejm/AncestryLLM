@@ -386,7 +386,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.equal(aggregate.targets.length, 6)
   assert.equal(aggregate.platformValidated, true)
   assert.equal(aggregate.status, 'passed')
-  assert.deepEqual(aggregate.publicationRequirements, { signedInstaller: true })
+  assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
 
   await writeFile(join(targetsRoot, 'ancestryllm-windows-11', 'evidence.json'), encoded({
     ...aggregate.targets.find((target) => target.runner === 'ancestryllm-windows-11'),

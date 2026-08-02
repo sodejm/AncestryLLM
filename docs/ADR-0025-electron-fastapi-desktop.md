@@ -67,11 +67,13 @@ endpoint, executable or preference-file path, stderr, raw sidecar or bridge
 errors, or stack traces. Electron main is the sole authenticated sidecar
 client.
 
-Supported 0.5.0 distribution uses manually installed signed installers after
-the platform-specific release gates pass. Unsigned CI artifacts and unpacked
-development builds are verification inputs, not supported releases. There is
-no updater, update feed, background update channel, or staged rollout in this
-version.
+Supported 0.5.0 distribution uses manually installed installers after the
+platform-specific release gates pass. The official 0.x release workflow
+defaults to unsigned binaries; local/manual builds may be self-signed, but
+full production/trusted signing is not used until the first full version
+release, v1.0.0. Release notes and evidence disclose the mode and warn that the
+OS may report an unknown publisher. There is no updater, update feed,
+background update channel, or staged rollout in this version.
 
 ### Target desktop product requirements
 

@@ -24,9 +24,11 @@ equivalent Electron resources directory on Windows and Linux.
 The workflow smoke-tests the native executable before packaging and verifies
 the exact packaged resource afterwards. A system Python installation is not
 used at runtime. CI output is an unsigned, unpacked verification artifact, not
-a supported release. Supported distribution requires a manually installed,
-signed installer plus applicable notarization, provenance, installation,
-target-execution, and packaged assurance gates. Version 0.5.0 has no updater,
+a supported release. Supported distribution requires a manually installed
+installer plus provenance, installation, target-execution, and packaged
+assurance gates. Full production/trusted binary signing and applicable
+notarization begin at v1.0.0; official `0.x` installers default to unsigned and
+local/manual `0.x` installers may be self-signed. Version 0.5.0 has no updater,
 update feed, background update channel, or staged rollout.
 
 ## Private lifecycle
@@ -111,6 +113,6 @@ node desktop/scripts/verify-sidecar.mjs darwin-arm64 desktop/release
 ```
 
 Choose the exact native target; cross-built sidecars are rejected. A desktop
-support or `0.5.0` release claim also requires the release tracker, signed
-installer, platform execution, installation, and packaged assurance gates to
-pass. Unsigned CI artifacts do not satisfy those gates.
+support or `0.5.0` release claim also requires the release tracker, declared
+binary-signing mode, platform execution, installation, and packaged assurance
+gates to pass. Unpacked CI artifacts do not satisfy those gates.

@@ -72,24 +72,29 @@ and architecture controls.
 ## Installation and updates
 
 The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
-on x64, and Ubuntu 24.04 on x64. A supported release is a manually installed,
-signed installer that has passed the target-specific release and packaged
-assurance gates in the [release runbook](RELEASING.md).
+on x64, and Ubuntu 24.04 on x64. A supported release is a manually installed
+installer that has passed the target-specific release and packaged assurance
+gates in the [release runbook](RELEASING.md). Full production/trusted binary
+signing is explicitly deferred until the first full version release, v1.0.0.
+Official `0.x` installers default to unsigned; local or explicitly manual
+`0.x` installers may be self-signed.
 
-Unsigned CI artifacts and unpacked development builds are verification inputs,
-not supported releases or evidence of successful signing, notarization, or
-installation. For an install or upgrade, quit AncestryLLM; download the
+Unpacked CI artifacts and development builds are verification inputs, not
+supported releases or evidence of installation. For an install or upgrade,
+quit AncestryLLM; download the
 target-matched full installer and `SHA256SUMS` from the same immutable release;
-verify its digest and platform signature; install it over the current
-application; relaunch; and confirm the version and healthy Diagnostics. Ubuntu
-also requires the adjacent `.deb.asc` detached GPG signature. Application files
-are replaced while OS-managed AncestryLLM data and configuration directories
-are retained.
+verify its digest and declared `binarySigningMode`; install it over the current
+application; relaunch; and confirm the version and healthy Diagnostics. A
+`0.x` binary may produce an unknown-publisher or equivalent operating-system
+prompt. At v1.0.0 and later, also verify the trusted platform signature;
+Ubuntu then requires the adjacent `.deb.asc` detached GPG signature.
+Application files are replaced while OS-managed AncestryLLM data and
+configuration directories are retained.
 
 Version 0.5.0 has no updater feed, no background update, no staged rollout, and
 no automatic rollback. It publishes no `latest*.yml` or blockmap. Updating and
-rolling back mean manually installing an appropriate complete, signed
-installer whose checksum and platform signature still verify.
+rolling back mean manually installing an appropriate complete installer whose
+checksum and version-required platform signature still verify.
 
 ## Sanitized diagnostics and recovery
 
@@ -97,7 +102,7 @@ When the bundled runtime is unavailable, keep recovery bounded and generic:
 
 1. Open **Diagnostics** and request one bounded retry.
 2. If the failure remains, close and reopen the application.
-3. Reinstall the same supported, target-matched signed build when local files
+3. Reinstall the same supported, target-matched build when local files
    may be incomplete.
 4. When reporting a problem, include only the application version,
    operating-system target, and stable diagnostic code shown by the shell. Do
@@ -120,5 +125,6 @@ The exact-head [desktop verification gate](DESKTOP_VERIFICATION.md) separately
 assembles and launches the literal unpublished unpacked executable on six
 hosted runner rows, exercises healthy first run, durable settings, corrupt
 preferences, accessibility and hardening controls, and inspects the packaged
-fuses. It does not launch a signed installer. Signing, manual installation, and
-actual Windows 11 execution remain separate release gates.
+fuses. It does not launch an installer. Manual installation and actual Windows
+11 execution remain separate release gates; trusted signing becomes a release
+gate at v1.0.0.

@@ -1,4 +1,4 @@
-"""Contracts for supported v0.5 signed desktop release artifacts."""
+"""Contracts for version-aware supported desktop release artifacts."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
 
     signing_start = workflow.index("      - name: Sign Ubuntu installer\n")
     verification_start = workflow.index(
-        "      - name: Verify, install, and exercise signed Ubuntu application\n"
+        "      - name: Verify, install, and exercise Ubuntu application\n"
     )
     cleanup_start = workflow.index(
         "      - name: Remove temporary Ubuntu signing and installation state\n"
@@ -125,7 +125,12 @@ def test_release_workflow_separates_pretag_installer_gates_from_tag_publication(
     assert "desktop artifact manifest digest mismatch" in workflow
     assert "github.rest.actions.downloadArtifact" not in workflow
     assert "compression-level: 0" in workflow
-    assert "environment: desktop-signing" in workflow
+    assert (
+        "environment: ${{ needs.validate.outputs.binary_signing_mode == 'trusted' "
+        "&& 'desktop-signing' || 'desktop-prerelease' }}"
+    ) in workflow
+    assert "scripts/release_signing_policy.py --version" in workflow
+    assert "BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}" in workflow
     assert "assemble-release-distributions:" in workflow
     assert "release-distributions" in workflow
 
@@ -145,19 +150,19 @@ def test_release_workflow_separates_pretag_installer_gates_from_tag_publication(
         assert "github.event_name == 'push'" in preamble
 
 
-def test_release_packaging_is_signed_manual_full_installer_only() -> None:
+def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None:
     builder = BUILDER_CONFIG.read_text(encoding="utf-8")
     entitlements = ENTITLEMENTS.read_text(encoding="utf-8")
 
     assert "appId: org.ancestryllm.desktop" in builder
-    assert "forceCodeSigning: true" in builder
+    assert "forceCodeSigning: false" in builder
     assert "identity: null" not in builder
     assert "target: dmg" in builder
     assert "target: nsis" in builder
     assert "target: deb" in builder
     assert "hardenedRuntime: true" in builder
     assert "entitlements.mac.plist" in builder
-    assert "notarize: true" in builder
+    assert "notarize: false" in builder
     assert "oneClick: false" in builder
     assert "allowToChangeInstallationDirectory: true" in builder
     assert "differentialPackage: false" in builder
@@ -261,6 +266,8 @@ def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: 
             "a" * 40,
             "--version",
             "0.5.0",
+            "--signing-mode",
+            "unsigned",
             "--target",
             "linux-x64",
             "--expected-os",
