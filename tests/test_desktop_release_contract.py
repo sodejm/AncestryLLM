@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,17 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "--status-fd 1 --verify" in workflow
     assert 'grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint "' in workflow
     assert "verification keyring unexpectedly contains a private key" in workflow
+
+
+def test_release_packaged_smoke_forwards_the_playwright_filter_without_a_pnpm_separator() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    scenario = (
+        "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+    )
+
+    assert workflow.count("test:e2e:packaged") == 6
+    assert workflow.count(f'--grep "{scenario}"') == 6
+    assert re.search(r"test:e2e:packaged --\s", workflow) is None
 
 
 def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> None:

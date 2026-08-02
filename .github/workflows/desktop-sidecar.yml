@@ -363,7 +363,7 @@ jobs:
             --gate rendererZeroEgressCanaryPassed \
             --gate normalLaunchDebugSurfaceAbsentPassed \
             --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
-            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
@@ -373,7 +373,7 @@ jobs:
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --gate packagedSidecarWithholdRetryPassed \
             --artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
-            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "withholds and restores the packaged sidecar through Diagnostics retry"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
@@ -385,7 +385,7 @@ jobs:
             --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             --gate packagedSidecarRestartExhaustionQuitPassed \
             --artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE" \
-            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
@@ -400,7 +400,7 @@ jobs:
             --gate packagedSidecarVersionMismatchPassed \
             --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
             --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
-            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
+            -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "rejects a target-native wrong-build packaged sidecar"
       - name: Inspect packaged Electron fuses
         shell: bash
