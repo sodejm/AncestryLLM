@@ -183,8 +183,9 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
     assert "desktop-exact-head-evidence.json" in workflow
     assert 'pnpm --dir desktop pkg set version="$VERSION"' in workflow
     assert workflow.index('pnpm --dir desktop pkg set version="$VERSION"') < workflow.index(
-        "pnpm --dir desktop sbom"
+        "pnpm --dir desktop run sbom"
     )
+    assert "pnpm --dir desktop sbom" not in workflow
     assert "download-artifact" in workflow
     assert "desktop-evidence-aggregate" in workflow
     assert "subject-path: dist/*" in workflow

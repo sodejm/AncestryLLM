@@ -673,7 +673,7 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
           pnpm --dir desktop pkg set version="$VERSION"
-          pnpm --dir desktop sbom
+          pnpm --dir desktop run sbom
           row_dir="desktop-release-row"
           mkdir "$row_dir"
           installer_name="$(basename "$INSTALLER")"
