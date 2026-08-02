@@ -121,6 +121,25 @@ test('receipt wrapper rejects tracked and staged mutations without writing a rec
   }
 })
 
+test('receipt wrapper rejects tracked mutations hidden by index flags', async () => {
+  const fixture = await cleanRepositoryFixture('ancestryllm-hidden-index-mutation-')
+  const outputPath = join(fixture.root, 'receipt.json')
+
+  await assert.rejects(runVerificationCommand({
+    gitHead: fixture.gitHead,
+    outputPath,
+    gates: ['auditPassed'],
+    command: [
+      '/bin/sh',
+      '-c',
+      "git update-index --assume-unchanged tracked.txt && printf 'hidden\\n' > tracked.txt",
+    ],
+    repositoryRoot: fixture.repositoryRoot,
+    forwardOutput: false,
+  }), /verification workspace changed during the command/)
+  await assert.rejects(access(outputPath), (error) => error.code === 'ENOENT')
+})
+
 test('receipt wrapper rejects undeclared untracked output and accepts only an explicit output path', async () => {
   const rejected = await cleanRepositoryFixture('ancestryllm-undeclared-output-')
   const rejectedReceipt = join(rejected.root, 'rejected.json')

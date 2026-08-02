@@ -219,6 +219,7 @@ async function captureWorkspaceState(repositoryRoot, allowedOutputs) {
   const headBefore = await gitHead(repositoryRoot)
   const indexDiff = await gitOutput(repositoryRoot, ['diff', '--cached', '--no-ext-diff', '--binary', '--full-index', '--no-renames', 'HEAD', '--'])
   const worktreeDiff = await gitOutput(repositoryRoot, ['diff', '--no-ext-diff', '--binary', '--full-index', '--no-renames', '--'])
+  const indexFlags = await gitOutput(repositoryRoot, ['ls-files', '-v', '-z'])
   const untrackedBytes = await gitOutput(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
   const untrackedPaths = nullSeparatedPaths(untrackedBytes)
     .filter((path) => !pathIsAllowed(path, allowedOutputs))
@@ -231,6 +232,7 @@ async function captureWorkspaceState(repositoryRoot, allowedOutputs) {
     headAfter,
     indexDiff: digest(indexDiff),
     worktreeDiff: digest(worktreeDiff),
+    indexFlags: digest(indexFlags),
     untracked: Object.freeze(untracked),
   })
 }
