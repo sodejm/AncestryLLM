@@ -87,7 +87,8 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert '--allow-output "$RECEIPTS_DIR/api-contract.json"' in workflow
     assert "inspect-package-fuses.mjs --output" in workflow
     assert "pnpm --dir desktop run check:secrets" in workflow
-    assert "pnpm --dir desktop sbom" in workflow
+    assert "pnpm --dir desktop run sbom" in workflow
+    assert "pnpm --dir desktop sbom" not in workflow
     assert "verification-evidence.mjs target" in workflow
     assert "verification-evidence.mjs security" in workflow
     assert "--receipts" in workflow
@@ -128,6 +129,52 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "ANCESTRYLLM_RESTART_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_MISMATCH_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" not in production_sources
+
+
+def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandbox() -> None:
+    workflow = _workflow()
+
+    assert (
+        'wrong_build_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/'
+        '$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"' in workflow
+    )
+    expected_evidence_paths = (
+        'ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"',
+        'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
+        'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
+        'ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"',
+    )
+    for evidence_path in expected_evidence_paths:
+        assert evidence_path in workflow
+
+    expected_recorded_evidence = (
+        '--withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json"',
+        '--restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
+        '--mismatch-evidence "$ROW_ROOT/sidecar-version-mismatch.json"',
+    )
+    for evidence_path in expected_recorded_evidence:
+        assert evidence_path in workflow
+    assert '--withhold-evidence "$ANCESTRYLLM_WITHHOLD_EVIDENCE"' not in workflow
+    assert '--restart-evidence "$ANCESTRYLLM_RESTART_EVIDENCE"' not in workflow
+    assert '--mismatch-evidence "$ANCESTRYLLM_MISMATCH_EVIDENCE"' not in workflow
+
+    sandbox_step = "Prepare Chromium sandbox for unpacked Linux verification"
+    assert f"name: {sandbox_step}" in workflow
+    assert "if: runner.os == 'Linux'" in workflow
+    assert 'sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"' in workflow
+    assert '"$GITHUB_WORKSPACE/desktop/release"/*) ;;' in workflow
+    assert 'echo "::error::Unexpected Chromium sandbox path"' in workflow
+    assert 'test ! -L "$sandbox_path"' in workflow
+    assert 'test -f "$sandbox_path"' in workflow
+    assert 'sudo chown root:root -- "$sandbox_path"' in workflow
+    assert 'sudo chmod 4755 -- "$sandbox_path"' in workflow
+    assert 'test "$(stat -c \'%U:%G:%a\' -- "$sandbox_path")" = "root:root:4755"' in workflow
+    assert "--no-sandbox" not in workflow
+    assert (
+        workflow.index("Assemble unpublished unpacked native application")
+        < workflow.index(sandbox_step)
+        < workflow.index("Exercise the packaged application")
+    )
 
 
 def test_fatal_sidecar_startup_uses_the_renderer_diagnostics_recovery_surface() -> None:

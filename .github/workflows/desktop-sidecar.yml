@@ -154,7 +154,7 @@ jobs:
             --allow-output "$RECEIPTS_DIR/secrets.json" \
             --gate sbomGeneratedPassed \
             --artifact sbom=desktop/sbom.cdx.json \
-            -- pnpm --dir desktop sbom
+            -- pnpm --dir desktop run sbom
           cp desktop/sbom.cdx.json "$SECURITY_ROOT/sbom.cdx.json"
       - name: Record security evidence
         shell: bash
@@ -306,7 +306,7 @@ jobs:
             --gate sidecarSmokePassed \
             -- uv run python scripts/smoke_sidecar.py "$sidecar_executable"
           uv run python scripts/build_verification_sidecar.py --expected-target "$SIDECAR_TARGET"
-          wrong_build_sidecar="desktop/build/verification-sidecar/$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"
+          wrong_build_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"
           if [[ "$SIDECAR_TARGET" == "win32-x64" ]]; then wrong_build_sidecar="$wrong_build_sidecar.exe"; fi
           echo "ANCESTRYLLM_WRONG_BUILD_SIDECAR=$wrong_build_sidecar" >> "$GITHUB_ENV"
       - name: Build production Electron application
@@ -322,6 +322,24 @@ jobs:
         env:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
         run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release
+      - name: Prepare Chromium sandbox for unpacked Linux verification
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs)"
+          sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"
+          case "$sandbox_path" in
+            "$GITHUB_WORKSPACE/desktop/release"/*) ;;
+            *)
+              echo "::error::Unexpected Chromium sandbox path"
+              exit 1
+              ;;
+          esac
+          test ! -L "$sandbox_path"
+          test -f "$sandbox_path"
+          sudo chown root:root -- "$sandbox_path"
+          sudo chmod 4755 -- "$sandbox_path"
+          test "$(stat -c '%U:%G:%a' -- "$sandbox_path")" = "root:root:4755"
       - name: Exercise the packaged application
         shell: bash
         env:
@@ -331,10 +349,10 @@ jobs:
           packaged_app="$(node desktop/scripts/find-packaged-app.mjs)"
           mkdir -p "$ROW_ROOT"
           export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
-          export ANCESTRYLLM_PACKAGED_METRICS="$ROW_ROOT/packaged-metrics.json"
-          export ANCESTRYLLM_WITHHOLD_EVIDENCE="$ROW_ROOT/sidecar-withhold-retry.json"
-          export ANCESTRYLLM_RESTART_EVIDENCE="$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
-          export ANCESTRYLLM_MISMATCH_EVIDENCE="$ROW_ROOT/sidecar-version-mismatch.json"
+          export ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"
+          export ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"
+          export ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
+          export ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"
           package_launcher=()
           if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
           node desktop/scripts/verification-receipt.mjs \
@@ -427,9 +445,9 @@ jobs:
             --package-boundary "$PACKAGE_BOUNDARY" \
             --metrics "$ROW_ROOT/packaged-metrics.json" \
             --fuse-inspection "$ROW_ROOT/fuse-inspection.json" \
-            --withhold-evidence "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
-            --restart-evidence "$ANCESTRYLLM_RESTART_EVIDENCE" \
-            --mismatch-evidence "$ANCESTRYLLM_MISMATCH_EVIDENCE" \
+            --withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --mismatch-evidence "$ROW_ROOT/sidecar-version-mismatch.json" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
