@@ -121,6 +121,36 @@ def test_snapshot_aborts_if_the_open_source_changes_during_copy(
     assert not destination.exists()
 
 
+def test_snapshot_aborts_if_source_content_changes_with_size_and_mtime_restored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_snapshot_helper()
+    source = _private_file(tmp_path / "credential", b"original bytes\n")
+    original_metadata = source.stat()
+    destination_directory = _private_destination_directory(tmp_path / "snapshots")
+    destination = destination_directory / "credential.snapshot"
+    original_copy = module._copy_descriptor
+
+    def mutating_copy(source_descriptor: int, destination_descriptor: int) -> int:
+        source.write_bytes(b"modified bytes\n")
+        source.chmod(0o600)
+        os.utime(
+            source,
+            ns=(original_metadata.st_atime_ns, original_metadata.st_mtime_ns),
+        )
+        return original_copy(source_descriptor, destination_descriptor)
+
+    monkeypatch.setattr(module, "_copy_descriptor", mutating_copy)
+
+    with pytest.raises(module.SnapshotError, match="changed while it was being copied"):
+        module.snapshot_credential_file(source, destination, REPOSITORY_ROOT)
+
+    assert source.stat().st_size == original_metadata.st_size
+    assert source.stat().st_mtime_ns == original_metadata.st_mtime_ns
+    assert source.stat().st_ctime_ns != original_metadata.st_ctime_ns
+    assert not destination.exists()
+
+
 def test_snapshot_rejects_a_symbolic_link_source(tmp_path: Path) -> None:
     target = _private_file(tmp_path / "target")
     source = tmp_path / "credential-link"

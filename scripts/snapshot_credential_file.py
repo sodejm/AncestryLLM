@@ -113,6 +113,7 @@ def _stable_source_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
         metadata.st_gid,
         metadata.st_size,
         metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
     )
 
 

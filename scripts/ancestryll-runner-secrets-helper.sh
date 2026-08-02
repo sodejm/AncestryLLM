@@ -129,6 +129,12 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command is missing: $1"
 }
 
+canonical_path() {
+  /usr/bin/python3 -c \
+    'import os, sys; print(os.path.realpath(sys.argv[1]))' \
+    "$1"
+}
+
 path_owner_and_mode() {
   local inspected_path=$1
 
@@ -185,14 +191,14 @@ resolve_trusted_gh() {
     esac
     [ ! -L "$GH_EXECUTABLE_ARGUMENT" ] \
       || fail 'GitHub CLI executable must not be a symbolic link'
-    canonical_candidate=$(/bin/realpath -- "$GH_EXECUTABLE_ARGUMENT") \
+    canonical_candidate=$(canonical_path "$GH_EXECUTABLE_ARGUMENT") \
       || fail "Could not resolve GitHub CLI executable: $GH_EXECUTABLE_ARGUMENT"
     [ "$canonical_candidate" = "$GH_EXECUTABLE_ARGUMENT" ] \
       || fail 'GitHub CLI executable must be a canonical path without symbolic links'
   else
     for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
       if [ -x "$candidate" ]; then
-        canonical_candidate=$(/bin/realpath -- "$candidate") \
+        canonical_candidate=$(canonical_path "$candidate") \
           || fail "Could not resolve GitHub CLI executable: $candidate"
         break
       fi
@@ -441,7 +447,7 @@ require_command /usr/bin/python3
 
 resolve_trusted_gh
 
-REPOSITORY_ROOT=$(/bin/realpath \
+REPOSITORY_ROOT=$(canonical_path \
   "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/..") \
   || fail 'Could not resolve the repository root'
 APPLE_IDENTITY_EXPORTER="$REPOSITORY_ROOT/scripts/export-apple-signing-identity.swift"

@@ -77,7 +77,6 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/api-contract.json" \
-            --allow-output desktop/verification/security \
             --gate apiContractPassed \
             --gate authBeforeParsingPassed \
             --gate domainRoutesAbsentPassed \
@@ -97,7 +96,7 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/desktop-tests.json"
-          --allow-output desktop/verification/security
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
           --gate ipcSenderValidationPassed
           -- pnpm --dir desktop run test
       - name: Verify production build inspection
@@ -108,7 +107,8 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/build-inspection.json"
-          --allow-output desktop/verification/security
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
           --gate buildInspectionPassed
           -- pnpm --dir desktop run build
       - name: Verify dependency audit
@@ -119,7 +119,9 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/audit.json"
-          --allow-output desktop/verification/security
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/build-inspection.json"
           --gate auditPassed
           -- pnpm --dir desktop run audit
       - name: Verify secret scan
@@ -130,7 +132,10 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/secrets.json"
-          --allow-output desktop/verification/security
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/build-inspection.json"
+          --allow-output "$RECEIPTS_DIR/audit.json"
           --gate secretsPassed
           -- pnpm --dir desktop run check:secrets
       - name: Generate and bind the software inventory
@@ -142,7 +147,11 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/sbom.json" \
-            --allow-output desktop/verification/security \
+            --allow-output "$RECEIPTS_DIR/api-contract.json" \
+            --allow-output "$RECEIPTS_DIR/desktop-tests.json" \
+            --allow-output "$RECEIPTS_DIR/build-inspection.json" \
+            --allow-output "$RECEIPTS_DIR/audit.json" \
+            --allow-output "$RECEIPTS_DIR/secrets.json" \
             --gate sbomGeneratedPassed \
             --artifact sbom=desktop/sbom.cdx.json \
             -- pnpm --dir desktop sbom
@@ -294,7 +303,6 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/sidecar-smoke.json" \
-            --allow-output "$ROW_ROOT" \
             --gate sidecarSmokePassed \
             -- uv run python scripts/smoke_sidecar.py "$sidecar_executable"
           uv run python scripts/build_verification_sidecar.py --expected-target "$SIDECAR_TARGET"
@@ -332,7 +340,7 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-runtime.json" \
-            --allow-output "$ROW_ROOT" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --gate packageRuntimePassed \
             --gate rendererZeroEgressCanaryPassed \
             --gate normalLaunchDebugSurfaceAbsentPassed \
@@ -342,7 +350,9 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
-            --allow-output "$ROW_ROOT" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --gate packagedSidecarWithholdRetryPassed \
             --artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
@@ -350,7 +360,11 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
-            --allow-output "$ROW_ROOT" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
+            --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             --gate packagedSidecarRestartExhaustionQuitPassed \
             --artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE" \
             -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged -- \
@@ -358,7 +372,13 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-version-mismatch.json" \
-            --allow-output "$ROW_ROOT" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
+            --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
+            --allow-output "$ANCESTRYLLM_RESTART_EVIDENCE" \
             --gate packagedSidecarVersionMismatchPassed \
             --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
             --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
@@ -373,7 +393,15 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/fuse-inspection.json" \
-            --allow-output "$ROW_ROOT" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-version-mismatch.json" \
+            --allow-output "$ROW_ROOT/packaged-metrics.json" \
+            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ROW_ROOT/sidecar-version-mismatch.json" \
             --gate fusesInspectedPassed \
             --artifact fuseInspection="$ROW_ROOT/fuse-inspection.json" \
             -- node desktop/scripts/inspect-package-fuses.mjs --output "$ROW_ROOT/fuse-inspection.json"

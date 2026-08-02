@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { access, lstat, mkdir, readFile, readdir, readlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 
 const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
@@ -214,29 +215,51 @@ async function untrackedEntry(repositoryRoot, path) {
   return Object.freeze({ path, kind, mode: stat.mode & 0o777, digest: digest(bytes) })
 }
 
-async function workspaceSnapshot(repositoryRoot, expectedHead, allowedOutputs) {
-  const [head, indexDiff, worktreeDiff, untrackedBytes] = await Promise.all([
-    gitHead(repositoryRoot),
-    gitOutput(repositoryRoot, ['diff', '--cached', '--no-ext-diff', '--binary', '--full-index', '--no-renames', 'HEAD', '--']),
-    gitOutput(repositoryRoot, ['diff', '--no-ext-diff', '--binary', '--full-index', '--no-renames', '--']),
-    gitOutput(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z']),
-  ])
-  assert.equal(exactHead(head, 'workspace gitHead'), expectedHead, 'verification workspace left the requested exact head')
+async function captureWorkspaceState(repositoryRoot, allowedOutputs) {
+  const headBefore = await gitHead(repositoryRoot)
+  const indexDiff = await gitOutput(repositoryRoot, ['diff', '--cached', '--no-ext-diff', '--binary', '--full-index', '--no-renames', 'HEAD', '--'])
+  const worktreeDiff = await gitOutput(repositoryRoot, ['diff', '--no-ext-diff', '--binary', '--full-index', '--no-renames', '--'])
+  const untrackedBytes = await gitOutput(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
   const untrackedPaths = nullSeparatedPaths(untrackedBytes)
     .filter((path) => !pathIsAllowed(path, allowedOutputs))
     .sort()
   const untracked = []
   for (const path of untrackedPaths) untracked.push(await untrackedEntry(repositoryRoot, path))
-  const manifest = Object.freeze({
-    gitHead: head,
+  const headAfter = await gitHead(repositoryRoot)
+  return Object.freeze({
+    gitHead: headBefore,
+    headAfter,
     indexDiff: digest(indexDiff),
     worktreeDiff: digest(worktreeDiff),
     untracked: Object.freeze(untracked),
   })
+}
+
+export async function workspaceSnapshot(
+  repositoryRoot,
+  expectedHead,
+  allowedOutputs,
+  capture = captureWorkspaceState,
+) {
+  let manifest
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const first = await capture(repositoryRoot, allowedOutputs)
+    const second = await capture(repositoryRoot, allowedOutputs)
+    if (first.gitHead !== first.headAfter || second.gitHead !== second.headAfter) continue
+    if (!isDeepStrictEqual(first, second)) continue
+    manifest = second
+    break
+  }
+  assert.notEqual(manifest, undefined, 'verification workspace did not remain stable while it was inspected')
+  assert.equal(
+    exactHead(manifest.gitHead, 'workspace gitHead'),
+    expectedHead,
+    'verification workspace left the requested exact head',
+  )
   const bytes = Buffer.from(JSON.stringify(manifest), 'utf8')
   return Object.freeze({
     digest: digest(bytes),
-    dirty: indexDiff.byteLength > 0 || worktreeDiff.byteLength > 0 || untracked.length > 0,
+    dirty: manifest.indexDiff.bytes > 0 || manifest.worktreeDiff.bytes > 0 || manifest.untracked.length > 0,
   })
 }
 
@@ -272,6 +295,35 @@ async function ensureOutputAbsent(outputPath) {
     throw error
   }
   throw new Error(`Verification receipt already exists: ${outputPath}`)
+}
+
+async function existingAllowedOutputEntries(repositoryRoot, allowedOutputs) {
+  const entries = {}
+  for (const path of allowedOutputs) {
+    const repositoryRelativePath = repositoryPath(repositoryRoot, path, 'allowed output')
+    try {
+      const entry = await untrackedEntry(repositoryRoot, repositoryRelativePath)
+      assert.notEqual(entry.kind, 'directory', `allowed output must identify a file: ${repositoryRelativePath}`)
+      assert.notEqual(entry.kind, 'other', `allowed output must identify a regular file: ${repositoryRelativePath}`)
+      entries[repositoryRelativePath] = entry
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  return Object.freeze(entries)
+}
+
+async function existingArtifactDigests(repositoryRoot, artifacts) {
+  const digests = {}
+  for (const name of Object.keys(artifacts).sort()) {
+    const artifactPath = isAbsolute(artifacts[name]) ? artifacts[name] : resolve(repositoryRoot, artifacts[name])
+    try {
+      digests[name] = digest(await readFile(artifactPath))
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  return Object.freeze(digests)
 }
 
 function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
@@ -334,6 +386,8 @@ export async function runVerificationCommand({
   }
 
   await ensureOutputAbsent(outputPath)
+  const allowedOutputEntriesBefore = await existingAllowedOutputEntries(repositoryRoot, allowedOutputs)
+  const artifactDigestsBefore = await existingArtifactDigests(repositoryRoot, artifacts)
   const headBefore = exactHead(await gitHead(repositoryRoot), 'headBefore')
   assert.equal(headBefore, expectedHead, 'verification command is not starting at the requested exact head')
   const normalizedOutputs = await normalizedAllowedOutputs(repositoryRoot, allowedOutputs, artifacts, outputPath)
@@ -347,11 +401,22 @@ export async function runVerificationCommand({
   const workspaceAfter = await workspaceSnapshot(repositoryRoot, expectedHead, normalizedOutputs)
   assert.equal(workspaceAfter.dirty, false, 'verification workspace changed during the command')
   assert.deepEqual(workspaceAfter.digest, workspaceBefore.digest, 'verification workspace changed during the command')
+  const allowedOutputEntriesAfter = await existingAllowedOutputEntries(repositoryRoot, allowedOutputs)
+  for (const [path, entry] of Object.entries(allowedOutputEntriesBefore)) {
+    assert.deepEqual(allowedOutputEntriesAfter[path], entry, `Pre-existing allowed output changed: ${path}`)
+  }
 
   const artifactDigests = {}
   for (const name of Object.keys(artifacts).sort()) {
     const artifactPath = isAbsolute(artifacts[name]) ? artifacts[name] : resolve(repositoryRoot, artifacts[name])
     artifactDigests[name] = digest(await readFile(artifactPath))
+    if (artifactDigestsBefore[name] !== undefined) {
+      assert.deepEqual(
+        artifactDigests[name],
+        artifactDigestsBefore[name],
+        `Pre-existing verification artifact changed: ${name}`,
+      )
+    }
   }
 
   const receipt = Object.freeze({

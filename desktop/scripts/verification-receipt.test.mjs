@@ -11,6 +11,7 @@ import {
   parseReceiptArguments,
   runVerificationCommand,
   validateVerificationReceipt,
+  workspaceSnapshot,
 } from './verification-receipt.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -146,6 +147,93 @@ test('receipt wrapper rejects undeclared untracked output and accepts only an ex
   })
   assert.deepEqual(receipt.workspace.allowedOutputs, ['declared/output.txt'])
   assert.equal(await readFile(join(accepted.repositoryRoot, 'declared/output.txt'), 'utf8'), 'declared\n')
+})
+
+test('receipt wrapper protects a pre-existing exact allowed output', async () => {
+  const fixture = await cleanRepositoryFixture('ancestryllm-preexisting-output-')
+  const outputPath = join(fixture.root, 'receipt.json')
+  await writeFile(join(fixture.repositoryRoot, 'earlier-receipt.json'), '{}\n')
+
+  await runVerificationCommand({
+    gitHead: fixture.gitHead,
+    outputPath,
+    gates: ['auditPassed'],
+    allowedOutputs: ['earlier-receipt.json'],
+    command: [process.execPath, '-e', 'process.exit(0)'],
+    repositoryRoot: fixture.repositoryRoot,
+    forwardOutput: false,
+  })
+
+  await assert.rejects(runVerificationCommand({
+    gitHead: fixture.gitHead,
+    outputPath: join(fixture.root, 'mutated-receipt.json'),
+    gates: ['auditPassed'],
+    allowedOutputs: ['earlier-receipt.json'],
+    command: [process.execPath, '-e', "require('fs').writeFileSync('earlier-receipt.json', '{changed}\\n')"],
+    repositoryRoot: fixture.repositoryRoot,
+    forwardOutput: false,
+  }), /Pre-existing allowed output changed/)
+})
+
+test('receipt wrapper rejects a directory as an allowed output', async () => {
+  const fixture = await cleanRepositoryFixture('ancestryllm-directory-output-')
+  const outputPath = join(fixture.root, 'receipt.json')
+  await mkdir(join(fixture.repositoryRoot, 'broad-output'))
+
+  await assert.rejects(runVerificationCommand({
+    gitHead: fixture.gitHead,
+    outputPath,
+    gates: ['auditPassed'],
+    allowedOutputs: ['broad-output'],
+    command: [process.execPath, '-e', 'process.exit(0)'],
+    repositoryRoot: fixture.repositoryRoot,
+    forwardOutput: false,
+  }), /allowed output must identify a file/)
+  await assert.rejects(access(outputPath), (error) => error.code === 'ENOENT')
+})
+
+test('receipt wrapper rejects mutation of a pre-existing input artifact', async () => {
+  const fixture = await cleanRepositoryFixture('ancestryllm-preexisting-artifact-')
+  const outputPath = join(fixture.root, 'receipt.json')
+  const artifactPath = join(fixture.root, 'input-artifact.txt')
+  await writeFile(artifactPath, 'before\n')
+
+  await assert.rejects(runVerificationCommand({
+    gitHead: fixture.gitHead,
+    outputPath,
+    gates: ['auditPassed'],
+    artifacts: { inputArtifact: artifactPath },
+    command: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(artifactPath)}, 'after\\n')`],
+    repositoryRoot: fixture.repositoryRoot,
+    forwardOutput: false,
+  }), /Pre-existing verification artifact changed/)
+  await assert.rejects(access(outputPath), (error) => error.code === 'ENOENT')
+})
+
+test('workspace snapshots retry until two serialized git states agree', async () => {
+  const gitHead = 'a'.repeat(40)
+  const clean = {
+    gitHead,
+    headAfter: gitHead,
+    indexDiff: { sha256: sha256(''), bytes: 0 },
+    worktreeDiff: { sha256: sha256(''), bytes: 0 },
+    untracked: [],
+  }
+  const changing = {
+    ...clean,
+    worktreeDiff: { sha256: sha256('changed'), bytes: 7 },
+  }
+  const captures = [clean, changing, clean, clean]
+  let calls = 0
+
+  const snapshot = await workspaceSnapshot('/unused', gitHead, [], async () => {
+    const value = captures[calls]
+    calls += 1
+    return value
+  })
+
+  assert.equal(calls, 4)
+  assert.equal(snapshot.dirty, false)
 })
 
 test('receipt validation rejects claimed success, head drift, and malformed output digests', () => {
