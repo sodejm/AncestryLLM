@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import sysconfig
 import tempfile
 from pathlib import Path
 from typing import Sequence
@@ -29,6 +30,18 @@ def native_target(system: str, machine: str) -> str:
         raise ValueError(f"unsupported native sidecar target: {system}/{machine}") from error
 
 
+def runtime_target(system: str, machine: str, python_platform: str) -> str:
+    """Return the native target, allowing x64 Python on a Windows ARM64 host."""
+
+    if (
+        system.casefold() == "windows"
+        and machine.casefold() == "arm64"
+        and python_platform.casefold() == "win-amd64"
+    ):
+        return "win32-x64"
+    return native_target(system, machine)
+
+
 def executable_path(output_root: Path, target: str) -> Path:
     """Return the path Electron expects after electron-builder copies resources."""
 
@@ -39,7 +52,7 @@ def executable_path(output_root: Path, target: str) -> Path:
 def build(output_root: Path, expected_target: str | None = None) -> Path:
     """Build the current host target and return its native executable path."""
 
-    target = native_target(platform.system(), platform.machine())
+    target = runtime_target(platform.system(), platform.machine(), sysconfig.get_platform())
     if expected_target is not None and target != expected_target:
         raise RuntimeError(f"native build host is {target}, expected {expected_target}")
 
