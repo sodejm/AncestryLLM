@@ -24,8 +24,8 @@ or sensitive data in that request.
 | Version | Security status |
 |---|---|
 | `main` (unreleased development) | Reports accepted; not a stable release |
-| `0.3.x` | Supported stable release line |
-| Earlier than `0.3.0` | Unsupported; reproduce on a supported version when possible |
+| `0.4.x` | Supported stable release line |
+| Earlier than `0.4.0` | Unsupported; reproduce on a supported version when possible |
 
 Update this table whenever the stable release line changes.
 
