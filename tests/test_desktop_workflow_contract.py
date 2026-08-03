@@ -43,7 +43,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64"),
         ("macos-26", "darwin-arm64", "macOS 26", "arm64"),
         ("macos-26-intel", "darwin-x64", "macOS 26", "x64"),
-        ("ancestryllm-windows-11", "win32-x64", "Windows 11", "x64"),
+        ("windows-11-arm", "win32-x64", "Windows 11", "x64"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64"),
     )
     for runner, sidecar_target, expected_os, arch in expected_rows:
@@ -64,8 +64,16 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         "ACTUAL_OS: ${{ steps.macos-host.outputs.actual_os || "
         "steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}" in workflow
     )
-    assert 'runs_on: \'["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]\'' in workflow
-    assert "ephemeral one-job runner" in workflow
+    assert "runs_on: '[\"windows-11-arm\"]'" in workflow
+    assert "name: Windows 11 ARM64 host / x64 package" in workflow
+    assert "host_arch: arm64" in workflow
+    assert workflow.count("runtime_arch:") == 6
+    assert "runtime_arch: x64" in workflow
+    assert workflow.count("architecture: ${{ matrix.runtime_arch }}") == 2
+    assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
+    assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
+    assert "self-hosted" not in workflow
+    assert "ancestryllm-windows-11" not in workflow
     assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow
     assert "windows-2025" not in workflow
     assert "Windows Server 2025" not in workflow

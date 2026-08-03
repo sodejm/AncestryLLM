@@ -75,10 +75,9 @@ process before reconfiguration:
 - `[GH_INSTALL_COMMAND]` if GitHub CLI is not already installed, and the
   project's approved `[GH_AUTHENTICATION_METHOD]`. The repository does not
   prescribe either one.
-- `[RUNNER_REGISTRATION_TOKEN]`, `[RUNNER_PROVIDER]`,
-  `[RUNNER_PROVISIONING_COMMAND]`, and `[RUNNER_DESTROY_COMMAND]` for the
-  ephemeral Windows 11 runner. No authorized provider or provisioning command
-  is defined in the repository, so the signing helper cannot create it.
+- Access to GitHub's hosted `windows-11-arm` runner for Windows 11 validation.
+  No repository runner registration token, provider, provisioning command, or
+  destroy command is required.
 
 No environment variables are required by the helper. All remaining paths and
 values are entered interactively so private values do not appear in command
@@ -269,18 +268,19 @@ If setup fails:
 - verification mismatch: do not run a release. Check repository/environment
   scope and authorization, then rerun the complete upload.
 
-## Ephemeral Windows 11 runner
+## GitHub-hosted Windows 11 validation
 
-The release contract requires a clean, one-job Windows 11 x64 VM with labels
-`self-hosted`, `Windows`, `X64`, and `ancestryllm-windows-11`. Its runner group
-must be restricted to trusted exact-`main` executions of
-`desktop-sidecar.yml` and `release.yml`, and the VM must be automatically
-destroyed after its job.
+The Windows x64 installer is built on GitHub's hosted `windows-2025` x64 image.
+The exact resulting artifact is then downloaded, installed, and launched on
+GitHub's hosted `windows-11-arm` image through Windows x64 emulation. Both
+workflows assert Windows 11 and the ARM64 host architecture before accepting
+validation evidence, and explicitly select x64 Python and Node.js for the
+Windows row so packaging and exercise stay on the shipped `win32-x64`
+boundary.
 
-Provisioning cannot be made executable until the missing
-`[RUNNER_PROVIDER]`, `[RUNNER_REGISTRATION_TOKEN]`,
-`[RUNNER_PROVISIONING_COMMAND]`, and `[RUNNER_DESTROY_COMMAND]` are approved
-and documented. Do not substitute an invented service, API, command, or
-authentication method. Once those decisions exist, add their exact setup,
-one-job lifecycle verification, and teardown procedure here before enabling a
-production release.
+GitHub supplies a fresh hosted VM for each job, so the repository has no
+self-hosted runner registration, provider, runner group, provisioning, or
+teardown procedure to maintain. If `windows-11-arm` is unavailable to the
+repository, the Windows row remains queued or fails and the aggregate desktop
+gate cannot pass; do not substitute a Windows Server image for this validation
+boundary.

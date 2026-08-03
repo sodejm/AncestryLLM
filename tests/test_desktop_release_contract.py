@@ -21,7 +21,7 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     expected_rows = (
         ("macos-15", "darwin-arm64", "macOS 15", "arm64", "dmg"),
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64", "dmg"),
-        ("ancestryllm-windows-11", "win32-x64", "Windows 11", "x64", "nsis"),
+        ("windows-11-arm", "win32-x64", "Windows 11", "x64", "nsis"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64", "deb"),
     )
     for runner, sidecar_target, expected_os, arch, installer_target in expected_rows:
@@ -41,6 +41,17 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
         assert f"arch: {arch}" in workflow
 
     assert "desktop-installers:" in workflow
+    assert "runner: windows-2025" in workflow
+    assert "runs_on: '\"windows-2025\"'" in workflow
+    assert "runner: windows-11-arm" in workflow
+    assert "runs_on: '\"windows-11-arm\"'" in workflow
+    assert "host_arch: arm64" in workflow
+    assert workflow.count("runtime_arch:") == 6
+    assert workflow.count("architecture: ${{ matrix.runtime_arch }}") == 2
+    assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
+    assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
+    assert "self-hosted" not in workflow
+    assert "ancestryllm-windows-11" not in workflow
     assert "electron-builder.release.yml" in workflow
     assert "scripts/smoke_sidecar.py" in workflow
     assert "ANCESTRYLLM_PACKAGED_RUNTIME_PATH" in workflow

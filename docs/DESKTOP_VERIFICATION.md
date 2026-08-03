@@ -13,19 +13,22 @@ application on each exact supported runner below. The assembled application exis
 inside that job; CI uploads its JSON evidence and SBOM, not the application
 tree.
 
-| Runner | Bundled sidecar | Intended target | Executed OS | Architecture | `platformValidated` |
-|---|---|---|---|---|---|
-| `macos-15` | `darwin-arm64` | macOS 15 | macOS 15 | arm64 | `true` |
-| `macos-15-intel` | `darwin-x64` | macOS 15 | macOS 15 | x64 | `true` |
-| `macos-26` | `darwin-arm64` | macOS 26 | macOS 26 | arm64 | `true` |
-| `macos-26-intel` | `darwin-x64` | macOS 26 | macOS 26 | x64 | `true` |
-| `ancestryllm-windows-11` | `win32-x64` | Windows 11 | Windows 11 | x64 | `true` |
-| `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 | Ubuntu 24.04 | x64 | `true` |
+| Runner | Bundled sidecar | Intended target | Executed OS | Host architecture | Artifact architecture | `platformValidated` |
+|---|---|---|---|---|---|---|
+| `macos-15` | `darwin-arm64` | macOS 15 | macOS 15 | arm64 | arm64 | `true` |
+| `macos-15-intel` | `darwin-x64` | macOS 15 | macOS 15 | x64 | x64 | `true` |
+| `macos-26` | `darwin-arm64` | macOS 26 | macOS 26 | arm64 | arm64 | `true` |
+| `macos-26-intel` | `darwin-x64` | macOS 26 | macOS 26 | x64 | x64 | `true` |
+| `windows-11-arm` | `win32-x64` | Windows 11 x64 | Windows 11 | arm64 | x64 | `true` |
+| `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 | Ubuntu 24.04 | x64 | x64 | `true` |
 
-The Windows row runs only on an ephemeral one-job self-hosted Windows 11 x64
-runner that is destroyed after the job. It never accepts pull-request code and
-cannot be replaced by a hosted server approximation. The aggregate records
-`platformValidated: true` only after all six exact rows pass.
+The Windows row uses GitHub's hosted `windows-11-arm` runner. The workflow
+asserts that the host is Windows 11 on ARM64, installs x64 Python and Node.js,
+and builds and launches the `win32-x64` application through Windows x64
+emulation. The evidence `arch` field remains the artifact architecture; the
+runner identity and host probe bind that artifact to the ARM64 validation
+environment. The aggregate records `platformValidated: true` only after all
+six exact rows pass.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
@@ -45,7 +48,7 @@ v1.0.0, all rows must declare `trusted` and pass their platform signature gates.
 |---|---|---|---|
 | `macos-15` | `darwin-arm64` | macOS 15 arm64 | DMG; Developer ID signed and notarized at v1.0.0+ |
 | `macos-15-intel` | `darwin-x64` | macOS 15 x64 | DMG; Developer ID signed and notarized at v1.0.0+ |
-| `ancestryllm-windows-11` | `win32-x64` | Windows 11 x64 | NSIS EXE; Authenticode signed at v1.0.0+ |
+| `windows-11-arm` | `win32-x64` | Windows 11 x64 through ARM64-hosted emulation | NSIS EXE; Authenticode signed at v1.0.0+ |
 | `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 x64 | DEB; detached GPG signature at v1.0.0+ |
 
 Each row must use the matching native sidecar, install or mount the full
@@ -62,14 +65,14 @@ identities are enforced again by validation jobs independently of signing jobs.
 
 Validation then runs those four immutable installer artifacts in all six exact
 supported environments: macOS 15 arm64 and x64, macOS 26 arm64 and x64,
-Windows 11 x64, and Ubuntu 24.04 x64. The macOS 26 rows download and validate
-the same matching-architecture DMGs built on macOS 15; no second installer is
-built. The Windows validation must run on an ephemeral one-job self-hosted
-Windows 11 runner. Every validation receipt binds the source Actions artifact ID and
-digest as well as the installed file digest, so an approximation or rebuilt
-copy cannot substitute for the approved installer. It also records the
-canonical actual OS derived from the successful native host probe and requires
-that value to match the intended OS before setting `operatingSystemPassed`.
+Windows 11 ARM64 hosting the Windows x64 artifact under emulation, and Ubuntu
+24.04 x64. The macOS 26 rows download and validate the same
+matching-architecture DMGs built on macOS 15; no second installer is built.
+Every validation receipt binds the source Actions artifact ID and digest as
+well as the installed file digest, so an approximation or rebuilt copy cannot
+substitute for the approved installer. It also records the canonical actual OS
+derived from the successful native host probe and requires that value to match
+the intended OS before setting `operatingSystemPassed`.
 
 Every target receipt binds the full commit SHA, stable version, OS,
 architecture, successful named gates, and SHA-256 identity of its installer,
