@@ -23,6 +23,7 @@ import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
 import { installSingleInstanceGuard } from './single-instance'
+import { WINDOW_READY_RECORD } from './window-readiness'
 import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
 
 app.enableSandbox()
@@ -118,7 +119,10 @@ function createWindow(): void {
   } finally {
     pendingWindowPreferences = null
   }
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => {
+    window.show()
+    console.info(WINDOW_READY_RECORD)
+  })
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 

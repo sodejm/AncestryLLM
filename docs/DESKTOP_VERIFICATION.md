@@ -123,9 +123,12 @@ to `127.0.0.1` solely so the harness can inspect and close the unpublished
 application. It does not pass credentials or expose the endpoint beyond the
 runner. A separate launch uses a fresh profile and no remote-debugging or
 Node-inspector argument; the test verifies that neither the normal process tree
-nor captured output exposes a debugging surface. On macOS only, both automation
-launches pass Chromium's `--use-mock-keychain` because the ad hoc, unpackaged
-runner build cannot reliably use a login keychain. That automation-only switch
+nor captured output exposes a debugging surface. The normal launch waits for a
+constant, non-sensitive lifecycle record emitted by the existing
+`ready-to-show` window path, so a sidecar or crash helper cannot satisfy the
+renderer-readiness gate. On macOS only, both automation launches pass Chromium's
+`--use-mock-keychain` because the ad hoc, unpackaged runner build cannot reliably
+use a login keychain. That automation-only switch
 is not part of a shipped launch path.
 
 Electron handles the native zoom shortcuts in the browser process, where unit

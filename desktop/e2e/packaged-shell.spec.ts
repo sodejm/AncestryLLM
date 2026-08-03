@@ -12,6 +12,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
+import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -579,8 +580,11 @@ async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Pr
     const browserProcess = browserProcesses.find(
       (record) => record.type === 'browser' && record.id === rootPid,
     )
+    const correlatedRendererProcess = tree.find((record) => rendererPids.has(record.pid))
     expect(browserProcess).toBeDefined()
     expect(correlatedRenderers.length).toBeGreaterThan(0)
+    expect(correlatedRendererProcess).toBeDefined()
+    expect(correlatedRendererProcess?.commandLine).toContain('--enable-sandbox')
     for (const record of [browserProcess, ...correlatedRenderers]) {
       expect(Number.isInteger(record?.id)).toBe(true)
       expect(record?.id).toBeGreaterThan(0)
@@ -600,12 +604,13 @@ async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Pr
 async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void> {
   if (!executablePath) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
-  const child = spawn(executablePath, [
+  const launchArguments = [
     ...automationArguments,
     `--user-data-dir=${root}`,
     `--disk-cache-dir=${join(root, 'chromium-cache')}`,
     `--crash-dumps-dir=${join(root, 'crash-dumps')}`,
-  ], {
+  ]
+  const child = spawn(executablePath, launchArguments, {
     env: await isolatedEnvironment(root),
     stdio: 'pipe',
     windowsHide: true,
@@ -622,30 +627,26 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
     if (!rootPid) throw new Error('Normal packaged launch PID is unavailable.')
     const deadline = Date.now() + 30_000
     let tree: ProcessRecord[] = []
-    let stableSamples = 0
+    let windowReady = false
     const observedCommandLines = new Set<string>()
     while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null) {
         throw new Error(
-          `Normal packaged launch exited before its process tree was stable `
+          `Normal packaged launch exited before its renderer window was ready `
           + `(code=${String(child.exitCode)}, signal=${String(child.signalCode)}).\n${output}`,
         )
       }
       tree = descendantProcessTree(await processSnapshot(), rootPid)
       for (const record of tree) observedCommandLines.add(record.commandLine)
       const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
-      if (tree.some((record) => record.pid === rootPid) && tree.length > 1 && rssBytes > 0) {
-        stableSamples += 1
-        if (stableSamples >= 3) break
-      } else {
-        stableSamples = 0
-      }
+      windowReady = outputContainsWindowReadyRecord(output)
+      if (windowReady && tree.some((record) => record.pid === rootPid) && rssBytes > 0) break
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
     expect(tree.some((record) => record.pid === rootPid)).toBe(true)
-    expect(tree.length).toBeGreaterThan(1)
     expect(tree.reduce((total, record) => total + record.rssBytes, 0)).toBeGreaterThan(0)
-    expect(stableSamples).toBeGreaterThanOrEqual(3)
+    expect(windowReady).toBe(true)
+    expect(launchArguments.join('\n')).not.toMatch(DEBUG_ARGUMENT)
     expect([...observedCommandLines].join('\n')).not.toMatch(DEBUG_ARGUMENT)
     expect(output).not.toContain('DevTools listening on ')
   } finally {
