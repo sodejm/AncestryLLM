@@ -46,7 +46,7 @@ export const TARGET_ROWS = Object.freeze({
   'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
   'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
   'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'ancestryllm-windows-11': Object.freeze({ sidecarTarget: 'win32-x64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'x64', platformValidated: true, ceilings: windowsCeilings }),
+  'windows-11-arm': Object.freeze({ sidecarTarget: 'win32-x64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'x64', platformValidated: true, ceilings: windowsCeilings }),
   'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
 })
 

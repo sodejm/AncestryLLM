@@ -187,6 +187,7 @@ jobs:
             sidecar_target: darwin-arm64
             expected_os: "macOS 15"
             arch: arm64
+            runtime_arch: arm64
             package_boundary: unpacked-native
             package_args: --mac --dir --arm64
           - name: macOS 15 x64
@@ -195,6 +196,7 @@ jobs:
             sidecar_target: darwin-x64
             expected_os: "macOS 15"
             arch: x64
+            runtime_arch: x64
             package_boundary: unpacked-native
             package_args: --mac --dir --x64
           - name: macOS 26 arm64
@@ -203,6 +205,7 @@ jobs:
             sidecar_target: darwin-arm64
             expected_os: "macOS 26"
             arch: arm64
+            runtime_arch: arm64
             package_boundary: unpacked-native
             package_args: --mac --dir --arm64
           - name: macOS 26 x64
@@ -211,15 +214,17 @@ jobs:
             sidecar_target: darwin-x64
             expected_os: "macOS 26"
             arch: x64
+            runtime_arch: x64
             package_boundary: unpacked-native
             package_args: --mac --dir --x64
-          - name: Windows 11 x64
-            runner: ancestryllm-windows-11
-            # This label must resolve only to an ephemeral one-job runner.
-            runs_on: '["self-hosted", "Windows", "X64", "ancestryllm-windows-11"]'
+          - name: Windows 11 ARM64 host / x64 package
+            runner: windows-11-arm
+            runs_on: '["windows-11-arm"]'
             sidecar_target: win32-x64
             expected_os: "Windows 11"
             arch: x64
+            host_arch: arm64
+            runtime_arch: x64
             package_boundary: unpacked-native
             package_args: --win --dir --x64
           - name: Ubuntu 24.04 x64
@@ -228,6 +233,7 @@ jobs:
             sidecar_target: linux-x64
             expected_os: "Ubuntu 24.04"
             arch: x64
+            runtime_arch: x64
             package_boundary: unpacked-native
             package_args: --linux --dir --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
@@ -255,9 +261,14 @@ jobs:
         shell: pwsh
         env:
           EXPECTED_OS: ${{ matrix.expected_os }}
+          EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}
         run: |
           $caption = (Get-CimInstance Win32_OperatingSystem).Caption
           if ($caption -notmatch 'Windows 11') { throw "expected Windows 11, found $caption" }
+          $hostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($hostArch -ne $env:EXPECTED_HOST_ARCH) {
+            throw "expected host architecture $env:EXPECTED_HOST_ARCH, found $hostArch"
+          }
           $actualOs = 'Windows 11'
           if ($actualOs -ne $env:EXPECTED_OS) {
             throw "expected $env:EXPECTED_OS, found $caption"
@@ -278,9 +289,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          architecture: ${{ matrix.runtime_arch }}
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26.5.0"
+          architecture: ${{ matrix.runtime_arch }}
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"

@@ -65,7 +65,7 @@ VALIDATIONS = {
     "macos-15-intel": ("darwin-x64", "macOS 15", "x64"),
     "macos-26": ("darwin-arm64", "macOS 26", "arm64"),
     "macos-26-intel": ("darwin-x64", "macOS 26", "x64"),
-    "ancestryllm-windows-11": ("win32-x64", "Windows 11", "x64"),
+    "windows-11-arm": ("win32-x64", "Windows 11", "x64"),
     "ubuntu-24.04": ("linux-x64", "Ubuntu 24.04", "x64"),
 }
 
@@ -284,7 +284,7 @@ def test_validation_receipt_rejects_observed_operating_system_mismatch(
         "--version",
         VERSION,
         "--runner",
-        "ancestryllm-windows-11",
+        "windows-11-arm",
         "--target",
         "win32-x64",
         "--expected-os",

@@ -114,13 +114,10 @@ accounts, updater behavior, and background release channels.
    Follow the repeatable macOS setup and verification procedure in
    [`DEPLOYMENT.md`](DEPLOYMENT.md#reconfigure-desktop-signing-from-macos);
    do not construct ad hoc upload commands containing private values.
-6. Register an ephemeral self-hosted Windows 11 x64 runner with the exact
-   labels `self-hosted`, `Windows`, `X64`, and
-   `ancestryllm-windows-11`. Each job must receive a clean one-job VM that is
-   automatically destroyed after completion. Restrict its runner group to the
-   trusted `desktop-sidecar.yml` exact-`main` workflow and `release.yml`, and
-   restrict repository and runner administration to the release maintainer.
-   Neither workflow accepts pull-request heads on this runner.
+6. Confirm the repository can use GitHub's hosted `windows-11-arm` runner.
+   The workflows assert Windows 11 and an ARM64 host, then use x64 Python and
+   Node.js to validate the shipped Windows x64 application under Windows x64
+   emulation. No self-hosted runner registration or lifecycle is required.
 7. Enable GitHub immutable releases.
 8. Enable automatic deletion of merged pull-request branches.
 
@@ -148,7 +145,8 @@ link or redacted screenshot:
   and no API-token publishing secret or fallback is configured; and
 - for v1.0.0 or later, the nine private release-signing secrets and four public
   signer-identity variables are configured, access-restricted, and current;
-  the ephemeral one-job Windows 11 runner is required for every version; and
+  the GitHub-hosted `windows-11-arm` validation row is required for every
+  version; and
 - GitHub immutable releases and automatic pull-request branch deletion are
   enabled.
 
@@ -248,7 +246,7 @@ listed trusted-signing checks.
 |---|---|---|
 | macOS 15 arm64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
 | macOS 15 x64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| Windows 11 x64 | NSIS EXE | install/launch on an ephemeral one-job Windows 11 runner; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
+| Windows 11 x64 | NSIS EXE | install/launch on GitHub-hosted `windows-11-arm` through Windows x64 emulation; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
 | Ubuntu 24.04 x64 | DEB | install/launch on clean Ubuntu 24.04; at v1.0.0+, adjacent `.deb.asc` detached GPG signature from the approved public-key fingerprint |
 
 Every row builds and smoke-tests the matching native sidecar, installs or

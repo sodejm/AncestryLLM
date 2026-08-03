@@ -98,7 +98,7 @@ VALIDATION_ENVIRONMENTS = {
         "expected_os": "macOS 26",
         "arch": "x64",
     },
-    "ancestryllm-windows-11": {
+    "windows-11-arm": {
         "target": "win32-x64",
         "expected_os": "Windows 11",
         "arch": "x64",

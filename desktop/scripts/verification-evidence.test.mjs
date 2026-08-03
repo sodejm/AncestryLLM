@@ -24,7 +24,7 @@ const rows = [
   ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64'],
   ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64'],
   ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64'],
-  ['ancestryllm-windows-11', 'win32-x64', 'Windows 11', 'Windows 11', 'x64'],
+  ['windows-11-arm', 'win32-x64', 'Windows 11', 'Windows 11', 'x64'],
   ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64'],
 ]
 
@@ -226,8 +226,8 @@ function securityFixture() {
   }
 }
 
-test('target evidence derives gates and the real Windows 11 platform boundary only from exact receipts and its row', () => {
-  const { evidence } = targetFixture(rows.find(([runner]) => runner === 'ancestryllm-windows-11'))
+test('target evidence derives gates for the Windows 11 ARM64-hosted x64 boundary only from exact receipts and its row', () => {
+  const { evidence } = targetFixture(rows.find(([runner]) => runner === 'windows-11-arm'))
   assert.equal(evidence.platformValidated, true)
   assert.equal(evidence.artifactKind, 'unpublished-unpacked-native')
   assert.equal(evidence.packageRuntime, true)
@@ -388,8 +388,8 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.equal(aggregate.status, 'passed')
   assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
 
-  await writeFile(join(targetsRoot, 'ancestryllm-windows-11', 'evidence.json'), encoded({
-    ...aggregate.targets.find((target) => target.runner === 'ancestryllm-windows-11'),
+  await writeFile(join(targetsRoot, 'windows-11-arm', 'evidence.json'), encoded({
+    ...aggregate.targets.find((target) => target.runner === 'windows-11-arm'),
     platformValidated: false,
   }))
   await assert.rejects(aggregateEvidence(root, gitHead), /platformValidated/)
