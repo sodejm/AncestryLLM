@@ -506,7 +506,7 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
     }))
   }
 
-  const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,ppid=,rss=,command='], {
+  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,command='], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
   })
