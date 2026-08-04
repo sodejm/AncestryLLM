@@ -306,8 +306,9 @@ The foundation sequence is:
 | Root `Makefile` | #99 owns initial desktop delegation targets; later edits require coordinator review. |
 | Architecture and security documents: `ARCHITECTURE.md`, this ADR, `THREAT_MODEL.md`, privacy, contributor, and desktop backlog decisions | #98 (`EL-01`) for ratification; later boundary changes update them in the owning issue. |
 
-Each implementation issue uses one dedicated branch/worktree based on updated
-`main` after its hard dependencies merge. Work outside exclusive ownership is a
+Each implementation issue uses one `feature/*`, `bugfix/*`, or `hotfix/*`
+branch/worktree based on current `origin/main` after its hard dependencies
+merge. Work outside exclusive ownership is a
 coordinated change request, not an opportunistic edit. A resumable issue
 checkpoint records baseline, branch/worktree, changed files, validation,
 blocker, and exactly one next action without private data or bootstrap values.

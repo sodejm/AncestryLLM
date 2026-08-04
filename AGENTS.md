@@ -44,7 +44,9 @@
 
 ## Workflow and completion
 
-- Work on a dedicated branch or worktree; never edit `main` or `master` directly.
+- Follow the [GitHub Flow branch contract](CONTRIBUTING.md#github-flow-branch-strategy):
+  branch from current `origin/main` using the appropriate `feature/*`, `bugfix/*`,
+  or `hotfix/*` prefix, and never edit `main` or `master` directly.
 - Preserve unrelated changes. Do not push unless explicitly requested.
 - Whenever Codex creates a GitHub issue, determine the appropriate release iteration
   from the Feature Release project's scope, priority, and dependency order, then add

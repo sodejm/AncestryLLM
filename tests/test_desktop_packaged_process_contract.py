@@ -30,13 +30,20 @@ def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
         r"packagedProcessTreeMetrics\(\s*browser:\s*Browser,\s*rootPid:\s*number",
         source,
     )
+    assert "sandboxedRendererCorrelated" in source
     assert re.search(
-        r"correlatedRendererProcess\s*=\s*tree\.find\("
-        r"\(record\)\s*=>\s*rendererPids\.has\(record\.pid\)\)",
+        r"tree\.some\(\(record\)\s*=>\s*"
+        r"isSandboxedRendererProcess\(record,\s*rendererPids\)\)",
         source,
     )
-    assert "correlatedRendererProcess?.commandLine" in source
-    assert ".toContain('--enable-sandbox')" in source
+    assert re.search(
+        r"correlatedRendererProcesses\s*=\s*tree\.filter\("
+        r"\(record\)\s*=>\s*isSandboxedRendererProcess\(record,\s*rendererPids\)\)",
+        source,
+    )
+    assert "correlatedRendererProcesses.length" in source
+    assert "commandLine.includes('--enable-sandbox')" in source
+    assert re.search(r"--type=renderer", source)
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
@@ -50,3 +57,15 @@ def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -
     assert "window.once('ready-to-show'" in main_source
     assert "expect([...observedCommandLines].join('\\n')).not.toMatch(DEBUG_ARGUMENT)" in source
     assert "expect(output).not.toContain('DevTools listening on ')" in source
+
+
+def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"async function removeTemporaryPackage\(root: string\): Promise<void> \{\s*"
+        r"await rm\(root, \{\s*recursive: true,\s*force: true,\s*"
+        r"maxRetries: 10,\s*retryDelay: 100,\s*\}\)\s*\}",
+        source,
+    )
+    assert source.count("await removeTemporaryPackage(root)") == 4
