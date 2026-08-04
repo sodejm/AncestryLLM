@@ -12,6 +12,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
+import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -536,27 +537,80 @@ function descendantProcessTree(records: readonly ProcessRecord[], rootPid: numbe
   return records.filter((record) => included.has(record.pid))
 }
 
-async function packagedProcessTreeMetrics(rootPid: number): Promise<number> {
-  const tree = descendantProcessTree(await processSnapshot(), rootPid)
-  expect(tree.some((record) => record.pid === rootPid)).toBe(true)
-  const renderer = tree.find((record) => /(?:^|\s)--type=renderer(?:\s|$)/.test(record.commandLine))
-  expect(renderer).toBeDefined()
-  expect(renderer?.commandLine).toContain('--enable-sandbox')
-  expect(tree.map((record) => record.commandLine).join('\n')).not.toMatch(/(?:^|\s)--inspect(?:-brk)?(?:=|\s|$)/)
-  const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
-  expect(rssBytes).toBeGreaterThan(0)
-  return rssBytes
+async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Promise<number> {
+  const session = await browser.newBrowserCDPSession()
+  let tree: ProcessRecord[] = []
+  let browserProcesses: Awaited<
+    ReturnType<typeof session.send<'SystemInfo.getProcessInfo'>>
+  >['processInfo'] = []
+
+  try {
+    await expect.poll(async () => {
+      const [{ processInfo }, snapshot] = await Promise.all([
+        session.send('SystemInfo.getProcessInfo'),
+        processSnapshot(),
+      ])
+      browserProcesses = processInfo
+      tree = descendantProcessTree(snapshot, rootPid)
+      const rendererPids = new Set(
+        processInfo
+          .filter((record) => record.type === 'renderer')
+          .map((record) => record.id),
+      )
+      return {
+        browserMatchesRoot: processInfo.some(
+          (record) => record.type === 'browser' && record.id === rootPid,
+        ),
+        rendererCorrelated: tree.some((record) => rendererPids.has(record.pid)),
+      }
+    }, { timeout: 30_000 }).toEqual({
+      browserMatchesRoot: true,
+      rendererCorrelated: true,
+    })
+
+    expect(tree.some((record) => record.pid === rootPid)).toBe(true)
+    const rendererPids = new Set(
+      browserProcesses
+        .filter((record) => record.type === 'renderer')
+        .map((record) => record.id),
+    )
+    const correlatedRenderers = browserProcesses.filter(
+      (record) => record.type === 'renderer' && tree.some((process) => process.pid === record.id),
+    )
+    const browserProcess = browserProcesses.find(
+      (record) => record.type === 'browser' && record.id === rootPid,
+    )
+    const correlatedRendererProcess = tree.find((record) => rendererPids.has(record.pid))
+    expect(browserProcess).toBeDefined()
+    expect(correlatedRenderers.length).toBeGreaterThan(0)
+    expect(correlatedRendererProcess).toBeDefined()
+    expect(correlatedRendererProcess?.commandLine).toContain('--enable-sandbox')
+    for (const record of [browserProcess, ...correlatedRenderers]) {
+      expect(Number.isInteger(record?.id)).toBe(true)
+      expect(record?.id).toBeGreaterThan(0)
+      expect(Number.isFinite(record?.cpuTime)).toBe(true)
+      expect(record?.cpuTime).toBeGreaterThanOrEqual(0)
+    }
+    expect(tree.some((record) => rendererPids.has(record.pid))).toBe(true)
+    expect(tree.map((record) => record.commandLine).join('\n')).not.toMatch(/(?:^|\s)--inspect(?:-brk)?(?:=|\s|$)/)
+    const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
+    expect(rssBytes).toBeGreaterThan(0)
+    return rssBytes
+  } finally {
+    await session.detach()
+  }
 }
 
 async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void> {
   if (!executablePath) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
-  const child = spawn(executablePath, [
+  const launchArguments = [
     ...automationArguments,
     `--user-data-dir=${root}`,
     `--disk-cache-dir=${join(root, 'chromium-cache')}`,
     `--crash-dumps-dir=${join(root, 'crash-dumps')}`,
-  ], {
+  ]
+  const child = spawn(executablePath, launchArguments, {
     env: await isolatedEnvironment(root),
     stdio: 'pipe',
     windowsHide: true,
@@ -569,28 +623,38 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
   child.stderr.on('data', consume)
 
   try {
+    const rootPid = child.pid
+    if (!rootPid) throw new Error('Normal packaged launch PID is unavailable.')
     const deadline = Date.now() + 30_000
     let tree: ProcessRecord[] = []
+    let windowReady = false
+    const observedCommandLines = new Set<string>()
     while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null) {
         throw new Error(
-          `Normal packaged launch exited before its renderer was ready `
+          `Normal packaged launch exited before its renderer window was ready `
           + `(code=${String(child.exitCode)}, signal=${String(child.signalCode)}).\n${output}`,
         )
       }
-      tree = descendantProcessTree(await processSnapshot(), child.pid ?? -1)
-      if (tree.some((record) => /(?:^|\s)--type=renderer(?:\s|$)/.test(record.commandLine))) break
+      tree = descendantProcessTree(await processSnapshot(), rootPid)
+      for (const record of tree) observedCommandLines.add(record.commandLine)
+      const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
+      windowReady = outputContainsWindowReadyRecord(output)
+      if (windowReady && tree.some((record) => record.pid === rootPid) && rssBytes > 0) break
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
-    expect(tree.some((record) => /(?:^|\s)--type=renderer(?:\s|$)/.test(record.commandLine))).toBe(true)
-    expect(tree.map((record) => record.commandLine).join('\n')).not.toMatch(DEBUG_ARGUMENT)
+    expect(tree.some((record) => record.pid === rootPid)).toBe(true)
+    expect(tree.reduce((total, record) => total + record.rssBytes, 0)).toBeGreaterThan(0)
+    expect(windowReady).toBe(true)
+    expect(launchArguments.join('\n')).not.toMatch(DEBUG_ARGUMENT)
+    expect([...observedCommandLines].join('\n')).not.toMatch(DEBUG_ARGUMENT)
     expect(output).not.toContain('DevTools listening on ')
   } finally {
     await forceCloseProcess(child)
   }
 }
 
-async function expectProductionBoundary(page: Page, rootPid: number): Promise<number> {
+async function expectProductionBoundary(page: Page, browser: Browser, rootPid: number): Promise<number> {
   const appUrl = new URL(page.url())
   expect({
     protocol: appUrl.protocol,
@@ -647,7 +711,7 @@ async function expectProductionBoundary(page: Page, rootPid: number): Promise<nu
     childWindowBlocked: true,
   })
   expect(externalRequests).toEqual([])
-  return packagedProcessTreeMetrics(rootPid)
+  return packagedProcessTreeMetrics(browser, rootPid)
 }
 
 async function expectAccessibleShell(page: Page): Promise<void> {
@@ -761,7 +825,7 @@ test.describe('unpublished unpacked native package', () => {
       await expect(page.getByText('Ready', { exact: true })).toBeVisible()
       await expect(page.getByRole('alert')).toHaveCount(0)
       if (!cold.process.pid) throw new Error('Packaged app PID is unavailable.')
-      const rssBytes = await expectProductionBoundary(page, cold.process.pid)
+      const rssBytes = await expectProductionBoundary(page, cold.browser, cold.process.pid)
       await expectAccessibleShell(page)
       const userData = cold.userData
       await closePackaged(cold)
