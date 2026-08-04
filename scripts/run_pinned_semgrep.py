@@ -326,19 +326,24 @@ def _download_rule_archive(archive: RuleArchive) -> bytes:
         archive.url,
         headers={"User-Agent": "AncestryLLM-release-security-gate"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
-        final_url = response.geturl()
-        _validate_archive_url(final_url)
-        if final_url != archive.url:
-            raise RuntimeError(f"Semgrep {archive.name} rule archive redirected unexpectedly")
-        payload = response.read(archive.revision.size + 1)
-    digest = hashlib.sha256(payload).hexdigest()
-    if digest != archive.revision.sha256 or len(payload) != archive.revision.size:
-        raise RuntimeError(
-            f"Semgrep {archive.name} rule archive differs from the committed "
-            f"release-security contract; observed sha256={digest}, size={len(payload)}"
-        )
-    return payload
+    observations: list[str] = []
+    for _attempt in range(_DOWNLOAD_ATTEMPTS):
+        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+            final_url = response.geturl()
+            _validate_archive_url(final_url)
+            if final_url != archive.url:
+                raise RuntimeError(f"Semgrep {archive.name} rule archive redirected unexpectedly")
+            payload = response.read(archive.revision.size + 1)
+        digest = hashlib.sha256(payload).hexdigest()
+        observations.append(f"sha256={digest}, size={len(payload)}")
+        if digest == archive.revision.sha256 and len(payload) == archive.revision.size:
+            return payload
+
+    observed = "; ".join(dict.fromkeys(observations))
+    raise RuntimeError(
+        f"Semgrep {archive.name} rule archive differs from the committed "
+        f"release-security contract after {_DOWNLOAD_ATTEMPTS} attempts; observed {observed}"
+    )
 
 
 def _archive_rules(archive: RuleArchive, payload: bytes) -> list[dict[str, object]]:
