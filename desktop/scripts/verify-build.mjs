@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const prohibitedNames = [/\.map$/i, /^latest.*\.ya?ml$/i, /credential/i, /^\.env/i]
 const prohibitedContent = [
@@ -46,9 +46,12 @@ export async function inspectBuild(root, { allowFixtures = false } = {}) {
   if ((await files(root)).length === 0 && all.length === 0) throw new Error('Build output is empty')
   return all.length
 }
+export function resolveBuildOutputPath(moduleUrl, options) {
+  return fileURLToPath(new URL('../out', moduleUrl), options)
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const count = await inspectBuild(
-    new URL('../out', import.meta.url).pathname,
+    resolveBuildOutputPath(import.meta.url),
     { allowFixtures: process.argv.includes('--fixture') },
   )
   console.log(`Verified ${count} build artifacts: no development-only gallery copy, source maps, embedded remote network endpoints, credentials, or updater metadata.`)
