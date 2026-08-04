@@ -969,4 +969,5 @@ Architecture review should answer:
 
 If the code and this document disagree, treat the discrepancy as a defect:
 verify the implementation, then update either the code or architecture in a
-focused branch before building further work on the disputed assumption.
+appropriately classified `feature/*`, `bugfix/*`, or `hotfix/*` branch before
+building further work on the disputed assumption.

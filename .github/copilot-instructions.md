@@ -49,7 +49,9 @@
 
 ## Workflow and PR quality
 
-- Work on a dedicated branch or worktree; never edit `main` or `master` directly.
+- Follow the [GitHub Flow branch contract](../CONTRIBUTING.md#github-flow-branch-strategy):
+  branch from current `origin/main` using the appropriate `feature/*`, `bugfix/*`,
+  or `hotfix/*` prefix, and never edit `main` or `master` directly.
 - Preserve unrelated changes and do not push unless explicitly requested.
 - Keep changes focused. Before completion, review behavior, tests, documentation, dead
   code, and relevant quality/security gates.

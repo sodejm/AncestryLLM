@@ -7,6 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS = ROOT / "AGENTS.md"
 COPILOT = ROOT / ".github" / "copilot-instructions.md"
+CONTRIBUTING = ROOT / "CONTRIBUTING.md"
+WORK_ITEM_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work_item.yml"
+PULL_REQUEST_TEMPLATE = ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
 
 
 def _normalized(path: Path) -> str:
@@ -73,7 +76,7 @@ def test_agent_guidance_agrees_on_validation_safety_and_workflow() -> None:
         "explicit provider selection and user consent",
         "OS keyring",
         "Do not auto-load `.env`",
-        "dedicated branch or worktree",
+        "appropriate `feature/*`, `bugfix/*`, or `hotfix/*`",
         "push unless explicitly requested",
         "tests, documentation, dead code",
         "acceptance criteria",
@@ -81,3 +84,33 @@ def test_agent_guidance_agrees_on_validation_safety_and_workflow() -> None:
     for contract in shared_contracts:
         assert contract in agents
         assert contract in copilot
+
+
+def test_contributing_defines_the_github_flow_branch_contract() -> None:
+    contributing = _normalized(CONTRIBUTING)
+
+    for contract in (
+        "GitHub Flow branch strategy",
+        "`feature/*`",
+        "`bugfix/*`",
+        "`hotfix/*`",
+        "current `origin/main`",
+        "pull request",
+        "protected",
+        "short-lived",
+        "Dependabot",
+        "AWS Prescriptive Guidance",
+    ):
+        assert contract in contributing
+
+
+def test_agent_and_issue_guidance_require_a_classified_branch_prefix() -> None:
+    agents = _normalized(AGENTS)
+    copilot = _normalized(COPILOT)
+    work_item = _normalized(WORK_ITEM_TEMPLATE)
+    pull_request = _normalized(PULL_REQUEST_TEMPLATE)
+
+    for guidance in (agents, copilot, work_item, pull_request):
+        assert "`feature/*`" in guidance
+        assert "`bugfix/*`" in guidance
+        assert "`hotfix/*`" in guidance
