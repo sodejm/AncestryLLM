@@ -53,7 +53,7 @@ typecheck:
 
 security:
 	@$(VENV_DIR)/bin/pip-audit
-	@$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src
+	@$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py .
 
 pre-push: test lint typecheck security
 

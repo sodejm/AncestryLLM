@@ -65,7 +65,7 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
     assert security_job.count(dependency_condition) == 4
     assert security_job.count("uv run pip-audit") == 1
-    assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py src") == 1
+    assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py .") == 1
     assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
 

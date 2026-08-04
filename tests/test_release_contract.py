@@ -284,11 +284,11 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     assert script_lock.is_file()
     lock = tomllib.loads(script_lock.read_text(encoding="utf-8"))
     locked_semgrep = [package for package in lock["package"] if package.get("name") == "semgrep"]
-    runner = "uv run --locked --script scripts/run_pinned_semgrep.py src"
+    runner = "uv run --locked --script scripts/run_pinned_semgrep.py ."
     sources = {
         ".github/workflows/ci.yml": runner,
         ".github/workflows/release-readiness.yml": runner,
-        "Makefile": "$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py src",
+        "Makefile": "$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py .",
     }
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 

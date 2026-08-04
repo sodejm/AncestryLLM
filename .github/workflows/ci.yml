@@ -170,7 +170,7 @@ jobs:
         if: needs.changes.outputs.dependencies == 'true'
         run: uv run pip-audit
       - name: Run pinned static security analysis
-        run: uv run --locked --script scripts/run_pinned_semgrep.py src
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Generate CycloneDX SBOM
         if: needs.changes.outputs.dependencies == 'true'
         run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
