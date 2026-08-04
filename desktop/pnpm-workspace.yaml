@@ -4,6 +4,8 @@ engineStrict: true
 ignoreScripts: false
 saveExact: true
 sharedWorkspaceLockfile: false
+overrides:
+  fast-uri: 3.1.5
 onlyBuiltDependencies:
   - electron
   - esbuild
