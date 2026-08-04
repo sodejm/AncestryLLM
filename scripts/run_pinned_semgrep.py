@@ -405,7 +405,8 @@ def _deduplicate_rules(
     for rules in rule_groups:
         for rule in rules:
             rule_id = rule.get("id")
-            assert isinstance(rule_id, str)
+            if not isinstance(rule_id, str) or not rule_id:
+                raise ValueError("Semgrep rule is missing a valid id")
             canonical = _canonical_rule(rule)
             previous = by_id.get(rule_id)
             if previous is not None:
