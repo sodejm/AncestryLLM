@@ -45,9 +45,9 @@ def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
     assert "correlatedRendererProcesses.length" in source
     assert "app.enableSandbox()" in main_source
     assert "commandLine.includes('--no-sandbox')" in source
-    assert "commandLine.includes('--disable-setuid-sandbox')" in source
+    assert "commandLine.includes('--disable-setuid-sandbox')" not in source
     assert "commandLine.includes('--enable-sandbox')" not in source
-    assert re.search(r"--type=renderer", source)
+    assert not re.search(r"--type=renderer", source)
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
