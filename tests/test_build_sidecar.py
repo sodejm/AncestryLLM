@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from scripts.build_sidecar import executable_path, native_target
+from scripts.build_sidecar import executable_path, native_target, runtime_target
 
 
 @pytest.mark.parametrize(
@@ -26,6 +26,15 @@ def test_supported_native_targets(system: str, machine: str, expected: str) -> N
 def test_unsupported_native_targets_fail_closed(system: str, machine: str) -> None:
     with pytest.raises(ValueError, match="unsupported native sidecar target"):
         native_target(system, machine)
+
+
+def test_windows_arm64_host_accepts_x64_python_runtime() -> None:
+    assert runtime_target("Windows", "ARM64", "win-amd64") == "win32-x64"
+
+
+def test_windows_arm64_host_rejects_arm64_python_runtime() -> None:
+    with pytest.raises(ValueError, match="unsupported native sidecar target"):
+        runtime_target("Windows", "ARM64", "win-arm64")
 
 
 def test_executable_path_matches_electron_resource_layout(tmp_path: Path) -> None:

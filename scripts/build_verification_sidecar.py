@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import sysconfig
 import tempfile
 from collections.abc import Callable
 from importlib import import_module
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Sequence
 
 _build_sidecar_module = "scripts.build_sidecar" if __package__ else "build_sidecar"
-native_target: Callable[[str, str], str] = import_module(_build_sidecar_module).native_target
+runtime_target: Callable[[str, str, str], str] = import_module(_build_sidecar_module).runtime_target
 
 ROOT = Path(__file__).resolve().parents[1]
 EXECUTABLE_NAME = "ancestryllm-wrong-build-sidecar"
@@ -28,7 +29,7 @@ def executable_path(output_root: Path, target: str) -> Path:
 def build(output_root: Path, expected_target: str | None = None) -> Path:
     """Build the current host target and return its verification executable path."""
 
-    target = native_target(platform.system(), platform.machine())
+    target = runtime_target(platform.system(), platform.machine(), sysconfig.get_platform())
     if expected_target is not None and target != expected_target:
         raise RuntimeError(f"native build host is {target}, expected {expected_target}")
 
