@@ -1,0 +1,128 @@
+{
+  "_comment": "Pages-only metadata sidecar. Keys are canonical source paths relative to docs/. This file is injected into the Pages staging tree by prepare_pages_source.py and is never copied to the GitHub Wiki.",
+  "_schema_version": 1,
+  "Home.md": {
+    "title": "AncestryLLM documentation",
+    "description": "Local-first genealogy research with optional LLM providers. Start here for CLI, REPL, and desktop references."
+  },
+  "CLI.md": {
+    "title": "CLI reference — AncestryLLM",
+    "description": "Complete reference for AncestryLLM one-shot command-line interface commands, options, and exit codes."
+  },
+  "CONSOLE.md": {
+    "title": "Interactive console guide — AncestryLLM",
+    "description": "How to start and use the prompt-toolkit/Rich interactive REPL for genealogy research sessions."
+  },
+  "PROVIDERS.md": {
+    "title": "Provider guide — AncestryLLM",
+    "description": "Configure and use LLM providers including provider none (network-free), local models, and cloud providers with explicit consent."
+  },
+  "PRIVACY_AND_CONSENT.md": {
+    "title": "Privacy and consent — AncestryLLM",
+    "description": "How AncestryLLM keeps genealogy data local-first, requires explicit consent for cloud providers, and preserves your privacy."
+  },
+  "GEDCOM_COMPATIBILITY.md": {
+    "title": "GEDCOM compatibility and release checks — AncestryLLM",
+    "description": "Supported GEDCOM versions, known compatibility limits, import smoke-test results, and vendor interoperability status."
+  },
+  "VERSIONING.md": {
+    "title": "Versioning and compatibility — AncestryLLM",
+    "description": "Semantic versioning policy, supported Python versions, upgrade paths, and deprecation schedule."
+  },
+  "RELEASING.md": {
+    "title": "Release runbook — AncestryLLM",
+    "description": "Step-by-step instructions for preparing, validating, and publishing an AncestryLLM release."
+  },
+  "ENCRYPTED_BACKUPS.md": {
+    "title": "Encrypted backup and recovery — AncestryLLM",
+    "description": "How to create, verify, and restore encrypted backups of your AncestryLLM configuration and data."
+  },
+  "SETUP_DIAGNOSTICS.md": {
+    "title": "First-run storage diagnostics — AncestryLLM",
+    "description": "Troubleshoot storage, permissions, and configuration issues on first run with AncestryLLM's built-in diagnostics."
+  },
+  "FILE_INGRESS.md": {
+    "title": "Bounded file ingress — AncestryLLM",
+    "description": "File-ingress policy: byte and record budgets, race detection, output alias rejection, and transactional publication."
+  },
+  "MODULE_AUTHORING.md": {
+    "title": "Built-in module authoring — AncestryLLM",
+    "description": "How to author, register, and test built-in research modules using the AncestryLLM CommandSpec contract."
+  },
+  "LOCAL_LLM_BENCHMARKS.md": {
+    "title": "Local LLM benchmarks — AncestryLLM",
+    "description": "Performance and quality benchmark results for locally run LLM models evaluated against genealogy research tasks."
+  },
+  "LOCAL_RETRIEVAL_EVALUATION.md": {
+    "title": "Local-first retrieval evaluation — AncestryLLM",
+    "description": "Evaluation methodology and results for local-first retrieval strategies used in AncestryLLM."
+  },
+  "CI.md": {
+    "title": "Continuous integration — AncestryLLM",
+    "description": "CI pipeline gates, workflow structure, and how to reproduce checks locally."
+  },
+  "ARCHITECTURE_CONTRACTS.md": {
+    "title": "Architecture ownership and dependency contracts — AncestryLLM",
+    "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."
+  },
+  "COMMAND_EXECUTOR.md": {
+    "title": "Command executor — AncestryLLM",
+    "description": "Transport-neutral CommandInvocation and CommandExecutor boundary used by CLI, REPL, and future adapters."
+  },
+  "WIKI_SYNC.md": {
+    "title": "Wiki synchronization — AncestryLLM",
+    "description": "How docs/ is synchronized to the GitHub Wiki, the flat-namespace rules, and local validation commands."
+  },
+  "WIKI_OPERATIONS.md": {
+    "title": "Wiki operations and recovery — AncestryLLM",
+    "description": "Dispatch, verification, troubleshooting, rollback, and reinitialization runbook for Wiki synchronization."
+  },
+  "SECURITY_RESPONSE.md": {
+    "title": "Security response checklist — AncestryLLM",
+    "description": "How to report vulnerabilities, the triage and disclosure process, and the responsible disclosure policy."
+  },
+  "THREAT_MODEL.md": {
+    "title": "Data-flow threat model and control matrix — AncestryLLM",
+    "description": "OWASP Top 10:2025 and NIST SP 800-218 control evidence for AncestryLLM's implemented and planned surfaces."
+  },
+  "DESKTOP_SHELL.md": {
+    "title": "Desktop shell — AncestryLLM",
+    "description": "v0.5.0 Electron desktop shell: supported targets, manual installer model, and pre-1.0 signing policy. Planned scope only."
+  },
+  "DESKTOP_SIDECAR.md": {
+    "title": "Packaged desktop sidecar — AncestryLLM",
+    "description": "Private FastAPI sidecar design, IPC validation, provider-none isolation, and security control lifecycle. Planned scope."
+  },
+  "DESKTOP_VERIFICATION.md": {
+    "title": "Desktop verification — AncestryLLM",
+    "description": "Exact-head hosted verification matrix, machine-readable evidence, and external release blockers for desktop builds."
+  },
+  "DEPLOYMENT.md": {
+    "title": "Deployment — AncestryLLM",
+    "description": "Deployment options, environment requirements, and configuration for AncestryLLM."
+  },
+  "REPL_ARCHITECTURE.md": {
+    "title": "REPL architecture — AncestryLLM",
+    "description": "Internal architecture of the prompt-toolkit/Rich interactive REPL, command dispatch, and session lifecycle."
+  },
+  "APPLICATION_CONTRACTS.md": {
+    "title": "Application contracts — AncestryLLM",
+    "description": "Service-layer DTOs, application ports, artifact references, and error-mapping contracts."
+  },
+  "CORE_CONTRACTS_BASELINE.md": {
+    "title": "Core contracts baseline — AncestryLLM",
+    "description": "Baseline snapshot of core contracts used for regression detection in the characterization test suite."
+  },
+  "ADR-0024-provider-framework-evaluation.md": {
+    "title": "ADR-0024: Provider framework evaluation — AncestryLLM",
+    "description": "Architecture decision record evaluating LLM provider framework options for AncestryLLM."
+  },
+  "ADR-0025-electron-fastapi-desktop.md": {
+    "title": "ADR-0025: Electron and FastAPI desktop — AncestryLLM",
+    "description": "Architecture decision record for the bounded Electron shell and private FastAPI sidecar desktop architecture."
+  },
+  "DOCS_AUTHORING.md": {
+    "title": "Documentation authoring guide — AncestryLLM",
+    "description": "Diátaxis information architecture map, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."
+  }
+}
