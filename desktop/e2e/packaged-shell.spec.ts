@@ -244,6 +244,15 @@ async function forceCloseProcess(child: ChildProcessWithoutNullStreams): Promise
   }
 }
 
+async function removeTemporaryPackage(root: string): Promise<void> {
+  await rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  })
+}
+
 async function closePackaged(result: LaunchResult): Promise<void> {
   const exited = waitForProcessExit(result.process, 15_000)
   await new Promise<void>((resolve, reject) => {
@@ -537,6 +546,15 @@ function descendantProcessTree(records: readonly ProcessRecord[], rootPid: numbe
   return records.filter((record) => included.has(record.pid))
 }
 
+function isSandboxedRendererProcess(
+  record: ProcessRecord,
+  rendererPids: ReadonlySet<number>,
+): boolean {
+  return rendererPids.has(record.pid)
+    && /(?:^|\s)--type=renderer(?:\s|$)/.test(record.commandLine)
+    && record.commandLine.includes('--enable-sandbox')
+}
+
 async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Promise<number> {
   const session = await browser.newBrowserCDPSession()
   let tree: ProcessRecord[] = []
@@ -561,11 +579,12 @@ async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Pr
         browserMatchesRoot: processInfo.some(
           (record) => record.type === 'browser' && record.id === rootPid,
         ),
-        rendererCorrelated: tree.some((record) => rendererPids.has(record.pid)),
+        sandboxedRendererCorrelated: tree.some((record) =>
+          isSandboxedRendererProcess(record, rendererPids)),
       }
     }, { timeout: 30_000 }).toEqual({
       browserMatchesRoot: true,
-      rendererCorrelated: true,
+      sandboxedRendererCorrelated: true,
     })
 
     expect(tree.some((record) => record.pid === rootPid)).toBe(true)
@@ -580,18 +599,18 @@ async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Pr
     const browserProcess = browserProcesses.find(
       (record) => record.type === 'browser' && record.id === rootPid,
     )
-    const correlatedRendererProcess = tree.find((record) => rendererPids.has(record.pid))
+    const correlatedRendererProcesses = tree.filter((record) =>
+      isSandboxedRendererProcess(record, rendererPids))
     expect(browserProcess).toBeDefined()
     expect(correlatedRenderers.length).toBeGreaterThan(0)
-    expect(correlatedRendererProcess).toBeDefined()
-    expect(correlatedRendererProcess?.commandLine).toContain('--enable-sandbox')
+    expect(correlatedRendererProcesses.length).toBeGreaterThan(0)
     for (const record of [browserProcess, ...correlatedRenderers]) {
       expect(Number.isInteger(record?.id)).toBe(true)
       expect(record?.id).toBeGreaterThan(0)
       expect(Number.isFinite(record?.cpuTime)).toBe(true)
       expect(record?.cpuTime).toBeGreaterThanOrEqual(0)
     }
-    expect(tree.some((record) => rendererPids.has(record.pid))).toBe(true)
+    expect(tree.some((record) => isSandboxedRendererProcess(record, rendererPids))).toBe(true)
     expect(tree.map((record) => record.commandLine).join('\n')).not.toMatch(/(?:^|\s)--inspect(?:-brk)?(?:=|\s|$)/)
     const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
     expect(rssBytes).toBeGreaterThan(0)
@@ -884,7 +903,7 @@ test.describe('unpublished unpacked native package', () => {
       }, null, 2)}\n`, { flag: 'wx' })
     } finally {
       if (running) await forceClosePackaged(running)
-      await rm(root, { recursive: true, force: true })
+      await removeTemporaryPackage(root)
     }
   })
 
@@ -935,7 +954,7 @@ test.describe('unpublished unpacked native package', () => {
       })
     } finally {
       if (running) await forceClosePackaged(running)
-      await rm(root, { recursive: true, force: true })
+      await removeTemporaryPackage(root)
     }
   })
 
@@ -1009,7 +1028,7 @@ test.describe('unpublished unpacked native package', () => {
       })
     } finally {
       if (running) await forceClosePackaged(running)
-      await rm(root, { recursive: true, force: true })
+      await removeTemporaryPackage(root)
     }
   })
 
@@ -1065,7 +1084,7 @@ test.describe('unpublished unpacked native package', () => {
       })
     } finally {
       if (running) await forceClosePackaged(running)
-      await rm(root, { recursive: true, force: true })
+      await removeTemporaryPackage(root)
     }
   })
 })
