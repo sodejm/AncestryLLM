@@ -328,12 +328,19 @@ def _download_rule_archive(archive: RuleArchive) -> bytes:
     )
     observations: list[str] = []
     for _attempt in range(_DOWNLOAD_ATTEMPTS):
-        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
-            final_url = response.geturl()
-            _validate_archive_url(final_url)
-            if final_url != archive.url:
-                raise RuntimeError(f"Semgrep {archive.name} rule archive redirected unexpectedly")
-            payload = response.read(archive.revision.size + 1)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                final_url = response.geturl()
+                _validate_archive_url(final_url)
+                if final_url != archive.url:
+                    raise RuntimeError(
+                        f"Semgrep {archive.name} rule archive redirected unexpectedly"
+                    )
+                payload = response.read(archive.revision.size + 1)
+        except OSError as error:
+            observations.append(f"transport_error={type(error).__name__}")
+            continue
+
         digest = hashlib.sha256(payload).hexdigest()
         observations.append(f"sha256={digest}, size={len(payload)}")
         if digest == archive.revision.sha256 and len(payload) == archive.revision.size:
@@ -342,7 +349,8 @@ def _download_rule_archive(archive: RuleArchive) -> bytes:
     observed = "; ".join(dict.fromkeys(observations))
     raise RuntimeError(
         f"Semgrep {archive.name} rule archive differs from the committed "
-        f"release-security contract after {_DOWNLOAD_ATTEMPTS} attempts; observed {observed}"
+        f"release-security contract after {_DOWNLOAD_ATTEMPTS} attempts; "
+        f"observed {observed}"
     )
 
 
@@ -410,8 +418,8 @@ def _deduplicate_rules(
     for rules in rule_groups:
         for rule in rules:
             rule_id = rule.get("id")
-            if not isinstance(rule_id, str) or not rule_id:
-                raise ValueError("Semgrep rule is missing a valid id")
+            if not isinstance(rule_id, str) or not rule_id.strip():
+                raise ValueError("Semgrep rule id must be a non-empty string")
             canonical = _canonical_rule(rule)
             previous = by_id.get(rule_id)
             if previous is not None:
