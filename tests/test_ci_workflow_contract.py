@@ -46,6 +46,7 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
         "uv run mypy src/ancestryllm",
         "uv run python scripts/check_architecture_contracts.py",
         "./scripts/check_repository_safety.sh",
+        "uv run python scripts/check_code_documentation.py",
     ):
         assert quality_job.count(command) == 1
 
@@ -148,3 +149,19 @@ def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
     assert "### Phase B: reduce the pull-request matrix" in guide
     assert "Do not merge both commits at once" in guide
     assert "`PR gate`" in guide
+
+
+def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    command = "uv run python scripts/check_code_documentation.py"
+    assert ci.count(command) == 1, "CI quality job must run check_code_documentation.py exactly once"
+    assert readiness.count(command) == 1, (
+        "release-readiness quality gates must run check_code_documentation.py exactly once"
+    )
+    assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
+    assert "check_code_documentation.py" in makefile, (
+        "Makefile code-docs-check target must invoke check_code_documentation.py"
+    )
