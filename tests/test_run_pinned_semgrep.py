@@ -370,6 +370,72 @@ def test_reads_only_reviewed_archive_members_and_checks_semantic_digest() -> Non
     ]
 
 
+def test_retries_archive_failures_before_accepting_reviewed_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    reviewed = b"reviewed archive bytes"
+    responses = iter((TimeoutError("temporary timeout"), b"unreviewed", reviewed))
+    archive = runner.RuleArchive(
+        name="test",
+        url="https://codeload.github.com/example/rules/tar.gz/commit",
+        semantic_sha256="unused",
+        revision=runner.RuleRevision(
+            sha256=hashlib.sha256(reviewed).hexdigest(), size=len(reviewed)
+        ),
+        members=(),
+    )
+    calls = 0
+
+    def urlopen(request: object, timeout: int) -> _Download:
+        nonlocal calls
+        calls += 1
+        assert timeout == 60
+        response = next(responses)
+        if isinstance(response, BaseException):
+            raise response
+        return _Download(response, archive.url)
+
+    monkeypatch.setattr(runner.urllib.request, "urlopen", urlopen)
+
+    assert runner._download_rule_archive(archive) == reviewed
+    assert calls == 3
+
+
+def test_reports_observed_content_after_bounded_archive_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    reviewed = b"reviewed archive bytes"
+    unreviewed = b"persistently changed archive"
+    archive = runner.RuleArchive(
+        name="test",
+        url="https://codeload.github.com/example/rules/tar.gz/commit",
+        semantic_sha256="unused",
+        revision=runner.RuleRevision(
+            sha256=hashlib.sha256(reviewed).hexdigest(), size=len(reviewed)
+        ),
+        members=(),
+    )
+    calls = 0
+
+    def urlopen(request: object, timeout: int) -> _Download:
+        nonlocal calls
+        calls += 1
+        return _Download(unreviewed, archive.url)
+
+    monkeypatch.setattr(runner.urllib.request, "urlopen", urlopen)
+    digest = hashlib.sha256(unreviewed).hexdigest()
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"after 3 attempts; observed sha256={digest}, size={len(unreviewed)}",
+    ):
+        runner._download_rule_archive(archive)
+
+    assert calls == 3
+
+
 def test_deduplicates_identical_ids_and_matching_logic_but_rejects_collisions() -> None:
     runner = _load_runner()
     first = {"id": "first", "message": "one", "severity": "WARNING", "pattern": "danger()"}
@@ -384,6 +450,14 @@ def test_deduplicates_identical_ids_and_matching_logic_but_rejects_collisions() 
         runner._deduplicate_rules(((first, {**first, "message": "changed"}),))
     with pytest.raises(ValueError, match="id collision has different content: second"):
         runner._deduplicate_rules(((first, same_logic, {**same_logic, "message": "changed"}),))
+
+
+@pytest.mark.parametrize("invalid_rule_id", (None, 1, "", "   "))
+def test_deduplication_rejects_invalid_rule_ids(invalid_rule_id: object) -> None:
+    runner = _load_runner()
+
+    with pytest.raises(ValueError, match="rule id must be a non-empty string"):
+        runner._deduplicate_rules((({"id": invalid_rule_id, "pattern": "danger()"},),))
 
 
 def test_runs_locked_semgrep_with_verified_temporary_configs(
@@ -431,7 +505,7 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
         for path in runtime_paths:
             path.touch()
         calls.append(command)
-        config_paths.extend(Path(command[config_index]) for _ in range(1))
+        config_paths.append(Path(command[config_index]))
         document = yaml.safe_load(config_paths[0].read_text(encoding="utf-8"))
         assert [rule["id"] for rule in document["rules"]] == ["python", "secrets"]
         return SimpleNamespace(returncode=0)

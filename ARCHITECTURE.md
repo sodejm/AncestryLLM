@@ -858,7 +858,7 @@ locked `uv.lock` dependency graph. The Make targets are the local contract:
 | `make test` | Pytest regression and characterization suite. |
 | `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
-| `make security` | Dependency audit and Semgrep Python/secret rules. |
+| `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
 | `make sbom` | CycloneDX environment SBOM. |
 
 CI installs the locked environment with all extras and tests Python 3.12,
