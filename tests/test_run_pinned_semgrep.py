@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import sys
+import tarfile
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -281,13 +283,116 @@ def test_resolves_semgrep_beside_the_script_interpreter(
     assert runner._semgrep_executable() == semgrep
 
 
+def test_configures_reviewed_trailofbits_registry_bundle() -> None:
+    runner = _load_runner()
+
+    bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
+    trailofbits = bundles["trailofbits"]
+
+    assert trailofbits.url == "https://semgrep.dev/c/p/trailofbits"
+    assert (
+        trailofbits.semantic_sha256
+        == "8b1a7d47796f1d002fa6ca1a960efefaf775b2d0cd864a413aa23a5210ed59ea"
+    )
+    assert trailofbits.revisions == (
+        runner.RuleRevision(
+            sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
+            size=185_537,
+        ),
+    )
+    assert len(trailofbits.include_rule_ids) == 10
+    assert all(
+        rule_id.startswith("trailofbits.generic.") for rule_id in trailofbits.include_rule_ids
+    )
+
+
+def test_configures_commit_pinned_reviewed_archives() -> None:
+    runner = _load_runner()
+
+    archives = {archive.name: archive for archive in runner.RULE_ARCHIVES}
+
+    assert set(archives) == {"apiiro-prevent", "elttam"}
+    assert len(archives["apiiro-prevent"].members) == 12
+    assert archives["apiiro-prevent"].url.endswith("a21246b666f34db899f0e33add7237ed70fab790")
+    assert archives["elttam"].members == (
+        "rules/yaml/github-actions/security/save-state.yaml",
+        "rules/yaml/github-actions/security/set-output.yaml",
+    )
+
+
+def test_selects_only_reviewed_registry_rules_and_rejects_missing_ids() -> None:
+    runner = _load_runner()
+    payload = b"rules:\n- id: selected\n- id: irrelevant\n"
+    bundle = runner.RuleBundle(
+        name="test",
+        url="https://semgrep.dev/c/p/test",
+        semantic_sha256=_semantic_rule_sha256(payload),
+        revisions=(),
+        include_rule_ids=("selected",),
+    )
+
+    assert [rule["id"] for rule in runner._selected_bundle_rules(bundle, payload)] == ["selected"]
+
+    missing = runner.RuleBundle(
+        name="test",
+        url=bundle.url,
+        semantic_sha256=bundle.semantic_sha256,
+        revisions=(),
+        include_rule_ids=("not-present",),
+    )
+    with pytest.raises(RuntimeError, match="missing reviewed rules: not-present"):
+        runner._selected_bundle_rules(missing, payload)
+
+
+def test_reads_only_reviewed_archive_members_and_checks_semantic_digest() -> None:
+    runner = _load_runner()
+    reviewed = b"rules:\n- id: reviewed\n  message: useful\n"
+    ignored = b"rules:\n- id: ignored\n"
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, content in (("root/reviewed.yml", reviewed), ("root/ignored.yml", ignored)):
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            tar.addfile(info, io.BytesIO(content))
+    semantic = _semantic_rule_sha256(reviewed)
+    archive = runner.RuleArchive(
+        name="test",
+        url="https://codeload.github.com/example/rules/tar.gz/commit",
+        semantic_sha256=semantic,
+        revision=runner.RuleRevision(
+            sha256=hashlib.sha256(buffer.getvalue()).hexdigest(), size=len(buffer.getvalue())
+        ),
+        members=("reviewed.yml",),
+    )
+
+    assert runner._archive_rules(archive, buffer.getvalue()) == [
+        {"id": "reviewed", "message": "useful"}
+    ]
+
+
+def test_deduplicates_identical_ids_and_matching_logic_but_rejects_collisions() -> None:
+    runner = _load_runner()
+    first = {"id": "first", "message": "one", "severity": "WARNING", "pattern": "danger()"}
+    same_id = dict(first)
+    same_logic = {"id": "second", "message": "two", "severity": "ERROR", "pattern": "danger()"}
+
+    rules, duplicates = runner._deduplicate_rules(((first, same_id, same_logic),))
+
+    assert rules == [first]
+    assert duplicates == 2
+    with pytest.raises(ValueError, match="id collision has different content: first"):
+        runner._deduplicate_rules(((first, {**first, "message": "changed"}),))
+    with pytest.raises(ValueError, match="id collision has different content: second"):
+        runner._deduplicate_rules(((first, same_logic, {**same_logic, "message": "changed"}),))
+
+
 def test_runs_locked_semgrep_with_verified_temporary_configs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _load_runner()
     payloads = {
-        "https://semgrep.dev/c/p/python": b"rules:\n- id: python\n",
-        "https://semgrep.dev/c/p/secrets": b"rules:\n- id: secrets\n",
+        "https://semgrep.dev/c/p/python": b"rules:\n- id: python\n  pattern: python()\n",
+        "https://semgrep.dev/c/p/secrets": b"rules:\n- id: secrets\n  pattern: secret()\n",
     }
     bundles = tuple(
         runner.RuleBundle(
@@ -307,6 +412,7 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
         )
     )
     monkeypatch.setattr(runner, "RULE_BUNDLES", bundles)
+    monkeypatch.setattr(runner, "RULE_ARCHIVES", ())
     monkeypatch.setattr(
         runner.urllib.request,
         "urlopen",
@@ -320,14 +426,14 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
     def run(command: list[str], *, check: bool, env: dict[str, str]) -> SimpleNamespace:
         assert check is False
         runtime_paths.extend((Path(env["SEMGREP_LOG_FILE"]), Path(env["SEMGREP_SETTINGS_FILE"])))
-        assert all(path.parent == Path(command[6]).parent for path in runtime_paths)
+        config_index = command.index("--config") + 1
+        assert all(path.parent == Path(command[config_index]).parent for path in runtime_paths)
         for path in runtime_paths:
             path.touch()
         calls.append(command)
-        config_paths.extend(
-            Path(command[index + 1]) for index, value in enumerate(command) if value == "--config"
-        )
-        assert [path.read_bytes() for path in config_paths] == list(payloads.values())
+        config_paths.extend(Path(command[config_index]) for _ in range(1))
+        document = yaml.safe_load(config_paths[0].read_text(encoding="utf-8"))
+        assert [rule["id"] for rule in document["rules"]] == ["python", "secrets"]
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(runner.subprocess, "run", run)
@@ -342,8 +448,6 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
             "--disable-version-check",
             "--config",
             str(config_paths[0]),
-            "--config",
-            str(config_paths[1]),
             "src",
         ]
     ]

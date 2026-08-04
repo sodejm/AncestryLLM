@@ -47,6 +47,34 @@ is deferred until and required starting with v1.0.0. Release validation still
 requires the exact installer bytes to install and execute on the supported OS
 matrix. See the [desktop verification guide](DESKTOP_VERIFICATION.md).
 
+## Semgrep rule policy
+
+The Semgrep gate scans the whole repository with one generated, local config.
+Every upstream input is pinned by exact bytes and semantic content, and rules
+with identical IDs or matching logic are deduplicated before Semgrep runs. A
+changed archive, missing reviewed rule, conflicting rule ID, or unreviewed
+redirect fails closed.
+
+The reviewed third-party additions deliberately cover only current repository
+surfaces:
+
+- ten generic command-line and transport-hardening rules from
+  [Trail of Bits](https://github.com/trailofbits/semgrep-rules);
+- twelve Python and JavaScript/TypeScript dynamic-execution and high-signal
+  obfuscation rules used by [Apiiro PRevent](https://github.com/apiiro/PRevent),
+  sourced from its separate
+  [malicious-code ruleset](https://github.com/apiiro/malicious-code-ruleset);
+- two GitHub Actions workflow-command rules from
+  [elttam](https://github.com/elttam/semgrep-rules).
+
+The [0xdea rules](https://github.com/0xdea/semgrep-rules) are not loaded because
+their maintained rules target C and C++, which this repository does not contain.
+Trail of Bits rules for absent frameworks and container tooling, overlapping
+secret rules, Apiiro rules that produced false positives or parser failures,
+and elttam's manual-audit and absent-framework rules are also excluded. Revisit
+this allowlist when the repository adds a language or framework; do not add a
+whole upstream pack without a clean scan and an overlap review.
+
 ## Ruleset migration for the pull-request matrix
 
 The pull-request install-matrix reduction must be introduced in two phases.
