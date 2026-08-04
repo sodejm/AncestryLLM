@@ -3,7 +3,17 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { inspectBuild } from './verify-build.mjs'
+import { inspectBuild, resolveBuildOutputPath } from './verify-build.mjs'
+
+test('build output path converts a Windows file URL without duplicating the drive prefix', () => {
+  assert.equal(
+    resolveBuildOutputPath(
+      'file:///C:/a/AncestryLLM/AncestryLLM/desktop/scripts/verify-build.mjs',
+      { windows: true },
+    ),
+    String.raw`C:\a\AncestryLLM\AncestryLLM\desktop\out`,
+  )
+})
 
 test('build inspection rejects development copy, source maps, remote assets, credentials, and updater metadata', async () => {
   for (const [name, contents] of [
