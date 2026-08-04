@@ -6,6 +6,24 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-04
+
+### Added
+
+- Electron desktop shell for macOS 15 arm64, macOS 15 x64, Windows 11 x64,
+  and Ubuntu 24.04 x64, distributed as manual full installers.
+- Authenticated FastAPI health and capability foundation for the loopback
+  sidecar, consumed by the Electron host through a private local port.
+- Desktop verification sidecar with immutable API-contract, IPC-sender
+  validation, and exact-head evidence gates.
+- Pre-1.0 binary-signing disclosure embedded in release notes and the release
+  workflow for every 0.x desktop release.
+
+### Changed
+
+- Desktop package version tracks the Python distribution version at every
+  release; `desktop/package.json` reports `0.5.0`.
+
 ## [0.4.0] - 2026-07-31
 
 ### Added
@@ -131,7 +149,8 @@ All notable changes to AncestryLLM are recorded here. The project follows
   SHM files without a WAL; and bounds schema-assisted query prompts with the stable
   `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
-[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sodejm/AncestryLLM/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sodejm/AncestryLLM/releases/tag/v0.2.0
