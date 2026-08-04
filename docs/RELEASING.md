@@ -171,8 +171,9 @@ self-approval; do not make that change during the one-maintainer release.
    duplicate target-iteration item also blocks release. Close an item only
    after its implementation, documentation, regression tests, dead-code
    review, and required hosted checks are complete.
-2. For every candidate release branch and worktree, first confirm a clean
-   status with `git status --short`, then audit reachability and unique commits
+2. For every candidate `feature/*`, `bugfix/*`, or `hotfix/*` branch and
+   worktree, first confirm a clean status with `git status --short`, then audit
+   reachability and unique commits
    with `git rev-list --left-right --count main...<branch>` and
    `git log main..<branch>`. Only remove the worktree and use normal
    `git branch -d <branch>` when it is clean and its work is fully reachable

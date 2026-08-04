@@ -13,7 +13,10 @@ risk policy requires independent review.
    evidence to people who need access.
 2. Remediate in the advisory's private fork or a separate access-controlled
    private repository. An unpushed local branch may be used for initial
-   investigation if the workstation is appropriately protected.
+   investigation if the workstation is appropriately protected. Use a
+   `hotfix/*` branch for a high-impact critical production defect and a
+   `bugfix/*` branch for other defects; keep the branch description
+   non-sensitive.
 3. Never push a remediation branch or open a pull request in the public
    repository until disclosure is coordinated. A branch in a public repository
    is public even when it is named `private` or has no pull request.

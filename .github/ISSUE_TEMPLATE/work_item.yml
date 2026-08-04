@@ -173,7 +173,7 @@ body:
           required: true
         - label: I did not include credentials, private genealogy records, databases, backups, logs, or prompt/response payloads.
           required: true
-        - label: I will use a dedicated branch or worktree and will not implement this directly on `main`.
+        - label: I will use the appropriate `feature/*`, `bugfix/*`, or `hotfix/*` branch/worktree from current `origin/main` and will not implement this directly on `main`.
           required: true
         - label: For behavioral work, I will observe the focused test fail for the expected reason before implementing the behavior.
           required: true

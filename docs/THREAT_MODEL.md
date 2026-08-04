@@ -250,7 +250,7 @@ continuous lifecycle, not a one-time compliance checklist.
 | Practice group | AncestryLLM outcome and evidence |
 |---|---|
 | `PO` | **Prepare the Organization:** ADR-0025, this control/risk ledger, issue/path ownership, fictional-data policy, secure toolchain, review roles, severity/expiry rules, and G0-G4 criteria define the security requirements and development environment. |
-| `PS` | **Protect the Software:** focused branches/worktrees, protected review, pinned CI actions, reviewed lockfiles, secret scanning, least-privilege CI, SBOM/provenance, signed immutable packages, and release access controls protect code and artifacts from tampering. |
+| `PS` | **Protect the Software:** classified `feature/*`, `bugfix/*`, or `hotfix/*` branches/worktrees, protected review, pinned CI actions, reviewed lockfiles, secret scanning, least-privilege CI, SBOM/provenance, signed immutable packages, and release access controls protect code and artifacts from tampering. |
 | `PW` | **Produce Well-Secured Software:** threat modeling before code, strict types/schemas, narrow adapters, secure defaults, peer review, negative tests, SAST, dependency analysis, contract/fuzz/E2E tests, packaging assertions, and documented residual risk reduce introduced vulnerabilities. |
 | `RV` | **Respond to Vulnerabilities:** `SECURITY.md` intake, `SECURITY_RESPONSE.md`, finding triage, owner/severity/expiry tracking, root-cause regression tests, revocation/emergency update plans, release evidence, and lessons fed back into controls address discovered vulnerabilities. |
 
