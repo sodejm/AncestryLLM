@@ -552,7 +552,8 @@ function isSandboxedRendererProcess(
 ): boolean {
   return rendererPids.has(record.pid)
     && /(?:^|\s)--type=renderer(?:\s|$)/.test(record.commandLine)
-    && record.commandLine.includes('--enable-sandbox')
+    && !record.commandLine.includes('--no-sandbox')
+    && !record.commandLine.includes('--disable-setuid-sandbox')
 }
 
 async function packagedProcessTreeMetrics(browser: Browser, rootPid: number): Promise<number> {

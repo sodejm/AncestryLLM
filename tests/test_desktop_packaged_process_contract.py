@@ -20,6 +20,7 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
 
 def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
     assert "browser.newBrowserCDPSession()" in source
     assert "session.send('SystemInfo.getProcessInfo')" in source
@@ -42,7 +43,10 @@ def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
         source,
     )
     assert "correlatedRendererProcesses.length" in source
-    assert "commandLine.includes('--enable-sandbox')" in source
+    assert "app.enableSandbox()" in main_source
+    assert "commandLine.includes('--no-sandbox')" in source
+    assert "commandLine.includes('--disable-setuid-sandbox')" in source
+    assert "commandLine.includes('--enable-sandbox')" not in source
     assert re.search(r"--type=renderer", source)
 
 
