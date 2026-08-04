@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -41,6 +44,18 @@ class RuleBundle:
     url: str
     semantic_sha256: str
     revisions: tuple[RuleRevision, ...]
+    include_rule_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RuleArchive:
+    """A commit- and content-pinned archive containing reviewed rule files."""
+
+    name: str
+    url: str
+    semantic_sha256: str
+    revision: RuleRevision
+    members: tuple[str, ...]
 
 
 RULE_BUNDLES = (
@@ -88,6 +103,74 @@ RULE_BUNDLES = (
             ),
         ),
     ),
+    RuleBundle(
+        name="trailofbits",
+        url="https://semgrep.dev/c/p/trailofbits",
+        semantic_sha256="8b1a7d47796f1d002fa6ca1a960efefaf775b2d0cd864a413aa23a5210ed59ea",
+        revisions=(
+            RuleRevision(
+                sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
+                size=185_537,
+            ),
+        ),
+        include_rule_ids=(
+            "trailofbits.generic.curl-insecure.curl-insecure",
+            "trailofbits.generic.curl-unencrypted-url.curl-unencrypted-url",
+            "trailofbits.generic.gpg-insecure-flags.gpg-insecure-flags",
+            "trailofbits.generic.installer-allow-untrusted.installer-allow-untrusted",
+            "trailofbits.generic.node-disable-certificate-validation.node-disable-certificate-validation",
+            "trailofbits.generic.openssl-insecure-flags.openssl-insecure-flags",
+            "trailofbits.generic.ssh-disable-host-key-checking.ssh-disable-host-key-checking",
+            "trailofbits.generic.tar-insecure-flags.tar-insecure-flags",
+            "trailofbits.generic.wget-no-check-certificate.wget-no-check-certificate",
+            "trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url",
+        ),
+    ),
+)
+
+RULE_ARCHIVES = (
+    RuleArchive(
+        name="apiiro-prevent",
+        url=(
+            "https://codeload.github.com/apiiro/malicious-code-ruleset/tar.gz/"
+            "a21246b666f34db899f0e33add7237ed70fab790"
+        ),
+        semantic_sha256="078d02c35e13f132282b4bf50f9756262d806365d64589b70644588f580e4ff5",
+        revision=RuleRevision(
+            sha256="d5dd3bd153c442761244d1493b855dc16d872d18bcde765bfca9f630fa64e2f4",
+            size=32_782,
+        ),
+        members=(
+            "dynamic_execution/python/python_dynamic-execution-system.yml",
+            "dynamic_execution/python/python_dynamic-execution_exec_eval.yml",
+            "dynamic_execution/python/python_dynamic-execution_functiontype.yml",
+            "dynamic_execution/python/python_dynamic-execution_pickle.yml",
+            "dynamic_execution/javascript_typescript/javascript_dynamic-execution_eval-Function.yml",
+            "dynamic_execution/javascript_typescript/javascript_dynamic-execution_system.yml",
+            "obfuscation/python/python_obfuscation_indirect-eval.yml",
+            "obfuscation/python/python_obfuscation_indirect-exec.yml",
+            "obfuscation/python/python_obfuscation_indirect-pickle.yml",
+            "obfuscation/javascript_typescript/javascript_obfuscation_blatant.yml",
+            "obfuscation/javascript_typescript/javascript_obfuscation_indirect-execution.yml",
+            "obfuscation/generic_hide_remotely.yml",
+        ),
+    ),
+    RuleArchive(
+        name="elttam",
+        url=(
+            "https://codeload.github.com/elttam/semgrep-rules/tar.gz/"
+            "244268562cc92d33f54b8a60a187df5520f91b26"
+        ),
+        semantic_sha256="f13c542a65ff1898c75f1aca20574dbb96b12ece72ca794fed0d7678958b9ea6",
+        revision=RuleRevision(
+            sha256="4a1c064f24391ec8423e53b9d423c5ba2cdedd5b481a0c73237ca32d6cd9d748",
+            size=444_683,
+        ),
+        members=(
+            "rules/yaml/github-actions/security/save-state.yaml",
+            "rules/yaml/github-actions/security/set-output.yaml",
+        ),
+    ),
 )
 
 _DOWNLOAD_ATTEMPTS = 3
@@ -105,25 +188,47 @@ def _validate_rule_url(url: str) -> None:
         raise ValueError(f"Semgrep rule URL is not trusted: {url}")
 
 
-def _semantic_rule_digest(payload: bytes) -> str:
-    """Hash a rule bundle after normalizing reviewed registry encodings."""
+def _validate_archive_url(url: str) -> None:
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "codeload.github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in (None, 443)
+    ):
+        raise ValueError(f"Semgrep rule archive URL is not trusted: {url}")
+
+
+def _load_rule_document(payload: bytes) -> dict[str, object]:
     try:
         document = yaml.safe_load(payload)
     except (UnicodeDecodeError, yaml.YAMLError) as error:
         raise ValueError("Semgrep rule bundle is not valid YAML or JSON") from error
     if not isinstance(document, dict):
         raise ValueError("Semgrep rule bundle must be a mapping")
-
     rules = document.get("rules")
     if not isinstance(rules, list):
         raise ValueError("Semgrep rule bundle must contain a rules list")
-    rule_ids: list[str] = []
     for rule in rules:
         if not isinstance(rule, dict):
             raise ValueError("Semgrep rule bundle contains a non-mapping rule")
         rule_id = rule.get("id")
         if not isinstance(rule_id, str) or not rule_id:
             raise ValueError("Semgrep rule bundle contains a rule without an id")
+    return document
+
+
+def _semantic_rule_digest(payload: bytes) -> str:
+    """Hash a rule bundle after normalizing reviewed registry encodings."""
+    document = _load_rule_document(payload)
+    rules = document["rules"]
+    assert isinstance(rules, list)
+    rule_ids: list[str] = []
+    for rule in rules:
+        assert isinstance(rule, dict)
+        rule_id = rule.get("id")
+        assert isinstance(rule_id, str)
         rule_ids.append(rule_id)
     if len(set(rule_ids)) != len(rule_ids):
         raise ValueError("Semgrep rule bundle contains duplicate rule ids")
@@ -142,6 +247,27 @@ def _semantic_rule_digest(payload: bytes) -> str:
     except (TypeError, ValueError) as error:
         raise ValueError("Semgrep rule bundle cannot be normalized") from error
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _rules_from_payload(payload: bytes) -> list[dict[str, object]]:
+    document = _load_rule_document(payload)
+    rules = document["rules"]
+    assert isinstance(rules, list)
+    return [dict(rule) for rule in rules if isinstance(rule, dict)]
+
+
+def _selected_bundle_rules(bundle: RuleBundle, payload: bytes) -> list[dict[str, object]]:
+    rules = _rules_from_payload(payload)
+    if not bundle.include_rule_ids:
+        return rules
+    by_id = {rule["id"]: rule for rule in rules}
+    missing = set(bundle.include_rule_ids) - by_id.keys()
+    if missing:
+        raise RuntimeError(
+            f"Semgrep {bundle.name} rule bundle is missing reviewed rules: "
+            + ", ".join(sorted(missing))
+        )
+    return [by_id[rule_id] for rule_id in bundle.include_rule_ids]
 
 
 def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
@@ -193,6 +319,110 @@ def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
     )
 
 
+def _download_rule_archive(archive: RuleArchive) -> bytes:
+    """Download one immutable commit archive and verify its exact bytes."""
+    _validate_archive_url(archive.url)
+    request = urllib.request.Request(  # noqa: S310
+        archive.url,
+        headers={"User-Agent": "AncestryLLM-release-security-gate"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+        final_url = response.geturl()
+        _validate_archive_url(final_url)
+        if final_url != archive.url:
+            raise RuntimeError(f"Semgrep {archive.name} rule archive redirected unexpectedly")
+        payload = response.read(archive.revision.size + 1)
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != archive.revision.sha256 or len(payload) != archive.revision.size:
+        raise RuntimeError(
+            f"Semgrep {archive.name} rule archive differs from the committed "
+            f"release-security contract; observed sha256={digest}, size={len(payload)}"
+        )
+    return payload
+
+
+def _archive_rules(archive: RuleArchive, payload: bytes) -> list[dict[str, object]]:
+    """Read only explicitly reviewed members without extracting the archive."""
+    documents: dict[str, bytes] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
+            for member in tar.getmembers():
+                relative_name = member.name.partition("/")[2]
+                if relative_name not in archive.members:
+                    continue
+                if not member.isfile() or relative_name in documents:
+                    raise ValueError(
+                        f"Semgrep {archive.name} archive has an invalid member: {relative_name}"
+                    )
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    raise ValueError(
+                        f"Semgrep {archive.name} archive member cannot be read: {relative_name}"
+                    )
+                documents[relative_name] = extracted.read()
+    except (tarfile.TarError, OSError) as error:
+        raise ValueError(f"Semgrep {archive.name} rule archive is invalid") from error
+    missing = set(archive.members) - documents.keys()
+    if missing:
+        raise ValueError(
+            f"Semgrep {archive.name} archive is missing reviewed members: "
+            + ", ".join(sorted(missing))
+        )
+    rules: list[dict[str, object]] = []
+    for member in archive.members:
+        rules.extend(_rules_from_payload(documents[member]))
+    semantic_payload = yaml.safe_dump({"rules": rules}, sort_keys=False).encode()
+    if _semantic_rule_digest(semantic_payload) != archive.semantic_sha256:
+        raise ValueError(f"Semgrep {archive.name} reviewed rules changed semantically")
+    return rules
+
+
+def _canonical_rule(rule: dict[str, object], *, matching_only: bool = False) -> bytes:
+    normalized = dict(rule)
+    if matching_only:
+        for key in ("id", "message", "metadata", "severity"):
+            normalized.pop(key, None)
+    try:
+        return json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise ValueError("Semgrep rule cannot be normalized") from error
+
+
+def _deduplicate_rules(
+    rule_groups: Iterable[Iterable[dict[str, object]]],
+) -> tuple[list[dict[str, object]], int]:
+    """Remove identical IDs and matching logic while rejecting ID collisions."""
+    selected: list[dict[str, object]] = []
+    by_id: dict[str, bytes] = {}
+    matching_fingerprints: set[bytes] = set()
+    duplicate_count = 0
+    for rules in rule_groups:
+        for rule in rules:
+            rule_id = rule.get("id")
+            assert isinstance(rule_id, str)
+            canonical = _canonical_rule(rule)
+            previous = by_id.get(rule_id)
+            if previous is not None:
+                if previous != canonical:
+                    raise ValueError(f"Semgrep rule id collision has different content: {rule_id}")
+                duplicate_count += 1
+                continue
+            by_id[rule_id] = canonical
+            matching_fingerprint = _canonical_rule(rule, matching_only=True)
+            if matching_fingerprint in matching_fingerprints:
+                duplicate_count += 1
+                continue
+            matching_fingerprints.add(matching_fingerprint)
+            selected.append(rule)
+    return selected, duplicate_count
+
+
 def _semgrep_executable() -> Path:
     executable = Path(sys.executable).with_name("semgrep")
     if not executable.is_file():
@@ -206,11 +436,21 @@ def _semgrep_executable() -> Path:
 def run_scan(targets: list[str]) -> int:
     """Run Semgrep against targets using only verified local rule files."""
     with tempfile.TemporaryDirectory(prefix="ancestryllm-semgrep-") as temp_dir:
-        config_paths: list[Path] = []
+        rule_groups: list[list[dict[str, object]]] = []
         for bundle in RULE_BUNDLES:
             config_path = Path(temp_dir) / f"{bundle.name}.yml"
             download_rule_bundle(bundle, config_path)
-            config_paths.append(config_path)
+            rule_groups.append(_selected_bundle_rules(bundle, config_path.read_bytes()))
+        for archive in RULE_ARCHIVES:
+            rule_groups.append(_archive_rules(archive, _download_rule_archive(archive)))
+
+        rules, duplicate_count = _deduplicate_rules(rule_groups)
+        config_path = Path(temp_dir) / "reviewed-rules.yml"
+        config_path.write_text(yaml.safe_dump({"rules": rules}, sort_keys=False), encoding="utf-8")
+        print(
+            f"Loaded {len(rules)} reviewed Semgrep rules "
+            f"({duplicate_count} duplicate{'s' if duplicate_count != 1 else ''} removed)."
+        )
 
         command = [
             str(_semgrep_executable()),
@@ -218,9 +458,9 @@ def run_scan(targets: list[str]) -> int:
             "--error",
             "--metrics=off",
             "--disable-version-check",
+            "--config",
+            str(config_path),
         ]
-        for config_path in config_paths:
-            command.extend(("--config", str(config_path)))
         command.extend(targets)
         environment = os.environ.copy()
         environment["SEMGREP_LOG_FILE"] = str(Path(temp_dir) / "semgrep.log")
