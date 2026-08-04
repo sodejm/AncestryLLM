@@ -61,6 +61,8 @@ Record exact commands and results. Mark non-applicable gates with a reason.
 
 ## Checklist
 
+- [ ] Head branch uses the appropriate `feature/*`, `bugfix/*`, or `hotfix/*`
+  prefix and was created from current `origin/main`
 - [ ] Every behavioral acceptance criterion maps to an automated test
 - [ ] Initial failures were observed for the expected reasons
 - [ ] Existing tests and safety controls were not weakened to make the change pass

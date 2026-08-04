@@ -16,7 +16,8 @@ A push to `main` deploys the documentation site. A push that changes a path
 under `docs/` also starts Wiki synchronization. The normal publication path is
 therefore:
 
-1. Make documentation changes on a dedicated branch.
+1. Make documentation changes on the appropriate `feature/*`, `bugfix/*`, or
+   `hotfix/*` branch from current `origin/main`.
 2. Run the validation commands described below.
 3. Merge the reviewed pull request into `main`.
 4. Verify the Pages deployment, resulting site, and Wiki commit before closing
@@ -208,7 +209,7 @@ any non-Markdown or nested Wiki content, which is outside the managed scope.
 
 Rollback happens in the source repository, not by rewriting Wiki history.
 
-1. Create a dedicated branch from current `origin/main`.
+1. Create a `bugfix/*` branch from current `origin/main`.
 2. Revert the documentation-only source commit, or restore the affected files
    under `docs/` to their last known-good content.
 3. Run `python scripts/validate_wiki_docs.py --source docs` and the relevant

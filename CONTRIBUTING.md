@@ -1,6 +1,7 @@
 # Contributing
 
-Use Python 3.12-3.14, create a focused branch, and run `make setup`. Define
+Use Python 3.12-3.14, create a focused branch under the branch contract below,
+and run `make setup`. Define
 commands through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
 not presentation or dispatch adapters. Core and application contracts must
@@ -10,6 +11,40 @@ contract and mocked timeout/malformed-output/consent/offline tests. New modules
 must be explicit built-ins with one-shot and console parity; follow the
 [module-authoring contract](docs/MODULE_AUTHORING.md) rather than adding a
 second command registry.
+
+## GitHub Flow branch strategy
+
+AncestryLLM follows the
+[GitHub Flow branch categories described by AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/choosing-git-branch-approach/branches-in-a-git-hub-flow-strategy.html).
+`main` is the protected, deployable trunk. Do not commit or push directly to
+`main`; create a short-lived branch from current `origin/main`, keep it focused
+on one work item, and merge it back through a reviewed, green pull request.
+This repository does not use long-lived `develop` or `release/*` branches.
+
+Every human-created work branch must use the prefix that matches its purpose:
+
+- `feature/*` — planned capabilities, enhancements, documentation, refactors,
+  dependency updates, CI changes, and other non-defect work;
+- `bugfix/*` — ordinary defects that do not require an emergency production
+  response; or
+- `hotfix/*` — high-impact critical defects that must reach production with
+  minimal delay.
+
+After the prefix, use a lowercase kebab-case name in the form
+`<work-item>-<short-description>`, where `<work-item>` is the issue or story
+number when one exists. Examples are `feature/231-signed-installer`,
+`bugfix/230-renderer-timeout`, and `hotfix/312-keyring-crash`. Do not create
+human work branches with unclassified or alternative prefixes such as
+`codex/*`, `chore/*`, `docs/*`, `fix/*`, `issue/*`, or `release/*`. GitHub-owned
+Dependabot branches are the sole naming exception because GitHub controls their
+`dependabot/*` refs; they still target `main` through the same protected
+pull-request gates.
+
+Before opening the pull request, incorporate the latest `origin/main` without
+rewriting shared history and rerun the relevant gates. Delete the merged remote
+branch and remove its clean local worktree when its commits are safely
+reachable; preserve branches with unmerged or graph-unique work for explicit
+follow-up.
 
 ## Test-driven development
 
@@ -73,10 +108,11 @@ and NIST SP 800-218 (`PO`, `PS`, `PW`, or `RV`) outcomes. Add and observe
 positive, boundary, and negative regression tests failing before implementing
 the behavior. A scanner result alone does not close a control.
 
-Use the dedicated issue branch/worktree and remain within its exclusive path
-ownership. Do not edit shared lockfiles, generated contracts, workflows,
-architecture/security documents, or another issue's subtree opportunistically.
-Wait for every hard dependency to merge before branching from updated `main`.
+Use the dedicated `feature/*`, `bugfix/*`, or `hotfix/*` issue branch/worktree
+and remain within its exclusive path ownership. Do not edit shared lockfiles,
+generated contracts, workflows, architecture/security documents, or another
+issue's subtree opportunistically. Wait for every hard dependency to merge
+before branching from current `origin/main`.
 
 Renderer code has no Node types/imports, direct filesystem/network/keyring/
 provider/database access, generic IPC, raw HTML, remote assets, or secrets in
@@ -95,8 +131,9 @@ exceptions and untriaged Critical/High findings fail the gate.
 
 The Markdown files under `docs/` are the authoritative source for documentation
 published to the [AncestryLLM documentation site](https://sodejm.github.io/AncestryLLM/)
-and GitHub Wiki. Make documentation changes in `docs/` on a focused branch and
-submit them through the normal pull-request workflow. Pages and the Wiki are
+and GitHub Wiki. Make documentation changes in `docs/` on the appropriate
+`feature/*`, `bugfix/*`, or `hotfix/*` branch and submit them through the normal
+pull-request workflow. Pages and the Wiki are
 generated publishing targets, not separate documentation sources.
 
 All version-controlled Markdown files under `docs/` are in publishing scope,
