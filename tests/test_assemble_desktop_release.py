@@ -407,3 +407,184 @@ def test_target_rejects_symlinked_installer(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "regular, non-symlink file" in completed.stderr
+
+
+def _create_unsigned_target(root: Path, target: str, version: str = "0.5.0") -> tuple[Path, Path]:
+    """Create a pre-1.0 target evidence row with unsigned signing mode."""
+    expected_os, arch, extension, _trusted_gates = TARGETS[target]
+    target_dir = root / target
+    target_dir.mkdir()
+    installer = target_dir / f"AncestryLLM-{version}-{target}{extension}"
+    installer.write_bytes(f"unsigned installer for {target}".encode())
+    sbom = target_dir / f"desktop-{target}.cdx.json"
+    sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "metadata": {
+                    "component": {
+                        "type": "application",
+                        "name": "ancestryllm-desktop",
+                        "version": version,
+                        "bom-ref": f"pkg:npm/ancestryllm-desktop@{version}",
+                    }
+                },
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "fictional-unsigned-component",
+                        "version": "1.0.0",
+                        "bom-ref": "pkg:npm/fictional-unsigned-component@1.0.0",
+                        "properties": [{"name": "existing", "value": target}],
+                    }
+                ],
+                "dependencies": [
+                    {
+                        "ref": f"pkg:npm/ancestryllm-desktop@{version}",
+                        "dependsOn": ["pkg:npm/fictional-unsigned-component@1.0.0"],
+                    },
+                    {
+                        "ref": "pkg:npm/fictional-unsigned-component@1.0.0",
+                        "dependsOn": [],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = target_dir / "desktop-target-evidence.json"
+    arguments = [
+        "target",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        version,
+        "--signing-mode",
+        "unsigned",
+        "--target",
+        target,
+        "--expected-os",
+        expected_os,
+        "--arch",
+        arch,
+        "--installer",
+        str(installer),
+        "--sbom",
+        str(sbom),
+        "--output",
+        str(evidence),
+    ]
+    for gate in COMMON_GATES:
+        arguments.extend(("--gate", gate))
+
+    completed = _run(*arguments)
+    assert completed.returncode == 0, completed.stderr
+    return evidence, installer
+
+
+def test_pre_1_aggregate_assembles_unsigned_matrix_with_no_signing_disclosure(
+    tmp_path: Path,
+) -> None:
+    """v0.5.0 official aggregate must use unsigned mode and include the pre-1.0 disclosure."""
+    pre_1_version = "0.5.0"
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    installers = {
+        target: _create_unsigned_target(inputs, target, pre_1_version)[1] for target in TARGETS
+    }
+    output = tmp_path / "release"
+
+    completed = _run(
+        "aggregate",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        pre_1_version,
+        "--input-dir",
+        str(inputs),
+        "--output-dir",
+        str(output),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    evidence = json.loads((output / "desktop-exact-head-evidence.json").read_text(encoding="utf-8"))
+    assert evidence["schemaVersion"] == 3
+    assert evidence["status"] == "passed"
+    assert evidence["gitHead"] == GIT_HEAD
+    assert evidence["version"] == pre_1_version
+    assert evidence["binarySigningMode"] == "unsigned"
+    assert (
+        "pre-1.0 release" in evidence["binarySigningDisclosure"].lower()
+        or "pre-1.0" in evidence["binarySigningDisclosure"]
+    )
+    assert "unsigned" in evidence["binarySigningDisclosure"]
+    assert {row["target"] for row in evidence["targets"]} == set(TARGETS)
+    manifest = json.loads((output / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schemaVersion"] == 2
+    assert manifest["version"] == pre_1_version
+    assert manifest["binarySigningMode"] == "unsigned"
+    assert manifest["binarySigningDisclosure"] == evidence["binarySigningDisclosure"]
+    expected_assets = {path.name for path in installers.values()} | {
+        f"desktop-{target}.cdx.json" for target in TARGETS
+    }
+    assert {item["name"] for item in manifest["artifacts"]} == expected_assets
+
+
+def test_pre_1_aggregate_rejects_trusted_signing_mode(tmp_path: Path) -> None:
+    """v0.5.0 aggregate must reject trusted signing mode; trusted is reserved for v1.0.0+."""
+    pre_1_version = "0.5.0"
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+
+    for target in TARGETS:
+        expected_os, arch, extension, target_gates = TARGETS[target]
+        target_dir = inputs / target
+        target_dir.mkdir()
+        installer = target_dir / f"AncestryLLM-{pre_1_version}-{target}{extension}"
+        installer.write_bytes(f"fake installer {target}".encode())
+        sbom = target_dir / f"desktop-{target}.cdx.json"
+        sbom.write_text(json.dumps({"bomFormat": "CycloneDX"}), encoding="utf-8")
+        evidence = target_dir / "desktop-target-evidence.json"
+        evidence.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "status": "passed",
+                    "gitHead": GIT_HEAD,
+                    "version": pre_1_version,
+                    "target": target,
+                    "expectedOs": expected_os,
+                    "arch": arch,
+                    "binarySigningMode": "trusted",
+                    "gates": {gate: True for gate in sorted((*COMMON_GATES, *target_gates))},
+                    "artifacts": {
+                        "installer": {
+                            "name": installer.name,
+                            "bytes": installer.stat().st_size,
+                            "sha256": "a" * 64,
+                        },
+                        "sbom": {
+                            "name": sbom.name,
+                            "bytes": sbom.stat().st_size,
+                            "sha256": "b" * 64,
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    completed = _run(
+        "aggregate",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        pre_1_version,
+        "--input-dir",
+        str(inputs),
+        "--output-dir",
+        str(tmp_path / "release"),
+    )
+
+    assert completed.returncode != 0
+    assert "trusted" in completed.stderr.lower() or "signing" in completed.stderr.lower()
