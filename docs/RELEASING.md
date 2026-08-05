@@ -311,6 +311,33 @@ the immutable GitHub Release. The attached `SHA256SUMS` covers
 every release asset except the checksum file itself. No other workflow or
 manual upload may publish an installer.
 
+### Documentation publication gate
+
+The release workflow enforces documentation publication for the exact release
+commit before the immutable GitHub Release is published. The
+`verify-docs-publication` job runs as a required predecessor to
+`publish-github-release` and performs two checks:
+
+**GitHub Pages (always required)**
+The `Deploy documentation site` (`jekyll-gh-pages.yml`) workflow must have a
+successful completed run for the release commit SHA. This workflow runs
+automatically on every push to `main`; if the release commit landed on `main`
+and Pages deployment succeeded, the gate passes automatically. If the gate
+fails, confirm that `jekyll-gh-pages.yml` completed successfully on `main` for
+that commit, wait for any in-progress deployment to finish, and re-run the
+release workflow.
+
+**Wiki synchronization (required when `docs/**` changed)**
+If the release commit modified any file under `docs/`, the `Sync Wiki`
+(`sync-wiki.yml`) workflow must also have a successful completed run for that
+commit. If `docs/` was not changed in the release commit, Wiki sync is treated
+as not required and the gate passes without checking it. If the gate fails
+because Wiki sync is missing or failed, confirm that `sync-wiki.yml` completed
+successfully on `main` for that commit and re-run the release workflow.
+
+Both checks use exact commit SHA matching and query only `status=success` runs;
+a workflow that is in progress or failed does not satisfy the gate.
+
 ### Verify a downloaded installer
 
 Download the target-matched full installer and the release's `SHA256SUMS` from
