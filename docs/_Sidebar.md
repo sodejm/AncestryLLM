@@ -1,4 +1,4 @@
-## AncestryLLM documentation
+# AncestryLLM documentation
 
 - [Documentation site](https://sodejm.github.io/AncestryLLM/)
 - [GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki)
