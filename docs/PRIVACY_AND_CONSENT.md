@@ -65,7 +65,6 @@ data classes, retention, and current consent before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
 renderer privileges.
 
-
 ## Interactive console privacy
 
 The only supported interactive console is the prompt-toolkit/Rich REPL. It uses
