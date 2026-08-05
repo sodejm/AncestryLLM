@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
@@ -403,6 +403,27 @@ function packagedSidecarPath(packageRoot: string): string {
   )
 }
 
+async function prepareCopiedLinuxSandbox(packageRoot: string): Promise<void> {
+  if (process.platform !== 'linux') return
+  const sandboxPath = join(packageRoot, 'chrome-sandbox')
+  const sandbox = await lstat(sandboxPath)
+  if (sandbox.isSymbolicLink() || !sandbox.isFile()) {
+    throw new Error(`Copied Chromium sandbox is not a regular file: ${sandboxPath}`)
+  }
+
+  // Copying the unpacked application clears the root owner required by
+  // Chromium's SUID sandbox. GitHub-hosted Ubuntu runners provide
+  // non-interactive sudo, so restore the production sandbox contract on each
+  // disposable fault-injection package instead of disabling the sandbox.
+  await execFileAsync('sudo', ['--non-interactive', 'chown', 'root:root', '--', sandboxPath])
+  await execFileAsync('sudo', ['--non-interactive', 'chmod', '4755', '--', sandboxPath])
+
+  const prepared = await lstat(sandboxPath)
+  if (prepared.uid !== 0 || prepared.gid !== 0 || (prepared.mode & 0o7777) !== 0o4755) {
+    throw new Error(`Copied Chromium sandbox is not configured root:root:4755: ${sandboxPath}`)
+  }
+}
+
 async function copyPackagedApplication(root: string): Promise<PackageCopy> {
   if (!executablePath) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const sourcePackageRoot = packageRootForExecutable(executablePath)
@@ -414,6 +435,7 @@ async function copyPackagedApplication(root: string): Promise<PackageCopy> {
   } else {
     await cp(sourcePackageRoot, packageRoot, { recursive: true, preserveTimestamps: true })
   }
+  await prepareCopiedLinuxSandbox(packageRoot)
   return {
     executablePath: join(packageRoot, relative(sourcePackageRoot, resolve(executablePath))),
     packageRoot,
