@@ -245,7 +245,7 @@ join that claim at v1.0.0. A local build, a different Windows runner, or an
 incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
-#131 or the release-coordination tracker #132. CI success must not be used to
+Issue #131 or the release-coordination tracker #132. CI success must not be used to
 synthesize missing external proof.
 
 ## Local reproduction
