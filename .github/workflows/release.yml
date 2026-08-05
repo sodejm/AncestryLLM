@@ -254,7 +254,7 @@ jobs:
           python-version: "3.12"
       - name: Rebuild deterministic artifacts and SBOM
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           uv run python scripts/build_release.py --output-dir dist
           uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
@@ -369,7 +369,7 @@ jobs:
       - name: Install locked release dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           pnpm --dir desktop install --frozen-lockfile
       - name: Build and smoke-test the native sidecar
@@ -1692,7 +1692,7 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           python scripts/verify_pypi_attestations.py \
             --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" \

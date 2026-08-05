@@ -66,7 +66,7 @@ jobs:
       - name: Install locked dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           pnpm --dir desktop install --frozen-lockfile
       - name: Verify API and workflow contracts
@@ -300,7 +300,7 @@ jobs:
       - name: Install locked dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           pnpm --dir desktop install --frozen-lockfile
       - name: Build and smoke-test native sidecar
