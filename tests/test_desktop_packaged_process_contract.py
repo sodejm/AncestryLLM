@@ -73,3 +73,23 @@ def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> Non
         source,
     )
     assert source.count("await removeTemporaryPackage(root)") == 4
+
+
+def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "async function prepareCopiedLinuxSandbox(packageRoot: string)" in source
+    assert "if (process.platform !== 'linux') return" in source
+    assert "const sandboxPath = join(packageRoot, 'chrome-sandbox')" in source
+    assert "sandbox.isSymbolicLink()" in source
+    assert "sandbox.isFile()" in source
+    assert "['--non-interactive', 'chown', 'root:root', '--', sandboxPath]" in source
+    assert "['--non-interactive', 'chmod', '4755', '--', sandboxPath]" in source
+    assert "prepared.uid !== 0" in source
+    assert "prepared.gid !== 0" in source
+    assert "(prepared.mode & 0o7777) !== 0o4755" in source
+    assert "await prepareCopiedLinuxSandbox(packageRoot)" in source
+    assert source.index("await cp(sourcePackageRoot, packageRoot") < source.index(
+        "await prepareCopiedLinuxSandbox(packageRoot)"
+    )
+    assert "args.push('--no-sandbox')" not in source
