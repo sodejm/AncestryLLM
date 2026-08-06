@@ -10,9 +10,11 @@ Electron shell with Home, Diagnostics, a sanitized capability summary, and
 local visual Settings only, backed by a private packaged sidecar. The first
 launch presents a bounded local welcome that asks for no account, provider,
 credential, genealogy data, or cloud consent. It has no genealogy, file, job,
-chat, provider, cloud-account, or updater surface. A supported desktop release
-is a manually installed signed installer; unsigned CI artifacts and unpacked
-development builds are verification inputs, not supported releases. The
+chat, provider, cloud-account, or updater surface. A supported v0.5.0 desktop
+release is a manually installed official unsigned installer. macOS or Windows
+may show an unknown-publisher or Gatekeeper prompt; verify the published
+checksums and release evidence before installation. Unsigned CI artifacts and
+unpacked development builds are verification inputs, not supported releases. The
 internal adapter is not a public API, and later domain adapters must reuse the
 existing service surface.
 
