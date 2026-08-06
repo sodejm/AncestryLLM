@@ -157,7 +157,9 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
     command = "uv run python scripts/check_code_documentation.py"
-    assert ci.count(command) == 1, "CI quality job must run check_code_documentation.py exactly once"
+    assert ci.count(command) == 1, (
+        "CI quality job must run check_code_documentation.py exactly once"
+    )
     assert readiness.count(command) == 1, (
         "release-readiness quality gates must run check_code_documentation.py exactly once"
     )
