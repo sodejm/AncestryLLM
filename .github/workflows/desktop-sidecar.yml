@@ -366,6 +366,7 @@ jobs:
           export ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"
           export ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
           export ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"
+          export ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"
           package_launcher=()
           if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
           node desktop/scripts/verification-receipt.mjs \
@@ -464,10 +465,11 @@ jobs:
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
         with:
           name: desktop-evidence-${{ matrix.runner }}
           path: desktop/verification
-          if-no-files-found: error
+          if-no-files-found: warn
 
   desktop-gate:
     name: Desktop gate
