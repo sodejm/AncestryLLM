@@ -75,6 +75,35 @@ def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> Non
     assert source.count("await removeTemporaryPackage(root)") == 4
 
 
+def test_packaged_cleanup_terminates_the_windows_process_tree_with_a_deadline() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "async function forceCloseProcess(child: ChildProcessWithoutNullStreams)" in source
+    assert "taskkill.exe" in source
+    assert "['/PID', String(child.pid), '/T', '/F']" in source
+    assert "timeout: 10_000" in source
+    assert "await forceCloseProcess(result.process)" in source
+    assert "await forceCloseProcess(child)" in source
+
+
+def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "const mismatchDiagnosticsPath = process.env.ANCESTRYLLM_MISMATCH_DIAGNOSTICS" in source
+    assert "async function withinDeadline<T>" in source
+    assert "Timed out while ${operation}" in source
+    assert "return withinDeadline('reading packaged startup diagnostics'" in source
+    assert "async function writeMismatchDiagnostics" in source
+    assert "let cleanupFailure: unknown" in source
+    assert "let primaryFailurePhase: string | null = null" in source
+    assert "primaryFailurePhase = phase" in source
+    assert "let cleanupFailurePhase: string | null = null" in source
+    assert "cleanupFailurePhase = phase" in source
+    assert "phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase" in source
+    assert "status: failure || cleanupFailure ? 'failed' : 'passed'" in source
+    assert "await writeMismatchDiagnostics" in source
+
+
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 
