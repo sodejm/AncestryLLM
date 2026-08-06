@@ -276,6 +276,14 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     assert "no automatic rollback" in normalized
 
 
+def test_readme_discloses_the_official_v05_unsigned_installer_policy() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "official unsigned installer" in readme
+    assert "unknown-publisher or Gatekeeper prompt" in readme
+    assert "manually installed signed installer" not in readme
+
+
 def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: Path) -> None:
     installer = tmp_path / "AncestryLLM-0.5.0-ubuntu-x64.deb"
     installer.write_bytes(b"installer")
