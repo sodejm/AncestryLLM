@@ -264,11 +264,11 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         release,
-    ) == ["uv==0.12.0", "uv==0.12.0", "uv==0.12.0"]
+    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         readiness,
-    ) == ["uv==0.12.0", "uv==0.12.0", "uv==0.12.0"]
+    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
     assert release.count("attestations: true") == 1
     assert release.count("attestations: false") == 1
     assert "--actual downloaded" in release
@@ -294,8 +294,8 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
 
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
-    assert "uv==0.12.0" in project["optional-dependencies"]["dev"]
-    assert "pip install --upgrade pip uv==0.12.0" in makefile
+    assert "uv==0.12.1" in project["optional-dependencies"]["dev"]
+    assert "pip install --upgrade pip uv==0.12.1" in makefile
     for relative_path, expected_command in sources.items():
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert content.count(expected_command) == 1
