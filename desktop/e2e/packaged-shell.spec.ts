@@ -1113,6 +1113,7 @@ test.describe('unpublished unpacked native package', () => {
     let phase = 'copy package'
     const startedAt = Date.now()
     let failure: unknown
+    let primaryFailurePhase: string | null = null
     let processPid: number | null = null
     let processExited = false
     try {
@@ -1165,9 +1166,11 @@ test.describe('unpublished unpacked native package', () => {
       })
     } catch (error) {
       failure = error
+      primaryFailurePhase = phase
     }
 
     let cleanupFailure: unknown
+    let cleanupFailurePhase: string | null = null
     try {
       phase = 'termination'
       if (running) {
@@ -1179,9 +1182,10 @@ test.describe('unpublished unpacked native package', () => {
       await removeTemporaryPackage(root)
     } catch (error) {
       cleanupFailure = error
+      cleanupFailurePhase = phase
     }
     await writeMismatchDiagnostics(mismatchDiagnosticsPath, {
-      phase,
+      phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase,
       elapsedMs: Date.now() - startedAt,
       status: failure || cleanupFailure ? 'failed' : 'passed',
       processPid,

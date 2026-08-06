@@ -413,6 +413,7 @@ jobs:
             --allow-output "$ANCESTRYLLM_RESTART_EVIDENCE" \
             --gate packagedSidecarVersionMismatchPassed \
             --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
+            --artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS" \
             --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
             -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "rejects a target-native wrong-build packaged sidecar"
@@ -434,6 +435,7 @@ jobs:
             --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
             --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
             --allow-output "$ROW_ROOT/sidecar-version-mismatch.json" \
+            --allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json" \
             --gate fusesInspectedPassed \
             --artifact fuseInspection="$ROW_ROOT/fuse-inspection.json" \
             -- node desktop/scripts/inspect-package-fuses.mjs --output "$ROW_ROOT/fuse-inspection.json"
