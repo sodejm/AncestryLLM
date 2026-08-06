@@ -1,3 +1,4 @@
+/** Resolves the renderer entry target and validates trusted renderer URLs for IPC authorization. */
 import { APP_ENTRY_URL } from './security-policy'
 
 interface RendererPolicy {

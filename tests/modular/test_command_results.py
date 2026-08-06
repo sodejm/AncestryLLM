@@ -1,3 +1,5 @@
+"""Tests for transport-neutral command result DTOs."""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,4 @@
+/** Tests the Electron single-instance guard and primary-window focus restoration behavior. */
 import { describe, expect, it, vi } from 'vitest'
 import { installSingleInstanceGuard } from './single-instance'
 

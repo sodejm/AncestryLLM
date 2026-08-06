@@ -1,3 +1,5 @@
+"""Tests for safe snapshotting of private credential files."""
+
 from __future__ import annotations
 
 import importlib.util

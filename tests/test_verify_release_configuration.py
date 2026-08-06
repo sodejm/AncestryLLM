@@ -1,3 +1,5 @@
+"""Tests for release configuration verification."""
+
 from __future__ import annotations
 
 import importlib.util

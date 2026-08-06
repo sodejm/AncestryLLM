@@ -1,3 +1,5 @@
+"""Tests for release milestone verification rules."""
+
 from __future__ import annotations
 
 import importlib.util

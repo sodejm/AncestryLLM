@@ -1,3 +1,4 @@
+/** Provides a deterministic mock implementation of the desktop bridge for renderer and fixture builds. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AncestryBridge,

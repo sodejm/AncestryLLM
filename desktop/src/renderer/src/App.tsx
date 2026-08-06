@@ -1,3 +1,4 @@
+/** Renders the offline desktop control shell, routing, onboarding, diagnostics, and local preference updates. */
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Heart, Home as HomeIcon, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react'

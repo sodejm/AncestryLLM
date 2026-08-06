@@ -1,3 +1,4 @@
+/** Tests bounded desktop preference persistence, optimistic concurrency, and unsafe-storage detection. */
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

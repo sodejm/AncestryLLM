@@ -1,3 +1,5 @@
+"""Tests for encrypted storage behavior and diagnostics."""
+
 from __future__ import annotations
 
 import base64

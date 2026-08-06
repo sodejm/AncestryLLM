@@ -1,3 +1,4 @@
+# Structured feature-request form requiring explicit safety constraints.
 name: Feature request
 description: Propose a testable enhancement with explicit safety constraints
 title: "[Feature]: "

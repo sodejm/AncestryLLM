@@ -1,3 +1,4 @@
+/** Implements the main-only authenticated HTTP client for fixed-route sidecar capabilities requests. */
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { DESKTOP_PROTOCOL_VERSION, type CapabilityManifest } from '../shared-contract/desktop'
 import { parseCapabilitiesResult } from '../shared-contract/runtime'

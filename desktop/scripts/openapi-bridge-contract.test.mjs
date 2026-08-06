@@ -1,3 +1,4 @@
+/** Verifies that the published OpenAPI document stays aligned with the desktop runtime bridge contract. */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'

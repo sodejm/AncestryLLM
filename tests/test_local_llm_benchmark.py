@@ -1,3 +1,5 @@
+"""Tests for the local LLM benchmark dry-run and metrics behavior."""
+
 from __future__ import annotations
 
 import importlib.util

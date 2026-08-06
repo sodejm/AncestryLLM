@@ -1,3 +1,5 @@
+"""Tests for release asset verification against checksum manifests."""
+
 from __future__ import annotations
 
 import hashlib

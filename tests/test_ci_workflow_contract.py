@@ -1,3 +1,5 @@
+"""Tests for the CI workflow contract and required quality gates."""
+
 from __future__ import annotations
 
 import re

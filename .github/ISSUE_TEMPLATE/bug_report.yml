@@ -1,3 +1,4 @@
+# Structured bug report form; see docs/CI.md for the issue triage workflow.
 name: Bug report
 description: Report a reproducible problem and define its regression test
 title: "[Bug]: "

@@ -1,3 +1,5 @@
+# Dependabot update policy: weekly checks with a cooldown to avoid churn from
+# just-published releases; see docs/CI.md for the dependency review workflow.
 version: 2
 updates:
   - package-ecosystem: "uv"

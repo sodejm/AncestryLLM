@@ -1,3 +1,5 @@
+# Base electron-builder configuration for local/unpublished desktop builds:
+# unsigned, unpacked directory targets with hardened Electron fuses.
 appId: org.ancestryllm.desktop
 productName: AncestryLLM
 executableName: ancestryllm

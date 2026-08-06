@@ -1,3 +1,5 @@
+"""Tests for Gemini transcription normalization helpers."""
+
 from ancestryllm.ocr import service as gemini
 
 

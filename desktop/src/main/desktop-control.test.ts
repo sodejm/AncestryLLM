@@ -1,3 +1,4 @@
+/** Tests the main-process desktop control bridge that exposes safe app, capabilities, and preferences responses. */
 import { describe, expect, it, vi } from 'vitest'
 import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
 

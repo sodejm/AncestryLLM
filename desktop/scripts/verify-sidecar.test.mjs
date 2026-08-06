@@ -1,3 +1,4 @@
+/** Tests supported sidecar target mapping and packaged sidecar discovery rules. */
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { test } from 'node:test'

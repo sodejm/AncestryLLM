@@ -1,3 +1,4 @@
+/** Parses and validates desktop bridge requests and results at the renderer and preload runtime boundary. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AppInfo,

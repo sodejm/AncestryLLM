@@ -1,3 +1,5 @@
+"""Tests for job management, cancellation, and progress reporting."""
+
 from __future__ import annotations
 
 import threading

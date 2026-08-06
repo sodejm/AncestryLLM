@@ -1,3 +1,5 @@
+# Canonical local developer entry points mirroring the CI quality/security
+# gates (setup, lint, typecheck, test, security, packaging, desktop targets).
 PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python

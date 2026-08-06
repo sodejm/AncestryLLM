@@ -1,3 +1,4 @@
+/** Checks the desktop workspace's pinned pnpm configuration, lockfile, and registry policy files. */
 import assert from 'node:assert/strict'
 import { access, readFile } from 'node:fs/promises'
 import test from 'node:test'

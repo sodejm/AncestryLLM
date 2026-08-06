@@ -1,3 +1,4 @@
+/** Implements in-memory and file-backed desktop preference storage with bounded schemas and safe writes. */
 import { randomUUID } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises'

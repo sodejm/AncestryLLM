@@ -1,3 +1,7 @@
+/// Prints the SHA-1 hash (or exports a certificate/private key pair to a
+/// temporary .p12) for a named macOS Developer ID signing identity in the
+/// login keychain. Used by CI to locate and stage a signing identity without
+/// ever printing the private key material to logs.
 import Foundation
 import Security
 

@@ -1,3 +1,5 @@
+"""Tests for LLM provider adapters and service streaming behavior."""
+
 from __future__ import annotations
 
 import asyncio

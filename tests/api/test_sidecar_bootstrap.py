@@ -1,3 +1,5 @@
+"""Tests for sidecar bootstrap readiness and loopback safety."""
+
 from __future__ import annotations
 
 import io

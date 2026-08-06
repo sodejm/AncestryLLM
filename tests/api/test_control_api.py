@@ -1,3 +1,5 @@
+"""Tests for the control API routes and shared metadata."""
+
 from __future__ import annotations
 
 import hashlib

@@ -1,3 +1,5 @@
+"""Tests for shared LLM provider contracts and preflight validation."""
+
 from __future__ import annotations
 
 import os

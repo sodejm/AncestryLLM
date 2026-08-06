@@ -1,3 +1,5 @@
+"""Tests for verification sidecar build target selection."""
+
 from __future__ import annotations
 
 from pathlib import Path

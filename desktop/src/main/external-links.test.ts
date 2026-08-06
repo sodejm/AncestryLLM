@@ -1,3 +1,4 @@
+/** Tests the allowlisted external-link flow, normalization, and explicit confirmation requirements. */
 import { describe, expect, it, vi } from 'vitest'
 import { externalLinkPrompt, openExternalLinkWithConfirmation, validateExternalLink } from './external-links'
 

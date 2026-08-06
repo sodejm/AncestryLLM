@@ -1,3 +1,5 @@
+"""Tests for RootsMagic export safety, publication, and query boundaries."""
+
 from __future__ import annotations
 
 import dataclasses

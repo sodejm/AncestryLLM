@@ -1,3 +1,4 @@
+/** Builds the main-process desktop control bridge that exposes safe app, sidecar, and preferences operations. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AncestryBridge,

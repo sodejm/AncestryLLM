@@ -1,3 +1,5 @@
+"""Tests for versioned release evidence record validation."""
+
 from __future__ import annotations
 
 import importlib.util

@@ -1,3 +1,5 @@
+# CodeQL static analysis for the Python source, scheduled weekly and on
+# push/PR to main; uploads results to the repository's security tab.
 name: CodeQL
 
 on:

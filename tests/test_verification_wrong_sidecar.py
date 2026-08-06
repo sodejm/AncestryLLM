@@ -1,3 +1,5 @@
+"""Tests for wrong-build verification sidecar readiness behavior."""
+
 from __future__ import annotations
 
 import json

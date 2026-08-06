@@ -1,3 +1,4 @@
+/** Defines the production app scheme, CSP, asset manifest, and secure BrowserWindow policy for the desktop shell. */
 export const APP_ENTRY_URL = 'app://bundle/index.html' as const
 
 export const APP_SCHEME_PRIVILEGES = Object.freeze({

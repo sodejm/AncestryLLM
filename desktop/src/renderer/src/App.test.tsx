@@ -1,3 +1,4 @@
+/** Tests the accessible desktop shell flows for onboarding, diagnostics, settings, and degraded startup states. */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

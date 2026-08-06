@@ -1,3 +1,5 @@
+"""Tests for presentation adapter rendering and error normalization."""
+
 from __future__ import annotations
 
 import json

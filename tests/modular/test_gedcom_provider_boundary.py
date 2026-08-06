@@ -1,3 +1,5 @@
+"""Tests for GEDCOM provider boundary contracts and isolation."""
+
 from __future__ import annotations
 
 import ast

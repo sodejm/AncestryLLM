@@ -1,3 +1,5 @@
+# Synchronizes docs/** content to the repository wiki whenever documentation
+# changes land on main.
 name: Sync Wiki
 
 on:

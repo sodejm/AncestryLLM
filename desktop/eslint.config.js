@@ -1,3 +1,4 @@
+/** Defines desktop ESLint rules, globals, and network-denial guardrails for the Electron scaffold. */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

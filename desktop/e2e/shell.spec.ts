@@ -1,3 +1,4 @@
+/** Exercises the unpackaged Electron shell to verify the renderer bridge, CSP, and zero-egress guardrails. */
 import {
   _electron as electron,
   expect,

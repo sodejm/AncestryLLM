@@ -1,3 +1,5 @@
+"""Tests for committed core contract characterization artifacts."""
+
 from __future__ import annotations
 
 import argparse

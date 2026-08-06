@@ -1,3 +1,5 @@
+# Signed/notarizable installer overlay of electron-builder.yml for tagged
+# releases: dmg/nsis/deb artifacts with per-OS code-signing toggles.
 appId: org.ancestryllm.desktop
 productName: AncestryLLM
 executableName: ancestryllm

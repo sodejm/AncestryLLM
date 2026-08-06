@@ -1,3 +1,5 @@
+"""Tests for verifying published index artifacts against checksums."""
+
 from __future__ import annotations
 
 import hashlib

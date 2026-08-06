@@ -1,3 +1,4 @@
+/** Defines deeply frozen fixture payloads and helpers for the mock desktop bridge. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AppInfo,

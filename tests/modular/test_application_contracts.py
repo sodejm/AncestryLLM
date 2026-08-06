@@ -1,3 +1,5 @@
+"""Tests for transport-neutral application contracts and DTO boundaries."""
+
 from __future__ import annotations
 
 import inspect

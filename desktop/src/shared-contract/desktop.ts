@@ -1,3 +1,4 @@
+/** Declares the versioned desktop bridge contract shared by the main, preload, renderer, and fixtures. */
 export const DESKTOP_PROTOCOL_VERSION = '1' as const
 
 export type DesktopColorScheme = 'system' | 'light' | 'dark'

@@ -1,3 +1,4 @@
+/** Tests keyboard zoom shortcuts, bounds, and platform-specific modifiers for the desktop shell. */
 import { describe, expect, it, vi } from 'vitest'
 import {
   installKeyboardZoom,

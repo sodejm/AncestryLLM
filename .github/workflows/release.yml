@@ -1,3 +1,5 @@
+# Packages a validated release from a tag push or manual dispatch without
+# publishing, using release-readiness evidence as the trust boundary.
 name: Release
 
 on:

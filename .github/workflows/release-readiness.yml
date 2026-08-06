@@ -1,3 +1,5 @@
+# Manually-dispatched gate that validates a candidate commit/version and
+# lifecycle cleanup confirmation before a release proceeds.
 name: Release readiness
 
 on:

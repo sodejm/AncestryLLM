@@ -1,3 +1,4 @@
+/** Discovers packaged Electron resource and executable paths across supported desktop bundle layouts. */
 import assert from 'node:assert/strict'
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'

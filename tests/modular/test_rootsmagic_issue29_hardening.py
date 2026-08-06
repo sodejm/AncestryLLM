@@ -1,3 +1,5 @@
+"""Tests for RootsMagic export hardening and issue 29 regressions."""
+
 from __future__ import annotations
 
 import sqlite3

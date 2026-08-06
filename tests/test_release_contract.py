@@ -1,3 +1,5 @@
+"""Tests for the release contract, workflows, and manifest invariants."""
+
 from __future__ import annotations
 
 import ast

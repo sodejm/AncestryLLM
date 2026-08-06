@@ -1,3 +1,4 @@
+/** Starts the fixture desktop runtime bridge used by unpackaged and end-to-end test builds. */
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
 import type { AncestryBridge } from '../shared-contract/desktop'
 

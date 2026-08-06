@@ -1,3 +1,4 @@
+/** Tests the production renderer protocol, CSP, and BrowserWindow security preference policy. */
 import { describe, expect, it, vi } from 'vitest'
 import {
   APP_ASSET_MANIFEST,

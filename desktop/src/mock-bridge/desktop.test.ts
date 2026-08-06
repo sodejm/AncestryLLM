@@ -1,3 +1,4 @@
+/** Tests the deterministic mock desktop bridge used by renderer and end-to-end fixtures. */
 import { describe, expect, it } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 

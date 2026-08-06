@@ -1,3 +1,4 @@
+/** Mounts the React renderer application into the desktop shell root element. */
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'

@@ -1,3 +1,4 @@
+/** Tests the default Electron session policy that denies permissions, capture, and downloads. */
 import { describe, expect, it, vi } from 'vitest'
 import { installSessionPolicy } from './session-policy'
 

@@ -1,3 +1,4 @@
+/** Installs the Electron single-instance guard and restores focus to the existing primary window. */
 export interface SingleInstanceWindow {
   isMinimized(): boolean
   restore(): void

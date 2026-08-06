@@ -1,3 +1,4 @@
+/** Starts the packaged desktop runtime bridge by wiring preferences, sidecar supervision, and capabilities access. */
 import { app } from 'electron'
 import type { AncestryBridge } from '../shared-contract/desktop'
 import { createDesktopControlBridge } from './desktop-control'
