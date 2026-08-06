@@ -24,10 +24,12 @@ packaged-sidecar build and supervision.
 The API exposes no genealogy, provider, domain, or generic command-dispatch
 route. The exact six-method renderer bridge uses deterministic fictional data
 in development; packaged Electron main alone may call the authenticated fixed
-capabilities route. A supported desktop release requires a target-matched,
-manually installed signed installer and all release assurance gates. Unsigned
-CI artifacts and unpacked development builds are verification inputs only.
-Version 0.5.0 has no updater or background update channel.
+capabilities route. A supported 0.x desktop release requires a target-matched,
+manually installed official unsigned installer and all release assurance gates.
+macOS and Windows can display an unknown-publisher or Gatekeeper prompt; users
+must verify published checksums and release evidence before installation.
+Unsigned CI artifacts and unpacked development builds are verification inputs
+only. Version 0.5.0 has no updater or background update channel.
 
 There is no supported production browser, public/LAN, or multi-user runtime.
 ADR-0025 accepts the packaged local Electron direction and later private domain
@@ -159,7 +161,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported release still requires a target-matched manually installed signed installer and all release assurance gates; unsigned artifacts are not supported distribution packages. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -280,11 +282,14 @@ target-assurance gates to pass.
   do not move into the renderer or main process.
 - Offline-first behavior remains mandatory: `provider=none` opens no network
   socket even when provider credentials and SDKs exist.
-- Supported distribution is a manually installed signed installer for macOS 15
-  and 26 on arm64 and x64, Windows 11 on x64, or Ubuntu 24.04 on x64 after the
-  applicable release gates pass. Unsigned CI artifacts and unpacked builds are
-  verification inputs only. Version 0.5.0 has no updater, update feed,
-  background update channel, or staged rollout.
+- Supported 0.x distribution is a manually installed official unsigned
+  installer for macOS 15 and 26 on arm64 and x64, Windows 11 on x64, or
+  Ubuntu 24.04 on x64 after the applicable release gates pass. macOS and
+  Windows can display an unknown-publisher or Gatekeeper prompt, so users must
+  verify published checksums and release evidence before installation.
+  Unsigned CI artifacts and unpacked builds are verification inputs only.
+  Version 0.5.0 has no updater, update feed, background update channel, or
+  staged rollout.
 
 The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 5.0.0 requirements and NIST SP 800-218 SSDF practices. The control IDs, STRIDE
@@ -907,7 +912,7 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim requires a target-matched manually installed signed installer and all signing, notarization where applicable, provenance, installation, platform-execution, packaged-assurance, and exact-head gates. Unsigned CI artifacts are verification inputs only. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. |
 | Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts
