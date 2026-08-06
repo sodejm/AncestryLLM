@@ -95,6 +95,11 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "return withinDeadline('reading packaged startup diagnostics'" in source
     assert "async function writeMismatchDiagnostics" in source
     assert "let cleanupFailure: unknown" in source
+    assert "let primaryFailurePhase: string | null = null" in source
+    assert "primaryFailurePhase = phase" in source
+    assert "let cleanupFailurePhase: string | null = null" in source
+    assert "cleanupFailurePhase = phase" in source
+    assert "phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase" in source
     assert "status: failure || cleanupFailure ? 'failed' : 'passed'" in source
     assert "await writeMismatchDiagnostics" in source
 
