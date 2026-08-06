@@ -20,6 +20,7 @@ const packagedAttachTimeoutMs = 45_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
 const mismatchEvidencePath = process.env.ANCESTRYLLM_MISMATCH_EVIDENCE
+const mismatchDiagnosticsPath = process.env.ANCESTRYLLM_MISMATCH_DIAGNOSTICS
 const wrongBuildSidecarPath = process.env.ANCESTRYLLM_WRONG_BUILD_SIDECAR
 const execFileAsync = promisify(execFile)
 
@@ -223,24 +224,49 @@ function waitForProcessExit(
 
 async function forceClosePackaged(result: LaunchResult): Promise<void> {
   await result.browser.close().catch(() => undefined)
-  if (result.process.exitCode !== null || result.process.signalCode !== null) return
-  result.process.kill('SIGTERM')
-  try {
-    await waitForProcessExit(result.process, 2_000)
-  } catch {
-    result.process.kill('SIGKILL')
-    await waitForProcessExit(result.process, 5_000).catch(() => undefined)
-  }
+  await forceCloseProcess(result.process)
 }
 
 async function forceCloseProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === 'win32' && child.pid) {
+    await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+    }).catch(async (error: unknown) => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      throw error
+    })
+    await waitForProcessExit(child, 10_000).catch(() => undefined)
+    return
+  }
   child.kill('SIGTERM')
   try {
     await waitForProcessExit(child, 2_000)
   } catch {
     child.kill('SIGKILL')
     await waitForProcessExit(child, 5_000).catch(() => undefined)
+  }
+}
+
+async function withinDeadline<T>(
+  operation: string,
+  timeoutMs: number,
+  task: () => Promise<T>,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      task(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Timed out while ${operation} after ${String(timeoutMs)}ms.`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
 
@@ -342,7 +368,7 @@ async function launchPackaged(
     }
   } catch (error) {
     await browser?.close().catch(() => undefined)
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    await forceCloseProcess(child).catch(() => undefined)
     throw new Error(
       `Packaged ${phase} launch failed: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
@@ -351,7 +377,7 @@ async function launchPackaged(
 }
 
 async function startupDiagnostics(page: Page): Promise<StartupDiagnostics> {
-  return page.evaluate(async () => {
+  return withinDeadline('reading packaged startup diagnostics', 15_000, () => page.evaluate(async () => {
     const result = await (window as unknown as {
       ancestry: {
         getStartupDiagnostics(): Promise<{
@@ -365,7 +391,7 @@ async function startupDiagnostics(page: Page): Promise<StartupDiagnostics> {
       throw new Error(`Could not read packaged startup diagnostics: ${result.error?.code ?? 'unknown'}`)
     }
     return result.data
-  })
+  }))
 }
 
 async function expectStartupDiagnostics(
@@ -465,6 +491,25 @@ async function writeFaultEvidence(
     productionFaultHookUsed: false,
     observations,
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+}
+
+async function writeMismatchDiagnostics(
+  path: string,
+  details: Readonly<{
+    phase: string
+    elapsedMs: number
+    status: 'passed' | 'failed'
+    processPid: number | null
+    processExited: boolean
+    errorName: string | null
+  }>,
+): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-fault-diagnostics',
+    scenario: 'sidecar-version-mismatch',
+    ...details,
+  }, null, 2)}\n`, { mode: 0o600 })
 }
 
 async function expectSafeDiagnosticsAlert(page: Page): Promise<void> {
@@ -1055,20 +1100,29 @@ test.describe('unpublished unpacked native package', () => {
 
   test('rejects a target-native wrong-build packaged sidecar', async () => {
     test.skip(
-      !mismatchEvidencePath || !wrongBuildSidecarPath,
-      'Mismatch evidence output and wrong-build sidecar are required',
+      !mismatchEvidencePath || !mismatchDiagnosticsPath || !wrongBuildSidecarPath,
+      'Mismatch evidence output, diagnostics output, and wrong-build sidecar are required',
     )
-    if (!mismatchEvidencePath || !wrongBuildSidecarPath) {
-      throw new Error('ANCESTRYLLM_MISMATCH_EVIDENCE and ANCESTRYLLM_WRONG_BUILD_SIDECAR are required')
+    if (!mismatchEvidencePath || !mismatchDiagnosticsPath || !wrongBuildSidecarPath) {
+      throw new Error(
+        'ANCESTRYLLM_MISMATCH_EVIDENCE, ANCESTRYLLM_MISMATCH_DIAGNOSTICS, and ANCESTRYLLM_WRONG_BUILD_SIDECAR are required',
+      )
     }
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-wrong-build-sidecar-'))
     let running: LaunchResult | undefined
+    let phase = 'copy package'
+    const startedAt = Date.now()
+    let failure: unknown
+    let processPid: number | null = null
+    let processExited = false
     try {
       const copied = await copyPackagedApplication(root)
+      phase = 'replace sidecar'
       await copyFile(wrongBuildSidecarPath, copied.sidecarPath)
       if (process.platform !== 'win32') await chmod(copied.sidecarPath, 0o755)
       await signVerificationPackage(copied.packageRoot)
 
+      phase = 'launch and readiness'
       running = await launchPackaged(
         join(root, 'user-data'),
         /Welcome to AncestryLLM/,
@@ -1081,10 +1135,13 @@ test.describe('unpublished unpacked native package', () => {
           manualRetriesRemaining: 1,
         },
       )
+      processPid = running.process.pid ?? null
+      phase = 'rejection surface'
       await expectSafeDiagnosticsAlert(running.page)
       await expect(running.page.getByRole('alert')).toContainText(
         'The desktop service is not compatible with this build.',
       )
+      phase = 'manual rejection'
       await running.page.getByRole('button', { name: 'Retry desktop service' }).click()
       await expectStartupDiagnostics(running.page, {
         state: 'degraded',
@@ -1092,9 +1149,12 @@ test.describe('unpublished unpacked native package', () => {
         automaticRestartsRemaining: 2,
         manualRetriesRemaining: 0,
       })
+      phase = 'termination'
       await forceClosePackaged(running)
       expect(running.process.exitCode !== null || running.process.signalCode !== null).toBe(true)
+      processExited = true
       running = undefined
+      phase = 'write fault evidence'
       await writeFaultEvidence(mismatchEvidencePath, 'sidecar-version-mismatch', {
         failure: 'incompatible_build',
         automaticRestartsRemaining: 2,
@@ -1103,9 +1163,40 @@ test.describe('unpublished unpacked native package', () => {
         manualRetriesRemainingAfter: 0,
         verificationProcessTerminated: true,
       })
-    } finally {
-      if (running) await forceClosePackaged(running)
-      await removeTemporaryPackage(root)
+    } catch (error) {
+      failure = error
     }
+
+    let cleanupFailure: unknown
+    try {
+      phase = 'termination'
+      if (running) {
+        processPid = running.process.pid ?? processPid
+        await forceClosePackaged(running)
+        processExited = running.process.exitCode !== null || running.process.signalCode !== null
+      }
+      phase = 'temporary package cleanup'
+      await removeTemporaryPackage(root)
+    } catch (error) {
+      cleanupFailure = error
+    }
+    await writeMismatchDiagnostics(mismatchDiagnosticsPath, {
+      phase,
+      elapsedMs: Date.now() - startedAt,
+      status: failure || cleanupFailure ? 'failed' : 'passed',
+      processPid,
+      processExited,
+      errorName: failure instanceof Error
+        ? failure.name
+        : cleanupFailure instanceof Error
+          ? cleanupFailure.name
+          : failure || cleanupFailure
+            ? 'unknown'
+            : null,
+    }).catch((diagnosticError: unknown) => {
+      if (!failure && !cleanupFailure) cleanupFailure = diagnosticError
+    })
+    if (failure) throw failure
+    if (cleanupFailure) throw cleanupFailure
   })
 })
