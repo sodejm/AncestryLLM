@@ -10,9 +10,10 @@ import {
   verifyPackagedSidecar,
 } from './verify-sidecar.mjs'
 
-test('maps only the four supported native platform targets', () => {
+test('maps supported native platform targets, including Windows ARM64', () => {
   assert.equal(nativeTarget('darwin', 'arm64'), 'darwin-arm64')
   assert.equal(nativeTarget('darwin', 'x64'), 'darwin-x64')
+  assert.equal(nativeTarget('win32', 'arm64'), 'win32-arm64')
   assert.equal(nativeTarget('win32', 'x64'), 'win32-x64')
   assert.equal(nativeTarget('linux', 'x64'), 'linux-x64')
   assert.throws(() => nativeTarget('linux', 'arm64'), /Unsupported desktop target/)
@@ -22,6 +23,10 @@ test('matches the resource path used by Electron main', () => {
   assert.equal(
     sidecarExecutable('/bundle', 'darwin-arm64'),
     join('/bundle', 'darwin-arm64', 'ancestryllm-sidecar', 'ancestryllm-sidecar'),
+  )
+  assert.equal(
+    sidecarExecutable('/bundle', 'win32-arm64'),
+    join('/bundle', 'win32-arm64', 'ancestryllm-sidecar', 'ancestryllm-sidecar.exe'),
   )
   assert.equal(
     sidecarExecutable('/bundle', 'win32-x64'),

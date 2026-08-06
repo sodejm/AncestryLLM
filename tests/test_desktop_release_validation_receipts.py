@@ -57,7 +57,7 @@ TARGETS = {
             "staplingPassed",
         ),
     ),
-    "win32-x64": ("Windows 11", "x64", ".exe", ("authenticodePassed",)),
+    "win32-arm64": ("Windows 11", "arm64", ".exe", ("authenticodePassed",)),
     "linux-x64": ("Ubuntu 24.04", "x64", ".deb", ("gpgSignaturePassed",)),
 }
 VALIDATIONS = {
@@ -65,7 +65,7 @@ VALIDATIONS = {
     "macos-15-intel": ("darwin-x64", "macOS 15", "x64"),
     "macos-26": ("darwin-arm64", "macOS 26", "arm64"),
     "macos-26-intel": ("darwin-x64", "macOS 26", "x64"),
-    "windows-11-arm": ("win32-x64", "Windows 11", "x64"),
+    "windows-11-arm": ("win32-arm64", "Windows 11", "arm64"),
     "ubuntu-24.04": ("linux-x64", "Ubuntu 24.04", "x64"),
 }
 
@@ -274,7 +274,7 @@ def test_validation_receipt_requires_observed_operating_system(tmp_path: Path) -
 def test_validation_receipt_rejects_observed_operating_system_mismatch(
     tmp_path: Path,
 ) -> None:
-    installer = tmp_path / "AncestryLLM-0.5.0-win32-x64.exe"
+    installer = tmp_path / "AncestryLLM-0.5.0-win32-arm64.exe"
     installer.write_bytes(b"signed installer")
 
     completed = _run(
@@ -286,13 +286,13 @@ def test_validation_receipt_rejects_observed_operating_system_mismatch(
         "--runner",
         "windows-11-arm",
         "--target",
-        "win32-x64",
+        "win32-arm64",
         "--expected-os",
         "Windows 11",
         "--actual-os",
         "Windows Server 2025",
         "--arch",
-        "x64",
+        "arm64",
         "--installer",
         str(installer),
         "--workflow-run-id",

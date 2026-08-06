@@ -19,16 +19,16 @@ tree.
 | `macos-15-intel` | `darwin-x64` | macOS 15 | macOS 15 | x64 | x64 | `true` |
 | `macos-26` | `darwin-arm64` | macOS 26 | macOS 26 | arm64 | arm64 | `true` |
 | `macos-26-intel` | `darwin-x64` | macOS 26 | macOS 26 | x64 | x64 | `true` |
-| `windows-11-arm` | `win32-x64` | Windows 11 x64 | Windows 11 | arm64 | x64 | `true` |
+| `windows-11-arm` | `win32-arm64` | Windows 11 arm64 | Windows 11 | arm64 | arm64 | `true` |
 | `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 | Ubuntu 24.04 | x64 | x64 | `true` |
 
 The Windows row uses GitHub's hosted `windows-11-arm` runner. The workflow
-asserts that the host is Windows 11 on ARM64, installs x64 Python and Node.js,
-and builds and launches the `win32-x64` application through Windows x64
-emulation. The evidence `arch` field remains the artifact architecture; the
-runner identity and host probe bind that artifact to the ARM64 validation
-environment. The aggregate records `platformValidated: true` only after all
-six exact rows pass.
+asserts that the host is Windows 11 on ARM64, installs ARM64 Python and
+Node.js, and builds and launches the native `win32-arm64` application. The
+evidence `arch` field remains the artifact architecture; the runner identity
+and host probe bind that artifact to the ARM64 validation environment. The
+aggregate records `platformValidated: true` only after all six exact rows
+pass.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
@@ -48,7 +48,7 @@ v1.0.0, all rows must declare `trusted` and pass their platform signature gates.
 |---|---|---|---|
 | `macos-15` | `darwin-arm64` | macOS 15 arm64 | DMG; Developer ID signed and notarized at v1.0.0+ |
 | `macos-15-intel` | `darwin-x64` | macOS 15 x64 | DMG; Developer ID signed and notarized at v1.0.0+ |
-| `windows-11-arm` | `win32-x64` | Windows 11 x64 through ARM64-hosted emulation | NSIS EXE; Authenticode signed at v1.0.0+ |
+| `windows-11-arm` | `win32-arm64` | Windows 11 arm64 | NSIS EXE; Authenticode signed at v1.0.0+ |
 | `ubuntu-24.04` | `linux-x64` | Ubuntu 24.04 x64 | DEB; detached GPG signature at v1.0.0+ |
 
 Each row must use the matching native sidecar, install or mount the full
@@ -65,8 +65,7 @@ identities are enforced again by validation jobs independently of signing jobs.
 
 Validation then runs those four immutable installer artifacts in all six exact
 supported environments: macOS 15 arm64 and x64, macOS 26 arm64 and x64,
-Windows 11 ARM64 hosting the Windows x64 artifact under emulation, and Ubuntu
-24.04 x64. The macOS 26 rows download and validate the same
+Windows 11 arm64, and Ubuntu 24.04 x64. The macOS 26 rows download and validate the same
 matching-architecture DMGs built on macOS 15; no second installer is built.
 Every validation receipt binds the source Actions artifact ID and digest as
 well as the installed file digest, so an approximation or rebuilt copy cannot
@@ -245,7 +244,7 @@ join that claim at v1.0.0. A local build, a different Windows runner, or an
 incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
-Issue #131 or the release-coordination tracker #132. CI success must not be used to
+#131 or the release-coordination tracker #132. CI success must not be used to
 synthesize missing external proof.
 
 ## Local reproduction

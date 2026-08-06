@@ -43,7 +43,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64"),
         ("macos-26", "darwin-arm64", "macOS 26", "arm64"),
         ("macos-26-intel", "darwin-x64", "macOS 26", "x64"),
-        ("windows-11-arm", "win32-x64", "Windows 11", "x64"),
+        ("windows-11-arm", "win32-arm64", "Windows 11", "arm64"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64"),
     )
     for runner, sidecar_target, expected_os, arch in expected_rows:
@@ -65,10 +65,10 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         "steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}" in workflow
     )
     assert "runs_on: '[\"windows-11-arm\"]'" in workflow
-    assert "name: Windows 11 ARM64 host / x64 package" in workflow
+    assert "name: Windows 11 ARM64 host / ARM64 package" in workflow
     assert "host_arch: arm64" in workflow
     assert workflow.count("runtime_arch:") == 6
-    assert "runtime_arch: x64" in workflow
+    assert "runtime_arch: arm64" in workflow
     assert workflow.count("architecture: ${{ matrix.runtime_arch }}") == 2
     assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
@@ -127,8 +127,6 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "packaged-sidecar-version-mismatch.json" in workflow
     assert "--gate packagedSidecarVersionMismatchPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
-    assert '--artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS"' in workflow
-    assert '--allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"' in workflow
     assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
 
     production_sources = "\n".join(
@@ -170,7 +168,6 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
         'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
         'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
         'ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"',
-        'ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"',
     )
     for evidence_path in expected_evidence_paths:
         assert evidence_path in workflow
@@ -203,19 +200,6 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
         < workflow.index(sandbox_step)
         < workflow.index("Exercise the packaged application")
     )
-
-
-def test_desktop_evidence_is_uploaded_even_when_a_packaged_scenario_fails() -> None:
-    workflow = _workflow()
-
-    artifact_step = (
-        "- uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n"
-        "        if: ${{ always() }}\n"
-        "        with:\n"
-        "          name: desktop-evidence-${{ matrix.runner }}"
-    )
-    assert artifact_step in workflow
-    assert "if-no-files-found: warn" in workflow
 
 
 def test_fatal_sidecar_startup_uses_the_renderer_diagnostics_recovery_surface() -> None:

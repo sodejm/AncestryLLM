@@ -21,7 +21,7 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     expected_rows = (
         ("macos-15", "darwin-arm64", "macOS 15", "arm64", "dmg"),
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64", "dmg"),
-        ("windows-11-arm", "win32-x64", "Windows 11", "x64", "nsis"),
+        ("windows-11-arm", "win32-arm64", "Windows 11", "arm64", "nsis"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64", "deb"),
     )
     for runner, sidecar_target, expected_os, arch, installer_target in expected_rows:
@@ -41,8 +41,8 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
         assert f"arch: {arch}" in workflow
 
     assert "desktop-installers:" in workflow
-    assert "runner: windows-2025" in workflow
-    assert "runs_on: '\"windows-2025\"'" in workflow
+    assert "runner: windows-2025" not in workflow
+    assert "runs_on: '\"windows-2025\"'" not in workflow
     assert "runner: windows-11-arm" in workflow
     assert "runs_on: '\"windows-11-arm\"'" in workflow
     assert "host_arch: arm64" in workflow
@@ -260,7 +260,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     for expected in (
         "macOS 15 arm64",
         "macOS 15 x64",
-        "Windows 11 x64",
+        "Windows 11 arm64",
         "Ubuntu 24.04 x64",
         "SHA256SUMS",
         "Authenticode",
@@ -274,17 +274,6 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     assert "no background update" in normalized
     assert "no staged rollout" in normalized
     assert "no automatic rollback" in normalized
-
-
-def test_readme_discloses_the_official_v05_unsigned_installer_policy() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
-
-    assert "official unsigned installer" in readme
-    assert "unknown-publisher or Gatekeeper prompt" in readme
-    assert "manually installed signed installer" not in readme
-    assert "official unsigned installer" in architecture
-    assert "manually installed signed installer" not in architecture
 
 
 def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ from scripts.build_sidecar import executable_path, native_target, runtime_target
     [
         ("Darwin", "arm64", "darwin-arm64"),
         ("Darwin", "x86_64", "darwin-x64"),
+        ("Windows", "ARM64", "win32-arm64"),
         ("Windows", "AMD64", "win32-x64"),
         ("Linux", "x86_64", "linux-x64"),
     ],
@@ -21,20 +22,20 @@ def test_supported_native_targets(system: str, machine: str, expected: str) -> N
 
 @pytest.mark.parametrize(
     ("system", "machine"),
-    [("Linux", "aarch64"), ("Windows", "ARM64"), ("FreeBSD", "x86_64")],
+    [("Linux", "aarch64"), ("FreeBSD", "x86_64")],
 )
 def test_unsupported_native_targets_fail_closed(system: str, machine: str) -> None:
     with pytest.raises(ValueError, match="unsupported native sidecar target"):
         native_target(system, machine)
 
 
-def test_windows_arm64_host_accepts_x64_python_runtime() -> None:
-    assert runtime_target("Windows", "ARM64", "win-amd64") == "win32-x64"
+def test_windows_arm64_host_requires_arm64_python_runtime() -> None:
+    assert runtime_target("Windows", "ARM64", "win-arm64") == "win32-arm64"
 
 
-def test_windows_arm64_host_rejects_arm64_python_runtime() -> None:
-    with pytest.raises(ValueError, match="unsupported native sidecar target"):
-        runtime_target("Windows", "ARM64", "win-arm64")
+def test_windows_arm64_host_rejects_x64_python_runtime() -> None:
+    with pytest.raises(ValueError, match="requires an ARM64 Python runtime"):
+        runtime_target("Windows", "ARM64", "win-amd64")
 
 
 def test_executable_path_matches_electron_resource_layout(tmp_path: Path) -> None:
@@ -43,4 +44,7 @@ def test_executable_path_matches_electron_resource_layout(tmp_path: Path) -> Non
     )
     assert executable_path(tmp_path, "win32-x64") == (
         tmp_path / "win32-x64" / "ancestryllm-sidecar" / "ancestryllm-sidecar.exe"
+    )
+    assert executable_path(tmp_path, "win32-arm64") == (
+        tmp_path / "win32-arm64" / "ancestryllm-sidecar" / "ancestryllm-sidecar.exe"
     )
