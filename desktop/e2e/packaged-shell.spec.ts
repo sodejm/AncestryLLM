@@ -13,10 +13,13 @@ import {
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
+import { withinDeadline } from './packaged-deadline'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const packagedAttachTimeoutMs = 45_000
+const packagedLaunchTimeoutMs = 120_000
+const packagedCleanupTimeoutMs = 10_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
 const mismatchEvidencePath = process.env.ANCESTRYLLM_MISMATCH_EVIDENCE
@@ -223,7 +226,8 @@ function waitForProcessExit(
 }
 
 async function forceClosePackaged(result: LaunchResult): Promise<void> {
-  await result.browser.close().catch(() => undefined)
+  await withinDeadline('closing packaged browser automation', packagedCleanupTimeoutMs, () => result.browser.close())
+    .catch(() => undefined)
   await forceCloseProcess(result.process)
 }
 
@@ -247,26 +251,6 @@ async function forceCloseProcess(child: ChildProcessWithoutNullStreams): Promise
   } catch {
     child.kill('SIGKILL')
     await waitForProcessExit(child, 5_000).catch(() => undefined)
-  }
-}
-
-async function withinDeadline<T>(
-  operation: string,
-  timeoutMs: number,
-  task: () => Promise<T>,
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined
-  try {
-    return await Promise.race([
-      task(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`Timed out while ${operation} after ${String(timeoutMs)}ms.`))
-        }, timeoutMs)
-      }),
-    ])
-  } finally {
-    if (timer) clearTimeout(timer)
   }
 }
 
@@ -334,40 +318,46 @@ async function launchPackaged(
   })
   let browser: Browser | undefined
   try {
-    const loggedEndpoint = await waitForDevToolsEndpoint(child)
-    const endpoint = await verifiedDevToolsEndpoint(loggedEndpoint)
-    try {
-      // A deliberately unavailable sidecar consumes the supervisor's bounded
-      // startup attempts before Electron creates the renderer. Keep this
-      // verifier-only timeout longer than that production retry window.
-      browser = await chromium.connectOverCDP(endpoint, { timeout: packagedAttachTimeoutMs })
-    } catch (error) {
-      throw new Error(
-        `Packaged CDP attach failed after a successful /json/version probe: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      )
-    }
-    const context = browser.contexts()[0]
-    if (!context) throw new Error('Packaged CDP session has no browser context.')
-    const page = context.pages()[0] ?? await context.waitForEvent('page', {
-      timeout: packagedAttachTimeoutMs,
+    return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs, async () => {
+      const loggedEndpoint = await waitForDevToolsEndpoint(child)
+      const endpoint = await verifiedDevToolsEndpoint(loggedEndpoint)
+      try {
+        // A deliberately unavailable sidecar consumes the supervisor's bounded
+        // startup attempts before Electron creates the renderer. Keep this
+        // verifier-only timeout longer than that production retry window.
+        browser = await chromium.connectOverCDP(endpoint, { timeout: packagedAttachTimeoutMs })
+      } catch (error) {
+        throw new Error(
+          `Packaged CDP attach failed after a successful /json/version probe: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        )
+      }
+      const context = browser.contexts()[0]
+      if (!context) throw new Error('Packaged CDP session has no browser context.')
+      const page = context.pages()[0] ?? await context.waitForEvent('page', {
+        timeout: packagedAttachTimeoutMs,
+      })
+      await page.waitForLoadState('domcontentloaded', { timeout: packagedAttachTimeoutMs })
+      await expect(page.getByRole('heading', { name: expectedHeading })).toBeVisible()
+      const launchMs = Date.now() - startedAt
+      await expectStartupDiagnostics(page, expectedDiagnostics)
+      const readyMs = Date.now() - startedAt
+      return {
+        browser,
+        page,
+        process: child,
+        launchMs,
+        readyMs,
+        userData: root,
+        browserEndpoint: endpoint,
+      }
     })
-    await page.waitForLoadState('domcontentloaded')
-    await expect(page.getByRole('heading', { name: expectedHeading })).toBeVisible()
-    const launchMs = Date.now() - startedAt
-    await expectStartupDiagnostics(page, expectedDiagnostics)
-    const readyMs = Date.now() - startedAt
-    return {
-      browser,
-      page,
-      process: child,
-      launchMs,
-      readyMs,
-      userData: root,
-      browserEndpoint: endpoint,
-    }
   } catch (error) {
-    await browser?.close().catch(() => undefined)
+    if (browser) {
+      const failedBrowser = browser
+      await withinDeadline('closing failed packaged browser automation', packagedCleanupTimeoutMs, () => failedBrowser.close())
+        .catch(() => undefined)
+    }
     await forceCloseProcess(child).catch(() => undefined)
     throw new Error(
       `Packaged ${phase} launch failed: ${error instanceof Error ? error.message : String(error)}`,
