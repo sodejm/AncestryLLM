@@ -127,6 +127,8 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "packaged-sidecar-version-mismatch.json" in workflow
     assert "--gate packagedSidecarVersionMismatchPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
+    assert '--artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS"' in workflow
+    assert '--allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"' in workflow
     assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
 
     production_sources = "\n".join(
