@@ -186,6 +186,13 @@ def classify(rel: str) -> str:
     if suffix in FIRST_PARTY_CODE_EXTENSIONS:
         if rel.startswith("tests/") or rel.startswith("desktop/e2e/"):
             return "first-party-test"
+        if rel.startswith("desktop/src/") and (
+            name.endswith(".test.ts")
+            or name.endswith(".test.tsx")
+            or name.endswith(".spec.ts")
+            or name.endswith(".spec.tsx")
+        ):
+            return "first-party-test"
         if rel.startswith("scripts/") or rel.startswith("desktop/scripts/"):
             return "first-party-script"
         return "first-party-code"
