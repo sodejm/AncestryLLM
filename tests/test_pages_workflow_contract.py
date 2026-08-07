@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,14 @@ def test_pages_workflow_builds_the_prepared_documentation_source() -> None:
     assert "path: ./_site" in workflow
 
 
+def test_pages_workflow_uses_upload_artifact_v7_compatible_action() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    # upload-pages-artifact v5 uses upload-artifact v7 internally, matching
+    # the repository's pinned artifact action version.
+    assert "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9" in workflow
+
+
 def test_pages_documentation_uses_the_canonical_docs_source() -> None:
     config = ROOT / "docs" / "_config.yml"
     layout = ROOT / "docs" / "_layouts" / "documentation.html"
@@ -40,3 +49,34 @@ def test_pages_documentation_uses_the_canonical_docs_source() -> None:
     assert "https://sodejm.github.io/AncestryLLM/" in architecture
     assert "https://sodejm.github.io/AncestryLLM/" in wiki_sync
     assert 'Documentation = "https://sodejm.github.io/AncestryLLM/"' in project
+
+
+def test_pages_config_enables_seo_and_sitemap_plugins() -> None:
+    config = (ROOT / "docs" / "_config.yml").read_text(encoding="utf-8")
+
+    assert "jekyll-seo-tag" in config
+    assert "jekyll-sitemap" in config
+
+
+def test_robots_txt_permits_all_routes_and_references_sitemap() -> None:
+    robots = ROOT / "docs" / "robots.txt"
+
+    assert robots.is_file()
+    content = robots.read_text(encoding="utf-8")
+    assert "User-agent: *" in content
+    assert "Allow: /" in content
+    assert "sitemap.xml" in content
+
+
+def test_page_metadata_sidecar_covers_all_canonical_pages() -> None:
+    metadata_path = ROOT / "docs" / "_data" / "page_metadata.json"
+    assert metadata_path.is_file()
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    for key, value in metadata.items():
+        if key.startswith("_"):
+            continue
+        assert "title" in value, f"missing title for {key}"
+        assert "description" in value, f"missing description for {key}"
+        assert value["title"], f"empty title for {key}"
+        assert value["description"], f"empty description for {key}"
