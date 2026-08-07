@@ -83,6 +83,55 @@ def test_prepare_pages_source_rejects_broken_markdown_targets(tmp_path: Path) ->
     assert not destination.exists()
 
 
+def test_prepare_pages_source_injects_page_metadata_into_staged_pages(tmp_path: Path) -> None:
+    source = tmp_path / "docs"
+    destination = tmp_path / "pages-source"
+    _write_docs(source)
+    (source / "_data").mkdir()
+    (source / "_data" / "page_metadata.json").write_text(
+        '{"Home.md": {"title": "Test home title", "description": "Test home desc"}}',
+        encoding="utf-8",
+    )
+
+    pages_source.prepare_pages_source(source, destination)
+
+    index_content = (destination / "index.md").read_text(encoding="utf-8")
+    assert 'title: "Test home title"' in index_content
+    assert 'description: "Test home desc"' in index_content
+    assert "layout: documentation" in index_content
+    guide_content = (destination / "Guide.md").read_text(encoding="utf-8")
+    assert "title:" not in guide_content
+
+
+def test_prepare_pages_source_does_not_add_metadata_to_wiki_output(tmp_path: Path) -> None:
+    source = tmp_path / "docs"
+    _write_docs(source)
+    (source / "_data").mkdir()
+    (source / "_data" / "page_metadata.json").write_text(
+        '{"Home.md": {"title": "Test title", "description": "Test desc"}}',
+        encoding="utf-8",
+    )
+
+    import importlib.util as _ilu
+    import sys as _sys
+
+    _WIKI_SCRIPT = ROOT / "scripts" / "sync_wiki_docs.py"
+    _WIKI_SPEC = _ilu.spec_from_file_location("sync_wiki_docs_meta_test", _WIKI_SCRIPT)
+    assert _WIKI_SPEC is not None and _WIKI_SPEC.loader is not None
+    sync_wiki = _ilu.module_from_spec(_WIKI_SPEC)
+    _sys.modules[_WIKI_SPEC.name] = sync_wiki
+    _WIKI_SPEC.loader.exec_module(sync_wiki)
+
+    wiki_dest = tmp_path / "wiki"
+    wiki_dest.mkdir()
+    (wiki_dest / ".git").mkdir()
+    sync_wiki.sync_wiki_docs(source, wiki_dest)
+
+    home_wiki = (wiki_dest / "Home.md").read_text(encoding="utf-8")
+    assert "layout:" not in home_wiki
+    assert "title:" not in home_wiki
+
+
 def test_repository_docs_stage_every_markdown_page(tmp_path: Path) -> None:
     source = ROOT / "docs"
     destination = tmp_path / "pages-source"
