@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import posixpath
 import re
 import shutil
@@ -23,6 +24,7 @@ _FRONT_MATTER = re.compile(
 )
 _HOME_PAGE = PurePosixPath("Home.md")
 _SIDEBAR_PAGE = PurePosixPath("_Sidebar.md")
+_PAGE_METADATA_PATH = PurePosixPath("_data/page_metadata.json")
 
 
 class PagesSourceError(ValueError):
@@ -45,7 +47,18 @@ def _output_path(page: PurePosixPath) -> PurePosixPath:
     return PurePosixPath("index.md") if page == _HOME_PAGE else page
 
 
-def _with_documentation_layout(markdown: str) -> str:
+def _with_documentation_layout(
+    markdown: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+) -> str:
+    extra = ""
+    if title:
+        extra += f"title: {json.dumps(title)}\n"
+    if description:
+        extra += f"description: {json.dumps(description)}\n"
+
     front_matter = _FRONT_MATTER.match(markdown)
     if front_matter is not None:
         metadata = front_matter.group("metadata")
@@ -54,9 +67,10 @@ def _with_documentation_layout(markdown: str) -> str:
         return (
             markdown[: front_matter.start("metadata")]
             + "layout: documentation\n"
+            + extra
             + markdown[front_matter.start("metadata") :]
         )
-    return f"---\nlayout: documentation\n---\n\n{markdown}"
+    return f"---\nlayout: documentation\n{extra}---\n\n{markdown}"
 
 
 def _relative_site_target(current: PurePosixPath, target: PurePosixPath) -> str:
@@ -113,10 +127,23 @@ def _pages_source_errors(source: Path) -> list[str]:
     return [error.message for error in validate_wiki_source(source)]
 
 
+def _load_page_metadata(source: Path) -> dict[str, dict[str, str]]:
+    metadata_path = source / _PAGE_METADATA_PATH
+    if not metadata_path.is_file():
+        return {}
+    raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    return {
+        key: value
+        for key, value in raw.items()
+        if not key.startswith("_") and isinstance(value, dict)
+    }
+
+
 def _stage_documentation(source: Path, staging: Path) -> PagesSourceResult:
     page_count = 0
     asset_count = 0
     sidebar: str | None = None
+    page_metadata = _load_page_metadata(source)
     files = sorted(
         (path for path in source.rglob("*") if path.is_file()),
         key=lambda path: _relative(path, source).as_posix(),
@@ -143,9 +170,17 @@ def _stage_documentation(source: Path, staging: Path) -> PagesSourceResult:
             sidebar = rewritten
             continue
 
+        meta = page_metadata.get(relative.as_posix(), {})
         destination = staging / _output_path(relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(_with_documentation_layout(rewritten), encoding="utf-8")
+        destination.write_text(
+            _with_documentation_layout(
+                rewritten,
+                title=meta.get("title"),
+                description=meta.get("description"),
+            ),
+            encoding="utf-8",
+        )
         page_count += 1
 
     if sidebar is not None:
