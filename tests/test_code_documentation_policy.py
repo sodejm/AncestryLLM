@@ -43,7 +43,7 @@ class TestClassify:
         assert classify("desktop/src/main/index.ts") == "first-party-code"
 
     def test_typescript_test(self) -> None:
-        assert classify("desktop/src/main/foo.test.ts") == "first-party-code"
+        assert classify("desktop/src/main/foo.test.ts") == "first-party-test"
 
     def test_tsx_source(self) -> None:
         assert classify("desktop/src/renderer/App.tsx") == "first-party-code"
