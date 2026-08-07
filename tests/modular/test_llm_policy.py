@@ -1,3 +1,5 @@
+"""Tests for LLM consent and provider endpoint policy enforcement."""
+
 from __future__ import annotations
 
 import pytest

@@ -1,3 +1,5 @@
+"""Tests for pinned Semgrep rule bundle verification."""
+
 from __future__ import annotations
 
 import hashlib

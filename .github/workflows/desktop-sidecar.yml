@@ -1,3 +1,5 @@
+# Verifies the packaged Electron desktop shell against its Python sidecar on
+# pushes to main and via manual dispatch for a specific commit.
 name: Desktop verification
 
 on:

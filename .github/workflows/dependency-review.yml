@@ -1,3 +1,5 @@
+# Blocks pull requests that introduce dependencies with high-severity known
+# vulnerabilities using GitHub's dependency review action.
 name: Dependency review
 
 on:

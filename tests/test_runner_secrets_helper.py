@@ -1,3 +1,5 @@
+"""Tests for the runner secrets helper security checks."""
+
 from __future__ import annotations
 
 import os

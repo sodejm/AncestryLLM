@@ -1,3 +1,5 @@
+"""Tests for the command specification registry and help generation."""
+
 from __future__ import annotations
 
 import json

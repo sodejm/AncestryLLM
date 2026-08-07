@@ -1,3 +1,4 @@
+/** Installs the default Electron session deny policy for permissions, display capture, and downloads. */
 interface PermissionTarget {
   setPermissionRequestHandler(handler: (contents: unknown, permission: unknown, callback: (allowed: boolean) => void) => void): void
   setPermissionCheckHandler(handler: (contents: unknown, permission: unknown, requestingOrigin: string) => boolean): void

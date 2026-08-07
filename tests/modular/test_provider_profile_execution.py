@@ -1,3 +1,5 @@
+"""Tests for provider profile execution, consent, and caching behavior."""
+
 from __future__ import annotations
 
 import asyncio

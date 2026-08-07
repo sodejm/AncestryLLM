@@ -1,3 +1,5 @@
+"""Tests for RootsMagic query orchestration and provider-independent failures."""
+
 from __future__ import annotations
 
 import json

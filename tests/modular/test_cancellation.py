@@ -1,3 +1,5 @@
+"""Tests for cooperative cancellation tokens and protected sections."""
+
 from __future__ import annotations
 
 import logging

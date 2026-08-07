@@ -1,3 +1,5 @@
+"""Tests for verifying PyPI attestations and release provenance."""
+
 from __future__ import annotations
 
 import base64

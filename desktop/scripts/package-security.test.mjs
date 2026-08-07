@@ -1,3 +1,4 @@
+/** Tests packaged Electron ASAR and fuse verification helpers and release security assumptions. */
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

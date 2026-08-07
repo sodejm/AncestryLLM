@@ -1,3 +1,4 @@
+/** Constrains desktop external navigation to allowlisted HTTPS destinations that require explicit confirmation. */
 export type ExternalLinkResult = Readonly<{ status: 'opened' | 'cancelled' }>
 
 const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com'])

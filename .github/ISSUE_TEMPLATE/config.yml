@@ -1,3 +1,5 @@
+# Issue template chooser config: disables blank issues and routes security
+# reports to private GitHub Security Advisories instead of public issues.
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability report

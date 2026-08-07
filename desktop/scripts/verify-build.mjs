@@ -1,3 +1,4 @@
+/** Inspects built desktop artifacts for prohibited development, network, and credential leakage. */
 import { readdir, readFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'

@@ -1,3 +1,5 @@
+# PR auto-labeling rules driven by changed-file globs; consumed by the
+# issue-labeler workflow.
 documentation:
   - changed-files:
       - any-glob-to-any-file:

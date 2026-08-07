@@ -1,3 +1,4 @@
+/** Tests desktop verification evidence aggregation, gate derivation, and CLI validation behavior. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'

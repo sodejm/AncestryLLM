@@ -1,3 +1,4 @@
+/** Launches the native sidecar process, validates readiness frames, and probes authenticated health. */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'

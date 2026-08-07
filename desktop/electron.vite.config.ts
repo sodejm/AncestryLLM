@@ -1,3 +1,4 @@
+/** Configures Electron Vite builds for the main, preload, and renderer bundles, including the fixture bridge alias. */
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'

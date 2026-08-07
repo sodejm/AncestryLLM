@@ -1,3 +1,5 @@
+"""Tests for incremental genealogy release workflows and safety invariants."""
+
 from __future__ import annotations
 
 import json

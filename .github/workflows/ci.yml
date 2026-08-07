@@ -1,3 +1,5 @@
+# Canonical quality/security gate: lint, type-check, tests, docs policy, and
+# dependency/workflow diffing for pushes, PRs, and a weekly scheduled run.
 name: CI
 
 on:

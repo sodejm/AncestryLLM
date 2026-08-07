@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Repository safety gate: fails if privacy-sensitive artifacts (genealogy
+# databases, exports, secrets, private keys) are Git-tracked. Read-only; makes
+# no network calls and requires no credentials. Exit 0 when clean, 1 otherwise.
 set -Eeuo pipefail
 
 blocked='\.(rmtree|rmgc|db|sqlite|sqlite3|ged|gedcom|log|sarif|p12|pfx|p8|pem|key|asc|gpg|b64|mobileprovision)$|(^|/)(\.env(\..+)?|family_trees/.+|secure/.+|secrets/.+)$'

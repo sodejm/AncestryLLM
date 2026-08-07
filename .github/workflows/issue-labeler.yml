@@ -1,3 +1,4 @@
+# Applies work-type labels to newly opened issues using .github/issue-labeler.yml.
 name: Issue Labeler
 
 on:

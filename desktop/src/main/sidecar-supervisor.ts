@@ -1,3 +1,4 @@
+/** Supervises the packaged native sidecar lifecycle, restart policy, and authenticated session state. */
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 

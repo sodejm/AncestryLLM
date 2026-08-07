@@ -1,3 +1,4 @@
+/** Scans desktop source files for obvious committed secrets and fails when protected patterns are present. */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 const patterns = [/AKIA[0-9A-Z]{16}/, /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/, /sk-[A-Za-z0-9_-]{20,}/]

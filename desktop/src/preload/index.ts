@@ -1,3 +1,4 @@
+/** Exposes the validated desktop bridge into the renderer through Electron's isolated preload boundary. */
 import { contextBridge, ipcRenderer } from 'electron'
 import { desktopChannels, type AncestryBridge, type PreferenceUpdate } from '../shared-contract/desktop'
 import {

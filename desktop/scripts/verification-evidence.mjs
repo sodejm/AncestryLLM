@@ -1,3 +1,4 @@
+/** Aggregates desktop verification receipts into bound performance and security evidence artifacts. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'

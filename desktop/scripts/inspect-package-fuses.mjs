@@ -1,3 +1,4 @@
+/** Inspects packaged Electron fuse settings and app.asar integrity evidence for desktop release verification. */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'

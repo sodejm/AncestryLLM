@@ -1,3 +1,5 @@
+"""Tests for REPL live progress display behavior."""
+
 from __future__ import annotations
 
 import pytest

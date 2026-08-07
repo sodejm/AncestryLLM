@@ -1,3 +1,4 @@
+/** Tests receipt generation, workspace snapshotting, and failure handling for desktop verification commands. */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'

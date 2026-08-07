@@ -1,3 +1,5 @@
+# sdist packaging manifest: bundles top-level docs and selected docs/ pages
+# while excluding scripts/tests/family_trees and Python build artifacts.
 include CHANGELOG.md
 include LICENSE
 include README.md

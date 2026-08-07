@@ -1,3 +1,4 @@
+/** Installs bounded keyboard zoom handling for Electron web contents across supported platforms. */
 export type KeyboardZoomInput = Readonly<{
   type: string
   key: string

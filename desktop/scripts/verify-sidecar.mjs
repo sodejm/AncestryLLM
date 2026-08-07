@@ -1,3 +1,4 @@
+/** Verifies supported sidecar bundle targets and packaged sidecar placement inside Electron resources. */
 import { constants } from 'node:fs'
 import { access, readdir, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'

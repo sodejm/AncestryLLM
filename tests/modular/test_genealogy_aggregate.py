@@ -1,3 +1,5 @@
+"""Tests for genealogy aggregate identity and domain invariants."""
+
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,3 +1,5 @@
+"""Tests for repository safety checks around signing artifacts."""
+
 from __future__ import annotations
 
 import shutil

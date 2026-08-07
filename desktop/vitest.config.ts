@@ -1,3 +1,4 @@
+/** Configures Vitest for the desktop TypeScript and renderer test suites. */
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 

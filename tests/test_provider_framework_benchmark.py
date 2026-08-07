@@ -1,3 +1,5 @@
+"""Tests for the provider framework benchmark report contract."""
+
 from __future__ import annotations
 
 import importlib.util

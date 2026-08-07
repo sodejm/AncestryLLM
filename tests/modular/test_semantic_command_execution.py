@@ -1,3 +1,5 @@
+"""Tests for semantic command execution result normalization."""
+
 from __future__ import annotations
 
 import json

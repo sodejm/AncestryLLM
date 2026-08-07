@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Runs the repository's fictional GEDCOM merge fixtures end-to-end offline
+# (no AI/API-key access). Writes a timestamped output directory and never
+# modifies its inputs. See --help / usage() below for options and outputs.
 set -Eeuo pipefail
 
 umask 077

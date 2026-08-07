@@ -1,3 +1,4 @@
+/** Tests desktop build inspection against prohibited artifacts, remote assets, and fixture leakage. */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

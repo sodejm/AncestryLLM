@@ -1,3 +1,5 @@
+# Proves the release Project gate is reachable and exact against origin/main
+# whenever release-relevant configuration or scripts change.
 name: Release Project gate proof
 
 on:

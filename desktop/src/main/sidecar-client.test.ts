@@ -1,3 +1,4 @@
+/** Tests the main-only authenticated capabilities client for bounded requests, validation, and timeouts. */
 import { createServer } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'

@@ -1,3 +1,4 @@
+/** Exercises the packaged Electron shell end to end, including readiness, CSP, and sidecar fault evidence flows. */
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'

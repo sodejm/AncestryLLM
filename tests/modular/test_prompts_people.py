@@ -1,3 +1,5 @@
+"""Tests for people prompt templates and reuse contracts."""
+
 from __future__ import annotations
 
 import pytest

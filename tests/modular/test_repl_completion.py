@@ -1,3 +1,5 @@
+"""Tests for REPL completion snapshots and privacy boundaries."""
+
 from __future__ import annotations
 
 import socket

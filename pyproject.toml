@@ -1,3 +1,5 @@
+# Python packaging, tooling, and lint/type-check configuration for the
+# ancestryllm distribution; see docs/RELEASING.md for the release contract.
 [build-system]
 requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"

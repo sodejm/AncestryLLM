@@ -1,3 +1,4 @@
+/** Tests the main-process IPC surface for exact channel registration, sender authorization, and payload validation. */
 import { describe, expect, it, vi } from 'vitest'
 import type { AncestryBridge } from '../shared-contract/desktop'
 import { desktopChannels } from '../shared-contract/desktop'

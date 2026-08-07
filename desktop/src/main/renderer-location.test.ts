@@ -1,3 +1,4 @@
+/** Tests renderer URL resolution and sender trust rules for packaged and development desktop shells. */
 import { describe, expect, it } from 'vitest'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 

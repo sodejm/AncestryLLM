@@ -1,3 +1,5 @@
+# pnpm workspace/install policy for the desktop package: pins build script
+# execution to an explicit allowlist so postinstall scripts stay auditable.
 autoInstallPeers: false
 enablePrePostScripts: false
 engineStrict: true

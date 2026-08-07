@@ -1,3 +1,4 @@
+/** Tests the exact newline-framed window-ready marker used by packaged shell verification. */
 import { describe, expect, it } from 'vitest'
 import { WINDOW_READY_RECORD, outputContainsWindowReadyRecord } from './window-readiness'
 

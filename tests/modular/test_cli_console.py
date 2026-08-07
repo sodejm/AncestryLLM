@@ -1,3 +1,5 @@
+"""Tests for CLI console dispatch and presentation contracts."""
+
 from __future__ import annotations
 
 import hashlib
