@@ -27,7 +27,7 @@ script enforces this at every CI run.
 | `first-party-test` | Test source maintained as code | `tests/**/*.py`, `desktop/src/**/*.test.ts` |
 | `first-party-script` | Build/release/tooling scripts | `scripts/*.py`, `scripts/*.sh` |
 | `first-party-config-exec` | Executable/behaviour-defining config | `*.yml`, `*.yaml`, `Makefile`, `pyproject.toml` |
-| `generated-vendor` | Generated or vendored output | `uv.lock`, `pnpm-lock.yaml`, `*.d.ts` stubs |
+| `generated-vendor` | Generated or vendored output | `uv.lock`, `pnpm-lock.yaml`, `desktop/node_modules/**` |
 | `test-data-fixture` | Fictional test data | `tests/fixtures/**/*.ged` |
 | `non-code-doc` | Human-readable documentation/content | `docs/**/*.md`, `README.md`, `LICENSE` |
 | `non-comment-format` | Formats that do not safely permit comments | `*.json`, `*.plist` |
