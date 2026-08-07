@@ -13,6 +13,14 @@ import {
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const productionMain = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 
+const minimumPatchedElectronVersion = [39, 8, 10]
+
+function parseExactVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
+  assert.ok(match, `Electron must use an exact semantic version, received ${version}`)
+  return match.slice(1).map(Number)
+}
+
 test('packaging locks the production ASAR and Electron fuse policy', () => {
   assert.equal(packageJson.build.asar, true)
   assert.deepEqual(packageJson.build.electronFuses, {
@@ -27,6 +35,15 @@ test('packaging locks the production ASAR and Electron fuse policy', () => {
   })
   assert.equal(packageJson.scripts['test:security'], 'pnpm package && vitest run src/main/security-policy.test.ts src/main/session-policy.test.ts src/main/external-links.test.ts && node scripts/inspect-package-fuses.mjs')
   assert.equal(packageJson.devDependencies['@electron/fuses'], '2.1.2')
+})
+
+test('packaging pins Electron at the minimum audited security remediation', () => {
+  const installed = parseExactVersion(packageJson.devDependencies.electron)
+  const comparison = installed.findIndex((part, index) => part !== minimumPatchedElectronVersion[index])
+  assert.ok(
+    comparison === -1 || installed[comparison] > minimumPatchedElectronVersion[comparison],
+    `Electron ${packageJson.devDependencies.electron} is below the audited remediation baseline 39.8.10`,
+  )
 })
 
 test('production main entry contains no fixture bridge or test hook', () => {
