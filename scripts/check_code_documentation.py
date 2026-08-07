@@ -233,23 +233,18 @@ def _has_file_level_comment(path: Path) -> bool:
     except OSError:
         return False
 
-    # Fast path: block comment anywhere near the start of the file.
-    if _BLOCK_COMMENT_START_RE.search(text[:500]):
-        return True
-    if _HTML_COMMENT_START_RE.search(text[:500]):
-        return True
-
-    lines = text.splitlines()
-    for line in lines:
+    # Scan for the first meaningful content line (skipping blanks and an optional shebang)
+    # and require it to be a comment opener.
+    for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         if _SHEBANG_RE.match(stripped):
             continue
-        # Single-line comment immediately at the start.
+        if stripped.startswith("/*") or stripped.startswith("<!--"):
+            return True
         if _SINGLE_LINE_COMMENT_RE.match(stripped):
             return True
-        # Non-empty, non-shebang content without a comment means no file header.
         break
     return False
 
