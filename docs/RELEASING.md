@@ -18,7 +18,7 @@ evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
 iteration, currently `v0.5.0 — Foundation`, is authoritative for future
 release readiness.
 
-### Private Project read token
+## Private Project read token
 
 Project 2 is private. Configure the repository Actions secret
 `ANCESTRYLLM_PROJECT_READ_TOKEN` with a classic personal access token for an

@@ -57,7 +57,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26.5.0"
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
@@ -66,7 +66,7 @@ jobs:
       - name: Install locked dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           pnpm --dir desktop install --frozen-lockfile
       - name: Verify API and workflow contracts
@@ -290,7 +290,7 @@ jobs:
         with:
           python-version: "3.12"
           architecture: ${{ matrix.runtime_arch }}
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26.5.0"
           architecture: ${{ matrix.runtime_arch }}
@@ -300,7 +300,7 @@ jobs:
       - name: Install locked dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.0
+          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           pnpm --dir desktop install --frozen-lockfile
       - name: Build and smoke-test native sidecar
@@ -366,6 +366,7 @@ jobs:
           export ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"
           export ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
           export ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"
+          export ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"
           package_launcher=()
           if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
           node desktop/scripts/verification-receipt.mjs \
@@ -412,6 +413,7 @@ jobs:
             --allow-output "$ANCESTRYLLM_RESTART_EVIDENCE" \
             --gate packagedSidecarVersionMismatchPassed \
             --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
+            --artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS" \
             --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
             -- "${package_launcher[@]}" pnpm --dir desktop run test:e2e:packaged \
               --grep "rejects a target-native wrong-build packaged sidecar"
@@ -433,6 +435,7 @@ jobs:
             --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
             --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
             --allow-output "$ROW_ROOT/sidecar-version-mismatch.json" \
+            --allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json" \
             --gate fusesInspectedPassed \
             --artifact fuseInspection="$ROW_ROOT/fuse-inspection.json" \
             -- node desktop/scripts/inspect-package-fuses.mjs --output "$ROW_ROOT/fuse-inspection.json"
@@ -464,10 +467,11 @@ jobs:
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
         with:
           name: desktop-evidence-${{ matrix.runner }}
           path: desktop/verification
-          if-no-files-found: error
+          if-no-files-found: warn
 
   desktop-gate:
     name: Desktop gate
@@ -501,7 +505,7 @@ jobs:
         if: needs.changes.outputs.desktop == 'true'
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: needs.changes.outputs.desktop == 'true'
         with:
           node-version: "26.5.0"
