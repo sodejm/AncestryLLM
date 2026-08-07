@@ -2,10 +2,10 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 
-.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security
+.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
 
 desktop-install:
 	@pnpm --dir desktop install --frozen-lockfile
@@ -27,6 +27,9 @@ setup:
 	@$(PYTHON) -m venv $(VENV_DIR)
 	@$(VENV_PYTHON) -m pip install --upgrade pip uv==0.12.1
 	@$(VENV_PYTHON) -m uv sync --active --all-extras --locked
+
+code-docs-check:
+	@$(VENV_PYTHON) scripts/check_code_documentation.py
 
 bootstrap: setup hooks
 

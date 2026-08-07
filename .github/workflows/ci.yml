@@ -136,6 +136,7 @@ jobs:
           uv run mypy src/ancestryllm
           uv run python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
+          uv run python scripts/check_code_documentation.py
 
   security:
     name: security
