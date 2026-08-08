@@ -608,8 +608,8 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
-          $process = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /D=$installRoot" -Wait -PassThru
+          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
@@ -625,10 +625,10 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
           $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
           if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
-            $process = Start-Process -FilePath $uninstaller -ArgumentList "/S /currentuser" -Wait -PassThru
+            $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
           }
           Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -1070,8 +1070,8 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
-          $process = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /D=$installRoot" -Wait -PassThru
+          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
@@ -1087,10 +1087,10 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
           $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
           if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
-            $process = Start-Process -FilePath $uninstaller -ArgumentList "/S /currentuser" -Wait -PassThru
+            $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
           }
           Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
