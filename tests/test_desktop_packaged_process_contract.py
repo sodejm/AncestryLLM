@@ -96,9 +96,18 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "export async function withinDeadline<T>" in deadline_source
     assert "Timed out while ${operation}" in deadline_source
     assert "const packagedLaunchTimeoutMs = 120_000" in source
-    assert "return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs" in source
-    assert "await page.waitForLoadState('domcontentloaded', { timeout: packagedAttachTimeoutMs })" in source
-    assert "withinDeadline('closing failed packaged browser automation', packagedCleanupTimeoutMs" in source
+    assert (
+        "return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs"
+        in source
+    )
+    assert (
+        "await page.waitForLoadState('domcontentloaded', { timeout: packagedAttachTimeoutMs })"
+        in source
+    )
+    assert (
+        "withinDeadline('closing failed packaged browser automation', packagedCleanupTimeoutMs"
+        in source
+    )
     assert "return withinDeadline('reading packaged startup diagnostics'" in source
     assert "async function writeMismatchDiagnostics" in source
     assert "let cleanupFailure: unknown" in source
