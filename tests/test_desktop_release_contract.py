@@ -292,6 +292,11 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     assert "no background update" in normalized
     assert "no staged rollout" in normalized
     assert "no automatic rollback" in normalized
+    assert (
+        "x64 Python and Node.js to build and validate the shipped Windows x64 application"
+        in normalized
+    )
+    assert "shipped Windows ARM64 application" not in normalized
 
 
 def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: Path) -> None:
