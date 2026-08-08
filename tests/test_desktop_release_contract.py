@@ -150,6 +150,17 @@ def test_desktop_build_profile_contains_only_the_sidecar_packager() -> None:
     assert optional_dependencies["desktop-build"] == ["pyinstaller>=6.17,<7"]
 
 
+def test_electron_builder_includes_the_nsis_binary_extraction_fix() -> None:
+    package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+    development_dependencies = package["devDependencies"]
+
+    # electron-builder 26.15.6 fixed its NSIS archive filter so the bundled
+    # install-time extractor no longer drops PE binaries on x64 or ARM64.
+    # Keep the paired Squirrel package on the same stable patch line.
+    assert development_dependencies["electron-builder"] == "26.15.7"
+    assert development_dependencies["electron-builder-squirrel-windows"] == "26.15.7"
+
+
 def test_release_packaged_smoke_forwards_the_playwright_filter_without_a_pnpm_separator() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     scenario = (

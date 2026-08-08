@@ -38,6 +38,20 @@ test('packaging locks the production ASAR and Electron fuse policy', () => {
   assert.equal(packageJson.devDependencies['@electron/fuses'], '2.1.2')
 })
 
+test('ordinary pre-v1 packages cannot auto-discover a signing identity', () => {
+  assert.deepEqual(packageJson.build.mac, {
+    identity: null,
+    forceCodeSigning: false,
+    hardenedRuntime: false,
+    notarize: false,
+  })
+  assert.deepEqual(packageJson.build.win, {
+    signAndEditExecutable: true,
+    signExecutable: false,
+    forceCodeSigning: false,
+  })
+})
+
 test('packaging pins Electron at the minimum audited security remediation', () => {
   const installed = parseExactVersion(packageJson.devDependencies.electron)
   const comparison = installed.findIndex((part, index) => part !== minimumPatchedElectronVersion[index])

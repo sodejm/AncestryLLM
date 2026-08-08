@@ -29,6 +29,7 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.match(lockfile, /^ {2}fast-uri@3\.1\.5:$/m)
   assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.4:$/m)
   assert.equal(packageJson.devDependencies['@testing-library/dom'], '10.4.1')
-  assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.15.3')
+  assert.equal(packageJson.devDependencies['electron-builder'], '26.15.7')
+  assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.15.7')
   await assert.rejects(access(npmrcUrl), { code: 'ENOENT' })
 })
