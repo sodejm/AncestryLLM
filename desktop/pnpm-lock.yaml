@@ -6,6 +6,8 @@ settings:
 
 overrides:
   fast-uri: 3.1.5
+  js-yaml@4.3.0: 4.3.1
+  nanoid@3.3.16: 3.3.17
 
 importers:
 
@@ -1799,10 +1801,6 @@ packages:
   js-tokens@9.0.1:
     resolution: {integrity: sha512-mxa9E9ITFOt0ban3j6L5MpjwegGz6lBQmM1IJkWeBZGcMxto50+eWdjC/52xDbS2vy0k7vIMK0Fe2wfL9OQSpQ==}
 
-  js-yaml@4.3.0:
-    resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
-    hasBin: true
-
   js-yaml@4.3.1:
     resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
@@ -2036,8 +2034,8 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  nanoid@3.3.16:
-    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
+  nanoid@3.3.17:
+    resolution: {integrity: sha512-xQLf0A3HOMlgHq0n247/LRuAOYmB7dXJ/DvAxGvsSBij45XtBSmQycu+F8ODbHwns/XyFZagyL1+J0Offw1E0g==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -3079,7 +3077,7 @@ snapshots:
       globals: 14.0.0
       ignore: 5.3.2
       import-fresh: 3.3.1
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       minimatch: 3.1.5
       strip-json-comments: 3.1.1
     transitivePeerDependencies:
@@ -4481,10 +4479,6 @@ snapshots:
 
   js-tokens@9.0.1: {}
 
-  js-yaml@4.3.0:
-    dependencies:
-      argparse: 2.0.1
-
   js-yaml@4.3.1:
     dependencies:
       argparse: 2.0.1
@@ -4684,7 +4678,7 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nanoid@3.3.16: {}
+  nanoid@3.3.17: {}
 
   natural-compare@1.4.0: {}
 
@@ -4798,7 +4792,7 @@ snapshots:
 
   postcss@8.5.25:
     dependencies:
-      nanoid: 3.3.16
+      nanoid: 3.3.17
       picocolors: 1.1.1
       source-map-js: 1.2.1
 

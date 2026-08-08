@@ -11,6 +11,7 @@ import {
 } from './inspect-package-fuses.mjs'
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const pnpmWorkspace = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8')
 const productionMain = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 
 const minimumPatchedElectronVersion = [39, 8, 10]
@@ -44,6 +45,11 @@ test('packaging pins Electron at the minimum audited security remediation', () =
     comparison === -1 || installed[comparison] > minimumPatchedElectronVersion[comparison],
     `Electron ${packageJson.devDependencies.electron} is below the audited remediation baseline 39.8.10`,
   )
+})
+
+test('dependency overrides preserve the audited transitive remediation floors', () => {
+  assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.1$/m)
+  assert.match(pnpmWorkspace, /^ {2}nanoid@3\.3\.16: 3\.3\.17$/m)
 })
 
 test('production main entry contains no fixture bridge or test hook', () => {
