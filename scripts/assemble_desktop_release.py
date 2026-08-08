@@ -58,9 +58,9 @@ TARGETS = {
             "staplingPassed",
         },
     },
-    "win32-arm64": {
+    "win32-x64": {
         "expected_os": "Windows 11",
-        "arch": "arm64",
+        "arch": "x64",
         "extension": ".exe",
         "gates": {"authenticodePassed"},
     },
@@ -74,7 +74,7 @@ TARGETS = {
 SELF_SIGNED_GATES = {
     "darwin-arm64": {"codeSignaturePassed", "hardenedRuntimePassed"},
     "darwin-x64": {"codeSignaturePassed", "hardenedRuntimePassed"},
-    "win32-arm64": {"authenticodePassed"},
+    "win32-x64": {"authenticodePassed"},
     "linux-x64": {"gpgSignaturePassed"},
 }
 VALIDATION_ENVIRONMENTS = {
@@ -82,31 +82,37 @@ VALIDATION_ENVIRONMENTS = {
         "target": "darwin-arm64",
         "expected_os": "macOS 15",
         "arch": "arm64",
+        "host_arch": "arm64",
     },
     "macos-15-intel": {
         "target": "darwin-x64",
         "expected_os": "macOS 15",
         "arch": "x64",
+        "host_arch": "x64",
     },
     "macos-26": {
         "target": "darwin-arm64",
         "expected_os": "macOS 26",
         "arch": "arm64",
+        "host_arch": "arm64",
     },
     "macos-26-intel": {
         "target": "darwin-x64",
         "expected_os": "macOS 26",
         "arch": "x64",
+        "host_arch": "x64",
     },
     "windows-11-arm": {
-        "target": "win32-arm64",
+        "target": "win32-x64",
         "expected_os": "Windows 11",
-        "arch": "arm64",
+        "arch": "x64",
+        "host_arch": "arm64",
     },
     "ubuntu-24.04": {
         "target": "linux-x64",
         "expected_os": "Ubuntu 24.04",
         "arch": "x64",
+        "host_arch": "x64",
     },
 }
 AGGREGATE_OUTPUTS = {
@@ -250,6 +256,7 @@ def create_validation_receipt(args: argparse.Namespace) -> None:
         or args.expected_os != configuration["expected_os"]
         or args.actual_os != configuration["expected_os"]
         or args.arch != configuration["arch"]
+        or args.host_arch != configuration["host_arch"]
     ):
         raise ValueError("runner does not match the supported validation matrix")
 
@@ -281,6 +288,7 @@ def create_validation_receipt(args: argparse.Namespace) -> None:
         "expectedOs": args.expected_os,
         "actualOs": args.actual_os,
         "arch": args.arch,
+        "hostArch": args.host_arch,
         "gates": {gate: True for gate in sorted(gates)},
         "installer": _artifact(installer),
         "workflow": {
@@ -378,6 +386,7 @@ def _validated_environments(
             or payload.get("expectedOs") != configuration["expected_os"]
             or payload.get("actualOs") != configuration["expected_os"]
             or payload.get("arch") != configuration["arch"]
+            or payload.get("hostArch") != configuration["host_arch"]
         ):
             raise ValueError(
                 f"desktop validation runner {runner} does not match the supported matrix"
@@ -668,6 +677,7 @@ def _parser() -> argparse.ArgumentParser:
     validation.add_argument("--expected-os", required=True)
     validation.add_argument("--actual-os", required=True)
     validation.add_argument("--arch", required=True)
+    validation.add_argument("--host-arch", required=True)
     validation.add_argument("--installer", required=True, type=Path)
     validation.add_argument("--workflow-run-id", required=True, type=int)
     validation.add_argument("--workflow-run-attempt", required=True, type=int)

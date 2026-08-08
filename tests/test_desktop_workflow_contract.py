@@ -43,7 +43,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64"),
         ("macos-26", "darwin-arm64", "macOS 26", "arm64"),
         ("macos-26-intel", "darwin-x64", "macOS 26", "x64"),
-        ("windows-11-arm", "win32-arm64", "Windows 11", "arm64"),
+        ("windows-11-arm", "win32-x64", "Windows 11", "x64"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64"),
     )
     for runner, sidecar_target, expected_os, arch in expected_rows:
@@ -65,13 +65,19 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         "steps.windows-host.outputs.actual_os || steps.linux-host.outputs.actual_os }}" in workflow
     )
     assert "runs_on: '[\"windows-11-arm\"]'" in workflow
-    assert "name: Windows 11 ARM64 host / ARM64 package" in workflow
+    assert "name: Windows 11 ARM64 host / x64 package" in workflow
     assert "host_arch: arm64" in workflow
     assert workflow.count("runtime_arch:") == 6
     assert "runtime_arch: arm64" in workflow
     assert workflow.count("architecture: ${{ matrix.runtime_arch }}") == 2
     assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
+    assert "HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
+    assert "name: Verify selected x64 runtimes on ARM64 Windows host" in workflow
+    assert "process.arch" in workflow
+    assert "platform.machine()" in workflow
+    assert "expected x64 Node.js runtime" in workflow
+    assert "expected AMD64 Python runtime" in workflow
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
     assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow
@@ -80,6 +86,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
     assert "package_boundary: unpacked-native" in workflow
     assert "release_supported:" not in workflow
     assert "--release-supported" not in workflow
+    assert '--host-arch "$HOST_ARCH"' in workflow
 
 
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:

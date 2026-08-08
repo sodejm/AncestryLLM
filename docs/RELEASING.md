@@ -62,7 +62,7 @@ waiver of those gates.
 ## v0.5.0 supported offline shell
 
 v0.5.0 is a supported offline three-OS Electron shell. Its installer matrix is
-macOS 15 arm64, macOS 15 x64, Windows 11 arm64, and Ubuntu 24.04 x64. The
+macOS 15 arm64, macOS 15 x64, Windows 11 x64, and Ubuntu 24.04 x64. The
 matching-architecture DMGs cover the supported macOS 15/26 range. Its release
 scope is Home, Diagnostics, Settings, capability onboarding, and a private
 loopback sidecar, distributed as manual full installers under the pre-1.0
@@ -247,7 +247,7 @@ listed trusted-signing checks.
 |---|---|---|
 | macOS 15 arm64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
 | macOS 15 x64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| Windows 11 arm64 | NSIS EXE | install/launch on GitHub-hosted `windows-11-arm`; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
+| Windows 11 x64 | NSIS EXE | build/install/launch under Windows x64 emulation on GitHub-hosted `windows-11-arm`; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
 | Ubuntu 24.04 x64 | DEB | install/launch on clean Ubuntu 24.04; at v1.0.0+, adjacent `.deb.asc` detached GPG signature from the approved public-key fingerprint |
 
 Every row builds and smoke-tests the matching native sidecar, installs or
