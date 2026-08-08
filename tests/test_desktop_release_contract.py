@@ -21,7 +21,7 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     expected_rows = (
         ("macos-15", "darwin-arm64", "macOS 15", "arm64", "dmg"),
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64", "dmg"),
-        ("windows-11-arm", "win32-x64", "Windows 11", "x64", "nsis"),
+        ("windows-11-arm", "win32-arm64", "Windows 11", "arm64", "nsis"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64", "deb"),
     )
     for runner, sidecar_target, expected_os, arch, installer_target in expected_rows:
@@ -51,12 +51,15 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
     assert workflow.count("\n          HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}") == 1
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
-    assert workflow.count("name: Verify selected x64 runtimes on ARM64 Windows host") == 2
+    assert workflow.count("name: Verify native ARM64 runtimes on Windows") == 2
     assert workflow.count("process.arch") >= 2
     assert workflow.count("sysconfig.get_platform()") >= 2
     assert "platform.machine()" not in workflow
-    assert workflow.count("expected x64 Node.js runtime") == 2
-    assert workflow.count("expected win-amd64 Python runtime") == 2
+    assert workflow.count("expected arm64 Node.js runtime") == 2
+    assert workflow.count("expected win-arm64 Python runtime") == 2
+    assert workflow.count("Microsoft.VisualStudio.Component.VC.Tools.ARM64") == 1
+    assert workflow.count("$env:OPENSSL_DIR = $openSslDir") == 1
+    assert workflow.count("-arch=arm64 -host_arch=arm64") == 1
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
@@ -204,11 +207,11 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "com.apple.security.cs.disable-library-validation" not in entitlements
 
 
-def test_windows_release_installer_targets_x64() -> None:
+def test_windows_release_installer_targets_arm64() -> None:
     builder = BUILDER_CONFIG.read_text(encoding="utf-8")
 
     assert re.search(
-        r"win:\n  target:\n    - target: nsis\n      arch:\n        - x64\n",
+        r"win:\n  target:\n    - target: nsis\n      arch:\n        - arm64\n",
         builder,
     )
 
@@ -294,7 +297,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     for expected in (
         "macOS 15 arm64",
         "macOS 15 x64",
-        "Windows 11 x64",
+        "Windows 11 ARM64",
         "Ubuntu 24.04 x64",
         "SHA256SUMS",
         "Authenticode",
@@ -309,12 +312,12 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     assert "no staged rollout" in normalized
     assert "no automatic rollback" in normalized
     assert (
-        "x64 Python and Node.js to build and validate the shipped Windows x64 application"
+        "native ARM64 Python and Node.js to build and validate the shipped Windows ARM64 application"
         in normalized
     )
     assert (
         "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
-        "Windows 11 on x64, and Ubuntu 24.04 on x64." in normalized_shell
+        "Windows 11 on arm64, and Ubuntu 24.04 on x64." in normalized_shell
     )
 
 

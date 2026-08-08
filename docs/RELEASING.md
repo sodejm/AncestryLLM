@@ -62,7 +62,7 @@ waiver of those gates.
 ## v0.5.0 supported offline shell
 
 v0.5.0 is a supported offline three-OS Electron shell. Its installer matrix is
-macOS 15 arm64, macOS 15 x64, Windows 11 x64, and Ubuntu 24.04 x64. The
+macOS 15 arm64, macOS 15 x64, Windows 11 ARM64, and Ubuntu 24.04 x64. The
 matching-architecture DMGs cover the supported macOS 15/26 range. Its release
 scope is Home, Diagnostics, Settings, capability onboarding, and a private
 loopback sidecar, distributed as manual full installers under the pre-1.0
@@ -115,11 +115,13 @@ accounts, updater behavior, and background release channels.
    [`DEPLOYMENT.md`](DEPLOYMENT.md#reconfigure-desktop-signing-from-macos);
    do not construct ad hoc upload commands containing private values.
 6. Confirm the repository can use GitHub's hosted `windows-11-arm` runner.
-   Desktop verification asserts Windows 11 and an ARM64 host before using x64
-   Python and Node.js to build and validate the shipped Windows x64 application
-   under Windows x64 emulation. The installer builder also uses the x64 runtimes
-   and records its later ARM64 host probe in the release receipt. No self-hosted
-   runner registration or lifecycle is required.
+   Desktop verification asserts Windows 11 and an ARM64 host before using
+   native ARM64 Python and Node.js to build and validate the shipped Windows
+   ARM64 application. Dependencies without an ARM64 wheel use the Visual Studio
+   ARM64, Rust, and OpenSSL toolchain included in the stock hosted image. The
+   installer builder records ARM64 for both host and artifact architecture in
+   the release receipt. No self-hosted runner registration or lifecycle is
+   required.
 7. Enable GitHub immutable releases.
 8. Enable automatic deletion of merged pull-request branches.
 
@@ -249,7 +251,7 @@ listed trusted-signing checks.
 |---|---|---|
 | macOS 15 arm64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
 | macOS 15 x64 | DMG | install/launch for `0.x`; at v1.0.0+, approved Apple Team ID, Developer ID signature, hardened runtime, minimal entitlements, Gatekeeper, notarization, and stapling |
-| Windows 11 x64 | NSIS EXE | build/install/launch under Windows x64 emulation on GitHub-hosted `windows-11-arm`; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
+| Windows 11 ARM64 | NSIS EXE | native build/install/launch on GitHub-hosted `windows-11-arm`; at v1.0.0+, approved certificate thumbprint and valid Authenticode signature |
 | Ubuntu 24.04 x64 | DEB | install/launch on clean Ubuntu 24.04; at v1.0.0+, adjacent `.deb.asc` detached GPG signature from the approved public-key fingerprint |
 
 Every row builds and smoke-tests the matching native sidecar, installs or

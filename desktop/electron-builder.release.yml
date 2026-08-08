@@ -40,7 +40,7 @@ win:
   target:
     - target: nsis
       arch:
-        - x64
+        - arm64
   signAndEditExecutable: true
   # Pre-1.0 release builds are unsigned by default. The release workflow
   # overrides this to true for v1.0.0 and later.

@@ -4,7 +4,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import {
+  execFile,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process'
 import {
   API_CONTRACT,
   type RunningSidecar,
@@ -16,6 +20,82 @@ const MAX_READINESS_BYTES = 1024
 const MAX_HEALTH_BYTES = 8192
 const TERMINATION_TIMEOUT_MS = 3000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
+
+type WindowsTreeKillExecutor = (
+  file: string,
+  args: string[],
+  options: { windowsHide: boolean },
+  callback: (error: Error | null) => void,
+) => void
+
+type WindowsTreeTerminator = (pid: number) => Promise<void>
+
+function waitForChildExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true)
+  }
+  return new Promise((resolve) => {
+    const onExit = (): void => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      child.off('exit', onExit)
+      resolve(false)
+    }, timeoutMs)
+    child.once('exit', onExit)
+  })
+}
+
+const executeWindowsTreeKill: WindowsTreeKillExecutor = (
+  file,
+  args,
+  options,
+  callback,
+) => {
+  execFile(file, args, options, (error) => callback(error))
+}
+
+export function terminateWindowsProcessTree(
+  pid: number,
+  execute: WindowsTreeKillExecutor = executeWindowsTreeKill,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execute(
+      'taskkill.exe',
+      ['/PID', String(pid), '/T', '/F'],
+      { windowsHide: true },
+      (error) => error ? reject(error) : resolve(),
+    )
+  })
+}
+
+export async function terminateNativeSidecarProcess(
+  child: ChildProcessWithoutNullStreams,
+  platform: NodeJS.Platform = process.platform,
+  terminateWindowsTree: WindowsTreeTerminator = terminateWindowsProcessTree,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+
+  if (platform === 'win32' && child.pid !== undefined) {
+    try {
+      await terminateWindowsTree(child.pid)
+      if (await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS)) return
+    } catch {
+      if (child.exitCode !== null || child.signalCode !== null) return
+    }
+  }
+
+  child.kill('SIGTERM')
+  const exited = await waitForChildExit(child, TERMINATION_TIMEOUT_MS)
+  if (!exited && child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGKILL')
+    await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS)
+  }
+}
 
 function parseReadyFrame(line: string): SidecarReadyFrame {
   let value: unknown
@@ -99,32 +179,8 @@ class NativeRunningSidecar extends EventEmitter implements RunningSidecar {
   }
 
   private async terminateOnce(): Promise<void> {
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      this.child.kill('SIGTERM')
-      const exited = await this.waitForExit(TERMINATION_TIMEOUT_MS)
-      if (!exited && this.child.exitCode === null && this.child.signalCode === null) {
-        this.child.kill('SIGKILL')
-        await this.waitForExit(FORCE_TERMINATION_TIMEOUT_MS)
-      }
-    }
+    await terminateNativeSidecarProcess(this.child)
     await rm(this.workingDirectory, { recursive: true, force: true })
-  }
-
-  private waitForExit(timeoutMs: number): Promise<boolean> {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) {
-      return Promise.resolve(true)
-    }
-    return new Promise((resolve) => {
-      const onExit = (): void => {
-        clearTimeout(timer)
-        resolve(true)
-      }
-      const timer = setTimeout(() => {
-        this.child.off('exit', onExit)
-        resolve(false)
-      }, timeoutMs)
-      this.child.once('exit', onExit)
-    })
   }
 }
 

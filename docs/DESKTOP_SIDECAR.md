@@ -18,7 +18,7 @@ equivalent Electron resources directory on Windows and Linux.
 | --- | --- | --- | --- |
 | macOS 15 | arm64, x64 | `darwin-arm64`, `darwin-x64` | `macos-15`, `macos-15-intel` |
 | macOS 26 | arm64, x64 | `darwin-arm64`, `darwin-x64` | `macos-26`, `macos-26-intel` |
-| Windows 11 | x64 | `win32-x64` | built and executed under x64 emulation on `windows-11-arm` |
+| Windows 11 | arm64 | `win32-arm64` | built and executed natively on `windows-11-arm` |
 | Ubuntu 24.04 | x64 | `linux-x64` | `ubuntu-24.04` |
 
 The workflow smoke-tests the native executable before packaging and verifies

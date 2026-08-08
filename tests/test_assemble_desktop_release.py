@@ -45,7 +45,7 @@ TARGETS = {
             "staplingPassed",
         ),
     ),
-    "win32-x64": ("Windows 11", "x64", ".exe", ("authenticodePassed",)),
+    "win32-arm64": ("Windows 11", "arm64", ".exe", ("authenticodePassed",)),
     "linux-x64": ("Ubuntu 24.04", "x64", ".deb", ("gpgSignaturePassed",)),
 }
 
@@ -212,7 +212,7 @@ def test_aggregate_rejects_an_installer_changed_after_evidence(tmp_path: Path) -
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     installers = {target: _create_target(inputs, target)[1] for target in TARGETS}
-    installers["win32-x64"].write_bytes(b"tampered")
+    installers["win32-arm64"].write_bytes(b"tampered")
 
     completed = _run(
         "aggregate",
@@ -236,7 +236,7 @@ def test_aggregate_refuses_to_overwrite_an_existing_release_asset(tmp_path: Path
     installers = {target: _create_target(inputs, target)[1] for target in TARGETS}
     output = tmp_path / "release"
     output.mkdir()
-    existing = output / installers["win32-x64"].name
+    existing = output / installers["win32-arm64"].name
     existing.write_bytes(b"existing release artifact")
 
     completed = _run(
@@ -297,7 +297,7 @@ def test_target_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> None:
 
 
 def test_pre_1_target_accepts_unsigned_build_without_signing_gates(tmp_path: Path) -> None:
-    installer = tmp_path / "AncestryLLM-0.5.0-win32-x64.exe"
+    installer = tmp_path / "AncestryLLM-0.5.0-win32-arm64.exe"
     installer.write_bytes(b"unsigned installer")
     sbom = tmp_path / "sbom.json"
     sbom.write_text(json.dumps({"bomFormat": "CycloneDX"}), encoding="utf-8")
@@ -311,11 +311,11 @@ def test_pre_1_target_accepts_unsigned_build_without_signing_gates(tmp_path: Pat
         "--signing-mode",
         "unsigned",
         "--target",
-        "win32-x64",
+        "win32-arm64",
         "--expected-os",
         "Windows 11",
         "--arch",
-        "x64",
+        "arm64",
         "--installer",
         str(installer),
         "--sbom",
