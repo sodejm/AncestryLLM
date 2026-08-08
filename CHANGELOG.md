@@ -10,7 +10,7 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Added
 
-- Electron desktop shell for macOS 15 arm64, macOS 15 x64, Windows 11 x64,
+- Electron desktop shell for macOS 15 arm64, macOS 15 x64, Windows 11 ARM64,
   and Ubuntu 24.04 x64, distributed as manual full installers.
 - Authenticated FastAPI health and capability foundation for the loopback
   sidecar, consumed by the Electron host through a private local port.

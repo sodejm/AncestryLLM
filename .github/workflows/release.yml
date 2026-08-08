@@ -212,7 +212,7 @@ jobs:
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64", "x64"),
               ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64", "arm64"),
               ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64", "x64"),
-              ("windows-11-arm", "win32-x64", "Windows 11", "Windows 11", "x64", "arm64"),
+              ("windows-11-arm", "win32-arm64", "Windows 11", "Windows 11", "arm64", "arm64"),
               ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64", "x64"),
           }
           actual = {
@@ -329,12 +329,12 @@ jobs:
             package_args: --mac --x64
           - runner: windows-11-arm
             runs_on: '"windows-11-arm"'
-            sidecar_target: win32-x64
+            sidecar_target: win32-arm64
             expected_os: "Windows 11"
-            arch: x64
+            arch: arm64
             host_arch: arm64
             installer_target: nsis
-            package_args: --win --x64
+            package_args: --win --arm64
           - runner: ubuntu-24.04
             runs_on: '"ubuntu-24.04"'
             sidecar_target: linux-x64
@@ -367,22 +367,52 @@ jobs:
           node-version: "26.5.0"
           architecture: ${{ matrix.arch }}
           package-manager-cache: false
-      - name: Verify selected x64 runtimes on ARM64 Windows host
+      - name: Verify native ARM64 runtimes on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $nodeArch = node -p "process.arch"
-          if ($nodeArch -ne 'x64') { throw "expected x64 Node.js runtime, found $nodeArch" }
+          if ($nodeArch -ne 'arm64') { throw "expected arm64 Node.js runtime, found $nodeArch" }
           $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
-          if ($pythonPlatform -ne 'win-amd64') { throw "expected win-amd64 Python runtime, found $pythonPlatform" }
+          if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"
-      - name: Install locked release dependencies
+      - name: Install locked Python release dependencies with stock Windows ARM64 toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw 'GitHub-hosted image is missing the Visual Studio ARM64 C++ toolchain'
+          }
+          $vsDevCmd = Join-Path $vsInstall 'Common7\Tools\VsDevCmd.bat'
+          $openSslDir = Join-Path $env:ProgramFiles 'OpenSSL'
+          if (-not (Test-Path (Join-Path $openSslDir 'include\openssl'))) {
+            throw "GitHub-hosted image is missing native ARM64 OpenSSL under $openSslDir"
+          }
+          $devEnvironment = & $env:ComSpec /d /s /c "`"$vsDevCmd`" -no_logo -arch=arm64 -host_arch=arm64 >nul && set"
+          if ($LASTEXITCODE -ne 0) { throw "VsDevCmd exited $LASTEXITCODE" }
+          foreach ($line in $devEnvironment) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+            }
+          }
+          $env:OPENSSL_DIR = $openSslDir
+          python -m pip install --disable-pip-version-check uv==0.12.1
+          if ($LASTEXITCODE -ne 0) { throw "pip exited $LASTEXITCODE" }
+          uv sync --locked --all-extras
+          if ($LASTEXITCODE -ne 0) { throw "uv sync exited $LASTEXITCODE" }
+      - name: Install locked Python release dependencies
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
+      - name: Install locked desktop release dependencies
+        shell: bash
+        run: |
           pnpm --dir desktop install --frozen-lockfile
       - name: Build and smoke-test the native sidecar
         shell: bash
@@ -711,7 +741,7 @@ jobs:
               darwin-*)
                 gates+=(codeSignaturePassed gatekeeperPassed hardenedRuntimePassed notarizationPassed staplingPassed)
                 ;;
-              win32-x64)
+              win32-arm64)
                 gates+=(authenticodePassed)
                 ;;
               linux-x64)
@@ -780,11 +810,11 @@ jobs:
             installer_target: dmg
           - runner: windows-11-arm
             runs_on: '"windows-11-arm"'
-            sidecar_target: win32-x64
+            sidecar_target: win32-arm64
             expected_os: "Windows 11"
-            arch: x64
+            arch: arm64
             host_arch: arm64
-            runtime_arch: x64
+            runtime_arch: arm64
             installer_target: nsis
           - runner: ubuntu-24.04
             runs_on: '"ubuntu-24.04"'
@@ -818,14 +848,14 @@ jobs:
           node-version: "26.5.0"
           architecture: ${{ matrix.runtime_arch }}
           package-manager-cache: false
-      - name: Verify selected x64 runtimes on ARM64 Windows host
+      - name: Verify native ARM64 runtimes on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $nodeArch = node -p "process.arch"
-          if ($nodeArch -ne 'x64') { throw "expected x64 Node.js runtime, found $nodeArch" }
+          if ($nodeArch -ne 'arm64') { throw "expected arm64 Node.js runtime, found $nodeArch" }
           $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
-          if ($pythonPlatform -ne 'win-amd64') { throw "expected win-amd64 Python runtime, found $pythonPlatform" }
+          if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"
@@ -1180,7 +1210,7 @@ jobs:
           target_names = {
               "desktop-installer-darwin-arm64",
               "desktop-installer-darwin-x64",
-              "desktop-installer-win32-x64",
+              "desktop-installer-win32-arm64",
               "desktop-installer-linux-x64",
           }
           validation_names = {
@@ -1424,7 +1454,7 @@ jobs:
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64", "x64"),
               ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64", "arm64"),
               ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64", "x64"),
-              ("windows-11-arm", "win32-x64", "Windows 11", "Windows 11", "x64", "arm64"),
+              ("windows-11-arm", "win32-arm64", "Windows 11", "Windows 11", "arm64", "arm64"),
               ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64", "x64"),
           }
           validation_rows = evidence.get("validations", [])

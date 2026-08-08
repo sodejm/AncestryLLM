@@ -24,7 +24,7 @@ const rows = [
   ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64', 'x64'],
   ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64', 'arm64'],
   ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64', 'x64'],
-  ['windows-11-arm', 'win32-x64', 'Windows 11', 'Windows 11', 'x64', 'arm64'],
+  ['windows-11-arm', 'win32-arm64', 'Windows 11', 'Windows 11', 'arm64', 'arm64'],
   ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64', 'x64'],
 ]
 
@@ -227,7 +227,7 @@ function securityFixture() {
   }
 }
 
-test('target evidence derives gates for the Windows 11 ARM64-hosted x64 boundary only from exact receipts and its row', () => {
+test('target evidence derives gates for the native Windows 11 ARM64 boundary only from exact receipts and its row', () => {
   const { evidence } = targetFixture(rows.find(([runner]) => runner === 'windows-11-arm'))
   assert.equal(evidence.platformValidated, true)
   assert.equal(evidence.artifactKind, 'unpublished-unpacked-native')
@@ -236,7 +236,7 @@ test('target evidence derives gates for the Windows 11 ARM64-hosted x64 boundary
   assert.equal(evidence.normalLaunchDebugSurfaceAbsent, true)
   assert.equal(evidence.signingVerified, false)
   assert.equal(evidence.hostArch, 'arm64')
-  assert.equal(evidence.arch, 'x64')
+  assert.equal(evidence.arch, 'arm64')
   assert.equal(evidence.performance.policyVersion, PERFORMANCE_POLICY_VERSION)
   assert.deepEqual(evidence.gates, Object.fromEntries(TARGET_RECEIPT_GATES.map((gate) => [gate, true])))
 
