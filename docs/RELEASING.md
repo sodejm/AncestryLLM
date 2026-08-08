@@ -8,10 +8,12 @@ Repository release coordinates are defined in
 `.github/release-config.json`. Its stable package version and GitHub Project 2
 release fields are one reviewed release control. The Project fields are the
 owner, Project number and title, `Release iteration`, `Priority`, `Status`, and
-`Validation`; no successor tracker issue is required. The configuration
-verifier requires the release version to match `pyproject.toml` at release time,
-and readiness and publication use the configured Project values instead of
-inferring release state from an issue number or version string.
+`Validation`; no successor tracker issue is required. The release workflow
+requires the configured version, `pyproject.toml`, `desktop/package.json`, and
+the packaged sidecar build identity to match exactly before either pre-tag
+packaging or tagged publication can proceed. Readiness and publication use the
+configured Project values instead of inferring release state from an issue
+number or version string.
 
 The published v0.4.0 release continues to use its preserved milestone/tracker
 evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project

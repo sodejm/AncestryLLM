@@ -64,12 +64,50 @@ jobs:
             commit="$TAG_COMMIT"
           fi
           python - "$version" <<'PY'
+          import ast
+          import json
           import re
           import sys
+          import tomllib
+          from pathlib import Path
 
           expected = sys.argv[1]
           if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", expected):
               raise SystemExit("release version is not stable SemVer")
+
+          with Path("pyproject.toml").open("rb") as handle:
+              python_version = str(tomllib.load(handle)["project"]["version"])
+          desktop_version = str(
+              json.loads(Path("desktop/package.json").read_text(encoding="utf-8"))["version"]
+          )
+          sidecar_module = ast.parse(
+              Path("src/ancestryllm/api/sidecar.py").read_text(encoding="utf-8")
+          )
+          sidecar_builds = [
+              node.value.value
+              for node in sidecar_module.body
+              if isinstance(node, ast.Assign)
+              and any(
+                  isinstance(target, ast.Name) and target.id == "SIDECAR_BUILD"
+                  for target in node.targets
+              )
+              and isinstance(node.value, ast.Constant)
+              and isinstance(node.value.value, str)
+          ]
+          identities = {
+              "pyproject.toml": python_version,
+              "desktop/package.json": desktop_version,
+              "src/ancestryllm/api/sidecar.py": sidecar_builds[0]
+              if len(sidecar_builds) == 1
+              else f"invalid assignments: {sidecar_builds!r}",
+          }
+          mismatches = {
+              source: actual for source, actual in identities.items() if actual != expected
+          }
+          if mismatches:
+              raise SystemExit(
+                  f"release build identity mismatch for {expected!r}: {mismatches!r}"
+              )
           PY
           test "${#commit}" -eq 40
           case "$commit" in *[!0-9a-f]*) echo "commit_sha must be lowercase hexadecimal" >&2; exit 1 ;; esac
@@ -85,8 +123,6 @@ jobs:
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$commit"
           test "$(jq -r '.release' .github/release-config.json)" = "$version"
-          desktop_version="$(jq -r '.version' desktop/package.json)"
-          test "$desktop_version" = "$version" || test "$desktop_version" = "$version-dev"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           binary_signing_mode="$(python scripts/release_signing_policy.py --version "$version")"
           echo "binary_signing_mode=$binary_signing_mode" >> "$GITHUB_OUTPUT"
@@ -97,16 +133,6 @@ jobs:
             exit 0
           fi
 
-          python - "$version" <<'PY'
-          import sys
-          import tomllib
-
-          expected = sys.argv[1]
-          with open("pyproject.toml", "rb") as handle:
-              actual = str(tomllib.load(handle)["project"]["version"])
-          if actual != expected:
-              raise SystemExit(f"project version {actual!r} != tag version {expected!r}")
-          PY
           python scripts/verify_release_configuration.py \
             --config .github/release-config.json \
             --version "$version"
@@ -608,11 +634,37 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
+          $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
+          Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
           $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
-          $application = Join-Path $installRoot 'ancestryllm.exe'
+          $displayName = "AncestryLLM $env:VERSION"
+          $registrations = @(
+            Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+              ForEach-Object {
+                $registration = Get-ItemProperty -LiteralPath $_.PSPath
+                if (
+                  $registration.DisplayName -eq $displayName -and
+                  $registration.DisplayVersion -eq $env:VERSION
+                ) {
+                  $registration
+                }
+              }
+          )
+          if ($registrations.Count -ne 1) {
+            throw "expected one $displayName uninstall registration, found $($registrations.Count)"
+          }
+          $displayIcon = [string]$registrations[0].DisplayIcon
+          if ([string]::IsNullOrWhiteSpace($displayIcon)) { throw 'installed application registration has no DisplayIcon' }
+          $application = ($displayIcon -replace ',0$', '').Trim('"')
+          if ((Split-Path -Leaf $application) -ine 'ancestryllm.exe') { throw "unexpected registered application $application" }
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
+          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $application)).TrimEnd('\')
+          if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
+            throw "unexpected install root outside LocalApplicationData: $installRoot"
+          }
+          Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
             if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
@@ -625,13 +677,47 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
-          $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
-          if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
-            $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
-            if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+          $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
+          $installRoots = @()
+          if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+            $installRoot = (Get-Content -LiteralPath $statePath -Raw).Trim()
+            if ([string]::IsNullOrWhiteSpace($installRoot)) { throw 'recorded Windows install root is empty' }
+            $installRoots += $installRoot
           }
-          Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          if ($installRoots.Count -eq 0) {
+            $displayName = "AncestryLLM $env:VERSION"
+            Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                $registration = Get-ItemProperty -LiteralPath $_.PSPath
+                if (
+                  $registration.DisplayName -eq $displayName -and
+                  $registration.DisplayVersion -eq $env:VERSION
+                ) {
+                  $displayIcon = [string]$registration.DisplayIcon
+                  if (-not [string]::IsNullOrWhiteSpace($displayIcon)) {
+                    $application = ($displayIcon -replace ',0$', '').Trim('"')
+                    if ((Split-Path -Leaf $application) -ieq 'ancestryllm.exe') {
+                      $installRoots += (Split-Path -Parent $application)
+                    }
+                  }
+                }
+              }
+          }
+          $installRoots = @($installRoots | Select-Object -Unique)
+          $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
+          foreach ($installRoot in $installRoots) {
+            $installRoot = [IO.Path]::GetFullPath($installRoot).TrimEnd('\')
+            if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
+              throw "refusing cleanup outside LocalApplicationData: $installRoot"
+            }
+            $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+            }
+            Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
       - name: Sign Ubuntu installer
         if: runner.os == 'Linux' && env.BINARY_SIGNING_MODE == 'trusted'
         shell: bash
@@ -1070,11 +1156,37 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
+          $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
+          Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
           $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
-          $application = Join-Path $installRoot 'ancestryllm.exe'
+          $displayName = "AncestryLLM $env:VERSION"
+          $registrations = @(
+            Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+              ForEach-Object {
+                $registration = Get-ItemProperty -LiteralPath $_.PSPath
+                if (
+                  $registration.DisplayName -eq $displayName -and
+                  $registration.DisplayVersion -eq $env:VERSION
+                ) {
+                  $registration
+                }
+              }
+          )
+          if ($registrations.Count -ne 1) {
+            throw "expected one $displayName uninstall registration, found $($registrations.Count)"
+          }
+          $displayIcon = [string]$registrations[0].DisplayIcon
+          if ([string]::IsNullOrWhiteSpace($displayIcon)) { throw 'installed application registration has no DisplayIcon' }
+          $application = ($displayIcon -replace ',0$', '').Trim('"')
+          if ((Split-Path -Leaf $application) -ine 'ancestryllm.exe') { throw "unexpected registered application $application" }
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
+          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $application)).TrimEnd('\')
+          if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
+            throw "unexpected install root outside LocalApplicationData: $installRoot"
+          }
+          Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
             if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
@@ -1087,13 +1199,47 @@ jobs:
         if: always() && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AncestryLLM'
-          $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
-          if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
-            $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
-            if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+          $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
+          $installRoots = @()
+          if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+            $installRoot = (Get-Content -LiteralPath $statePath -Raw).Trim()
+            if ([string]::IsNullOrWhiteSpace($installRoot)) { throw 'recorded Windows install root is empty' }
+            $installRoots += $installRoot
           }
-          Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          if ($installRoots.Count -eq 0) {
+            $displayName = "AncestryLLM $env:VERSION"
+            Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                $registration = Get-ItemProperty -LiteralPath $_.PSPath
+                if (
+                  $registration.DisplayName -eq $displayName -and
+                  $registration.DisplayVersion -eq $env:VERSION
+                ) {
+                  $displayIcon = [string]$registration.DisplayIcon
+                  if (-not [string]::IsNullOrWhiteSpace($displayIcon)) {
+                    $application = ($displayIcon -replace ',0$', '').Trim('"')
+                    if ((Split-Path -Leaf $application) -ieq 'ancestryllm.exe') {
+                      $installRoots += (Split-Path -Parent $application)
+                    }
+                  }
+                }
+              }
+          }
+          $installRoots = @($installRoots | Select-Object -Unique)
+          $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
+          foreach ($installRoot in $installRoots) {
+            $installRoot = [IO.Path]::GetFullPath($installRoot).TrimEnd('\')
+            if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
+              throw "refusing cleanup outside LocalApplicationData: $installRoot"
+            }
+            $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+            }
+            Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
       - name: Verify, install, and exercise Ubuntu application
         if: runner.os == 'Linux'
         shell: bash

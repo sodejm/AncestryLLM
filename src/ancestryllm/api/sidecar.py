@@ -24,7 +24,7 @@ from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 from ancestryllm.core.commands import ModuleDescriptor
 
-SIDECAR_BUILD = "0.5.0-dev"
+SIDECAR_BUILD = "0.5.0"
 MAX_LAUNCH_FRAME_BYTES = 4096
 STARTUP_TIMEOUT_SECONDS = 10.0
 
