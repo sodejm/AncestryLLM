@@ -143,8 +143,16 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
     assert "ancestryllm-release-key.asc" not in verification_step
     assert "ancestryllm-signing-gnupg" not in verification_step
     assert "--status-fd 1 --verify" in verification_step
-    assert "sudo dpkg -i" in verification_step
+    assert 'sudo apt-get install -y "./$INSTALLER"' in verification_step
     assert "xvfb-run --auto-servernum pnpm" in verification_step
+
+
+def test_release_installer_runtime_validation_uses_platform_native_copy_and_install() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count('ditto --noqtn "${mounted_apps[0]}" "$installed_app"') == 2
+    assert workflow.count('sudo apt-get install -y "./$INSTALLER"') == 2
+    assert 'sudo dpkg -i "$INSTALLER"' not in workflow
 
 
 def test_release_workflow_separates_pretag_installer_gates_from_tag_publication() -> None:

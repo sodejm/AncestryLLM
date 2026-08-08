@@ -575,7 +575,7 @@ jobs:
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
           fi
-          ditto "${mounted_apps[0]}" "$installed_app"
+          ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
@@ -717,7 +717,7 @@ jobs:
             cleanup_verification_material
             trap - EXIT
           fi
-          sudo dpkg -i "$INSTALLER"
+          sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
@@ -1042,7 +1042,7 @@ jobs:
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
           fi
-          ditto "${mounted_apps[0]}" "$installed_app"
+          ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
@@ -1133,7 +1133,7 @@ jobs:
             grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
               "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
           fi
-          sudo dpkg -i "$INSTALLER"
+          sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
