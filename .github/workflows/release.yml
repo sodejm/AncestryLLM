@@ -690,7 +690,15 @@ jobs:
           if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
             throw "unexpected install root outside LocalApplicationData: $installRoot"
           }
-          $application = Join-Path $installRoot 'ancestryllm.exe'
+          $resourceMarkers = @(
+            Get-ChildItem -LiteralPath $installRoot -Filter 'app.asar' -File -Recurse |
+              Where-Object { $_.Directory.Name -ieq 'resources' }
+          )
+          if ($resourceMarkers.Count -ne 1) {
+            throw "expected one installed Electron resources marker beneath $installRoot, found $($resourceMarkers.Count)"
+          }
+          $resourcesPath = $resourceMarkers[0].Directory.FullName
+          $application = Join-Path (Split-Path -Parent $resourcesPath) 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
@@ -1236,7 +1244,15 @@ jobs:
           if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
             throw "unexpected install root outside LocalApplicationData: $installRoot"
           }
-          $application = Join-Path $installRoot 'ancestryllm.exe'
+          $resourceMarkers = @(
+            Get-ChildItem -LiteralPath $installRoot -Filter 'app.asar' -File -Recurse |
+              Where-Object { $_.Directory.Name -ieq 'resources' }
+          )
+          if ($resourceMarkers.Count -ne 1) {
+            throw "expected one installed Electron resources marker beneath $installRoot, found $($resourceMarkers.Count)"
+          }
+          $resourcesPath = $resourceMarkers[0].Directory.FullName
+          $application = Join-Path (Split-Path -Parent $resourcesPath) 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
