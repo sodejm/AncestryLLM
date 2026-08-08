@@ -220,6 +220,7 @@ def test_release_workflow_separates_pretag_installer_gates_from_tag_publication(
     ) in workflow
     assert "scripts/release_signing_policy.py --version" in workflow
     assert "BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}" in workflow
+    assert "RELEASE_TAG_MODE: ${{ needs.validate.outputs.release_tag_mode }}" in workflow
     assert "assemble-release-distributions:" in workflow
     assert "release-distributions" in workflow
 
@@ -249,9 +250,10 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "target: dmg" in builder
     assert "target: nsis" in builder
     assert "target: deb" in builder
-    assert "hardenedRuntime: true" in builder
+    assert "hardenedRuntime: false" in builder
     assert "entitlements.mac.plist" in builder
     assert "notarize: false" in builder
+    assert "signAndEditExecutable: false" in builder
     assert "oneClick: false" in builder
     assert "allowToChangeInstallationDirectory: true" in builder
     assert "differentialPackage: false" in builder
@@ -260,6 +262,34 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "com.apple.security.cs.allow-jit" in entitlements
     assert "com.apple.security.cs.allow-unsigned-executable-memory" in entitlements
     assert "com.apple.security.cs.disable-library-validation" not in entitlements
+
+
+def test_pre_1_release_path_proves_unsigned_installers_and_annotated_tag() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert (
+        'release_tag_mode="$(python scripts/release_signing_policy.py --version "$version" --tag-mode)"'
+        in workflow
+    )
+    assert 'echo "release_tag_mode=$release_tag_mode" >> "$GITHUB_OUTPUT"' in workflow
+    assert "export CSC_IDENTITY_AUTO_DISCOVERY=false" in workflow
+    assert "--config.mac.identity=null" in workflow
+    assert "--config.mac.hardenedRuntime=false" in workflow
+    assert "$env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'" in workflow
+    assert "--config.win.forceCodeSigning=false" in workflow
+    assert "--config.win.signAndEditExecutable=false" in workflow
+    assert "--config.win.signAndEditExecutable=true" in workflow
+    assert 'codesign --verify --deep --strict "${mounted_apps[0]}"' in workflow
+    assert "if ($signature.Status -ne 'NotSigned')" in workflow
+    assert "if ($applicationSignature.Status -ne 'NotSigned')" in workflow
+    assert 'test ! -e "$INSTALLER.asc"' in workflow
+    assert "gates+=(unsignedArtifactPassed)" in workflow
+    assert 'test "$(jq -r \'.verification.reason\' <<<"$tag_json")" = "unsigned"' in workflow
+    assert 'test "$(jq -r \'.verification.signature\' <<<"$tag_json")" = "null"' in workflow
+    assert 'test "$(jq -r \'.verification.payload\' <<<"$tag_json")" = "null"' in workflow
+    assert 'test "$(jq -r \'.verification.verified\' <<<"$tag_json")" = "true"' in workflow
+    assert '"releaseTagMode": os.environ["RELEASE_TAG_MODE"]' in workflow
+    assert '"signedTag":' not in workflow
 
 
 def test_release_package_declares_linux_distribution_metadata() -> None:
@@ -378,6 +408,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
     desktop = (ROOT / "docs" / "DESKTOP_VERIFICATION.md").read_text(encoding="utf-8")
     desktop_shell = (ROOT / "docs" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
+    release_notes = (ROOT / "docs" / "release-notes" / "0.5.0.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     normalized = " ".join(
@@ -391,6 +422,8 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
             + architecture
             + "\n"
             + changelog
+            + "\n"
+            + release_notes
         ).split()
     )
     normalized_shell = " ".join(desktop_shell.split())
@@ -420,6 +453,14 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
         "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
         "Windows 11 on arm64, and Ubuntu 24.04 on x64." in normalized_shell
     )
+    assert 'binarySigningMode: "unsigned"' in releasing
+    assert 'releaseTagMode: "unsigned-annotated"' in releasing
+    assert "git tag -a" in releasing
+    assert "git tag -s" in releasing
+    assert "Release-tag mode for this release: `unsigned-annotated`" in release_notes
+    assert "Windows 11 | arm64 | NSIS executable" in release_notes
+    assert "Windows 11 on x64" not in normalized
+    assert "may be self-signed" not in normalized
 
 
 def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: Path) -> None:

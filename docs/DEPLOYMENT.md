@@ -8,7 +8,8 @@ Full production/trusted binary signing is intentionally deferred until the
 first full version release, v1.0.0. Official `0.x` releases default to unsigned
 binaries, so none of the signing credentials below are required to build or
 publish them. This procedure prepares the mandatory v1.0.0-and-later trusted
-signing environment; it does not change the signed-commit or signed-tag rules.
+signing environment. Signed annotated release tags are likewise deferred until
+v1.0.0; protected-branch signed-commit requirements are unchanged.
 
 ## Reconfigure desktop signing from macOS
 

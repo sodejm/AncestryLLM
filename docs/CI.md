@@ -41,9 +41,8 @@ reports a conclusion.
 The desktop workflow applies the same pattern through the stable `Desktop
 gate`. Its source-security job and six native unpublished-package rows emit
 exact-head machine-readable evidence. They do not establish production binary
-signing. Official 0.x releases default to unsigned installers and may produce
-self-signed installers only in local/manual runs; full trusted binary signing
-is deferred until and required starting with v1.0.0. Release validation still
+signing. Project-produced 0.x release installers must be unsigned; full trusted
+binary signing is deferred until and required starting with v1.0.0. Release validation still
 requires the exact installer bytes to install and execute on the supported OS
 matrix. See the [desktop verification guide](DESKTOP_VERIFICATION.md).
 

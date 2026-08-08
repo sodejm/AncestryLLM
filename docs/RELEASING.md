@@ -42,24 +42,27 @@ create the secret in a pull request or place the token in repository files.
 
 ## Binary-signing version boundary
 
-AncestryLLM will **not use full production or publicly trusted binary signing
-until the first full version release, v1.0.0**. Every stable `0.x` installer may
-therefore be unsigned or self-signed. The official release workflow defaults
-all `0.x` builds to `unsigned`; a self-signed `0.x` build is permitted only in a
-local or explicitly manual build. Trusted Developer ID, notarization,
-Authenticode, and release-key GPG signing credentials must not be used for an
-official pre-1.0 build.
+AncestryLLM will **not sign project-produced release artifacts or release tags
+until the first full version release, v1.0.0**. Every stable `0.x` installer
+must therefore use `binarySigningMode: "unsigned"`, and every stable `0.x`
+release tag must use `releaseTagMode: "unsigned-annotated"`. Developer ID,
+notarization, Authenticode, detached GPG, ad hoc signing, and Git tag-signing
+credentials must not be used for an official pre-1.0 release.
 
-Starting with v1.0.0, full trusted platform signing is mandatory and unsigned
-or self-signed release binaries are rejected. This binary-signing boundary
-does not relax repository identity controls: signed commits and signed,
-annotated Git release tags remain required for every version, including `0.x`.
+Starting with v1.0.0, full trusted platform signing and a signed annotated
+release tag are mandatory; unsigned or self-signed release binaries and an
+unsigned release tag are rejected. This release-output boundary does not relax
+repository identity controls such as signed commits on the protected branch.
 
-Every pre-1.0 release must disclose its `binarySigningMode` in release evidence
-and release notes, warn that the operating system may show an unknown-publisher
-or equivalent prompt, and retain all checksum, SBOM, provenance, exact-head,
-installation, and installed-runtime gates. Deferring trusted signing is not a
-waiver of those gates.
+Every pre-1.0 release must disclose its `binarySigningMode` and
+`releaseTagMode` in release evidence and release notes, warn that the operating
+system may show an unknown-publisher or equivalent prompt, and retain all
+checksum, SBOM, provenance, exact-head, installation, and installed-runtime
+gates. Deferring signing is not a waiver of those gates. The macOS desktop
+verification workflow may apply an ephemeral ad hoc signature solely to launch
+an unpublished fuse-mutated test bundle on a hosted runner; that bundle must
+never be distributed, imported into a release, or accepted as release-signing
+evidence.
 
 ## v0.5.0 supported offline shell
 
@@ -214,7 +217,7 @@ self-approval; do not make that change during the one-maintainer release.
 
 At the exact approval points, a maintainer approves the release-preparation PR;
 the readiness operator attests the cleanup audit and approves its evidence; the
-maintainer approves creation and push of the signed tag; and `sodejm` approves
+maintainer approves creation and push of the annotated release tag; and `sodejm` approves
 the `pypi` environment deployment. For this one-maintainer release, that final
 approval may be self-approval by the workflow initiator. A separate explicit
 approval is required for the GitHub-only fallback described below.
@@ -271,11 +274,10 @@ combined SBOM, desktop manifest, and exact-head evidence document.
 
 ## Tag and publish
 
-Configure Git tag signing before creating the release tag. From a clean checkout
-whose `HEAD` is the approved `main` commit. When using SSH signatures, also
-configure `gpg.ssh.allowedSignersFile` with the maintainer identity and the
-registered signing public key so local verification is meaningful. Confirm the
-release commit first with `git log --show-signature -1`, then:
+From a clean checkout whose `HEAD` is the approved `main` commit, derive the
+version-dependent release-tag mode and create an annotated tag. Pre-1.0 tags
+must be unsigned; v1.0.0-and-later tags must be signed. Confirm the release
+commit first with `git log --show-signature -1`, then:
 
 ```bash
 release_version="$(jq -er '.release' .github/release-config.json)"
@@ -283,24 +285,32 @@ release_tag="v${release_version}"
 desktop_release_run="<successful pre-tag release workflow run ID>"
 desktop_release_artifact="<desktop-release-distributions artifact ID>"
 desktop_release_digest="sha256:<GitHub Actions artifact SHA-256>"
+release_tag_mode="$(.venv/bin/python scripts/release_signing_policy.py \
+  --version "${release_version}" --tag-mode)"
 .venv/bin/python scripts/verify_release_configuration.py \
   --config .github/release-config.json \
   --version "${release_version}"
-git tag -s "${release_tag}" HEAD \
-  -m "AncestryLLM ${release_version}" \
-  -m "Desktop-Release-Run-ID: ${desktop_release_run}" \
-  -m "Desktop-Release-Artifact-ID: ${desktop_release_artifact}" \
+tag_args=(
+  -m "AncestryLLM ${release_version}"
+  -m "Desktop-Release-Run-ID: ${desktop_release_run}"
+  -m "Desktop-Release-Artifact-ID: ${desktop_release_artifact}"
   -m "Desktop-Release-Artifact-Digest: ${desktop_release_digest}"
-git tag -v "${release_tag}"
+)
+if [[ "${release_tag_mode}" == "unsigned-annotated" ]]; then
+  git tag -a "${tag_args[@]}" "${release_tag}" HEAD
+else
+  git tag -s "${tag_args[@]}" "${release_tag}" HEAD
+  git tag -v "${release_tag}"
+fi
 git push origin "${release_tag}"
 ```
 
-Push only the release tag. The tag-triggered workflow verifies the signed,
-annotated tag, exact readiness evidence, and exact pre-tag installer artifact;
+Push only the release tag. The tag-triggered workflow verifies the required
+annotated-tag mode, exact readiness evidence, and exact pre-tag installer artifact;
 the three `Desktop-Release-*` tag-message fields are mandatory and bind the
 approval to one successful manual release-workflow run, one artifact ID, and
 GitHub's exact SHA-256 artifact digest. Obtain them from that run's summary and
-independently confirm them in the Actions artifact metadata before signing.
+independently confirm them in the Actions artifact metadata before tagging.
 The summary normalizes the upload-artifact output to the required
 `sha256:<64 lowercase hex>` form; do not remove the `sha256:` prefix.
 The workflow then attests the combined artifacts; prepares a draft GitHub
@@ -348,9 +358,10 @@ a workflow that is in progress or failed does not satisfy the gate.
 
 Download the target-matched full installer and the release's `SHA256SUMS` from
 the same immutable GitHub Release. Verify the checksum before opening the
-installer. For a `0.x` release, confirm the disclosed `binarySigningMode` and
-expect an operating-system unknown-publisher or equivalent prompt; do not infer
-a trusted identity from an unsigned or self-signed binary. For v1.0.0 and
+installer. For a `0.x` release, require `binarySigningMode: "unsigned"` and
+`releaseTagMode: "unsigned-annotated"`, and expect an operating-system
+unknown-publisher or equivalent prompt; do not infer a trusted identity from
+an unsigned binary. For v1.0.0 and
 later, inspect the Developer ID signature and notarization/stapling on macOS,
 require a valid Authenticode signature on Windows, and verify Ubuntu's adjacent
 `.deb.asc` with the documented release key. Do not install when a required

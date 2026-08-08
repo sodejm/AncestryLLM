@@ -26,6 +26,7 @@ COMMON_GATES = {
     "sbomGeneratedPassed",
     "sidecarHandshakePassed",
 }
+UNSIGNED_GATES = {"unsignedArtifactPassed"}
 VALIDATION_GATES = {
     "exactHeadPassed",
     "installedRuntimePassed",
@@ -70,12 +71,6 @@ TARGETS = {
         "extension": ".deb",
         "gates": {"gpgSignaturePassed"},
     },
-}
-SELF_SIGNED_GATES = {
-    "darwin-arm64": {"codeSignaturePassed", "hardenedRuntimePassed"},
-    "darwin-x64": {"codeSignaturePassed", "hardenedRuntimePassed"},
-    "win32-arm64": {"authenticodePassed"},
-    "linux-x64": {"gpgSignaturePassed"},
 }
 VALIDATION_ENVIRONMENTS = {
     "macos-15": {
@@ -177,9 +172,7 @@ def _positive_integer(value: int, label: str) -> int:
 
 def _required_gates(target: str, signing_mode: str) -> set[str]:
     if signing_mode == "unsigned":
-        signing_gates: set[str] = set()
-    elif signing_mode == "self-signed":
-        signing_gates = SELF_SIGNED_GATES[target]
+        signing_gates = UNSIGNED_GATES
     else:
         signing_gates = set(TARGETS[target]["gates"])
     return COMMON_GATES | signing_gates
@@ -654,7 +647,7 @@ def _parser() -> argparse.ArgumentParser:
     target.add_argument(
         "--signing-mode",
         required=True,
-        choices=("unsigned", "self-signed", "trusted"),
+        choices=("unsigned", "trusted"),
     )
     target.add_argument("--target", required=True)
     target.add_argument("--expected-os", required=True)
