@@ -23,11 +23,7 @@ artifactName: AncestryLLM-${version}-${os}-${arch}.${ext}
 publish: null
 generateUpdatesFilesForAllChannels: false
 mac:
-  target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
+  target: dmg
   category: public.app-category.productivity
   # Pre-1.0 release builds are unsigned by default. The release workflow
   # overrides this to true for v1.0.0 and later.
