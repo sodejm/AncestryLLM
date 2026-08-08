@@ -1,3 +1,4 @@
+// Verifies the packaged-application deadline helper rejects stalled operations.
 import { describe, expect, it } from 'vitest'
 
 import { withinDeadline } from './packaged-deadline'
