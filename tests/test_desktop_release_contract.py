@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,43 @@ BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.release.yml"
 PACKAGE_JSON = ROOT / "desktop" / "package.json"
 ENTITLEMENTS = ROOT / "desktop" / "resources" / "entitlements.mac.plist"
 ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
+PYPROJECT = ROOT / "pyproject.toml"
+RELEASE_CONFIG = ROOT / ".github" / "release-config.json"
+SIDECAR_MODULE = ROOT / "src" / "ancestryllm" / "api" / "sidecar.py"
+
+
+def test_release_sources_share_the_exact_stable_build_identity() -> None:
+    expected = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))["release"]
+    desktop_version = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))["version"]
+    with PYPROJECT.open("rb") as handle:
+        python_version = str(tomllib.load(handle)["project"]["version"])
+
+    module = ast.parse(SIDECAR_MODULE.read_text(encoding="utf-8"))
+    sidecar_builds = [
+        node.value.value
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "SIDECAR_BUILD" for target in node.targets
+        )
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    ]
+
+    assert sidecar_builds == [expected]
+    assert python_version == expected
+    assert desktop_version == expected
+
+
+def test_release_request_validates_every_build_identity_before_pretag_exit() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    validation = workflow[workflow.index("      - id: release\n") : workflow.index("\n  build:\n")]
+    pretag_exit = validation.rindex('if test "$EVENT_NAME" = "workflow_dispatch"; then')
+
+    assert '"pyproject.toml"' in validation[:pretag_exit]
+    assert '"desktop/package.json"' in validation[:pretag_exit]
+    assert '"src/ancestryllm/api/sidecar.py"' in validation[:pretag_exit]
+    assert "$version-dev" not in validation
 
 
 def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -> None:
@@ -254,17 +293,20 @@ def test_windows_release_installer_targets_arm64() -> None:
 def test_windows_installer_verification_uses_the_nsis_current_user_default() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    default_install_root = (
-        "$installRoot = Join-Path "
-        "([Environment]::GetFolderPath('LocalApplicationData')) "
-        "'Programs\\AncestryLLM'"
-    )
-
     # Exercise electron-builder's stock current-user destination instead of a
-    # workflow-owned /D override. Both the aggregate and platform verification
-    # paths install and uninstall the application.
-    assert workflow.count(default_install_root) == 4
+    # workflow-owned /D override or an assumed fallback path. Resolve the exact
+    # installed executable from NSIS uninstall metadata, then retain its root
+    # for bounded cleanup in both verification paths.
     assert workflow.count("-ArgumentList @('/S', '/currentuser') -Wait -PassThru") == 4
+    assert workflow.count("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall") == 4
+    assert workflow.count('$displayName = "AncestryLLM $env:VERSION"') == 4
+    assert workflow.count("$registration.DisplayName -eq $displayName") == 4
+    assert workflow.count("$registration.DisplayVersion -eq $env:VERSION") == 4
+    assert workflow.count("$application = ($displayIcon -replace ',0$', '').Trim('\"')") == 4
+    assert workflow.count("'ancestryllm-install-root.txt'") == 4
+    assert workflow.count("if ($installRoots.Count -eq 0)") == 2
+    assert workflow.count("unexpected install root outside LocalApplicationData") == 2
+    assert workflow.count("refusing cleanup outside LocalApplicationData") == 2
     assert "/D=$installRoot" not in workflow
     assert "$installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'" not in workflow
     assert workflow.count("$uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'") == 2

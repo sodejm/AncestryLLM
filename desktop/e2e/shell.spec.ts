@@ -59,7 +59,7 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
     }
   })).toEqual({ frozen: true, methods: bridgeMethods })
 
-  const securityState = await app.evaluate(({ BrowserWindow }) => {
+  const securityState = await app.evaluate(async ({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]
     if (!window) throw new Error('No BrowserWindow')
     const preferences = (window.webContents as unknown as {
@@ -78,13 +78,22 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
       rendererUrl: window.webContents.getURL(),
       contextIsolation: preferences.contextIsolation,
       nodeIntegration: preferences.nodeIntegration,
-      nodeIntegrationInWorker: preferences.nodeIntegrationInWorker,
-      nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames,
+      // Electron 39 omits explicit false values for these false-by-default
+      // preferences from getLastWebPreferences(). The constructor contract is
+      // still asserted directly by security-policy.test.ts.
+      nodeIntegrationInWorker: preferences.nodeIntegrationInWorker ?? false,
+      nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames ?? false,
       sandbox: preferences.sandbox,
       webSecurity: preferences.webSecurity,
       webviewTag: preferences.webviewTag,
-      devTools: preferences.devTools,
-      devToolsOpen: window.webContents.isDevToolsOpened(),
+      devToolsOpenBeforeRequest: window.webContents.isDevToolsOpened(),
+      devToolsOpenAfterRequest: await (async () => {
+        window.webContents.openDevTools({ mode: 'detach' })
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        const opened = window.webContents.isDevToolsOpened()
+        if (opened) window.webContents.closeDevTools()
+        return opened
+      })(),
     }
   })
   expect(securityState).toEqual({
@@ -96,8 +105,8 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
     sandbox: true,
     webSecurity: true,
     webviewTag: false,
-    devTools: false,
-    devToolsOpen: false,
+    devToolsOpenBeforeRequest: false,
+    devToolsOpenAfterRequest: false,
   })
 
   const response = await page.reload()
