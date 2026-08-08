@@ -58,7 +58,14 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert workflow.count("expected arm64 Node.js runtime") == 2
     assert workflow.count("expected win-arm64 Python runtime") == 2
     assert workflow.count("Microsoft.VisualStudio.Component.VC.Tools.ARM64") == 1
+    assert workflow.count("$openSslIncludeDir = Join-Path $openSslDir 'include'") == 1
+    assert workflow.count("$openSslLibDir = Join-Path $openSslDir 'lib\\VC\\arm64\\MD'") == 1
+    assert workflow.count("@('libssl.lib', 'libcrypto.lib')") == 1
+    assert workflow.count("dumpbin /headers $libraryPath") == 1
+    assert workflow.count("'(?i)AA64 machine'") == 1
     assert workflow.count("$env:OPENSSL_DIR = $openSslDir") == 1
+    assert workflow.count("$env:OPENSSL_INCLUDE_DIR = $openSslIncludeDir") == 1
+    assert workflow.count("$env:OPENSSL_LIB_DIR = $openSslLibDir") == 1
     assert workflow.count("-arch=arm64 -host_arch=arm64") == 1
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow

@@ -389,7 +389,9 @@ jobs:
           }
           $vsDevCmd = Join-Path $vsInstall 'Common7\Tools\VsDevCmd.bat'
           $openSslDir = Join-Path $env:ProgramFiles 'OpenSSL'
-          if (-not (Test-Path (Join-Path $openSslDir 'include\openssl'))) {
+          $openSslIncludeDir = Join-Path $openSslDir 'include'
+          $openSslLibDir = Join-Path $openSslDir 'lib\VC\arm64\MD'
+          if (-not (Test-Path (Join-Path $openSslIncludeDir 'openssl'))) {
             throw "GitHub-hosted image is missing native ARM64 OpenSSL under $openSslDir"
           }
           $devEnvironment = & $env:ComSpec /d /s /c "`"$vsDevCmd`" -no_logo -arch=arm64 -host_arch=arm64 >nul && set"
@@ -399,7 +401,20 @@ jobs:
               [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
             }
           }
+          foreach ($libraryName in @('libssl.lib', 'libcrypto.lib')) {
+            $libraryPath = Join-Path $openSslLibDir $libraryName
+            if (-not (Test-Path $libraryPath)) {
+              throw "GitHub-hosted image is missing $libraryName under native ARM64 OpenSSL directory $openSslLibDir"
+            }
+            $libraryHeaders = & dumpbin /headers $libraryPath 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "dumpbin exited $LASTEXITCODE for $libraryPath" }
+            if (($libraryHeaders -join "`n") -notmatch '(?i)AA64 machine') {
+              throw "$libraryPath is not a native ARM64 library"
+            }
+          }
           $env:OPENSSL_DIR = $openSslDir
+          $env:OPENSSL_INCLUDE_DIR = $openSslIncludeDir
+          $env:OPENSSL_LIB_DIR = $openSslLibDir
           python -m pip install --disable-pip-version-check uv==0.12.1
           if ($LASTEXITCODE -ne 0) { throw "pip exited $LASTEXITCODE" }
           uv sync --locked --all-extras
