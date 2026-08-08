@@ -29,7 +29,7 @@ for this query. The release workflows retain `github.token` for repository and
 Actions operations, but supply the named secret only to the Project GraphQL
 read. A missing or unusable secret fails the Project gate closed.
 
-`Release Project gate proof` runs only for a path-scoped push to `main`, checks
+`Release Project gate proof` runs for every push to protected `main`, checks
 that the checkout and `origin/main` are the triggering commit, validates the
 configured release coordinates, and performs the authenticated Project query.
 It verifies pagination and target-iteration field schema without claiming that
@@ -37,7 +37,10 @@ the in-development iteration is ready to release; a deterministic regression
 then proves the strict verifier rejects an open P0 item. `Release readiness`
 and the tag workflow continue to use the strict live gate. The proof has no
 pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
-After this change is merged, its exact-main run is the hosted proof; do not
+While the triggering commit remains the tip of `main`, use GitHub's rerun
+mechanism to retry its immutable run. If `main` advances, the earlier candidate
+and its proof are superseded; require a successful proof from the newer tip
+instead. The exact-main run for each candidate is the hosted proof; do not
 create the secret in a pull request or place the token in repository files.
 
 ## Binary-signing version boundary
