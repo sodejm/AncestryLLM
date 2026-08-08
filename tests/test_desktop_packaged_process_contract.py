@@ -88,10 +88,26 @@ def test_packaged_cleanup_terminates_the_windows_process_tree_with_a_deadline() 
 
 def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    deadline_helper = PACKAGED_SPEC.parent / "packaged-deadline.ts"
+    deadline_source = deadline_helper.read_text(encoding="utf-8")
 
     assert "const mismatchDiagnosticsPath = process.env.ANCESTRYLLM_MISMATCH_DIAGNOSTICS" in source
-    assert "async function withinDeadline<T>" in source
-    assert "Timed out while ${operation}" in source
+    assert "import { withinDeadline } from './packaged-deadline'" in source
+    assert "export async function withinDeadline<T>" in deadline_source
+    assert "Timed out while ${operation}" in deadline_source
+    assert "const packagedLaunchTimeoutMs = 120_000" in source
+    assert (
+        "return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs"
+        in source
+    )
+    assert (
+        "await page.waitForLoadState('domcontentloaded', { timeout: packagedAttachTimeoutMs })"
+        in source
+    )
+    assert (
+        "withinDeadline('closing failed packaged browser automation', packagedCleanupTimeoutMs"
+        in source
+    )
     assert "return withinDeadline('reading packaged startup diagnostics'" in source
     assert "async function writeMismatchDiagnostics" in source
     assert "let cleanupFailure: unknown" in source
