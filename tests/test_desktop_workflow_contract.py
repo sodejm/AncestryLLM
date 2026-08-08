@@ -80,7 +80,14 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
     assert "expected arm64 Node.js runtime" in workflow
     assert "expected win-arm64 Python runtime" in workflow
     assert "Microsoft.VisualStudio.Component.VC.Tools.ARM64" in workflow
+    assert "$openSslIncludeDir = Join-Path $openSslDir 'include'" in workflow
+    assert "$openSslLibDir = Join-Path $openSslDir 'lib\\VC\\arm64\\MD'" in workflow
+    assert "@('libssl.lib', 'libcrypto.lib')" in workflow
+    assert "dumpbin /headers $libraryPath" in workflow
+    assert "'(?i)AA64 machine'" in workflow
     assert "$env:OPENSSL_DIR = $openSslDir" in workflow
+    assert "$env:OPENSSL_INCLUDE_DIR = $openSslIncludeDir" in workflow
+    assert "$env:OPENSSL_LIB_DIR = $openSslLibDir" in workflow
     assert "-arch=arm64 -host_arch=arm64" in workflow
     assert "uv sync --locked --all-extras" in workflow
     assert "self-hosted" not in workflow
