@@ -3,18 +3,6 @@ name: Release Project gate proof
 on:
   push:
     branches: [main]
-    paths:
-      - .github/release-config.json
-      - .github/workflows/release-project-gate-proof.yml
-      - .github/workflows/release-readiness.yml
-      - .github/workflows/release.yml
-      - docs/RELEASING.md
-      - pyproject.toml
-      - scripts/verify_release_configuration.py
-      - scripts/verify_release_project.py
-      - tests/test_release_contract.py
-      - tests/test_verify_release_project.py
-      - uv.lock
 
 permissions:
   contents: read
