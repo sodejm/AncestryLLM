@@ -11,6 +11,7 @@ import {
   parseReceiptArguments,
   runVerificationCommand,
   validateVerificationReceipt,
+  verificationCommandInvocation,
   workspaceSnapshot,
 } from './verification-receipt.mjs'
 
@@ -41,6 +42,19 @@ test('target receipts require each packaged sidecar fault scenario explicitly', 
     'packagedSidecarRestartExhaustionQuitPassed',
     'packagedSidecarVersionMismatchPassed',
   ])
+})
+
+test('receipt command invocation preserves multiword arguments without a shell', () => {
+  const scenario = 'withholds and restores the packaged sidecar through Diagnostics retry'
+
+  assert.deepEqual(
+    verificationCommandInvocation('node', ['runner.mjs', '--grep', scenario]),
+    {
+      executable: 'node',
+      args: ['runner.mjs', '--grep', scenario],
+      shell: false,
+    },
+  )
 })
 
 function sha256(value) {
