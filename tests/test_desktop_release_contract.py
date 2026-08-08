@@ -338,8 +338,9 @@ def test_windows_installer_verification_uses_the_nsis_current_user_default() -> 
     # workflow-owned /D override or an assumed fallback path. Resolve the exact
     # install root from NSIS's quoted QuietUninstallString metadata instead of
     # treating DisplayIcon as a stable application-path contract. Then verify
-    # the expected executable and retain its root for bounded cleanup in both
-    # verification paths.
+    # exactly one packaged resources marker beneath that root, derive the
+    # sibling executable from Electron's packaged layout, and retain the root
+    # for bounded cleanup in both verification paths.
     assert workflow.count("-ArgumentList @('/S', '/currentuser') -Wait -PassThru") == 4
     assert workflow.count("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall") == 4
     assert workflow.count('$displayName = "AncestryLLM $env:VERSION"') == 4
@@ -347,7 +348,20 @@ def test_windows_installer_verification_uses_the_nsis_current_user_default() -> 
     assert workflow.count("$registration.DisplayVersion -eq $env:VERSION") == 4
     assert workflow.count(".QuietUninstallString") == 4
     assert workflow.count('$uninstallCommand -notmatch \'^"(?<path>[^"]+)"(?:\\s|$)\'') == 4
-    assert workflow.count("$application = Join-Path $installRoot 'ancestryllm.exe'") == 2
+    assert (
+        workflow.count("Get-ChildItem -LiteralPath $installRoot -Filter 'app.asar' -File -Recurse")
+        == 2
+    )
+    assert workflow.count("$_.Directory.Name -ieq 'resources'") == 2
+    assert workflow.count("if ($resourceMarkers.Count -ne 1)") == 2
+    assert workflow.count("$resourcesPath = $resourceMarkers[0].Directory.FullName") == 2
+    assert (
+        workflow.count(
+            "$application = Join-Path (Split-Path -Parent $resourcesPath) 'ancestryllm.exe'"
+        )
+        == 2
+    )
+    assert "$application = Join-Path $installRoot 'ancestryllm.exe'" not in workflow
     assert "DisplayIcon" not in workflow
     assert workflow.count("'ancestryllm-install-root.txt'") == 4
     assert workflow.count("if ($installRoots.Count -eq 0)") == 2
