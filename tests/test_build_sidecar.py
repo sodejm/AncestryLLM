@@ -33,9 +33,13 @@ def test_windows_arm64_host_requires_arm64_python_runtime() -> None:
     assert runtime_target("Windows", "ARM64", "win-arm64") == "win32-arm64"
 
 
-def test_windows_arm64_host_rejects_x64_python_runtime() -> None:
-    with pytest.raises(ValueError, match="requires an ARM64 Python runtime"):
-        runtime_target("Windows", "ARM64", "win-amd64")
+def test_windows_arm64_host_uses_emulated_x64_python_runtime_target() -> None:
+    assert runtime_target("Windows", "ARM64", "win-amd64") == "win32-x64"
+
+
+def test_windows_runtime_rejects_unknown_python_platform() -> None:
+    with pytest.raises(ValueError, match="unsupported Windows Python runtime platform"):
+        runtime_target("Windows", "ARM64", "mingw-x86_64")
 
 
 def test_executable_path_matches_electron_resource_layout(tmp_path: Path) -> None:

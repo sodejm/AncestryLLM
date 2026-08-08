@@ -373,8 +373,8 @@ jobs:
         run: |
           $nodeArch = node -p "process.arch"
           if ($nodeArch -ne 'x64') { throw "expected x64 Node.js runtime, found $nodeArch" }
-          $pythonArch = python -c "import platform; print(platform.machine())"
-          if ($pythonArch -ne 'AMD64') { throw "expected AMD64 Python runtime, found $pythonArch" }
+          $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
+          if ($pythonPlatform -ne 'win-amd64') { throw "expected win-amd64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"
@@ -824,8 +824,8 @@ jobs:
         run: |
           $nodeArch = node -p "process.arch"
           if ($nodeArch -ne 'x64') { throw "expected x64 Node.js runtime, found $nodeArch" }
-          $pythonArch = python -c "import platform; print(platform.machine())"
-          if ($pythonArch -ne 'AMD64') { throw "expected AMD64 Python runtime, found $pythonArch" }
+          $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
+          if ($pythonPlatform -ne 'win-amd64') { throw "expected win-amd64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
           version: "11.9.0"

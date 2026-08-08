@@ -53,9 +53,10 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
     assert workflow.count("name: Verify selected x64 runtimes on ARM64 Windows host") == 2
     assert workflow.count("process.arch") >= 2
-    assert workflow.count("platform.machine()") >= 2
+    assert workflow.count("sysconfig.get_platform()") >= 2
+    assert "platform.machine()" not in workflow
     assert workflow.count("expected x64 Node.js runtime") == 2
-    assert workflow.count("expected AMD64 Python runtime") == 2
+    assert workflow.count("expected win-amd64 Python runtime") == 2
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
