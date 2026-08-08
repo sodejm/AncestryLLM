@@ -115,8 +115,10 @@ accounts, updater behavior, and background release channels.
    [`DEPLOYMENT.md`](DEPLOYMENT.md#reconfigure-desktop-signing-from-macos);
    do not construct ad hoc upload commands containing private values.
 6. Confirm the repository can use GitHub's hosted `windows-11-arm` runner.
-   The workflows assert Windows 11 and an ARM64 host, then use ARM64 Python and
-   Node.js to validate the shipped Windows ARM64 application. No self-hosted
+   Desktop verification asserts Windows 11 and an ARM64 host before using x64
+   Python and Node.js to build and validate the shipped Windows x64 application
+   under Windows x64 emulation. The installer builder also uses the x64 runtimes
+   and records its later ARM64 host probe in the release receipt. No self-hosted
    runner registration or lifecycle is required.
 7. Enable GitHub immutable releases.
 8. Enable automatic deletion of merged pull-request branches.

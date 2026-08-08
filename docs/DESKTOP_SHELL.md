@@ -72,7 +72,7 @@ and architecture controls.
 ## Installation and updates
 
 The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
-on arm64, and Ubuntu 24.04 on x64. A supported release is a manually installed
+on x64, and Ubuntu 24.04 on x64. A supported release is a manually installed
 installer that has passed the target-specific release and packaged assurance
 gates in the [release runbook](RELEASING.md). Full production/trusted binary
 signing is explicitly deferred until the first full version release, v1.0.0.

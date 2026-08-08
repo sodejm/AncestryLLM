@@ -283,7 +283,7 @@ target-assurance gates to pass.
 - Offline-first behavior remains mandatory: `provider=none` opens no network
   socket even when provider credentials and SDKs exist.
 - Supported 0.x distribution is a manually installed official unsigned
-  installer for macOS 15 and 26 on arm64 and x64, Windows 11 on arm64, or
+  installer for macOS 15 and 26 on arm64 and x64, Windows 11 on x64, or
   Ubuntu 24.04 on x64 after the applicable release gates pass. macOS and
   Windows can display an unknown-publisher or Gatekeeper prompt, so users must
   verify published checksums and release evidence before installation.
