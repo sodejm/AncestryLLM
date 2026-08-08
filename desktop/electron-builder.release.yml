@@ -37,9 +37,11 @@ win:
     - target: nsis
       arch:
         - arm64
-  signAndEditExecutable: false
-  # Pre-1.0 release builds are unsigned by default. The release workflow
-  # overrides this to true for v1.0.0 and later.
+  # Keep resedit enabled so the application name, icon, version, and execution
+  # level replace the upstream Electron executable resources. Disable only the
+  # signing phase until v1.0.0.
+  signAndEditExecutable: true
+  signExecutable: false
   forceCodeSigning: false
 linux:
   target:

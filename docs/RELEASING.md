@@ -297,7 +297,7 @@ tag_args=(
   -m "Desktop-Release-Artifact-Digest: ${desktop_release_digest}"
 )
 if [[ "${release_tag_mode}" == "unsigned-annotated" ]]; then
-  git tag -a "${tag_args[@]}" "${release_tag}" HEAD
+  git tag --no-sign -a "${tag_args[@]}" "${release_tag}" HEAD
 else
   git tag -s "${tag_args[@]}" "${release_tag}" HEAD
   git tag -v "${release_tag}"

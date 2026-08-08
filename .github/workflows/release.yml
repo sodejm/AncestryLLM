@@ -562,7 +562,8 @@ jobs:
             $env:CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
             $signingArgs = @(
               '--config.win.forceCodeSigning=true',
-              '--config.win.signAndEditExecutable=true'
+              '--config.win.signAndEditExecutable=true',
+              '--config.win.signExecutable=true'
             )
           } else {
             if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw 'WINDOWS_CERTIFICATE_BASE64 must be empty for an unsigned release' }
@@ -572,7 +573,8 @@ jobs:
             Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
             $signingArgs = @(
               '--config.win.forceCodeSigning=false',
-              '--config.win.signAndEditExecutable=false'
+              '--config.win.signAndEditExecutable=true',
+              '--config.win.signExecutable=false'
             )
           }
           $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
@@ -644,15 +646,22 @@ jobs:
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
           if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --strict --verbose=4 "$INSTALLER"
             codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
             codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
             grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-details.txt"
             grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
-          elif codesign --verify --deep --strict "${mounted_apps[0]}"; then
-            echo "0.x macOS application must be unsigned" >&2
-            exit 1
+          else
+            if codesign --verify --strict "$INSTALLER"; then
+              echo "0.x macOS installer must be unsigned" >&2
+              exit 1
+            fi
+            if codesign --verify --deep --strict "${mounted_apps[0]}"; then
+              echo "0.x macOS application must be unsigned" >&2
+              exit 1
+            fi
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
@@ -1189,14 +1198,21 @@ jobs:
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
           if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --strict --verbose=4 "$INSTALLER"
             codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
             codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-validation-details.txt"
             grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-validation-details.txt"
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
-          elif codesign --verify --deep --strict "${mounted_apps[0]}"; then
-            echo "0.x macOS application must be unsigned" >&2
-            exit 1
+          else
+            if codesign --verify --strict "$INSTALLER"; then
+              echo "0.x macOS installer must be unsigned" >&2
+              exit 1
+            fi
+            if codesign --verify --deep --strict "${mounted_apps[0]}"; then
+              echo "0.x macOS application must be unsigned" >&2
+              exit 1
+            fi
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"

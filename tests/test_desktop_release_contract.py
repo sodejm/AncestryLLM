@@ -253,7 +253,8 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "hardenedRuntime: false" in builder
     assert "entitlements.mac.plist" in builder
     assert "notarize: false" in builder
-    assert "signAndEditExecutable: false" in builder
+    assert "signAndEditExecutable: true" in builder
+    assert "signExecutable: false" in builder
     assert "oneClick: false" in builder
     assert "allowToChangeInstallationDirectory: true" in builder
     assert "differentialPackage: false" in builder
@@ -277,8 +278,12 @@ def test_pre_1_release_path_proves_unsigned_installers_and_annotated_tag() -> No
     assert "--config.mac.hardenedRuntime=false" in workflow
     assert "$env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'" in workflow
     assert "--config.win.forceCodeSigning=false" in workflow
-    assert "--config.win.signAndEditExecutable=false" in workflow
+    assert "--config.win.signAndEditExecutable=false" not in workflow
     assert "--config.win.signAndEditExecutable=true" in workflow
+    assert "--config.win.signExecutable=false" in workflow
+    assert "--config.win.signExecutable=true" in workflow
+    assert 'codesign --verify --strict --verbose=4 "$INSTALLER"' in workflow
+    assert 'codesign --verify --strict "$INSTALLER"' in workflow
     assert 'codesign --verify --deep --strict "${mounted_apps[0]}"' in workflow
     assert "if ($signature.Status -ne 'NotSigned')" in workflow
     assert "if ($applicationSignature.Status -ne 'NotSigned')" in workflow
@@ -455,7 +460,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     )
     assert 'binarySigningMode: "unsigned"' in releasing
     assert 'releaseTagMode: "unsigned-annotated"' in releasing
-    assert "git tag -a" in releasing
+    assert "git tag --no-sign -a" in releasing
     assert "git tag -s" in releasing
     assert "Release-tag mode for this release: `unsigned-annotated`" in release_notes
     assert "Windows 11 | arm64 | NSIS executable" in release_notes
