@@ -68,6 +68,10 @@ RULE_BUNDLES = (
         # canonical semantic digest; every other response fails.
         revisions=(
             RuleRevision(
+                sha256="f65001af74892a76d941e11694a0f6b84c3b5ab558ae5202af6b3fd070566f56",
+                size=487_962,
+            ),
+            RuleRevision(
                 sha256="6c5830b3c92994be81404c599c7d5595538aa8d6036fb8042eb3861e6608638d",
                 size=487_962,
             ),
