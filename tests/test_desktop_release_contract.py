@@ -273,11 +273,23 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
 def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> None:
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
     desktop = (ROOT / "docs" / "DESKTOP_VERIFICATION.md").read_text(encoding="utf-8")
+    desktop_shell = (ROOT / "docs" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     normalized = " ".join(
-        (releasing + "\n" + desktop + "\n" + architecture + "\n" + changelog).split()
+        (
+            releasing
+            + "\n"
+            + desktop
+            + "\n"
+            + desktop_shell
+            + "\n"
+            + architecture
+            + "\n"
+            + changelog
+        ).split()
     )
+    normalized_shell = " ".join(desktop_shell.split())
 
     for expected in (
         "macOS 15 arm64",
@@ -300,8 +312,11 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
         "x64 Python and Node.js to build and validate the shipped Windows x64 application"
         in normalized
     )
-    assert "Windows 11 on arm64" not in normalized
-    assert "Windows 11 arm64" not in normalized
+    assert (
+        "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
+        "Windows 11 on x64, and Ubuntu 24.04 on x64."
+        in normalized_shell
+    )
 
 
 def test_desktop_release_assembler_rejects_incomplete_target_evidence(tmp_path: Path) -> None:
