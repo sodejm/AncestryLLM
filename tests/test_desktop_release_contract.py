@@ -211,6 +211,25 @@ def test_release_installer_runtime_validation_uses_platform_native_copy_and_inst
     assert 'sudo dpkg -i "$INSTALLER"' not in workflow
 
 
+def test_pretag_installer_locator_is_portable_to_hosted_macos_bash() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    validation_start = workflow.index("  desktop-installer-validation:\n")
+    locator_start = workflow.index(
+        "        name: Locate the one previously built installer\n",
+        validation_start,
+    )
+    locator_end = workflow.index("      - id: macos-host\n", locator_start)
+    locator = workflow[locator_start:locator_end]
+
+    assert "shopt -s globstar" not in locator
+    assert 'python - "$INSTALLER_TARGET" "$GITHUB_OUTPUT" <<\'PY\'' in locator
+    assert 'Path("desktop-installer-source").rglob(f"*.{extension}")' in locator
+    assert "expected exactly one" in locator
+    assert 'if "\\n" in installer or "\\r" in installer:' in locator
+    assert 'raise SystemExit("installer path contains a line break")' in locator
+
+
 def test_release_workflow_separates_pretag_installer_gates_from_tag_publication() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

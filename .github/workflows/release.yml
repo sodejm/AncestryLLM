@@ -1084,15 +1084,34 @@ jobs:
         env:
           INSTALLER_TARGET: ${{ matrix.installer_target }}
         run: |
-          shopt -s globstar nullglob
-          case "$INSTALLER_TARGET" in
-            dmg) installers=(desktop-installer-source/**/*.dmg) ;;
-            nsis) installers=(desktop-installer-source/**/*.exe) ;;
-            deb) installers=(desktop-installer-source/**/*.deb) ;;
-            *) echo "unsupported installer target: $INSTALLER_TARGET" >&2; exit 1 ;;
-          esac
-          test "${#installers[@]}" -eq 1
-          echo "path=${installers[0]}" >> "$GITHUB_OUTPUT"
+          python - "$INSTALLER_TARGET" "$GITHUB_OUTPUT" <<'PY'
+          import sys
+          from pathlib import Path
+
+          target, output_file = sys.argv[1:]
+          extensions = {"dmg": "dmg", "nsis": "exe", "deb": "deb"}
+          try:
+              extension = extensions[target]
+          except KeyError as error:
+              raise SystemExit(f"unsupported installer target: {target}") from error
+
+          installers = sorted(
+              path
+              for path in Path("desktop-installer-source").rglob(f"*.{extension}")
+              if path.is_file()
+          )
+          if len(installers) != 1:
+              names = ", ".join(str(path) for path in installers) or "none"
+              raise SystemExit(
+                  f"expected exactly one .{extension} installer, found "
+                  f"{len(installers)}: {names}"
+              )
+          installer = str(installers[0])
+          if "\n" in installer or "\r" in installer:
+              raise SystemExit("installer path contains a line break")
+          with Path(output_file).open("a", encoding="utf-8") as output:
+              output.write(f"path={installer}\n")
+          PY
       - id: macos-host
         name: Verify supported macOS version
         if: runner.os == 'macOS'
