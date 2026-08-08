@@ -148,7 +148,7 @@ def test_ci_pins_uv_bootstrap_version() -> None:
     )
 
     assert installed_versions
-    assert set(installed_versions) == {"uv==0.12.0"}
+    assert set(installed_versions) == {"uv==0.12.1"}
 
 
 def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> None:

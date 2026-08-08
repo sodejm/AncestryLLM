@@ -127,7 +127,9 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "packaged-sidecar-version-mismatch.json" in workflow
     assert "--gate packagedSidecarVersionMismatchPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
+    assert '--artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS"' in workflow
     assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
+    assert '--allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"' in workflow
 
     production_sources = "\n".join(
         path.read_text(encoding="utf-8")
@@ -168,6 +170,7 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
         'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
         'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
         'ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"',
+        'ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"',
     )
     for evidence_path in expected_evidence_paths:
         assert evidence_path in workflow

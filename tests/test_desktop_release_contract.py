@@ -196,6 +196,15 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "com.apple.security.cs.disable-library-validation" not in entitlements
 
 
+def test_windows_release_installer_targets_arm64() -> None:
+    builder = BUILDER_CONFIG.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"win:\n  target:\n    - target: nsis\n      arch:\n        - arm64\n",
+        builder,
+    )
+
+
 def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
