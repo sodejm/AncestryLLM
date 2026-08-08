@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.release.yml"
+PACKAGE_JSON = ROOT / "desktop" / "package.json"
 ENTITLEMENTS = ROOT / "desktop" / "resources" / "entitlements.mac.plist"
 ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
 
@@ -212,6 +213,25 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "com.apple.security.cs.allow-jit" in entitlements
     assert "com.apple.security.cs.allow-unsigned-executable-memory" in entitlements
     assert "com.apple.security.cs.disable-library-validation" not in entitlements
+
+
+def test_release_package_declares_linux_distribution_metadata() -> None:
+    package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+
+    assert package["description"]
+    assert package["homepage"] == "https://github.com/sodejm/AncestryLLM"
+    assert package["author"]["name"] == "Justin Soderberg"
+    assert re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", package["author"]["email"])
+
+
+def test_release_builder_defers_macos_architecture_to_the_matrix_row() -> None:
+    builder = BUILDER_CONFIG.read_text(encoding="utf-8")
+    mac_config = builder[builder.index("mac:\n") : builder.index("win:\n")]
+
+    assert "arch:" not in mac_config
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert workflow.count("package_args: --mac --arm64") == 1
+    assert workflow.count("package_args: --mac --x64") == 1
 
 
 def test_windows_release_installer_targets_arm64() -> None:
