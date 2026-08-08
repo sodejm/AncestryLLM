@@ -37,9 +37,11 @@ the in-development iteration is ready to release; a deterministic regression
 then proves the strict verifier rejects an open P0 item. `Release readiness`
 and the tag workflow continue to use the strict live gate. The proof has no
 pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
-Use GitHub's rerun mechanism to retry the immutable run for the same main commit.
-The exact-main run for each candidate is the hosted proof; do not create the
-secret in a pull request or place the token in repository files.
+While the triggering commit remains the tip of `main`, use GitHub's rerun
+mechanism to retry its immutable run. If `main` advances, the earlier candidate
+and its proof are superseded; require a successful proof from the newer tip
+instead. The exact-main run for each candidate is the hosted proof; do not
+create the secret in a pull request or place the token in repository files.
 
 ## Binary-signing version boundary
 
