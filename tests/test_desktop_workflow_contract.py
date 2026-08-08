@@ -75,9 +75,10 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
     assert "name: Verify selected x64 runtimes on ARM64 Windows host" in workflow
     assert "process.arch" in workflow
-    assert "platform.machine()" in workflow
+    assert "sysconfig.get_platform()" in workflow
+    assert "platform.machine()" not in workflow
     assert "expected x64 Node.js runtime" in workflow
-    assert "expected AMD64 Python runtime" in workflow
+    assert "expected win-amd64 Python runtime" in workflow
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
     assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow
