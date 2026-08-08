@@ -96,7 +96,8 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert workflow.count("pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9") == 2
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
-    assert "pnpm --dir desktop run test:e2e:packaged" in workflow
+    assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
+    assert workflow.count("node desktop/scripts/run-packaged-tests.mjs") == 4
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
@@ -159,11 +160,11 @@ def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator(
         "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
         "rejects a target-native wrong-build packaged sidecar",
     )
-    assert workflow.count("test:e2e:packaged") == len(expected_scenarios)
+    assert workflow.count("run-packaged-tests.mjs") == len(expected_scenarios)
     for scenario in expected_scenarios:
         assert workflow.count(f'--grep "{scenario}"') == 1
 
-    assert re.search(r"test:e2e:packaged --\s", workflow) is None
+    assert re.search(r"run-packaged-tests\.mjs --\s", workflow) is None
 
 
 def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandbox() -> None:

@@ -328,17 +328,28 @@ async function existingArtifactDigests(repositoryRoot, artifacts) {
   return Object.freeze(digests)
 }
 
+export function verificationCommandInvocation(executable, args) {
+  assert.equal(typeof executable === 'string' && executable.length > 0, true, 'command executable is required')
+  assert.equal(Array.isArray(args), true, 'command arguments must be an array')
+  assert.equal(args.every((item) => typeof item === 'string'), true, 'command arguments must be strings')
+  return Object.freeze({
+    executable,
+    args: Object.freeze([...args]),
+    shell: false,
+  })
+}
+
 function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
   return new Promise((resolvePromise, rejectPromise) => {
     const stdoutHash = createHash('sha256')
     const stderrHash = createHash('sha256')
     let stdoutBytes = 0
     let stderrBytes = 0
-    const useShell = process.platform === 'win32'
-    const child = spawn(executable, args, {
+    const command = verificationCommandInvocation(executable, args)
+    const child = spawn(command.executable, command.args, {
       cwd: repositoryRoot,
       env: process.env,
-      shell: useShell,
+      shell: command.shell,
       stdio: ['inherit', 'pipe', 'pipe'],
     })
     child.stdout.on('data', (chunk) => {
@@ -353,7 +364,7 @@ function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
     })
     child.once('error', rejectPromise)
     child.once('close', (exitCode, signal) => resolvePromise({
-      command: Object.freeze({ executable, args: Object.freeze([...args]), shell: useShell }),
+      command,
       result: Object.freeze({
         exitCode,
         signal,
