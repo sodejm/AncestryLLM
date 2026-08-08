@@ -295,14 +295,19 @@ def test_windows_installer_verification_uses_the_nsis_current_user_default() -> 
 
     # Exercise electron-builder's stock current-user destination instead of a
     # workflow-owned /D override or an assumed fallback path. Resolve the exact
-    # installed executable from NSIS uninstall metadata, then retain its root
-    # for bounded cleanup in both verification paths.
+    # install root from NSIS's quoted QuietUninstallString metadata instead of
+    # treating DisplayIcon as a stable application-path contract. Then verify
+    # the expected executable and retain its root for bounded cleanup in both
+    # verification paths.
     assert workflow.count("-ArgumentList @('/S', '/currentuser') -Wait -PassThru") == 4
     assert workflow.count("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall") == 4
     assert workflow.count('$displayName = "AncestryLLM $env:VERSION"') == 4
     assert workflow.count("$registration.DisplayName -eq $displayName") == 4
     assert workflow.count("$registration.DisplayVersion -eq $env:VERSION") == 4
-    assert workflow.count("$application = ($displayIcon -replace ',0$', '').Trim('\"')") == 4
+    assert workflow.count(".QuietUninstallString") == 4
+    assert workflow.count('$uninstallCommand -notmatch \'^"(?<path>[^"]+)"(?:\\s|$)\'') == 4
+    assert workflow.count("$application = Join-Path $installRoot 'ancestryllm.exe'") == 2
+    assert "DisplayIcon" not in workflow
     assert workflow.count("'ancestryllm-install-root.txt'") == 4
     assert workflow.count("if ($installRoots.Count -eq 0)") == 2
     assert workflow.count("unexpected install root outside LocalApplicationData") == 2

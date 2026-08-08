@@ -654,16 +654,21 @@ jobs:
           if ($registrations.Count -ne 1) {
             throw "expected one $displayName uninstall registration, found $($registrations.Count)"
           }
-          $displayIcon = [string]$registrations[0].DisplayIcon
-          if ([string]::IsNullOrWhiteSpace($displayIcon)) { throw 'installed application registration has no DisplayIcon' }
-          $application = ($displayIcon -replace ',0$', '').Trim('"')
-          if ((Split-Path -Leaf $application) -ine 'ancestryllm.exe') { throw "unexpected registered application $application" }
-          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $uninstallCommand = [string]$registrations[0].QuietUninstallString
+          if ([string]::IsNullOrWhiteSpace($uninstallCommand)) { throw 'installed application registration has no QuietUninstallString' }
+          if ($uninstallCommand -notmatch '^"(?<path>[^"]+)"(?:\s|$)') {
+            throw "unexpected quiet uninstall command $uninstallCommand"
+          }
+          $uninstaller = $Matches.path
+          if ((Split-Path -Leaf $uninstaller) -ine 'Uninstall AncestryLLM.exe') { throw "unexpected registered uninstaller $uninstaller" }
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "registered uninstaller is absent: $uninstaller" }
           $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
-          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $application)).TrimEnd('\')
+          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $uninstaller)).TrimEnd('\')
           if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
             throw "unexpected install root outside LocalApplicationData: $installRoot"
           }
+          $application = Join-Path $installRoot 'ancestryllm.exe'
+          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
@@ -693,13 +698,14 @@ jobs:
                   $registration.DisplayName -eq $displayName -and
                   $registration.DisplayVersion -eq $env:VERSION
                 ) {
-                  $displayIcon = [string]$registration.DisplayIcon
-                  if (-not [string]::IsNullOrWhiteSpace($displayIcon)) {
-                    $application = ($displayIcon -replace ',0$', '').Trim('"')
-                    if ((Split-Path -Leaf $application) -ieq 'ancestryllm.exe') {
-                      $installRoots += (Split-Path -Parent $application)
-                    }
+                  $uninstallCommand = [string]$registration.QuietUninstallString
+                  if ([string]::IsNullOrWhiteSpace($uninstallCommand)) { throw 'installed application registration has no QuietUninstallString' }
+                  if ($uninstallCommand -notmatch '^"(?<path>[^"]+)"(?:\s|$)') {
+                    throw "unexpected quiet uninstall command $uninstallCommand"
                   }
+                  $uninstaller = $Matches.path
+                  if ((Split-Path -Leaf $uninstaller) -ine 'Uninstall AncestryLLM.exe') { throw "unexpected registered uninstaller $uninstaller" }
+                  $installRoots += (Split-Path -Parent $uninstaller)
                 }
               }
           }
@@ -1176,16 +1182,21 @@ jobs:
           if ($registrations.Count -ne 1) {
             throw "expected one $displayName uninstall registration, found $($registrations.Count)"
           }
-          $displayIcon = [string]$registrations[0].DisplayIcon
-          if ([string]::IsNullOrWhiteSpace($displayIcon)) { throw 'installed application registration has no DisplayIcon' }
-          $application = ($displayIcon -replace ',0$', '').Trim('"')
-          if ((Split-Path -Leaf $application) -ine 'ancestryllm.exe') { throw "unexpected registered application $application" }
-          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
+          $uninstallCommand = [string]$registrations[0].QuietUninstallString
+          if ([string]::IsNullOrWhiteSpace($uninstallCommand)) { throw 'installed application registration has no QuietUninstallString' }
+          if ($uninstallCommand -notmatch '^"(?<path>[^"]+)"(?:\s|$)') {
+            throw "unexpected quiet uninstall command $uninstallCommand"
+          }
+          $uninstaller = $Matches.path
+          if ((Split-Path -Leaf $uninstaller) -ine 'Uninstall AncestryLLM.exe') { throw "unexpected registered uninstaller $uninstaller" }
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "registered uninstaller is absent: $uninstaller" }
           $localAppData = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\')
-          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $application)).TrimEnd('\')
+          $installRoot = [IO.Path]::GetFullPath((Split-Path -Parent $uninstaller)).TrimEnd('\')
           if (-not $installRoot.StartsWith("$localAppData\", [StringComparison]::OrdinalIgnoreCase)) {
             throw "unexpected install root outside LocalApplicationData: $installRoot"
           }
+          $application = Join-Path $installRoot 'ancestryllm.exe'
+          if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
@@ -1215,13 +1226,14 @@ jobs:
                   $registration.DisplayName -eq $displayName -and
                   $registration.DisplayVersion -eq $env:VERSION
                 ) {
-                  $displayIcon = [string]$registration.DisplayIcon
-                  if (-not [string]::IsNullOrWhiteSpace($displayIcon)) {
-                    $application = ($displayIcon -replace ',0$', '').Trim('"')
-                    if ((Split-Path -Leaf $application) -ieq 'ancestryllm.exe') {
-                      $installRoots += (Split-Path -Parent $application)
-                    }
+                  $uninstallCommand = [string]$registration.QuietUninstallString
+                  if ([string]::IsNullOrWhiteSpace($uninstallCommand)) { throw 'installed application registration has no QuietUninstallString' }
+                  if ($uninstallCommand -notmatch '^"(?<path>[^"]+)"(?:\s|$)') {
+                    throw "unexpected quiet uninstall command $uninstallCommand"
                   }
+                  $uninstaller = $Matches.path
+                  if ((Split-Path -Leaf $uninstaller) -ine 'Uninstall AncestryLLM.exe') { throw "unexpected registered uninstaller $uninstaller" }
+                  $installRoots += (Split-Path -Parent $uninstaller)
                 }
               }
           }
