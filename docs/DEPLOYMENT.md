@@ -276,9 +276,13 @@ GitHub's hosted `windows-11-arm` image. Workflows assert Windows 11 and the
 ARM64 host architecture before accepting validation evidence, then explicitly
 select and probe ARM64 Python and Node.js so dependency installation,
 packaging, and exercise stay on the shipped `win32-arm64` boundary. The locked
-environment uses the Visual Studio ARM64, Rust, and OpenSSL toolchain bundled
-with the stock hosted image when an ARM64 dependency must be built from source.
-Evidence records ARM64 for both host and artifact architecture.
+desktop environment installs only the base runtime and the `desktop-build`
+extra, which contains the sidecar packager. Third-party packages must resolve
+to prebuilt wheels; `uv --no-build` fails the job instead of invoking a compiler
+or external library toolchain. The workflow then installs and packages only the
+local AncestryLLM application code. Optional remote-provider SDKs are not part
+of the provider-`none` desktop sidecar. Evidence records ARM64 for both host and
+artifact architecture.
 
 GitHub supplies a fresh hosted VM for each job, so the repository has no
 self-hosted runner registration, provider, runner group, provisioning, or

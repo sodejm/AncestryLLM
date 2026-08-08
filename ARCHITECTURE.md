@@ -511,6 +511,11 @@ OpenRouter. OpenRouter reuses the OpenAI-compatible adapter with a fixed
 allowlisted endpoint. Provider packages are optional extras and are imported
 only when selected.
 
+The provider-`none` Electron sidecar distribution installs the base runtime and
+the `desktop-build` sidecar packager only. Native package jobs require prebuilt
+third-party wheels and fail instead of compiling third-party source; only the
+local AncestryLLM application code is built in those jobs.
+
 Before a remote call, `ConsentPolicy` verifies:
 
 - provider identity and an active grant for the exact selected profile/endpoint;

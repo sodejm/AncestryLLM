@@ -122,11 +122,13 @@ accounts, updater behavior, and background release channels.
 6. Confirm the repository can use GitHub's hosted `windows-11-arm` runner.
    Desktop verification asserts Windows 11 and an ARM64 host before using
    native ARM64 Python and Node.js to build and validate the shipped Windows
-   ARM64 application. Dependencies without an ARM64 wheel use the Visual Studio
-   ARM64, Rust, and OpenSSL toolchain included in the stock hosted image. The
-   installer builder records ARM64 for both host and artifact architecture in
-   the release receipt. No self-hosted runner registration or lifecycle is
-   required.
+   ARM64 application. The locked desktop profile contains the base runtime and
+   sidecar packager only. Every third-party Python dependency must have a
+   prebuilt wheel; a missing wheel fails installation rather than starting a
+   source compiler or external library toolchain. Only the local AncestryLLM
+   application code is built. The installer builder records ARM64 for both host
+   and artifact architecture in the release receipt. No self-hosted runner
+   registration or lifecycle is required.
 7. Enable GitHub immutable releases.
 8. Enable automatic deletion of merged pull-request branches.
 
