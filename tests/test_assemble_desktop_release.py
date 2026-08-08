@@ -163,8 +163,11 @@ def test_aggregate_binds_exact_matrix_assets_evidence_and_combined_sbom(
     assert evidence["status"] == "passed"
     assert evidence["gitHead"] == GIT_HEAD
     assert evidence["binarySigningMode"] == "trusted"
-    assert "requires trusted platform signing" in evidence["binarySigningDisclosure"]
-    assert "verified signed annotated release tag" in evidence["binarySigningDisclosure"]
+    assert "must carry a verifiable publisher identity" in evidence["binarySigningDisclosure"]
+    assert (
+        "annotated release tag must pass signature verification"
+        in evidence["binarySigningDisclosure"]
+    )
     assert {row["target"] for row in evidence["targets"]} == set(TARGETS)
     manifest = json.loads((output / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
     assert manifest["binarySigningDisclosure"] == evidence["binarySigningDisclosure"]

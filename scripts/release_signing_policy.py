@@ -21,9 +21,9 @@ PRE_1_NOTICE = (
     "prohibited for every stable 0.x release. Operating systems may show an "
     "unknown-publisher warning. Trusted release signing starts with v1.0.0."
 )
-TRUSTED_NOTICE = (
-    "This full-version release requires trusted platform signing on every supported "
-    "desktop platform and a verified signed annotated release tag."
+FULL_RELEASE_NOTICE = (
+    "Starting with v1.0.0, every supported desktop package must carry a verifiable "
+    "publisher identity, and the annotated release tag must pass signature verification."
 )
 
 
@@ -73,7 +73,7 @@ def signing_disclosure(version: str, mode: str) -> str:
     validate_signing_mode(version, mode)
     if _major(version) == 0:
         return f"{PRE_1_NOTICE} Binary-signing mode for this release: `{mode}`."
-    return f"{TRUSTED_NOTICE} Binary-signing mode for this release: `{mode}`."
+    return f"{FULL_RELEASE_NOTICE} Binary-signing mode for this release: `{mode}`."
 
 
 def _parser() -> argparse.ArgumentParser:
