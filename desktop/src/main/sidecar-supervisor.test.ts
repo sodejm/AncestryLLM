@@ -46,6 +46,9 @@ describe('sidecar launch boundary', () => {
     expect(resolveSidecarExecutable('/app/resources', 'win32', 'x64')).toBe(
       '/app/resources/sidecar/win32-x64/ancestryllm-sidecar/ancestryllm-sidecar.exe',
     )
+    expect(resolveSidecarExecutable('/app/resources', 'win32', 'arm64')).toBe(
+      '/app/resources/sidecar/win32-arm64/ancestryllm-sidecar/ancestryllm-sidecar.exe',
+    )
     expect(() => resolveSidecarExecutable('/app/resources', 'linux', 'arm64')).toThrow('Unsupported desktop target')
   })
 })

@@ -58,9 +58,9 @@ TARGETS = {
             "staplingPassed",
         },
     },
-    "win32-x64": {
+    "win32-arm64": {
         "expected_os": "Windows 11",
-        "arch": "x64",
+        "arch": "arm64",
         "extension": ".exe",
         "gates": {"authenticodePassed"},
     },
@@ -74,7 +74,7 @@ TARGETS = {
 SELF_SIGNED_GATES = {
     "darwin-arm64": {"codeSignaturePassed", "hardenedRuntimePassed"},
     "darwin-x64": {"codeSignaturePassed", "hardenedRuntimePassed"},
-    "win32-x64": {"authenticodePassed"},
+    "win32-arm64": {"authenticodePassed"},
     "linux-x64": {"gpgSignaturePassed"},
 }
 VALIDATION_ENVIRONMENTS = {
@@ -99,9 +99,9 @@ VALIDATION_ENVIRONMENTS = {
         "arch": "x64",
     },
     "windows-11-arm": {
-        "target": "win32-x64",
+        "target": "win32-arm64",
         "expected_os": "Windows 11",
-        "arch": "x64",
+        "arch": "arm64",
     },
     "ubuntu-24.04": {
         "target": "linux-x64",

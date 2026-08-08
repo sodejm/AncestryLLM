@@ -22,7 +22,7 @@ EXECUTABLE_NAME = "ancestryllm-wrong-build-sidecar"
 def executable_path(output_root: Path, target: str) -> Path:
     """Return the standalone verification executable for one native target."""
 
-    suffix = ".exe" if target == "win32-x64" else ""
+    suffix = ".exe" if target.startswith("win32-") else ""
     return output_root / target / f"{EXECUTABLE_NAME}{suffix}"
 
 

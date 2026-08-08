@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 const SUPPORTED_TARGETS = new Set([
   'darwin-arm64',
   'darwin-x64',
+  'win32-arm64',
   'win32-x64',
   'linux-x64',
 ])
@@ -22,7 +23,7 @@ export function sidecarExecutable(root, target) {
   if (!SUPPORTED_TARGETS.has(target)) {
     throw new Error(`Unsupported desktop target: ${target}`)
   }
-  const executable = target === 'win32-x64'
+  const executable = target.startsWith('win32-')
     ? 'ancestryllm-sidecar.exe'
     : 'ancestryllm-sidecar'
   return join(root, target, 'ancestryllm-sidecar', executable)
@@ -32,7 +33,7 @@ export async function verifySidecar(root, target) {
   const executable = sidecarExecutable(root, target)
   const metadata = await stat(executable)
   if (!metadata.isFile()) throw new Error(`Sidecar executable is not a file: ${executable}`)
-  await access(executable, target === 'win32-x64' ? constants.R_OK : constants.R_OK | constants.X_OK)
+  await access(executable, target.startsWith('win32-') ? constants.R_OK : constants.R_OK | constants.X_OK)
   return executable
 }
 
@@ -47,7 +48,7 @@ async function findNamedFiles(root, basename) {
 }
 
 export async function verifyPackagedSidecar(releaseRoot, target) {
-  const executable = target === 'win32-x64'
+  const executable = target.startsWith('win32-')
     ? 'ancestryllm-sidecar.exe'
     : 'ancestryllm-sidecar'
   const suffix = [

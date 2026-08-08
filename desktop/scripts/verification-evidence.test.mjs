@@ -24,7 +24,7 @@ const rows = [
   ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64'],
   ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64'],
   ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64'],
-  ['windows-11-arm', 'win32-x64', 'Windows 11', 'Windows 11', 'x64'],
+  ['windows-11-arm', 'win32-arm64', 'Windows 11', 'Windows 11', 'arm64'],
   ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64'],
 ]
 

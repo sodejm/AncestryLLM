@@ -12,6 +12,9 @@ def test_verification_sidecar_uses_a_separate_target_native_output(tmp_path: Pat
     assert executable_path(tmp_path, "win32-x64") == (
         tmp_path / "win32-x64" / "ancestryllm-wrong-build-sidecar.exe"
     )
+    assert executable_path(tmp_path, "win32-arm64") == (
+        tmp_path / "win32-arm64" / "ancestryllm-wrong-build-sidecar.exe"
+    )
 
 
 def test_verification_sidecar_builder_accepts_an_explicit_target_and_output(tmp_path: Path) -> None:

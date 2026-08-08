@@ -22,6 +22,7 @@ def native_target(system: str, machine: str) -> str:
         ("darwin", "arm64"): "darwin-arm64",
         ("darwin", "x86_64"): "darwin-x64",
         ("windows", "amd64"): "win32-x64",
+        ("windows", "arm64"): "win32-arm64",
         ("linux", "x86_64"): "linux-x64",
     }
     try:
@@ -31,21 +32,21 @@ def native_target(system: str, machine: str) -> str:
 
 
 def runtime_target(system: str, machine: str, python_platform: str) -> str:
-    """Return the native target, allowing x64 Python on a Windows ARM64 host."""
+    """Return the native target for the current host and Python runtime."""
 
     if (
         system.casefold() == "windows"
         and machine.casefold() == "arm64"
-        and python_platform.casefold() == "win-amd64"
+        and python_platform.casefold() != "win-arm64"
     ):
-        return "win32-x64"
+        raise ValueError("Windows ARM64 host requires an ARM64 Python runtime for native packaging")
     return native_target(system, machine)
 
 
 def executable_path(output_root: Path, target: str) -> Path:
     """Return the path Electron expects after electron-builder copies resources."""
 
-    suffix = ".exe" if target == "win32-x64" else ""
+    suffix = ".exe" if target.startswith("win32-") else ""
     return output_root / target / EXECUTABLE_NAME / f"{EXECUTABLE_NAME}{suffix}"
 
 

@@ -2,10 +2,10 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 
-.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security
+.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
 
 desktop-install:
 	@pnpm --dir desktop install --frozen-lockfile
@@ -65,6 +65,9 @@ package:
 
 workflow-audit:
 	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows
+
+code-docs-check:
+	@$(VENV_DIR)/bin/uv run python scripts/check_code_documentation.py
 
 hooks: setup
 	@$(VENV_DIR)/bin/pre-commit install --hook-type pre-commit --hook-type pre-push

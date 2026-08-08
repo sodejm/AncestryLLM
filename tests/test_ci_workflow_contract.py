@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+DEPENDENCY_REVIEW_PATH = ROOT / ".github/workflows/dependency-review.yml"
 PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
 PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
 
@@ -46,6 +47,7 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
         "uv run mypy src/ancestryllm",
         "uv run python scripts/check_architecture_contracts.py",
         "./scripts/check_repository_safety.sh",
+        "uv run python scripts/check_code_documentation.py",
     ):
         assert quality_job.count(command) == 1
 
@@ -105,12 +107,37 @@ def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> No
     workflow = CI_PATH.read_text(encoding="utf-8")
     install_job = _job(workflow, "install-smoke")
 
-    assert install_job.count("github.event_name == 'pull_request'") == 2
+    assert install_job.count("github.event_name == 'pull_request'") == 3
     assert "'[\"ubuntu-latest\"]'" in install_job
     assert '\'["ubuntu-latest","macos-latest","windows-latest"]\'' in install_job
     assert "'[\"3.12\"]'" in install_job
     assert '\'["3.12","3.13","3.14"]\'' in install_job
     assert "runs-on: ${{ matrix.os }}" in install_job
+
+
+def test_ci_limits_pull_request_test_matrix_and_runner_parallelism() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    test_job = _job(workflow, "test")
+    install_job = _job(workflow, "install-smoke")
+
+    assert "max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}" in (
+        test_job
+    )
+    assert (
+        "python: ${{ fromJSON(github.event_name == 'pull_request' "
+        '&& \'["3.12"]\' || \'["3.12","3.13","3.14"]\') }}'
+    ) in test_job
+    assert "max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}" in (
+        install_job
+    )
+
+
+def test_dependency_review_runs_on_hosted_ubuntu_with_bounded_duration() -> None:
+    workflow = DEPENDENCY_REVIEW_PATH.read_text(encoding="utf-8")
+
+    assert "runs-on: ubuntu-24.04" in workflow
+    assert "timeout-minutes: 15" in workflow
+    assert "self-hosted" not in workflow
 
 
 def test_ci_pins_uv_bootstrap_version() -> None:
@@ -148,3 +175,21 @@ def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
     assert "### Phase B: reduce the pull-request matrix" in guide
     assert "Do not merge both commits at once" in guide
     assert "`PR gate`" in guide
+
+
+def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    command = "uv run python scripts/check_code_documentation.py"
+    assert ci.count(command) == 1, (
+        "CI quality job must run check_code_documentation.py exactly once"
+    )
+    assert readiness.count(command) == 1, (
+        "release-readiness quality gates must run check_code_documentation.py exactly once"
+    )
+    assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
+    assert "check_code_documentation.py" in makefile, (
+        "Makefile code-docs-check target must invoke check_code_documentation.py"
+    )

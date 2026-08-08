@@ -81,8 +81,9 @@ jobs:
     needs: lockfile
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}
       matrix:
-        python: ["3.12", "3.13", "3.14"]
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.12","3.13","3.14"]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,6 +137,7 @@ jobs:
           uv run mypy src/ancestryllm
           uv run python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
+          uv run python scripts/check_code_documentation.py
 
   security:
     name: security
@@ -210,6 +212,7 @@ jobs:
     needs: package
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
         python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.12","3.13","3.14"]') }}

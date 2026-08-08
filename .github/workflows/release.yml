@@ -212,7 +212,7 @@ jobs:
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
               ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64"),
               ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64"),
-              ("windows-11-arm", "win32-x64", "Windows 11", "Windows 11", "x64"),
+              ("windows-11-arm", "win32-arm64", "Windows 11", "Windows 11", "arm64"),
               ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64"),
           }
           actual = {
@@ -326,13 +326,14 @@ jobs:
             arch: x64
             installer_target: dmg
             package_args: --mac --x64
-          - runner: windows-2025
-            runs_on: '"windows-2025"'
-            sidecar_target: win32-x64
+          - runner: windows-11-arm
+            runs_on: '"windows-11-arm"'
+            sidecar_target: win32-arm64
             expected_os: "Windows 11"
-            arch: x64
+            arch: arm64
+            host_arch: arm64
             installer_target: nsis
-            package_args: --win --x64
+            package_args: --win --arm64
           - runner: ubuntu-24.04
             runs_on: '"ubuntu-24.04"'
             sidecar_target: linux-x64
@@ -359,9 +360,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26.5.0"
+          architecture: ${{ matrix.arch }}
           package-manager-cache: false
       - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
         with:
@@ -379,7 +382,7 @@ jobs:
         run: |
           uv run python scripts/build_sidecar.py --expected-target "$SIDECAR_TARGET"
           sidecar_executable="desktop/build/sidecar/$SIDECAR_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
-          if [[ "$SIDECAR_TARGET" == "win32-x64" ]]; then sidecar_executable="$sidecar_executable.exe"; fi
+          if [[ "$SIDECAR_TARGET" == win32-* ]]; then sidecar_executable="$sidecar_executable.exe"; fi
           uv run python scripts/smoke_sidecar.py "$sidecar_executable"
       - name: Build the production Electron application
         shell: bash
@@ -534,11 +537,16 @@ jobs:
         shell: pwsh
         env:
           INSTALLER: ${{ steps.installer.outputs.path }}
+          EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}
           WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT }}
           ANCESTRYLLM_PACKAGED_RUNTIME_PATH: ""
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
           $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
+          $hostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($hostArch -ne $env:EXPECTED_HOST_ARCH) {
+            throw "expected host architecture $env:EXPECTED_HOST_ARCH, found $hostArch"
+          }
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
             if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
@@ -694,7 +702,7 @@ jobs:
               darwin-*)
                 gates+=(codeSignaturePassed gatekeeperPassed hardenedRuntimePassed notarizationPassed staplingPassed)
                 ;;
-              win32-x64)
+              win32-arm64)
                 gates+=(authenticodePassed)
                 ;;
               linux-x64)
@@ -763,11 +771,11 @@ jobs:
             installer_target: dmg
           - runner: windows-11-arm
             runs_on: '"windows-11-arm"'
-            sidecar_target: win32-x64
+            sidecar_target: win32-arm64
             expected_os: "Windows 11"
-            arch: x64
+            arch: arm64
             host_arch: arm64
-            runtime_arch: x64
+            runtime_arch: arm64
             installer_target: nsis
           - runner: ubuntu-24.04
             runs_on: '"ubuntu-24.04"'
@@ -796,7 +804,7 @@ jobs:
         with:
           python-version: "3.12"
           architecture: ${{ matrix.runtime_arch }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26.5.0"
           architecture: ${{ matrix.runtime_arch }}
@@ -1153,7 +1161,7 @@ jobs:
           target_names = {
               "desktop-installer-darwin-arm64",
               "desktop-installer-darwin-x64",
-              "desktop-installer-win32-x64",
+              "desktop-installer-win32-arm64",
               "desktop-installer-linux-x64",
           }
           validation_names = {
@@ -1397,7 +1405,7 @@ jobs:
               ("macos-15-intel", "darwin-x64", "macOS 15", "macOS 15", "x64"),
               ("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64"),
               ("macos-26-intel", "darwin-x64", "macOS 26", "macOS 26", "x64"),
-              ("windows-11-arm", "win32-x64", "Windows 11", "Windows 11", "x64"),
+              ("windows-11-arm", "win32-arm64", "Windows 11", "Windows 11", "arm64"),
               ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "Ubuntu 24.04", "x64"),
           }
           validation_rows = evidence.get("validations", [])
@@ -1595,7 +1603,7 @@ jobs:
         run: |
           mkdir dist
           cp release/*.whl release/*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           attestations: false # TestPyPI lacks PyPI's PEP 740 Integrity API
           repository-url: https://test.pypi.org/legacy/
@@ -1652,7 +1660,7 @@ jobs:
         run: |
           mkdir dist
           cp release/*.whl release/*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           attestations: true
 

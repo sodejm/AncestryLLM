@@ -270,13 +270,11 @@ If setup fails:
 
 ## GitHub-hosted Windows 11 validation
 
-The Windows x64 installer is built on GitHub's hosted `windows-2025` x64 image.
-The exact resulting artifact is then downloaded, installed, and launched on
-GitHub's hosted `windows-11-arm` image through Windows x64 emulation. Both
-workflows assert Windows 11 and the ARM64 host architecture before accepting
-validation evidence, and explicitly select x64 Python and Node.js for the
-Windows row so packaging and exercise stay on the shipped `win32-x64`
-boundary.
+The Windows arm64 installer is built, installed, and launched on GitHub's
+hosted `windows-11-arm` image. Workflows assert Windows 11 and the ARM64 host
+architecture before accepting validation evidence, and explicitly select ARM64
+Python and Node.js for the Windows row so packaging and exercise stay on the
+shipped `win32-arm64` boundary.
 
 GitHub supplies a fresh hosted VM for each job, so the repository has no
 self-hosted runner registration, provider, runner group, provisioning, or
