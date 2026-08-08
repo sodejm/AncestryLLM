@@ -32,14 +32,19 @@ def native_target(system: str, machine: str) -> str:
 
 
 def runtime_target(system: str, machine: str, python_platform: str) -> str:
-    """Return the native target for the current host and Python runtime."""
+    """Return the package target produced by the current Python runtime."""
 
-    if (
-        system.casefold() == "windows"
-        and machine.casefold() == "arm64"
-        and python_platform.casefold() != "win-arm64"
-    ):
-        raise ValueError("Windows ARM64 host requires an ARM64 Python runtime for native packaging")
+    if system.casefold() == "windows":
+        windows_targets = {
+            "win-amd64": "win32-x64",
+            "win-arm64": "win32-arm64",
+        }
+        try:
+            return windows_targets[python_platform.casefold()]
+        except KeyError as error:
+            raise ValueError(
+                f"unsupported Windows Python runtime platform: {python_platform}"
+            ) from error
     return native_target(system, machine)
 
 
