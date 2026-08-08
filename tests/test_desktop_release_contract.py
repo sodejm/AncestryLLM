@@ -97,16 +97,15 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "platform.machine()" not in workflow
     assert workflow.count("expected arm64 Node.js runtime") == 2
     assert workflow.count("expected win-arm64 Python runtime") == 2
-    assert workflow.count("Microsoft.VisualStudio.Component.VC.Tools.ARM64") == 1
-    assert workflow.count("$openSslIncludeDir = Join-Path $openSslDir 'include'") == 1
-    assert workflow.count("$openSslLibDir = Join-Path $openSslDir 'lib\\VC\\arm64\\MD'") == 1
-    assert workflow.count("@('libssl.lib', 'libcrypto.lib')") == 1
-    assert workflow.count("dumpbin /headers $libraryPath") == 1
-    assert workflow.count("'(?i)AA64 machine'") == 1
-    assert workflow.count("$env:OPENSSL_DIR = $openSslDir") == 1
-    assert workflow.count("$env:OPENSSL_INCLUDE_DIR = $openSslIncludeDir") == 1
-    assert workflow.count("$env:OPENSSL_LIB_DIR = $openSslLibDir") == 1
-    assert workflow.count("-arch=arm64 -host_arch=arm64") == 1
+    assert "Microsoft.VisualStudio.Component.VC.Tools.ARM64" not in workflow
+    assert "OPENSSL_DIR" not in workflow
+    assert "dumpbin /headers" not in workflow
+    assert (
+        workflow.count("uv sync --locked --extra desktop-build --no-install-project --no-build")
+        == 1
+    )
+    assert workflow.count("uv pip install --python .venv --no-deps --editable .") == 1
+    assert workflow.count("uv run --no-sync") == 3
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
@@ -142,6 +141,13 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "--status-fd 1 --verify" in workflow
     assert 'grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint "' in workflow
     assert "verification keyring unexpectedly contains a private key" in workflow
+
+
+def test_desktop_build_profile_contains_only_the_sidecar_packager() -> None:
+    with PYPROJECT.open("rb") as handle:
+        optional_dependencies = tomllib.load(handle)["project"]["optional-dependencies"]
+
+    assert optional_dependencies["desktop-build"] == ["pyinstaller>=6.17,<7"]
 
 
 def test_release_packaged_smoke_forwards_the_playwright_filter_without_a_pnpm_separator() -> None:

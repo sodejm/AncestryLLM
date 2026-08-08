@@ -264,7 +264,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         release,
-    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
+    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
     assert re.findall(
         r"python -m pip install --disable-pip-version-check (uv\S*)",
         readiness,

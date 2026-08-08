@@ -25,11 +25,13 @@ tree.
 The Windows row uses GitHub's hosted `windows-11-arm` runner. The workflow
 asserts that the host is Windows 11 on ARM64, explicitly selects native ARM64
 Python and Node.js, and verifies both runtimes before dependency installation.
-Locked Python dependencies that do not publish an ARM64 wheel are compiled
-with the Visual Studio ARM64, Rust, and OpenSSL toolchain provided by the stock
-runner image. The resulting `win32-arm64` sidecar and application are built and
-launched natively. The aggregate records `platformValidated: true` only after
-all six exact rows pass.
+The locked desktop profile installs the base runtime and `desktop-build`
+sidecar packager with source builds disabled. A third-party dependency without
+a compatible wheel fails the row; the workflow builds only the local
+AncestryLLM application code. Optional remote-provider SDKs are excluded because
+the desktop sidecar starts with provider `none`. The resulting `win32-arm64`
+sidecar and application are built and launched natively. The aggregate records
+`platformValidated: true` only after all six exact rows pass.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.

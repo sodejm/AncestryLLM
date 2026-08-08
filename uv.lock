@@ -62,6 +62,9 @@ all-llm = [
 anthropic = [
     { name = "anthropic" },
 ]
+desktop-build = [
+    { name = "pyinstaller" },
+]
 dev = [
     { name = "build" },
     { name = "check-wheel-contents" },
@@ -125,6 +128,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.5,<5" },
     { name = "prompt-toolkit", specifier = ">=3.0.52,<4" },
     { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "pyinstaller", marker = "extra == 'desktop-build'", specifier = ">=6.17,<7" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.17,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9,<10" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7,<8" },
@@ -145,7 +149,7 @@ requires-dist = [
     { name = "wheel", marker = "extra == 'dev'", specifier = ">=0.45,<1" },
     { name = "zizmor", marker = "extra == 'dev'", specifier = "==1.29.0" },
 ]
-provides-extras = ["ollama", "openai", "anthropic", "gemini", "openrouter", "all-llm", "dev"]
+provides-extras = ["ollama", "openai", "anthropic", "gemini", "openrouter", "all-llm", "desktop-build", "dev"]
 
 [[package]]
 name = "annotated-doc"
