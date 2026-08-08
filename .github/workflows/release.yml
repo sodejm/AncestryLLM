@@ -608,8 +608,8 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-installed'
-          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $process = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /D=$installRoot" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
@@ -624,7 +624,14 @@ jobs:
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
         shell: pwsh
-        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-installed') -Recurse -Force -ErrorAction SilentlyContinue
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
+          if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+            $process = Start-Process -FilePath $uninstaller -ArgumentList "/S /currentuser" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+          }
+          Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
       - name: Sign Ubuntu installer
         if: runner.os == 'Linux' && env.BINARY_SIGNING_MODE == 'trusted'
         shell: bash
@@ -1063,8 +1070,8 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
           }
-          $installRoot = Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed'
-          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $process = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /D=$installRoot" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS installer exited $($process.ExitCode)" }
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'installed application is absent' }
@@ -1079,7 +1086,14 @@ jobs:
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
         shell: pwsh
-        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'ancestryllm-validation-installed') -Recurse -Force -ErrorAction SilentlyContinue
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'
+          $uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'
+          if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+            $process = Start-Process -FilePath $uninstaller -ArgumentList "/S /currentuser" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "NSIS uninstaller exited $($process.ExitCode)" }
+          }
+          Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
       - name: Verify, install, and exercise Ubuntu application
         if: runner.os == 'Linux'
         shell: bash

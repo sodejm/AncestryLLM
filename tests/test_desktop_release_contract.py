@@ -243,6 +243,18 @@ def test_windows_release_installer_targets_arm64() -> None:
     )
 
 
+def test_windows_installer_verification_uses_the_exact_product_directory() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    # electron-builder's assisted NSIS template appends APP_FILENAME when the
+    # selected directory does not already contain that case-sensitive name.
+    assert workflow.count("$installRoot = Join-Path $env:RUNNER_TEMP 'AncestryLLM'") == 4
+    assert workflow.count('-ArgumentList "/S /currentuser /D=$installRoot"') == 2
+    assert "@('/S', \"/D=$installRoot\")" not in workflow
+    assert workflow.count("$uninstaller = Join-Path $installRoot 'Uninstall AncestryLLM.exe'") == 2
+    assert workflow.count('-ArgumentList "/S /currentuser" -Wait -PassThru') == 2
+
+
 def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
