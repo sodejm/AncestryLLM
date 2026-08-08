@@ -21,7 +21,7 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     expected_rows = (
         ("macos-15", "darwin-arm64", "macOS 15", "arm64", "dmg"),
         ("macos-15-intel", "darwin-x64", "macOS 15", "x64", "dmg"),
-        ("windows-11-arm", "win32-arm64", "Windows 11", "arm64", "nsis"),
+        ("windows-11-arm", "win32-x64", "Windows 11", "x64", "nsis"),
         ("ubuntu-24.04", "linux-x64", "Ubuntu 24.04", "x64", "deb"),
     )
     for runner, sidecar_target, expected_os, arch, installer_target in expected_rows:
@@ -49,7 +49,14 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert workflow.count("runtime_arch:") == 6
     assert workflow.count("architecture: ${{ matrix.runtime_arch }}") == 2
     assert "EXPECTED_HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}" in workflow
+    assert workflow.count("\n          HOST_ARCH: ${{ matrix.host_arch || matrix.arch }}") == 1
     assert "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" in workflow
+    assert workflow.count("name: Verify selected x64 runtimes on ARM64 Windows host") == 2
+    assert workflow.count("process.arch") >= 2
+    assert workflow.count("platform.machine()") >= 2
+    assert workflow.count("expected x64 Node.js runtime") == 2
+    assert workflow.count("expected AMD64 Python runtime") == 2
+    assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
     assert "electron-builder.release.yml" in workflow
@@ -196,11 +203,11 @@ def test_release_packaging_defaults_to_unsigned_manual_full_installers() -> None
     assert "com.apple.security.cs.disable-library-validation" not in entitlements
 
 
-def test_windows_release_installer_targets_arm64() -> None:
+def test_windows_release_installer_targets_x64() -> None:
     builder = BUILDER_CONFIG.read_text(encoding="utf-8")
 
     assert re.search(
-        r"win:\n  target:\n    - target: nsis\n      arch:\n        - arm64\n",
+        r"win:\n  target:\n    - target: nsis\n      arch:\n        - x64\n",
         builder,
     )
 
@@ -258,7 +265,8 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
 
     tag_import = workflow[workflow.index("  import-desktop-release-distributions:") :]
     assert 'row["actualOs"]' in tag_import
-    assert '("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64")' in tag_import
+    assert '("macos-26", "darwin-arm64", "macOS 26", "macOS 26", "arm64", "arm64")' in tag_import
+    assert 'row["hostArch"]' in tag_import
 
 
 def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> None:
@@ -269,7 +277,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     for expected in (
         "macOS 15 arm64",
         "macOS 15 x64",
-        "Windows 11 arm64",
+        "Windows 11 x64",
         "Ubuntu 24.04 x64",
         "SHA256SUMS",
         "Authenticode",

@@ -20,12 +20,12 @@ import {
 
 const gitHead = '0123456789abcdef0123456789abcdef01234567'
 const rows = [
-  ['macos-15', 'darwin-arm64', 'macOS 15', 'macOS 15', 'arm64'],
-  ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64'],
-  ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64'],
-  ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64'],
-  ['windows-11-arm', 'win32-arm64', 'Windows 11', 'Windows 11', 'arm64'],
-  ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64'],
+  ['macos-15', 'darwin-arm64', 'macOS 15', 'macOS 15', 'arm64', 'arm64'],
+  ['macos-15-intel', 'darwin-x64', 'macOS 15', 'macOS 15', 'x64', 'x64'],
+  ['macos-26', 'darwin-arm64', 'macOS 26', 'macOS 26', 'arm64', 'arm64'],
+  ['macos-26-intel', 'darwin-x64', 'macOS 26', 'macOS 26', 'x64', 'x64'],
+  ['windows-11-arm', 'win32-x64', 'Windows 11', 'Windows 11', 'x64', 'arm64'],
+  ['ubuntu-24.04', 'linux-x64', 'Ubuntu 24.04', 'Ubuntu 24.04', 'x64', 'x64'],
 ]
 
 const metrics = {
@@ -114,7 +114,7 @@ function faultEvidence(scenario, observations) {
 }
 
 function targetFixture(row, observed = metrics) {
-  const [runner, sidecarTarget, expectedOs, actualOs, arch] = row
+  const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
   const metricsBytes = encoded(observed)
   const inspection = fuseInspection(TARGET_ROWS[runner].platform)
   const fuseInspectionBytes = encoded(inspection)
@@ -188,6 +188,7 @@ function targetFixture(row, observed = metrics) {
     expectedOs,
     actualOs,
     arch,
+    hostArch,
     packageBoundary: 'unpacked-native',
     metrics: observed,
     metricsBytes,
@@ -234,6 +235,8 @@ test('target evidence derives gates for the Windows 11 ARM64-hosted x64 boundary
   assert.equal(evidence.rendererZeroEgressCanary, true)
   assert.equal(evidence.normalLaunchDebugSurfaceAbsent, true)
   assert.equal(evidence.signingVerified, false)
+  assert.equal(evidence.hostArch, 'arm64')
+  assert.equal(evidence.arch, 'x64')
   assert.equal(evidence.performance.policyVersion, PERFORMANCE_POLICY_VERSION)
   assert.deepEqual(evidence.gates, Object.fromEntries(TARGET_RECEIPT_GATES.map((gate) => [gate, true])))
 
@@ -245,6 +248,7 @@ test('target evidence derives gates for the Windows 11 ARM64-hosted x64 boundary
     expectedOs: rows[0][2],
     actualOs: rows[0][3],
     arch: rows[0][4],
+    hostArch: rows[0][5],
     packageBoundary: 'unpacked-native',
     platformValidated: false,
     metrics,
@@ -290,6 +294,7 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     expectedOs: rows[0][2],
     actualOs: rows[0][3],
     arch: rows[0][4],
+    hostArch: rows[0][5],
     packageBoundary: 'unpacked-native',
     metrics,
     metricsBytes: Buffer.from('{}'),
@@ -321,6 +326,7 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     expectedOs: linuxRow[2],
     actualOs: linuxRow[3],
     arch: linuxRow[4],
+    hostArch: linuxRow[5],
     packageBoundary: 'unpacked-native',
     metrics,
     metricsBytes: linuxFixture.metricsBytes,

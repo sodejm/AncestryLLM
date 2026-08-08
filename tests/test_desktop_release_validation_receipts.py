@@ -57,16 +57,16 @@ TARGETS = {
             "staplingPassed",
         ),
     ),
-    "win32-arm64": ("Windows 11", "arm64", ".exe", ("authenticodePassed",)),
+    "win32-x64": ("Windows 11", "x64", ".exe", ("authenticodePassed",)),
     "linux-x64": ("Ubuntu 24.04", "x64", ".deb", ("gpgSignaturePassed",)),
 }
 VALIDATIONS = {
-    "macos-15": ("darwin-arm64", "macOS 15", "arm64"),
-    "macos-15-intel": ("darwin-x64", "macOS 15", "x64"),
-    "macos-26": ("darwin-arm64", "macOS 26", "arm64"),
-    "macos-26-intel": ("darwin-x64", "macOS 26", "x64"),
-    "windows-11-arm": ("win32-arm64", "Windows 11", "arm64"),
-    "ubuntu-24.04": ("linux-x64", "Ubuntu 24.04", "x64"),
+    "macos-15": ("darwin-arm64", "macOS 15", "arm64", "arm64"),
+    "macos-15-intel": ("darwin-x64", "macOS 15", "x64", "x64"),
+    "macos-26": ("darwin-arm64", "macOS 26", "arm64", "arm64"),
+    "macos-26-intel": ("darwin-x64", "macOS 26", "x64", "x64"),
+    "windows-11-arm": ("win32-x64", "Windows 11", "x64", "arm64"),
+    "ubuntu-24.04": ("linux-x64", "Ubuntu 24.04", "x64", "x64"),
 }
 
 
@@ -143,7 +143,7 @@ def _create_target(root: Path, target: str) -> Path:
 
 
 def _create_validation_receipt(root: Path, runner: str, source_installer: Path) -> Path:
-    target, expected_os, arch = VALIDATIONS[runner]
+    target, expected_os, arch, host_arch = VALIDATIONS[runner]
     receipt_dir = root / runner
     receipt_dir.mkdir(parents=True)
     installer = receipt_dir / source_installer.name
@@ -164,6 +164,8 @@ def _create_validation_receipt(root: Path, runner: str, source_installer: Path) 
         expected_os,
         "--arch",
         arch,
+        "--host-arch",
+        host_arch,
         "--installer",
         str(installer),
         "--workflow-run-id",
@@ -190,7 +192,7 @@ def _create_release_inputs(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]
     inputs.mkdir()
     validations.mkdir()
     installers = {target: _create_target(inputs, target) for target in TARGETS}
-    for runner, (target, _expected_os, _arch) in VALIDATIONS.items():
+    for runner, (target, _expected_os, _arch, _host_arch) in VALIDATIONS.items():
         _create_validation_receipt(validations, runner, installers[target])
     return inputs, validations, installers
 
@@ -214,6 +216,8 @@ def test_validation_receipt_rejects_runner_target_matrix_mismatch(tmp_path: Path
         "--actual-os",
         "macOS 26",
         "--arch",
+        "x64",
+        "--host-arch",
         "x64",
         "--installer",
         str(installer),
@@ -252,6 +256,8 @@ def test_validation_receipt_requires_observed_operating_system(tmp_path: Path) -
         "Ubuntu 24.04",
         "--arch",
         "x64",
+        "--host-arch",
+        "x64",
         "--installer",
         str(installer),
         "--workflow-run-id",
@@ -274,7 +280,7 @@ def test_validation_receipt_requires_observed_operating_system(tmp_path: Path) -
 def test_validation_receipt_rejects_observed_operating_system_mismatch(
     tmp_path: Path,
 ) -> None:
-    installer = tmp_path / "AncestryLLM-0.5.0-win32-arm64.exe"
+    installer = tmp_path / "AncestryLLM-0.5.0-win32-x64.exe"
     installer.write_bytes(b"signed installer")
 
     completed = _run(
@@ -286,12 +292,14 @@ def test_validation_receipt_rejects_observed_operating_system_mismatch(
         "--runner",
         "windows-11-arm",
         "--target",
-        "win32-arm64",
+        "win32-x64",
         "--expected-os",
         "Windows 11",
         "--actual-os",
         "Windows Server 2025",
         "--arch",
+        "x64",
+        "--host-arch",
         "arm64",
         "--installer",
         str(installer),
@@ -435,6 +443,31 @@ def test_aggregate_rejects_observed_operating_system_tampering(tmp_path: Path) -
     receipt_path = validations / "macos-26" / "desktop-validation-receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     receipt["actualOs"] = "macOS 15"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    completed = _run(
+        "aggregate",
+        "--git-head",
+        GIT_HEAD,
+        "--version",
+        VERSION,
+        "--input-dir",
+        str(inputs),
+        "--validation-dir",
+        str(validations),
+        "--output-dir",
+        str(tmp_path / "release"),
+    )
+
+    assert completed.returncode != 0
+    assert "supported matrix" in completed.stderr
+
+
+def test_aggregate_rejects_observed_host_architecture_tampering(tmp_path: Path) -> None:
+    inputs, validations, _installers = _create_release_inputs(tmp_path)
+    receipt_path = validations / "windows-11-arm" / "desktop-validation-receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["hostArch"] = "x64"
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
 
     completed = _run(

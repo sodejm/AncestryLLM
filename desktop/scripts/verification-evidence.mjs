@@ -42,12 +42,12 @@ const macAndLinuxCeilings = ceilings(30_000, 20_000, 45_000, 1_610_612_736)
 const windowsCeilings = ceilings(45_000, 30_000, 60_000, 2_147_483_648)
 
 export const TARGET_ROWS = Object.freeze({
-  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'windows-11-arm': Object.freeze({ sidecarTarget: 'win32-arm64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'arm64', platformValidated: true, ceilings: windowsCeilings }),
-  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+  'windows-11-arm': Object.freeze({ sidecarTarget: 'win32-x64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'x64', hostArch: 'arm64', platformValidated: true, ceilings: windowsCeilings }),
+  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
 })
 
 function exactHead(value, label = 'gitHead') {
@@ -290,7 +290,7 @@ function validatedFaultEvidence(value, expected) {
 function validateTargetRow(input) {
   const expected = TARGET_ROWS[input.runner]
   assert.ok(expected, `Unsupported runner: ${input.runner}`)
-  for (const field of ['sidecarTarget', 'expectedOs', 'actualOs', 'arch']) {
+  for (const field of ['sidecarTarget', 'expectedOs', 'actualOs', 'arch', 'hostArch']) {
     assert.equal(input[field], expected[field], `${field} does not match the supported target row`)
   }
   assert.equal(input.packageBoundary, 'unpacked-native', 'packageBoundary must be unpacked-native')
@@ -330,6 +330,7 @@ export function createTargetEvidence(input) {
     expectedOs: input.expectedOs,
     actualOs: input.actualOs,
     arch: input.arch,
+    hostArch: input.hostArch,
     packageBoundary: input.packageBoundary,
     platformValidated: expected.platformValidated,
     artifactKind: 'unpublished-unpacked-native',
@@ -417,7 +418,7 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.gitHead, gitHead, `${value.runner ?? 'target'} evidence is not from the exact head`)
   const expected = TARGET_ROWS[value.runner]
   assert.ok(expected, `Unsupported runner: ${value.runner}`)
-  for (const field of ['sidecarTarget', 'expectedOs', 'actualOs', 'arch']) {
+  for (const field of ['sidecarTarget', 'expectedOs', 'actualOs', 'arch', 'hostArch']) {
     assert.equal(value[field], expected[field], `${value.runner} ${field} does not match the supported target row`)
   }
   assert.equal(value.packageBoundary, 'unpacked-native')
@@ -564,7 +565,7 @@ export async function runCli([command, ...args]) {
   const common = new Set(['git-head', 'output'])
   let allowed
   if (command === 'target') {
-    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'mismatch-evidence', 'receipts'])
+    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'mismatch-evidence', 'receipts'])
   } else if (command === 'security') {
     allowed = new Set([...common, 'sbom', 'receipts'])
   } else if (command === 'aggregate') {
@@ -591,6 +592,7 @@ export async function runCli([command, ...args]) {
       expectedOs: required(values, 'expected-os'),
       actualOs: required(values, 'actual-os'),
       arch: required(values, 'arch'),
+      hostArch: required(values, 'host-arch'),
       packageBoundary: required(values, 'package-boundary'),
       metrics: JSON.parse(metricsBytes.toString('utf8')),
       metricsBytes,
