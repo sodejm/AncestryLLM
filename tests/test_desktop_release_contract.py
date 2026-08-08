@@ -314,8 +314,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
     )
     assert (
         "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
-        "Windows 11 on x64, and Ubuntu 24.04 on x64."
-        in normalized_shell
+        "Windows 11 on x64, and Ubuntu 24.04 on x64." in normalized_shell
     )
 
 
