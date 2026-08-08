@@ -1,7 +1,8 @@
 # Release evidence
 
 Each release workflow produces an immutable evidence bundle attached to its
-GitHub Release. The bundle identifies the semantic version, signed tag, commit,
+GitHub Release. The bundle identifies the semantic version, annotated tag and
+its version-dependent signing mode, commit,
 workflow run, artifact hashes, supported platform/Python matrix, SBOM, quality
 gates, security finding dispositions, and GEDCOM importer status.
 

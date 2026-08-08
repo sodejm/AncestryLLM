@@ -27,8 +27,8 @@ used at runtime. CI output is an unsigned, unpacked verification artifact, not
 a supported release. Supported distribution requires a manually installed
 installer plus provenance, installation, target-execution, and packaged
 assurance gates. Full production/trusted binary signing and applicable
-notarization begin at v1.0.0; official `0.x` installers default to unsigned and
-local/manual `0.x` installers may be self-signed. Version 0.5.0 has no updater,
+notarization begin at v1.0.0; project-produced `0.x` release installers and
+annotated tags must be unsigned. Version 0.5.0 has no updater,
 update feed, background update channel, or staged rollout.
 
 ## Private lifecycle

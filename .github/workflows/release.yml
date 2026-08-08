@@ -39,6 +39,7 @@ jobs:
       desktop_release_artifact: ${{ steps.release.outputs.desktop_release_artifact }}
       desktop_release_digest: ${{ steps.release.outputs.desktop_release_digest }}
       binary_signing_mode: ${{ steps.release.outputs.binary_signing_mode }}
+      release_tag_mode: ${{ steps.release.outputs.release_tag_mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -125,7 +126,9 @@ jobs:
           test "$(jq -r '.release' .github/release-config.json)" = "$version"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           binary_signing_mode="$(python scripts/release_signing_policy.py --version "$version")"
+          release_tag_mode="$(python scripts/release_signing_policy.py --version "$version" --tag-mode)"
           echo "binary_signing_mode=$binary_signing_mode" >> "$GITHUB_OUTPUT"
+          echo "release_tag_mode=$release_tag_mode" >> "$GITHUB_OUTPUT"
 
           if test "$EVENT_NAME" = "workflow_dispatch"; then
             echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -158,7 +161,21 @@ jobs:
           test "$(jq -r '.object.type' <<<"$ref_json")" = "tag"
           tag_object="$(jq -r '.object.sha' <<<"$ref_json")"
           tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object")"
-          test "$(jq -r '.verification.verified' <<<"$tag_json")" = "true"
+          case "$release_tag_mode" in
+            unsigned-annotated)
+              test "$(jq -r '.verification.verified' <<<"$tag_json")" = "false"
+              test "$(jq -r '.verification.reason' <<<"$tag_json")" = "unsigned"
+              test "$(jq -r '.verification.signature' <<<"$tag_json")" = "null"
+              test "$(jq -r '.verification.payload' <<<"$tag_json")" = "null"
+              ;;
+            signed-annotated)
+              test "$(jq -r '.verification.verified' <<<"$tag_json")" = "true"
+              ;;
+            *)
+              echo "unsupported release tag mode: $release_tag_mode" >&2
+              exit 1
+              ;;
+          esac
           test "$(jq -r '.object.sha' <<<"$tag_json")" = "$commit"
           tag_message="$RUNNER_TEMP/desktop-release-tag-message.txt"
           approval_json="$RUNNER_TEMP/desktop-release-approval.json"
@@ -180,7 +197,9 @@ jobs:
           for name, pattern in fields.items():
               matches = re.findall(rf"(?m)^{pattern}$", message)
               if len(matches) != 1:
-                  raise SystemExit(f"signed tag must contain exactly one {pattern!r} line")
+                  raise SystemExit(
+                      f"annotated release tag must contain exactly one {pattern!r} line"
+                  )
               result[name] = matches[0] if name == "artifactDigest" else int(matches[0])
           output_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
           PY
@@ -493,7 +512,25 @@ jobs:
             export CSC_LINK="$signing_dir/certificate.p12"
             export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
             export APPLE_API_KEY="$signing_dir/AuthKey_$APPLE_API_KEY_ID.p8"
-            signing_args+=(--config.mac.forceCodeSigning=true --config.mac.notarize=true)
+            signing_args+=(
+              --config.mac.forceCodeSigning=true
+              --config.mac.hardenedRuntime=true
+              --config.mac.notarize=true
+            )
+          else
+            test -z "$APPLE_CERTIFICATE_BASE64"
+            test -z "$APPLE_CERTIFICATE_PASSWORD"
+            test -z "$APPLE_API_KEY_BASE64"
+            test -z "$APPLE_API_KEY_ID"
+            test -z "$APPLE_API_ISSUER"
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
+            signing_args+=(
+              --config.mac.identity=null
+              --config.mac.forceCodeSigning=false
+              --config.mac.hardenedRuntime=false
+              --config.mac.notarize=false
+            )
           fi
           read -r -a package_args <<< "$PACKAGE_ARGS"
           pnpm --dir desktop exec electron-builder \
@@ -523,7 +560,22 @@ jobs:
             [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
             $env:CSC_LINK = $certificate
             $env:CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
-            $signingArgs = @('--config.win.forceCodeSigning=true')
+            $signingArgs = @(
+              '--config.win.forceCodeSigning=true',
+              '--config.win.signAndEditExecutable=true',
+              '--config.win.signExecutable=true'
+            )
+          } else {
+            if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw 'WINDOWS_CERTIFICATE_BASE64 must be empty for an unsigned release' }
+            if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw 'WINDOWS_CERTIFICATE_PASSWORD must be empty for an unsigned release' }
+            $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+            Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            $signingArgs = @(
+              '--config.win.forceCodeSigning=false',
+              '--config.win.signAndEditExecutable=true',
+              '--config.win.signExecutable=false'
+            )
           }
           $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
           pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
@@ -594,12 +646,22 @@ jobs:
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
           if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --strict --verbose=4 "$INSTALLER"
             codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
             codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-details.txt"
             grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-details.txt"
             grep -E 'flags=.*runtime' "$RUNNER_TEMP/codesign-details.txt"
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
+          else
+            if codesign --verify --strict "$INSTALLER"; then
+              echo "0.x macOS installer must be unsigned" >&2
+              exit 1
+            fi
+            if codesign --verify --deep --strict "${mounted_apps[0]}"; then
+              echo "0.x macOS application must be unsigned" >&2
+              exit 1
+            fi
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
@@ -627,12 +689,14 @@ jobs:
           if ($hostArch -ne $env:EXPECTED_HOST_ARCH) {
             throw "expected host architecture $env:EXPECTED_HOST_ARCH, found $hostArch"
           }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
             if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
-            $signature = Get-AuthenticodeSignature -LiteralPath $installer
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          } elseif ($signature.Status -ne 'NotSigned') {
+            throw "unsigned installer Authenticode status is $($signature.Status)"
           }
           $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
           Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
@@ -670,10 +734,12 @@ jobs:
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
+          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
-            $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
             if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
             if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          } elseif ($applicationSignature.Status -ne 'NotSigned') {
+            throw "unsigned application Authenticode status is $($applicationSignature.Status)"
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
@@ -808,6 +874,8 @@ jobs:
               "$gpg_status"
             cleanup_verification_material
             trap - EXIT
+          else
+            test ! -e "$INSTALLER.asc"
           fi
           sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
@@ -865,6 +933,8 @@ jobs:
                 ;;
               *) echo "unsupported release target: $SIDECAR_TARGET" >&2; exit 1 ;;
             esac
+          else
+            gates+=(unsignedArtifactPassed)
           fi
           gate_args=()
           for gate in "${gates[@]}"; do gate_args+=(--gate "$gate"); done
@@ -1128,11 +1198,21 @@ jobs:
           mounted_apps=("$mount_point"/*.app)
           test "${#mounted_apps[@]}" -eq 1
           if [[ "$BINARY_SIGNING_MODE" == "trusted" ]]; then
+            codesign --verify --strict --verbose=4 "$INSTALLER"
             codesign --verify --deep --strict --verbose=4 "${mounted_apps[0]}"
             codesign -d --verbose=4 "${mounted_apps[0]}" 2> "$RUNNER_TEMP/codesign-validation-details.txt"
             grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/codesign-validation-details.txt"
             spctl --assess --type execute --verbose=4 "${mounted_apps[0]}"
             xcrun stapler validate "$INSTALLER"
+          else
+            if codesign --verify --strict "$INSTALLER"; then
+              echo "0.x macOS installer must be unsigned" >&2
+              exit 1
+            fi
+            if codesign --verify --deep --strict "${mounted_apps[0]}"; then
+              echo "0.x macOS application must be unsigned" >&2
+              exit 1
+            fi
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
@@ -1155,12 +1235,14 @@ jobs:
           ANCESTRYLLM_PACKAGED_METRICS: ${{ runner.temp }}/ancestryllm-packaged-metrics.json
         run: |
           $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
             $expectedThumbprint = ($env:WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
             if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE_THUMBPRINT must be a complete 40-character SHA-1 certificate thumbprint' }
-            $signature = Get-AuthenticodeSignature -LiteralPath $installer
             if ($signature.Status -ne 'Valid') { throw "installer Authenticode status is $($signature.Status)" }
             if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'installer signer certificate thumbprint does not match the approved identity' }
+          } elseif ($signature.Status -ne 'NotSigned') {
+            throw "unsigned installer Authenticode status is $($signature.Status)"
           }
           $statePath = Join-Path $env:RUNNER_TEMP 'ancestryllm-install-root.txt'
           Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
@@ -1198,10 +1280,12 @@ jobs:
           $application = Join-Path $installRoot 'ancestryllm.exe'
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw "installed application is absent: $application" }
           Set-Content -LiteralPath $statePath -Value $installRoot -NoNewline
+          $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
           if ($env:BINARY_SIGNING_MODE -eq 'trusted') {
-            $applicationSignature = Get-AuthenticodeSignature -LiteralPath $application
             if ($applicationSignature.Status -ne 'Valid') { throw "application Authenticode status is $($applicationSignature.Status)" }
             if ($applicationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) { throw 'application signer certificate thumbprint does not match the approved identity' }
+          } elseif ($applicationSignature.Status -ne 'NotSigned') {
+            throw "unsigned application Authenticode status is $($applicationSignature.Status)"
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
@@ -1290,6 +1374,8 @@ jobs:
               "$INSTALLER.asc" "$INSTALLER" | tee "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
             grep -Fq "[GNUPG:] VALIDSIG $expected_fingerprint " \
               "$RUNNER_TEMP/ancestryllm-public-gpg-status.txt"
+          else
+            test ! -e "$INSTALLER.asc"
           fi
           sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
@@ -1466,10 +1552,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
-      - name: Record the signed-tag approval coordinates
+      - name: Record the release-tag approval coordinates
         env:
           ARTIFACT_ID: ${{ steps.desktop_release.outputs.artifact-id }}
           RAW_ARTIFACT_DIGEST: ${{ steps.desktop_release.outputs.artifact-digest }}
+          RELEASE_TAG_MODE: ${{ needs.validate.outputs.release_tag_mode }}
         run: |
           if [[ "$RAW_ARTIFACT_DIGEST" =~ ^[0-9A-Fa-f]{64}$ ]]; then
             ARTIFACT_DIGEST="sha256:${RAW_ARTIFACT_DIGEST,,}"
@@ -1480,7 +1567,9 @@ jobs:
           {
             echo "### Approved desktop release candidate"
             echo
-            echo 'Add these exact lines to the signed annotated release tag:'
+            echo "Release tag mode: \`$RELEASE_TAG_MODE\`"
+            echo
+            echo 'Add these exact lines to the annotated release tag:'
             echo '```text'
             echo "Desktop-Release-Run-ID: $GITHUB_RUN_ID"
             echo "Desktop-Release-Artifact-ID: $ARTIFACT_ID"
@@ -1495,7 +1584,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       actions: read # required to download the exact approved workflow artifact by ID
-      contents: read # required to verify the signed tag and release commit
+      contents: read # required to verify the annotated release tag and release commit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1563,6 +1652,7 @@ jobs:
           APPROVED_ARTIFACT: ${{ needs.validate.outputs.desktop_release_artifact }}
           APPROVED_DIGEST: ${{ needs.validate.outputs.desktop_release_digest }}
           TAG_NAME: ${{ github.ref_name }}
+          RELEASE_TAG_MODE: ${{ needs.validate.outputs.release_tag_mode }}
         run: |
           python scripts/verify_release_assets.py --expected imported --actual imported
           python - imported "$VERSION" "$COMMIT_SHA" <<'PY'
@@ -1678,7 +1768,8 @@ jobs:
               "status": "approved",
               "version": os.environ["VERSION"],
               "gitHead": os.environ["COMMIT_SHA"],
-              "signedTag": os.environ["TAG_NAME"],
+              "releaseTag": os.environ["TAG_NAME"],
+              "releaseTagMode": os.environ["RELEASE_TAG_MODE"],
               "workflowRunId": int(os.environ["APPROVED_RUN"]),
               "artifactId": int(os.environ["APPROVED_ARTIFACT"]),
               "artifactDigest": os.environ["APPROVED_DIGEST"],

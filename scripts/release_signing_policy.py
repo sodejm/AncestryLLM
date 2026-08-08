@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve and validate AncestryLLM desktop binary-signing policy by version."""
+"""Resolve and validate AncestryLLM release-signing policy by version."""
 
 from __future__ import annotations
 
@@ -9,19 +9,21 @@ import re
 import sys
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
-PRE_1_MODES = frozenset({"unsigned", "self-signed"})
+PRE_1_MODES = frozenset({"unsigned"})
 FULL_RELEASE_MODES = frozenset({"trusted"})
 SIGNING_MODES = PRE_1_MODES | FULL_RELEASE_MODES
+PRE_1_TAG_MODE = "unsigned-annotated"
+FULL_RELEASE_TAG_MODE = "signed-annotated"
 
 PRE_1_NOTICE = (
-    "This pre-1.0 release is not fully production/trusted signed. "
-    "Official 0.x binaries are unsigned by default; locally produced binaries may be "
-    "self-signed, and operating systems may show an unknown-publisher warning. "
-    "Full trusted binary signing starts with v1.0.0."
+    "This pre-1.0 release's installers and release tag are intentionally unsigned. "
+    "Code signing, notarization, Authenticode, and detached package signatures are "
+    "prohibited for every stable 0.x release. Operating systems may show an "
+    "unknown-publisher warning. Trusted release signing starts with v1.0.0."
 )
-TRUSTED_NOTICE = (
-    "This full-version release requires production/trusted binary signing on every "
-    "supported desktop platform."
+FULL_RELEASE_NOTICE = (
+    "Starting with v1.0.0, every supported desktop package must carry a verifiable "
+    "publisher identity, and the annotated release tag must pass signature verification."
 )
 
 
@@ -44,6 +46,12 @@ def default_signing_mode(version: str) -> str:
     return "unsigned" if _major(version) == 0 else "trusted"
 
 
+def release_tag_mode(version: str) -> str:
+    """Return the annotated-tag signature mode required for a stable release."""
+
+    return PRE_1_TAG_MODE if _major(version) == 0 else FULL_RELEASE_TAG_MODE
+
+
 def validate_signing_mode(version: str, mode: str) -> None:
     """Reject a signing mode that violates the v1.0.0 policy boundary."""
 
@@ -54,8 +62,7 @@ def validate_signing_mode(version: str, mode: str) -> None:
         return
     if _major(version) == 0:
         raise ValueError(
-            f"{version} cannot use trusted binary signing; "
-            "full trusted binary signing starts at v1.0.0"
+            f"{version} cannot use trusted binary signing; 0.x releases must remain unsigned"
         )
     raise ValueError(f"{version} requires trusted binary signing")
 
@@ -66,7 +73,7 @@ def signing_disclosure(version: str, mode: str) -> str:
     validate_signing_mode(version, mode)
     if _major(version) == 0:
         return f"{PRE_1_NOTICE} Binary-signing mode for this release: `{mode}`."
-    return f"{TRUSTED_NOTICE} Binary-signing mode for this release: `{mode}`."
+    return f"{FULL_RELEASE_NOTICE} Binary-signing mode for this release: `{mode}`."
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -75,6 +82,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=sorted(SIGNING_MODES))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--notice", action="store_true")
+    parser.add_argument("--tag-mode", action="store_true")
     return parser
 
 
@@ -86,15 +94,24 @@ def main() -> int:
     except ValueError as exc:
         print(f"release signing policy error: {exc}", file=sys.stderr)
         return 1
+    if sum((args.notice, args.json, args.tag_mode)) > 1:
+        print(
+            "release signing policy error: --notice, --json, and --tag-mode are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 1
     if args.notice:
-        print("## Binary signing\n")
+        print("## Release signing\n")
         print(signing_disclosure(args.version, mode))
+    elif args.tag_mode:
+        print(release_tag_mode(args.version))
     elif args.json:
         print(
             json.dumps(
                 {
                     "allowedBinarySigningModes": sorted(allowed_signing_modes(args.version)),
                     "binarySigningMode": mode,
+                    "releaseTagMode": release_tag_mode(args.version),
                     "version": args.version,
                 },
                 sort_keys=True,

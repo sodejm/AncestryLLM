@@ -76,8 +76,8 @@ on arm64, and Ubuntu 24.04 on x64. A supported release is a manually installed
 installer that has passed the target-specific release and packaged assurance
 gates in the [release runbook](RELEASING.md). Full production/trusted binary
 signing is explicitly deferred until the first full version release, v1.0.0.
-Official `0.x` installers default to unsigned; local or explicitly manual
-`0.x` installers may be self-signed.
+Project-produced `0.x` release installers and annotated release tags must be
+unsigned.
 
 Unpacked CI artifacts and development builds are verification inputs, not
 supported releases or evidence of installation. For an install or upgrade,

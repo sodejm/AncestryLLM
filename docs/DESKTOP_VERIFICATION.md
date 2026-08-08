@@ -41,9 +41,10 @@ the expensive jobs, but `Desktop gate` still reports a result.
 The manually dispatched pre-tag release workflow builds the four installer
 rows below for one full commit SHA and stable version. AncestryLLM does not use
 full production/trusted binary signing before the first full version release,
-v1.0.0. Official `0.x` rows therefore use `binarySigningMode: "unsigned"`;
-local/manual `0.x` assembly may instead declare `self-signed`. Starting with
-v1.0.0, all rows must declare `trusted` and pass their platform signature gates.
+v1.0.0. Every project-produced `0.x` release row therefore uses
+`binarySigningMode: "unsigned"`; self-signing is not a permitted release mode.
+Starting with v1.0.0, all rows must declare `trusted` and pass their platform
+signature gates.
 
 | Runner | Sidecar | Supported target | Installer |
 |---|---|---|---|
@@ -138,11 +139,12 @@ browser-process hook, so the packaged harness verifies layout at an equivalent
 200% renderer scale and states that distinction explicitly instead of claiming
 a native shortcut observation it did not make.
 
-On macOS, the verification-only builder overlay applies an ad hoc signature
-after electron-builder mutates the Electron executable and fuses. That
-signature only permits the unpublished application to launch on the hosted
-runner; it is not release identity, installer-signing, or notarization
-evidence. The aggregate therefore continues to record
+On macOS, the verification-only builder overlay applies an ephemeral ad hoc
+signature after electron-builder mutates the Electron executable and fuses.
+That signature only permits the unpublished application to launch on the
+hosted runner; the bundle is never distributed or imported into a release and
+is not release identity, installer-signing, or notarization evidence. The
+aggregate therefore continues to record
 `signingVerified: false` and leaves those claims to #231.
 
 The packaged renderer canary observes attempted HTTP, HTTPS, WebSocket, window,

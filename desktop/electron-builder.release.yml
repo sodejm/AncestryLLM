@@ -28,7 +28,7 @@ mac:
   # Pre-1.0 release builds are unsigned by default. The release workflow
   # overrides this to true for v1.0.0 and later.
   forceCodeSigning: false
-  hardenedRuntime: true
+  hardenedRuntime: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   notarize: false
@@ -37,9 +37,11 @@ win:
     - target: nsis
       arch:
         - arm64
+  # Keep resedit enabled so the application name, icon, version, and execution
+  # level replace the upstream Electron executable resources. Disable only the
+  # signing phase until v1.0.0.
   signAndEditExecutable: true
-  # Pre-1.0 release builds are unsigned by default. The release workflow
-  # overrides this to true for v1.0.0 and later.
+  signExecutable: false
   forceCodeSigning: false
 linux:
   target:

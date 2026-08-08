@@ -163,7 +163,11 @@ def test_aggregate_binds_exact_matrix_assets_evidence_and_combined_sbom(
     assert evidence["status"] == "passed"
     assert evidence["gitHead"] == GIT_HEAD
     assert evidence["binarySigningMode"] == "trusted"
-    assert "requires production/trusted binary signing" in evidence["binarySigningDisclosure"]
+    assert "must carry a verifiable publisher identity" in evidence["binarySigningDisclosure"]
+    assert (
+        "annotated release tag must pass signature verification"
+        in evidence["binarySigningDisclosure"]
+    )
     assert {row["target"] for row in evidence["targets"]} == set(TARGETS)
     manifest = json.loads((output / "desktop-artifact-manifest.json").read_text(encoding="utf-8"))
     assert manifest["binarySigningDisclosure"] == evidence["binarySigningDisclosure"]
@@ -323,7 +327,7 @@ def test_pre_1_target_accepts_unsigned_build_without_signing_gates(tmp_path: Pat
         "--output",
         str(evidence),
     ]
-    for gate in COMMON_GATES:
+    for gate in (*COMMON_GATES, "unsignedArtifactPassed"):
         arguments.extend(("--gate", gate))
 
     completed = _run(*arguments)
@@ -331,10 +335,11 @@ def test_pre_1_target_accepts_unsigned_build_without_signing_gates(tmp_path: Pat
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(evidence.read_text(encoding="utf-8"))
     assert payload["binarySigningMode"] == "unsigned"
+    assert payload["gates"]["unsignedArtifactPassed"] is True
     assert "authenticodePassed" not in payload["gates"]
 
 
-def test_pre_1_target_accepts_self_signed_build_with_limited_gates(tmp_path: Path) -> None:
+def test_pre_1_target_rejects_self_signed_build(tmp_path: Path) -> None:
     installer = tmp_path / "AncestryLLM-0.5.0-darwin-arm64.dmg"
     installer.write_bytes(b"self-signed installer")
     sbom = tmp_path / "sbom.json"
@@ -366,10 +371,9 @@ def test_pre_1_target_accepts_self_signed_build_with_limited_gates(tmp_path: Pat
 
     completed = _run(*arguments)
 
-    assert completed.returncode == 0, completed.stderr
-    payload = json.loads(evidence.read_text(encoding="utf-8"))
-    assert payload["binarySigningMode"] == "self-signed"
-    assert "notarizationPassed" not in payload["gates"]
+    assert completed.returncode != 0
+    assert "self-signed" in completed.stderr
+    assert not evidence.exists()
 
 
 def test_target_rejects_symlinked_installer(tmp_path: Path) -> None:
@@ -476,6 +480,7 @@ def _create_unsigned_target(root: Path, target: str, version: str = "0.5.0") -> 
     ]
     for gate in COMMON_GATES:
         arguments.extend(("--gate", gate))
+    arguments.extend(("--gate", "unsignedArtifactPassed"))
 
     completed = _run(*arguments)
     assert completed.returncode == 0, completed.stderr
