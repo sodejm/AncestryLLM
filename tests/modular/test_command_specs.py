@@ -1,3 +1,5 @@
+"""Verify stable transport-neutral command specifications and derived CLI help."""
+
 from __future__ import annotations
 
 import json

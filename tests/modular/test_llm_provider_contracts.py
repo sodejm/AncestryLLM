@@ -1,3 +1,5 @@
+"""Verify provider registry, consent, endpoint, timeout, and error contracts."""
+
 from __future__ import annotations
 
 import os

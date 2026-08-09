@@ -1,3 +1,5 @@
+"""Verify GEDCOM provider boundaries, consent locality, and sanitized refinements."""
+
 from __future__ import annotations
 
 import ast

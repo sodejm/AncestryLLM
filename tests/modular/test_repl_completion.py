@@ -1,3 +1,5 @@
+"""Verify REPL completion is context-aware, private, bounded, and offline."""
+
 from __future__ import annotations
 
 import socket

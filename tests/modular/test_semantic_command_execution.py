@@ -1,3 +1,5 @@
+"""Verify semantic command executors return stable path-free result DTOs."""
+
 from __future__ import annotations
 
 import json

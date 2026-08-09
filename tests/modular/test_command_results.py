@@ -1,3 +1,5 @@
+"""Verify strict, path-safe, transport-neutral command result contracts."""
+
 from __future__ import annotations
 
 import json

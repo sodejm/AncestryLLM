@@ -1,3 +1,5 @@
+"""Verify provider profiles enforce consent, locality, scheduling, and safe failures."""
+
 from __future__ import annotations
 
 import asyncio

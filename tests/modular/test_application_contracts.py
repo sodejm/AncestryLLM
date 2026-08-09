@@ -1,3 +1,5 @@
+"""Verify transport-neutral application DTO, operation, artifact, and error contracts."""
+
 from __future__ import annotations
 
 import inspect

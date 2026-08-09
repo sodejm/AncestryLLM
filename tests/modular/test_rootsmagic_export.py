@@ -1,3 +1,5 @@
+"""Verify immutable RootsMagic export, rooted publication, GEDCOM, and privacy safeguards."""
+
 from __future__ import annotations
 
 import dataclasses

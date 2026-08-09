@@ -1,3 +1,5 @@
+"""Provide shared isolated application-context fixtures for modular tests."""
+
 from __future__ import annotations
 
 from pathlib import Path

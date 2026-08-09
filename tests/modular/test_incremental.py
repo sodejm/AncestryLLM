@@ -1,3 +1,5 @@
+"""Verify loss-minimal incremental GEDCOM publication and rollback safety boundaries."""
+
 from __future__ import annotations
 
 import json

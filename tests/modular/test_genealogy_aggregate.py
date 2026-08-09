@@ -1,3 +1,5 @@
+"""Verify genealogy aggregate identity ownership and deterministic safe domain values."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
