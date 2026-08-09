@@ -127,13 +127,13 @@ def create_app(
         summary="Private loopback control plane for the AncestryLLM desktop application.",
         description="Authenticated internal discovery only. This is not a public, LAN, or browser API.",
         version="1.0.0",
-        openapi_version="3.1.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
         redirect_slashes=False,
         lifespan=lifespan,
     )
+    app.openapi_version = "3.1.0"
     app.add_middleware(InternalApiMiddleware, settings=settings)
 
     @app.exception_handler(AncestryError)

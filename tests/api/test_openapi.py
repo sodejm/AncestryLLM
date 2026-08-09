@@ -4,14 +4,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 
 from ancestryllm.api import API_NAMESPACE
 from ancestryllm.api.openapi import OPENAPI_ARTIFACT, canonical_openapi, contract_app
 
 
-def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0() -> None:
+def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    original_init = FastAPI.__init__
+
+    def initialize_with_future_default(self: FastAPI, **kwargs: Any) -> None:
+        original_init(self, **kwargs)
+        self.openapi_version = "9.9.9"
+
+    monkeypatch.setattr(FastAPI, "__init__", initialize_with_future_default)
+
     assert contract_app().openapi_version == "3.1.0"
 
 
