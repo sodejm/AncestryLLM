@@ -17,6 +17,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   EXPECTED_HEAD: ${{ inputs.commit_sha || github.sha }}
 

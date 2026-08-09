@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 # Allow only one deployment; do not interrupt a publication in progress.
 concurrency:
   group: "pages"

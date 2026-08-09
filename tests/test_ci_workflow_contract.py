@@ -10,6 +10,7 @@ RELEASE_READINESS_PATH = ROOT / ".github/workflows/release-readiness.yml"
 DEPENDENCY_REVIEW_PATH = ROOT / ".github/workflows/dependency-review.yml"
 PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
 PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
+WORKFLOWS_DIR = ROOT / ".github/workflows"
 
 
 def _job(workflow: str, job: str) -> str:
@@ -30,6 +31,21 @@ def test_pull_request_labeler_has_the_config_file_it_loads() -> None:
     for repository_label in ("documentation:", "testing:", "contracts:"):
         assert repository_label in config
     assert "any-glob-to-any-file:" in config
+
+
+def test_command_workflows_use_headless_bash_and_make_does_not_inherit_zsh() -> None:
+    command_workflows = sorted(
+        path for path in WORKFLOWS_DIR.glob("*.yml") if "run:" in path.read_text(encoding="utf-8")
+    )
+
+    assert command_workflows
+    for path in command_workflows:
+        workflow = path.read_text(encoding="utf-8")
+        assert "zsh" not in workflow.lower(), path
+        assert re.search(r"(?m)^defaults:\n  run:\n    shell: bash\n", workflow), path
+
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "SHELL := /bin/bash" in makefile
 
 
 def test_ci_separates_tests_from_single_run_quality_checks() -> None:

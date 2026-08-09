@@ -11,6 +11,8 @@ with the implemented shared execution contract in
 [`docs/COMMAND_EXECUTOR.md`](docs/COMMAND_EXECUTOR.md),
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
+and the accepted, not-yet-implemented deployment direction in
+[`docs/ADR-0026-local-first-container-remote-deployment.md`](docs/ADR-0026-local-first-container-remote-deployment.md),
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
@@ -31,13 +33,14 @@ must verify published checksums and release evidence before installation.
 Unsigned CI artifacts and unpacked development builds are verification inputs
 only. Version 0.5.0 has no updater or background update channel.
 
-There is no supported production browser, public/LAN, or multi-user runtime.
-ADR-0025 accepts the packaged local Electron direction and later private domain
-routes; it does not accept a public/LAN API, browser client, or
-multi-user server. The one-shot CLI and interactive console remain the
-implemented genealogy-capable user-facing adapters. Every adapter must consume
-the same application contracts and services without depending on terminal
-presentation or redefining domain behavior.
+There is no current supported production browser, public/LAN, container, or
+remote runtime. ADR-0026 accepts a planned single-household container backend
+and advanced self-supported remote profile, but neither is implemented or
+available. It does not accept a browser client, general public API, multi-user
+server, or multi-tenant service. The one-shot CLI and interactive console
+remain the implemented genealogy-capable user-facing adapters. Every adapter
+must consume the same application contracts and services without depending on
+terminal presentation or redefining domain behavior.
 
 ## Architectural priorities
 
@@ -295,6 +298,78 @@ The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
 5.0.0 requirements and NIST SP 800-218 SSDF practices. The control IDs, STRIDE
 ledger, abuse cases, evidence-backed residual-risk policy, and assurance gates
 are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+
+### Accepted deployment profiles
+
+[ADR-0026](docs/ADR-0026-local-first-container-remote-deployment.md) ratifies
+three later deployment intents while preserving the current runtime boundary:
+
+- **Local Desktop** remains the default. It has no non-loopback listener. A
+  future container backend may replace the native sidecar only behind the same
+  service contracts and privacy controls.
+- **Connect Remote** is an explicit, advanced enrolled-client mode for one
+  pre-existing HTTPS deployment. It is never inferred from environment,
+  runtime discovery, or stale settings.
+- **Host Remote** is an explicit, advanced, self-supported operator mode for
+  one trusted household. Only a validated TLS edge may be public; internal
+  gateway, worker, data, administrative, and Docker services remain private
+  and independently authenticated. Network membership is not identity.
+
+`provider=none` is incompatible with Connect Remote and Host Remote. It forces
+Local Desktop/local execution and opens no network socket; endpoint state,
+ambient credentials, or a previously enrolled client cannot weaken that rule.
+Remote execution requires a separate explicit profile and may not claim
+`provider=none`. The offline profile selects the socket-free native
+application-service path and does not start the container backend, host
+supervisor, Engine API, gateway, workers, or containers.
+
+Host Remote v1 authorizes one household as one configured OIDC principal. The
+gateway rejects every other OIDC subject before route or object access, and
+administrative actions require fresh authentication by the same principal.
+This is not individual multi-user authorization. Unrelated or mutually
+distrusting households require separate hosts, secrets, volumes, and identity
+realms.
+
+Electron Main owns profile state, enrollment, API use, error sanitization, and
+the narrow host lifecycle boundary. The sandboxed renderer receives no Node,
+filesystem, raw network, Docker socket or client credential, API/enrollment
+bearer, keyring value, provider secret, SQLCipher key, or unrestricted path.
+It uses only a fixed, typed, versioned preload bridge. Profile changes clear
+endpoint-specific state and commit only after preflight; failure rolls back to
+the prior safe profile without publishing a listener or mutating data.
+
+Docker Engine API compatibility plus Docker Compose is the portable runtime
+contract. Colima/Lima is the open-source macOS arm64 default; Docker Desktop is
+optional, separately selected, and separately licensed. Electron, FastAPI,
+Uvicorn, SQLCipher, OS-keyring integration, and the existing transport-neutral
+application and executor contracts remain authoritative. Kubernetes, a service
+mesh, Redis, an external database, or a broker needs measured evidence,
+lifecycle ownership, and a separate ADR.
+
+Local lifecycle belongs to a host supervisor: verify engine identity and the
+rendered Compose model, acquire digest-pinned images, broker secrets from the OS
+keyring, start and authenticate private services, migrate atomically, enforce
+resource/network policy, preserve recoverable data during upgrade or rollback,
+and remove only exactly owned resources after informed confirmation. A remote
+operator instead owns host, DNS, TLS, identity, firewall, capacity, monitoring,
+updates, backups, and recovery. The project provides no hosting or operations
+SLA for the self-supported profile.
+
+Containerized source ingress is grant-mediated. The host supervisor may render
+only an allowlisted read-only `family_trees` mount resolved from an opaque
+native-dialog grant, revalidated as immutable, and attached only to the worker
+performing the authorized operation. The renderer receives no filesystem path,
+and writable, broad, ungranted, aliased, or additional host mounts fail closed.
+
+Cold/warm/remote readiness, shutdown, idle memory, VM ceiling, compressed image
+size, local and remote listener exposure, and offline egress have quantitative
+fail-closed budgets in ADR-0026. Native evidence on every claimed architecture
+is required; emulation is labeled and cannot establish native support.
+Local Desktop containers require `G0`, `G5`, and their applicable `G7` evidence.
+Connect Remote requires `G0`, its applicable client-side `G6`, and `G7` evidence.
+Host Remote requires `G0`, `G6`, and its applicable `G7` evidence.
+AB-11 through AB-21 remain fail-closed according to their owning profile; a
+failed gate blocks the affected availability or release claim.
 
 GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
 publication/recovery, operation orchestration, and legacy argument translation
@@ -918,15 +993,16 @@ installed local hooks.
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. |
-| Public web/API/multi-user runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
+| Container and advanced remote deployment profiles | ADR-0026 accepts Local Desktop, Connect Remote, and single-household Host Remote as a target architecture. No container or remote profile is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before availability. |
+| Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts
 
 The current release intentionally excludes:
 
-- a public/LAN HTTP API, WebUI, browser authentication, or multi-user
-  authorization; the accepted `/api/v1` is private, authenticated, loopback
-  only, and main-process mediated;
+- a browser WebUI, general public API, multi-user authorization, or multi-tenant
+  service. ADR-0026's future Host Remote profile is a separately secured,
+  single-household gateway, not permission to publish the current `/api/v1`;
 - autonomous agents, LLM tool execution, generated shell/Python execution, or
   write-capable generated SQL;
 - third-party module/provider discovery or runtime plugin installation;
@@ -953,6 +1029,7 @@ Use these paths when extending the system:
 | GEDCOM behavior | façade plus kernel as necessary, fictional fixtures | Loss-minimal preservation, stable pointers, conflicts/citations/families, atomic output, 5.5.5 and fallback impact. |
 | RootsMagic behavior | reader/exporter/service | Source remains hash-identical, bounded query, no write path, loss report. |
 | Cloud data use | module service, `GenerationRequest`, consent docs/tests | Correct data classes, purpose/model/module grant, minimization, retention, network-offline test. |
+| Deployment profile or container topology | ADR-0026, host supervisor, Compose policy, threat/privacy/operator docs | Explicit intent, renderer invariants, verified engine identity, authenticated workloads, minimal ingress/egress, key separation, rollback, budgets, native evidence, G5-G7. |
 | Documentation page | `docs/`, sidebar if needed, publishing tests | Unique flattened basename, safe links, deterministic Pages staging and Wiki sync. |
 
 ## Architecture governance
