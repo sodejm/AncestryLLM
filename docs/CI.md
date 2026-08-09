@@ -18,6 +18,18 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
 `make setup` installs the locked environment without changing Git hooks. This
 is the appropriate target for automation and disposable environments.
 
+## Headless shell policy
+
+Every workflow that executes a command sets the workflow-level default shell to
+noninteractive Bash. Individual steps may override that default only when the
+host requires another native shell: the Windows signing, host-inspection,
+installer-validation, and cleanup steps use PowerShell because they call
+Windows APIs or PowerShell-only signing tools. No CI workflow or Make recipe
+uses `zsh` or an interactive shell profile.
+
+The Makefile pins its recipe shell to `/bin/bash`, so local and CI invocations
+have the same command semantics regardless of the caller's interactive shell.
+
 ## Hosted gate tiers
 
 | Event | Required work |

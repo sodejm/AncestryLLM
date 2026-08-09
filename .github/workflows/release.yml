@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: release-${{ github.event_name }}-${{ inputs.commit_sha || github.sha }}
   cancel-in-progress: false
