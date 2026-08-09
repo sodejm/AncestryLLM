@@ -180,6 +180,40 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "include docs/FILE_INGRESS.md" in manifest
 
 
+def test_readme_orients_new_readers_to_the_released_product_boundary() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    prose = " ".join(readme.split())
+
+    assert readme.startswith("# AncestryLLM\n")
+    assert "people researching family history" in prose
+    assert "Python 3.12 through 3.14" in prose
+    assert "### Use the CLI or interactive prompt" in readme
+    assert "pipx install ancestryllm" in readme
+    assert "pipx install 'ancestryllm[all-llm]'" in readme
+    assert "### Use the desktop control shell" in readme
+    assert "Desktop installation does not require Python or pipx" in prose
+    assert "interactive prompt" in prose
+    assert "Home, Diagnostics, Settings, and capability onboarding" in prose
+    assert "not a desktop genealogy application" in prose
+    assert "Desktop genealogy workflows are not available yet" in prose
+    assert "target-matched full installer and `SHA256SUMS`" in prose
+    assert "declared `binarySigningMode`" in prose
+    assert "Provider `none` is network-free" in prose
+    assert "explicit provider selection and your consent" in prose
+    assert "OS keyring" in prose
+    links = set(re.findall(r"\]\((https://[^)]+)\)", readme))
+    assert {
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/CLI.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/CONSOLE.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/PRIVACY_AND_CONSENT.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/PROVIDERS.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/CONTRIBUTING.md",
+    } <= links
+    assert "(docs/" not in readme
+    assert "](CONTRIBUTING.md)" not in readme
+
+
 def test_release_sdist_closes_shipped_cli_document_links() -> None:
     manifest_includes = {
         line.removeprefix("include ").strip()
