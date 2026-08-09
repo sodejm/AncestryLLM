@@ -1,0 +1,30 @@
+# Periodically verifies trusted external links in the published documentation source.
+name: Documentation external-link health
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-link-health-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check trusted external links
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out canonical documentation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check external documentation links
+        run: >-
+          python scripts/check_external_doc_links.py
+          --source docs
+          --exceptions docs/_data/external_link_exceptions.json

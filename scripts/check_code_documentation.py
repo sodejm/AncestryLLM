@@ -104,6 +104,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "tests/fixtures/gedcom_adversarial/manifest.json": "tests/test_gedcom_adversarial.py",
     # Jekyll page metadata; see the 0.6.0 documentation release notes.
     "docs/_data/page_metadata.json": "docs/release-notes/0.6.0.md",
+    # External-link exceptions and their operating policy.
+    "docs/_data/external_link_exceptions.json": "docs/WIKI_OPERATIONS.md",
 }
 
 # ---------------------------------------------------------------------------

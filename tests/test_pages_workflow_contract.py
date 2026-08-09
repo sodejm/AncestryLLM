@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "jekyll-gh-pages.yml"
+EXTERNAL_LINK_WORKFLOW = ROOT / ".github" / "workflows" / "docs-link-health.yml"
 
 
 def test_pages_workflow_builds_the_prepared_documentation_source() -> None:
@@ -14,8 +15,9 @@ def test_pages_workflow_builds_the_prepared_documentation_source() -> None:
 
     assert "Prepare canonical documentation for Pages" in workflow
     assert (
-        "python scripts/prepare_pages_source.py --source docs --destination _pages_source"
-        in workflow
+        "python scripts/prepare_pages_source.py" in workflow
+        and "--source docs" in workflow
+        and "--destination _pages_source" in workflow
     )
     assert "actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697" in workflow
     assert "source: ./_pages_source" in workflow
@@ -80,3 +82,44 @@ def test_page_metadata_sidecar_covers_all_canonical_pages() -> None:
         assert "description" in value, f"missing description for {key}"
         assert value["title"], f"empty title for {key}"
         assert value["description"], f"empty description for {key}"
+
+    canonical_pages = {
+        path.relative_to(ROOT / "docs").as_posix()
+        for path in (ROOT / "docs").rglob("*.md")
+        if path.name != "_Sidebar.md"
+    }
+    metadata_pages = {key for key in metadata if not key.startswith("_")}
+    assert metadata_pages == canonical_pages
+    titles = [metadata[page]["title"].casefold() for page in sorted(metadata_pages)]
+    assert len(titles) == len(set(titles))
+
+
+def test_pages_workflow_validates_source_rendered_site_and_deployment() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "python scripts/validate_wiki_docs.py --source docs" in workflow
+    assert "python scripts/validate_rendered_docs.py --site _site" in workflow
+    assert "python scripts/smoke_pages_deployment.py" in workflow
+    assert '--expected-source-sha "$SOURCE_SHA"' in workflow
+    deploy_job = workflow.split("  deploy:", maxsplit=1)[1]
+    assert "permissions:\n      contents: read" in deploy_job
+
+
+def test_documentation_layout_emits_seo_and_source_revision_metadata() -> None:
+    layout = (ROOT / "docs" / "_layouts" / "documentation.html").read_text(encoding="utf-8")
+
+    assert "{% seo %}" in layout
+    assert 'name="ancestryllm-source-commit"' in layout
+
+
+def test_external_link_health_workflow_is_trusted_and_least_privilege() -> None:
+    workflow = EXTERNAL_LINK_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "schedule:" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "pull_request:" not in workflow
+    assert "permissions:\n  contents: read" in workflow
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "python scripts/check_external_doc_links.py" in workflow
+    assert "docs/_data/external_link_exceptions.json" in workflow

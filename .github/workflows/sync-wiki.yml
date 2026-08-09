@@ -26,6 +26,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate canonical documentation before remote mutation
+        run: python scripts/validate_wiki_docs.py --source docs
+
       - name: Clone initialized wiki repository
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -27,6 +27,42 @@ Changes only to the Wiki workflow or synchronization scripts do not match the
 `docs/**` path filter. Use a manual Wiki dispatch after those changes reach
 `main`.
 
+## Validate before publication
+
+Run the deterministic local-source validator before opening a pull request:
+
+```console
+python scripts/validate_wiki_docs.py --source docs
+```
+
+It resolves page, image, and asset links from the canonical file that contains
+them, checks the complete metadata sidecar, and rejects unsafe or ambiguous
+paths and both hierarchical and flattened-namespace collisions. The Pages and
+Wiki workflows repeat this validation before staging or remote mutation.
+
+The Pages workflow embeds `${{ github.sha }}` in the generated artifact and
+then runs `validate_rendered_docs.py`. That post-Jekyll gate checks metadata,
+internal routes and anchors, the sitemap, robots policy, and the exact source
+revision before upload. After deployment, `smoke_pages_deployment.py` allows
+only the production `sodejm.github.io` host and verifies representative routes
+carry the deployed source revision.
+
+External URL health is a separate trusted, scheduled check because it requires
+network access and must not run against untrusted pull-request input. To run it
+manually on `main`:
+
+```console
+gh workflow run docs-link-health.yml --repo sodejm/AncestryLLM --ref main
+```
+
+The checker deduplicates URLs, limits concurrency and request rate, retries
+transient failures (including bounded `Retry-After` delays), and rejects local,
+private, link-local, reserved, credential-bearing, or unsafe redirect targets.
+Temporary exceptions live in `_data/external_link_exceptions.json` and require
+an exact `url`, accountable `owner`, nonempty `reason`, and ISO `expires` date.
+Remove an exception when the target recovers; expired and unreferenced entries
+fail the check.
+
 ## Manual dispatch
 
 Use the Actions page, select **Sync Wiki**, select **Run workflow**, and choose
@@ -63,6 +99,11 @@ credentials or complete raw logs into an issue.
 Open the [published documentation site](https://sodejm.github.io/AncestryLLM/)
 after the Pages deployment and verify the changed page, sidebar, and internal
 links before completing the Wiki checks below.
+
+The post-deploy smoke gate proves that the served Pages artifact matches the
+workflow source SHA. Live Pages and Wiki evidence can only be recorded after
+the change is merged and both publishers run on `main`; a successful pull
+request build is not hosted-publication evidence.
 
 1. Resolve the current `main` SHA and its matching run:
 
@@ -105,8 +146,8 @@ links before completing the Wiki checks below.
 
    The commit author must be `github-actions[bot]`, its subject must be
    `docs: synchronize from <source_sha>`, the synchronizer must report that the
-   destination is already synchronized, and `git status --porcelain` must print
-   nothing.
+   destination is already synchronized, every linked local asset must exist at
+   its rewritten path, and `git status --porcelain` must print nothing.
 
 4. Open the [published Wiki](https://github.com/sodejm/AncestryLLM/wiki), follow
    the sidebar link to each changed page, and confirm headings, internal links,

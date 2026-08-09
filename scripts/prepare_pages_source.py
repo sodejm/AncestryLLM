@@ -14,11 +14,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from docs_linking import (
+    DocumentationLinkError,
+    SourceIndex,
+    encode_path,
+    split_destination,
+)
 from rewrite_wiki_links import rewrite_markdown_link_destinations
 from validate_wiki_docs import validate_wiki_source
 
-_DESTINATION = re.compile(r"(?P<target>\S+)(?P<title>.*)", re.DOTALL)
-_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _FRONT_MATTER = re.compile(
     r"\A---[ \t]*\r?\n(?P<metadata>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\Z)", re.DOTALL
 )
@@ -53,7 +57,7 @@ def _with_documentation_layout(
     title: str | None = None,
     description: str | None = None,
 ) -> str:
-    extra = ""
+    extra = "layout: documentation\n"
     if title:
         extra += f"title: {json.dumps(title)}\n"
     if description:
@@ -62,15 +66,14 @@ def _with_documentation_layout(
     front_matter = _FRONT_MATTER.match(markdown)
     if front_matter is not None:
         metadata = front_matter.group("metadata")
-        if re.search(r"(?m)^layout\s*:", metadata):
-            return markdown
+        metadata = re.sub(r"(?m)^(?:layout|title|description)[ \t]*:.*(?:\r?\n|\Z)", "", metadata)
         return (
             markdown[: front_matter.start("metadata")]
-            + "layout: documentation\n"
             + extra
-            + markdown[front_matter.start("metadata") :]
+            + metadata
+            + markdown[front_matter.end("metadata") :]
         )
-    return f"---\nlayout: documentation\n{extra}---\n\n{markdown}"
+    return f"---\n{extra}---\n\n{markdown}"
 
 
 def _relative_site_target(current: PurePosixPath, target: PurePosixPath) -> str:
@@ -78,49 +81,44 @@ def _relative_site_target(current: PurePosixPath, target: PurePosixPath) -> str:
     if target_html == PurePosixPath("index.html"):
         relative = posixpath.relpath(".", _output_path(current).parent.as_posix())
         return "./" if relative == "." else f"{relative.rstrip('/')}/"
-    return posixpath.relpath(
-        target_html.as_posix(),
-        _output_path(current).parent.as_posix(),
+    return encode_path(
+        posixpath.relpath(
+            target_html.as_posix(),
+            _output_path(current).parent.as_posix(),
+        )
     )
 
 
 def _rewrite_page_destination(
     destination: str,
     *,
-    source: Path,
+    index: SourceIndex,
     current_page: PurePosixPath,
 ) -> str:
-    parsed = _DESTINATION.fullmatch(destination)
-    if parsed is None:
-        return destination
-
-    target = parsed.group("target")
-    path, separator, fragment = target.partition("#")
-    if not path.endswith(".md") or "://" in path or path.startswith(("mailto:", "tel:")):
-        return destination
-    if path.startswith(("/", "\\")) or _WINDOWS_DRIVE.match(path):
-        raise PagesSourceError(f"unsafe Markdown target: {current_page} -> {path}")
-
-    candidate = (source / current_page.parent / path).resolve()
+    target, title = split_destination(destination)
     try:
-        target_page = _relative(candidate, source)
-    except ValueError as error:
-        raise PagesSourceError(f"unsafe Markdown target: {current_page} -> {path}") from error
-    if not candidate.is_file() or candidate.suffix != ".md":
-        raise PagesSourceError(f"broken Markdown target: {current_page} -> {path}")
+        resolved = index.resolve(current_page, target)
+    except DocumentationLinkError as error:
+        raise PagesSourceError(str(error)) from error
+    if resolved is None:
+        return destination
 
     if current_page == _SIDEBAR_PAGE:
-        target_html = _output_path(target_page).with_suffix(".html")
-        rewritten = (
-            "{{site.baseurl}}/"
-            if target_html == PurePosixPath("index.html")
-            else f"{{{{site.baseurl}}}}/{target_html.as_posix()}"
-        )
+        if resolved.relative.suffix == ".md":
+            target_path = _output_path(resolved.relative).with_suffix(".html")
+            path = (
+                "{{site.baseurl}}/"
+                if target_path == PurePosixPath("index.html")
+                else f"{{{{site.baseurl}}}}/{encode_path(target_path)}"
+            )
+        else:
+            path = f"{{{{site.baseurl}}}}/{encode_path(resolved.relative)}"
+    elif resolved.relative.suffix != ".md":
+        return f"{index.relative_url(current_page, resolved)}{title}"
     else:
-        rewritten = _relative_site_target(current_page, target_page)
-    if separator:
-        rewritten = f"{rewritten}#{fragment}"
-    return f"{rewritten}{parsed.group('title')}"
+        path = _relative_site_target(current_page, resolved.relative)
+    rewritten = resolved.url(path)
+    return f"{rewritten}{title}"
 
 
 def _pages_source_errors(source: Path) -> list[str]:
@@ -139,11 +137,12 @@ def _load_page_metadata(source: Path) -> dict[str, dict[str, str]]:
     }
 
 
-def _stage_documentation(source: Path, staging: Path) -> PagesSourceResult:
+def _stage_documentation(source: Path, staging: Path, *, source_sha: str) -> PagesSourceResult:
     page_count = 0
     asset_count = 0
     sidebar: str | None = None
     page_metadata = _load_page_metadata(source)
+    index = SourceIndex(source)
     files = sorted(
         (path for path in source.rglob("*") if path.is_file()),
         key=lambda path: _relative(path, source).as_posix(),
@@ -158,13 +157,18 @@ def _stage_documentation(source: Path, staging: Path) -> PagesSourceResult:
             continue
 
         markdown = source_file.read_text(encoding="utf-8")
+
+        def rewrite(destination: str, current_page: PurePosixPath = relative) -> str:
+            return _rewrite_page_destination(
+                destination,
+                index=index,
+                current_page=current_page,
+            )
+
         rewritten = rewrite_markdown_link_destinations(
             markdown,
-            lambda destination, current_page=relative: _rewrite_page_destination(
-                destination,
-                source=source,
-                current_page=current_page,
-            ),
+            rewrite,
+            include_images=True,
         )
         if relative == _SIDEBAR_PAGE:
             sidebar = rewritten
@@ -187,10 +191,18 @@ def _stage_documentation(source: Path, staging: Path) -> PagesSourceResult:
         sidebar_destination = staging / "_includes" / "sidebar.md"
         sidebar_destination.parent.mkdir(parents=True, exist_ok=True)
         sidebar_destination.write_text(sidebar, encoding="utf-8")
+    build_metadata = staging / "_data" / "build.json"
+    build_metadata.parent.mkdir(parents=True, exist_ok=True)
+    build_metadata.write_text(
+        json.dumps({"source_sha": source_sha}, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return PagesSourceResult(page_count=page_count, asset_count=asset_count)
 
 
-def prepare_pages_source(source: Path, destination: Path) -> PagesSourceResult:
+def prepare_pages_source(
+    source: Path, destination: Path, *, source_sha: str = "local"
+) -> PagesSourceResult:
     """Build an isolated, Jekyll-ready copy of canonical documentation."""
     source = source.resolve()
     destination = destination.resolve()
@@ -211,7 +223,7 @@ def prepare_pages_source(source: Path, destination: Path) -> PagesSourceResult:
         prefix=f".{destination.name}.", dir=destination.parent
     ) as temporary:
         staging = Path(temporary)
-        result = _stage_documentation(source, staging)
+        result = _stage_documentation(source, staging, source_sha=source_sha)
         staging.replace(destination)
     return result
 
@@ -224,13 +236,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--destination", type=Path, required=True, help="new Jekyll source directory"
     )
+    parser.add_argument(
+        "--source-sha", default="local", help="source revision embedded in rendered pages"
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = prepare_pages_source(args.source, args.destination)
+        result = prepare_pages_source(args.source, args.destination, source_sha=args.source_sha)
     except PagesSourceError as error:
         print(f"pages-source: {error}", file=sys.stderr)
         return 1
