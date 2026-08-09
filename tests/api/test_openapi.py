@@ -11,6 +11,10 @@ from ancestryllm.api import API_NAMESPACE
 from ancestryllm.api.openapi import OPENAPI_ARTIFACT, canonical_openapi, contract_app
 
 
+def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0() -> None:
+    assert contract_app().openapi_version == "3.1.0"
+
+
 def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> None:
     committed = OPENAPI_ARTIFACT.read_text(encoding="utf-8")
     assert committed == canonical_openapi(contract_app())
