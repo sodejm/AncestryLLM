@@ -33,6 +33,11 @@ incomplete. The current desktop records document the released control-surface
 boundary and the verification needed for later expansion; they are not a
 current journey for excluded domain capabilities.
 
+The accepted deployment architecture records future Local Desktop container,
+Connect Remote, and advanced Host Remote profiles. None is currently
+implemented, shipped, or supported, and the local CLI, REPL, and bounded
+desktop shell remain the only product surfaces.
+
 ## Tutorials
 
 Learn a complete, safe workflow with fictional data:
@@ -93,6 +98,7 @@ Concepts, rationale, and design context:
 - [Release notes (planned v0.6)](release-notes/0.6.0.md) — release preparation, not a current release
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md) — exact-head verification, not release approval
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md) — installer publication controls, not a hosted application
+- [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md) — accepted future profiles, trust boundaries, and release gates; not current support
 - [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md) — released control-shell boundary and excluded domain scope
 - [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md) — recorded provider choice
 - [Data-flow threat model and control matrix](THREAT_MODEL.md) — security governance

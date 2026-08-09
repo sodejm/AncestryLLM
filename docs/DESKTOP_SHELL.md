@@ -69,6 +69,14 @@ stderr, raw sidecar or bridge errors, or stack traces. See the
 [desktop ADR](ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
+The separately accepted
+[deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md)
+defines future container and advanced remote targets. It does not expand the
+released 0.5 shell: there is no supported container, remote, LAN, browser, or
+public-service surface. Any future profile keeps the renderer sandbox and
+fixed typed bridge, leaves authority in Electron Main and the shared service
+contracts, and must pass its own release and threat-model gates.
+
 ## Installation and updates
 
 The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
