@@ -133,21 +133,26 @@ function targetFixture(row, observed = metrics) {
     activeSidecarExitedOnQuit: true,
     cleanExit: true,
   })
-  const mismatchEvidence = faultEvidence('sidecar-version-mismatch', {
-    failure: 'incompatible_build',
+  const integrityEvidence = faultEvidence('sidecar-integrity-substitution', {
+    failure: 'startup_failed',
     automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
-    manualRetryFailure: 'incompatible_build',
+    manualRetryFailure: 'startup_failed',
     manualRetriesRemainingAfter: 0,
     verificationProcessTerminated: true,
   })
   const withholdEvidenceBytes = encoded(withholdEvidence)
   const restartEvidenceBytes = encoded(restartEvidence)
-  const mismatchEvidenceBytes = encoded(mismatchEvidence)
+  const integrityEvidenceBytes = encoded(integrityEvidence)
   const runtimeReceipt = receiptRecord(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed', 'normalLaunchDebugSurfaceAbsentPassed'],
     { metrics: digest(metricsBytes) },
     ['pnpm', 'exec', 'playwright', 'test'],
+  )
+  const processTreeGuardReceipt = receiptRecord(
+    ['sidecarProcessTreeGuardPassed'],
+    {},
+    ['python', '-m', 'pytest', 'tests/api/test_sidecar_bootstrap.py'],
   )
   const sidecarReceipt = receiptRecord(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
   const fuseReceipt = receiptRecord(
@@ -165,21 +170,22 @@ function targetFixture(row, observed = metrics) {
     { faultEvidence: digest(restartEvidenceBytes) },
     ['pnpm', 'exec', 'playwright', 'test', '--grep', 'restarts'],
   )
-  const mismatchReceipt = receiptRecord(
-    ['packagedSidecarVersionMismatchPassed'],
+  const integrityReceipt = receiptRecord(
+    ['packagedSidecarIntegritySubstitutionPassed'],
     {
-      faultEvidence: digest(mismatchEvidenceBytes),
-      wrongBuildSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
+      faultEvidence: digest(integrityEvidenceBytes),
+      substitutedSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
     },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'wrong-build'],
+    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'substituted-sidecar'],
   )
   const receiptRecords = [
     runtimeReceipt,
+    processTreeGuardReceipt,
     sidecarReceipt,
     fuseReceipt,
     withholdReceipt,
     restartReceipt,
-    mismatchReceipt,
+    integrityReceipt,
   ]
   const evidence = createTargetEvidence({
     gitHead,
@@ -198,8 +204,8 @@ function targetFixture(row, observed = metrics) {
     withholdEvidenceBytes,
     restartEvidence,
     restartEvidenceBytes,
-    mismatchEvidence,
-    mismatchEvidenceBytes,
+    integrityEvidence,
+    integrityEvidenceBytes,
     receiptRecords,
   })
   return {
@@ -208,7 +214,7 @@ function targetFixture(row, observed = metrics) {
     fuseInspectionBytes,
     withholdEvidenceBytes,
     restartEvidenceBytes,
-    mismatchEvidenceBytes,
+    integrityEvidenceBytes,
     receiptRecords,
   }
 }
@@ -259,8 +265,8 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
     restartEvidenceBytes: fixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(fixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: fixture.integrityEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /platformValidated is derived/)
 })
@@ -304,8 +310,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
     restartEvidenceBytes: fixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(fixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: fixture.integrityEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /not the artifact produced/)
 
@@ -336,8 +342,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     withholdEvidenceBytes: linuxFixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(linuxFixture.restartEvidenceBytes),
     restartEvidenceBytes: linuxFixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(linuxFixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: linuxFixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(linuxFixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: linuxFixture.integrityEvidenceBytes,
     receiptRecords: records,
   }), /not-applicable/)
 })
@@ -376,7 +382,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
     await writeFile(join(runnerRoot, 'fuse-inspection.json'), fixture.fuseInspectionBytes)
     await writeFile(join(runnerRoot, 'sidecar-withhold-retry.json'), fixture.withholdEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-restart-exhaustion-quit.json'), fixture.restartEvidenceBytes)
-    await writeFile(join(runnerRoot, 'sidecar-version-mismatch.json'), fixture.mismatchEvidenceBytes)
+    await writeFile(join(runnerRoot, 'sidecar-integrity-substitution.json'), fixture.integrityEvidenceBytes)
     for (const [index, receipt] of fixture.receiptRecords.entries()) {
       await writeFile(join(runnerRoot, `receipt-${index}.json`), receipt.raw)
     }

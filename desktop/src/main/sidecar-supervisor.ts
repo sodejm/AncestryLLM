@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
+import { SidecarIntegrityError } from './sidecar-integrity'
 
 export const API_CONTRACT = 'ancestryllm.internal-api/1'
 
@@ -31,6 +32,7 @@ type ProbeSidecar = (
 interface SidecarSupervisorOptions {
   appBuild: string
   executablePath: string
+  verify: () => Promise<void>
   launch: LaunchSidecar
   probe: ProbeSidecar
   tokenFactory?: () => string
@@ -113,6 +115,16 @@ export function resolveSidecarExecutable(
   platform: NodeJS.Platform,
   architecture: string,
 ): string {
+  const targetRoot = resolveSidecarTargetRoot(resourcesPath, platform, architecture)
+  const executable = platform === 'win32' ? 'ancestryllm-sidecar.exe' : 'ancestryllm-sidecar'
+  return join(targetRoot, 'ancestryllm-sidecar', executable)
+}
+
+export function resolveSidecarTargetRoot(
+  resourcesPath: string,
+  platform: NodeJS.Platform,
+  architecture: string,
+): string {
   const target = `${platform}-${architecture}`
   if (!new Set([
     'darwin-arm64',
@@ -123,8 +135,7 @@ export function resolveSidecarExecutable(
   ]).has(target)) {
     throw new Error(`Unsupported desktop target: ${target}`)
   }
-  const executable = platform === 'win32' ? 'ancestryllm-sidecar.exe' : 'ancestryllm-sidecar'
-  return join(resourcesPath, 'sidecar', target, 'ancestryllm-sidecar', executable)
+  return join(resourcesPath, 'sidecar', target)
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -190,6 +201,10 @@ export class SidecarSupervisor {
     try {
       await this.launchOne()
     } catch (error) {
+      if (error instanceof SidecarIntegrityError) {
+        this.reportUnavailable('startup_failed')
+        throw error
+      }
       if (error instanceof SidecarCompatibilityError) {
         this.reportUnavailable('incompatible_build')
         throw error
@@ -201,6 +216,10 @@ export class SidecarSupervisor {
           await this.launchOne()
           return
         } catch (retryError) {
+          if (retryError instanceof SidecarIntegrityError) {
+            this.reportUnavailable('startup_failed')
+            throw retryError
+          }
           if (retryError instanceof SidecarCompatibilityError) {
             this.reportUnavailable('incompatible_build')
             throw retryError
@@ -244,7 +263,7 @@ export class SidecarSupervisor {
     return retry
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise
     this.stopping = true
     this.transition('stopping', null)
@@ -254,12 +273,19 @@ export class SidecarSupervisor {
     const processes = new Set(this.pending)
     if (active) processes.add(active)
     this.stopPromise = Promise.allSettled(
-      [...processes].map(async (process) => this.terminateOnce(process)),
-    ).then(() => { this.transition('stopped', null) })
+      [...processes].map((process) => this.terminateOnce(process)),
+    ).then((results) => {
+      if (results.some((result) => result.status === 'rejected')) {
+        this.reportUnavailable('startup_failed')
+        throw new Error('Sidecar shutdown failed.')
+      }
+      this.transition('stopped', null)
+    })
     return this.stopPromise
   }
 
   private async launchOne(): Promise<void> {
+    await this.options.verify()
     const token = (this.options.tokenFactory ?? createLaunchToken)()
     const launchFrame = `${JSON.stringify({
       contract: API_CONTRACT,
@@ -310,7 +336,18 @@ export class SidecarSupervisor {
     this.current = undefined
     this.activeSession = undefined
     this.transition('restarting', null)
-    void this.restartAfterExit()
+    void this.cleanupAndRestartAfterExit(sidecar)
+  }
+
+  private async cleanupAndRestartAfterExit(sidecar: RunningSidecar): Promise<void> {
+    try {
+      await this.terminateOnce(sidecar)
+    } catch {
+      if (!this.stopping) this.reportUnavailable('startup_failed')
+      return
+    }
+    if (this.stopping) return
+    await this.restartAfterExit()
   }
 
   private async restartAfterExit(): Promise<void> {
@@ -320,6 +357,10 @@ export class SidecarSupervisor {
         await this.launchOne()
         return
       } catch (error) {
+        if (error instanceof SidecarIntegrityError) {
+          this.reportUnavailable('startup_failed')
+          return
+        }
         if (error instanceof SidecarCompatibilityError) {
           this.reportUnavailable('incompatible_build')
           return

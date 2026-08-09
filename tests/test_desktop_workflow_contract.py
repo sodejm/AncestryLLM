@@ -149,19 +149,22 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     workflow = _workflow()
 
     assert "scripts/build_verification_sidecar.py" in workflow
-    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" in workflow
+    assert "sidecar-process-tree-guard.json" in workflow
+    assert "--gate sidecarProcessTreeGuardPassed" in workflow
+    assert "tests/api/test_sidecar_bootstrap.py" in workflow
+    assert "ANCESTRYLLM_SUBSTITUTED_SIDECAR" in workflow
     assert "packaged-sidecar-withhold-retry.json" in workflow
     assert "--gate packagedSidecarWithholdRetryPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE"' in workflow
     assert "packaged-sidecar-restart-exhaustion-quit.json" in workflow
     assert "--gate packagedSidecarRestartExhaustionQuitPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE"' in workflow
-    assert "packaged-sidecar-version-mismatch.json" in workflow
-    assert "--gate packagedSidecarVersionMismatchPassed" in workflow
-    assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
-    assert '--artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS"' in workflow
-    assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
-    assert '--allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"' in workflow
+    assert "packaged-sidecar-integrity-substitution.json" in workflow
+    assert "--gate packagedSidecarIntegritySubstitutionPassed" in workflow
+    assert '--artifact faultEvidence="$ANCESTRYLLM_INTEGRITY_EVIDENCE"' in workflow
+    assert '--artifact failureDiagnostics="$ANCESTRYLLM_INTEGRITY_DIAGNOSTICS"' in workflow
+    assert '--artifact substitutedSidecar="$ANCESTRYLLM_SUBSTITUTED_SIDECAR"' in workflow
+    assert '--allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"' in workflow
 
     production_sources = "\n".join(
         path.read_text(encoding="utf-8")
@@ -170,8 +173,8 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     )
     assert "ANCESTRYLLM_WITHHOLD_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_RESTART_EVIDENCE" not in production_sources
-    assert "ANCESTRYLLM_MISMATCH_EVIDENCE" not in production_sources
-    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" not in production_sources
+    assert "ANCESTRYLLM_INTEGRITY_EVIDENCE" not in production_sources
+    assert "ANCESTRYLLM_SUBSTITUTED_SIDECAR" not in production_sources
 
 
 def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator() -> None:
@@ -181,7 +184,7 @@ def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator(
         "exercises first run, persistence, corrupt preferences, security, and resource evidence",
         "withholds and restores the packaged sidecar through Diagnostics retry",
         "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
-        "rejects a target-native wrong-build packaged sidecar",
+        "rejects a target-native substituted packaged sidecar before spawn",
     )
     assert workflow.count("run-packaged-tests.mjs") == len(expected_scenarios)
     for scenario in expected_scenarios:
@@ -194,15 +197,15 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
     workflow = _workflow()
 
     assert (
-        'wrong_build_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/'
+        'substituted_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/'
         '$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"' in workflow
     )
     expected_evidence_paths = (
         'ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"',
         'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
         'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
-        'ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"',
-        'ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"',
+        'ANCESTRYLLM_INTEGRITY_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution.json"',
+        'ANCESTRYLLM_INTEGRITY_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"',
     )
     for evidence_path in expected_evidence_paths:
         assert evidence_path in workflow
@@ -210,13 +213,13 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
     expected_recorded_evidence = (
         '--withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json"',
         '--restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
-        '--mismatch-evidence "$ROW_ROOT/sidecar-version-mismatch.json"',
+        '--integrity-evidence "$ROW_ROOT/sidecar-integrity-substitution.json"',
     )
     for evidence_path in expected_recorded_evidence:
         assert evidence_path in workflow
     assert '--withhold-evidence "$ANCESTRYLLM_WITHHOLD_EVIDENCE"' not in workflow
     assert '--restart-evidence "$ANCESTRYLLM_RESTART_EVIDENCE"' not in workflow
-    assert '--mismatch-evidence "$ANCESTRYLLM_MISMATCH_EVIDENCE"' not in workflow
+    assert '--integrity-evidence "$ANCESTRYLLM_INTEGRITY_EVIDENCE"' not in workflow
 
     sandbox_step = "Prepare Chromium sandbox for unpacked Linux verification"
     assert f"name: {sandbox_step}" in workflow

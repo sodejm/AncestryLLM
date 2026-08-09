@@ -28,7 +28,7 @@
     "check:secrets": "node scripts/check-secrets.mjs",
     "sbom": "pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --sbom-type application --out sbom.cdx.json",
     "security": "pnpm audit --audit-level high && pnpm check:secrets && pnpm run sbom",
-    "package": "pnpm build && node scripts/verify-sidecar.mjs && electron-builder --dir",
+    "package": "node scripts/verify-sidecar.mjs && pnpm build && electron-builder --dir",
     "inspect:fuses": "node scripts/inspect-package-fuses.mjs",
     "test:security": "pnpm package && vitest run src/main/security-policy.test.ts src/main/session-policy.test.ts src/main/external-links.test.ts && node scripts/inspect-package-fuses.mjs"
   },

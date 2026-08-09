@@ -1,7 +1,8 @@
 # Packaged desktop sidecar
 
 Issue #225 adds the control-only native sidecar used by the packaged Electron
-main process. Issue #226 adds the narrow typed bridge that lets the renderer
+main process. Issue #102 hardens its payload verification and process-tree
+supervision. Issue #226 adds the narrow typed bridge that lets the renderer
 read sanitized control state without becoming a sidecar client. Neither change
 exposes genealogy, job, chat, provider, cloud-account, updater, or generic
 command routes; the sidecar is not a domain-data transport.
@@ -21,39 +22,75 @@ equivalent Electron resources directory on Windows and Linux.
 | Windows 11 | arm64 | `win32-arm64` | built and executed natively on `windows-11-arm` |
 | Ubuntu 24.04 | x64 | `linux-x64` | `ubuntu-24.04` |
 
+The native build writes a deterministic `sidecar-manifest.json` containing the
+exact target, application/sidecar build, and sorted full payload inventory. It
+binds regular files by size and SHA-256 and records only safe in-tree symbolic
+links. The Electron production build embeds the SHA-256 of that adjacent
+manifest in main-process code. Before generating a bearer or starting a child,
+main verifies the embedded digest, exact target/build, complete inventory,
+every file, and every link. An unexpected, missing, substituted, or escaping
+entry fails closed with only a structural startup diagnostic.
+
+This manifest binding detects sidecar-payload substitution; it is not a
+publisher signature, notarization, or whole-application integrity mechanism.
+Project-produced `0.x` release installers and annotated tags remain unsigned by
+policy. Manifest binding does not make the payload publisher-signed and cannot
+authenticate a wholly rewritten application bundle. Trusted publisher signing
+and applicable notarization remain the Issue #132 distribution gate and become
+mandatory at v1.0.0. The
+verify-to-spawn filesystem interval also remains a residual TOCTOU boundary;
+trusted signing does not remove the need to narrow or eliminate that interval.
+
 The workflow smoke-tests the native executable before packaging and verifies
 the exact packaged resource afterwards. A system Python installation is not
 used at runtime. CI output is an unsigned, unpacked verification artifact, not
 a supported release. Supported distribution requires a manually installed
 installer plus provenance, installation, target-execution, and packaged
-assurance gates. Full production/trusted binary signing and applicable
-notarization begin at v1.0.0; project-produced `0.x` release installers and
-annotated tags must be unsigned. Version 0.5.0 has no updater,
-update feed, background update channel, or staged rollout.
+assurance gates. Version 0.5.0 has no updater, update feed, background update
+channel, or staged rollout.
 
 ## Private lifecycle
 
-1. Electron main resolves only the current native resource target and creates a
-   fresh 32-byte (256-bit) bearer with the operating-system random source.
-2. It starts the executable with no arguments, no shell, a private temporary
+1. Electron main resolves only the current native resource target and completes
+   the manifest verification described above.
+2. Only after verification, it creates a fresh 32-byte (256-bit) bearer with
+   the operating-system random source.
+3. It starts the executable with no arguments, no shell, a private temporary
    working directory, and an allowlisted environment. Provider credentials,
    `PATH`, and home-directory values are not inherited.
-3. Electron writes one bounded JSON line to stdin containing the exact API
+4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness
    output, or diagnostics.
-4. The sidecar forces `provider=none`, binds IPv4 `127.0.0.1` on port `0`, and
+5. The sidecar forces `provider=none`, binds IPv4 `127.0.0.1` on port `0`, and
    exposes only authenticated `/api/v1/health` and `/api/v1/capabilities`.
-5. It emits one bounded readiness line containing only the contract, sidecar
+6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
 
 Contract or build mismatch fails closed without restart. Startup and probe
 work are bounded to 10 seconds. Other launch failures and unexpected crashes
 receive at most two restart attempts for the application lifetime. Application
-quit sends one termination request, waits up to three seconds, then force-kills
-and performs one final bounded wait. No sidecar is started by the development
-mock shell.
+quit allows up to 12 seconds for Uvicorn's configured 10-second graceful
+shutdown, then force-kills and performs one final one-second wait. POSIX
+launches use a detached process group and signal the full group even if its
+leader already exited. On Windows, the sidecar assigns itself to a
+non-inheritable, kill-on-close Job Object before reading bootstrap input, while
+Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
+therefore terminates descendants even when Electron cannot observe the original
+leader. No sidecar is started by the development mock shell.
+
+The current shutdown drains only resources that the implemented control
+sidecar actually owns: the Uvicorn server task and loopback listener, child
+stdio, the supervised process tree, and Electron's private temporary working
+directory. FastAPI exposes an application-lifespan shutdown hook, but the
+current health/capability-only composition registers no domain jobs, provider
+streams, or database sessions. Every future resource of those types must
+register an orderly drain through that lifecycle before its route is enabled.
+The native Windows descendant-kill assertion can run only on Windows; the
+exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
+Non-Windows local runs exercise only the explicit no-op branch and do not
+substitute for that evidence.
 
 The supervisor exposes a main-process-only control interface. A fixed-route
 internal client may acquire the authenticated session only while its lifecycle

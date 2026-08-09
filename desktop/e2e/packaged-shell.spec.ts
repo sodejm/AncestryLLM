@@ -22,9 +22,9 @@ const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
-const mismatchEvidencePath = process.env.ANCESTRYLLM_MISMATCH_EVIDENCE
-const mismatchDiagnosticsPath = process.env.ANCESTRYLLM_MISMATCH_DIAGNOSTICS
-const wrongBuildSidecarPath = process.env.ANCESTRYLLM_WRONG_BUILD_SIDECAR
+const integrityEvidencePath = process.env.ANCESTRYLLM_INTEGRITY_EVIDENCE
+const integrityDiagnosticsPath = process.env.ANCESTRYLLM_INTEGRITY_DIAGNOSTICS
+const substitutedSidecarPath = process.env.ANCESTRYLLM_SUBSTITUTED_SIDECAR
 const execFileAsync = promisify(execFile)
 
 const bridgeMethods = [
@@ -469,7 +469,7 @@ async function signVerificationPackage(packageRoot: string): Promise<void> {
 
 async function writeFaultEvidence(
   path: string,
-  scenario: 'sidecar-withhold-retry' | 'sidecar-restart-exhaustion-quit' | 'sidecar-version-mismatch',
+  scenario: 'sidecar-withhold-retry' | 'sidecar-restart-exhaustion-quit' | 'sidecar-integrity-substitution',
   observations: Record<string, boolean | number | string>,
 ): Promise<void> {
   await writeFile(path, `${JSON.stringify({
@@ -483,7 +483,7 @@ async function writeFaultEvidence(
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
 }
 
-async function writeMismatchDiagnostics(
+async function writeIntegrityDiagnostics(
   path: string,
   details: Readonly<{
     phase: string
@@ -497,7 +497,7 @@ async function writeMismatchDiagnostics(
   await writeFile(path, `${JSON.stringify({
     schemaVersion: 1,
     kind: 'ancestryllm-packaged-fault-diagnostics',
-    scenario: 'sidecar-version-mismatch',
+    scenario: 'sidecar-integrity-substitution',
     ...details,
   }, null, 2)}\n`, { mode: 0o600 })
 }
@@ -1088,17 +1088,17 @@ test.describe('unpublished unpacked native package', () => {
     }
   })
 
-  test('rejects a target-native wrong-build packaged sidecar', async () => {
+  test('rejects a target-native substituted packaged sidecar before spawn', async () => {
     test.skip(
-      !mismatchEvidencePath || !mismatchDiagnosticsPath || !wrongBuildSidecarPath,
-      'Mismatch evidence output, diagnostics output, and wrong-build sidecar are required',
+      !integrityEvidencePath || !integrityDiagnosticsPath || !substitutedSidecarPath,
+      'Integrity evidence output, diagnostics output, and substituted sidecar are required',
     )
-    if (!mismatchEvidencePath || !mismatchDiagnosticsPath || !wrongBuildSidecarPath) {
+    if (!integrityEvidencePath || !integrityDiagnosticsPath || !substitutedSidecarPath) {
       throw new Error(
-        'ANCESTRYLLM_MISMATCH_EVIDENCE, ANCESTRYLLM_MISMATCH_DIAGNOSTICS, and ANCESTRYLLM_WRONG_BUILD_SIDECAR are required',
+        'ANCESTRYLLM_INTEGRITY_EVIDENCE, ANCESTRYLLM_INTEGRITY_DIAGNOSTICS, and ANCESTRYLLM_SUBSTITUTED_SIDECAR are required',
       )
     }
-    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-wrong-build-sidecar-'))
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-substituted-sidecar-'))
     let running: LaunchResult | undefined
     let phase = 'copy package'
     const startedAt = Date.now()
@@ -1109,7 +1109,7 @@ test.describe('unpublished unpacked native package', () => {
     try {
       const copied = await copyPackagedApplication(root)
       phase = 'replace sidecar'
-      await copyFile(wrongBuildSidecarPath, copied.sidecarPath)
+      await copyFile(substitutedSidecarPath, copied.sidecarPath)
       if (process.platform !== 'win32') await chmod(copied.sidecarPath, 0o755)
       await signVerificationPackage(copied.packageRoot)
 
@@ -1117,11 +1117,11 @@ test.describe('unpublished unpacked native package', () => {
       running = await launchPackaged(
         join(root, 'user-data'),
         /Welcome to AncestryLLM/,
-        'wrong-build-sidecar',
+        'substituted-sidecar',
         copied.executablePath,
         {
           state: 'degraded',
-          failure: 'incompatible_build',
+          failure: 'startup_failed',
           automaticRestartsRemaining: 2,
           manualRetriesRemaining: 1,
         },
@@ -1130,13 +1130,13 @@ test.describe('unpublished unpacked native package', () => {
       phase = 'rejection surface'
       await expectSafeDiagnosticsAlert(running.page)
       await expect(running.page.getByRole('alert')).toContainText(
-        'The desktop service is not compatible with this build.',
+        'The desktop service did not start.',
       )
       phase = 'manual rejection'
       await running.page.getByRole('button', { name: 'Retry desktop service' }).click()
       await expectStartupDiagnostics(running.page, {
         state: 'degraded',
-        failure: 'incompatible_build',
+        failure: 'startup_failed',
         automaticRestartsRemaining: 2,
         manualRetriesRemaining: 0,
       })
@@ -1146,11 +1146,11 @@ test.describe('unpublished unpacked native package', () => {
       processExited = true
       running = undefined
       phase = 'write fault evidence'
-      await writeFaultEvidence(mismatchEvidencePath, 'sidecar-version-mismatch', {
-        failure: 'incompatible_build',
+      await writeFaultEvidence(integrityEvidencePath, 'sidecar-integrity-substitution', {
+        failure: 'startup_failed',
         automaticRestartsRemaining: 2,
         manualRetriesRemainingBefore: 1,
-        manualRetryFailure: 'incompatible_build',
+        manualRetryFailure: 'startup_failed',
         manualRetriesRemainingAfter: 0,
         verificationProcessTerminated: true,
       })
@@ -1174,7 +1174,7 @@ test.describe('unpublished unpacked native package', () => {
       cleanupFailure = error
       cleanupFailurePhase = phase
     }
-    await writeMismatchDiagnostics(mismatchDiagnosticsPath, {
+    await writeIntegrityDiagnostics(integrityDiagnosticsPath, {
       phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase,
       elapsedMs: Date.now() - startedAt,
       status: failure || cleanupFailure ? 'failed' : 'passed',

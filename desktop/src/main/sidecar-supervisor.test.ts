@@ -9,6 +9,7 @@ import {
   resolveSidecarExecutable,
   type RunningSidecar,
 } from './sidecar-supervisor'
+import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 
 class FakeSidecar extends EventEmitter implements RunningSidecar {
   readonly terminate = vi.fn(async () => undefined)
@@ -21,6 +22,7 @@ class FakeSidecar extends EventEmitter implements RunningSidecar {
 }
 
 const ready = { contract: API_CONTRACT, sidecar_build: '0.5.0-dev', port: 49152 }
+const verify = async (): Promise<void> => undefined
 
 describe('sidecar launch boundary', () => {
   it('creates a fresh 256-bit URL-safe launch token', () => {
@@ -54,11 +56,40 @@ describe('sidecar launch boundary', () => {
 })
 
 describe('SidecarSupervisor', () => {
+  it('verifies the immutable payload before token creation and does not restart integrity failures', async () => {
+    const events: string[] = []
+    const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar',
+      verify: async () => {
+        events.push('verify')
+        await verifySidecarPayload({
+          targetRoot: '/bundle/missing-sidecar-target',
+          expectedManifestSha256: '0'.repeat(64),
+          expectedTarget: 'darwin-arm64',
+          appBuild: '0.5.0-dev',
+        })
+      },
+      launch,
+      probe: async () => undefined,
+      tokenFactory: () => { events.push('token'); return 'T'.repeat(43) },
+      startupTimeoutMs: 100, maxRestarts: 2,
+    })
+
+    await expect(supervisor.start()).rejects.toBeInstanceOf(SidecarIntegrityError)
+    expect(events).toEqual(['verify'])
+    expect(launch).not.toHaveBeenCalled()
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 0,
+    })
+  })
+
   it('reports sanitized lifecycle transitions and grants sessions only while ready', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const launch = vi.fn(async () => sidecar)
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/private/canary-sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/private/canary-sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'S'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
     })
@@ -91,7 +122,7 @@ describe('SidecarSupervisor', () => {
     const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
     const probe = vi.fn(async () => undefined)
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch, probe,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch, probe,
       tokenFactory: () => 'T'.repeat(43), startupTimeoutMs: 100, maxRestarts: 2,
     })
 
@@ -104,18 +135,27 @@ describe('SidecarSupervisor', () => {
     expect(probe).toHaveBeenCalledWith(ready, 'T'.repeat(43), '0.5.0-dev')
   })
 
-  it('fails closed immediately on protocol or build mismatch', async () => {
-    const sidecar = new FakeSidecar(Promise.resolve({ ...ready, sidecar_build: 'wrong-build' }))
+  it.each([
+    ['protocol', { ...ready, contract: 'ancestryllm.sidecar/wrong' }],
+    ['build', { ...ready, sidecar_build: 'wrong-build' }],
+  ])('fails closed immediately on a manifest-valid %s mismatch without retry', async (_kind, response) => {
+    const sidecar = new FakeSidecar(Promise.resolve(response))
     const launch = vi.fn(async () => sidecar)
+    const verifier = vi.fn(verify)
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify: verifier, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2,
     })
 
     await expect(supervisor.start()).rejects.toBeInstanceOf(SidecarCompatibilityError)
+    expect(verifier).toHaveBeenCalledOnce()
     expect(launch).toHaveBeenCalledTimes(1)
     expect(sidecar.terminate).toHaveBeenCalledTimes(1)
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'incompatible_build',
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 0,
+    })
   })
 
   it('restarts crashes deterministically and stops after the bounded budget', async () => {
@@ -125,7 +165,7 @@ describe('SidecarSupervisor', () => {
     const probe = vi.fn(async () => undefined)
     const fatal = vi.fn()
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
     })
@@ -148,7 +188,7 @@ describe('SidecarSupervisor', () => {
       .mockResolvedValueOnce(replacement)
     const fatal = vi.fn()
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
     })
@@ -165,7 +205,8 @@ describe('SidecarSupervisor', () => {
   it('bounds startup time and terminates the stalled process', async () => {
     const sidecar = new FakeSidecar(new Promise(() => undefined))
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch: async () => sidecar,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 5, maxRestarts: 0,
     })
@@ -178,7 +219,7 @@ describe('SidecarSupervisor', () => {
     const secret = 'secret-token-canary'
     const privatePath = '/private/path/canary-sidecar'
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: privatePath,
+      appBuild: '0.5.0-dev', executablePath: privatePath, verify,
       launch: async () => { throw new Error(`${secret} ${privatePath}\nprivate stderr\nstack`) },
       probe: async () => undefined, tokenFactory: () => secret,
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
@@ -206,7 +247,7 @@ describe('SidecarSupervisor', () => {
       .mockRejectedValueOnce(new Error('initial failure'))
       .mockResolvedValueOnce(retrySidecar)
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
     })
@@ -214,7 +255,7 @@ describe('SidecarSupervisor', () => {
 
     const firstRetry = supervisor.retry()
     const concurrentRetry = supervisor.retry()
-    expect(launch).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
     expect(supervisor.diagnostics().manualRetriesRemaining).toBe(0)
     releaseRetry?.()
     await expect(Promise.all([firstRetry, concurrentRetry])).resolves.toEqual([true, true])
@@ -232,7 +273,7 @@ describe('SidecarSupervisor', () => {
       .mockRejectedValueOnce(new Error('initial failure'))
       .mockResolvedValueOnce(retrySidecar)
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 10, maxRestarts: 0, maxManualRetries: 1,
     })
@@ -250,7 +291,8 @@ describe('SidecarSupervisor', () => {
   it('terminates the active sidecar exactly once on app shutdown', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const supervisor = new SidecarSupervisor({
-      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', launch: async () => sidecar,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2,
     })
@@ -258,5 +300,57 @@ describe('SidecarSupervisor', () => {
 
     await Promise.all([supervisor.stop(), supervisor.stop()])
     expect(sidecar.terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails shutdown closed when process-tree termination cannot be verified', async () => {
+    const privateFailure = '/private/process-tree-cleanup-failure'
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    sidecar.terminate.mockRejectedValueOnce(new Error(privateFailure))
+    const fatal = vi.fn()
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
+    })
+    await supervisor.start()
+
+    const firstStop = supervisor.stop()
+    const concurrentStop = supervisor.stop()
+    const results = await Promise.allSettled([firstStop, concurrentStop])
+
+    expect(results).toEqual([
+      { status: 'rejected', reason: new Error('Sidecar shutdown failed.') },
+      { status: 'rejected', reason: new Error('Sidecar shutdown failed.') },
+    ])
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 0,
+    })
+    expect(JSON.stringify(results)).not.toContain(privateFailure)
+    expect(JSON.stringify(fatal.mock.calls)).not.toContain(privateFailure)
+  })
+
+  it('fails closed without an unhandled restart when crash cleanup fails', async () => {
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    sidecar.terminate.mockRejectedValueOnce(new Error('/private cleanup failure'))
+    const launch = vi.fn(async () => sidecar)
+    const fatal = vi.fn()
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
+    })
+    await supervisor.start()
+
+    sidecar.emit('exit', 1)
+
+    await vi.waitFor(() => expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 0,
+    }))
+    expect(launch).toHaveBeenCalledOnce()
+    expect(JSON.stringify(fatal.mock.calls)).not.toContain('/private cleanup failure')
   })
 })

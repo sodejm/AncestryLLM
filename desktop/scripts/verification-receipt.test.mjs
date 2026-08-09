@@ -34,13 +34,14 @@ async function cleanRepositoryFixture(prefix = 'ancestryllm-receipt-repository-'
 test('target receipts require each packaged sidecar fault scenario explicitly', () => {
   assert.deepEqual(TARGET_RECEIPT_GATES, [
     'packageRuntimePassed',
+    'sidecarProcessTreeGuardPassed',
     'sidecarSmokePassed',
     'fusesInspectedPassed',
     'rendererZeroEgressCanaryPassed',
     'normalLaunchDebugSurfaceAbsentPassed',
     'packagedSidecarWithholdRetryPassed',
     'packagedSidecarRestartExhaustionQuitPassed',
-    'packagedSidecarVersionMismatchPassed',
+    'packagedSidecarIntegritySubstitutionPassed',
   ])
 })
 

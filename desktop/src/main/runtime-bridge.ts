@@ -3,8 +3,13 @@ import type { AncestryBridge } from '../shared-contract/desktop'
 import { createDesktopControlBridge } from './desktop-control'
 import { FilePreferencesStore } from './preferences-store'
 import { createSidecarCapabilitiesClient } from './sidecar-client'
+import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
-import { resolveSidecarExecutable, SidecarSupervisor } from './sidecar-supervisor'
+import {
+  resolveSidecarExecutable,
+  resolveSidecarTargetRoot,
+  SidecarSupervisor,
+} from './sidecar-supervisor'
 
 export interface RuntimeBridge {
   bridge: AncestryBridge
@@ -17,9 +22,25 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
   }
 
   const preferences = new FilePreferencesStore(app.getPath('userData'))
+  const target = `${process.platform}-${process.arch}`
   const supervisor = new SidecarSupervisor({
     appBuild: app.getVersion(),
     executablePath: resolveSidecarExecutable(process.resourcesPath, process.platform, process.arch),
+    verify: async () => {
+      if (__ANCESTRYLLM_SIDECAR_MANIFEST_SHA256__ === null) {
+        throw new SidecarIntegrityError()
+      }
+      await verifySidecarPayload({
+        targetRoot: resolveSidecarTargetRoot(
+          process.resourcesPath,
+          process.platform,
+          process.arch,
+        ),
+        expectedManifestSha256: __ANCESTRYLLM_SIDECAR_MANIFEST_SHA256__,
+        expectedTarget: target,
+        appBuild: app.getVersion(),
+      })
+    },
     launch: launchNativeSidecar,
     probe: probeNativeSidecar,
     startupTimeoutMs: 10_000,
