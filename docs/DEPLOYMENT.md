@@ -4,6 +4,28 @@ AncestryLLM is local-first software. This document covers the hosted controls
 used to build and publish its desktop installers; it does not describe a
 hosted application deployment.
 
+## Deployment-profile status
+
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
+future Local Desktop container profile plus explicit Connect Remote and Host
+Remote profiles. None is implemented, shipped, or supported today. This guide
+does not authorize using the current private sidecar as a network service or
+provide a current Host Remote runbook.
+
+Before any profile release, a separate operator runbook must cover every
+claimed native host and architecture, Docker Engine API and Compose
+compatibility, Colima/Lima as the open-source macOS default, and Docker Desktop
+as an optional separately licensed runtime. It must also cover explicit profile
+intent, identity and enrollment, immutable image digests, TLS, authentication,
+firewalls and listeners, the narrow host-secret broker, backups, upgrades,
+uninstall, monitoring, recovery, and ownership. Host Remote is limited to one
+trusted household, is self-supported, and has no project-operated SLA.
+
+Release evidence must meet ADR-0026's quantitative startup, shutdown, memory,
+image-size, listener, and zero-egress budgets and the threat model's `G5`-`G7`
+gates. Emulated execution must be labeled as emulation and cannot establish
+native platform or architecture support.
+
 Full production/trusted binary signing is intentionally deferred until the
 first full version release, v1.0.0. Official `0.x` releases default to unsigned
 binaries, so none of the signing credentials below are required to build or

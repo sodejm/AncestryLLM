@@ -133,6 +133,10 @@
     "title": "ADR-0025: Electron and FastAPI desktop — AncestryLLM",
     "description": "Architecture decision record for the released bounded Electron control shell, private FastAPI sidecar, and limits on future desktop-domain work."
   },
+  "ADR-0026-local-first-container-remote-deployment.md": {
+    "title": "ADR-0026: Local-first container and advanced remote deployment — AncestryLLM",
+    "description": "Accepted future local-container and advanced remote profiles, including trust boundaries, ownership, resource budgets, non-goals, and release gates."
+  },
   "DOCS_AUTHORING.md": {
     "title": "Documentation architecture and authoring guide — AncestryLLM",
     "description": "Canonical Diátaxis architecture, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."

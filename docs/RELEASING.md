@@ -20,6 +20,33 @@ evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
 iteration, currently `v0.5.0 — Foundation`, is authoritative for future
 release readiness.
 
+## Future deployment-profile release gate
+
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
+target, not a current availability claim. Local Desktop containers, Connect
+Remote, and Host Remote remain unavailable until all of these conditions pass:
+
+1. Threat-model gates `G5`-`G7` have linked implementation evidence, no
+   untriaged Critical or High finding, and approval by a reviewer other than
+   the implementer.
+2. Every claimed OS, architecture, Docker Engine API, Compose version, and
+   runtime is tested natively. Emulation is labeled and does not establish
+   native support. Colima/Lima is the open-source macOS default; Docker Desktop
+   is optional and separately licensed.
+3. ADR-0026's startup, shutdown, memory, image-size, listener, and zero-egress
+   budgets pass on the release candidate.
+4. OCI digests, checksums, dependency licenses, SBOM, and provenance are
+   verified; images and artifacts contain no credentials, genealogy data, or
+   Docker authority; and any later artifact-signing boundary is documented.
+5. Operator documentation covers profile intent, the renderer and Docker trust
+   boundaries, listeners, TLS, authentication, secret and SQLCipher-key
+   custody, restore drills, upgrades, rollback, uninstall, capacity,
+   monitoring, incident response, and recovery. Host Remote remains a
+   single-household, self-supported profile with no project-operated SLA.
+
+Failure of any condition blocks the affected profile without blocking the
+existing local CLI, REPL, or released bounded desktop shell.
+
 ### Private Project read token
 
 Project 2 is private. Configure the repository Actions secret

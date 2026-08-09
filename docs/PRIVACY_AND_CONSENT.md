@@ -65,6 +65,45 @@ data classes, retention, and current consent before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
 renderer privileges.
 
+## Accepted future deployment privacy boundary
+
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts future
+Local Desktop, Connect Remote, and Host Remote profiles, but none is currently
+implemented or supported. Local Desktop remains the default and may not open a
+non-loopback listener. Choosing or discovering a container runtime does not
+grant remote consent, and an upgrade may not infer a remote profile.
+
+The renderer boundary does not change between profiles. It receives no raw
+network access, endpoint, session or enrollment bearer, Docker credential,
+filesystem path, keyring value, provider secret, or SQLCipher key. Electron
+Main owns the fixed typed bridge and authenticated session state. Switching
+profiles clears renderer state, revokes scoped grants, and establishes a fresh
+authenticated session rather than carrying authority across the boundary.
+
+Local containers do not read the OS keyring directly. A narrow host broker may
+provide a required secret to one authorized process after policy and consent
+checks, but the value must not enter Compose files, images, environment
+manifests, command arguments, logs, inspection output, or renderer state. Data
+and SQLCipher-key material use separate storage and backup paths.
+`provider=none` continues to mean zero provider and model egress in every
+profile.
+
+Host Remote is an explicit, advanced, self-supported profile for one trusted
+household. Its operator controls the host root account, container runtime, DNS,
+TLS edge, identity provider, logs, backups, and recovery and can therefore
+observe plaintext handled by the service. The data owner explicitly accepts
+that custody; containers do not protect data from a malicious or compromised
+operator. Unrelated households require separate deployments and data stores.
+Remote hosting does not relax provider selection, consent, retention,
+redaction, authentication, or audit policy.
+
+Only the validated TLS gateway may be publicly reachable. Internal network or
+VPN membership is not identity: every application route requires an
+authenticated, authorized session, and there are no anonymous health, schema,
+documentation, setup, or bootstrap routes. Network and identity providers may
+still observe traffic metadata even when payloads are encrypted, so production
+logging remains off or privacy-minimal and excludes genealogy and secret data.
+
 ## Interactive console privacy
 
 The only supported interactive console is the prompt-toolkit/Rich REPL. It uses
