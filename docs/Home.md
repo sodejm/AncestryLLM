@@ -9,11 +9,14 @@ The canonical source is this `docs/` directory. It is published to the
 [GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki); the Wiki remains
 available, but neither published view is an independent documentation source.
 
-## Implemented surfaces
+## Current product surfaces
 
-The CLI and interactive REPL are the two implemented product surfaces.
-Both use the same command specification, transport-neutral executor, application
-DTOs, and genealogy services.
+The CLI, interactive REPL, and released bounded Electron desktop control shell
+are the implemented product surfaces. The shell supports Home, Diagnostics,
+Settings, and capability onboarding.
+
+The CLI and REPL use the same command specification, transport-neutral
+executor, application DTOs, and genealogy services.
 
 - Start with the [CLI reference](CLI.md) for one-shot commands.
 - Start with the [interactive console guide](CONSOLE.md) for the prompt-toolkit
@@ -23,19 +26,25 @@ All user-selected files are governed by the shared
 [bounded file-ingress policy](FILE_INGRESS.md), including byte and record
 budgets, race detection, output alias rejection, and transactional publication.
 
-**Planned (v0.5.0):** The offline Electron desktop shell on macOS, Windows, and
-Ubuntu introduces Home, Diagnostics, Settings, and capability onboarding. It
-uses a private control-only sidecar and excludes genealogy, files, jobs, chat,
-providers, cloud accounts, and updater surfaces. See the
-[desktop shell guide](DESKTOP_SHELL.md) and
-[desktop verification guide](DESKTOP_VERIFICATION.md).
+The released bounded Electron desktop control shell uses the authenticated
+health/capability sidecar. Desktop-domain capabilities—genealogy/domain routes,
+files, jobs, providers, cloud accounts, and updater flows—remain planned or
+incomplete. The current desktop records document the released control-surface
+boundary and the verification needed for later expansion; they are not a
+current journey for excluded domain capabilities.
+
+## Tutorials
+
+Tutorials will provide safe, end-to-end learning paths when they are published.
+There is no tutorial page yet, so this navigation deliberately does not link to
+an uncreated destination. Current users can begin with the CLI reference or the
+interactive console how-to guide below.
 
 ## How-to guides
 
 Task-oriented guidance for common goals:
 
 - [Interactive console guide](CONSOLE.md) — start and use the REPL
-- [Provider guide](PROVIDERS.md) — configure provider none or a cloud provider
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md) — create and restore backups
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md) — troubleshoot setup
 - [Release runbook](RELEASING.md) — prepare and publish a release
@@ -45,13 +54,16 @@ Task-oriented guidance for common goals:
 Factual, accurate information to look up:
 
 - [CLI reference](CLI.md) — commands, options, and exit codes
+- [Provider guide](PROVIDERS.md) — provider policy, profiles, and capabilities
 - [GEDCOM compatibility and release checks](GEDCOM_COMPATIBILITY.md)
 - [Versioning and compatibility](VERSIONING.md)
 - [Bounded file ingress](FILE_INGRESS.md)
-- [Built-in module authoring](MODULE_AUTHORING.md)
 - [Continuous integration](CI.md)
 - [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Command executor](COMMAND_EXECUTOR.md)
+- [Built-in module authoring](MODULE_AUTHORING.md) — constraints, registration, and tests
+- [Application contracts](APPLICATION_CONTRACTS.md) — service DTOs and ports
+- [API reference](api/API_REFERENCE.md) — authenticated health and capability control API
 - [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
 - [Local-first retrieval evaluation](LOCAL_RETRIEVAL_EVALUATION.md)
 
@@ -61,17 +73,21 @@ Concepts, rationale, and design context:
 
 - [Privacy and consent](PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
 - [REPL architecture](REPL_ARCHITECTURE.md) — internal session and dispatch design
-- [Application contracts](APPLICATION_CONTRACTS.md) — service DTOs and ports
-- [Data-flow threat model and control matrix](THREAT_MODEL.md)
-- [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md)
-- [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md)
+- [Desktop shell (released bounded v0.5.0 control surface)](DESKTOP_SHELL.md) — Home, Diagnostics, Settings, and capability onboarding only
 
-## Maintainer and publishing guides
+## Supporting records and publishing
 
 - [Wiki synchronization](WIKI_SYNC.md) — reproduce the publishing step locally
 - [Wiki operations and recovery](WIKI_OPERATIONS.md) — dispatch, verify, rollback
 - [Security response checklist](SECURITY_RESPONSE.md)
 - [Documentation authoring guide](DOCS_AUTHORING.md) — Diátaxis map and authoring rules
+- [Release notes (planned v0.6)](release-notes/0.6.0.md) — release preparation, not a current release
+- [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md) — exact-head verification, not release approval
+- [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md) — installer publication controls, not a hosted application
+- [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md) — released control-shell boundary and excluded domain scope
+- [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md) — recorded provider choice
+- [Data-flow threat model and control matrix](THREAT_MODEL.md) — security governance
+- [Release evidence index](release-evidence/README.md) — retained verification artifacts
 
 ## Documentation links
 

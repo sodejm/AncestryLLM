@@ -3,7 +3,7 @@
   "_schema_version": 1,
   "Home.md": {
     "title": "AncestryLLM documentation",
-    "description": "Local-first genealogy research with optional LLM providers. Start here for CLI, REPL, and desktop references."
+    "description": "Local-first genealogy research with optional LLM providers. Start with the current CLI and REPL or released bounded desktop control shell; desktop-domain capabilities remain planned."
   },
   "CLI.md": {
     "title": "CLI reference — AncestryLLM",
@@ -15,7 +15,7 @@
   },
   "PROVIDERS.md": {
     "title": "Provider guide — AncestryLLM",
-    "description": "Configure and use LLM providers including provider none (network-free), local models, and cloud providers with explicit consent."
+    "description": "Provider policy, execution behavior, profiles, and capability limits for network-free, local, and consented cloud models."
   },
   "PRIVACY_AND_CONSENT.md": {
     "title": "Privacy and consent — AncestryLLM",
@@ -87,19 +87,19 @@
   },
   "DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
-    "description": "v0.5.0 Electron desktop shell: supported targets, manual installer model, and pre-1.0 signing policy. Planned scope only."
+    "description": "Released v0.5.0 Electron desktop control shell for Home, Diagnostics, Settings, and capability onboarding; genealogy and domain capabilities remain excluded."
   },
   "DESKTOP_SIDECAR.md": {
     "title": "Packaged desktop sidecar — AncestryLLM",
-    "description": "Private FastAPI sidecar design, IPC validation, provider-none isolation, and security control lifecycle. Planned scope."
+    "description": "Released private FastAPI control sidecar for the bounded v0.5.0 shell; it excludes genealogy, jobs, files, provider, cloud, and updater routes."
   },
   "DESKTOP_VERIFICATION.md": {
     "title": "Desktop verification — AncestryLLM",
-    "description": "Exact-head hosted verification matrix, machine-readable evidence, and external release blockers for desktop builds."
+    "description": "Implemented exact-head verification for the released bounded desktop shell and future desktop changes; it does not grant release approval."
   },
   "DEPLOYMENT.md": {
     "title": "Deployment — AncestryLLM",
-    "description": "Deployment options, environment requirements, and configuration for AncestryLLM."
+    "description": "Released bounded desktop installer publication controls, signing configuration, and environment requirements; not a hosted application or domain-capability rollout."
   },
   "REPL_ARCHITECTURE.md": {
     "title": "REPL architecture — AncestryLLM",
@@ -119,11 +119,11 @@
   },
   "ADR-0025-electron-fastapi-desktop.md": {
     "title": "ADR-0025: Electron and FastAPI desktop — AncestryLLM",
-    "description": "Architecture decision record for the bounded Electron shell and private FastAPI sidecar desktop architecture."
+    "description": "Architecture decision record for the released bounded Electron control shell, private FastAPI sidecar, and limits on future desktop-domain work."
   },
   "DOCS_AUTHORING.md": {
-    "title": "Documentation authoring guide — AncestryLLM",
-    "description": "Diátaxis information architecture map, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."
+    "title": "Documentation architecture and authoring guide — AncestryLLM",
+    "description": "Canonical Diátaxis architecture, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."
   },
   "CODE_DOCUMENTATION.md": {
     "title": "In-code documentation policy — AncestryLLM",
@@ -131,7 +131,7 @@
   },
   "api/API_REFERENCE.md": {
     "title": "Internal API contract — AncestryLLM",
-    "description": "Authenticated health and capability endpoints provided by the bounded FastAPI foundation."
+    "description": "Authenticated health and capability endpoints used by the released bounded desktop control shell."
   },
   "release-evidence/README.md": {
     "title": "Release evidence index — AncestryLLM",
@@ -155,7 +155,7 @@
   },
   "release-notes/0.5.0.md": {
     "title": "AncestryLLM 0.5.0 release notes",
-    "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.5.0 release."
+    "description": "Changes, compatibility notes, and validation evidence for the released AncestryLLM 0.5.0 release."
   },
   "release-notes/0.6.0.md": {
     "title": "AncestryLLM 0.6.0 release notes",
