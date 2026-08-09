@@ -48,6 +48,26 @@
   branch from current `origin/main` using the appropriate `feature/*`, `bugfix/*`,
   or `hotfix/*` prefix, and never edit `main` or `master` directly.
 - Preserve unrelated changes. Do not push unless explicitly requested.
+- Keep the local Git environment tidy: before starting new work, reuse a suitable
+  existing worktree or create one only when isolation is needed; do not leave
+  disposable worktrees behind after work is closed.
+- Periodically audit local branches and worktrees against `origin/main`, their
+  upstreams, and open PRs. Remove only branches whose work is merged or
+  patch-equivalent and which are not checked out by a worktree; preserve all
+  unmerged, dirty, active, or ambiguous work and report it for a user decision.
+- Before removing any worktree, confirm it is clean and no active task, issue, or
+  PR still depends on it. Prefer ordinary `git branch -d` and `git worktree
+  remove`; do not force-delete a branch merely because its upstream disappeared.
+  Report patch-equivalent but non-ancestry branches for an explicit user-approved
+  cleanup plan instead.
+- Documentation is mandatory for every net-new feature. Before its PR merges,
+  update the relevant user, developer, API, operational, and release documentation
+  as applicable, and explicitly record why any normally expected documentation
+  surface is unaffected.
+- Before a net-new feature PR merges, evaluate its architecture and threat-model
+  impact. Update `ARCHITECTURE.md` and the applicable threat-model documentation
+  when the feature changes either; otherwise, explicitly record why each is
+  unaffected.
 - Whenever Codex creates a GitHub issue, determine the appropriate release iteration
   from the Feature Release project's scope, priority, and dependency order, then add
   the issue to that iteration on the release calendar. If project access prevents the
