@@ -1,3 +1,5 @@
+"""Verify RootsMagic query orchestration preserves reader and provider safety contracts."""
+
 from __future__ import annotations
 
 import json

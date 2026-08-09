@@ -1,3 +1,5 @@
+"""Verify encrypted storage, safe backups, and redacted read-only diagnostics."""
+
 from __future__ import annotations
 
 import base64

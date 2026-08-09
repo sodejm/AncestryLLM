@@ -1,3 +1,5 @@
+"""Verify provider consent, locality, endpoint, and offline execution policy."""
+
 from __future__ import annotations
 
 import pytest

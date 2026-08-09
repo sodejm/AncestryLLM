@@ -1,3 +1,5 @@
+"""Verify bounded job scheduling, progress, cancellation, and sanitized snapshots."""
+
 from __future__ import annotations
 
 import threading
