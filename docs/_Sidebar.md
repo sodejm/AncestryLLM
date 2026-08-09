@@ -6,11 +6,12 @@
 
 ### Tutorials
 
-No tutorial has been published yet. Start with the CLI reference or interactive
-console guide while the documented learning path is prepared.
+- [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
 
 ### How-to guides
 
+- [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md)
+- [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
 - [Interactive console guide](CONSOLE.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md)

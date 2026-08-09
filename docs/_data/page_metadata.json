@@ -13,6 +13,14 @@
     "title": "Interactive console guide — AncestryLLM",
     "description": "How to start and use the prompt-toolkit/Rich interactive REPL for genealogy research sessions."
   },
+  "how-to/explore-the-interactive-console.md": {
+    "title": "Explore commands in the interactive console — AncestryLLM",
+    "description": "Safely inspect the implemented prompt-toolkit/Rich REPL without opening genealogy data or selecting a provider."
+  },
+  "how-to/run-an-offline-gedcom-merge.md": {
+    "title": "Run an offline GEDCOM merge — AncestryLLM",
+    "description": "Merge public fictional GEDCOM fixtures with provider none, verify the rooted result, and recover without partial output."
+  },
   "PROVIDERS.md": {
     "title": "Provider guide — AncestryLLM",
     "description": "Provider policy, execution behavior, profiles, and capability limits for network-free, local, and consented cloud models."
@@ -84,6 +92,10 @@
   "THREAT_MODEL.md": {
     "title": "Data-flow threat model and control matrix — AncestryLLM",
     "description": "OWASP Top 10:2025 and NIST SP 800-218 control evidence for AncestryLLM's implemented and planned surfaces."
+  },
+  "tutorials/offline-gedcom-merge.md": {
+    "title": "Merge fictional GEDCOM records offline — AncestryLLM",
+    "description": "A safe end-to-end GEDCOM 5.5.5 merge tutorial using fictional fixtures, provider none, and no network calls."
   },
   "DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",

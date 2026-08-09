@@ -35,19 +35,28 @@ current journey for excluded domain capabilities.
 
 ## Tutorials
 
-Tutorials will provide safe, end-to-end learning paths when they are published.
-There is no tutorial page yet, so this navigation deliberately does not link to
-an uncreated destination. Current users can begin with the CLI reference or the
-interactive console how-to guide below.
+Learn a complete, safe workflow with fictional data:
+
+- [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
+  — produce a rooted GEDCOM 5.5.5 file and quality report with `provider=none`
+  and no network calls.
 
 ## How-to guides
 
 Task-oriented guidance for common goals:
 
+- [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md) — merge
+  the public fictional fixtures, verify the results, and recover from failure
+- [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
+  — inspect the implemented prompt-toolkit/Rich REPL safely
 - [Interactive console guide](CONSOLE.md) — start and use the REPL
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md) — create and restore backups
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md) — troubleshoot setup
 - [Release runbook](RELEASING.md) — prepare and publish a release
+
+The established root paths for the last four guides remain published while
+release packaging and contract consumers use them. Their inventory records the
+later `git mv` cutover that will update those consumers together.
 
 ## Reference
 
