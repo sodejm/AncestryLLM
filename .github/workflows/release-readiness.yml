@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: release-readiness-${{ inputs.commit_sha }}
   cancel-in-progress: false

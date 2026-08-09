@@ -9,6 +9,10 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: sync-wiki-${{ github.repository }}
   cancel-in-progress: false
