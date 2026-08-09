@@ -1,3 +1,4 @@
+/** Boots the Electron main process, security policies, runtime bridge, IPC, and window lifecycle. */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {

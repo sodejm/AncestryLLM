@@ -1,3 +1,4 @@
+/** Registers the desktop IPC bridge and validates renderer requests and main-process responses. */
 import { DESKTOP_PROTOCOL_VERSION, desktopChannels, type AncestryBridge, type BridgeResult, type PreferenceUpdate } from '../shared-contract/desktop'
 import {
   parseAppInfoResult,
