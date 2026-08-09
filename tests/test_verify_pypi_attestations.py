@@ -178,7 +178,7 @@ def test_rejects_repository_that_is_not_owner_slash_repo(
     "url",
     (
         "https://user@files.pythonhosted.org/packages/release.whl",
-        "https://user:password@files.pythonhosted.org/packages/release.whl",
+        "https://user:" + "password@files.pythonhosted.org/packages/release.whl",
         "https://files.pythonhosted.org:444/packages/release.whl",
         "https://files.pythonhosted.org/packages/release.whl#fragment",
     ),

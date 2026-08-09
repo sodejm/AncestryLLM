@@ -305,6 +305,18 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     assert runner not in release
 
 
+def test_synthetic_credentialed_url_fixtures_do_not_target_live_services() -> None:
+    """Keep secret verification from probing public hosts with fake credentials."""
+
+    credentialed_public_url = re.compile(r"https://[^\s\"']+:[^@\s\"']{3,}@")
+    for relative_path in (
+        "desktop/src/main/external-links.test.ts",
+        "tests/test_verify_pypi_attestations.py",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert credentialed_public_url.search(content) is None, relative_path
+
+
 def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
     """Keep repository-only test tooling importable in clean hosted environments."""
 
