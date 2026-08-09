@@ -41,6 +41,13 @@ Three explicit deployment intents are accepted:
    gateway is public. Internal application services remain private and
    authenticated.
 
+The offline invariant is stronger than a provider-egress restriction:
+`provider=none` is incompatible with Connect Remote and Host Remote. Selecting
+it forces Local Desktop/local execution, rejects remote-profile activation,
+and opens no network socket even when remote endpoints or ambient credentials
+exist. Remote use requires a separate explicit profile and may never claim or
+silently translate `provider=none`.
+
 Docker Engine API compatibility and Docker Compose are the portable container
 contract. On macOS arm64 the open-source default is Colima/Lima with a
 Docker-compatible Engine API and Compose. Docker Desktop is an optional,
@@ -92,7 +99,8 @@ and logs, and mount only application-owned paths.
 Local Desktop publishes exactly one authenticated loopback gateway and no
 worker, database, administration, or Docker endpoint. Network membership is
 never identity: every sensitive service route authenticates a workload or user
-credential before parsing a body. `provider=none` remains network-free.
+credential before parsing a body. `provider=none` remains network-free and
+cannot be combined with a remote profile.
 
 ### Connect Remote and Host Remote
 
@@ -130,6 +138,14 @@ and clock bounds. No anonymous health, schema, documentation, bootstrap, setup,
 or internal service route is public. Enrollment is explicit, bound to the
 server/user/client/profile, short-lived, and single-use.
 
+Host Remote v1 has exactly one authorized household principal. The configured
+OIDC issuer, audience, and subject identify that principal; every other OIDC
+subject is rejected before route or object access. Administrative actions
+require fresh authentication by that same principal. Multiple people are not
+represented as separately authorized users, and credential sharing is not a
+multi-user authorization model. Supporting another principal requires a new
+ADR and authorization threat model.
+
 The remote operator is a trusted data custodian. Host root or control of the
 container runtime can observe application memory, keys during use, plaintext
 records, and backups. Containers are a defense-in-depth boundary, not a defense
@@ -163,7 +179,7 @@ mutating data.
 | Runtime bootstrap | Host supervisor | Operator | Verify engine identity/version and the rendered Compose model before use. |
 | Images and configuration | Release tooling and host supervisor | Operator using project release metadata | Pull by immutable digest; verify platform, SBOM, provenance, and configuration policy. |
 | Start/readiness | Host supervisor | Operator runbook | Start private networks and services in dependency order; readiness proves authenticated service identity, not merely an open port. |
-| Secrets | OS keyring and narrow host broker | Operator-approved secret file/manager and narrow delivery path | Containers do not query the desktop keyring; no plaintext fallback, Compose value, image, environment, argument, log, or renderer readback. |
+| Secrets | OS keyring and narrow host broker | Operator-approved secret file/manager and narrow delivery path | Containers do not query the desktop keyring; delivery uses non-pageable or locked no-swap memory, or a no-swap memory-backed filesystem with equivalent platform evidence. No plaintext fallback, Compose value, image, environment, argument, log, swap, or renderer readback is allowed. |
 | Database and migrations | Application services over SQLCipher volume | Same application services; operator schedules maintenance | One active backend; staged migration; integrity check; atomic rollback before reporting ready. |
 | Backup and restore | Desktop workflow and user-selected separate destination | Operator | Keep keys separate; verify a cross-container restore before release/upgrade; never treat a live volume snapshot alone as a backup. |
 | Upgrade and rollback | Host supervisor after informed approval | Operator | Preserve the previous trusted version and recoverable data; no silent channel switch or downgrade. |
@@ -211,7 +227,33 @@ not substitute for native support.
 | OCI image footprint | total compressed application image set at or below 1.5 GiB; no application image above 1 GiB | Inspect native and multi-architecture manifests by digest; base/runtime duplication counts against the total. |
 | Local exposure | one authenticated loopback listener; zero wildcard/LAN, worker, data, admin, and Docker publications | Scan IPv4 and IPv6 from host, runtime VM, and peer LAN host; inspect Compose and host firewall state. |
 | Host Remote exposure | one public TCP 443 edge; zero direct backend, worker, data, admin, and Docker publications | Scan externally, from host, and from sibling containers; inspect IPv4/IPv6 listeners, proxy routes, firewall, and network attachments. |
-| Offline profile | zero provider egress with `provider=none` | Capture host and container traffic during startup and the canonical fictional workload with ambient provider credentials present. |
+| Offline profile | zero network sockets or traffic with `provider=none`; remote profiles are rejected | Capture host and container traffic during startup and the canonical fictional workload with ambient provider credentials and remote state present. |
+
+The following per-profile ceilings are release defaults, not sizing
+suggestions. A supported profile may lower them. Raising one requires measured
+evidence, updated one-over tests, and an ADR amendment. "Aggregate" covers all
+application-owned processes or containers in that profile; infrastructure
+outside the application remains separately operator-bounded.
+
+| Budget | Local Desktop | Connect Remote client | Host Remote reference deployment |
+|---|---:|---:|---:|
+| CPU quota | 2.0 host CPU cores aggregate | 1.0 host CPU core aggregate over the canonical remote workload | 4.0 host CPU cores aggregate |
+| PID ceiling | 256 aggregate | 128 aggregate | 512 aggregate |
+| Writable storage | 20 GiB encrypted data plus scratch | 1 GiB endpoint/session cache; no genealogy database | 100 GiB encrypted data plus scratch |
+| Inode ceiling | 100,000 | 20,000 | 500,000 |
+| Log retention | 100 MiB aggregate, at most 5 files | 50 MiB aggregate, at most 5 files | 500 MiB aggregate, at most 10 files |
+| Concurrent connections | 64 at the loopback gateway | 8 outbound to the enrolled origin | 256 at the TLS edge and 128 at the private gateway |
+| API workers | exactly 1 gateway worker | 0 server workers | exactly 1 gateway worker |
+| Concurrent jobs | 2 bounded genealogy jobs | 0 server jobs | 4 bounded genealogy jobs |
+| Non-file request body | 1 MiB | 1 MiB | 1 MiB |
+
+Typed file-ingress limits remain operation-specific and do not inherit the
+non-file request limit. Boundary and one-over tests must prove the profile
+rejects excess work with a stable coded error (`413` or `429` at HTTP
+boundaries), does not mutate genealogy data, retains bounded host control, and
+returns to a ready or documented recovery state within the 20-second shutdown
+budget. Disk-full, inode-full, fork, connection, request, job, and log-growth
+tests are mandatory evidence for `AB-14` and `TM-K01`.
 
 A budget change requires measured evidence and an ADR amendment. A release may
 support a smaller host matrix than the architecture target, but must name it and

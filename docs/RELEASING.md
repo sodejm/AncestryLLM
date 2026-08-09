@@ -23,22 +23,31 @@ release readiness.
 ## Future deployment-profile release gate
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
-target, not a current availability claim. Local Desktop containers, Connect
-Remote, and Host Remote remain unavailable until all of these conditions pass:
+target, not a current availability claim. A profile remains unavailable until
+its row below and the common conditions pass. A gate or subset assigned to one
+profile does not block an independent profile whose own row is complete.
 
-1. Threat-model gates `G5`-`G7` have linked implementation evidence, no
-   untriaged Critical or High finding, and approval by a reviewer other than
-   the implementer.
-2. Every claimed OS, architecture, Docker Engine API, Compose version, and
+| Profile | Required threat-model evidence |
+|---|---|
+| Local Desktop containers | `G0`, `G5`, and the Local Desktop container-acquisition, native-image, lifecycle, rollback, uninstall, and support-lifetime parts of `G7`. Remote edge, identity, and host-operations evidence from `G6` is not applicable. |
+| Connect Remote | `G0`; the enrolled-client, endpoint, TLS, session, authorization, and client-side portions of `G6`; and the desktop-client acquisition, integrity, upgrade, rollback, and support-lifetime parts of `G7`. Local Docker/runtime evidence from `G5` and Host Remote operations are not applicable. |
+| Host Remote | `G0`, the hosting edge, identity, authorization, enrollment, custody, external-scan, backup, and recovery parts of `G6`, and the host image/runtime distribution, startup, shutdown, upgrade, rollback, uninstall, runbook, capacity, and support-lifetime parts of `G7`. Local Desktop supervisor evidence is not applicable. |
+
+Every required gate or subset needs linked implementation evidence, no
+untriaged Critical or High finding, and approval by a reviewer other than the
+implementer. The common conditions are:
+
+1. Every claimed OS, architecture, Docker Engine API, Compose version, and
    runtime is tested natively. Emulation is labeled and does not establish
    native support. Colima/Lima is the open-source macOS default; Docker Desktop
    is optional and separately licensed.
-3. ADR-0026's startup, shutdown, memory, image-size, listener, and zero-egress
-   budgets pass on the release candidate.
-4. OCI digests, checksums, dependency licenses, SBOM, and provenance are
+2. ADR-0026's startup, shutdown, CPU, memory, PID, storage, inode, log,
+   connection, worker, job, request-size, image-size, listener, and zero-network
+   budgets pass on the release candidate for that profile.
+3. OCI digests, checksums, dependency licenses, SBOM, and provenance are
    verified; images and artifacts contain no credentials, genealogy data, or
    Docker authority; and any later artifact-signing boundary is documented.
-5. Operator documentation covers profile intent, the renderer and Docker trust
+4. Operator documentation covers profile intent, the renderer and Docker trust
    boundaries, listeners, TLS, authentication, secret and SQLCipher-key
    custody, restore drills, upgrades, rollback, uninstall, capacity,
    monitoring, incident response, and recovery. Host Remote remains a

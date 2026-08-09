@@ -315,6 +315,19 @@ three later deployment intents while preserving the current runtime boundary:
   gateway, worker, data, administrative, and Docker services remain private
   and independently authenticated. Network membership is not identity.
 
+`provider=none` is incompatible with Connect Remote and Host Remote. It forces
+Local Desktop/local execution and opens no network socket; endpoint state,
+ambient credentials, or a previously enrolled client cannot weaken that rule.
+Remote execution requires a separate explicit profile and may not claim
+`provider=none`.
+
+Host Remote v1 authorizes one household as one configured OIDC principal. The
+gateway rejects every other OIDC subject before route or object access, and
+administrative actions require fresh authentication by the same principal.
+This is not individual multi-user authorization. Unrelated or mutually
+distrusting households require separate hosts, secrets, volumes, and identity
+realms.
+
 Electron Main owns profile state, enrollment, API use, error sanitization, and
 the narrow host lifecycle boundary. The sandboxed renderer receives no Node,
 filesystem, raw network, Docker socket or client credential, API/enrollment

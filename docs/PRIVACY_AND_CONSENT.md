@@ -82,18 +82,24 @@ authenticated session rather than carrying authority across the boundary.
 
 Local containers do not read the OS keyring directly. A narrow host broker may
 provide a required secret to one authorized process after policy and consent
-checks, but the value must not enter Compose files, images, environment
-manifests, command arguments, logs, inspection output, or renderer state. Data
-and SQLCipher-key material use separate storage and backup paths.
-`provider=none` continues to mean zero provider and model egress in every
-profile.
+checks through non-pageable or locked no-swap memory, or a no-swap
+memory-backed filesystem with equivalent platform evidence. The value must not
+enter Compose files, images, environment manifests, command arguments, logs,
+inspection output, swap, or renderer state. Data and SQLCipher-key material use
+separate storage and backup paths.
+`provider=none` is incompatible with Connect Remote and Host Remote. It forces
+Local Desktop/local execution, opens no network socket, and rejects remote
+activation even when endpoint state or ambient credentials exist. Remote use
+requires a separate explicit profile and may not claim `provider=none`.
 
 Host Remote is an explicit, advanced, self-supported profile for one trusted
 household. Its operator controls the host root account, container runtime, DNS,
 TLS edge, identity provider, logs, backups, and recovery and can therefore
 observe plaintext handled by the service. The data owner explicitly accepts
 that custody; containers do not protect data from a malicious or compromised
-operator. Unrelated households require separate deployments and data stores.
+operator. Host Remote authorizes exactly one household principal and rejects
+every other OIDC subject. Unrelated or mutually distrusting households require
+separate hosts, secrets, volumes, and identity realms.
 Remote hosting does not relax provider selection, consent, retention,
 redaction, authentication, or audit policy.
 
