@@ -19,9 +19,10 @@ def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0(
 ) -> None:
     original_init = FastAPI.__init__
 
-    def initialize_with_future_default(self: FastAPI, **kwargs: Any) -> None:
-        original_init(self, **kwargs)
-        self.openapi_version = "9.9.9"
+    def initialize_with_future_default(self: FastAPI, *args: Any, **kwargs: Any) -> None:
+        if "openapi_version" not in kwargs:
+            kwargs["openapi_version"] = "9.9.9"
+        original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(FastAPI, "__init__", initialize_with_future_default)
 
