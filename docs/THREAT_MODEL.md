@@ -20,7 +20,7 @@ verification before a planned control can be treated as effective.
 local-first multi-container backend, an advanced remote-client profile, and a
 separately operated remote-server profile as the target architecture. None is
 implemented or supported. The deployment diagrams, `TM-M01` through `TM-B01`,
-`STR-H-*` through `STR-B-*`, AB-11 through AB-21, and G5 through G7 below are
+`STR-H-*` through `STR-M-*` and `STR-B-*`, AB-11 through AB-21, and G5 through G7 below are
 therefore requirements for planned work, not current protections. No deployment
 risk is reduced until the owning issue provides native-runtime, negative-test,
 and independent-review evidence at its named gate.
