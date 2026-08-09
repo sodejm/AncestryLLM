@@ -1,3 +1,5 @@
+"""Verify safe versioned prompts and reusable people-research service records."""
+
 from __future__ import annotations
 
 import pytest

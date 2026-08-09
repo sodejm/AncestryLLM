@@ -1,3 +1,5 @@
+"""Verify RootsMagic issue 29 schema, privacy, and atomic-publication hardening."""
+
 from __future__ import annotations
 
 import sqlite3

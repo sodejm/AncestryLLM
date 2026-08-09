@@ -1,3 +1,5 @@
+"""Verify REPL progress display rendering across job outcomes and cancellation states."""
+
 from __future__ import annotations
 
 import pytest

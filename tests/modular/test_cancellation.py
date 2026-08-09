@@ -1,3 +1,5 @@
+"""Verify cooperative cancellation tokens, protected sections, and listener isolation."""
+
 from __future__ import annotations
 
 import logging

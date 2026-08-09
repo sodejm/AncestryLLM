@@ -1,3 +1,5 @@
+"""Verify LLM provider lifecycle, streaming, retry, privacy, and cancellation behavior."""
+
 from __future__ import annotations
 
 import asyncio

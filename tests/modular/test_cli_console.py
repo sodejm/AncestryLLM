@@ -1,3 +1,5 @@
+"""Verify CLI and console routing, serialization, and sanitized error behavior."""
+
 from __future__ import annotations
 
 import hashlib
