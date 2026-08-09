@@ -127,7 +127,7 @@ def test_every_desktop_abuse_case_has_owner_gate_and_negative_test() -> None:
         )
     }
 
-    assert set(rows) == {f"AB-{number:02}" for number in range(1, 11)}
+    assert set(rows) == {f"AB-{number:02}" for number in range(1, 22)}
     for abuse_case, row in rows.items():
         assert "TM-" in row, abuse_case
         assert "#" in row, abuse_case
