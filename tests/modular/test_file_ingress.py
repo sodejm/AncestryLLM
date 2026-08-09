@@ -1302,7 +1302,7 @@ def test_rootsmagic_byte_and_row_bounds_apply_before_output(
     assert bytes_error.value.code == "FILE_INPUT_TOO_LARGE"
 
 
-def test_rootsmagic_exact_row_limit_is_valid(tmp_path: Path) -> None:
+def test_rootsmagic_exact_row_limit_is_valid_case(tmp_path: Path) -> None:
     tree = tmp_path / "exact.rmtree"
     _write_tree(tree, people=2)
     defaults = FileIngressLimits()
