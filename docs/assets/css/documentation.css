@@ -41,7 +41,6 @@
   display: block;
   max-width: 100%;
   overflow-x: auto;
-  white-space: nowrap;
 }
 
 @media (max-width: 48rem) {

@@ -34,6 +34,12 @@ def test_documentation_stylesheet_preserves_readability_and_overflow_access() ->
     assert "@media (max-width: 48rem)" in stylesheet
 
 
+def test_documentation_tables_do_not_force_wide_screen_text_to_nowrap() -> None:
+    stylesheet = STYLESHEET.read_text(encoding="utf-8")
+
+    assert "white-space: nowrap;" not in stylesheet
+
+
 def test_documentation_layout_keeps_the_semantic_navigation_and_article_regions() -> None:
     layout = LAYOUT.read_text(encoding="utf-8")
 
