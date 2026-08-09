@@ -75,7 +75,7 @@ def test_consent_denies_living_data_by_default() -> None:
         ConsentPolicy().authorize(living, capabilities, grant)
 
 
-def test_none_provider_never_calls_a_network() -> None:
+def test_none_provider_never_calls_a_network_case() -> None:
     provider = ProviderRegistry(MemorySecretStore({})).create("none")
     with pytest.raises(ProviderError, match="strictly offline"):
         provider.generate(request("none"))

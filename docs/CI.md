@@ -24,14 +24,22 @@ is the appropriate target for automation and disposable environments.
 |---|---|
 | Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs only when a workflow changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
-| Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner has no pull-request or push range, so it scans the repository history. |
-| Release readiness | The exhaustive release-candidate gate. Its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
+| Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
+| Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
 
 The `PR gate` job aggregates repository-owned pull-request jobs behind one
 stable check name. A conditionally skipped workflow audit is accepted; every
 other aggregate dependency must succeed. GitHub's Dependency Review and CodeQL
 checks remain independent required security controls.
+
+TruffleHog retains its provider detectors and fails on verified or unknown
+results. Pull-request and protected-push runs scan the event's commit range;
+scheduled and manually dispatched CI scans the current `main` candidate tree;
+release readiness scans the exact frozen candidate tree. This keeps candidate
+evidence scoped to the source that can actually ship. GitHub secret scanning
+and push protection remain the repository controls for immutable Git history
+and incoming pushes; the candidate-tree scans do not replace those controls.
 
 Workflow-level path filters are intentionally not used for the required CI
 workflow. A filtered-out workflow may never create its required check. Path

@@ -183,7 +183,7 @@ def test_rejects_repository_that_is_not_owner_slash_repo(
         "https://files.pythonhosted.org/packages/release.whl#fragment",
     ),
 )
-def test_rejects_untrusted_pypi_artifact_url(url: str) -> None:
+def test_rejects_untrusted_pypi_artifact_url_case(url: str) -> None:
     with pytest.raises(RuntimeError, match="untrusted PyPI URL"):
         verifier._validated_url(url, host="files.pythonhosted.org")
 

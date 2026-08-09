@@ -135,7 +135,7 @@ def test_interruptible_sleep_wakes_when_cancellation_is_requested() -> None:
 
 
 @pytest.mark.parametrize("operation", ("", " ", "x" * 201))
-def test_protected_section_names_are_bounded(operation: str) -> None:
+def test_protected_section_names_are_bounded_case(operation: str) -> None:
     token = CancellationToken()
     with bind_cancellation_token(token), pytest.raises(ValueError):
         with non_interruptible_section(operation):

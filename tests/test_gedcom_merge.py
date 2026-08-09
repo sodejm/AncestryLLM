@@ -213,7 +213,7 @@ class TestIdentityFactExtraction:
         assert person.residences[0].effective_country == "united states"
         assert "Boston" in person.residences[0].place
 
-    def test_alternate_names_are_not_overwritten(self):
+    def test_alternate_names_are_not_overwritten_case(self):
         person = _parse_individual(
             [
                 "0 @I1@ INDI",
@@ -299,7 +299,7 @@ class TestRelationshipEnrichment:
             "Alex Doe",
         }
 
-    def test_child_details_support_sparse_parent(self):
+    def test_child_details_support_sparse_parent_case(self):
         parent = _make_record(
             pointer="@I1@",
             given_name="Jane",

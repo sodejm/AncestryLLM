@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+RELEASE_READINESS_PATH = ROOT / ".github/workflows/release-readiness.yml"
 DEPENDENCY_REVIEW_PATH = ROOT / ".github/workflows/dependency-review.yml"
 PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
 PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
@@ -192,4 +194,66 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
     assert "check_code_documentation.py" in makefile, (
         "Makefile code-docs-check target must invoke check_code_documentation.py"
+    )
+
+
+def test_secret_scans_use_commit_ranges_or_exact_candidate_trees() -> None:
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+    ci_security = _job(ci, "security")
+    readiness_security = _job(readiness, "security")
+
+    assert (
+        "fetch-depth: ${{ (github.event_name == 'workflow_dispatch' || "
+        "github.event_name == 'schedule') && 1 || 0 }}"
+    ) in ci_security
+    assert "name: Scan commit range or current candidate tree for secrets" in ci_security
+
+    assert "ref: ${{ needs.validate.outputs.commit }}" in readiness_security
+    assert "fetch-depth: 1" in readiness_security
+    assert "name: Scan frozen candidate tree for secrets" in readiness_security
+
+    for security_job in (ci_security, readiness_security):
+        assert "--results=verified,unknown --fail-on-scan-errors" in security_job
+        assert "--exclude-detectors" not in security_job
+        assert "--exclude-paths" not in security_job
+
+
+def test_secret_scan_contract_is_documented_with_native_repository_controls() -> None:
+    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+    normalized_guide = " ".join(guide.split())
+
+    assert "current `main` candidate tree" in normalized_guide
+    assert "exact frozen candidate tree" in normalized_guide
+    assert "GitHub secret scanning and push protection" in normalized_guide
+    assert "immutable Git history" in normalized_guide
+
+
+def test_tracked_text_avoids_provider_key_shaped_identifiers() -> None:
+    completed = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    detector_shape = re.compile(r"\b(?:live|test)_" + r"[A-Za-z0-9_]{35}\b")
+    matches: list[str] = []
+
+    for relative_bytes in completed.stdout.split(b"\0"):
+        if not relative_bytes:
+            continue
+        relative = relative_bytes.decode("utf-8")
+        try:
+            lines = (ROOT / relative).read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        matches.extend(
+            f"{relative}:{line_number}"
+            for line_number, line in enumerate(lines, start=1)
+            if detector_shape.search(line)
+        )
+
+    assert matches == [], (
+        "tracked text must not contain values shaped like provider credentials: "
+        + ", ".join(matches)
     )
