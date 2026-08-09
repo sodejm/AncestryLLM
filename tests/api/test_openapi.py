@@ -1,3 +1,5 @@
+"""Tests for the control API OpenAPI contract."""
+
 from __future__ import annotations
 
 import json

@@ -41,12 +41,9 @@ desktop/scripts/verify-sidecar.mjs:missing-file-header-comment
 desktop/scripts/verify-sidecar.test.mjs:missing-file-header-comment
 desktop/scripts/workspace-config.test.mjs:missing-file-header-comment
 desktop/src/main/desktop-control.test.ts:missing-file-header-comment
-desktop/src/main/desktop-control.ts:missing-file-header-comment
 desktop/src/main/external-links.test.ts:missing-file-header-comment
 desktop/src/main/external-links.ts:missing-file-header-comment
-desktop/src/main/index.ts:missing-file-header-comment
 desktop/src/main/ipc-handlers.test.ts:missing-file-header-comment
-desktop/src/main/ipc-handlers.ts:missing-file-header-comment
 desktop/src/main/preferences-store.test.ts:missing-file-header-comment
 desktop/src/main/preferences-store.ts:missing-file-header-comment
 desktop/src/main/renderer-location.test.ts:missing-file-header-comment
@@ -90,11 +87,6 @@ pyproject.toml:missing-file-header-comment
 scripts/check_repository_safety.sh:missing-file-header-comment
 scripts/export-apple-signing-identity.swift:missing-file-header-comment
 scripts/gedcom_merge_quickstart.sh:missing-file-header-comment
-tests/api/test_control_api.py:missing-module-docstring
-tests/api/test_lifecycle.py:missing-module-docstring
-tests/api/test_openapi.py:missing-module-docstring
-tests/api/test_security.py:missing-module-docstring
-tests/api/test_sidecar_bootstrap.py:missing-module-docstring
 tests/modular/conftest.py:missing-module-docstring
 tests/modular/test_application_contracts.py:missing-module-docstring
 tests/modular/test_cancellation.py:missing-module-docstring

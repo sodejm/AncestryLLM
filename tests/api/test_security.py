@@ -1,3 +1,5 @@
+"""Tests for control API authentication and security boundaries."""
+
 from __future__ import annotations
 
 import asyncio
