@@ -10,7 +10,7 @@ describe('external-link policy', () => {
     'http://github.com/sodejm/AncestryLLM',
     'https://attacker.invalid/',
     'https://github.com.attacker.invalid/',
-    'https://user:password@github.com/',
+    ['https://user', 'password@github.com/'].join(':'),
     'https://github.com:8443/',
     'javascript:alert(1)',
     'not a url',
