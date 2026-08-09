@@ -202,6 +202,7 @@ def test_deployment_adr_records_fail_closed_profile_contracts() -> None:
     adr = _read(_DEPLOYMENT_ADR)
     architecture = _read(_ARCHITECTURE)
     privacy = _read(_PRIVACY)
+    threat_model = _read(_THREAT_MODEL)
     normalized_adr = " ".join(adr.split())
 
     for text in (adr, architecture, privacy):
@@ -214,8 +215,21 @@ def test_deployment_adr_records_fail_closed_profile_contracts() -> None:
         "one authorized household principal",
         "every other OIDC subject",
         "no-swap memory",
+        "allowlisted read-only `family_trees` mount",
     ):
         assert phrase in normalized_adr
+
+    for text in (adr, architecture, threat_model):
+        normalized = " ".join(text.split())
+        assert "socket-free native application-service path" in normalized
+        assert "does not start the container backend" in normalized
+
+    normalized_threat_model = " ".join(threat_model.split())
+    assert "allowlisted read-only `family_trees` mount" in normalized_threat_model
+    assert 'RemoteRenderer -->|"fixed typed bridge"| RemoteMain' in threat_model
+    assert 'RemoteMain -->|"HTTPS after enrollment"| Internet' in threat_model
+    assert "RemoteRenderer --> Internet" not in threat_model
+    assert "Gateway <--> Volume" not in threat_model
 
     for budget in (
         "CPU quota",
@@ -233,6 +247,7 @@ def test_deployment_adr_records_fail_closed_profile_contracts() -> None:
 
 def test_deployment_release_gates_are_profile_specific() -> None:
     releasing = _read(_RELEASING)
+    architecture = _read(_ARCHITECTURE)
 
     for profile in ("Local Desktop containers", "Connect Remote", "Host Remote"):
         assert f"| {profile} |" in releasing
@@ -243,6 +258,13 @@ def test_deployment_release_gates_are_profile_specific() -> None:
         "Local Desktop supervisor evidence is not applicable.",
     ):
         assert exclusion in releasing
+
+    for mapping in (
+        "Local Desktop containers require `G0`, `G5`, and their applicable `G7` evidence",
+        "Connect Remote requires `G0`, its applicable client-side `G6`, and `G7` evidence",
+        "Host Remote requires `G0`, `G6`, and its applicable `G7` evidence",
+    ):
+        assert mapping in architecture
 
 
 def test_desktop_policy_is_aligned_across_normative_guidance() -> None:

@@ -46,7 +46,10 @@ The offline invariant is stronger than a provider-egress restriction:
 it forces Local Desktop/local execution, rejects remote-profile activation,
 and opens no network socket even when remote endpoints or ambient credentials
 exist. Remote use requires a separate explicit profile and may never claim or
-silently translate `provider=none`.
+silently translate `provider=none`. It selects the socket-free native
+application-service path and does not start the container backend, host
+supervisor, Engine API, gateway, workers, or any container. The Local Desktop
+container subprofile is therefore unavailable while `provider=none` is active.
 
 Docker Engine API compatibility and Docker Compose are the portable container
 contract. On macOS arm64 the open-source default is Colima/Lima with a
@@ -75,6 +78,7 @@ flowchart LR
     Gateway["Authenticated local gateway\nloopback publication only"]
     Workers["Private app workers\nno host ports"]
     Data["SQLCipher volume\nkey stored separately"]
+    FamilyTrees["Grant-authorized family_trees source\nread-only"]
 
     User --> Renderer
     Renderer -->|"fixed typed bridge"| Main
@@ -84,6 +88,7 @@ flowchart LR
     Engine --> Workers
     Gateway --> Workers
     Workers --> Data
+    FamilyTrees --> Workers
     Broker -->|"scoped secret delivery"| Gateway
     Broker -->|"scoped secret delivery"| Workers
 ```
@@ -94,13 +99,22 @@ surface. Neither renderer nor containers receive the Docker socket, a generic
 Docker proxy, client certificates, SSH context, or arbitrary build, exec, copy,
 mount, device, or volume authority. Application containers run non-root, drop
 capabilities, use read-only filesystems where practical, have bounded resources
-and logs, and mount only application-owned paths.
+and logs, and mount only application-owned paths. The one source-data exception
+is an allowlisted read-only `family_trees` mount. Electron Main must first
+resolve an opaque native-dialog grant through the host supervisor, which
+canonicalizes and revalidates the immutable source before rendering that exact
+mount into Compose. The renderer receives only the grant ID, never the path.
+Compose validation rejects writable, broad, ungranted, aliased, or additional
+host mounts, and only the worker that performs the authorized operation may
+receive the source mount.
 
 Local Desktop publishes exactly one authenticated loopback gateway and no
 worker, database, administration, or Docker endpoint. Network membership is
 never identity: every sensitive service route authenticates a workload or user
 credential before parsing a body. `provider=none` remains network-free and
-cannot be combined with a remote profile.
+cannot be combined with a remote profile. Under `provider=none`, this
+socket-backed container topology is not started; the native application-service
+path handles the authorized local operation directly.
 
 ### Connect Remote and Host Remote
 
@@ -227,7 +241,7 @@ not substitute for native support.
 | OCI image footprint | total compressed application image set at or below 1.5 GiB; no application image above 1 GiB | Inspect native and multi-architecture manifests by digest; base/runtime duplication counts against the total. |
 | Local exposure | one authenticated loopback listener; zero wildcard/LAN, worker, data, admin, and Docker publications | Scan IPv4 and IPv6 from host, runtime VM, and peer LAN host; inspect Compose and host firewall state. |
 | Host Remote exposure | one public TCP 443 edge; zero direct backend, worker, data, admin, and Docker publications | Scan externally, from host, and from sibling containers; inspect IPv4/IPv6 listeners, proxy routes, firewall, and network attachments. |
-| Offline profile | zero network sockets or traffic with `provider=none`; remote profiles are rejected | Capture host and container traffic during startup and the canonical fictional workload with ambient provider credentials and remote state present. |
+| Offline profile | zero network sockets or traffic with `provider=none`; remote profiles are rejected and the container backend remains stopped | Assert that the supervisor, Engine API, gateway, workers, and containers never start; instrument host sockets and traffic during the native canonical fictional workload with ambient provider credentials and remote state present. |
 
 The following per-profile ceilings are release defaults, not sizing
 suggestions. A supported profile may lower them. Raising one requires measured

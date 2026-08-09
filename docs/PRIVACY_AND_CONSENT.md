@@ -90,7 +90,10 @@ separate storage and backup paths.
 `provider=none` is incompatible with Connect Remote and Host Remote. It forces
 Local Desktop/local execution, opens no network socket, and rejects remote
 activation even when endpoint state or ambient credentials exist. Remote use
-requires a separate explicit profile and may not claim `provider=none`.
+requires a separate explicit profile and may not claim `provider=none`. The
+offline profile selects the socket-free native application-service path and
+does not start the container backend, host supervisor, Engine API, gateway,
+workers, or containers.
 
 Host Remote is an explicit, advanced, self-supported profile for one trusted
 household. Its operator controls the host root account, container runtime, DNS,

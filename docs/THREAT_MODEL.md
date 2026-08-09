@@ -158,6 +158,7 @@ flowchart LR
     Keyring["OS keyring"]
     Broker["One-shot secret broker\ncontainer-specific material"]
     Volume["Encrypted app volume"]
+    FamilyTrees["Grant-authorized family_trees source\nread-only"]
     Provider["Explicitly consented provider"]
     LocalProcess["Other local process\nuntrusted"]
     Registry["OCI registry and release metadata\nuntrusted input"]
@@ -172,8 +173,8 @@ flowchart LR
     Gateway -->|"authenticated private route"| Worker
     Keyring --> Broker -->|"non-pageable/no-swap memory; never image/env/Compose"| Gateway
     Broker --> Worker
-    Gateway <--> Volume
     Worker <--> Volume
+    FamilyTrees -->|"allowlisted read-only mount"| Worker
     Gateway -->|"explicit policy and consent"| Provider
     LocalProcess -. "hostile loopback and socket probes" .-> Gateway
     LocalProcess -. "must not reach" .-> Engine
@@ -182,7 +183,8 @@ flowchart LR
 ```mermaid
 flowchart LR
     RemoteUser["Remote user"]
-    Client["Enrolled Electron client\nuntrusted display"]
+    RemoteRenderer["Sandboxed renderer\nuntrusted display"]
+    RemoteMain["Electron Main\nenrolled client authority"]
     Internet["Untrusted network"]
     Edge["TLS reverse proxy\nonly public service"]
     Gateway["Authenticated gateway\ndefault deny"]
@@ -192,10 +194,12 @@ flowchart LR
     Admin["Trusted advanced operator\nhost, DNS, TLS, firewall, backups"]
     Engine["Remote Docker control plane\nhigh privilege"]
 
-    RemoteUser --> Client --> Internet --> Edge --> Gateway
+    RemoteUser --> RemoteRenderer
+    RemoteRenderer -->|"fixed typed bridge"| RemoteMain
+    RemoteMain -->|"HTTPS after enrollment"| Internet
+    Internet --> Edge --> Gateway
     Gateway <--> IdP
     Gateway -->|"authenticated workload route"| Worker
-    Gateway <--> Volume
     Worker <--> Volume
     Admin --> Engine --> Edge
     Engine --> Gateway
@@ -237,9 +241,9 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-U01` | Supply chain and updates: reviewed lockfiles, SBOM/provenance, disclosed binary-signing mode, sidecar manifests, verified update metadata, ASAR integrity where supported, and tested rollback. Project-produced 0.x release binaries and annotated tags must be unsigned; signed/notarized production packages and signed annotated tags become mandatory at v1.0.0. |
 | `TM-U02` | Update freshness: signed expiring metadata binds platform, application/sidecar versions, hashes, sizes, key identity, and monotonic release state; downgrade and freeze attempts fail closed. |
 | `TM-E01` | Event integrity: bounded sequenced streams, acknowledgement/backpressure, gap handling, terminal-state idempotency, startup reconciliation, and no automatic replay of side-effecting work after output begins. |
-| `TM-M01` | Deployment-mode integrity: Local Desktop is the safe default; Connect Remote and Host Remote require explicit, informed selection and separate configuration. `provider=none` is incompatible with Connect Remote and Host Remote, forces local execution, and opens no network socket. No environment, listener, interface, Docker context, installer flag omission, or discovered server may infer a remote mode, widen a bind, enable synchronization, or reuse credentials across profiles. |
+| `TM-M01` | Deployment-mode integrity: Local Desktop is the safe default; Connect Remote and Host Remote require explicit, informed selection and separate configuration. `provider=none` is incompatible with Connect Remote and Host Remote, forces local execution, and opens no network socket. It selects the socket-free native application-service path and does not start the container backend, host supervisor, Engine API, gateway, workers, or containers. No environment, listener, interface, Docker context, installer flag omission, or discovered server may infer a remote mode, widen a bind, enable synchronization, or reuse credentials across profiles. |
 | `TM-H01` | Docker control-plane least authority: use only an application-owned, identity-verified context and local socket selected by the host supervisor; ignore ambient `DOCKER_HOST`/`DOCKER_CONTEXT`; reject TCP/SSH endpoints; allowlist lifecycle and inspection operations; validate generated Compose before use; and expose no generic exec, copy, build, mount, image-load, plugin, swarm, or socket pass-through. The renderer and application containers never receive the socket or a Docker client credential. |
-| `TM-K01` | Runtime and container isolation: native architecture, rootless or VM-isolated engine where supported, non-root users, read-only roots, dropped capabilities, `no-new-privileges`, default-deny seccomp/MAC policy, no host network/PID/IPC/devices/privilege, explicit resource limits, bounded logs, and platform-native firewall/socket tests. Rootful-daemon, Docker-group, WSL2, Hyper-V, VM, named-pipe, user-namespace, and kernel limitations are disclosed and tested rather than assumed equivalent. |
+| `TM-K01` | Runtime and container isolation: native architecture, rootless or VM-isolated engine where supported, non-root users, read-only roots, dropped capabilities, `no-new-privileges`, default-deny seccomp/MAC policy, no host network/PID/IPC/devices/privilege, explicit resource limits, bounded logs, and platform-native firewall/socket tests. Generated Compose permits only application-owned paths plus an allowlisted read-only `family_trees` mount resolved from an opaque native-dialog grant, revalidated as an immutable source, and exposed only to the authorized worker; writable, broad, ungranted, aliased, and additional host mounts fail closed. Rootful-daemon, Docker-group, WSL2, Hyper-V, VM, named-pipe, user-namespace, and kernel limitations are disclosed and tested rather than assumed equivalent. |
 | `TM-N01` | Network and workload identity: explicit internal networks, no implicit default network, no direct host publication for workers/data services, loopback-only local gateway, default-deny route authorization, short-lived service-specific credentials, replay resistance, bounded ingress/egress, provider-policy enforcement, and fail-closed IPv4/IPv6/proxy/forwarded-header handling. Network membership alone never authorizes a request. |
 | `TM-V01` | Container secret and data custody: the OS keyring remains the local authority; a narrow broker delivers per-container, short-lived material only through non-pageable or locked no-swap memory, or a no-swap memory-backed filesystem with equivalent platform evidence. Material never enters Compose, images, environment, arguments, logs, swap, or inspectable metadata. SQLCipher keys, identity secrets, encrypted volumes, migrations, backups, restore, rotation, revocation, and uninstall are fail-closed, versioned, recoverable, and tested for loss as well as disclosure. |
 | `TM-G01` | Remote edge and identity: only the TLS reverse proxy is public; TLS and certificate validation, exact external origin, trusted-proxy allowlists, OIDC issuer/audience/redirect/PKCE/state/nonce, session rotation/revocation, CSRF protection, rate limits, default-deny authorization, administrative re-authentication, and clock-skew bounds pass preflight before Host Remote starts. Host Remote authorizes exactly one configured household principal; every other OIDC subject is rejected before route or object access. No anonymous health, docs, setup, bootstrap, or internal service route is exposed. |
@@ -433,7 +437,7 @@ Minimum pull-request evidence for desktop work includes:
 | `G2 — MVP candidate` | #118 and #131 provide packaged XSS, API/IPC fuzz, secret-leak, stream-race, GEDCOM, `provider=none`, accessibility, performance, SAST/dependency/SBOM, and three-OS evidence with no untriaged Critical/High risk. |
 | `G3 — New high-risk capability` | #16/#125 plugins, #130 retrieval, #129 editing, and any new renderer network path remain disabled until renewed architecture review and all added control/negative-test evidence pass. |
 | `G4 — Distribution and update` | #132 verifies app/sidecar integrity, signing/notarization, SBOM/provenance, update tamper/expiry/rollback/freeze handling, recovery, and emergency-response evidence on macOS, Windows, and Linux. |
-| `G5 — Local container runtime` | #348-#351, #363-#365 and #131 verify explicit Local Desktop selection, renderer/Main separation, local Engine identity and least authority, validated Compose, non-root/resource-bounded containers, authenticated workloads, keyring broker, SQLCipher migration/backup/restore, `provider=none` rejecting remote profiles and opening zero sockets or traffic, exact listener budgets, readiness/memory/image budgets, cleanup/rollback, and native evidence for every claimed engine, OS, and architecture. |
+| `G5 — Local container runtime` | #348-#351, #363-#365 and #131 verify explicit Local Desktop selection, renderer/Main separation, local Engine identity and least authority, validated Compose including grant-authorized read-only source mounts, non-root/resource-bounded containers, authenticated workloads, keyring broker, SQLCipher migration/backup/restore, `provider=none` rejecting remote profiles, opening zero sockets or traffic, and leaving every container component stopped, exact listener budgets, readiness/memory/image budgets, cleanup/rollback, and native evidence for every claimed engine, OS, and architecture. |
 | `G6 — Advanced remote boundary` | #107, #347, #350, #351, and #355-#357 verify explicit hosting and enrollment, one public TLS 443 edge, no direct backend/admin/data/Docker publication, trusted-proxy policy, OIDC/session/CSRF/default-deny authorization, workload identity, one-time endpoint-bound enrollment, operator custody disclosure, backup/recovery drills, external IPv4/IPv6 scans, and zero untriaged Critical/High risk. |
 | `G7 — Deployment distribution and operations` | #132, #353, #358-#362, #364, and #365 verify native multi-architecture images by immutable digest, checksums, license inventory, SBOM/provenance, bootstrap/runtime acquisition without remote shell, startup/shutdown/upgrade/rollback/uninstall safety, supported-lifetime ownership, operator runbooks, quantitative budgets, and a reviewer other than the implementer. Pre-1.0 and v1 signing rules remain those in #132. |
 

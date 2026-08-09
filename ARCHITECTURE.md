@@ -319,7 +319,9 @@ three later deployment intents while preserving the current runtime boundary:
 Local Desktop/local execution and opens no network socket; endpoint state,
 ambient credentials, or a previously enrolled client cannot weaken that rule.
 Remote execution requires a separate explicit profile and may not claim
-`provider=none`.
+`provider=none`. The offline profile selects the socket-free native
+application-service path and does not start the container backend, host
+supervisor, Engine API, gateway, workers, or containers.
 
 Host Remote v1 authorizes one household as one configured OIDC principal. The
 gateway rejects every other OIDC subject before route or object access, and
@@ -353,12 +355,21 @@ operator instead owns host, DNS, TLS, identity, firewall, capacity, monitoring,
 updates, backups, and recovery. The project provides no hosting or operations
 SLA for the self-supported profile.
 
+Containerized source ingress is grant-mediated. The host supervisor may render
+only an allowlisted read-only `family_trees` mount resolved from an opaque
+native-dialog grant, revalidated as immutable, and attached only to the worker
+performing the authorized operation. The renderer receives no filesystem path,
+and writable, broad, ungranted, aliased, or additional host mounts fail closed.
+
 Cold/warm/remote readiness, shutdown, idle memory, VM ceiling, compressed image
 size, local and remote listener exposure, and offline egress have quantitative
 fail-closed budgets in ADR-0026. Native evidence on every claimed architecture
-is required; emulation is labeled and cannot establish native support. The
-threat model's G5 through G7 gates and AB-11 through AB-21 risks must pass before
-any availability or release claim.
+is required; emulation is labeled and cannot establish native support.
+Local Desktop containers require `G0`, `G5`, and their applicable `G7` evidence.
+Connect Remote requires `G0`, its applicable client-side `G6`, and `G7` evidence.
+Host Remote requires `G0`, `G6`, and its applicable `G7` evidence.
+AB-11 through AB-21 remain fail-closed according to their owning profile; a
+failed gate blocks the affected availability or release claim.
 
 GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
 publication/recovery, operation orchestration, and legacy argument translation
