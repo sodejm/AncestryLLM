@@ -29,7 +29,7 @@ Choose the path that matches how you want to use AncestryLLM.
 
 ### Use the CLI or interactive prompt
 
-You will need Python 3.12 through 3.14.
+You will need Python 3.12 through 3.14 and a working OS credential store.
 
 1. Install [pipx](https://pipx.pypa.io/) if you do not already use it.
 2. Install AncestryLLM and confirm it is available:
@@ -45,6 +45,12 @@ You will need Python 3.12 through 3.14.
 
 3. Run `ancestry --help` to see available commands, or run `ancestry` to open
    the interactive prompt.
+
+On a minimal or headless system, first follow the
+[setup diagnostics](https://github.com/sodejm/AncestryLLM/blob/main/docs/SETUP_DIAGNOSTICS.md).
+They cover a supported credential backend and the headless/CI
+environment-injection fallback for ephemeral test secrets. Run
+`ancestry --json database diagnose` before opening an encrypted workspace.
 
 ### Use the desktop control shell
 
