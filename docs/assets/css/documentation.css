@@ -1,5 +1,9 @@
 /* Responsive layout rules for the documentation Pages shell. */
 
+.main-content {
+  max-width: 100%;
+}
+
 .documentation-shell {
   display: grid;
   grid-template-columns: minmax(14rem, 18rem) minmax(0, 72rem);

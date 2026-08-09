@@ -20,6 +20,8 @@ def test_documentation_layout_loads_a_pages_safe_responsive_stylesheet() -> None
 def test_documentation_stylesheet_preserves_readability_and_overflow_access() -> None:
     stylesheet = STYLESHEET.read_text(encoding="utf-8")
 
+    assert ".main-content" in stylesheet
+    assert "max-width: 100%" in stylesheet
     assert ".documentation-shell" in stylesheet
     assert "grid-template-columns:" in stylesheet
     assert ".documentation-navigation" in stylesheet
