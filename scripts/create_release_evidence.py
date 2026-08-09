@@ -23,7 +23,7 @@ REQUIRED_GATES = {
     "cyclonedx-sbom",
     "dependency-audit",
     "lifecycle-audit",
-    "milestone-closure",
+    "project-release-gate",
     "mypy",
     "privacy-regressions",
     "repository-safety",

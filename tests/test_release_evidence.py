@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -15,6 +16,14 @@ assert _SPEC is not None and _SPEC.loader is not None
 evidence = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = evidence
 _SPEC.loader.exec_module(evidence)
+
+
+def _readiness_gate_inventory() -> set[str]:
+    workflow = (
+        Path(__file__).parents[1] / ".github" / "workflows" / "release-readiness.yml"
+    ).read_text(encoding="utf-8")
+    gate_array = workflow.split("gates: (", maxsplit=1)[1].split("| map({", maxsplit=1)[0]
+    return set(re.findall(r'^\s+"([a-z0-9-]+)",?$', gate_array, flags=re.MULTILINE))
 
 
 def _findings() -> dict[str, Any]:
@@ -192,6 +201,10 @@ def test_gate_inventory_requires_exact_commit_every_gate_and_verified_status() -
     payload["gates"][0]["status"] = "unverified"
     with pytest.raises(ValueError, match="status must be verified"):
         evidence._validate_gates(payload, "0.2.0", "a" * 40)
+
+
+def test_readiness_workflow_and_evidence_generator_share_gate_inventory() -> None:
+    assert _readiness_gate_inventory() == evidence.REQUIRED_GATES
 
 
 def test_generator_embeds_dispositions_interoperability_and_hashes(
