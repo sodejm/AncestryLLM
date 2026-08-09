@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "validate_wiki_docs.py"
+sys.path.insert(0, str(_SCRIPT.parent))
 _SPEC = importlib.util.spec_from_file_location("validate_wiki_docs", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 wiki_validation = importlib.util.module_from_spec(_SPEC)
@@ -74,6 +75,18 @@ def test_unsafe_sidebar_paths_are_rejected(tmp_path: Path, capsys) -> None:
     assert "unsafe sidebar target: C:/secret" in output
 
 
+def test_wiki_style_sidebar_links_cannot_address_nested_source_paths(
+    tmp_path: Path, capsys
+) -> None:
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "Home.md").write_text("# Home\n", encoding="utf-8")
+    (tmp_path / "nested" / "Child.md").write_text("# Child\n", encoding="utf-8")
+    (tmp_path / "_Sidebar.md").write_text("[[nested/Child]]\n", encoding="utf-8")
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 1
+    assert "unsafe sidebar target: nested/Child" in capsys.readouterr().err
+
+
 def test_symlinked_sources_are_rejected(tmp_path: Path, capsys) -> None:
     _write_wiki(tmp_path)
     outside = tmp_path.parent / "outside.md"
@@ -82,3 +95,59 @@ def test_symlinked_sources_are_rejected(tmp_path: Path, capsys) -> None:
 
     assert wiki_validation.main(["--source", str(tmp_path)]) == 1
     assert "symlinked source is not supported: linked.md" in capsys.readouterr().err
+
+
+def test_all_local_links_and_metadata_are_validated(tmp_path: Path, capsys) -> None:
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "_data").mkdir()
+    (tmp_path / "Home.md").write_text("[Child](nested/Child.md)\n", encoding="utf-8")
+    (tmp_path / "_Sidebar.md").write_text("[Child](nested/Child.md)\n", encoding="utf-8")
+    (tmp_path / "nested" / "Child.md").write_text(
+        "[Parent](../Home.md) ![Missing](../assets/missing.svg)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "_data" / "page_metadata.json").write_text(
+        '{"Home.md": {"title": "Home", "description": "Home description"}}',
+        encoding="utf-8",
+    )
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 1
+    output = capsys.readouterr().err
+    assert "broken local target: nested/Child.md -> ../assets/missing.svg" in output
+    assert "missing page metadata: nested/Child.md" in output
+
+
+def test_local_source_anchors_are_validated_after_percent_decoding(tmp_path: Path, capsys) -> None:
+    (tmp_path / "Home.md").write_text(
+        "[Valid](Guide.md#caf%C3%A9)\n[Missing](Guide.md#not-there)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Guide.md").write_text("# Café\n", encoding="utf-8")
+    (tmp_path / "_Sidebar.md").write_text("[Guide](Guide.md)\n", encoding="utf-8")
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 1
+    output = capsys.readouterr().err
+    assert "missing source anchor: Home.md -> Guide.md#not-there" in output
+    assert "Guide.md#caf%C3%A9" not in output
+
+
+def test_query_only_same_page_anchor_is_validated(tmp_path: Path, capsys) -> None:
+    (tmp_path / "Home.md").write_text(
+        "# Home\n\n## Topic\n\n[Filtered view](?view=compact#topic)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "_Sidebar.md").write_text("[Home](Home.md)\n", encoding="utf-8")
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_setext_heading_anchors_are_validated(tmp_path: Path, capsys) -> None:
+    (tmp_path / "Home.md").write_text(
+        "[Setext section](Guide.md#setext-section)\n", encoding="utf-8"
+    )
+    (tmp_path / "Guide.md").write_text("Setext Section\n==============\n", encoding="utf-8")
+    (tmp_path / "_Sidebar.md").write_text("[Guide](Guide.md)\n", encoding="utf-8")
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 0
+    assert capsys.readouterr().err == ""

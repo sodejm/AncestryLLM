@@ -124,5 +124,41 @@
   "DOCS_AUTHORING.md": {
     "title": "Documentation authoring guide — AncestryLLM",
     "description": "Diátaxis information architecture map, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."
+  },
+  "CODE_DOCUMENTATION.md": {
+    "title": "In-code documentation policy — AncestryLLM",
+    "description": "Standards for Python docstrings, comments, API contracts, and documentation-focused review in AncestryLLM."
+  },
+  "api/API_REFERENCE.md": {
+    "title": "Internal API contract — AncestryLLM",
+    "description": "Authenticated health and capability endpoints provided by the bounded FastAPI foundation."
+  },
+  "release-evidence/README.md": {
+    "title": "Release evidence index — AncestryLLM",
+    "description": "Index of machine-readable and human-reviewed evidence retained for AncestryLLM release decisions."
+  },
+  "release-evidence/issue-10-import-smoke-tests.md": {
+    "title": "GEDCOM import smoke-test evidence — AncestryLLM",
+    "description": "Reproducible evidence for the fictional GEDCOM importer smoke tests tracked by issue 10."
+  },
+  "release-notes/0.2.0.md": {
+    "title": "AncestryLLM 0.2.0 release notes",
+    "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.2.0 release."
+  },
+  "release-notes/0.3.0.md": {
+    "title": "AncestryLLM 0.3.0 release notes",
+    "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.3.0 release."
+  },
+  "release-notes/0.4.0.md": {
+    "title": "AncestryLLM 0.4.0 release notes",
+    "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.4.0 release."
+  },
+  "release-notes/0.5.0.md": {
+    "title": "AncestryLLM 0.5.0 release notes",
+    "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.5.0 release."
+  },
+  "release-notes/0.6.0.md": {
+    "title": "AncestryLLM 0.6.0 release notes",
+    "description": "Planned changes, compatibility notes, and validation requirements for the future AncestryLLM 0.6.0 release."
   }
 }

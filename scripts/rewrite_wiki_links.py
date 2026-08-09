@@ -11,8 +11,7 @@ from pathlib import Path
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(?P<marker>`+).*?(?P=marker)")
 _MARKDOWN_LINK = re.compile(
-    r"(?<!!)"
-    r"(?P<prefix>\[[^\]\n]*\]\()"
+    r"(?P<prefix>!?\[[^\]\n]*\]\()"
     r"(?P<destination>[^)\n]+)"
     r"(?P<suffix>\))"
 )
@@ -35,29 +34,50 @@ def _rewrite_destination(destination: str) -> str:
     return f"{wiki_target}{match.group('title')}"
 
 
-def _rewrite_links(fragment: str, rewrite_destination: Callable[[str], str]) -> str:
+def _rewrite_links(
+    fragment: str,
+    rewrite_destination: Callable[[str], str],
+    *,
+    include_images: bool,
+) -> str:
     def replace(match: re.Match[str]) -> str:
+        if match.group("prefix").startswith("!") and not include_images:
+            return match.group(0)
         destination = rewrite_destination(match.group("destination"))
         return f"{match.group('prefix')}{destination}{match.group('suffix')}"
 
     return _MARKDOWN_LINK.sub(replace, fragment)
 
 
-def _rewrite_line(line: str, rewrite_destination: Callable[[str], str]) -> str:
+def _rewrite_line(
+    line: str,
+    rewrite_destination: Callable[[str], str],
+    *,
+    include_images: bool,
+) -> str:
     rewritten: list[str] = []
     cursor = 0
     for match in _INLINE_CODE.finditer(line):
-        rewritten.append(_rewrite_links(line[cursor : match.start()], rewrite_destination))
+        rewritten.append(
+            _rewrite_links(
+                line[cursor : match.start()], rewrite_destination, include_images=include_images
+            )
+        )
         rewritten.append(match.group(0))
         cursor = match.end()
-    rewritten.append(_rewrite_links(line[cursor:], rewrite_destination))
+    rewritten.append(
+        _rewrite_links(line[cursor:], rewrite_destination, include_images=include_images)
+    )
     return "".join(rewritten)
 
 
 def rewrite_markdown_link_destinations(
-    markdown: str, rewrite_destination: Callable[[str], str]
+    markdown: str,
+    rewrite_destination: Callable[[str], str],
+    *,
+    include_images: bool = False,
 ) -> str:
-    """Rewrite ordinary Markdown links without changing code or image examples."""
+    """Rewrite Markdown links and images without changing code examples."""
     rewritten: list[str] = []
     fence_marker: str | None = None
     for line in markdown.splitlines(keepends=True):
@@ -67,7 +87,9 @@ def rewrite_markdown_link_destinations(
                 fence_marker = fence.group("marker")
                 rewritten.append(line)
             else:
-                rewritten.append(_rewrite_line(line, rewrite_destination))
+                rewritten.append(
+                    _rewrite_line(line, rewrite_destination, include_images=include_images)
+                )
             continue
 
         rewritten.append(line)

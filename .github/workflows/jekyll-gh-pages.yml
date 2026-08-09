@@ -23,18 +23,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Validate canonical documentation
+        run: python scripts/validate_wiki_docs.py --source docs
       - name: Prepare canonical documentation for Pages
-        run: python scripts/prepare_pages_source.py --source docs --destination _pages_source
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: >-
+          python scripts/prepare_pages_source.py
+          --source docs
+          --destination _pages_source
+          --source-sha "$SOURCE_SHA"
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
         with:
           source: ./_pages_source
           destination: ./_site
+      - name: Validate generated documentation artifact
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: >-
+          python scripts/validate_rendered_docs.py --site _site
+          --expected-source-sha "$SOURCE_SHA"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
@@ -48,9 +62,20 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     permissions:
+      contents: read # Check out the fixed smoke-test client after deployment.
       pages: write # Publish the prepared artifact to GitHub Pages.
       id-token: write # Authenticate this deployment with GitHub Pages.
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+      - name: Check out smoke-test client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Smoke-test deployed documentation revision
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: >-
+          python scripts/smoke_pages_deployment.py
+          --expected-source-sha "$SOURCE_SHA"
