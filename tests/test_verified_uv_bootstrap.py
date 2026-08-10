@@ -1823,6 +1823,44 @@ def test_record_post_preflight_failure_cli_updates_and_prints_receipt(
     }
 
 
+def test_bootstrap_cli_records_github_output_write_failure(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    receipt = _verified_success_receipt(
+        tmp_path / "fixture",
+        bootstrap_module,
+        receipt_path,
+    )
+    github_output = tmp_path / "github-output"
+    github_output.mkdir()
+    monkeypatch.setattr(bootstrap_module, "bootstrap_uv", lambda **_kwargs: receipt)
+
+    assert (
+        bootstrap_module.main(
+            [
+                "bootstrap",
+                "--receipt",
+                str(receipt_path),
+                "--github-output",
+                str(github_output),
+            ]
+        )
+        == 1
+    )
+
+    rendered = capsys.readouterr()
+    assert "GITHUB_OUTPUT_WRITE_FAILED" in rendered.err
+    assert json.loads(receipt_path.read_text(encoding="utf-8")) == {
+        **receipt,
+        "status": "failure",
+        "failure_category": "GITHUB_OUTPUT_WRITE_FAILED",
+    }
+
+
 def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
     assert ACTION_PATH.is_file()
     action = ACTION_PATH.read_text(encoding="utf-8")

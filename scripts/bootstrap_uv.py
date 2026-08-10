@@ -139,6 +139,7 @@ DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 ATTESTATION_TIMEOUT_SECONDS = 60
 POST_PREFLIGHT_FAILURE_CATEGORIES = frozenset(
     {
+        "GITHUB_OUTPUT_WRITE_FAILED",
         "INSTALLED_UV_VERIFICATION_FAILED",
         "SETUP_UV_ACTION_FAILED",
     }
@@ -1752,11 +1753,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 platform_id=platform_id,
             )
             if arguments.github_output is not None:
-                _write_github_outputs(
-                    arguments.github_output,
-                    receipt=receipt,
-                    receipt_path=arguments.receipt,
-                )
+                try:
+                    _write_github_outputs(
+                        arguments.github_output,
+                        receipt=receipt,
+                        receipt_path=arguments.receipt,
+                    )
+                except BootstrapError as exc:
+                    try:
+                        record_post_preflight_failure(arguments.receipt, exc.code)
+                    except BootstrapError as receipt_failure:
+                        raise receipt_failure from exc
+                    raise
             print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
             return 0
 
