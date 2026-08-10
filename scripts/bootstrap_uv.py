@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -526,6 +527,71 @@ def _download_deadline_exceeded() -> NoReturn:
     )
 
 
+def _close_download_response(response: Any) -> None:
+    close_response = getattr(response, "close", None)
+    if not callable(close_response):
+        return
+    try:
+        close_response()
+    except Exception:  # noqa: BLE001,S110 - preserve the coded failure
+        pass
+
+
+def _open_download_response(request: urllib.request.Request, deadline: float) -> Any:
+    condition = threading.Condition()
+    state: dict[str, Any] = {"cancelled": False}
+
+    def open_response() -> None:
+        response: Any | None = None
+        failure: Exception | None = None
+        try:
+            response = urllib.request.urlopen(  # noqa: S310
+                request,
+                timeout=min(
+                    float(DOWNLOAD_CONNECT_TIMEOUT_SECONDS),
+                    float(DOWNLOAD_DEADLINE_SECONDS),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve failures across thread boundary
+            failure = exc
+
+        close_after_cancellation = False
+        with condition:
+            if state["cancelled"]:
+                close_after_cancellation = response is not None
+            else:
+                state["outcome"] = (response, failure)
+                condition.notify_all()
+        if close_after_cancellation:
+            _close_download_response(response)
+
+    worker = threading.Thread(
+        target=open_response,
+        name="uv-bootstrap-response-open",
+        daemon=True,
+    )
+    worker.start()
+
+    with condition:
+        while "outcome" not in state:
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                state["cancelled"] = True
+                _download_deadline_exceeded()
+            condition.wait(timeout=remaining_seconds)
+        response, failure = state["outcome"]
+
+    if time.monotonic() >= deadline:
+        if response is not None:
+            _close_download_response(response)
+        _download_deadline_exceeded()
+    if failure is not None:
+        raise failure
+    if response is None:
+        _fail("DOWNLOAD_FAILED", "reviewed release asset response was unavailable")
+    return response
+
+
 def _set_response_read_timeout(response: Any, timeout: float) -> None:
     stream = response
     for _ in range(2):
@@ -583,11 +649,9 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
             "User-Agent": "AncestryLLM verified uv bootstrap/1",
         },
     )
+    deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            request,
-            timeout=DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
-        ) as response:
+        with _open_download_response(request, deadline) as response:
             content_length = response.headers.get("Content-Length")
             if (
                 not isinstance(content_length, str)
@@ -599,7 +663,6 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
                     "release asset size does not match bootstrap policy",
                 )
 
-            deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
             bytes_written = 0
             with destination.open("xb") as target:
                 while bytes_written < expected_size:
@@ -629,6 +692,20 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
     except (OSError, ValueError, urllib.error.URLError) as exc:
         _discard_partial_download(destination)
         raise BootstrapError("DOWNLOAD_FAILED", "reviewed release asset download failed") from exc
+
+
+def _create_temporary_workspace(
+    temporary_parent: Path | None,
+) -> tempfile.TemporaryDirectory[str]:
+    try:
+        if temporary_parent is not None:
+            temporary_parent.mkdir(parents=True, exist_ok=True)
+        return tempfile.TemporaryDirectory(dir=temporary_parent)
+    except OSError as exc:
+        raise BootstrapError(
+            "TEMPORARY_WORKSPACE_FAILED",
+            "temporary bootstrap workspace could not be created",
+        ) from exc
 
 
 def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -1040,10 +1117,7 @@ def bootstrap_uv(
             )
             return receipt
 
-        temporary_parent = temporary_root
-        if temporary_parent is not None:
-            temporary_parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=temporary_parent) as temporary_name:
+        with _create_temporary_workspace(temporary_root) as temporary_name:
             temporary = Path(temporary_name)
             gh_archive = temporary / gh_asset["archive_name"]
             downloader(

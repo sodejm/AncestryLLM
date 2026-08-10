@@ -10,13 +10,15 @@ import stat
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 import tomllib
 import zipfile
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -929,6 +931,16 @@ class _ClosingDownloadResponse(_DownloadResponse):
         return chunk
 
 
+class _TrackedDownloadResponse(_DownloadResponse):
+    def __init__(self, payload: bytes, content_length: str | None) -> None:
+        super().__init__(payload, content_length)
+        self.closed_event = threading.Event()
+
+    def close(self) -> None:
+        super().close()
+        self.closed_event.set()
+
+
 class _RecordingSocket:
     def __init__(self) -> None:
         self.timeouts: list[float] = []
@@ -1019,6 +1031,42 @@ def test_download_stops_when_reviewed_content_length_closes_transport(
     )
 
     assert destination.read_bytes() == payload
+
+
+def test_download_deadline_includes_response_opening(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"abc"
+    response = _TrackedDownloadResponse(payload, str(len(payload)))
+    release_response = threading.Event()
+
+    def delayed_urlopen(*_args: object, **_kwargs: object) -> _TrackedDownloadResponse:
+        release_response.wait(timeout=1.0)
+        return response
+
+    monkeypatch.setattr(bootstrap_module.urllib.request, "urlopen", delayed_urlopen)
+    monkeypatch.setattr(bootstrap_module, "DOWNLOAD_DEADLINE_SECONDS", 0.05)
+    destination = tmp_path / "asset.tar.gz"
+    started_at = time.perf_counter()
+
+    try:
+        with pytest.raises(
+            bootstrap_module.BootstrapError,
+            match="DOWNLOAD_DEADLINE_EXCEEDED",
+        ):
+            bootstrap_module._download(
+                "https://github.com/example/release/asset.tar.gz",
+                destination,
+                len(payload),
+            )
+    finally:
+        release_response.set()
+
+    assert time.perf_counter() - started_at < 0.5
+    assert response.closed_event.wait(timeout=0.5)
+    assert not destination.exists()
 
 
 def test_download_fails_when_the_bounded_deadline_expires(
@@ -1160,6 +1208,46 @@ def test_initialization_failures_emit_minimal_sanitized_receipts(
         "failure_category": error,
     }
     assert str(tmp_path) not in receipt_text
+    assert downloader.calls == []
+    assert runner.commands == []
+
+
+def test_temporary_workspace_failure_is_coded_and_receipted(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    sensitive_detail = str(tmp_path / "private-temporary-root")
+
+    def fail_temporary_directory(*_args: object, **_kwargs: object) -> NoReturn:
+        raise PermissionError(sensitive_detail)
+
+    monkeypatch.setattr(
+        bootstrap_module.tempfile,
+        "TemporaryDirectory",
+        fail_temporary_directory,
+    )
+    receipt_path = tmp_path / "receipt.json"
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="TEMPORARY_WORKSPACE_FAILED",
+    ) as failure:
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    receipt_text = receipt_path.read_text(encoding="utf-8")
+    assert json.loads(receipt_text)["failure_category"] == "TEMPORARY_WORKSPACE_FAILED"
+    assert sensitive_detail not in str(failure.value)
+    assert sensitive_detail not in receipt_text
     assert downloader.calls == []
     assert runner.commands == []
 
