@@ -76,5 +76,5 @@ jobs:
           receipt-artifact-name: uv-bootstrap-release-project-proof
       - name: Prove strict verifier rejects a non-ready P0 fixture
         run: |
-          uv sync --locked --all-extras
-          uv run python -m pytest tests/test_verify_release_project.py -q
+          uv sync --locked --no-default-groups --group test
+          uv run --no-sync python -m pytest tests/test_verify_release_project.py -q

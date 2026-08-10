@@ -387,10 +387,15 @@ def test_release_verifier_is_locked_but_excluded_from_general_setup() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     assert project["dependency-groups"]["release-verifier"] == ["pypi-attestations==0.0.30"]
-    assert "pypi-attestations==0.0.30" not in project["project"]["optional-dependencies"]["dev"]
-    assert "uv sync --locked --group release-verifier" in release
+    assert "dev" not in project["project"]["optional-dependencies"]
+    assert all(
+        "pypi-attestations==0.0.30" not in dependencies
+        for dependencies in project["project"]["optional-dependencies"].values()
+    )
+    assert "uv sync --locked --no-default-groups --group release-verifier" in release
     assert (
-        "uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py"
+        "uv run --locked --no-default-groups --group release-verifier "
+        "python scripts/verify_pypi_attestations.py"
     ) in release
     assert "uv sync --locked --extra dev" not in release
 

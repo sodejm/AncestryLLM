@@ -53,19 +53,24 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     test_job = _job(workflow, "test")
     quality_job = _job(workflow, "quality")
 
-    assert test_job.count("uv run python -m pytest --verbose --cov --cov-report=term-missing") == 1
+    assert (
+        test_job.count(
+            "uv run --no-sync python -m pytest --verbose --cov --cov-report=term-missing"
+        )
+        == 1
+    )
     assert "ruff check" not in test_job
     assert "mypy" not in test_job
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
     for command in (
-        "uv run ruff check src tests scripts",
-        "uv run ruff format --check src tests scripts",
-        "uv run mypy src/ancestryllm",
-        "uv run python scripts/check_architecture_contracts.py",
+        "uv run --no-sync ruff check src tests scripts",
+        "uv run --no-sync ruff format --check src tests scripts",
+        "uv run --no-sync mypy src/ancestryllm",
+        "uv run --no-sync python scripts/check_architecture_contracts.py",
         "./scripts/check_repository_safety.sh",
-        "uv run python scripts/check_code_documentation.py",
+        "uv run --no-sync python scripts/check_code_documentation.py",
     ):
         assert quality_job.count(command) == 1
 
@@ -85,7 +90,7 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
     assert security_job.count(dependency_condition) == 4
-    assert security_job.count("uv run pip-audit") == 1
+    assert security_job.count("uv run --no-sync pip-audit") == 1
     assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py .") == 1
     assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
@@ -216,13 +221,14 @@ def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
     readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
 
     assert (
-        'VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --all-extras --locked'
-        in makefile
+        'VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked '
+        "--no-default-groups --all-extras --group lint --group typecheck --group test "
+        "--group security --group build" in makefile
     )
     audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
     assert f"$(VENV_DIR)/bin/{audit_command}" in makefile
-    assert f"uv run {audit_command}" in _job(ci, "workflow-audit")
-    assert f"uv run {audit_command}" in _job(readiness, "quality")
+    assert f"uv run --no-sync {audit_command}" in _job(ci, "workflow-audit")
+    assert f"uv run --no-sync {audit_command}" in _job(readiness, "security")
 
 
 def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
@@ -263,10 +269,12 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert re.match(workflow_filter, ".github/workflows/ci.yml")
     assert not re.match(workflow_filter, "docs/CI.md")
     assert hooks.count("stages: [pre-push]") == 2
-    assert "bootstrap: setup hooks" in makefile
+    assert "bootstrap: hooks" in makefile
+    assert "$(MAKE) setup" in makefile
     assert "lock-check:" in makefile
     assert "$(UV_BIN) lock --check" in makefile
-    assert "pre-push: test lint typecheck security" in makefile
+    for target in ("test", "lint", "typecheck", "security"):
+        assert f"$(MAKE) {target}" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 
 
@@ -284,7 +292,7 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
-    command = "uv run python scripts/check_code_documentation.py"
+    command = "uv run --no-sync python scripts/check_code_documentation.py"
     assert ci.count(command) == 1, (
         "CI quality job must run check_code_documentation.py exactly once"
     )

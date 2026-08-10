@@ -101,11 +101,14 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "OPENSSL_DIR" not in workflow
     assert "dumpbin /headers" not in workflow
     assert (
-        workflow.count("uv sync --locked --extra desktop-build --no-install-project --no-build")
+        workflow.count(
+            "uv sync --locked --no-default-groups --extra desktop-build "
+            "--no-install-project --no-build"
+        )
         == 1
     )
     assert workflow.count("uv pip install --python .venv --no-deps --editable .") == 1
-    assert workflow.count("uv run --no-sync") == 3
+    assert workflow.count("uv run --no-sync") == 5
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow

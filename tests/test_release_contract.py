@@ -294,10 +294,11 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
-    assert "uv sync --locked --group release-verifier" in release
+    assert "uv sync --locked --no-default-groups --group release-verifier" in release
     assert "uv sync --locked --extra dev" not in release
     assert (
-        "uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py"
+        "uv run --locked --no-default-groups --group release-verifier "
+        "python scripts/verify_pypi_attestations.py"
     ) in release
     assert "uvx" not in release
     assert "security-events: read" in readiness_codeql
@@ -318,6 +319,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
 
 def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     project = _project()
+    project_configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     script = (ROOT / "scripts/run_pinned_semgrep.py").read_text(encoding="utf-8")
     script_lock = ROOT / "scripts/run_pinned_semgrep.py.lock"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -334,7 +336,12 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
 
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
-    assert "uv==0.12.1" in project["optional-dependencies"]["dev"]
+    assert all(
+        not dependency.startswith("uv")
+        for dependencies in project_configuration["dependency-groups"].values()
+        for dependency in dependencies
+    )
+    assert "dev" not in project["optional-dependencies"]
     assert "pip install --upgrade pip uv==0.12.1" not in makefile
     assert "scripts/bootstrap_uv.py bootstrap" in makefile
     for relative_path, expected_command in sources.items():
@@ -361,7 +368,7 @@ def test_synthetic_credentialed_url_fixtures_do_not_target_live_services() -> No
 def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
     """Keep repository-only test tooling importable in clean hosted environments."""
 
-    command = "uv run python -m pytest --verbose --cov --cov-report=term-missing"
+    command = "uv run --no-sync python -m pytest --verbose --cov --cov-report=term-missing"
     for relative_path in (
         ".github/workflows/ci.yml",
         ".github/workflows/release-readiness.yml",
@@ -387,8 +394,8 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
     )
 
     assert "Rebuild deterministic artifacts and SBOM" in release
-    assert "uv run python scripts/build_release.py --output-dir dist" in release
-    assert "uv run cyclonedx-py environment --output-file dist/sbom.json" in release
+    assert "uv run --no-sync python scripts/build_release.py --output-dir dist" in release
+    assert "uv run --no-sync cyclonedx-py environment --output-file dist/sbom.json" in release
     assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
     for duplicate_gate in duplicate_gates:
         assert duplicate_gate not in release
@@ -437,7 +444,7 @@ def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_
     assert '--version "$project_release"' in proof
     assert "--schema-only" in proof
     assert "import tomllib" not in proof
-    assert "uv run python -m pytest tests/test_verify_release_project.py -q" in proof
+    assert "uv run --no-sync python -m pytest tests/test_verify_release_project.py -q" in proof
 
 
 def test_release_project_proof_runs_for_every_main_commit_only() -> None:
