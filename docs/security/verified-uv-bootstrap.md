@@ -74,7 +74,8 @@ alternate index, implicit latest version, or unverified `PATH` fallback.
 The bootstrap downloads the policy-selected GitHub CLI archive into a temporary
 directory and compares its SHA-256 in constant time. Each download must report
 the reviewed byte size, may stream no more than that size, and must complete
-within the bounded acquisition deadline; a mismatch, overrun, underrun, or
+within the bounded acquisition deadline. The remaining deadline is applied to
+each single underlying transport read; a mismatch, overrun, underrun, or
 deadline failure discards the partial file. Before extraction the bootstrap
 rejects absolute paths, parent traversal, symbolic or hard links, device files,
 and any member that would escape the empty temporary extraction root. Only the
@@ -115,6 +116,13 @@ signer identity, UTC timestamp, success status, and a stable failure category.
 It excludes tokens, environment values, usernames, hostnames, absolute or
 temporary paths, and response bodies.
 
+If policy loading or validation, platform selection, policy hashing, or clock
+validation fails before those reviewed identity fields are available, the
+bootstrap emits a minimal schema-v1 failure envelope containing only
+`schema_version`, `status`, and `failure_category`. It never fills unavailable
+fields with unverified values. This envelope preserves stable failure evidence
+for CI upload but is intentionally insufficient for release authorization.
+
 CI retains the receipt as a normal artifact. Release-readiness and release jobs
 require it through the `bootstrap-verification` evidence gate and include its
 digest and verified identity in the release manifest. A failed, malformed,
@@ -126,7 +134,8 @@ evidence.
 Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `PLATFORM_UNSUPPORTED`, `ARCHITECTURE_UNSUPPORTED`,
 `DOWNLOAD_SIZE_MISMATCH`, `DOWNLOAD_DEADLINE_EXCEEDED`,
-`ARCHIVE_MEMBER_UNSAFE`, `INSTALL_PATH_UNSAFE`, `RECEIPT_PATH_UNSAFE`,
+`ARCHIVE_MEMBER_UNSAFE`, `INSTALL_PATH_UNSAFE`, `INSTALL_WRITE_FAILED`,
+`RECEIPT_PATH_UNSAFE`,
 `VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
 `VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_IDENTITY_MISMATCH`, and
 `UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
@@ -135,6 +144,8 @@ the receipt.
 
 For an interrupted download or a cache mismatch, leave user files untouched,
 remove only the repository-local ignored `.tools/uv/` cache, and retry. For a
+local `INSTALL_WRITE_FAILED`, correct the repository-local directory's space or
+permissions and retry; the failed temporary install is discarded. For a
 policy, provenance, or identity mismatch, stop and review the upstream release
 and policy history before changing any trusted value. In Actions,
 `VERIFIER_AUTHENTICATION_FAILED` means the job-scoped token was unavailable or

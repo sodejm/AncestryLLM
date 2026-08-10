@@ -519,6 +519,55 @@ def _discard_partial_download(destination: Path) -> None:
         pass
 
 
+def _download_deadline_exceeded() -> NoReturn:
+    _fail(
+        "DOWNLOAD_DEADLINE_EXCEEDED",
+        "release asset download exceeded its bounded deadline",
+    )
+
+
+def _set_response_read_timeout(response: Any, timeout: float) -> None:
+    stream = getattr(response, "fp", None)
+    raw_stream = getattr(stream, "raw", None)
+    transport = getattr(raw_stream, "_sock", None)
+    set_timeout = getattr(transport, "settimeout", None)
+    if not callable(set_timeout):
+        _fail(
+            "DOWNLOAD_FAILED",
+            "reviewed release asset transport cannot enforce bounded reads",
+        )
+    set_timeout(timeout)
+
+
+def _read_download_chunk(response: Any, size: int, deadline: float) -> bytes:
+    remaining_seconds = deadline - time.monotonic()
+    if remaining_seconds <= 0:
+        _download_deadline_exceeded()
+    deadline_limits_read = remaining_seconds <= DOWNLOAD_CONNECT_TIMEOUT_SECONDS
+    _set_response_read_timeout(
+        response,
+        min(float(DOWNLOAD_CONNECT_TIMEOUT_SECONDS), remaining_seconds),
+    )
+    read_once = getattr(response, "read1", None)
+    if not callable(read_once):
+        _fail(
+            "DOWNLOAD_FAILED",
+            "reviewed release asset transport does not support bounded reads",
+        )
+    try:
+        chunk = read_once(size)
+    except TimeoutError as exc:
+        if deadline_limits_read:
+            raise BootstrapError(
+                "DOWNLOAD_DEADLINE_EXCEEDED",
+                "release asset download exceeded its bounded deadline",
+            ) from exc
+        raise
+    if time.monotonic() >= deadline:
+        _download_deadline_exceeded()
+    return chunk
+
+
 def _download(url: str, destination: Path, expected_size: int) -> None:
     if isinstance(expected_size, bool) or not isinstance(expected_size, int) or expected_size <= 0:
         _fail("DOWNLOAD_SIZE_MISMATCH", "reviewed release asset size is invalid")
@@ -545,17 +594,16 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
                     "release asset size does not match bootstrap policy",
                 )
 
-            started_at = time.monotonic()
+            deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
             bytes_written = 0
             with destination.open("xb") as target:
                 while True:
-                    if time.monotonic() - started_at > DOWNLOAD_DEADLINE_SECONDS:
-                        _fail(
-                            "DOWNLOAD_DEADLINE_EXCEEDED",
-                            "release asset download exceeded its bounded deadline",
-                        )
                     remaining = expected_size - bytes_written
-                    chunk = response.read(min(DOWNLOAD_CHUNK_SIZE, remaining + 1))
+                    chunk = _read_download_chunk(
+                        response,
+                        min(DOWNLOAD_CHUNK_SIZE, remaining + 1),
+                        deadline,
+                    )
                     if not chunk:
                         break
                     bytes_written += len(chunk)
@@ -565,11 +613,6 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
                             "release asset exceeded its reviewed size",
                         )
                     target.write(chunk)
-                    if time.monotonic() - started_at > DOWNLOAD_DEADLINE_SECONDS:
-                        _fail(
-                            "DOWNLOAD_DEADLINE_EXCEEDED",
-                            "release asset download exceeded its bounded deadline",
-                        )
             if bytes_written != expected_size:
                 _fail(
                     "DOWNLOAD_SIZE_MISMATCH",
@@ -775,6 +818,16 @@ def _build_receipt(
     }
 
 
+def _build_initialization_receipt() -> dict[str, Any]:
+    """Build the minimal envelope used before verified identity is available."""
+
+    return {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "status": "failure",
+        "failure_category": None,
+    }
+
+
 def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
     temporary_path: Path | None = None
     try:
@@ -819,25 +872,55 @@ def _write_failure_receipt(
         raise receipt_failure from failure
 
 
-def _atomic_install(source: Path, destination: Path) -> None:
-    _assert_install_path_safe(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    _assert_install_path_safe(destination)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=".tmp",
-    )
-    temporary_path = Path(temporary_name)
+def _discard_partial_install(temporary_path: Path | None) -> None:
+    if temporary_path is None:
+        return
     try:
-        with source.open("rb") as input_stream, os.fdopen(descriptor, "wb") as output:
+        temporary_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _discard_install_descriptor(descriptor: int | None) -> None:
+    if descriptor is None:
+        return
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+
+
+def _atomic_install(source: Path, destination: Path) -> None:
+    temporary_path: Path | None = None
+    descriptor: int | None = None
+    try:
+        _assert_install_path_safe(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _assert_install_path_safe(destination)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+        )
+        temporary_path = Path(temporary_name)
+        output_stream = os.fdopen(descriptor, "wb")
+        descriptor = None
+        with output_stream as output, source.open("rb") as input_stream:
             shutil.copyfileobj(input_stream, output)
             output.flush()
             os.fsync(output.fileno())
         temporary_path.chmod(0o755)
         os.replace(temporary_path, destination)
+    except BootstrapError:
+        raise
+    except OSError as exc:
+        raise BootstrapError(
+            "INSTALL_WRITE_FAILED",
+            "verified uv could not be installed atomically",
+        ) from exc
     finally:
-        temporary_path.unlink(missing_ok=True)
+        _discard_install_descriptor(descriptor)
+        _discard_partial_install(temporary_path)
 
 
 def _assert_install_path_safe(destination: Path) -> None:
@@ -916,26 +999,27 @@ def bootstrap_uv(
 ) -> dict[str, Any]:
     """Install and execute uv only after every reviewed trust check succeeds."""
 
-    policy = load_policy(policy_path)
-    operating_system, architecture, platform_key, uv_asset, gh_asset = select_platform(
-        policy, platform_id
-    )
-    expected_target = UV_TARGET_TRIPLES[platform_key]
-    policy_sha256 = _sha256_file(policy_path)
-    verified_at = _timestamp(now)
-    binary_name = "uv.exe" if operating_system == "windows" else "uv"
-    installed_uv = install_dir / binary_name
-    receipt = _build_receipt(
-        policy_sha256=policy_sha256,
-        policy=policy,
-        operating_system=operating_system,
-        architecture=architecture,
-        uv_asset=uv_asset,
-        gh_asset=gh_asset,
-        verified_at=verified_at,
-    )
-
+    receipt = _build_initialization_receipt()
     try:
+        policy = load_policy(policy_path)
+        operating_system, architecture, platform_key, uv_asset, gh_asset = select_platform(
+            policy, platform_id
+        )
+        expected_target = UV_TARGET_TRIPLES[platform_key]
+        policy_sha256 = _sha256_file(policy_path)
+        verified_at = _timestamp(now)
+        binary_name = "uv.exe" if operating_system == "windows" else "uv"
+        installed_uv = install_dir / binary_name
+        receipt = _build_receipt(
+            policy_sha256=policy_sha256,
+            policy=policy,
+            operating_system=operating_system,
+            architecture=architecture,
+            uv_asset=uv_asset,
+            gh_asset=gh_asset,
+            verified_at=verified_at,
+        )
+
         _assert_install_path_safe(installed_uv)
         if installed_uv.exists() or installed_uv.is_symlink():
             _assert_binary(

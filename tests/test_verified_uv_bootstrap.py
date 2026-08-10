@@ -15,6 +15,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -777,6 +778,47 @@ def test_symlinked_install_ancestor_fails_before_download(
     assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
 
 
+def test_atomic_install_io_failure_is_sanitized_and_receipted(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    install_dir = tmp_path / "tools"
+    installed_uv = install_dir / "uv"
+    receipt_path = tmp_path / "receipt.json"
+    sensitive_detail = str(tmp_path / "private-host-detail")
+    real_replace = bootstrap_module.os.replace
+
+    def fail_install_replace(source: Path, destination: Path) -> None:
+        if Path(destination) == installed_uv:
+            raise PermissionError(sensitive_detail)
+        real_replace(source, destination)
+
+    monkeypatch.setattr(bootstrap_module.os, "replace", fail_install_replace)
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="INSTALL_WRITE_FAILED",
+    ) as failure:
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=install_dir,
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    receipt_text = receipt_path.read_text(encoding="utf-8")
+    assert json.loads(receipt_text)["failure_category"] == "INSTALL_WRITE_FAILED"
+    assert sensitive_detail not in str(failure.value)
+    assert sensitive_detail not in receipt_text
+    assert not installed_uv.exists()
+    assert list(install_dir.glob(".uv.*.tmp")) == []
+
+
 def test_symlinked_receipt_ancestor_blocks_success_receipt(
     tmp_path: Path,
     bootstrap_module: Any,
@@ -872,6 +914,47 @@ class _DownloadResponse(io.BytesIO):
     def __init__(self, payload: bytes, content_length: str | None) -> None:
         super().__init__(payload)
         self.headers = {} if content_length is None else {"Content-Length": content_length}
+        self.fp = SimpleNamespace(
+            raw=SimpleNamespace(
+                _sock=SimpleNamespace(settimeout=lambda _timeout: None),
+            )
+        )
+
+
+class _RecordingSocket:
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+
+class _DeadlineResponse:
+    def __init__(self, clock: dict[str, float]) -> None:
+        self.headers = {"Content-Length": "2"}
+        self.clock = clock
+        self.socket = _RecordingSocket()
+        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
+        self.read_count = 0
+
+    def __enter__(self) -> _DeadlineResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, _size: int) -> bytes:
+        raise AssertionError("bounded downloads must not use accumulating read()")
+
+    def read1(self, _size: int) -> bytes:
+        self.read_count += 1
+        if self.read_count == 1:
+            assert self.socket.timeouts[-1] == pytest.approx(10.0)
+            self.clock["now"] = 59.5
+            return b"a"
+        assert self.socket.timeouts[-1] == pytest.approx(0.5)
+        self.clock["now"] = 60.0
+        raise TimeoutError("bounded fixture read timed out")
 
 
 @pytest.mark.parametrize(
@@ -931,6 +1014,112 @@ def test_download_fails_when_the_bounded_deadline_expires(
         )
 
     assert not destination.exists()
+
+
+def test_download_enforces_remaining_deadline_inside_each_read(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 0.0}
+    response = _DeadlineResponse(clock)
+    monkeypatch.setattr(
+        bootstrap_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: response,
+    )
+    monkeypatch.setattr(
+        bootstrap_module.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    destination = tmp_path / "asset.tar.gz"
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="DOWNLOAD_DEADLINE_EXCEEDED",
+    ):
+        bootstrap_module._download(
+            "https://github.com/example/release/asset.tar.gz",
+            destination,
+            2,
+        )
+
+    assert response.socket.timeouts == pytest.approx([10.0, 0.5])
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure_point", "error"),
+    [
+        ("unreadable-policy", "POLICY_READ_FAILED"),
+        ("invalid-policy", "POLICY_SCHEMA_UNSUPPORTED"),
+        ("unsupported-platform", "PLATFORM_UNSUPPORTED"),
+        ("policy-hash", "ARTIFACT_READ_FAILED"),
+        ("clock", "CLOCK_INVALID"),
+    ],
+)
+def test_initialization_failures_emit_minimal_sanitized_receipts(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+    error: str,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    platform_id = ("linux", "x86_64")
+
+    def aware_now() -> datetime:
+        return datetime(2026, 8, 10, tzinfo=UTC)
+
+    now: Callable[[], datetime] = aware_now
+
+    if failure_point == "unreadable-policy":
+        policy_path = tmp_path / "private-policy-location.json"
+    elif failure_point == "invalid-policy":
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["schema_version"] = 2
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    elif failure_point == "unsupported-platform":
+        platform_id = ("private-operating-system", "x86_64")
+    elif failure_point == "policy-hash":
+
+        def fail_policy_hash(_path: Path) -> str:
+            raise bootstrap_module.BootstrapError(
+                "ARTIFACT_READ_FAILED",
+                f"sensitive hash path: {tmp_path}",
+            )
+
+        monkeypatch.setattr(bootstrap_module, "_sha256_file", fail_policy_hash)
+    elif failure_point == "clock":
+
+        def naive_now() -> datetime:
+            return datetime(2026, 8, 10)
+
+        now = naive_now
+
+    receipt_path = tmp_path / "receipt.json"
+    with pytest.raises(bootstrap_module.BootstrapError, match=error):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=platform_id,
+            temporary_root=tmp_path / "temporary",
+            now=now,
+        )
+
+    receipt_text = receipt_path.read_text(encoding="utf-8")
+    assert json.loads(receipt_text) == {
+        "schema_version": 1,
+        "status": "failure",
+        "failure_category": error,
+    }
+    assert str(tmp_path) not in receipt_text
+    assert downloader.calls == []
+    assert runner.commands == []
 
 
 def test_receipt_is_deterministic_except_timestamp_and_excludes_local_context(
