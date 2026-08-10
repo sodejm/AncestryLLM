@@ -39,8 +39,10 @@ diagnostics, native targets, and remaining release gates.
 
 ## Deterministic OpenAPI
 
-The committed contract is [`openapi-v1.json`](openapi-v1.json). Regenerate it
-from authoritative Pydantic models and FastAPI routes with:
+The committed contract is [`openapi-v1.json`](openapi-v1.json). It explicitly
+pins OpenAPI 3.1.0, so FastAPI default-version changes cannot silently alter
+generated internal clients. Regenerate it from authoritative Pydantic models
+and FastAPI routes with:
 
 ```bash
 .venv/bin/python -m ancestryllm.api.openapi --write
