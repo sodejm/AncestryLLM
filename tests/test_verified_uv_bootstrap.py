@@ -378,7 +378,27 @@ def test_uv_version_accepts_pinned_build_metadata(
         uv_version=("uv 0.12.1 (329541a50 2026-07-31 aarch64-apple-darwin)"),
     )
 
-    bootstrap_module._assert_uv_version(tmp_path / "uv", runner)
+    bootstrap_module._assert_uv_version(
+        tmp_path / "uv",
+        runner,
+        expected_target="aarch64-apple-darwin",
+    )
+
+
+def test_uv_version_accepts_pinned_linux_target_metadata(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    runner = FixtureRunner(
+        "[]",
+        uv_version="uv 0.12.1 (x86_64-unknown-linux-gnu)",
+    )
+
+    bootstrap_module._assert_uv_version(
+        tmp_path / "uv",
+        runner,
+        expected_target="x86_64-unknown-linux-gnu",
+    )
 
 
 @pytest.mark.parametrize(
@@ -386,6 +406,7 @@ def test_uv_version_accepts_pinned_build_metadata(
     [
         "uv 0.12.2 (329541a50 2026-07-31 aarch64-apple-darwin)",
         "uv 0.12.1 (000000000 2026-07-31 aarch64-apple-darwin)",
+        "uv 0.12.1 (x86_64-unknown-linux-gnu)",
         "uv 0.12.1 substitute",
     ],
 )
@@ -397,7 +418,11 @@ def test_uv_version_rejects_unreviewed_identity(
     runner = FixtureRunner("[]", uv_version=reported_version)
 
     with pytest.raises(bootstrap_module.BootstrapError, match="UV_VERSION_MISMATCH"):
-        bootstrap_module._assert_uv_version(tmp_path / "uv", runner)
+        bootstrap_module._assert_uv_version(
+            tmp_path / "uv",
+            runner,
+            expected_target="aarch64-apple-darwin",
+        )
 
 
 def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(

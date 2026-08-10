@@ -81,6 +81,14 @@ UV_ASSET_SHAPE = {
         "uv-aarch64-pc-windows-msvc/uv.exe",
     ),
 }
+UV_TARGET_TRIPLES = {
+    "linux-x86_64": "x86_64-unknown-linux-gnu",
+    "linux-arm64": "aarch64-unknown-linux-gnu",
+    "macos-x86_64": "x86_64-apple-darwin",
+    "macos-arm64": "aarch64-apple-darwin",
+    "windows-x86_64": "x86_64-pc-windows-msvc",
+    "windows-arm64": "aarch64-pc-windows-msvc",
+}
 GH_ASSET_SHAPE = {
     "linux-x86_64": (
         "gh_2.97.0_linux_amd64.tar.gz",
@@ -848,6 +856,7 @@ def _assert_uv_version(
     uv_path: Path,
     runner: Runner,
     *,
+    expected_target: str,
     error_code: str = "UV_VERSION_MISMATCH",
 ) -> None:
     result = _run_checked(
@@ -857,11 +866,17 @@ def _assert_uv_version(
         message="verified uv executable could not report its version",
     )
     first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
-    version_output = re.compile(
-        rf"uv {re.escape(UV_VERSION)}"
-        rf"(?: \({re.escape(UV_SOURCE_COMMIT[:9])} [^()\r\n]+\))?"
+    version_prefix = f"uv {UV_VERSION}"
+    build_metadata_output = re.compile(
+        rf"{re.escape(version_prefix)} "
+        rf"\({re.escape(UV_SOURCE_COMMIT[:9])} "
+        rf"\d{{4}}-\d{{2}}-\d{{2}} {re.escape(expected_target)}\)"
     )
-    if version_output.fullmatch(first_line) is None:
+    permitted_outputs = {
+        version_prefix,
+        f"{version_prefix} ({expected_target})",
+    }
+    if first_line not in permitted_outputs and build_metadata_output.fullmatch(first_line) is None:
         _fail(error_code, "uv executable reported an unexpected version")
 
 
@@ -879,7 +894,10 @@ def bootstrap_uv(
     """Install and execute uv only after every reviewed trust check succeeds."""
 
     policy = load_policy(policy_path)
-    operating_system, architecture, _, uv_asset, gh_asset = select_platform(policy, platform_id)
+    operating_system, architecture, platform_key, uv_asset, gh_asset = select_platform(
+        policy, platform_id
+    )
+    expected_target = UV_TARGET_TRIPLES[platform_key]
     policy_sha256 = _sha256_file(policy_path)
     verified_at = _timestamp(now)
     binary_name = "uv.exe" if operating_system == "windows" else "uv"
@@ -903,7 +921,11 @@ def bootstrap_uv(
                 "CACHED_BINARY_DIGEST_MISMATCH",
             )
             _write_receipt(receipt_path, receipt)
-            _assert_uv_version(installed_uv, runner)
+            _assert_uv_version(
+                installed_uv,
+                runner,
+                expected_target=expected_target,
+            )
             return receipt
 
         temporary_parent = temporary_root
@@ -979,7 +1001,11 @@ def bootstrap_uv(
             )
 
         _write_receipt(receipt_path, receipt)
-        _assert_uv_version(installed_uv, runner)
+        _assert_uv_version(
+            installed_uv,
+            runner,
+            expected_target=expected_target,
+        )
     except BootstrapError as exc:
         _write_failure_receipt(receipt_path, receipt, exc)
         raise
@@ -996,7 +1022,7 @@ def verify_installed_uv(
     """Re-hash a setup-uv installation before its first execution."""
 
     policy = load_policy(policy_path)
-    _, _, _, uv_asset, _ = select_platform(policy, platform_id)
+    _, _, platform_key, uv_asset, _ = select_platform(policy, platform_id)
     _assert_binary(
         uv_path,
         uv_asset["binary_sha256"],
@@ -1005,6 +1031,7 @@ def verify_installed_uv(
     _assert_uv_version(
         uv_path,
         runner,
+        expected_target=UV_TARGET_TRIPLES[platform_key],
         error_code="INSTALLED_VERSION_MISMATCH",
     )
 
