@@ -108,7 +108,9 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
         == 1
     )
     assert workflow.count("uv pip install --python .venv --no-deps --editable .") == 1
-    assert workflow.count("uv run --no-sync") == 5
+    # Package and SBOM creation use their canonical Make targets; only the
+    # purpose-built desktop commands retain the already-synchronized profile.
+    assert workflow.count("uv run --no-sync") == 3
     assert workflow.count('--host-arch "$HOST_ARCH"') == 1
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow

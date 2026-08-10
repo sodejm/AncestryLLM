@@ -2,14 +2,18 @@
 
 AncestryLLM records application features as optional extras and repository
 tooling as purpose-specific PEP 735 dependency groups. The complete resolution
-for every extra and group is committed in `uv.lock`, but each command installs
-only the environment it needs. This keeps quality, security, build, desktop,
-and release-verification jobs from relying on undeclared cross-profile tools.
+for every extra and group is committed in `uv.lock`. Local setup synchronizes
+the complete graph; purpose-specific workflow jobs synchronize only the
+environment they need before calling the canonical Make command. This keeps
+quality, security, build, desktop, and release-verification jobs from relying
+on undeclared cross-profile tools.
 
 The repository-local, verified `uv` 0.12.1 bootstrap is the only supported way
-to create or update these environments. `uv` is not a project dependency and
-must not be installed through a dependency group, `pip`, an alternate index,
-or an unverified executable on `PATH`.
+to create or update these environments. It requires a system-supplied Python
+3.12-3.14; `.python-version` selects 3.12 by default, and `[tool.uv]` prohibits
+Python downloads. `uv` is not a project dependency and must not be installed
+through a dependency group, `pip`, an alternate index, or an unverified
+executable on `PATH`.
 
 ## Environment contracts
 
@@ -24,12 +28,12 @@ The dependency groups are:
 | `build` | Distribution construction and artifact validation | `make package` and package/release build jobs |
 | `release-verifier` | Exact PyPI attestation verifier | Release artifact verification only |
 
-`make setup` installs every user-facing optional extra plus `lint`,
-`typecheck`, `test`, `security`, and `build`. It deliberately excludes
-`release-verifier`, whose platform-specific dependencies are needed only after
-production publication. Each canonical gate re-synchronizes to its smaller
-declared profile with `--no-default-groups`, so running a gate does not depend
-on tools left behind by `make setup` or another gate.
+`make setup` runs `uv sync --locked --all-extras --all-groups`, including the
+`release-verifier` group, so a local source checkout has the complete locked
+graph. Canonical gates use exact `uv run --locked --group ...` commands. A
+purpose-specific workflow may first synchronize a smaller profile with
+`--no-default-groups`, but it then invokes the same Make target without changing
+the actual command or flags.
 
 Provider SDKs remain user-facing optional extras: `ollama`, `openai`,
 `anthropic`, `gemini`, `openrouter`, and the aggregate `all-llm`. The Python
@@ -58,13 +62,15 @@ verified bootstrap supplies `uv`, so the lock intentionally contains no direct
    artifact hash, alternate source, or unexplained transitive re-resolution is
    a failure, not routine lockfile noise.
 4. Run the focused dependency-group and workflow contract tests, followed by
-   each affected canonical Make target from a clean environment. A command
-   succeeds only when its declared group supplies every tool it executes.
+   each affected canonical Make target from a clean environment. Purpose-
+   specific workflow profiles must succeed without tools inherited from
+   another group.
 5. Run the full applicable quality and security gates and update contributor,
    CI, security, release, and user installation documentation when the changed
    dependency affects those surfaces.
 
-The lock-check workflow installs no group and runs only `uv lock --check`.
+The lock-check workflow installs no group and runs `make lock-check`, whose
+canonical command is `uv lock --check`.
 Stock-`pip` wheel and source-distribution smoke jobs remain intentionally
 outside these repository-tool profiles: they verify supported non-`uv`
 consumer installation and do not build or authorize release artifacts.
@@ -74,12 +80,13 @@ consumer installation and do not build or authorize release artifacts.
 - Every former development dependency is present in exactly one appropriate
   group, retained as a named optional extra, or has a documented removal audit.
 - Provider extras and `desktop-build` retain their public installation meaning.
-- Workflow jobs use the same group profile as their canonical Make target and
-  pass `--no-default-groups`.
+- Workflow jobs use the group profile declared for their canonical Make target,
+  pass `--no-default-groups`, and invoke that target without command drift.
 - Semgrep continues through the independently pinned script even though the
   surrounding security tools come from the `security` group.
-- Release verification installs only `release-verifier`; ordinary development
-  and release construction do not inherit it.
+- Production release verification installs only `release-verifier`; release
+  construction does not inherit it. Full local setup intentionally includes
+  every group.
 - The complete lock retains artifact hashes for every supported platform and
   all extras and groups without unexplained package-version movement.
 - Application APIs, CLI commands, service DTOs, provider policy, GEDCOM

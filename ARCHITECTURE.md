@@ -935,35 +935,47 @@ published views; this file governs code structure and architectural decisions.
 
 ## Verification and delivery architecture
 
-The supported development environment is Python 3.12 through 3.14 with a
-locked `uv.lock` dependency graph. The Make targets are the local contract:
+The supported development environment is a system-supplied Python 3.12 through
+3.14 with a locked `uv.lock` dependency graph. The checked-in
+`.python-version` selects 3.12 by default. `[tool.uv]` requires exactly `uv`
+0.12.1, prefers only the system interpreter, and disables Python downloads;
+the verified bootstrap is the sole source of the repository-local executable.
+The Make targets are the command contract:
 
 | Command | Gate |
 |---|---|
+| `make setup` | Verify `uv`, validate the system interpreter, and synchronize all locked extras and groups. |
+| `make lock-check` | Verify `uv` and prove `uv.lock` matches project metadata without installing a group. |
 | `make test` | Pytest regression and characterization suite. |
 | `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
 | `make sbom` | CycloneDX environment SBOM. |
+| `make package` | Locked build-group construction and artifact validation. |
+| `make workflow-audit` | Locked security-group GitHub Actions audit. |
 
-CI resolves the complete lock but synchronizes purpose-specific PEP 735
-dependency groups. The Python 3.12-3.14 test matrix installs `test` with the
-`all-llm` application extra; quality installs only `lint` and `typecheck`;
-dependency audit, SBOM, and workflow audit install `security`; and package
-construction installs `build`. Release artifact verification installs only the
+CI may synchronize a purpose-specific PEP 735 dependency group before running
+a gate, but it invokes the same Make target and cannot vary the actual command
+or flags. The Python 3.12-3.14 test matrix installs `test` with the `all-llm`
+application extra; quality installs only `lint` and `typecheck`; dependency
+audit, SBOM, and workflow audit install `security`; and package construction
+installs `build`. The production artifact-verification job installs only the
 non-default `release-verifier` group, while desktop sidecar packaging installs
 the `desktop-build` application extra. Coverage is branch-aware with a current
-75% floor. Python 3.12 also runs Ruff, strict mypy, the executable architecture
-contract, and the repository safety script. Release readiness is the
-authoritative release gate and runs the same architecture check; the tag
-workflow consumes that exact approved evidence instead of repeating it.
+75% floor supplied through the Make-owned test environment while the canonical
+pytest command remains identical locally and in CI. Python 3.12 also runs Ruff,
+strict mypy, the executable architecture contract, and the repository safety
+script. Release readiness is the authoritative release gate and runs the same
+architecture check; the tag workflow consumes that exact approved evidence
+instead of repeating it.
 Semgrep remains an independently pinned pull-request gate. CodeQL runs on
 pushes, pull requests, and a weekly schedule. Dependabot covers Python and
 GitHub Actions. Pinned action commit SHAs reduce workflow supply-chain drift.
 
-This environment partitioning changes repository tooling only. It does not add
-an application dependency or alter CLI commands, service DTOs, provider
-selection, GEDCOM handling, storage, FastAPI contracts, or Electron boundaries.
+This environment ownership changes repository tooling only and adds no
+python-build-standalone executable trust chain. It does not add an application
+dependency or alter CLI commands, service DTOs, provider selection, GEDCOM
+handling, storage, FastAPI contracts, or Electron boundaries.
 
 Tests are intentionally split by risk:
 

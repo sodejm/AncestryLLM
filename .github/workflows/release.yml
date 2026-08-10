@@ -311,8 +311,8 @@ jobs:
       - name: Rebuild deterministic artifacts and SBOM
         run: |
           uv sync --locked --no-default-groups --group build --group security
-          uv run --no-sync python scripts/build_release.py --output-dir dist
-          uv run --no-sync cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
+          make package
+          make sbom SBOM_OUTPUT=dist/sbom.json
       - name: Compare approved readiness artifacts
         env:
           GH_TOKEN: ${{ github.token }}

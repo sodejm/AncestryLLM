@@ -368,6 +368,11 @@ Release construction installs the locked `build` group and the `security`
 group needed for SBOM generation, with no provider extras. Stock-`pip` wheel
 and source-distribution smoke jobs remain unchanged because they validate the
 published consumer experience rather than authorize a build.
+Release construction uses SHA-pinned `actions/setup-python` with Python 3.12,
+then the verified repository contract requires exactly `uv` 0.12.1, selects
+only that system interpreter, and disables Python downloads. The workflow calls
+the same `make package` and `make sbom` interfaces used locally after its narrow
+locked synchronization.
 The workflow then attests the combined artifacts; prepares a draft GitHub
 Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
 not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
@@ -378,7 +383,9 @@ exact repository, workflow, environment, filename, and SHA-256 identity, with
 the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. The workflow installs this tool
 from the locked, non-default `release-verifier` dependency group so ordinary
-developer setup does not inherit its platform-specific build dependencies.
+release construction does not inherit its platform-specific build
+dependencies. Full local `make setup` intentionally synchronizes all groups;
+the production verification job remains isolated to `release-verifier` alone.
 After production PyPI publishing, the supported platform/Python wheel-and-sdist
 install smoke matrix runs before
 the immutable GitHub Release. The attached `SHA256SUMS` covers

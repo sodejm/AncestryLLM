@@ -88,6 +88,11 @@ build = [
 ]
 release-verifier = ["pypi-attestations==0.0.30"]
 
+[tool.uv]
+required-version = "==0.12.1"
+python-preference = "only-system"
+python-downloads = "never"
+
 [project.urls]
 Homepage = "https://github.com/sodejm/AncestryLLM"
 Documentation = "https://sodejm.github.io/AncestryLLM/"
@@ -111,6 +116,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "--strict-markers"
 filterwarnings = [
     "error::ResourceWarning",

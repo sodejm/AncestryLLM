@@ -326,10 +326,9 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     assert script_lock.is_file()
     lock = tomllib.loads(script_lock.read_text(encoding="utf-8"))
     locked_semgrep = [package for package in lock["package"] if package.get("name") == "semgrep"]
-    runner = "uv run --locked --script scripts/run_pinned_semgrep.py ."
     sources = {
-        ".github/workflows/ci.yml": runner,
-        ".github/workflows/release-readiness.yml": runner,
+        ".github/workflows/ci.yml": "make security-static",
+        ".github/workflows/release-readiness.yml": "make security-static",
         "Makefile": "$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .",
     }
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -351,7 +350,7 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
         assert "uvx semgrep" not in content
         assert "--config p/python" not in content
         assert "--config p/secrets" not in content
-    assert runner not in release
+    assert "make security-static" not in release
 
 
 def test_synthetic_credentialed_url_fixtures_do_not_target_live_services() -> None:
@@ -366,17 +365,19 @@ def test_synthetic_credentialed_url_fixtures_do_not_target_live_services() -> No
         assert credentialed_public_url.search(content) is None, relative_path
 
 
-def test_workflows_invoke_pytest_as_a_module_from_the_repository_root() -> None:
-    """Keep repository-only test tooling importable in clean hosted environments."""
+def test_workflows_invoke_the_make_owned_test_command() -> None:
+    """Keep the test flags identical between local and hosted environments."""
 
-    command = "uv run --no-sync python -m pytest --verbose --cov --cov-report=term-missing"
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    command = "make test"
     for relative_path in (
         ".github/workflows/ci.yml",
         ".github/workflows/release-readiness.yml",
     ):
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert content.count(command) == 1
-        assert "uv run pytest " not in content
+        assert "uv run --no-sync python -m pytest" not in content
+    assert "$(UV_BIN) run --locked --group test pytest --verbose" in makefile
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert command not in release
 
@@ -395,8 +396,8 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
     )
 
     assert "Rebuild deterministic artifacts and SBOM" in release
-    assert "uv run --no-sync python scripts/build_release.py --output-dir dist" in release
-    assert "uv run --no-sync cyclonedx-py environment --output-file dist/sbom.json" in release
+    assert "make package" in release
+    assert "make sbom SBOM_OUTPUT=dist/sbom.json" in release
     assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
     for duplicate_gate in duplicate_gates:
         assert duplicate_gate not in release
