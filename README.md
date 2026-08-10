@@ -52,6 +52,22 @@ They cover a supported credential backend and the headless/CI
 environment-injection fallback for ephemeral test secrets. Run
 `ancestry --json database diagnose` before opening an encrypted workspace.
 
+### Work from source
+
+A source checkout requires a system-supplied Python 3.12 through 3.14. The
+checked-in `.python-version` selects 3.12 by default; repository `uv` policy
+never downloads Python. After authenticating as described in the
+[verified `uv` bootstrap guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md), run:
+
+```bash
+make setup
+make test
+```
+
+`make setup` verifies exactly `uv` 0.12.1 and synchronizes all application
+extras and dependency groups from `uv.lock`. Do not create a separate
+`pip`-managed development environment or install `uv` from `PATH`.
+
 ### Use the desktop control shell
 
 Desktop installation does not require Python or pipx. Download the

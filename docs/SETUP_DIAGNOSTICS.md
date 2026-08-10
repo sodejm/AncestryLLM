@@ -1,4 +1,32 @@
-# First-run storage diagnostics
+# Setup diagnostics
+
+## Repository environment setup
+
+A source checkout requires a system-supplied Python 3.12 through 3.14. The
+checked-in `.python-version` selects 3.12 by default, and repository policy
+requires exactly `uv` 0.12.1 with Python downloads disabled. Run:
+
+```console
+make setup
+```
+
+On Windows, Make looks for `python`; on macOS and Linux it looks for `python3`.
+Set `PYTHON` to another system executable when necessary, for example
+`make setup PYTHON=python3.13`. Do not recover by installing `uv` with `pip`,
+using an executable from `PATH`, enabling Python downloads, using `uvx`, or
+adding `uv run --with` dependencies.
+
+| Failure | Meaning | Required action |
+|---|---|---|
+| `UVENV_PYTHON_NOT_FOUND` | The selected system Python executable is absent. | Install a supported system Python or set `PYTHON` to an existing supported executable, then retry. |
+| `UVENV_PYTHON_VERSION_UNSUPPORTED` | The selected interpreter is outside Python 3.12-3.14 or its version cannot be read. | Select a supported system interpreter; do not let `uv` download one. |
+| Bootstrap receipt reports a stable failure category | The cached or downloaded `uv`, verifier, policy, identity, or provenance failed closed. | Follow the [verified uv bootstrap recovery procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md); never bypass verification or substitute another `uv`. |
+
+Successful setup verifies the repository-local executable, then runs
+`uv sync --locked --all-extras --all-groups`. A wrong `uv` version or failed
+bootstrap never reaches an environment command.
+
+## First-run storage diagnostics
 
 Run a read-only local health check before creating or opening a workspace:
 
@@ -10,7 +38,7 @@ The command never creates a database, writes a credential, or reports a secret
 value.  It checks SQLCipher availability, the configured credential-store read
 path, workspace-directory access, and existing workspace permissions.
 
-## Diagnostic codes
+### Diagnostic codes
 
 | Code | Meaning | Required action |
 |---|---|---|
@@ -27,7 +55,7 @@ Diagnostics are advisory until the database is opened. Database initialization
 and opening remain fail-closed for plaintext files, missing keys, wrong keys,
 and failed integrity checks.
 
-## Platform recovery
+### Platform recovery
 
 - macOS: unlock the login keychain, then ensure the application can access it
   in Keychain Access.  Reinstall the supported SQLCipher wheel if the command

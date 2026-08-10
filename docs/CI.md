@@ -19,14 +19,14 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
 `make setup` first runs the
 [verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the
 repository-local `.tools/uv/uv` binary to install the locked environment
-without changing Git hooks. The bootstrap refuses an unverified `uv` from
-`PATH`, re-hashes a cached local binary, and emits the sanitized
+without changing Git hooks. It requires a system-supplied Python 3.12-3.14;
+`.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
+downloads. Setup runs the exact full-profile command
+`uv sync --locked --all-extras --all-groups`. The bootstrap refuses an
+unverified `uv` from `PATH`, re-hashes a cached local binary, and emits the sanitized
 `.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
 `uv` command may run. This is the appropriate target for automation and
-disposable environments. The release-only `pypi-attestations` verifier remains
-locked in the non-default `release-verifier` dependency group, so general setup
-does not require its platform-specific build dependencies. Local developers
-authenticate once with
+disposable environments. Local developers authenticate once with
 `gh auth login --hostname github.com`; headless shells provide `GH_TOKEN`
 through their secret manager. The bootstrap uses that credential only with the
 policy-pinned, hash-verified GitHub CLI and never delegates verification to an
@@ -35,13 +35,15 @@ executable found on `PATH`.
 ## Locked environment profiles
 
 The complete `uv.lock` covers every application extra and repository tool
-group, but jobs synchronize only the profile they execute. Every project
-environment passes `--no-default-groups`; the lock consistency job installs no
-group and runs only `uv lock --check`.
+group. Full local setup installs that complete graph, including the release
+verifier. Purpose-specific workflow jobs pass `--no-default-groups` and
+synchronize only the profile they execute. The lock consistency job installs no
+group and calls `make lock-check`, whose canonical command is
+`uv lock --check`.
 
 | Work | Locked environment |
 |---|---|
-| Local full setup | All user-facing extras plus `lint`, `typecheck`, `test`, `security`, and `build`; excludes `release-verifier` |
+| Local full setup | All application extras and every dependency group, including `release-verifier` |
 | Python test matrix | `test` plus `all-llm` |
 | Quality | `lint` plus `typecheck` |
 | Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
@@ -50,7 +52,9 @@ group and runs only `uv lock --check`.
 | Native desktop sidecar packaging | `desktop-build` only |
 | Release-project proof | `test` only |
 
-No quality, security, or build job installs provider extras. The Python 3.12
+No quality, security, or build job installs provider extras. After any allowed
+narrow synchronization, workflow jobs call the same canonical Make target used
+locally; they do not restate or vary its command arguments. The Python 3.12
 release-readiness row first exercises the provider-aware test profile, then
 replaces it with `lint` and `typecheck` before static checks; the separate
 security-evidence job installs `security`. This prevents a successful gate from
@@ -74,7 +78,7 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |

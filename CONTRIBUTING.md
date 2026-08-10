@@ -1,17 +1,19 @@
 # Contributing
 
-Use Python 3.12-3.14, create a focused branch under the branch contract below,
-and run `make setup`. That target verifies the pinned `uv` release before its
-first execution and installs it under the ignored repository-local `.tools/`
+Use a system-supplied Python 3.12-3.14, create a focused branch under the branch
+contract below, and run `make setup`. The checked-in `.python-version` selects
+3.12 by default, and repository policy prevents `uv` from downloading another
+interpreter. The setup target verifies the pinned `uv` release before its first
+execution and installs it under the ignored repository-local `.tools/`
 directory; do not substitute an unverified `uv` from `PATH`. See the
 [verified uv bootstrap guide](docs/security/verified-uv-bootstrap.md) for the
 required local GitHub authentication, trust policy, failure recovery, and
-reviewed update procedure. `make setup` installs every user-facing optional
-extra plus the ordinary `lint`, `typecheck`, `test`, `security`, and `build`
-tool groups; the release-only `release-verifier` group remains isolated. See
-[dependency maintenance](docs/DEPENDENCY_MAINTENANCE.md) for the canonical
-group-to-command contract and lockfile review procedure. Define
-commands through the shared `CommandSpec`, route both terminal adapters through
+reviewed update procedure. `make setup` executes
+`uv sync --locked --all-extras --all-groups`; purpose-specific CI jobs may
+synchronize a narrower declared profile before invoking the same canonical Make
+target. See [dependency maintenance](docs/DEPENDENCY_MAINTENANCE.md) for the
+group-to-command contract and lockfile review procedure. Define commands
+through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
 not presentation or dispatch adapters. Core and application contracts must
 remain independent of Click, prompt-toolkit, Rich, FastAPI/Pydantic, Electron,
@@ -97,10 +99,11 @@ bypass required checks.
 Repository tooling belongs in a purpose-specific PEP 735 dependency group, not
 in an application extra. Provider SDKs remain optional extras and must not be
 added to quality, security, or package environments without a demonstrated
-runtime import. Each canonical Make target re-synchronizes to its declared
-locked profile, so it must pass without tools inherited from another target.
-The verified bootstrap supplies `uv`; do not add `uv` to a dependency group or
-install it with `pip`.
+runtime import. Canonical Make targets execute their tools through exact
+`uv run --locked` commands. CI may narrow synchronization first, but it calls
+the same Make target without changing the command or its flags. The verified
+bootstrap supplies `uv`; do not add `uv` to a dependency group, install it with
+`pip`, use `uvx` or `uv run --with`, or enable Python downloads.
 
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures

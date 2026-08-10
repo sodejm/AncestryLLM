@@ -12,7 +12,9 @@ storage, FastAPI contracts, or desktop boundaries.
 
 ## Developer setup
 
-Use a supported system Python 3.12-3.14. GitHub's attestation API also requires
+Use a supported system Python 3.12-3.14. The checked-in `.python-version`
+selects 3.12 by default; `[tool.uv]` permits only a system interpreter and
+disables Python downloads. GitHub's attestation API also requires
 authentication. For interactive development, authenticate once with:
 
 ```bash
@@ -42,12 +44,12 @@ the executable on `PATH`: it reads the provisioned credential only after the
 policy-pinned GitHub CLI archive passes its own hash and archive checks.
 
 `uv` is supplied by this bootstrap, not by an application extra or PEP 735
-dependency group. After verification, `make setup` synchronizes every
-user-facing optional extra plus the ordinary `lint`, `typecheck`, `test`,
-`security`, and `build` groups. Purpose-specific Make and workflow gates use
-smaller locked profiles, and production PyPI verification alone installs
-`release-verifier`. See [Dependency maintenance](../DEPENDENCY_MAINTENANCE.md)
-for the complete group contract.
+dependency group. After verification, `make setup` runs
+`uv sync --locked --all-extras --all-groups`, including the release verifier.
+Purpose-specific workflows may synchronize smaller locked profiles before
+calling the same canonical Make targets, and the production PyPI verification
+job installs only `release-verifier`. See [Dependency
+maintenance](../DEPENDENCY_MAINTENANCE.md) for the complete group contract.
 
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on
@@ -72,8 +74,8 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
   and every permitted wheel or sdist filename, URL, and SHA-256. The same
   verifier release and artifact hashes are represented by `uv.lock` in the
-  non-default `release-verifier` dependency group. General setup excludes that
-  release-only verifier and its platform-specific build dependencies.
+  non-default `release-verifier` dependency group. Full local setup includes
+  that group, while the production verification job installs it alone.
 
 Unknown schema versions, operating systems, architectures, archive names,
 URLs, policy fields, or omitted trust fields are rejected. There is no mirror,
