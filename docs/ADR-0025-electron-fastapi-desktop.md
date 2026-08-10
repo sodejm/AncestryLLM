@@ -202,8 +202,9 @@ untrusted even when they originated locally.
   before parsing a request body. Reject unexpected `Host`, `Origin`, `Cookie`,
   forwarding headers, content type, version, route, redirect, or size.
 - Keep API docs and runtime OpenAPI routes disabled in packaged builds. Commit a
-  deterministic OpenAPI artifact used to generate TypeScript types, validators,
-  mocks, and contract-drift tests.
+  deterministic OpenAPI 3.1.0 artifact, explicitly pinned at the application
+  factory rather than inherited from FastAPI defaults, for TypeScript types,
+  validators, mocks, and contract-drift tests.
 - Use a token-derived readiness proof and exact app/sidecar build and protocol
   handshake. Keep the port and bearer only in Electron main memory. Disable
   access logs and use privacy-minimal structural stderr.
