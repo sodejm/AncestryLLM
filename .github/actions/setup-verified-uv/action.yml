@@ -4,7 +4,7 @@ description: Verify uv release provenance and digests before repository commands
 
 inputs:
   python-version:
-    description: Kept for caller compatibility; no longer consumed by this action.
+    description: System Python version used to partition setup-uv's cache.
     required: true
   receipt-artifact-name:
     description: Unique artifact name for the schema-v1 verification receipt.
@@ -16,8 +16,8 @@ outputs:
     description: Repository-relative path to the schema-v1 verification receipt.
     value: ${{ steps.receipt.outputs.receipt_path }}
   uv-path:
-    description: Path to the verified bootstrapped uv binary.
-    value: ${{ steps.bootstrap-path.outputs.uv_path }}
+    description: Path to the verified setup-uv binary.
+    value: ${{ steps.setup-uv.outputs.uv-path }}
 
 runs:
   using: composite
@@ -32,6 +32,8 @@ runs:
     - name: Verify release provenance and bootstrap repository-local uv
       id: preflight
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: >-
         python scripts/bootstrap_uv.py bootstrap
         --receipt "${{ steps.receipt.outputs.receipt_path }}"
@@ -39,27 +41,25 @@ runs:
         --architecture "${{ runner.arch }}"
         --github-output "$GITHUB_OUTPUT"
 
-    - name: Resolve bootstrapped uv path
-      id: bootstrap-path
-      shell: bash
-      run: |
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          echo "uv_path=.tools/uv/uv.exe" >> "$GITHUB_OUTPUT"
-        else
-          echo "uv_path=.tools/uv/uv" >> "$GITHUB_OUTPUT"
-        fi
+    - name: Install preflighted uv with the pinned setup action
+      id: setup-uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      with:
+        version: "0.12.1"
+        checksum: ${{ steps.preflight.outputs.checksum }}
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+        cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}
+        download-from-astral-mirror: false
 
-    - name: Re-hash bootstrapped binary before first execution
+    - name: Re-hash setup-uv binary before first execution
       shell: bash
       run: >-
         python scripts/bootstrap_uv.py verify-installed
-        --uv-path "${{ steps.bootstrap-path.outputs.uv_path }}"
+        --uv-path "${{ steps.setup-uv.outputs.uv-path }}"
         --platform "${{ runner.os }}"
         --architecture "${{ runner.arch }}"
-
-    - name: Add bootstrapped uv to PATH
-      shell: bash
-      run: echo ".tools/uv" >> "$GITHUB_PATH"
 
     - name: Retain verified bootstrap receipt
       if: ${{ always() }}
@@ -67,5 +67,6 @@ runs:
       with:
         name: ${{ inputs.receipt-artifact-name }}
         path: ${{ steps.receipt.outputs.receipt_path }}
-        if-no-files-found: ignore
+        if-no-files-found: error
+        include-hidden-files: true
         retention-days: 30

@@ -40,7 +40,7 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs only when a workflow changes. |
+| Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
@@ -48,9 +48,13 @@ have the same command semantics regardless of the caller's interactive shell.
 
 Every workflow job that uses `uv` calls the repository-local
 `setup-verified-uv` composite action. The action performs the same policy
-preflight as local setup, passes the policy-selected checksum to the exact
-pinned `setup-uv` commit with Astral mirror downloads disabled, re-hashes the
-installed binary before execution, and retains the schema-v1 receipt. Its cache
+preflight with the ephemeral job-scoped GitHub token, passes the policy-selected
+checksum to the exact pinned `setup-uv` commit with Astral mirror downloads
+disabled, re-hashes the installed binary before execution, and retains the
+schema-v1 receipt. The token is not included in receipts or action outputs. The
+repository Actions allowlist must permit `astral-sh/setup-uv`; SHA pinning and
+the policy's exact commit remain mandatory. The receipt upload includes the
+ignored `.tools` directory and fails if the expected file is absent. The cache
 key includes `uv.lock`, Python version, runner operating system, and runner
 architecture. Release-readiness and release evidence include the receipt's
 policy digest and verified identity through the required

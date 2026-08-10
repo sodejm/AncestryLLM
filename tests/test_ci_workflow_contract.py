@@ -80,6 +80,7 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
     assert "\n  schedule:\n" in workflow
     assert "pyproject.toml|uv.lock)" in changes_job
     assert ".github/workflows/*)" in changes_job
+    assert ".github/actions/*)" in changes_job
     assert "paths:" not in workflow
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"

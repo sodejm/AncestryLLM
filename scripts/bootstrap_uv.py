@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -118,8 +119,11 @@ PYPI_ARTIFACT_URLS = {
 }
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:")
+DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 10
+DOWNLOAD_DEADLINE_SECONDS = 60
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
-Downloader = Callable[[str, Path], None]
+Downloader = Callable[[str, Path, int], None]
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 
@@ -158,6 +162,11 @@ def _expect_sha256(value: Any, label: str) -> None:
         _fail("POLICY_VALUE_INVALID", f"{label} must be a lowercase SHA-256 digest")
 
 
+def _expect_positive_int(value: Any, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        _fail("POLICY_VALUE_INVALID", f"{label} must be a positive integer")
+
+
 def _validate_assets(
     value: Any,
     *,
@@ -168,7 +177,7 @@ def _validate_assets(
     assets = _expect_mapping(value, label)
     if set(assets) != PLATFORM_KEYS:
         _fail("POLICY_FIELDS_INVALID", f"{label} must contain every supported platform")
-    fields = {"archive_name", "sha256", "binary_path"}
+    fields = {"archive_name", "sha256", "size_bytes", "binary_path"}
     if include_binary_digest:
         fields.add("binary_sha256")
     for platform_key, expected in expected_shape.items():
@@ -176,6 +185,7 @@ def _validate_assets(
         _expect_literal(asset["archive_name"], expected[0], f"{label}.{platform_key}.archive_name")
         _expect_literal(asset["binary_path"], expected[1], f"{label}.{platform_key}.binary_path")
         _expect_sha256(asset["sha256"], f"{label}.{platform_key}.sha256")
+        _expect_positive_int(asset["size_bytes"], f"{label}.{platform_key}.size_bytes")
         if include_binary_digest:
             _expect_sha256(asset["binary_sha256"], f"{label}.{platform_key}.binary_sha256")
 
@@ -494,16 +504,74 @@ def safe_extract_archive(archive_path: Path, destination: Path) -> None:
         _fail("ARCHIVE_FORMAT_UNSUPPORTED", "archive format is not permitted")
 
 
-def _download(url: str, destination: Path) -> None:
+def _discard_partial_download(destination: Path) -> None:
+    try:
+        destination.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _download(url: str, destination: Path, expected_size: int) -> None:
+    if isinstance(expected_size, bool) or not isinstance(expected_size, int) or expected_size <= 0:
+        _fail("DOWNLOAD_SIZE_MISMATCH", "reviewed release asset size is invalid")
     request = urllib.request.Request(  # noqa: S310 - exact policy URL is validated
         url,
-        headers={"User-Agent": "AncestryLLM verified uv bootstrap/1"},
+        headers={
+            "Accept-Encoding": "identity",
+            "User-Agent": "AncestryLLM verified uv bootstrap/1",
+        },
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310
+            request,
+            timeout=DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
+        ) as response:
+            content_length = response.headers.get("Content-Length")
+            if (
+                not isinstance(content_length, str)
+                or not content_length.isdecimal()
+                or int(content_length) != expected_size
+            ):
+                _fail(
+                    "DOWNLOAD_SIZE_MISMATCH",
+                    "release asset size does not match bootstrap policy",
+                )
+
+            started_at = time.monotonic()
+            bytes_written = 0
             with destination.open("xb") as target:
-                shutil.copyfileobj(response, target)
-    except (OSError, urllib.error.URLError) as exc:
+                while True:
+                    if time.monotonic() - started_at > DOWNLOAD_DEADLINE_SECONDS:
+                        _fail(
+                            "DOWNLOAD_DEADLINE_EXCEEDED",
+                            "release asset download exceeded its bounded deadline",
+                        )
+                    remaining = expected_size - bytes_written
+                    chunk = response.read(min(DOWNLOAD_CHUNK_SIZE, remaining + 1))
+                    if not chunk:
+                        break
+                    bytes_written += len(chunk)
+                    if bytes_written > expected_size:
+                        _fail(
+                            "DOWNLOAD_SIZE_MISMATCH",
+                            "release asset exceeded its reviewed size",
+                        )
+                    target.write(chunk)
+                    if time.monotonic() - started_at > DOWNLOAD_DEADLINE_SECONDS:
+                        _fail(
+                            "DOWNLOAD_DEADLINE_EXCEEDED",
+                            "release asset download exceeded its bounded deadline",
+                        )
+            if bytes_written != expected_size:
+                _fail(
+                    "DOWNLOAD_SIZE_MISMATCH",
+                    "release asset ended before its reviewed size",
+                )
+    except BootstrapError:
+        _discard_partial_download(destination)
+        raise
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        _discard_partial_download(destination)
         raise BootstrapError("DOWNLOAD_FAILED", "reviewed release asset download failed") from exc
 
 
@@ -529,6 +597,21 @@ def _run_checked(
     result = runner(command)
     if result.returncode != 0:
         _fail(code, message)
+    return result
+
+
+def _verify_attestation(
+    runner: Runner,
+    command: Sequence[str],
+) -> subprocess.CompletedProcess[str]:
+    result = runner(command)
+    if result.returncode == 4:
+        _fail(
+            "VERIFIER_AUTHENTICATION_FAILED",
+            "GitHub CLI requires an authenticated token for attestation verification",
+        )
+    if result.returncode != 0:
+        _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
     return result
 
 
@@ -724,7 +807,9 @@ def _write_failure_receipt(
 
 
 def _atomic_install(source: Path, destination: Path) -> None:
+    _assert_install_path_safe(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    _assert_install_path_safe(destination)
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent,
         prefix=f".{destination.name}.",
@@ -740,6 +825,16 @@ def _atomic_install(source: Path, destination: Path) -> None:
         os.replace(temporary_path, destination)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def _assert_install_path_safe(destination: Path) -> None:
+    absolute_destination = Path(os.path.abspath(destination))
+    for candidate in (absolute_destination, *absolute_destination.parents):
+        if candidate.is_symlink():
+            _fail(
+                "INSTALL_PATH_UNSAFE",
+                "uv install path contains a symbolic-link component",
+            )
 
 
 def _assert_binary(path: Path, expected_sha256: str, error_code: str) -> None:
@@ -800,6 +895,7 @@ def bootstrap_uv(
     )
 
     try:
+        _assert_install_path_safe(installed_uv)
         if installed_uv.exists() or installed_uv.is_symlink():
             _assert_binary(
                 installed_uv,
@@ -816,7 +912,11 @@ def bootstrap_uv(
         with tempfile.TemporaryDirectory(dir=temporary_parent) as temporary_name:
             temporary = Path(temporary_name)
             gh_archive = temporary / gh_asset["archive_name"]
-            downloader(_release_url(policy["github_cli"], gh_asset), gh_archive)
+            downloader(
+                _release_url(policy["github_cli"], gh_asset),
+                gh_archive,
+                gh_asset["size_bytes"],
+            )
             if not _digest_matches(gh_archive, gh_asset["sha256"]):
                 _fail(
                     "VERIFIER_ARCHIVE_DIGEST_MISMATCH",
@@ -843,17 +943,19 @@ def bootstrap_uv(
                 )
 
             uv_archive = temporary / uv_asset["archive_name"]
-            downloader(_release_url(policy["uv"], uv_asset), uv_archive)
+            downloader(
+                _release_url(policy["uv"], uv_asset),
+                uv_archive,
+                uv_asset["size_bytes"],
+            )
             if not _digest_matches(uv_archive, uv_asset["sha256"]):
                 _fail(
                     "UV_ARCHIVE_DIGEST_MISMATCH",
                     "uv archive digest does not match bootstrap policy",
                 )
-            attestation = _run_checked(
+            attestation = _verify_attestation(
                 runner,
                 _attestation_command(gh_path, uv_archive, policy),
-                code="ATTESTATION_VERIFICATION_FAILED",
-                message="GitHub CLI rejected uv provenance",
             )
             _verify_attestation_payload(
                 attestation.stdout,

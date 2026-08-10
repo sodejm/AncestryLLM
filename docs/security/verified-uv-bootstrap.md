@@ -41,10 +41,11 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - exactly `uv` 0.12.1 from `astral-sh/uv`, including the reviewed source commit
   and ref, release repository and tag, GitHub Actions OIDC issuer, signer
   workflow identity, and SLSA provenance-v1 predicate;
-- exact release archive names, archive SHA-256 values, paths, and extracted
-  executable SHA-256 values for Linux, macOS, and Windows on x86-64 and ARM64;
+- exact release archive names, reviewed byte sizes, archive SHA-256 values,
+  paths, and extracted executable SHA-256 values for Linux, macOS, and Windows
+  on x86-64 and ARM64;
 - GitHub CLI 2.97.0 as the pinned provenance verifier, with an exact archive and
-  reviewed SHA-256 for every supported platform;
+  reviewed byte size and SHA-256 for every supported platform;
 - `astral-sh/setup-uv` v9.0.0 at its exact reviewed commit; and
 - `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
   and every permitted wheel or sdist filename, URL, and SHA-256. The same
@@ -57,7 +58,10 @@ alternate index, implicit latest version, or unverified `PATH` fallback.
 ## Verification phases
 
 The bootstrap downloads the policy-selected GitHub CLI archive into a temporary
-directory and compares its SHA-256 in constant time. Before extraction it
+directory and compares its SHA-256 in constant time. Each download must report
+the reviewed byte size, may stream no more than that size, and must complete
+within the bounded acquisition deadline; a mismatch, overrun, underrun, or
+deadline failure discards the partial file. Before extraction the bootstrap
 rejects absolute paths, parent traversal, symbolic or hard links, device files,
 and any member that would escape the empty temporary extraction root. Only the
 verified GitHub CLI may execute.
@@ -68,13 +72,19 @@ attestation. The returned statement must bind the selected asset digest to the
 exact source repository, source commit and ref, signer workflow, OIDC issuer,
 and SLSA predicate. The extracted `uv` executable receives a second digest
 check and exact-version check before an atomic repository-local installation.
+The install destination and each existing ancestor must not be a symbolic link,
+and that condition is rechecked after the parent directory is created.
 
 In GitHub Actions, `.github/actions/setup-verified-uv/action.yml` performs that
-preflight, supplies the selected checksum and exact version to the pinned
-`setup-uv` commit with Astral mirror downloads disabled, and re-hashes the
-action-installed executable before first use. Setup-uv caching is keyed by
-`uv.lock`, Python version, runner OS, and runner architecture. The local action
-retains the receipt even when a later step fails.
+preflight with the job-scoped `github.token`, supplies the selected checksum and
+exact version to the pinned `setup-uv` commit with Astral mirror downloads
+disabled, and re-hashes the action-installed executable before first use. The
+token is available only to the verifier process and is never written to the
+receipt or action output. Repository Actions policy must permit
+`astral-sh/setup-uv`; the workflow still selects the exact policy commit and the
+repository requires SHA-pinned actions. Setup-uv caching is keyed by `uv.lock`,
+Python version, runner OS, and runner architecture. The local action uploads the
+hidden receipt on success or failure and treats a missing receipt as an error.
 
 The stock-`pip` wheel and sdist consumer smoke jobs are deliberately unchanged.
 They verify supported non-`uv` installation paths and neither build release
@@ -99,8 +109,10 @@ evidence.
 
 Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `PLATFORM_UNSUPPORTED`, `ARCHITECTURE_UNSUPPORTED`,
-`ARCHIVE_MEMBER_UNSAFE`, `VERIFIER_ARCHIVE_DIGEST_MISMATCH`,
-`UV_ARCHIVE_DIGEST_MISMATCH`, `ATTESTATION_IDENTITY_MISMATCH`, and
+`DOWNLOAD_SIZE_MISMATCH`, `DOWNLOAD_DEADLINE_EXCEEDED`,
+`ARCHIVE_MEMBER_UNSAFE`, `INSTALL_PATH_UNSAFE`,
+`VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
+`VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_IDENTITY_MISMATCH`, and
 `UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
 cause is understood. Do not bypass it with a global installation or by editing
 the receipt.
@@ -108,9 +120,12 @@ the receipt.
 For an interrupted download or a cache mismatch, leave user files untouched,
 remove only the repository-local ignored `.tools/uv/` cache, and retry. For a
 policy, provenance, or identity mismatch, stop and review the upstream release
-and policy history before changing any trusted value. Preserve only sanitized
-receipts when reporting a failure; do not attach download responses, temporary
-directories, environment dumps, or credentials.
+and policy history before changing any trusted value. In Actions,
+`VERIFIER_AUTHENTICATION_FAILED` means the job-scoped token was unavailable or
+rejected; restore the standard token and required read permissions rather than
+supplying a personal access token. Preserve only sanitized receipts when
+reporting a failure; do not attach download responses, temporary directories,
+environment dumps, or credentials.
 
 ## Reviewed policy updates
 
@@ -119,10 +134,10 @@ review and update all of the following where applicable:
 
 1. the `uv` version, release tag and repository, source commit and ref, signer
    workflow, OIDC issuer, and predicate type;
-2. every supported platform's exact archive name, archive digest, extracted
-   binary path, and binary digest;
+2. every supported platform's exact archive name, reviewed byte size, archive
+   digest, extracted binary path, and binary digest;
 3. the GitHub CLI verifier version and every supported archive name, path, and
-   digest;
+   reviewed byte size and digest;
 4. the setup-uv action version and immutable commit;
 5. the Python verifier's exact project and source identity, permitted artifact
    names, canonical PyPI URLs, and digests, together with the matching

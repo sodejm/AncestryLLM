@@ -33,26 +33,32 @@ EXPECTED_UV_ARCHIVES = {
     "linux-x86_64": (
         "uv-x86_64-unknown-linux-gnu.tar.gz",
         "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
+        21760555,
     ),
     "linux-arm64": (
         "uv-aarch64-unknown-linux-gnu.tar.gz",
         "769d373e146692c639b5fbaae33b331c297a32e03d30448772051902df52bbf4",
+        20534826,
     ),
     "macos-x86_64": (
         "uv-x86_64-apple-darwin.tar.gz",
         "69d9f9a00337f25a50dcb13882052da08b8469bac11091c98c5694c3c6721467",
+        19622543,
     ),
     "macos-arm64": (
         "uv-aarch64-apple-darwin.tar.gz",
         "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
+        17679560,
     ),
     "windows-x86_64": (
         "uv-x86_64-pc-windows-msvc.zip",
         "8fcb0cb46e1229065e344758980924e569bef5882ef45f46fada8fb24e06b74a",
+        19073343,
     ),
     "windows-arm64": (
         "uv-aarch64-pc-windows-msvc.zip",
         "9bc7c18e616230fa2dc6fb24bc3afde18a95c2b5c9433de747e9502c66041568",
+        18030168,
     ),
 }
 
@@ -60,26 +66,32 @@ EXPECTED_GH_ARCHIVES = {
     "linux-x86_64": (
         "gh_2.97.0_linux_amd64.tar.gz",
         "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112",
+        14770812,
     ),
     "linux-arm64": (
         "gh_2.97.0_linux_arm64.tar.gz",
         "73ea440ecad9c9e284429997ee6f93577bc6f7bc6fba357ef62c53ad8fb641a5",
+        13428558,
     ),
     "macos-x86_64": (
         "gh_2.97.0_macOS_amd64.zip",
         "63298c998cc2a924c9e254c6af6a1caad6ece281122687a91f079bc0a462700e",
+        15418698,
     ),
     "macos-arm64": (
         "gh_2.97.0_macOS_arm64.zip",
         "a58b8fd77b417a38f47a0b54d1370c59b0fcdb324ccc9ca002b0998f7c4c999e",
+        13845290,
     ),
     "windows-x86_64": (
         "gh_2.97.0_windows_amd64.zip",
         "35d7fe05c4dd1411ffda1e73dfc7c6f44b75c936ca51fa6595c657fdc0350cec",
+        14938517,
     ),
     "windows-arm64": (
         "gh_2.97.0_windows_arm64.zip",
         "3e2d4a166da4ee5020c592737b65eec0e724946d5d5b962f5fe59d99116dc4bf",
+        13391688,
     ),
 }
 
@@ -97,6 +109,11 @@ def bootstrap_module() -> Any:
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _corrupt_same_size(payload: bytes) -> bytes:
+    assert payload
+    return bytes([payload[0] ^ 1]) + payload[1:]
 
 
 def _tar_archive(member: str, payload: bytes, *, mode: int = 0o755) -> bytes:
@@ -127,8 +144,10 @@ def _fixture_policy(
 ) -> Path:
     payload = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
     payload["uv"]["assets"]["linux-x86_64"]["sha256"] = _sha256(uv_archive)
+    payload["uv"]["assets"]["linux-x86_64"]["size_bytes"] = len(uv_archive)
     payload["uv"]["assets"]["linux-x86_64"]["binary_sha256"] = _sha256(uv_binary)
     payload["github_cli"]["assets"]["linux-x86_64"]["sha256"] = _sha256(gh_archive)
+    payload["github_cli"]["assets"]["linux-x86_64"]["size_bytes"] = len(gh_archive)
     path = tmp_path / "policy.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
@@ -187,10 +206,14 @@ def _attestation_payload(
 class FixtureDownloader:
     def __init__(self, payloads: dict[str, bytes]) -> None:
         self.payloads = payloads
-        self.urls: list[str] = []
+        self.calls: list[tuple[str, int | None]] = []
 
-    def __call__(self, url: str, destination: Path) -> None:
-        self.urls.append(url)
+    @property
+    def urls(self) -> list[str]:
+        return [url for url, _ in self.calls]
+
+    def __call__(self, url: str, destination: Path, expected_size: int | None = None) -> None:
+        self.calls.append((url, expected_size))
         destination.write_bytes(self.payloads[url])
 
 
@@ -201,10 +224,14 @@ class FixtureRunner:
         *,
         gh_version: str = "gh version 2.97.0 (fixture)",
         uv_version: str = "uv 0.12.1",
+        attestation_returncode: int = 0,
+        attestation_stderr: str = "",
     ) -> None:
         self.attestation_stdout = attestation_stdout
         self.gh_version = gh_version
         self.uv_version = uv_version
+        self.attestation_returncode = attestation_returncode
+        self.attestation_stderr = attestation_stderr
         self.commands: list[tuple[str, ...]] = []
 
     def __call__(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -214,6 +241,12 @@ class FixtureRunner:
             stdout = self.gh_version
         elif "attestation" in normalized:
             stdout = self.attestation_stdout
+            return subprocess.CompletedProcess(
+                normalized,
+                self.attestation_returncode,
+                stdout=stdout,
+                stderr=self.attestation_stderr,
+            )
         else:
             stdout = self.uv_version
         return subprocess.CompletedProcess(normalized, 0, stdout=stdout, stderr="")
@@ -259,14 +292,16 @@ def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
     assert uv["signer_workflow_identity"] == UV_SIGNER
     assert uv["predicate_type"] == "https://slsa.dev/provenance/v1"
     assert {
-        key: (asset["archive_name"], asset["sha256"]) for key, asset in uv["assets"].items()
+        key: (asset["archive_name"], asset["sha256"], asset["size_bytes"])
+        for key, asset in uv["assets"].items()
     } == EXPECTED_UV_ARCHIVES
 
     gh = payload["github_cli"]
     assert gh["version"] == "2.97.0"
     assert gh["release_repository"] == "cli/cli"
     assert {
-        key: (asset["archive_name"], asset["sha256"]) for key, asset in gh["assets"].items()
+        key: (asset["archive_name"], asset["sha256"], asset["size_bytes"])
+        for key, asset in gh["assets"].items()
     } == EXPECTED_GH_ARCHIVES
 
     assert payload["setup_uv_action"] == {
@@ -403,6 +438,12 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
     assert attestation_index < uv_version_index
     assert "--cert-identity" in runner.commands[attestation_index]
     assert "--signer-workflow" not in runner.commands[attestation_index]
+    gh_url = next(url for url in downloader.payloads if "cli/cli" in url)
+    uv_url = next(url for url in downloader.payloads if "astral-sh/uv" in url)
+    assert downloader.calls == [
+        (gh_url, len(downloader.payloads[gh_url])),
+        (uv_url, len(downloader.payloads[uv_url])),
+    ]
 
 
 def test_bad_github_cli_is_never_executed(
@@ -411,7 +452,7 @@ def test_bad_github_cli_is_never_executed(
 ) -> None:
     policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
     gh_url = next(url for url in downloader.payloads if "cli/cli" in url)
-    downloader.payloads[gh_url] += b"corruption"
+    downloader.payloads[gh_url] = _corrupt_same_size(downloader.payloads[gh_url])
 
     with pytest.raises(bootstrap_module.BootstrapError, match="VERIFIER_ARCHIVE_DIGEST_MISMATCH"):
         bootstrap_module.bootstrap_uv(
@@ -436,7 +477,7 @@ def test_corrupted_uv_never_reaches_attestation(
 ) -> None:
     policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
     uv_url = next(url for url in downloader.payloads if "astral-sh/uv" in url)
-    downloader.payloads[uv_url] += b"corruption"
+    downloader.payloads[uv_url] = _corrupt_same_size(downloader.payloads[uv_url])
 
     with pytest.raises(bootstrap_module.BootstrapError, match="UV_ARCHIVE_DIGEST_MISMATCH"):
         bootstrap_module.bootstrap_uv(
@@ -522,6 +563,14 @@ def test_attestation_identity_mismatches_fail_closed(
         ),
         (lambda policy: policy.update(unreviewed_field=True), "POLICY_FIELDS_INVALID"),
         (lambda policy: policy["uv"].pop("source_commit"), "POLICY_FIELDS_INVALID"),
+        (
+            lambda policy: policy["uv"]["assets"]["linux-x86_64"].pop("size_bytes"),
+            "POLICY_FIELDS_INVALID",
+        ),
+        (
+            lambda policy: policy["github_cli"]["assets"]["linux-x86_64"].update(size_bytes=0),
+            "POLICY_VALUE_INVALID",
+        ),
     ],
 )
 def test_unknown_schema_versions_fields_assets_urls_and_index_artifacts_fail(
@@ -674,6 +723,131 @@ def test_corrupted_cached_binary_is_not_reused_or_deleted(
     assert receipt["failure_category"] == "CACHED_BINARY_DIGEST_MISMATCH"
 
 
+def test_symlinked_install_ancestor_fails_before_download(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repository / ".tools").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="INSTALL_PATH_UNSAFE"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=repository / ".tools" / "uv",
+            receipt_path=tmp_path / "receipt.json",
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert downloader.calls == []
+    assert runner.commands == []
+    assert not (outside / "uv" / "uv").exists()
+    receipt = json.loads((tmp_path / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
+
+
+def test_attestation_authentication_failure_is_distinct_and_sanitized(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    secret = "github_pat_fixture-secret"
+    local_path = str(tmp_path / "sensitive-local-path")
+    runner.attestation_returncode = 4
+    runner.attestation_stderr = f"not logged in; token={secret}; path={local_path}"
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="VERIFIER_AUTHENTICATION_FAILED",
+    ):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "tools",
+            receipt_path=tmp_path / "receipt.json",
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    receipt_text = (tmp_path / "receipt.json").read_text(encoding="utf-8")
+    assert json.loads(receipt_text)["failure_category"] == "VERIFIER_AUTHENTICATION_FAILED"
+    assert secret not in receipt_text
+    assert local_path not in receipt_text
+    assert not any(Path(command[0]).name == "uv" for command in runner.commands)
+
+
+class _DownloadResponse(io.BytesIO):
+    def __init__(self, payload: bytes, content_length: str | None) -> None:
+        super().__init__(payload)
+        self.headers = {} if content_length is None else {"Content-Length": content_length}
+
+
+@pytest.mark.parametrize(
+    ("payload", "content_length", "expected_size"),
+    [
+        (b"abc", "4", 3),
+        (b"abcd", "3", 3),
+        (b"ab", "3", 3),
+        (b"abc", None, 3),
+    ],
+)
+def test_download_rejects_unreviewed_or_mismatched_sizes(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    content_length: str | None,
+    expected_size: int,
+) -> None:
+    monkeypatch.setattr(
+        bootstrap_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _DownloadResponse(payload, content_length),
+    )
+    destination = tmp_path / "asset.tar.gz"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="DOWNLOAD_SIZE_MISMATCH"):
+        bootstrap_module._download(
+            "https://github.com/example/release/asset.tar.gz",
+            destination,
+            expected_size,
+        )
+
+    assert not destination.exists()
+
+
+def test_download_fails_when_the_bounded_deadline_expires(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"abc"
+    monotonic_values = iter((0.0, 0.0, 61.0))
+    monkeypatch.setattr(
+        bootstrap_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _DownloadResponse(payload, str(len(payload))),
+    )
+    monkeypatch.setattr(bootstrap_module.time, "monotonic", lambda: next(monotonic_values))
+    destination = tmp_path / "asset.tar.gz"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="DOWNLOAD_DEADLINE_EXCEEDED"):
+        bootstrap_module._download(
+            "https://github.com/example/release/asset.tar.gz",
+            destination,
+            len(payload),
+        )
+
+    assert not destination.exists()
+
+
 def test_receipt_is_deterministic_except_timestamp_and_excludes_local_context(
     tmp_path: Path,
     bootstrap_module: Any,
@@ -735,20 +909,32 @@ def test_verify_installed_rehashes_before_running_uv(
     assert runner.commands == []
 
 
-def test_composite_action_bootstraps_local_uv_without_third_party_action() -> None:
+def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
     assert ACTION_PATH.is_file()
     action = ACTION_PATH.read_text(encoding="utf-8")
 
-    assert "astral-sh/setup-uv@" not in action
+    assert f"astral-sh/setup-uv@{SETUP_UV_COMMIT}" in action
+    assert "GH_TOKEN: ${{ github.token }}" in action
     assert "python-version" in action
     assert "runner.os" in action
     assert "runner.arch" in action
+    assert 'version: "0.12.1"' in action
+    assert "checksum: ${{ steps.preflight.outputs.checksum }}" in action
+    assert "download-from-astral-mirror: false" in action
+    assert "enable-cache: true" in action
+    assert "cache-dependency-glob: uv.lock" in action
+    assert (
+        "cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}"
+        in action
+    )
     assert "bootstrap_uv.py verify-installed" in action
-    assert "--uv-path" in action
-    assert "GITHUB_PATH" in action
+    assert '--uv-path "${{ steps.setup-uv.outputs.uv-path }}"' in action
+    assert "GITHUB_PATH" not in action
     assert "value: ${{ steps.receipt.outputs.receipt_path }}" in action
+    assert "value: ${{ steps.setup-uv.outputs.uv-path }}" in action
     assert "if: ${{ always() }}" in action
-    assert "if-no-files-found: ignore" in action
+    assert "if-no-files-found: error" in action
+    assert "include-hidden-files: true" in action
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in action
 
 
