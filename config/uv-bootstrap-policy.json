@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "uv": {
+    "version": "0.12.1",
+    "release_repository": "astral-sh/uv",
+    "release_tag": "0.12.1",
+    "release_url_template": "https://github.com/{repository}/releases/download/{tag}/{asset}",
+    "source_repository": "https://github.com/astral-sh/uv",
+    "source_commit": "329541a503de8a4d9bb021814f9c0875efe033c8",
+    "source_ref": "refs/heads/main",
+    "oidc_issuer": "https://token.actions.githubusercontent.com",
+    "signer_workflow_identity": "https://github.com/astral-sh/uv/.github/workflows/release.yml@refs/heads/main",
+    "predicate_type": "https://slsa.dev/provenance/v1",
+    "assets": {
+      "linux-x86_64": {
+        "archive_name": "uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
+        "size_bytes": 21760555,
+        "binary_path": "uv-x86_64-unknown-linux-gnu/uv",
+        "binary_sha256": "92face6b1f0462ad911857957bd168cd4ae45515e2a2cb3fcc3ecbda3d4d82b1"
+      },
+      "linux-arm64": {
+        "archive_name": "uv-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "769d373e146692c639b5fbaae33b331c297a32e03d30448772051902df52bbf4",
+        "size_bytes": 20534826,
+        "binary_path": "uv-aarch64-unknown-linux-gnu/uv",
+        "binary_sha256": "d8e93d894c81ebaa27ef159a5c5b1398283e30fdf91f662433caa494fa421b9f"
+      },
+      "macos-x86_64": {
+        "archive_name": "uv-x86_64-apple-darwin.tar.gz",
+        "sha256": "69d9f9a00337f25a50dcb13882052da08b8469bac11091c98c5694c3c6721467",
+        "size_bytes": 19622543,
+        "binary_path": "uv-x86_64-apple-darwin/uv",
+        "binary_sha256": "88af0b228e9eaa017c670d73e8c74fbd220450cb74195025203dc0009335351e"
+      },
+      "macos-arm64": {
+        "archive_name": "uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
+        "size_bytes": 17679560,
+        "binary_path": "uv-aarch64-apple-darwin/uv",
+        "binary_sha256": "cf8774f78b8df0768991aeb5a1c78f9c61f3a0b4993c875b83d2b4a66b80bf9e"
+      },
+      "windows-x86_64": {
+        "archive_name": "uv-x86_64-pc-windows-msvc.zip",
+        "sha256": "8fcb0cb46e1229065e344758980924e569bef5882ef45f46fada8fb24e06b74a",
+        "size_bytes": 19073343,
+        "binary_path": "uv-x86_64-pc-windows-msvc/uv.exe",
+        "binary_sha256": "f537cc65c1791d9d1a022132302b21ecd48cdf0a605a7b345809fbe8af4e807d"
+      },
+      "windows-arm64": {
+        "archive_name": "uv-aarch64-pc-windows-msvc.zip",
+        "sha256": "9bc7c18e616230fa2dc6fb24bc3afde18a95c2b5c9433de747e9502c66041568",
+        "size_bytes": 18030168,
+        "binary_path": "uv-aarch64-pc-windows-msvc/uv.exe",
+        "binary_sha256": "9c11339f74a3fd89e800d22cdd1bc332d3810da517d54230b47cc21fa1c29206"
+      }
+    }
+  },
+  "github_cli": {
+    "version": "2.97.0",
+    "release_repository": "cli/cli",
+    "release_tag": "v2.97.0",
+    "release_url_template": "https://github.com/{repository}/releases/download/{tag}/{asset}",
+    "assets": {
+      "linux-x86_64": {
+        "archive_name": "gh_2.97.0_linux_amd64.tar.gz",
+        "sha256": "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112",
+        "size_bytes": 14770812,
+        "binary_path": "gh_2.97.0_linux_amd64/bin/gh"
+      },
+      "linux-arm64": {
+        "archive_name": "gh_2.97.0_linux_arm64.tar.gz",
+        "sha256": "73ea440ecad9c9e284429997ee6f93577bc6f7bc6fba357ef62c53ad8fb641a5",
+        "size_bytes": 13428558,
+        "binary_path": "gh_2.97.0_linux_arm64/bin/gh"
+      },
+      "macos-x86_64": {
+        "archive_name": "gh_2.97.0_macOS_amd64.zip",
+        "sha256": "63298c998cc2a924c9e254c6af6a1caad6ece281122687a91f079bc0a462700e",
+        "size_bytes": 15418698,
+        "binary_path": "gh_2.97.0_macOS_amd64/bin/gh"
+      },
+      "macos-arm64": {
+        "archive_name": "gh_2.97.0_macOS_arm64.zip",
+        "sha256": "a58b8fd77b417a38f47a0b54d1370c59b0fcdb324ccc9ca002b0998f7c4c999e",
+        "size_bytes": 13845290,
+        "binary_path": "gh_2.97.0_macOS_arm64/bin/gh"
+      },
+      "windows-x86_64": {
+        "archive_name": "gh_2.97.0_windows_amd64.zip",
+        "sha256": "35d7fe05c4dd1411ffda1e73dfc7c6f44b75c936ca51fa6595c657fdc0350cec",
+        "size_bytes": 14938517,
+        "binary_path": "bin/gh.exe"
+      },
+      "windows-arm64": {
+        "archive_name": "gh_2.97.0_windows_arm64.zip",
+        "sha256": "3e2d4a166da4ee5020c592737b65eec0e724946d5d5b962f5fe59d99116dc4bf",
+        "size_bytes": 13391688,
+        "binary_path": "bin/gh.exe"
+      }
+    }
+  },
+  "setup_uv_action": {
+    "version": "v9.0.0",
+    "commit": "c771a70e6277c0a99b617c7a806ffedaca235ff9"
+  },
+  "python_verifiers": {
+    "pypi-attestations": {
+      "version": "0.0.30",
+      "project": "pypi-attestations",
+      "project_url": "https://pypi.org/project/pypi-attestations/",
+      "source_repository": "https://github.com/pypi/pypi-attestations",
+      "reviewed_update_procedure": "docs/security/verified-uv-bootstrap.md#reviewed-policy-updates",
+      "artifacts": [
+        {
+          "filename": "pypi_attestations-0.0.30-py3-none-any.whl",
+          "sha256": "b3a9c53f6cb89e5e7b5b70e6cfca97cfc66008c1ed54087355e06e40071cef21",
+          "url": "https://files.pythonhosted.org/packages/5f/24/e59078318b5e2bca59be5a21957d70e082e6eb4f478adffe373f3b74daf4/pypi_attestations-0.0.30-py3-none-any.whl"
+        },
+        {
+          "filename": "pypi_attestations-0.0.30.tar.gz",
+          "sha256": "14ff13c76bbef02a483c2b77532da02bfd746b5141b881f355e06b9807434423",
+          "url": "https://files.pythonhosted.org/packages/97/1e/eb8a0233cdcaf01acb18076ac8b8a057714177b3717baf26b78a11b8d929/pypi_attestations-0.0.30.tar.gz"
+        }
+      ]
+    }
+  }
+}

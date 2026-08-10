@@ -89,6 +89,10 @@
     "title": "Security response checklist — AncestryLLM",
     "description": "How to report vulnerabilities, the triage and disclosure process, and the responsible disclosure policy."
   },
+  "security/verified-uv-bootstrap.md": {
+    "title": "Verified uv bootstrap — AncestryLLM",
+    "description": "Trust policy, verification phases, receipt evidence, reviewed updates, and recovery for the repository's pinned uv bootstrap."
+  },
   "THREAT_MODEL.md": {
     "title": "Data-flow threat model and control matrix — AncestryLLM",
     "description": "OWASP Top 10:2025 and NIST SP 800-218 control evidence for AncestryLLM's implemented and planned surfaces."

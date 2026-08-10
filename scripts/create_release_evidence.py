@@ -7,17 +7,19 @@ import argparse
 import hashlib
 import json
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 EVIDENCE_STATUSES = {"verified", "failed", "unavailable", "unverified"}
 DISPOSITIONS = {"fixed", "false-positive", "accepted-risk"}
 SEVERITIES = {"critical", "high", "medium", "low", "informational"}
 REQUIRED_GATES = {
+    "bootstrap-verification",
     "codeql",
     "cross-platform-install",
     "cyclonedx-sbom",
@@ -34,6 +36,7 @@ REQUIRED_GATES = {
     "tests-and-coverage",
     "workflow-security-analysis",
 }
+BOOTSTRAP_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "uv-bootstrap-policy.json"
 FINDING_SOURCES = {
     "dependency-audit",
     "semgrep",
@@ -266,6 +269,193 @@ def _validate_interoperability(payload: dict[str, Any], version: str) -> list[di
     return validated
 
 
+def _exact_object_fields(
+    value: object,
+    expected: set[str],
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError(f"{label} fields do not match schema v1")
+    return value
+
+
+def _receipt_sha256(value: object, field: str) -> str:
+    digest = _text(value, field)
+    if not SHA256.fullmatch(digest):
+        raise ValueError(f"{field} must be a lowercase SHA-256 digest")
+    return digest
+
+
+def _reviewed_value(actual: str, expected: object, field: str) -> str:
+    if actual != expected:
+        raise ValueError(f"{field} does not match the reviewed bootstrap policy")
+    return actual
+
+
+def _validate_bootstrap_receipt(
+    payload: dict[str, Any],
+    policy_path: Path = BOOTSTRAP_POLICY_PATH,
+) -> dict[str, str]:
+    receipt = _exact_object_fields(
+        payload,
+        {
+            "schema_version",
+            "policy",
+            "tool",
+            "verifier",
+            "provenance",
+            "verified_at",
+            "status",
+            "failure_category",
+        },
+        "bootstrap receipt",
+    )
+    if type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1:
+        raise ValueError("bootstrap receipt.schema_version must be 1")
+
+    policy = _load_object(policy_path, "bootstrap policy")
+    if type(policy.get("schema_version")) is not int or policy["schema_version"] != 1:
+        raise ValueError("bootstrap policy.schema_version must be 1")
+    receipt_policy = _exact_object_fields(
+        receipt["policy"], {"schema_version", "sha256"}, "bootstrap receipt.policy"
+    )
+    if type(receipt_policy["schema_version"]) is not int or receipt_policy["schema_version"] != 1:
+        raise ValueError("bootstrap receipt.policy.schema_version must be 1")
+    if receipt_policy["schema_version"] != policy["schema_version"]:
+        raise ValueError("bootstrap receipt.policy.schema_version does not match policy")
+    policy_sha256 = _receipt_sha256(receipt_policy["sha256"], "bootstrap receipt policy SHA-256")
+    if policy_sha256 != _sha256(policy_path):
+        raise ValueError("bootstrap receipt policy SHA-256 does not match the reviewed policy")
+
+    tool = _exact_object_fields(
+        receipt["tool"],
+        {
+            "name",
+            "version",
+            "platform",
+            "architecture",
+            "asset_name",
+            "asset_sha256",
+            "binary_sha256",
+        },
+        "bootstrap receipt.tool",
+    )
+    tool_name = _reviewed_value(
+        _text(tool["name"], "bootstrap receipt.tool.name"),
+        "uv",
+        "bootstrap receipt.tool.name",
+    )
+    tool_version = _reviewed_value(
+        _text(tool["version"], "bootstrap receipt.tool.version"),
+        policy["uv"]["version"],
+        "bootstrap receipt.tool.version",
+    )
+    operating_system = _text(tool["platform"], "bootstrap receipt.tool.platform")
+    architecture = _text(tool["architecture"], "bootstrap receipt.tool.architecture")
+    platform = f"{operating_system}-{architecture}"
+    try:
+        uv_asset = policy["uv"]["assets"][platform]
+        gh_asset = policy["github_cli"]["assets"][platform]
+    except KeyError as exc:
+        raise ValueError("bootstrap receipt platform is not reviewed") from exc
+    asset_name = _reviewed_value(
+        _text(tool["asset_name"], "bootstrap receipt.tool.asset_name"),
+        uv_asset["archive_name"],
+        "bootstrap receipt.tool.asset_name",
+    )
+    asset_sha256 = _reviewed_value(
+        _receipt_sha256(tool["asset_sha256"], "bootstrap receipt.tool.asset_sha256"),
+        uv_asset["sha256"],
+        "bootstrap receipt.tool.asset_sha256",
+    )
+    binary_sha256 = _reviewed_value(
+        _receipt_sha256(tool["binary_sha256"], "bootstrap receipt.tool.binary_sha256"),
+        uv_asset["binary_sha256"],
+        "bootstrap receipt.tool.binary_sha256",
+    )
+
+    verifier = _exact_object_fields(
+        receipt["verifier"],
+        {"name", "version", "archive_name", "archive_sha256"},
+        "bootstrap receipt.verifier",
+    )
+    verifier_name = _reviewed_value(
+        _text(verifier["name"], "bootstrap receipt.verifier.name"),
+        "GitHub CLI",
+        "bootstrap receipt.verifier.name",
+    )
+    verifier_version = _reviewed_value(
+        _text(verifier["version"], "bootstrap receipt.verifier.version"),
+        policy["github_cli"]["version"],
+        "bootstrap receipt.verifier.version",
+    )
+    verifier_archive = _reviewed_value(
+        _text(verifier["archive_name"], "bootstrap receipt.verifier.archive_name"),
+        gh_asset["archive_name"],
+        "bootstrap receipt.verifier.archive_name",
+    )
+    verifier_sha256 = _reviewed_value(
+        _receipt_sha256(verifier["archive_sha256"], "bootstrap receipt.verifier.archive_sha256"),
+        gh_asset["sha256"],
+        "bootstrap receipt.verifier.archive_sha256",
+    )
+
+    provenance = _exact_object_fields(
+        receipt["provenance"],
+        {
+            "source_repository",
+            "source_commit",
+            "source_ref",
+            "signer_workflow_identity",
+            "oidc_issuer",
+            "predicate_type",
+        },
+        "bootstrap receipt.provenance",
+    )
+    validated_provenance = {
+        field: _reviewed_value(
+            _text(provenance[field], f"bootstrap receipt.provenance.{field}"),
+            policy["uv"][field],
+            f"bootstrap receipt.provenance.{field}",
+        )
+        for field in (
+            "source_repository",
+            "source_commit",
+            "source_ref",
+            "signer_workflow_identity",
+            "oidc_issuer",
+            "predicate_type",
+        )
+    }
+    if receipt["status"] != "success":
+        raise ValueError("bootstrap receipt.status must be success")
+    if receipt["failure_category"] is not None:
+        raise ValueError("bootstrap receipt.failure_category must be null for success")
+    verified_at = _text(receipt["verified_at"], "bootstrap receipt.verified_at")
+    try:
+        parsed_timestamp = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("bootstrap receipt.verified_at must be an ISO UTC timestamp") from exc
+    if not verified_at.endswith("Z") or parsed_timestamp.utcoffset() != timedelta(0):
+        raise ValueError("bootstrap receipt.verified_at must be an ISO UTC timestamp")
+
+    return {
+        "policy_sha256": policy_sha256,
+        "tool_name": tool_name,
+        "tool_version": tool_version,
+        "platform": platform,
+        "asset_name": asset_name,
+        "asset_sha256": asset_sha256,
+        "binary_sha256": binary_sha256,
+        "verifier_name": verifier_name,
+        "verifier_version": verifier_version,
+        "verifier_archive": verifier_archive,
+        "verifier_sha256": verifier_sha256,
+        "verified_at": verified_at,
+        **validated_provenance,
+    }
+
+
 def _escape(value: str) -> str:
     return value.replace("|", "\\|").replace("`", "'")
 
@@ -280,6 +470,7 @@ def main() -> int:
     parser.add_argument("--gates", required=True, type=Path)
     parser.add_argument("--findings", required=True, type=Path)
     parser.add_argument("--interoperability", required=True, type=Path)
+    parser.add_argument("--bootstrap-receipt", required=True, type=Path)
     args = parser.parse_args()
 
     if not SEMVER.fullmatch(args.version):
@@ -309,6 +500,8 @@ def main() -> int:
         )
         interoperability_payload = _load_object(args.interoperability, "interoperability")
         vendors = _validate_interoperability(interoperability_payload, args.version)
+        bootstrap_payload = _load_object(args.bootstrap_receipt, "bootstrap receipt")
+        bootstrap = _validate_bootstrap_receipt(bootstrap_payload)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -342,6 +535,7 @@ def main() -> int:
         for vendor in vendors
     )
     generated = generated_date.isoformat()
+    bootstrap_receipt_sha256 = _sha256(args.bootstrap_receipt)
     args.output.write_text(
         f"""# AncestryLLM {args.version} release evidence
 
@@ -357,6 +551,23 @@ def main() -> int:
 | Gate | Status | Evidence |
 |---|---|---|
 {gate_rows}
+
+## Bootstrap verification
+
+- Receipt SHA-256: `{bootstrap_receipt_sha256}`
+- Policy SHA-256: `{bootstrap["policy_sha256"]}`
+- Tool: `{bootstrap["tool_name"]}` `{bootstrap["tool_version"]}`
+- Platform: `{bootstrap["platform"]}`
+- Release asset: `{bootstrap["asset_name"]}` (`{bootstrap["asset_sha256"]}`)
+- Installed binary SHA-256: `{bootstrap["binary_sha256"]}`
+- Verifier: `{bootstrap["verifier_name"]}` `{bootstrap["verifier_version"]}`
+  from `{bootstrap["verifier_archive"]}` (`{bootstrap["verifier_sha256"]}`)
+- Source: `{bootstrap["source_repository"]}` at `{bootstrap["source_commit"]}`
+  (`{bootstrap["source_ref"]}`)
+- Signer workflow: `{bootstrap["signer_workflow_identity"]}`
+- OIDC issuer: `{bootstrap["oidc_issuer"]}`
+- Predicate: `{bootstrap["predicate_type"]}`
+- Verified at: `{bootstrap["verified_at"]}`
 
 ## Security finding dispositions
 

@@ -256,6 +256,16 @@ self-approval; do not make that change during the one-maintainer release.
    an input to the installer gate, not release-installer evidence by itself.
 8. Review the evidence artifact and confirm every required job succeeded.
 
+Every readiness, build, and release job that executes `uv` first uses the
+[verified uv bootstrap](security/verified-uv-bootstrap.md). Confirm the
+`bootstrap-verification` gate in `gates.json` is `verified`, and that the
+release manifest records the expected policy digest, `uv` release asset,
+GitHub CLI verifier archive, source repository and commit/ref, signer workflow,
+OIDC issuer, and SLSA predicate. A missing, failed, timestamp-invalid, or
+identity-mismatched schema-v1 receipt blocks release. The stock-`pip` wheel and
+sdist consumer smoke tests remain separate because they validate supported
+installation paths; they cannot build or authorize a release.
+
 At the exact approval points, a maintainer approves the release-preparation PR;
 the readiness operator attests the cleanup audit and approves its evidence; the
 maintainer approves creation and push of the annotated release tag; and `sodejm` approves
@@ -362,7 +372,10 @@ publishing explicitly requests `attestations: true`. The workflow then verifies
 the PEP 740 provenance for both the wheel and source distribution, including
 exact repository, workflow, environment, filename, and SHA-256 identity, with
 the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
-verifier output as evidence and fails closed. After production PyPI publishing,
+verifier output as evidence and fails closed. The workflow installs this tool
+from the locked, non-default `release-verifier` dependency group so ordinary
+developer setup does not inherit its platform-specific build dependencies.
+After production PyPI publishing,
 the supported platform/Python wheel-and-sdist install smoke matrix runs before
 the immutable GitHub Release. The attached `SHA256SUMS` covers
 every release asset except the checksum file itself. No other workflow or

@@ -105,6 +105,17 @@ not runtime trust boundaries, and their presence or a passing scan does not
 prove that vulnerabilities are absent. A stopped or interrupted security scan
 is incomplete.
 
+Repository setup, CI, and release jobs use the same
+[verified uv bootstrap](docs/security/verified-uv-bootstrap.md). The reviewed
+schema-v1 policy binds the supported platform and architecture to exact
+GitHub CLI and `uv` release archives, reviewed byte sizes, hashes, source
+identity, signer workflow, OIDC issuer, and SLSA provenance predicate. Unknown
+or mismatched inputs fail before either tool may execute; downloads are bounded
+by their reviewed size and acquisition deadline, cached `uv` binaries are
+re-hashed before use, and release evidence requires a sanitized successful
+receipt. This control is specific to the repository's `uv` bootstrap and does
+not establish trust in unrelated deployment or application update channels.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;

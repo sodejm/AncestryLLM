@@ -80,6 +80,7 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
     assert "\n  schedule:\n" in workflow
     assert "pyproject.toml|uv.lock)" in changes_job
     assert ".github/workflows/*)" in changes_job
+    assert ".github/actions/*)" in changes_job
     assert "paths:" not in workflow
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
@@ -158,15 +159,93 @@ def test_dependency_review_runs_on_hosted_ubuntu_with_bounded_duration() -> None
     assert "self-hosted" not in workflow
 
 
-def test_ci_pins_uv_bootstrap_version() -> None:
-    workflow = CI_PATH.read_text(encoding="utf-8")
-    installed_versions = re.findall(
-        r"python -m pip install --disable-pip-version-check (uv\S*)",
-        workflow,
-    )
+def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:
+    expected_counts = {
+        ".github/workflows/ci.yml": 6,
+        ".github/workflows/release-readiness.yml": 3,
+        ".github/workflows/release.yml": 3,
+        ".github/workflows/desktop-sidecar.yml": 2,
+        ".github/workflows/release-project-gate-proof.yml": 1,
+    }
 
-    assert installed_versions
-    assert set(installed_versions) == {"uv==0.12.1"}
+    for relative_path, expected_count in expected_counts.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert workflow.count("uses: ./.github/actions/setup-verified-uv") == expected_count
+        assert "pip install --disable-pip-version-check uv" not in workflow
+        assert "astral-sh/setup-uv@" not in workflow
+
+
+def test_verified_uv_calling_jobs_grant_attestation_read_permission() -> None:
+    expected_jobs = {
+        ".github/workflows/ci.yml": (
+            "lockfile",
+            "test",
+            "quality",
+            "security",
+            "package",
+            "workflow-audit",
+        ),
+        ".github/workflows/release-readiness.yml": ("quality", "security", "package"),
+        ".github/workflows/release.yml": (
+            "build",
+            "desktop-installers",
+            "verify-pypi-hashes",
+        ),
+        ".github/workflows/desktop-sidecar.yml": ("desktop-security", "native-package"),
+        ".github/workflows/release-project-gate-proof.yml": ("validate",),
+    }
+
+    for relative_path, job_names in expected_jobs.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+        for job_name in job_names:
+            job = _job(workflow, job_name)
+            permissions = re.search(
+                r"(?m)^    permissions:\n(?P<body>(?:      [^\n]+\n)+)",
+                job,
+            )
+            assert permissions is not None, f"{relative_path}:{job_name}"
+            assert re.search(
+                r"(?m)^      attestations: read(?:\s+#.*)?$",
+                permissions.group("body"),
+            ), f"{relative_path}:{job_name}"
+
+
+def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+
+    assert (
+        'VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --all-extras --locked'
+        in makefile
+    )
+    audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
+    assert f"$(VENV_DIR)/bin/{audit_command}" in makefile
+    assert f"uv run {audit_command}" in _job(ci, "workflow-audit")
+    assert f"uv run {audit_command}" in _job(readiness, "quality")
+
+
+def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+
+    assert "actions/cache@" not in workflow
+    assert "~/.cache/uv" not in workflow
+    assert "${{ runner.os }}-uv-" not in workflow
+
+
+def test_stock_pip_consumer_smoke_jobs_remain_explicit_exceptions() -> None:
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    for job in (_job(ci, "install-smoke"), _job(ci, "sdist-smoke")):
+        assert "pip install --disable-pip-version-check" in job
+        assert "setup-verified-uv" not in job
+    readiness_install = _job(readiness, "install")
+    release_install = _job(release, "verify-pypi-install")
+    for job in (readiness_install, release_install):
+        assert "pip install --disable-pip-version-check" in job
+        assert "setup-verified-uv" not in job
 
 
 def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> None:
@@ -178,10 +257,15 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert "entry: make workflow-audit" in hooks
     assert "entry: make lock-check" in hooks
     assert "files: ^(pyproject\\.toml|uv\\.lock)$" in hooks
+    workflow_filter = r"^\.github/(actions|workflows)/"
+    assert f"files: {workflow_filter}" in hooks
+    assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
+    assert re.match(workflow_filter, ".github/workflows/ci.yml")
+    assert not re.match(workflow_filter, "docs/CI.md")
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
-    assert "-m uv lock --check" in makefile
+    assert "$(UV_BIN) lock --check" in makefile
     assert "pre-push: test lint typecheck security" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 

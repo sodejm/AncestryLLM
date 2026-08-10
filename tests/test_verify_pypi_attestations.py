@@ -4,6 +4,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -323,3 +324,41 @@ def test_fails_closed_when_cryptographic_verifier_fails(
             artifacts=artifacts,
             evidence=tmp_path / "evidence",
         )
+
+
+def test_cryptographic_verifier_runs_from_the_locked_python_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        assert kwargs == {
+            "check": False,
+            "capture_output": True,
+            "text": True,
+        }
+        return subprocess.CompletedProcess(command, 0, stdout="verified\n", stderr="")
+
+    monkeypatch.setattr(verifier.subprocess, "run", fake_run)
+
+    output = verifier._run_verifier(
+        "sodejm/AncestryLLM",
+        "https://files.pythonhosted.org/packages/ancestryllm.whl",
+    )
+
+    assert output == "verified\n"
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[0] == sys.executable
+    assert command[1] == "-c"
+    assert "pypi_attestations._cli" in command[2]
+    assert command[3:] == [
+        "verify",
+        "pypi",
+        "--repository",
+        "https://github.com/sodejm/AncestryLLM",
+        "https://files.pythonhosted.org/packages/ancestryllm.whl",
+    ]
+    assert "uvx" not in command
+    assert "--from" not in command

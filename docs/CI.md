@@ -13,10 +13,24 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   problems;
 - the pre-push hook runs `make pre-push`, which expands to the canonical test,
   lint, type-check, dependency-audit, and Semgrep gates. It also runs
-  `make workflow-audit` when a pushed commit changes `.github/workflows/`.
+  `make workflow-audit` when a pushed commit changes `.github/workflows/` or
+  `.github/actions/`.
 
-`make setup` installs the locked environment without changing Git hooks. This
-is the appropriate target for automation and disposable environments.
+`make setup` first runs the
+[verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the
+repository-local `.tools/uv/uv` binary to install the locked environment
+without changing Git hooks. The bootstrap refuses an unverified `uv` from
+`PATH`, re-hashes a cached local binary, and emits the sanitized
+`.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
+`uv` command may run. This is the appropriate target for automation and
+disposable environments. The release-only `pypi-attestations` verifier remains
+locked in the non-default `release-verifier` dependency group, so general setup
+does not require its platform-specific build dependencies. Local developers
+authenticate once with
+`gh auth login --hostname github.com`; headless shells provide `GH_TOKEN`
+through their secret manager. The bootstrap uses that credential only with the
+policy-pinned, hash-verified GitHub CLI and never delegates verification to an
+executable found on `PATH`.
 
 ## Headless shell policy
 
@@ -34,11 +48,38 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs only when a workflow changes. |
+| Pull request | An early `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
+
+Every workflow job that uses `uv` calls the repository-local
+`setup-verified-uv` composite action. The action performs the same policy
+preflight with the ephemeral job-scoped GitHub token, passes the policy-selected
+checksum to the exact pinned `setup-uv` commit with Astral mirror downloads
+disabled, re-hashes the installed binary before execution, and retains the
+schema-v1 receipt. Each calling job grants the verifier `contents: read` and
+`attestations: read`; jobs retain only any additional job-specific scope already
+required by their release contract. The token is not included in receipts or
+action outputs.
+Only the bounded `gh attestation verify` subprocess receives the token; version
+probes and all `uv` subprocesses receive an environment with GitHub token
+variables removed. An attestation verifier that exceeds 60 seconds fails with a
+stable coded error before `uv` can execute.
+The repository Actions allowlist permits only
+`astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` for that
+external action. The policy, local action, and workflow contracts independently
+require the same commit. The receipt upload includes the ignored `.tools`
+directory and fails if the expected file is absent. The cache key includes
+`uv.lock`, Python version, runner operating system, and runner architecture.
+Release-readiness and release evidence include the receipt's policy digest and
+verified identity through the required `bootstrap-verification` gate.
+
+The explicitly enumerated wheel and source-distribution consumer smoke jobs
+continue to use stock `pip`. Those jobs test what supported non-`uv` consumers
+receive; they do not build release artifacts or provide an exception to the
+verified bootstrap for repository commands.
 
 The `PR gate` job aggregates repository-owned pull-request jobs behind one
 stable check name. A conditionally skipped workflow audit is accepted; every

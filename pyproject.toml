@@ -80,6 +80,9 @@ dev = [
     "zizmor==1.29.0",
 ]
 
+[dependency-groups]
+release-verifier = ["pypi-attestations==0.0.30"]
+
 [project.urls]
 Homepage = "https://github.com/sodejm/AncestryLLM"
 Documentation = "https://sodejm.github.io/AncestryLLM/"

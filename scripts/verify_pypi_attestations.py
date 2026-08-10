@@ -8,8 +8,8 @@ import base64
 import hashlib
 import json
 import re
-import shutil
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -218,15 +218,11 @@ def _validate_provenance(
 
 def _run_verifier(repository: str, artifact_url: str) -> str:
     repository = _validated_repository(repository)
-    uvx = shutil.which("uvx")
-    if uvx is None:
-        raise RuntimeError("uvx is required for pinned PyPI attestation verification")
     result = subprocess.run(  # noqa: S603 - executable path and arguments are fixed/validated
         [
-            uvx,
-            "--from",
-            PYPI_ATTESTATIONS,
-            "pypi-attestations",
+            sys.executable,
+            "-c",
+            "from pypi_attestations._cli import main; raise SystemExit(main())",
             "verify",
             "pypi",
             "--repository",

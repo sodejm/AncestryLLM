@@ -283,6 +283,25 @@ def test_resolves_semgrep_beside_the_script_interpreter(
     assert runner._semgrep_executable() == semgrep
 
 
+def test_configures_reviewed_python_registry_bundle() -> None:
+    runner = _load_runner()
+
+    bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
+    python = bundles["python"]
+
+    assert python.url == "https://semgrep.dev/c/p/python"
+    assert (
+        python.semantic_sha256 == "80eeb6e5e772926c4fb1e0c6dd49def6d197305127e002a6bdb24b35bf3e6b80"
+    )
+    assert (
+        runner.RuleRevision(
+            sha256="0b7d2717d79da2ce99bffa329d954833e2ecc034b7ff86f0932a38ce416b5946",
+            size=487_962,
+        )
+        in python.revisions
+    )
+
+
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:
     runner = _load_runner()
 
