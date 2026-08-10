@@ -909,29 +909,20 @@ def test_verify_installed_rehashes_before_running_uv(
     assert runner.commands == []
 
 
-def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
+def test_composite_action_bootstraps_local_uv_without_third_party_action() -> None:
     assert ACTION_PATH.is_file()
     action = ACTION_PATH.read_text(encoding="utf-8")
 
-    assert f"astral-sh/setup-uv@{SETUP_UV_COMMIT}" in action
+    assert "astral-sh/setup-uv@" not in action
     assert "GH_TOKEN: ${{ github.token }}" in action
     assert "python-version" in action
     assert "runner.os" in action
     assert "runner.arch" in action
-    assert 'version: "0.12.1"' in action
-    assert "checksum: ${{ steps.preflight.outputs.checksum }}" in action
-    assert "download-from-astral-mirror: false" in action
-    assert "enable-cache: true" in action
-    assert "cache-dependency-glob: uv.lock" in action
-    assert (
-        "cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}"
-        in action
-    )
     assert "bootstrap_uv.py verify-installed" in action
-    assert '--uv-path "${{ steps.setup-uv.outputs.uv-path }}"' in action
-    assert "GITHUB_PATH" not in action
+    assert "--uv-path" in action
+    assert "GITHUB_PATH" in action
     assert "value: ${{ steps.receipt.outputs.receipt_path }}" in action
-    assert "value: ${{ steps.setup-uv.outputs.uv-path }}" in action
+    assert "value: ${{ steps.bootstrap-path.outputs.uv_path }}" in action
     assert "if: ${{ always() }}" in action
     assert "if-no-files-found: error" in action
     assert "include-hidden-files: true" in action
