@@ -4,7 +4,7 @@ description: Verify uv release provenance and digests before repository commands
 
 inputs:
   python-version:
-    description: Installed Python version included in the setup-uv cache key.
+    description: Kept for caller compatibility; no longer consumed by this action.
     required: true
   receipt-artifact-name:
     description: Unique artifact name for the schema-v1 verification receipt.
@@ -16,8 +16,8 @@ outputs:
     description: Repository-relative path to the schema-v1 verification receipt.
     value: ${{ steps.receipt.outputs.receipt_path }}
   uv-path:
-    description: Path to the setup-uv-installed binary after re-verification.
-    value: ${{ steps.setup-uv.outputs.uv-path }}
+    description: Path to the verified bootstrapped uv binary.
+    value: ${{ steps.bootstrap-path.outputs.uv_path }}
 
 runs:
   using: composite
@@ -35,25 +35,31 @@ runs:
       run: >-
         python scripts/bootstrap_uv.py bootstrap
         --receipt "${{ steps.receipt.outputs.receipt_path }}"
+        --platform "${{ runner.os }}"
+        --architecture "${{ runner.arch }}"
         --github-output "$GITHUB_OUTPUT"
 
-    - name: Install the preflighted uv release
-      id: setup-uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
-      with:
-        version: "0.12.1"
-        checksum: ${{ steps.preflight.outputs.checksum }}
-        download-from-astral-mirror: false
-        python-version: ${{ inputs.python-version }}
-        enable-cache: true
-        cache-dependency-glob: uv.lock
-        cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}
+    - name: Resolve bootstrapped uv path
+      id: bootstrap-path
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "uv_path=.tools/uv/uv.exe" >> "$GITHUB_OUTPUT"
+        else
+          echo "uv_path=.tools/uv/uv" >> "$GITHUB_OUTPUT"
+        fi
 
-    - name: Re-hash setup-uv before first execution
+    - name: Re-hash bootstrapped binary before first execution
       shell: bash
       run: >-
         python scripts/bootstrap_uv.py verify-installed
-        --uv-path "${{ steps.setup-uv.outputs.uv-path }}"
+        --uv-path "${{ steps.bootstrap-path.outputs.uv_path }}"
+        --platform "${{ runner.os }}"
+        --architecture "${{ runner.arch }}"
+
+    - name: Add bootstrapped uv to PATH
+      shell: bash
+      run: echo ".tools/uv" >> "$GITHUB_PATH"
 
     - name: Retain verified bootstrap receipt
       if: ${{ always() }}
