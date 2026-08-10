@@ -89,10 +89,13 @@ returned statement must bind the selected asset digest to the exact source
 repository, source commit and ref, signer workflow, OIDC issuer, and SLSA
 predicate. The extracted `uv` executable receives a second digest check and
 exact-version check before an atomic repository-local installation.
-The install destination and each existing ancestor must not be a symbolic link,
-and that condition is rechecked after the parent directory is created. The same
-no-symbolic-link rule applies to the receipt destination before its directory or
-temporary file is created and again before the receipt is atomically replaced.
+The install and receipt destinations are resolved through stable parent handles:
+POSIX uses directory descriptors and relative filesystem operations, while
+Windows holds every ancestor directory open without delete sharing and rejects
+reparse points. Temporary-file creation and atomic replacement stay anchored to
+the held destination parent, so renaming an ancestor or replacing it with a link
+cannot redirect either write. Existing destination links and reparse points are
+also rejected.
 
 In GitHub Actions, `.github/actions/setup-verified-uv/action.yml` performs that
 preflight with the job-scoped `github.token`, supplies the selected checksum and
@@ -125,6 +128,13 @@ names and SHA-256 values, extracted `uv` binary SHA-256, verified source and
 signer identity, UTC timestamp, success status, and a stable failure category.
 It excludes tokens, environment values, usernames, hostnames, absolute or
 temporary paths, and response bodies.
+
+If the pinned setup action fails after preflight, or if its installed binary
+fails the final digest and identity check, the composite action atomically
+transitions the canonical success receipt to `SETUP_UV_ACTION_FAILED` or
+`INSTALLED_UV_VERIFICATION_FAILED` before upload. An unknown failure category or
+a malformed, incomplete, extended, or non-success receipt cannot be
+transitioned.
 
 If policy loading or validation, platform selection, policy hashing, or clock
 validation fails before those reviewed identity fields are available, the

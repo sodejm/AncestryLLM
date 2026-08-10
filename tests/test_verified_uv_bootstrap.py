@@ -290,6 +290,25 @@ def _valid_fixture(
     return policy_path, downloader, runner, uv_binary
 
 
+def _verified_success_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    receipt_path: Path,
+) -> dict[str, Any]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    return bootstrap_module.bootstrap_uv(
+        policy_path=policy_path,
+        install_dir=tmp_path / "tools",
+        receipt_path=receipt_path,
+        downloader=downloader,
+        runner=runner,
+        platform_id=("linux", "x86_64"),
+        temporary_root=tmp_path / "temporary",
+        now=lambda: datetime(2026, 8, 10, 12, tzinfo=UTC),
+    )
+
+
 def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
     assert POLICY_PATH.is_file()
     payload = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
@@ -473,6 +492,8 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
 
     installed = install_dir / "uv"
     assert installed.read_bytes() == uv_binary
+    if sys.platform != "win32":
+        assert stat.S_IMODE(installed.stat().st_mode) == 0o700
     assert receipt == json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["status"] == "success"
     assert receipt["failure_category"] is None
@@ -921,10 +942,15 @@ def test_atomic_install_io_failure_is_sanitized_and_receipted(
     sensitive_detail = str(tmp_path / "private-host-detail")
     real_replace = bootstrap_module.os.replace
 
-    def fail_install_replace(source: Path, destination: Path) -> None:
-        if Path(destination) == installed_uv:
+    def fail_install_replace(
+        source: str | Path,
+        destination: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if Path(destination).name == installed_uv.name and kwargs.get("dst_dir_fd"):
             raise PermissionError(sensitive_detail)
-        real_replace(source, destination)
+        real_replace(source, destination, *args, **kwargs)
 
     monkeypatch.setattr(bootstrap_module.os, "replace", fail_install_replace)
 
@@ -958,15 +984,25 @@ def test_receipt_cleanup_failure_does_not_mask_stable_write_error(
     receipt_path = tmp_path / "receipt.json"
     sensitive_detail = str(tmp_path / "private-receipt-detail")
 
-    def fail_replace(_source: Path, _destination: Path) -> NoReturn:
+    def fail_replace(
+        _source: str | Path,
+        _destination: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> NoReturn:
+        del args, kwargs
         raise PermissionError(sensitive_detail)
 
-    def fail_cleanup(_path: Path, *, missing_ok: bool = False) -> NoReturn:
-        del missing_ok
+    def fail_cleanup(
+        _path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> NoReturn:
+        del args, kwargs
         raise PermissionError(sensitive_detail)
 
     monkeypatch.setattr(bootstrap_module.os, "replace", fail_replace)
-    monkeypatch.setattr(bootstrap_module.Path, "unlink", fail_cleanup)
+    monkeypatch.setattr(bootstrap_module.os, "unlink", fail_cleanup)
 
     with pytest.raises(
         bootstrap_module.BootstrapError,
@@ -979,6 +1015,98 @@ def test_receipt_cleanup_failure_does_not_mask_stable_write_error(
 
     assert failure.value.code == "RECEIPT_WRITE_FAILED"
     assert sensitive_detail not in str(failure.value)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory-descriptor regression")
+def test_receipt_parent_swap_cannot_redirect_atomic_commit(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    tools = repository / ".tools"
+    receipts = tools / "receipts"
+    receipts.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    (outside / "receipts").mkdir(parents=True)
+    parked_tools = repository / "parked-tools"
+    receipt_path = receipts / "uv-bootstrap.json"
+    real_replace = bootstrap_module.os.replace
+    swapped = False
+
+    def swap_parent_then_replace(
+        source: str | Path,
+        destination: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal swapped
+        if not swapped and Path(destination).name == receipt_path.name:
+            swapped = True
+            real_replace(tools, parked_tools)
+            tools.symlink_to(outside, target_is_directory=True)
+            redirected_temporary = outside / "receipts" / Path(source).name
+            redirected_temporary.write_text("attacker-controlled\n", encoding="utf-8")
+        real_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(bootstrap_module.os, "replace", swap_parent_then_replace)
+    receipt = {
+        "schema_version": 1,
+        "status": "failure",
+        "failure_category": "FIXTURE",
+    }
+
+    bootstrap_module._write_receipt(receipt_path, receipt)
+
+    assert swapped
+    assert (
+        json.loads((parked_tools / "receipts" / receipt_path.name).read_text(encoding="utf-8"))
+        == receipt
+    )
+    assert not (outside / "receipts" / receipt_path.name).exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory-descriptor regression")
+def test_install_parent_swap_cannot_redirect_atomic_commit(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    tools = repository / ".tools"
+    install_dir = tools / "uv"
+    install_dir.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    (outside / "uv").mkdir(parents=True)
+    parked_tools = repository / "parked-tools"
+    source = tmp_path / "verified-uv"
+    source.write_bytes(b"verified executable")
+    destination = install_dir / "uv"
+    real_replace = bootstrap_module.os.replace
+    swapped = False
+
+    def swap_parent_then_replace(
+        temporary: str | Path,
+        target: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal swapped
+        if not swapped and Path(target).name == destination.name:
+            swapped = True
+            real_replace(tools, parked_tools)
+            tools.symlink_to(outside, target_is_directory=True)
+            redirected_temporary = outside / "uv" / Path(temporary).name
+            redirected_temporary.write_bytes(b"attacker-controlled")
+        real_replace(temporary, target, *args, **kwargs)
+
+    monkeypatch.setattr(bootstrap_module.os, "replace", swap_parent_then_replace)
+
+    bootstrap_module._atomic_install(source, destination)
+
+    assert swapped
+    assert (parked_tools / "uv" / destination.name).read_bytes() == source.read_bytes()
+    assert not (outside / "uv" / destination.name).exists()
 
 
 def test_symlinked_receipt_ancestor_blocks_success_receipt(
@@ -1473,6 +1601,164 @@ def test_verify_installed_rehashes_before_running_uv(
     assert runner.commands == []
 
 
+def test_record_post_preflight_failure_overwrites_success_status(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    receipt = _verified_success_receipt(tmp_path, bootstrap_module, receipt_path)
+
+    failed_receipt = bootstrap_module.record_post_preflight_failure(
+        receipt_path,
+        "SETUP_UV_ACTION_FAILED",
+    )
+
+    expected = {
+        **receipt,
+        "status": "failure",
+        "failure_category": "SETUP_UV_ACTION_FAILED",
+    }
+    assert failed_receipt == expected
+    assert json.loads(receipt_path.read_text(encoding="utf-8")) == expected
+
+
+def test_record_post_preflight_failure_rejects_unknown_category(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    _verified_success_receipt(tmp_path, bootstrap_module, receipt_path)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="FAILURE_CATEGORY_INVALID"):
+        bootstrap_module.record_post_preflight_failure(receipt_path, "UNREVIEWED_FAILURE")
+
+
+@pytest.mark.parametrize("mutation", ["unknown-field", "missing-field"])
+def test_record_post_preflight_failure_rejects_noncanonical_schema(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    mutation: str,
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    receipt = _verified_success_receipt(tmp_path, bootstrap_module, receipt_path)
+    if mutation == "unknown-field":
+        receipt["unreviewed_extension"] = "not permitted in schema v1"
+    else:
+        del receipt["provenance"]
+    bootstrap_module._write_receipt(receipt_path, receipt)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="RECEIPT_STATE_INVALID"):
+        bootstrap_module.record_post_preflight_failure(
+            receipt_path,
+            "SETUP_UV_ACTION_FAILED",
+        )
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ("not-json\n", "RECEIPT_READ_FAILED"),
+        ("[]\n", "RECEIPT_STATE_INVALID"),
+    ],
+)
+def test_record_post_preflight_failure_rejects_invalid_receipt_content(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    payload: str,
+    error: str,
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    receipt_path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(bootstrap_module.BootstrapError, match=error):
+        bootstrap_module.record_post_preflight_failure(
+            receipt_path,
+            "SETUP_UV_ACTION_FAILED",
+        )
+
+
+def test_record_post_preflight_failure_rejects_missing_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    with pytest.raises(bootstrap_module.BootstrapError, match="RECEIPT_READ_FAILED"):
+        bootstrap_module.record_post_preflight_failure(
+            tmp_path / "missing.json",
+            "SETUP_UV_ACTION_FAILED",
+        )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory-descriptor regression")
+def test_record_post_preflight_failure_parent_swap_cannot_redirect_commit(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    tools = repository / ".tools"
+    receipt_path = tools / "receipts" / "uv-bootstrap.json"
+    receipt_path.parent.mkdir(parents=True)
+    receipt = _verified_success_receipt(tmp_path / "fixture", bootstrap_module, receipt_path)
+    outside = tmp_path / "outside"
+    (outside / "receipts").mkdir(parents=True)
+    parked_tools = repository / "parked-tools"
+    real_read = bootstrap_module._read_receipt_from_parent
+
+    def read_then_swap(destination: Path, parent_fd: int | None) -> dict[str, Any]:
+        parsed = real_read(destination, parent_fd)
+        tools.replace(parked_tools)
+        tools.symlink_to(outside, target_is_directory=True)
+        return parsed
+
+    monkeypatch.setattr(bootstrap_module, "_read_receipt_from_parent", read_then_swap)
+
+    failed_receipt = bootstrap_module.record_post_preflight_failure(
+        receipt_path,
+        "INSTALLED_UV_VERIFICATION_FAILED",
+    )
+
+    assert failed_receipt == {
+        **receipt,
+        "status": "failure",
+        "failure_category": "INSTALLED_UV_VERIFICATION_FAILED",
+    }
+    assert (
+        json.loads((parked_tools / "receipts" / receipt_path.name).read_text(encoding="utf-8"))
+        == failed_receipt
+    )
+    assert not (outside / "receipts" / receipt_path.name).exists()
+
+
+def test_record_post_preflight_failure_cli_updates_and_prints_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    receipt_path = tmp_path / "uv-bootstrap.json"
+    receipt = _verified_success_receipt(tmp_path, bootstrap_module, receipt_path)
+
+    assert (
+        bootstrap_module.main(
+            [
+                "record-failure",
+                "--receipt",
+                str(receipt_path),
+                "--failure-category",
+                "SETUP_UV_ACTION_FAILED",
+            ]
+        )
+        == 0
+    )
+
+    rendered = capsys.readouterr()
+    assert rendered.err == ""
+    assert json.loads(rendered.out) == {
+        **receipt,
+        "status": "failure",
+        "failure_category": "SETUP_UV_ACTION_FAILED",
+    }
+
+
 def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
     assert ACTION_PATH.is_file()
     action = ACTION_PATH.read_text(encoding="utf-8")
@@ -1492,6 +1778,13 @@ def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
         in action
     )
     assert "bootstrap_uv.py verify-installed" in action
+    assert "bootstrap_uv.py record-failure" in action
+    assert "mkdir -p .tools/receipts" not in action
+    assert action.count("continue-on-error: true") == 2
+    assert "steps.setup-uv.outcome != 'success'" in action
+    assert "steps.verify-installed.outcome != 'success'" in action
+    assert "SETUP_UV_ACTION_FAILED" in action
+    assert "INSTALLED_UV_VERIFICATION_FAILED" in action
     assert "VERIFIED_UV_RECEIPT_PATH: ${{ steps.receipt.outputs.receipt_path }}" in action
     assert "VERIFIED_UV_INSTALLED_PATH: ${{ steps.setup-uv.outputs.uv-path }}" in action
     assert action.count("VERIFIED_UV_RUNNER_OS: ${{ runner.os }}") == 2

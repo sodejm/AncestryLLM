@@ -26,7 +26,6 @@ runs:
       id: receipt
       shell: bash
       run: |
-        mkdir -p .tools/receipts
         echo "receipt_path=.tools/receipts/uv-bootstrap.json" >> "$GITHUB_OUTPUT"
 
     - name: Verify release provenance and bootstrap repository-local uv
@@ -46,6 +45,7 @@ runs:
 
     - name: Install preflighted uv with the pinned setup action
       id: setup-uv
+      continue-on-error: true
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
       with:
         version: "0.12.1"
@@ -56,7 +56,22 @@ runs:
         cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}
         download-from-astral-mirror: false
 
+    - name: Record setup-uv failure
+      if: >-
+        ${{ always() && steps.preflight.outcome == 'success' &&
+        steps.setup-uv.outcome != 'success' }}
+      shell: bash
+      env:
+        VERIFIED_UV_RECEIPT_PATH: ${{ steps.receipt.outputs.receipt_path }}
+      run: |
+        python scripts/bootstrap_uv.py record-failure \
+          --receipt "$VERIFIED_UV_RECEIPT_PATH" \
+          --failure-category SETUP_UV_ACTION_FAILED
+        exit 1
+
     - name: Re-hash setup-uv binary before first execution
+      id: verify-installed
+      continue-on-error: true
       shell: bash
       env:
         VERIFIED_UV_INSTALLED_PATH: ${{ steps.setup-uv.outputs.uv-path }}
@@ -67,6 +82,19 @@ runs:
         --uv-path "$VERIFIED_UV_INSTALLED_PATH"
         --platform "$VERIFIED_UV_RUNNER_OS"
         --architecture "$VERIFIED_UV_RUNNER_ARCH"
+
+    - name: Record installed uv verification failure
+      if: >-
+        ${{ always() && steps.setup-uv.outcome == 'success' &&
+        steps.verify-installed.outcome != 'success' }}
+      shell: bash
+      env:
+        VERIFIED_UV_RECEIPT_PATH: ${{ steps.receipt.outputs.receipt_path }}
+      run: |
+        python scripts/bootstrap_uv.py record-failure \
+          --receipt "$VERIFIED_UV_RECEIPT_PATH" \
+          --failure-category INSTALLED_UV_VERIFICATION_FAILED
+        exit 1
 
     - name: Retain verified bootstrap receipt
       if: ${{ always() }}

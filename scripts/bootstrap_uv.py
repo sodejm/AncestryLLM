@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import hmac
 import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -21,7 +24,8 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, Protocol
@@ -132,6 +136,49 @@ DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 10
 DOWNLOAD_DEADLINE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 ATTESTATION_TIMEOUT_SECONDS = 60
+POST_PREFLIGHT_FAILURE_CATEGORIES = frozenset(
+    {
+        "INSTALLED_UV_VERIFICATION_FAILED",
+        "SETUP_UV_ACTION_FAILED",
+    }
+)
+RECEIPT_TOP_LEVEL_KEYS = frozenset(
+    {
+        "failure_category",
+        "policy",
+        "provenance",
+        "schema_version",
+        "status",
+        "tool",
+        "verified_at",
+        "verifier",
+    }
+)
+RECEIPT_NESTED_KEYS = {
+    "policy": frozenset({"schema_version", "sha256"}),
+    "tool": frozenset(
+        {
+            "architecture",
+            "asset_name",
+            "asset_sha256",
+            "binary_sha256",
+            "name",
+            "platform",
+            "version",
+        }
+    ),
+    "verifier": frozenset({"archive_name", "archive_sha256", "name", "version"}),
+    "provenance": frozenset(
+        {
+            "oidc_issuer",
+            "predicate_type",
+            "signer_workflow_identity",
+            "source_commit",
+            "source_ref",
+            "source_repository",
+        }
+    ),
+}
 
 Downloader = Callable[[str, Path, int], None]
 
@@ -953,40 +1000,261 @@ def _build_initialization_receipt() -> dict[str, Any]:
     }
 
 
-def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
-    temporary_path: Path | None = None
+def _is_link_or_reparse_point(path: Path) -> bool:
     try:
-        _assert_receipt_path_safe(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _assert_receipt_path_safe(path)
+        path_status = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    windows_reparse_point = bool(getattr(path_status, "st_file_attributes", 0) & 0x400)
+    return stat.S_ISLNK(path_status.st_mode) or windows_reparse_point
+
+
+def _raise_unsafe_component_if_applicable(
+    error: OSError,
+    *,
+    code: str,
+    message: str,
+) -> None:
+    if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+        raise BootstrapError(code, message) from error
+
+
+@contextmanager
+def _open_posix_parent(
+    destination: Path,
+    *,
+    code: str,
+    message: str,
+) -> Iterator[int]:
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    components = destination.parent.parts
+    if not components or components[0] != os.sep:
+        _fail(code, message)
+
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(components[0], directory_flags)
+        for component in components[1:]:
+            try:
+                child_descriptor = os.open(
+                    component,
+                    directory_flags,
+                    dir_fd=descriptor,
+                )
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, mode=0o755, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                try:
+                    child_descriptor = os.open(
+                        component,
+                        directory_flags,
+                        dir_fd=descriptor,
+                    )
+                except OSError as exc:
+                    _raise_unsafe_component_if_applicable(exc, code=code, message=message)
+                    raise
+            except OSError as exc:
+                _raise_unsafe_component_if_applicable(exc, code=code, message=message)
+                raise
+            os.close(descriptor)
+            descriptor = child_descriptor
+        yield descriptor
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+@contextmanager
+def _lock_windows_parent(
+    destination: Path,
+    *,
+    code: str,
+    message: str,
+) -> Iterator[None]:
+    # These attributes exist only on Windows; deferred lookup keeps POSIX imports valid.
+    loader: Any = getattr(ctypes, "WinDLL")  # noqa: B009
+    kernel32: Any = loader("kernel32", use_last_error=True)
+    create_file: Any = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    close_handle: Any = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)
+    close_handle.restype = ctypes.c_int
+
+    file_read_attributes = 0x80
+    file_share_read = 0x1
+    file_share_write = 0x2
+    open_existing = 0x3
+    file_flag_backup_semantics = 0x02000000
+    file_flag_open_reparse_point = 0x00200000
+    invalid_handle = ctypes.c_void_p(-1).value
+    handles: list[int] = []
+    try:
+        parents = tuple(reversed((destination.parent, *destination.parent.parents)))
+        for candidate in parents:
+            if not os.path.lexists(candidate):
+                try:
+                    candidate.mkdir()
+                except FileExistsError:
+                    pass
+            handle = create_file(
+                str(candidate),
+                file_read_attributes,
+                file_share_read | file_share_write,
+                None,
+                open_existing,
+                file_flag_backup_semantics | file_flag_open_reparse_point,
+                None,
+            )
+            if handle is None or handle == invalid_handle:
+                if _is_link_or_reparse_point(candidate):
+                    _fail(code, message)
+                last_error: Callable[[], int] = getattr(  # noqa: B009
+                    ctypes,
+                    "get_last_error",
+                )
+                raise OSError(last_error(), "could not lock destination directory")
+            handle_value = int(handle)
+            handles.append(handle_value)
+            candidate_status = os.lstat(candidate)
+            if _is_link_or_reparse_point(candidate) or not stat.S_ISDIR(candidate_status.st_mode):
+                _fail(code, message)
+        if _is_link_or_reparse_point(destination):
+            _fail(code, message)
+        yield
+    finally:
+        for handle in reversed(handles):
+            close_handle(handle)
+
+
+@contextmanager
+def _anchored_parent(
+    destination: Path,
+    *,
+    code: str,
+    message: str,
+) -> Iterator[tuple[Path, int | None]]:
+    absolute_destination = Path(os.path.abspath(destination))
+    if os.name == "nt":
+        with _lock_windows_parent(absolute_destination, code=code, message=message):
+            yield absolute_destination, None
+        return
+
+    with _open_posix_parent(absolute_destination, code=code, message=message) as parent_fd:
+        try:
+            destination_status = os.stat(
+                absolute_destination.name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(destination_status.st_mode):
+                _fail(code, message)
+        yield absolute_destination, parent_fd
+
+
+def _create_temporary_file(destination: Path, parent_fd: int | None) -> tuple[int, str]:
+    prefix = f".{destination.name}."
+    if parent_fd is None:
+        return tempfile.mkstemp(dir=destination.parent, prefix=prefix, suffix=".tmp")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    for _ in range(128):
+        temporary_name = f"{prefix}{secrets.token_hex(16)}.tmp"
+        try:
+            descriptor = os.open(
+                temporary_name,
+                flags,
+                mode=0o600,
+                dir_fd=parent_fd,
+            )
+        except FileExistsError:
+            continue
+        return descriptor, temporary_name
+    raise OSError(errno.EEXIST, "could not allocate a unique temporary file")
+
+
+def _commit_temporary_file(
+    temporary_name: str,
+    destination: Path,
+    parent_fd: int | None,
+) -> None:
+    if parent_fd is None:
+        os.replace(temporary_name, destination)
+        return
+    os.replace(
+        temporary_name,
+        destination.name,
+        src_dir_fd=parent_fd,
+        dst_dir_fd=parent_fd,
+    )
+
+
+def _discard_partial_file(temporary_name: str | None, parent_fd: int | None) -> None:
+    if temporary_name is None:
+        return
+    try:
+        if parent_fd is None:
+            Path(temporary_name).unlink(missing_ok=True)
+        else:
+            os.unlink(temporary_name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+def _write_receipt_to_parent(
+    destination: Path,
+    parent_fd: int | None,
+    receipt: Mapping[str, Any],
+) -> None:
+    temporary_name: str | None = None
+    descriptor: int | None = None
+    try:
         rendered = json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-        )
-        temporary_path = Path(temporary_name)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        descriptor, temporary_name = _create_temporary_file(destination, parent_fd)
+        output_stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = None
+        with output_stream as stream:
             stream.write(rendered)
             stream.flush()
             os.fsync(stream.fileno())
-        _assert_receipt_path_safe(path)
-        os.replace(temporary_path, path)
+        _commit_temporary_file(temporary_name, destination, parent_fd)
+    finally:
+        _discard_install_descriptor(descriptor)
+        _discard_partial_file(temporary_name, parent_fd)
+
+
+def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
+    try:
+        with _anchored_parent(
+            path,
+            code="RECEIPT_PATH_UNSAFE",
+            message="verification receipt path contains a symbolic-link component",
+        ) as (destination, parent_fd):
+            _write_receipt_to_parent(destination, parent_fd, receipt)
+    except BootstrapError:
+        raise
     except OSError as exc:
         raise BootstrapError(
             "RECEIPT_WRITE_FAILED", "verification receipt could not be written"
         ) from exc
-    finally:
-        _discard_partial_receipt(temporary_path)
-
-
-def _discard_partial_receipt(temporary_path: Path | None) -> None:
-    if temporary_path is None:
-        return
-    try:
-        temporary_path.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _write_failure_receipt(
@@ -1005,13 +1273,141 @@ def _write_failure_receipt(
         raise receipt_failure from failure
 
 
-def _discard_partial_install(temporary_path: Path | None) -> None:
-    if temporary_path is None:
-        return
+def _read_receipt_from_parent(
+    destination: Path,
+    parent_fd: int | None,
+) -> dict[str, Any]:
+    flags = os.O_RDONLY
+    if parent_fd is not None:
+        flags |= os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor: int | None = None
     try:
-        temporary_path.unlink(missing_ok=True)
-    except OSError:
-        pass
+        if parent_fd is None:
+            descriptor = os.open(destination, flags)
+        else:
+            descriptor = os.open(destination.name, flags, dir_fd=parent_fd)
+        input_stream = os.fdopen(descriptor, encoding="utf-8")
+        descriptor = None
+        with input_stream as stream:
+            receipt = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BootstrapError(
+            "RECEIPT_READ_FAILED",
+            "verification receipt could not be read",
+        ) from exc
+    finally:
+        _discard_install_descriptor(descriptor)
+    if not isinstance(receipt, dict) or not all(isinstance(key, str) for key in receipt):
+        _fail("RECEIPT_STATE_INVALID", "verification receipt must be an object")
+    return receipt
+
+
+def _validate_success_receipt(receipt: Mapping[str, Any]) -> None:
+    def invalid() -> NoReturn:
+        _fail(
+            "RECEIPT_STATE_INVALID",
+            "verification receipt is not a canonical schema-v1 success receipt",
+        )
+
+    if frozenset(receipt) != RECEIPT_TOP_LEVEL_KEYS:
+        invalid()
+    nested: dict[str, Mapping[str, Any]] = {}
+    for field, expected_keys in RECEIPT_NESTED_KEYS.items():
+        value = receipt[field]
+        if not isinstance(value, dict) or frozenset(value) != expected_keys:
+            invalid()
+        nested[field] = value
+
+    policy = nested["policy"]
+    tool = nested["tool"]
+    verifier = nested["verifier"]
+    provenance = nested["provenance"]
+    if (
+        type(receipt["schema_version"]) is not int
+        or receipt["schema_version"] != RECEIPT_SCHEMA_VERSION
+        or receipt["status"] != "success"
+        or receipt["failure_category"] is not None
+        or type(policy["schema_version"]) is not int
+        or policy["schema_version"] != POLICY_SCHEMA_VERSION
+        or not isinstance(policy["sha256"], str)
+        or SHA256_PATTERN.fullmatch(policy["sha256"]) is None
+        or tool["name"] != "uv"
+        or tool["version"] != UV_VERSION
+        or verifier["name"] != "GitHub CLI"
+        or verifier["version"] != GH_VERSION
+    ):
+        invalid()
+
+    if not isinstance(tool["platform"], str) or not isinstance(tool["architecture"], str):
+        invalid()
+    platform_key = f"{tool['platform']}-{tool['architecture']}"
+    if platform_key not in PLATFORM_KEYS:
+        invalid()
+    if (
+        tool["asset_name"] != UV_ASSET_SHAPE[platform_key][0]
+        or verifier["archive_name"] != GH_ASSET_SHAPE[platform_key][0]
+    ):
+        invalid()
+    for owner, field in (
+        (tool, "asset_sha256"),
+        (tool, "binary_sha256"),
+        (verifier, "archive_sha256"),
+    ):
+        value = owner[field]
+        if not isinstance(value, str) or SHA256_PATTERN.fullmatch(value) is None:
+            invalid()
+
+    expected_provenance = {
+        "source_repository": UV_SOURCE_REPOSITORY,
+        "source_commit": UV_SOURCE_COMMIT,
+        "source_ref": UV_SOURCE_REF,
+        "signer_workflow_identity": UV_SIGNER_WORKFLOW,
+        "oidc_issuer": UV_OIDC_ISSUER,
+        "predicate_type": UV_PREDICATE_TYPE,
+    }
+    if provenance != expected_provenance:
+        invalid()
+    verified_at = receipt["verified_at"]
+    if not isinstance(verified_at, str) or not verified_at.endswith("Z"):
+        invalid()
+    try:
+        parsed_timestamp = datetime.fromisoformat(f"{verified_at[:-1]}+00:00")
+    except ValueError:
+        invalid()
+    if parsed_timestamp.utcoffset() != UTC.utcoffset(parsed_timestamp):
+        invalid()
+
+
+def record_post_preflight_failure(path: Path, failure_category: str) -> dict[str, Any]:
+    """Replace a preflight success receipt when a later action phase fails."""
+
+    if failure_category not in POST_PREFLIGHT_FAILURE_CATEGORIES:
+        _fail(
+            "FAILURE_CATEGORY_INVALID",
+            "post-preflight failure category is not permitted",
+        )
+    try:
+        with _anchored_parent(
+            path,
+            code="RECEIPT_PATH_UNSAFE",
+            message="verification receipt path contains a symbolic-link component",
+        ) as (destination, parent_fd):
+            receipt = _read_receipt_from_parent(destination, parent_fd)
+            _validate_success_receipt(receipt)
+            failed_receipt = {
+                **receipt,
+                "status": "failure",
+                "failure_category": failure_category,
+            }
+            _write_receipt_to_parent(destination, parent_fd, failed_receipt)
+    except BootstrapError:
+        raise
+    except OSError as exc:
+        raise BootstrapError(
+            "RECEIPT_WRITE_FAILED",
+            "verification receipt could not be written",
+        ) from exc
+    return failed_receipt
 
 
 def _discard_install_descriptor(descriptor: int | None) -> None:
@@ -1024,26 +1420,38 @@ def _discard_install_descriptor(descriptor: int | None) -> None:
 
 
 def _atomic_install(source: Path, destination: Path) -> None:
-    temporary_path: Path | None = None
-    descriptor: int | None = None
     try:
-        _assert_install_path_safe(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _assert_install_path_safe(destination)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=destination.parent,
-            prefix=f".{destination.name}.",
-            suffix=".tmp",
-        )
-        temporary_path = Path(temporary_name)
-        output_stream = os.fdopen(descriptor, "wb")
-        descriptor = None
-        with output_stream as output, source.open("rb") as input_stream:
-            shutil.copyfileobj(input_stream, output)
-            output.flush()
-            os.fsync(output.fileno())
-        temporary_path.chmod(0o755)
-        os.replace(temporary_path, destination)
+        with _anchored_parent(
+            destination,
+            code="INSTALL_PATH_UNSAFE",
+            message="uv install path contains a symbolic-link component",
+        ) as (anchored_destination, parent_fd):
+            temporary_name: str | None = None
+            descriptor: int | None = None
+            try:
+                descriptor, temporary_name = _create_temporary_file(
+                    anchored_destination,
+                    parent_fd,
+                )
+                output_stream = os.fdopen(descriptor, "wb")
+                descriptor = None
+                with output_stream as output, source.open("rb") as input_stream:
+                    shutil.copyfileobj(input_stream, output)
+                    output.flush()
+                    if parent_fd is not None:
+                        os.fchmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                            output.fileno(), 0o700
+                        )
+                    os.fsync(output.fileno())
+                if parent_fd is None:
+                    # The verified tool must be directly executable after installation.
+                    os.chmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                        temporary_name, 0o700
+                    )
+                _commit_temporary_file(temporary_name, anchored_destination, parent_fd)
+            finally:
+                _discard_install_descriptor(descriptor)
+                _discard_partial_file(temporary_name, parent_fd)
     except BootstrapError:
         raise
     except OSError as exc:
@@ -1051,9 +1459,6 @@ def _atomic_install(source: Path, destination: Path) -> None:
             "INSTALL_WRITE_FAILED",
             "verified uv could not be installed atomically",
         ) from exc
-    finally:
-        _discard_install_descriptor(descriptor)
-        _discard_partial_install(temporary_path)
 
 
 def _assert_install_path_safe(destination: Path) -> None:
@@ -1061,14 +1466,6 @@ def _assert_install_path_safe(destination: Path) -> None:
         destination,
         code="INSTALL_PATH_UNSAFE",
         message="uv install path contains a symbolic-link component",
-    )
-
-
-def _assert_receipt_path_safe(destination: Path) -> None:
-    _assert_path_without_symlinks(
-        destination,
-        code="RECEIPT_PATH_UNSAFE",
-        message="verification receipt path contains a symbolic-link component",
     )
 
 
@@ -1080,7 +1477,7 @@ def _assert_path_without_symlinks(
 ) -> None:
     absolute_destination = Path(os.path.abspath(destination))
     for candidate in (absolute_destination, *absolute_destination.parents):
-        if candidate.is_symlink():
+        if _is_link_or_reparse_point(candidate):
             _fail(code, message)
 
 
@@ -1322,12 +1719,27 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--uv-path", type=Path, required=True)
     verify.add_argument("--platform")
     verify.add_argument("--architecture")
+
+    record_failure = subparsers.add_parser(
+        "record-failure",
+        help="replace a preflight success receipt after a later action failure",
+    )
+    record_failure.add_argument("--receipt", type=Path, required=True)
+    record_failure.add_argument("--failure-category", required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
+        if arguments.command == "record-failure":
+            receipt = record_post_preflight_failure(
+                arguments.receipt,
+                arguments.failure_category,
+            )
+            print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+            return 0
+
         platform_id = _platform_override(arguments)
         if arguments.command == "bootstrap":
             receipt = bootstrap_uv(
