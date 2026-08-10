@@ -83,10 +83,12 @@ verified GitHub CLI may execute.
 
 The utility then downloads the exact policy-selected `uv` release URL, verifies
 the archive digest, and asks the verified GitHub CLI to verify the release
-attestation. The returned statement must bind the selected asset digest to the
-exact source repository, source commit and ref, signer workflow, OIDC issuer,
-and SLSA predicate. The extracted `uv` executable receives a second digest
-check and exact-version check before an atomic repository-local installation.
+attestation within a 60-second subprocess deadline. A timeout fails as
+`ATTESTATION_VERIFICATION_TIMEOUT` before extraction or `uv` execution. The
+returned statement must bind the selected asset digest to the exact source
+repository, source commit and ref, signer workflow, OIDC issuer, and SLSA
+predicate. The extracted `uv` executable receives a second digest check and
+exact-version check before an atomic repository-local installation.
 The install destination and each existing ancestor must not be a symbolic link,
 and that condition is rechecked after the parent directory is created. The same
 no-symbolic-link rule applies to the receipt destination before its directory or
@@ -99,8 +101,10 @@ disabled, and re-hashes the action-installed executable before first use. The
 calling job grants the verifier `contents: read` and `attestations: read`; jobs
 retain only any additional job-specific scope already required by their release
 contract.
-The token is available only to the verifier process and is never written to the
-receipt or action output. Repository Actions policy permits only
+The token is available only to the `gh attestation verify` subprocess; the
+verified GitHub CLI version probe and every `uv` subprocess receive an
+environment with GitHub token variables removed. The token is never written to
+the receipt or action output. Repository Actions policy permits only
 `astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` for that
 external action; the policy, local action, and workflow contracts independently
 select the same commit and reject a mutable action reference. Setup-uv caching
@@ -141,13 +145,12 @@ Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `PLATFORM_UNSUPPORTED`, `ARCHITECTURE_UNSUPPORTED`,
 `DOWNLOAD_SIZE_MISMATCH`, `DOWNLOAD_DEADLINE_EXCEEDED`,
 `ARCHIVE_MEMBER_UNSAFE`, `TEMPORARY_WORKSPACE_FAILED`, `INSTALL_PATH_UNSAFE`,
-`INSTALL_WRITE_FAILED`,
-`RECEIPT_PATH_UNSAFE`,
+`INSTALL_WRITE_FAILED`, `RECEIPT_PATH_UNSAFE`, `RECEIPT_WRITE_FAILED`,
 `VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
-`VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_IDENTITY_MISMATCH`, and
-`UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
-cause is understood. Do not bypass it with a global installation or by editing
-the receipt.
+`VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_VERIFICATION_TIMEOUT`,
+`ATTESTATION_IDENTITY_MISMATCH`, and `UV_VERSION_MISMATCH`. Treat every failure
+as a trust-chain failure until its cause is understood. Do not bypass it with a
+global installation or by editing the receipt.
 
 For an interrupted download or a cache mismatch, leave user files untouched,
 remove only the repository-local ignored `.tools/uv/` cache, and retry. For a

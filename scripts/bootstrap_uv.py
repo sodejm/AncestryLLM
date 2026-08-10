@@ -24,7 +24,7 @@ import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Protocol
 
 POLICY_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
@@ -131,9 +131,21 @@ DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:")
 DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 10
 DOWNLOAD_DEADLINE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+ATTESTATION_TIMEOUT_SECONDS = 60
 
 Downloader = Callable[[str, Path, int], None]
-Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+
+
+class Runner(Protocol):
+    """Execute a verified binary with an explicit environment and deadline."""
+
+    def __call__(
+        self,
+        command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 class BootstrapError(RuntimeError):
@@ -708,16 +720,33 @@ def _create_temporary_workspace(
         ) from exc
 
 
-def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str],
+    timeout: float | None,
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(  # noqa: S603 - executable was hash-verified first
             list(command),
             check=False,
             capture_output=True,
             text=True,
+            env=dict(env),
+            timeout=timeout,
         )
     except OSError as exc:
         raise BootstrapError("VERIFIER_EXECUTION_FAILED", "verified executable failed") from exc
+
+
+def _runner_environment(*, allow_github_credentials: bool) -> dict[str, str]:
+    environment = dict(os.environ)
+    if allow_github_credentials:
+        return environment
+    for name in tuple(environment):
+        if name.upper() in {"GH_TOKEN", "GITHUB_TOKEN"}:
+            del environment[name]
+    return environment
 
 
 def _run_checked(
@@ -727,7 +756,11 @@ def _run_checked(
     code: str,
     message: str,
 ) -> subprocess.CompletedProcess[str]:
-    result = runner(command)
+    result = runner(
+        command,
+        env=_runner_environment(allow_github_credentials=False),
+        timeout=None,
+    )
     if result.returncode != 0:
         _fail(code, message)
     return result
@@ -737,7 +770,17 @@ def _verify_attestation(
     runner: Runner,
     command: Sequence[str],
 ) -> subprocess.CompletedProcess[str]:
-    result = runner(command)
+    try:
+        result = runner(
+            command,
+            env=_runner_environment(allow_github_credentials=True),
+            timeout=ATTESTATION_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BootstrapError(
+            "ATTESTATION_VERIFICATION_TIMEOUT",
+            "GitHub attestation verification exceeded its bounded deadline",
+        ) from exc
     if result.returncode == 4:
         _fail(
             "VERIFIER_AUTHENTICATION_FAILED",
@@ -934,8 +977,16 @@ def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
             "RECEIPT_WRITE_FAILED", "verification receipt could not be written"
         ) from exc
     finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+        _discard_partial_receipt(temporary_path)
+
+
+def _discard_partial_receipt(temporary_path: Path | None) -> None:
+    if temporary_path is None:
+        return
+    try:
+        temporary_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _write_failure_receipt(

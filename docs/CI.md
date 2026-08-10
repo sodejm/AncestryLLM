@@ -58,7 +58,12 @@ checksum to the exact pinned `setup-uv` commit with Astral mirror downloads
 disabled, re-hashes the installed binary before execution, and retains the
 schema-v1 receipt. Each calling job grants the verifier `contents: read` and
 `attestations: read`; jobs retain only any additional job-specific scope already
-required by their release contract. The token is not included in receipts or action outputs.
+required by their release contract. The token is not included in receipts or
+action outputs.
+Only the bounded `gh attestation verify` subprocess receives the token; version
+probes and all `uv` subprocesses receive an environment with GitHub token
+variables removed. An attestation verifier that exceeds 60 seconds fails with a
+stable coded error before `uv` can execute.
 The repository Actions allowlist permits only
 `astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` for that
 external action. The policy, local action, and workflow contracts independently

@@ -14,7 +14,7 @@ import threading
 import time
 import tomllib
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -236,10 +236,20 @@ class FixtureRunner:
         self.attestation_returncode = attestation_returncode
         self.attestation_stderr = attestation_stderr
         self.commands: list[tuple[str, ...]] = []
+        self.environments: list[dict[str, str]] = []
+        self.timeouts: list[float | None] = []
 
-    def __call__(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    def __call__(
+        self,
+        command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]:
         normalized = tuple(str(token) for token in command)
         self.commands.append(normalized)
+        self.environments.append(dict(env))
+        self.timeouts.append(timeout)
         if normalized[-1] == "--version" and "gh" in Path(normalized[0]).name:
             stdout = self.gh_version
         elif "attestation" in normalized:
@@ -439,13 +449,16 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
 
     def receipt_observing_runner(
         command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
     ) -> subprocess.CompletedProcess[str]:
         normalized = tuple(str(token) for token in command)
         if Path(normalized[0]).name == "uv" and normalized[-1] == "--version":
             receipts_before_uv_execution.append(
                 json.loads(receipt_path.read_text(encoding="utf-8"))
             )
-        return runner(command)
+        return runner(command, env=env, timeout=timeout)
 
     receipt = bootstrap_module.bootstrap_uv(
         policy_path=policy_path,
@@ -484,6 +497,76 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
         (gh_url, len(downloader.payloads[gh_url])),
         (uv_url, len(downloader.payloads[uv_url])),
     ]
+
+
+def test_github_token_is_available_only_to_attestation_verifier(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "fixture-gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "fixture-github-token")
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+
+    bootstrap_module.bootstrap_uv(
+        policy_path=policy_path,
+        install_dir=tmp_path / "tools",
+        receipt_path=tmp_path / "receipt.json",
+        downloader=downloader,
+        runner=runner,
+        platform_id=("linux", "x86_64"),
+        temporary_root=tmp_path / "temporary",
+    )
+
+    assert len(runner.commands) == len(runner.environments)
+    for command, environment in zip(runner.commands, runner.environments, strict=True):
+        if "attestation" in command:
+            assert environment["GH_TOKEN"] == "fixture-gh-token"
+            assert environment["GITHUB_TOKEN"] == "fixture-github-token"
+        else:
+            assert "GH_TOKEN" not in environment
+            assert "GITHUB_TOKEN" not in environment
+
+
+def test_attestation_timeout_is_coded_receipted_and_blocks_uv_execution(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, fixture_runner, _ = _valid_fixture(tmp_path)
+    observed_timeout: float | None = None
+
+    def timeout_runner(
+        command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal observed_timeout
+        if "attestation" in command:
+            observed_timeout = timeout
+            raise subprocess.TimeoutExpired(command, timeout)
+        return fixture_runner(command, env=env, timeout=timeout)
+
+    receipt_path = tmp_path / "receipt.json"
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="ATTESTATION_VERIFICATION_TIMEOUT",
+    ):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=timeout_runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert observed_timeout == bootstrap_module.ATTESTATION_TIMEOUT_SECONDS
+    assert json.loads(receipt_path.read_text(encoding="utf-8"))["failure_category"] == (
+        "ATTESTATION_VERIFICATION_TIMEOUT"
+    )
+    assert not any(Path(command[0]).name == "uv" for command in fixture_runner.commands)
 
 
 def test_wrong_uv_identity_is_never_published_to_the_cache(
@@ -865,6 +948,37 @@ def test_atomic_install_io_failure_is_sanitized_and_receipted(
     assert sensitive_detail not in receipt_text
     assert not installed_uv.exists()
     assert list(install_dir.glob(".uv.*.tmp")) == []
+
+
+def test_receipt_cleanup_failure_does_not_mask_stable_write_error(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    sensitive_detail = str(tmp_path / "private-receipt-detail")
+
+    def fail_replace(_source: Path, _destination: Path) -> NoReturn:
+        raise PermissionError(sensitive_detail)
+
+    def fail_cleanup(_path: Path, *, missing_ok: bool = False) -> NoReturn:
+        del missing_ok
+        raise PermissionError(sensitive_detail)
+
+    monkeypatch.setattr(bootstrap_module.os, "replace", fail_replace)
+    monkeypatch.setattr(bootstrap_module.Path, "unlink", fail_cleanup)
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError,
+        match="RECEIPT_WRITE_FAILED",
+    ) as failure:
+        bootstrap_module._write_receipt(
+            receipt_path,
+            {"schema_version": 1, "status": "failure", "failure_category": "FIXTURE"},
+        )
+
+    assert failure.value.code == "RECEIPT_WRITE_FAILED"
+    assert sensitive_detail not in str(failure.value)
 
 
 def test_symlinked_receipt_ancestor_blocks_success_receipt(
