@@ -17,7 +17,10 @@ import pytest
 from ancestryllm.application import dto as dto_module
 from ancestryllm.application import operations as operations_module
 from ancestryllm.application._artifacts import _ArtifactRegistry
-from ancestryllm.application._compat import _CurrentCancellationAdapter
+from ancestryllm.application._compat import (
+    _CurrentCancellationAdapter,
+    _CurrentProgressAdapter,
+)
 from ancestryllm.application.dto import (
     CONTRACT_VERSION,
     ArtifactAccess,
@@ -496,6 +499,32 @@ def test_current_cancellation_adapter_maps_legacy_signal_without_detail() -> Non
 
     assert caught.value.code is DomainFailureCode.CANCELLED
     assert str(caught.value) == "CANCELLED"
+
+
+def test_current_progress_adapter_accepts_protocol_keyword_and_preserves_counts() -> None:
+    class LegacyReporter:
+        def __init__(self) -> None:
+            self.updates: list[tuple[str, int | None, int | None]] = []
+
+        def check_cancelled(self) -> None:
+            return
+
+        def update(
+            self,
+            operation: str,
+            *,
+            completed: int | None = None,
+            total: int | None = None,
+        ) -> None:
+            self.updates.append((operation, completed, total))
+
+    reporter = LegacyReporter()
+
+    _CurrentProgressAdapter(reporter).emit(
+        event=ProgressUpdate("gedcom.merge", "write", 1, completed=2, total=3),
+    )
+
+    assert reporter.updates == [("gedcom.merge.write", 2, 3)]
 
 
 def test_artifact_grants_are_opaque_operation_scoped_and_revocable(tmp_path: Path) -> None:

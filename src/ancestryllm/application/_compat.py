@@ -51,11 +51,11 @@ class _CurrentProgressAdapter:
     def __init__(self, reporter: _LegacyReporter) -> None:
         self._reporter = reporter
 
-    def emit(self, update: ProgressEvent) -> None:
+    def emit(self, event: ProgressEvent) -> None:
         self._reporter.update(
-            f"{update.operation}.{update.stage}",
-            completed=update.completed,
-            total=update.total,
+            f"{event.operation}.{event.stage}",
+            completed=event.completed,
+            total=event.total,
         )
 
 
