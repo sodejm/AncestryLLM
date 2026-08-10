@@ -162,32 +162,31 @@ def test_typecheck_profile_treats_provider_sdks_as_optional_imports() -> None:
 
 def test_make_profiles_select_only_their_declared_groups() -> None:
     profiles = {
-        "setup": "--all-extras --group lint --group typecheck --group test --group security --group build",
-        "test": "--extra all-llm --group test",
-        "lint": "--group lint",
-        "typecheck": "--group typecheck",
-        "security": "--group security",
-        "sbom": "--group security",
-        "package": "--group build",
-        "workflow-audit": "--group security",
-        "code-docs-check": "--group lint",
-        "hooks": "--group lint",
+        "test": {"test"},
+        "lint": {"lint"},
+        "typecheck": {"typecheck"},
+        "dependency-audit": {"security"},
+        "security-static": set(),
+        "sbom": {"security"},
+        "package": {"build"},
+        "workflow-audit": {"security"},
+        "code-docs-check": {"lint"},
+        "hooks": {"lint"},
     }
-    command_prefix = (
-        '@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) '
-        "sync --active --locked --no-default-groups "
-    )
 
-    for target_name, profile in profiles.items():
+    for target_name, expected_groups in profiles.items():
         target = _make_target(target_name)
-        sync_lines = [line.strip() for line in target.splitlines() if " sync " in line]
-        assert sync_lines == [f"{command_prefix}{profile}"], (target_name, sync_lines)
+        assert set(re.findall(r"--group ([a-z-]+)", target)) == expected_groups
+        assert "--all-extras" not in target
+        assert "--all-groups" not in target
 
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    setup = _make_target("setup")
 
+    assert "$(UV_BIN) sync --locked --all-extras --all-groups" in setup
     assert "--group release-verifier" not in makefile
     assert "--extra dev" not in makefile
-    assert "--all-groups" not in makefile
+    assert makefile.count("--all-groups") == 1
 
 
 def test_workflows_install_only_the_groups_required_by_each_job() -> None:
@@ -261,6 +260,6 @@ def test_every_workflow_sync_disables_implicit_groups() -> None:
 def test_lockfile_job_checks_without_installing_any_group() -> None:
     lockfile = _workflow_job(".github/workflows/ci.yml", "lockfile")
 
-    assert "uv lock --check" in lockfile
+    assert "make lock-check" in lockfile
     assert "uv sync" not in lockfile
     assert "--group" not in lockfile

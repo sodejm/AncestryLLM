@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import venv
@@ -957,14 +956,14 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert (3, 12) <= sys.version_info[:2] < (3, 15)
     repository = Path(__file__).resolve().parents[2]
     wheelhouse = tmp_path / "wheelhouse"
-    venv_bin = Path(sys.executable).parent
     uv_name = "uv.exe" if os.name == "nt" else "uv"
-    uv = venv_bin / uv_name
-    if not uv.is_file():
-        resolved = shutil.which("uv")
-        assert resolved is not None, "uv is required by the locked build workflow"
-        uv = Path(resolved)
-    uv_environment = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")}
+    uv = repository / ".tools" / "uv" / uv_name
+    assert uv.is_file(), "make setup must install the verified repository-local uv"
+    uv_environment = {
+        **os.environ,
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        "UV_PYTHON": sys.executable,
+    }
     build = subprocess.run(
         [uv, "build", "--wheel", "--out-dir", str(wheelhouse)],
         check=False,

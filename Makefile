@@ -1,17 +1,23 @@
 SHELL := /bin/bash
 
-PYTHON ?= python3
 VENV_DIR ?= .venv
-VENV_PYTHON := $(VENV_DIR)/bin/python
 UV_TOOL_DIR := .tools/uv
 UV_RECEIPT := .tools/receipts/uv-bootstrap.json
+DIST_DIR ?= dist
+SBOM_OUTPUT ?= sbom.json
+export PYTEST_ADDOPTS ?= --cov --cov-report=term-missing
 ifeq ($(OS),Windows_NT)
+PYTHON ?= python
 UV_BIN := $(UV_TOOL_DIR)/uv.exe
+VENV_PYTHON := $(VENV_DIR)/Scripts/python.exe
 else
+PYTHON ?= python3
 UV_BIN := $(UV_TOOL_DIR)/uv
+VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
+export UV_PYTHON := $(PYTHON)
 
-.PHONY: help verified-uv setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint typecheck dependency-audit security-static security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
 	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
@@ -32,20 +38,20 @@ desktop-security:
 	@pnpm --dir desktop security
 	@pnpm --dir desktop test:security
 
-verified-uv:
+system-python:
+	@command -v "$(PYTHON)" >/dev/null 2>&1 || { echo "UVENV_PYTHON_NOT_FOUND: required system Python executable '$(PYTHON)' was not found" >&2; exit 2; }
+	@$(PYTHON) scripts/check_system_python.py
+
+verified-uv: system-python
 	@$(PYTHON) scripts/bootstrap_uv.py bootstrap --install-dir $(UV_TOOL_DIR) --receipt $(UV_RECEIPT) >/dev/null
 
-$(VENV_PYTHON):
-	@$(PYTHON) -m venv $(VENV_DIR)
+setup: verified-uv
+	@$(UV_BIN) sync --locked --all-extras --all-groups
 
-setup: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --all-extras --group lint --group typecheck --group test --group security --group build
+bootstrap: setup hooks
 
-bootstrap: hooks
-	@$(MAKE) setup
-
-console:
-	@$(VENV_PYTHON) -m ancestryllm
+console: verified-uv
+	@$(UV_BIN) run --locked ancestry
 
 lock: verified-uv
 	@$(UV_BIN) lock
@@ -53,25 +59,26 @@ lock: verified-uv
 lock-check: verified-uv
 	@$(UV_BIN) lock --check
 
-test: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --extra all-llm --group test
-	@$(VENV_PYTHON) -m pytest --verbose
+test: verified-uv
+	@$(UV_BIN) run --locked --group test pytest --verbose
 
-lint: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
-	@$(VENV_DIR)/bin/ruff check src tests scripts
-	@$(VENV_DIR)/bin/ruff format --check src tests scripts
-	@$(VENV_PYTHON) scripts/check_architecture_contracts.py
+lint: verified-uv
+	@$(UV_BIN) run --locked --group lint ruff check src tests scripts
+	@$(UV_BIN) run --locked --group lint ruff format --check src tests scripts
+	@$(UV_BIN) run --locked --group lint python scripts/check_architecture_contracts.py
 	@./scripts/check_repository_safety.sh
+	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
-typecheck: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group typecheck
-	@$(VENV_DIR)/bin/mypy src/ancestryllm
+typecheck: verified-uv
+	@$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm
 
-security: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
-	@$(VENV_DIR)/bin/pip-audit
+dependency-audit: verified-uv
+	@$(UV_BIN) run --locked --group security pip-audit
+
+security-static: verified-uv
 	@$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .
+
+security: dependency-audit security-static
 
 pre-push:
 	@$(MAKE) test
@@ -79,22 +86,17 @@ pre-push:
 	@$(MAKE) typecheck
 	@$(MAKE) security
 
-sbom: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
-	@$(VENV_DIR)/bin/cyclonedx-py environment --output-file sbom.json $(VENV_PYTHON)
+sbom: verified-uv
+	@$(UV_BIN) run --locked --group security cyclonedx-py environment --output-file $(SBOM_OUTPUT) $(VENV_PYTHON)
 
-package: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group build
-	@$(VENV_PYTHON) scripts/build_release.py --output-dir dist
+package: verified-uv
+	@$(UV_BIN) run --locked --group build python scripts/build_release.py --output-dir $(DIST_DIR)
 
-workflow-audit: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
-	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows .github/actions
+workflow-audit: verified-uv
+	@$(UV_BIN) run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
-code-docs-check: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
-	@$(VENV_PYTHON) scripts/check_code_documentation.py
+code-docs-check: verified-uv
+	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
-hooks: verified-uv $(VENV_PYTHON)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
-	@$(VENV_DIR)/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+hooks: verified-uv
+	@$(UV_BIN) run --locked --group lint pre-commit install --hook-type pre-commit --hook-type pre-push
