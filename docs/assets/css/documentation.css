@@ -1,0 +1,56 @@
+/* Responsive layout rules for the documentation Pages shell. */
+
+.main-content {
+  max-width: 100%;
+}
+
+.documentation-shell {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 72rem);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: start;
+  max-inline-size: 96rem;
+  margin-inline: auto;
+}
+
+.documentation-navigation {
+  position: sticky;
+  top: 1rem;
+  max-block-size: calc(100vh - 2rem);
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+
+.documentation-navigation ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.documentation-content {
+  min-width: 0;
+  max-inline-size: 72rem;
+}
+
+.documentation-content pre,
+.documentation-content .highlight {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.documentation-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 48rem) {
+  .documentation-shell {
+    display: block;
+  }
+
+  .documentation-navigation {
+    position: static;
+    max-block-size: none;
+    margin-bottom: 2rem;
+  }
+}
