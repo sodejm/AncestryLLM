@@ -69,6 +69,10 @@
     "title": "Continuous integration — AncestryLLM",
     "description": "CI pipeline gates, workflow structure, and how to reproduce checks locally."
   },
+  "DEPENDENCY_MAINTENANCE.md": {
+    "title": "Dependency maintenance — AncestryLLM",
+    "description": "Purpose-specific dependency groups, locked environment profiles, and the reviewed dependency update procedure."
+  },
   "ARCHITECTURE_CONTRACTS.md": {
     "title": "Architecture ownership and dependency contracts — AncestryLLM",
     "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."

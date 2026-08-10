@@ -946,15 +946,24 @@ locked `uv.lock` dependency graph. The Make targets are the local contract:
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
 | `make sbom` | CycloneDX environment SBOM. |
 
-CI installs the locked environment with all extras and tests Python 3.12,
-3.13, and 3.14. Coverage is branch-aware with a current 75% floor. Python 3.12
-also runs Ruff, strict mypy, the executable architecture contract, and the
-repository safety script. Release readiness is the authoritative release gate
-and runs the same architecture check; the tag workflow consumes that exact
-approved evidence instead of repeating it. Dependency changes run `pip-audit`
-and produce an SBOM, while Semgrep remains a pull-request gate. CodeQL runs on
+CI resolves the complete lock but synchronizes purpose-specific PEP 735
+dependency groups. The Python 3.12-3.14 test matrix installs `test` with the
+`all-llm` application extra; quality installs only `lint` and `typecheck`;
+dependency audit, SBOM, and workflow audit install `security`; and package
+construction installs `build`. Release artifact verification installs only the
+non-default `release-verifier` group, while desktop sidecar packaging installs
+the `desktop-build` application extra. Coverage is branch-aware with a current
+75% floor. Python 3.12 also runs Ruff, strict mypy, the executable architecture
+contract, and the repository safety script. Release readiness is the
+authoritative release gate and runs the same architecture check; the tag
+workflow consumes that exact approved evidence instead of repeating it.
+Semgrep remains an independently pinned pull-request gate. CodeQL runs on
 pushes, pull requests, and a weekly schedule. Dependabot covers Python and
 GitHub Actions. Pinned action commit SHAs reduce workflow supply-chain drift.
+
+This environment partitioning changes repository tooling only. It does not add
+an application dependency or alter CLI commands, service DTOs, provider
+selection, GEDCOM handling, storage, FastAPI contracts, or Electron boundaries.
 
 Tests are intentionally split by risk:
 

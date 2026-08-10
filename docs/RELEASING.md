@@ -364,6 +364,10 @@ GitHub's exact SHA-256 artifact digest. Obtain them from that run's summary and
 independently confirm them in the Actions artifact metadata before tagging.
 The summary normalizes the upload-artifact output to the required
 `sha256:<64 lowercase hex>` form; do not remove the `sha256:` prefix.
+Release construction installs the locked `build` group and the `security`
+group needed for SBOM generation, with no provider extras. Stock-`pip` wheel
+and source-distribution smoke jobs remain unchanged because they validate the
+published consumer experience rather than authorize a build.
 The workflow then attests the combined artifacts; prepares a draft GitHub
 Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
 not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
@@ -375,8 +379,8 @@ the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. The workflow installs this tool
 from the locked, non-default `release-verifier` dependency group so ordinary
 developer setup does not inherit its platform-specific build dependencies.
-After production PyPI publishing,
-the supported platform/Python wheel-and-sdist install smoke matrix runs before
+After production PyPI publishing, the supported platform/Python wheel-and-sdist
+install smoke matrix runs before
 the immutable GitHub Release. The attached `SHA256SUMS` covers
 every release asset except the checksum file itself. No other workflow or
 manual upload may publish an installer.

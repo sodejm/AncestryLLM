@@ -25,6 +25,7 @@
 - [Versioning and compatibility](VERSIONING.md)
 - [Bounded file ingress](FILE_INGRESS.md)
 - [Continuous integration](CI.md)
+- [Dependency maintenance](DEPENDENCY_MAINTENANCE.md)
 - [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Command executor](COMMAND_EXECUTOR.md)
 - [Built-in module authoring](MODULE_AUTHORING.md)

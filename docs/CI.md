@@ -32,6 +32,32 @@ through their secret manager. The bootstrap uses that credential only with the
 policy-pinned, hash-verified GitHub CLI and never delegates verification to an
 executable found on `PATH`.
 
+## Locked environment profiles
+
+The complete `uv.lock` covers every application extra and repository tool
+group, but jobs synchronize only the profile they execute. Every project
+environment passes `--no-default-groups`; the lock consistency job installs no
+group and runs only `uv lock --check`.
+
+| Work | Locked environment |
+|---|---|
+| Local full setup | All user-facing extras plus `lint`, `typecheck`, `test`, `security`, and `build`; excludes `release-verifier` |
+| Python test matrix | `test` plus `all-llm` |
+| Quality | `lint` plus `typecheck` |
+| Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
+| Package and release construction | `build`; release construction also installs `security` only for SBOM generation |
+| Production PyPI artifact verification | `release-verifier` only |
+| Native desktop sidecar packaging | `desktop-build` only |
+| Release-project proof | `test` only |
+
+No quality, security, or build job installs provider extras. The Python 3.12
+release-readiness row first exercises the provider-aware test profile, then
+replaces it with `lint` and `typecheck` before static checks; the separate
+security-evidence job installs `security`. This prevents a successful gate from
+depending on packages left behind by another profile. The exact profiles and
+maintenance procedure are documented in [Dependency
+maintenance](DEPENDENCY_MAINTENANCE.md).
+
 ## Headless shell policy
 
 Every workflow that executes a command sets the workflow-level default shell to
