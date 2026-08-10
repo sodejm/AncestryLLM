@@ -616,7 +616,9 @@ def _verify_attestation(
     if result.returncode == 4:
         _fail(
             "VERIFIER_AUTHENTICATION_FAILED",
-            "GitHub CLI requires an authenticated token for attestation verification",
+            "GitHub attestation authentication is required; run "
+            "gh auth login --hostname github.com locally or set GH_TOKEN "
+            "from a secret manager for headless use",
         )
     if result.returncode != 0:
         _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
@@ -776,7 +778,9 @@ def _build_receipt(
 def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
     temporary_path: Path | None = None
     try:
+        _assert_receipt_path_safe(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        _assert_receipt_path_safe(path)
         rendered = json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
         descriptor, temporary_name = tempfile.mkstemp(
             dir=path.parent,
@@ -788,6 +792,7 @@ def _write_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
             stream.write(rendered)
             stream.flush()
             os.fsync(stream.fileno())
+        _assert_receipt_path_safe(path)
         os.replace(temporary_path, path)
     except OSError as exc:
         raise BootstrapError(
@@ -803,7 +808,7 @@ def _write_failure_receipt(
     receipt: Mapping[str, Any],
     failure: BootstrapError,
 ) -> None:
-    if failure.code == "RECEIPT_WRITE_FAILED":
+    if failure.code in {"RECEIPT_PATH_UNSAFE", "RECEIPT_WRITE_FAILED"}:
         raise failure
     failed_receipt = dict(receipt)
     failed_receipt["status"] = "failure"
@@ -836,13 +841,31 @@ def _atomic_install(source: Path, destination: Path) -> None:
 
 
 def _assert_install_path_safe(destination: Path) -> None:
+    _assert_path_without_symlinks(
+        destination,
+        code="INSTALL_PATH_UNSAFE",
+        message="uv install path contains a symbolic-link component",
+    )
+
+
+def _assert_receipt_path_safe(destination: Path) -> None:
+    _assert_path_without_symlinks(
+        destination,
+        code="RECEIPT_PATH_UNSAFE",
+        message="verification receipt path contains a symbolic-link component",
+    )
+
+
+def _assert_path_without_symlinks(
+    destination: Path,
+    *,
+    code: str,
+    message: str,
+) -> None:
     absolute_destination = Path(os.path.abspath(destination))
     for candidate in (absolute_destination, *absolute_destination.parents):
         if candidate.is_symlink():
-            _fail(
-                "INSTALL_PATH_UNSAFE",
-                "uv install path contains a symbolic-link component",
-            )
+            _fail(code, message)
 
 
 def _assert_binary(path: Path, expected_sha256: str, error_code: str) -> None:

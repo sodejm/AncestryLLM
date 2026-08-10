@@ -777,6 +777,61 @@ def test_symlinked_install_ancestor_fails_before_download(
     assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
 
 
+def test_symlinked_receipt_ancestor_blocks_success_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repository / ".tools").symlink_to(outside, target_is_directory=True)
+    receipt_path = repository / ".tools" / "receipts" / "uv-bootstrap.json"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="RECEIPT_PATH_UNSAFE"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "safe-tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert not (outside / "receipts" / "uv-bootstrap.json").exists()
+    assert not any(Path(command[0]).name == "uv" for command in runner.commands)
+
+
+def test_symlinked_receipt_ancestor_blocks_failure_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repository / ".tools").symlink_to(outside, target_is_directory=True)
+    receipt_path = repository / ".tools" / "receipts" / "uv-bootstrap.json"
+    runner.attestation_returncode = 1
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="RECEIPT_PATH_UNSAFE"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "safe-tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert not (outside / "receipts" / "uv-bootstrap.json").exists()
+    assert not any(Path(command[0]).name == "uv" for command in runner.commands)
+
+
 def test_attestation_authentication_failure_is_distinct_and_sanitized(
     tmp_path: Path,
     bootstrap_module: Any,
@@ -790,7 +845,7 @@ def test_attestation_authentication_failure_is_distinct_and_sanitized(
     with pytest.raises(
         bootstrap_module.BootstrapError,
         match="VERIFIER_AUTHENTICATION_FAILED",
-    ):
+    ) as failure:
         bootstrap_module.bootstrap_uv(
             policy_path=policy_path,
             install_dir=tmp_path / "tools",
@@ -801,6 +856,11 @@ def test_attestation_authentication_failure_is_distinct_and_sanitized(
             temporary_root=tmp_path / "temporary",
         )
 
+    failure_text = str(failure.value)
+    assert "gh auth login --hostname github.com" in failure_text
+    assert "GH_TOKEN" in failure_text
+    assert secret not in failure_text
+    assert local_path not in failure_text
     receipt_text = (tmp_path / "receipt.json").read_text(encoding="utf-8")
     assert json.loads(receipt_text)["failure_category"] == "VERIFIER_AUTHENTICATION_FAILED"
     assert secret not in receipt_text

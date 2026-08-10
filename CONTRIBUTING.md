@@ -5,7 +5,8 @@ and run `make setup`. That target verifies the pinned `uv` release before its
 first execution and installs it under the ignored repository-local `.tools/`
 directory; do not substitute an unverified `uv` from `PATH`. See the
 [verified uv bootstrap guide](docs/security/verified-uv-bootstrap.md) for the
-trust policy, failure recovery, and reviewed update procedure. Define
+required local GitHub authentication, trust policy, failure recovery, and
+reviewed update procedure. Define
 commands through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
 not presentation or dispatch adapters. Core and application contracts must

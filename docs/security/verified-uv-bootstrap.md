@@ -12,7 +12,16 @@ storage, FastAPI contracts, or desktop boundaries.
 
 ## Developer setup
 
-Use a supported system Python 3.12-3.14 and run:
+Use a supported system Python 3.12-3.14. GitHub's attestation API also requires
+authentication. For interactive development, authenticate once with:
+
+```bash
+gh auth login --hostname github.com
+```
+
+For a headless shell, provide `GH_TOKEN` from the shell's secret manager or
+credential injection mechanism. Do not put a token in a command argument,
+tracked file, shell history, or bootstrap receipt. Then run:
 
 ```bash
 make setup
@@ -26,6 +35,11 @@ perform only the verification and installation phase, run:
 ```bash
 python3 scripts/bootstrap_uv.py bootstrap
 ```
+
+The `gh auth login` command provisions the standard GitHub CLI credential; it
+does not verify or install `uv`. The bootstrap never delegates verification to
+the executable on `PATH`: it reads the provisioned credential only after the
+policy-pinned GitHub CLI archive passes its own hash and archive checks.
 
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on
@@ -73,7 +87,9 @@ exact source repository, source commit and ref, signer workflow, OIDC issuer,
 and SLSA predicate. The extracted `uv` executable receives a second digest
 check and exact-version check before an atomic repository-local installation.
 The install destination and each existing ancestor must not be a symbolic link,
-and that condition is rechecked after the parent directory is created.
+and that condition is rechecked after the parent directory is created. The same
+no-symbolic-link rule applies to the receipt destination before its directory or
+temporary file is created and again before the receipt is atomically replaced.
 
 In GitHub Actions, `.github/actions/setup-verified-uv/action.yml` performs that
 preflight with the job-scoped `github.token`, supplies the selected checksum and
@@ -110,7 +126,7 @@ evidence.
 Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `PLATFORM_UNSUPPORTED`, `ARCHITECTURE_UNSUPPORTED`,
 `DOWNLOAD_SIZE_MISMATCH`, `DOWNLOAD_DEADLINE_EXCEEDED`,
-`ARCHIVE_MEMBER_UNSAFE`, `INSTALL_PATH_UNSAFE`,
+`ARCHIVE_MEMBER_UNSAFE`, `INSTALL_PATH_UNSAFE`, `RECEIPT_PATH_UNSAFE`,
 `VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
 `VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_IDENTITY_MISMATCH`, and
 `UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
@@ -123,7 +139,9 @@ policy, provenance, or identity mismatch, stop and review the upstream release
 and policy history before changing any trusted value. In Actions,
 `VERIFIER_AUTHENTICATION_FAILED` means the job-scoped token was unavailable or
 rejected; restore the standard token and required read permissions rather than
-supplying a personal access token. Preserve only sanitized receipts when
+supplying a personal access token. Locally, renew the standard credential with
+`gh auth login --hostname github.com`, or provide `GH_TOKEN` through a secret
+manager for a headless shell. Preserve only sanitized receipts when
 reporting a failure; do not attach download responses, temporary directories,
 environment dumps, or credentials.
 
