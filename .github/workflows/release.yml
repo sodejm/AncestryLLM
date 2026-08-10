@@ -293,6 +293,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read # required to compare the approved readiness distributions
+      attestations: read # required by the verified uv provenance preflight
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -399,6 +400,7 @@ jobs:
     runs-on: ${{ fromJSON(matrix.runs_on) }}
     environment: ${{ needs.validate.outputs.binary_signing_mode == 'trusted' && 'desktop-signing' || 'desktop-prerelease' }}
     permissions:
+      attestations: read # required by the verified uv provenance preflight
       contents: read
     env:
       EXPECTED_HEAD: ${{ needs.validate.outputs.commit }}
@@ -2009,6 +2011,9 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, publish-pypi]
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

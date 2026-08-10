@@ -109,6 +109,9 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -135,12 +138,15 @@ jobs:
           uv run python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
           uv run python scripts/check_code_documentation.py
-          uv run zizmor --persona=pedantic .github/workflows
+          uv run zizmor --persona=pedantic .github/workflows .github/actions
 
   security:
     name: security evidence
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -209,6 +215,9 @@ jobs:
     name: release package
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

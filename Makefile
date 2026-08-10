@@ -37,7 +37,7 @@ verified-uv:
 
 setup: verified-uv
 	@$(PYTHON) -m venv $(VENV_DIR)
-	@$(UV_BIN) sync --active --all-extras --locked
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --all-extras --locked
 
 bootstrap: setup hooks
 
@@ -75,7 +75,7 @@ package:
 	@$(VENV_PYTHON) scripts/build_release.py --output-dir dist
 
 workflow-audit:
-	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows
+	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows .github/actions
 
 code-docs-check: verified-uv
 	@$(UV_BIN) run python scripts/check_code_documentation.py

@@ -435,13 +435,24 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
     policy_path, downloader, runner, uv_binary = _valid_fixture(tmp_path)
     receipt_path = tmp_path / "receipt.json"
     install_dir = tmp_path / "tools" / "uv"
+    receipts_before_uv_execution: list[dict[str, Any]] = []
+
+    def receipt_observing_runner(
+        command: Sequence[str],
+    ) -> subprocess.CompletedProcess[str]:
+        normalized = tuple(str(token) for token in command)
+        if Path(normalized[0]).name == "uv" and normalized[-1] == "--version":
+            receipts_before_uv_execution.append(
+                json.loads(receipt_path.read_text(encoding="utf-8"))
+            )
+        return runner(command)
 
     receipt = bootstrap_module.bootstrap_uv(
         policy_path=policy_path,
         install_dir=install_dir,
         receipt_path=receipt_path,
         downloader=downloader,
-        runner=runner,
+        runner=receipt_observing_runner,
         platform_id=("linux", "x86_64"),
         temporary_root=tmp_path / "temporary",
         now=lambda: datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
@@ -454,6 +465,7 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
     assert receipt["failure_category"] is None
     assert receipt["tool"]["version"] == UV_VERSION
     assert receipt["provenance"]["source_commit"] == UV_SOURCE_COMMIT
+    assert receipts_before_uv_execution == [receipt]
     attestation_index = next(
         index for index, command in enumerate(runner.commands) if "attestation" in command
     )
@@ -472,6 +484,40 @@ def test_valid_local_artifacts_complete_bootstrap_and_emit_receipt(
         (gh_url, len(downloader.payloads[gh_url])),
         (uv_url, len(downloader.payloads[uv_url])),
     ]
+
+
+def test_wrong_uv_identity_is_never_published_to_the_cache(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    runner.uv_version = "uv 0.12.2"
+    install_dir = tmp_path / "tools" / "uv"
+    installed_uv = install_dir / "uv"
+    receipt_path = tmp_path / "receipt.json"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="UV_VERSION_MISMATCH"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=install_dir,
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    uv_version_commands = [
+        command
+        for command in runner.commands
+        if Path(command[0]).name == "uv" and command[-1] == "--version"
+    ]
+    assert len(uv_version_commands) == 1
+    assert Path(uv_version_commands[0][0]) != installed_uv
+    assert not installed_uv.exists()
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["status"] == "failure"
+    assert receipt["failure_category"] == "UV_VERSION_MISMATCH"
 
 
 def test_bad_github_cli_is_never_executed(
@@ -1332,7 +1378,14 @@ def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
         in action
     )
     assert "bootstrap_uv.py verify-installed" in action
-    assert '--uv-path "${{ steps.setup-uv.outputs.uv-path }}"' in action
+    assert "VERIFIED_UV_RECEIPT_PATH: ${{ steps.receipt.outputs.receipt_path }}" in action
+    assert "VERIFIED_UV_INSTALLED_PATH: ${{ steps.setup-uv.outputs.uv-path }}" in action
+    assert action.count("VERIFIED_UV_RUNNER_OS: ${{ runner.os }}") == 2
+    assert action.count("VERIFIED_UV_RUNNER_ARCH: ${{ runner.arch }}") == 2
+    assert '--receipt "$VERIFIED_UV_RECEIPT_PATH"' in action
+    assert '--uv-path "$VERIFIED_UV_INSTALLED_PATH"' in action
+    assert action.count('--platform "$VERIFIED_UV_RUNNER_OS"') == 2
+    assert action.count('--architecture "$VERIFIED_UV_RUNNER_ARCH"') == 2
     assert "GITHUB_PATH" not in action
     assert "value: ${{ steps.receipt.outputs.receipt_path }}" in action
     assert "value: ${{ steps.setup-uv.outputs.uv-path }}" in action

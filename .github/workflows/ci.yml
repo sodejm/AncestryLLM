@@ -70,6 +70,9 @@ jobs:
   lockfile:
     name: lockfile consistency
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,6 +97,9 @@ jobs:
       matrix:
         python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.12","3.13","3.14"]') }}
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,6 +121,9 @@ jobs:
     name: quality
     needs: lockfile
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -142,6 +151,9 @@ jobs:
     name: security
     needs: [changes, lockfile]
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,6 +194,9 @@ jobs:
     name: package
     needs: lockfile
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -260,6 +275,9 @@ jobs:
     needs: [changes, lockfile]
     if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -275,7 +293,7 @@ jobs:
       - name: Audit workflow security
         run: |
           uv sync --locked --all-extras
-          uv run zizmor --persona=pedantic .github/workflows
+          uv run zizmor --persona=pedantic .github/workflows .github/actions
 
   pr-gate:
     name: PR gate

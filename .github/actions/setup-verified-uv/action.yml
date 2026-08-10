@@ -34,11 +34,14 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        VERIFIED_UV_RECEIPT_PATH: ${{ steps.receipt.outputs.receipt_path }}
+        VERIFIED_UV_RUNNER_ARCH: ${{ runner.arch }}
+        VERIFIED_UV_RUNNER_OS: ${{ runner.os }}
       run: >-
         python scripts/bootstrap_uv.py bootstrap
-        --receipt "${{ steps.receipt.outputs.receipt_path }}"
-        --platform "${{ runner.os }}"
-        --architecture "${{ runner.arch }}"
+        --receipt "$VERIFIED_UV_RECEIPT_PATH"
+        --platform "$VERIFIED_UV_RUNNER_OS"
+        --architecture "$VERIFIED_UV_RUNNER_ARCH"
         --github-output "$GITHUB_OUTPUT"
 
     - name: Install preflighted uv with the pinned setup action
@@ -55,11 +58,15 @@ runs:
 
     - name: Re-hash setup-uv binary before first execution
       shell: bash
+      env:
+        VERIFIED_UV_INSTALLED_PATH: ${{ steps.setup-uv.outputs.uv-path }}
+        VERIFIED_UV_RUNNER_ARCH: ${{ runner.arch }}
+        VERIFIED_UV_RUNNER_OS: ${{ runner.os }}
       run: >-
         python scripts/bootstrap_uv.py verify-installed
-        --uv-path "${{ steps.setup-uv.outputs.uv-path }}"
-        --platform "${{ runner.os }}"
-        --architecture "${{ runner.arch }}"
+        --uv-path "$VERIFIED_UV_INSTALLED_PATH"
+        --platform "$VERIFIED_UV_RUNNER_OS"
+        --architecture "$VERIFIED_UV_RUNNER_ARCH"
 
     - name: Retain verified bootstrap receipt
       if: ${{ always() }}

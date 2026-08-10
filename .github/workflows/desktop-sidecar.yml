@@ -50,6 +50,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-24.04
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -245,6 +248,9 @@ jobs:
             package_boundary: unpacked-native
             package_args: --linux --dir --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    permissions:
+      attestations: read # required by the verified uv provenance preflight
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

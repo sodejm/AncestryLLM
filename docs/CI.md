@@ -13,7 +13,8 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   problems;
 - the pre-push hook runs `make pre-push`, which expands to the canonical test,
   lint, type-check, dependency-audit, and Semgrep gates. It also runs
-  `make workflow-audit` when a pushed commit changes `.github/workflows/`.
+  `make workflow-audit` when a pushed commit changes `.github/workflows/` or
+  `.github/actions/`.
 
 `make setup` first runs the
 [verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the
@@ -55,14 +56,17 @@ Every workflow job that uses `uv` calls the repository-local
 preflight with the ephemeral job-scoped GitHub token, passes the policy-selected
 checksum to the exact pinned `setup-uv` commit with Astral mirror downloads
 disabled, re-hashes the installed binary before execution, and retains the
-schema-v1 receipt. The token is not included in receipts or action outputs. The
-repository Actions allowlist must permit `astral-sh/setup-uv`; SHA pinning and
-the policy's exact commit remain mandatory. The receipt upload includes the
-ignored `.tools` directory and fails if the expected file is absent. The cache
-key includes `uv.lock`, Python version, runner operating system, and runner
-architecture. Release-readiness and release evidence include the receipt's
-policy digest and verified identity through the required
-`bootstrap-verification` gate.
+schema-v1 receipt. Each calling job grants the verifier `contents: read` and
+`attestations: read`; jobs retain only any additional job-specific scope already
+required by their release contract. The token is not included in receipts or action outputs.
+The repository Actions allowlist permits only
+`astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` for that
+external action. The policy, local action, and workflow contracts independently
+require the same commit. The receipt upload includes the ignored `.tools`
+directory and fails if the expected file is absent. The cache key includes
+`uv.lock`, Python version, runner operating system, and runner architecture.
+Release-readiness and release evidence include the receipt's policy digest and
+verified identity through the required `bootstrap-verification` gate.
 
 The explicitly enumerated wheel and source-distribution consumer smoke jobs
 continue to use stock `pip`. Those jobs test what supported non-`uv` consumers

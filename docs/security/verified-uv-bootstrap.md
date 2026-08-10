@@ -96,12 +96,18 @@ In GitHub Actions, `.github/actions/setup-verified-uv/action.yml` performs that
 preflight with the job-scoped `github.token`, supplies the selected checksum and
 exact version to the pinned `setup-uv` commit with Astral mirror downloads
 disabled, and re-hashes the action-installed executable before first use. The
-token is available only to the verifier process and is never written to the
-receipt or action output. Repository Actions policy must permit
-`astral-sh/setup-uv`; the workflow still selects the exact policy commit and the
-repository requires SHA-pinned actions. Setup-uv caching is keyed by `uv.lock`,
-Python version, runner OS, and runner architecture. The local action uploads the
-hidden receipt on success or failure and treats a missing receipt as an error.
+calling job grants the verifier `contents: read` and `attestations: read`; jobs
+retain only any additional job-specific scope already required by their release
+contract.
+The token is available only to the verifier process and is never written to the
+receipt or action output. Repository Actions policy permits only
+`astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` for that
+external action; the policy, local action, and workflow contracts independently
+select the same commit and reject a mutable action reference. Setup-uv caching
+is keyed by `uv.lock`, Python version, runner OS, and runner architecture. The
+local action uploads the hidden receipt on success or failure and treats a
+missing receipt as an error. `make workflow-audit` and the equivalent hosted
+gate audit both `.github/workflows/` and `.github/actions/`.
 
 The stock-`pip` wheel and sdist consumer smoke jobs are deliberately unchanged.
 They verify supported non-`uv` installation paths and neither build release

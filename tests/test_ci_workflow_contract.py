@@ -175,6 +175,56 @@ def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None
         assert "astral-sh/setup-uv@" not in workflow
 
 
+def test_verified_uv_calling_jobs_grant_attestation_read_permission() -> None:
+    expected_jobs = {
+        ".github/workflows/ci.yml": (
+            "lockfile",
+            "test",
+            "quality",
+            "security",
+            "package",
+            "workflow-audit",
+        ),
+        ".github/workflows/release-readiness.yml": ("quality", "security", "package"),
+        ".github/workflows/release.yml": (
+            "build",
+            "desktop-installers",
+            "verify-pypi-hashes",
+        ),
+        ".github/workflows/desktop-sidecar.yml": ("desktop-security", "native-package"),
+        ".github/workflows/release-project-gate-proof.yml": ("validate",),
+    }
+
+    for relative_path, job_names in expected_jobs.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+        for job_name in job_names:
+            job = _job(workflow, job_name)
+            permissions = re.search(
+                r"(?m)^    permissions:\n(?P<body>(?:      [^\n]+\n)+)",
+                job,
+            )
+            assert permissions is not None, f"{relative_path}:{job_name}"
+            assert re.search(
+                r"(?m)^      attestations: read(?:\s+#.*)?$",
+                permissions.group("body"),
+            ), f"{relative_path}:{job_name}"
+
+
+def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+
+    assert (
+        'VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --all-extras --locked'
+        in makefile
+    )
+    audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
+    assert f"$(VENV_DIR)/bin/{audit_command}" in makefile
+    assert f"uv run {audit_command}" in _job(ci, "workflow-audit")
+    assert f"uv run {audit_command}" in _job(readiness, "quality")
+
+
 def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
     workflow = CI_PATH.read_text(encoding="utf-8")
 

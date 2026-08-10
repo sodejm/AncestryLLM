@@ -1179,19 +1179,18 @@ def bootstrap_uv(
                 uv_asset["binary_sha256"],
                 "UV_BINARY_DIGEST_MISMATCH",
             )
+            _write_receipt(receipt_path, receipt)
+            _assert_uv_version(
+                extracted_uv,
+                runner,
+                expected_target=expected_target,
+            )
             _atomic_install(extracted_uv, installed_uv)
             _assert_binary(
                 installed_uv,
                 uv_asset["binary_sha256"],
                 "INSTALLED_BINARY_DIGEST_MISMATCH",
             )
-
-        _write_receipt(receipt_path, receipt)
-        _assert_uv_version(
-            installed_uv,
-            runner,
-            expected_target=expected_target,
-        )
     except BootstrapError as exc:
         _write_failure_receipt(receipt_path, receipt, exc)
         raise
