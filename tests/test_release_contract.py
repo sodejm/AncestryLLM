@@ -337,7 +337,8 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
     assert all(
-        not dependency.startswith("uv")
+        (match := re.match(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)", dependency)) is None
+        or match.group(1).lower().replace("_", "-") != "uv"
         for dependencies in project_configuration["dependency-groups"].values()
         for dependency in dependencies
     )
