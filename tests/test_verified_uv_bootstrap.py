@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -381,6 +382,19 @@ def test_python_verifier_artifacts_are_mirrored_by_uv_lock() -> None:
     assert locked_artifacts == policy_artifacts
 
 
+def test_release_verifier_is_locked_but_excluded_from_general_setup() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert project["dependency-groups"]["release-verifier"] == ["pypi-attestations==0.0.30"]
+    assert "pypi-attestations==0.0.30" not in project["project"]["optional-dependencies"]["dev"]
+    assert "uv sync --locked --group release-verifier" in release
+    assert (
+        "uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py"
+    ) in release
+    assert "uv sync --locked --extra dev" not in release
+
+
 def test_attestation_accepts_reviewed_asset_in_multi_asset_statement(
     bootstrap_module: Any,
 ) -> None:
@@ -527,6 +541,7 @@ def test_github_token_is_available_only_to_attestation_verifier(
 ) -> None:
     monkeypatch.setenv("GH_TOKEN", "fixture-gh-token")
     monkeypatch.setenv("GITHUB_TOKEN", "fixture-github-token")
+    monkeypatch.setenv("GH_HOST", "enterprise.example.com")
     policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
 
     bootstrap_module.bootstrap_uv(
@@ -544,6 +559,8 @@ def test_github_token_is_available_only_to_attestation_verifier(
         if "attestation" in command:
             assert environment["GH_TOKEN"] == "fixture-gh-token"
             assert environment["GITHUB_TOKEN"] == "fixture-github-token"
+            hostname_index = command.index("--hostname")
+            assert command[hostname_index + 1] == "github.com"
         else:
             assert "GH_TOKEN" not in environment
             assert "GITHUB_TOKEN" not in environment
@@ -1294,6 +1311,53 @@ def test_download_rejects_unreviewed_or_mismatched_sizes(
             "https://github.com/example/release/asset.tar.gz",
             destination,
             expected_size,
+        )
+
+    assert not destination.exists()
+
+
+def test_download_normalizes_malformed_http_status_line(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def malformed_response(*_args: object, **_kwargs: object) -> NoReturn:
+        raise http.client.BadStatusLine("not-http")
+
+    monkeypatch.setattr(bootstrap_module.urllib.request, "urlopen", malformed_response)
+    destination = tmp_path / "asset.tar.gz"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="DOWNLOAD_FAILED"):
+        bootstrap_module._download(
+            "https://github.com/example/release/asset.tar.gz",
+            destination,
+            3,
+        )
+
+    assert not destination.exists()
+
+
+def test_download_normalizes_incomplete_http_body(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class IncompleteResponse(_DownloadResponse):
+        def read1(self, _size: int) -> bytes:
+            raise http.client.IncompleteRead(b"a", 3)
+
+    monkeypatch.setattr(
+        bootstrap_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: IncompleteResponse(b"abc", "3"),
+    )
+    destination = tmp_path / "asset.tar.gz"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="DOWNLOAD_FAILED"):
+        bootstrap_module._download(
+            "https://github.com/example/release/asset.tar.gz",
+            destination,
+            3,
         )
 
     assert not destination.exists()

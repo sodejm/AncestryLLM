@@ -372,7 +372,10 @@ publishing explicitly requests `attestations: true`. The workflow then verifies
 the PEP 740 provenance for both the wheel and source distribution, including
 exact repository, workflow, environment, filename, and SHA-256 identity, with
 the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
-verifier output as evidence and fails closed. After production PyPI publishing,
+verifier output as evidence and fails closed. The workflow installs this tool
+from the locked, non-default `release-verifier` dependency group so ordinary
+developer setup does not inherit its platform-specific build dependencies.
+After production PyPI publishing,
 the supported platform/Python wheel-and-sdist install smoke matrix runs before
 the immutable GitHub Release. The attached `SHA256SUMS` covers
 every release asset except the checksum file itself. No other workflow or

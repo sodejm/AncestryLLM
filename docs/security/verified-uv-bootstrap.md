@@ -63,7 +63,9 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - `astral-sh/setup-uv` v9.0.0 at its exact reviewed commit; and
 - `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
   and every permitted wheel or sdist filename, URL, and SHA-256. The same
-  verifier release and artifact hashes are represented by `uv.lock`.
+  verifier release and artifact hashes are represented by `uv.lock` in the
+  non-default `release-verifier` dependency group. General setup excludes that
+  release-only verifier and its platform-specific build dependencies.
 
 Unknown schema versions, operating systems, architectures, archive names,
 URLs, policy fields, or omitted trust fields are rejected. There is no mirror,
@@ -76,14 +78,17 @@ directory and compares its SHA-256 in constant time. Each download must report
 the reviewed byte size, may stream no more than that size, and must complete
 within the bounded acquisition deadline. The remaining deadline is applied to
 each single underlying transport read; a mismatch, overrun, underrun, or
-deadline failure discards the partial file. Before extraction the bootstrap
+deadline failure discards the partial file. Malformed or incomplete HTTP
+protocol responses fail with the stable `DOWNLOAD_FAILED` category. Before
+extraction the bootstrap
 rejects absolute paths, parent traversal, symbolic or hard links, device files,
 and any member that would escape the empty temporary extraction root. Only the
 verified GitHub CLI may execute.
 
 The utility then downloads the exact policy-selected `uv` release URL, verifies
 the archive digest, and asks the verified GitHub CLI to verify the release
-attestation within a 60-second subprocess deadline. A timeout fails as
+attestation against `github.com` within a 60-second subprocess deadline;
+ambient `GH_HOST` configuration cannot select another host. A timeout fails as
 `ATTESTATION_VERIFICATION_TIMEOUT` before extraction or `uv` execution. The
 returned statement must bind the selected asset digest to the exact source
 repository, source commit and ref, signer workflow, OIDC issuer, and SLSA

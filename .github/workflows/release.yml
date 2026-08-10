@@ -2050,8 +2050,8 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          uv sync --locked --extra dev
-          uv run --locked python scripts/verify_pypi_attestations.py \
+          uv sync --locked --group release-verifier
+          uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py \
             --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --verifier pypi-attestations==0.0.30 \

@@ -8,6 +8,7 @@ import ctypes
 import errno
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import platform
@@ -748,7 +749,7 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
     except BootstrapError:
         _discard_partial_download(destination)
         raise
-    except (OSError, ValueError, urllib.error.URLError) as exc:
+    except (OSError, ValueError, http.client.HTTPException, urllib.error.URLError) as exc:
         _discard_partial_download(destination)
         raise BootstrapError("DOWNLOAD_FAILED", "reviewed release asset download failed") from exc
 
@@ -919,6 +920,8 @@ def _attestation_command(
         "attestation",
         "verify",
         str(uv_archive_path),
+        "--hostname",
+        "github.com",
         "--repo",
         uv["release_repository"],
         "--source-digest",

@@ -23,7 +23,10 @@ without changing Git hooks. The bootstrap refuses an unverified `uv` from
 `PATH`, re-hashes a cached local binary, and emits the sanitized
 `.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
 `uv` command may run. This is the appropriate target for automation and
-disposable environments. Local developers authenticate once with
+disposable environments. The release-only `pypi-attestations` verifier remains
+locked in the non-default `release-verifier` dependency group, so general setup
+does not require its platform-specific build dependencies. Local developers
+authenticate once with
 `gh auth login --hostname github.com`; headless shells provide `GH_TOKEN`
 through their secret manager. The bootstrap uses that credential only with the
 policy-pinned, hash-verified GitHub CLI and never delegates verification to an

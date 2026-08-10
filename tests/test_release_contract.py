@@ -294,8 +294,11 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
-    assert "uv sync --locked --extra dev" in release
-    assert "uv run --locked python scripts/verify_pypi_attestations.py" in release
+    assert "uv sync --locked --group release-verifier" in release
+    assert "uv sync --locked --extra dev" not in release
+    assert (
+        "uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py"
+    ) in release
     assert "uvx" not in release
     assert "security-events: read" in readiness_codeql
     assert "upload-database: false" in readiness_codeql

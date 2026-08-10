@@ -257,6 +257,11 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert "entry: make workflow-audit" in hooks
     assert "entry: make lock-check" in hooks
     assert "files: ^(pyproject\\.toml|uv\\.lock)$" in hooks
+    workflow_filter = r"^\.github/(actions|workflows)/"
+    assert f"files: {workflow_filter}" in hooks
+    assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
+    assert re.match(workflow_filter, ".github/workflows/ci.yml")
+    assert not re.match(workflow_filter, "docs/CI.md")
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
