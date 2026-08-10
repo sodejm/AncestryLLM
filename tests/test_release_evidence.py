@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -85,6 +86,46 @@ def _interoperability() -> dict[str, Any]:
                 for vendor in sorted(evidence.REQUIRED_INTEROPERABILITY_VENDORS - {"Ancestry"})
             ],
         ],
+    }
+
+
+def _bootstrap_receipt() -> dict[str, Any]:
+    policy_path = Path(__file__).parents[1] / "config" / "uv-bootstrap-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    uv_asset = policy["uv"]["assets"]["macos-arm64"]
+    gh_asset = policy["github_cli"]["assets"]["macos-arm64"]
+    return {
+        "schema_version": 1,
+        "policy": {
+            "schema_version": policy["schema_version"],
+            "sha256": hashlib.sha256(policy_path.read_bytes()).hexdigest(),
+        },
+        "tool": {
+            "name": "uv",
+            "version": policy["uv"]["version"],
+            "platform": "macos",
+            "architecture": "arm64",
+            "asset_name": uv_asset["archive_name"],
+            "asset_sha256": uv_asset["sha256"],
+            "binary_sha256": uv_asset["binary_sha256"],
+        },
+        "verifier": {
+            "name": "GitHub CLI",
+            "version": policy["github_cli"]["version"],
+            "archive_name": gh_asset["archive_name"],
+            "archive_sha256": gh_asset["sha256"],
+        },
+        "provenance": {
+            "source_repository": policy["uv"]["source_repository"],
+            "source_commit": policy["uv"]["source_commit"],
+            "source_ref": policy["uv"]["source_ref"],
+            "signer_workflow_identity": policy["uv"]["signer_workflow_identity"],
+            "oidc_issuer": policy["uv"]["oidc_issuer"],
+            "predicate_type": policy["uv"]["predicate_type"],
+        },
+        "verified_at": "2026-08-09T12:34:56Z",
+        "status": "success",
+        "failure_category": None,
     }
 
 
@@ -207,6 +248,67 @@ def test_readiness_workflow_and_evidence_generator_share_gate_inventory() -> Non
     assert _readiness_gate_inventory() == evidence.REQUIRED_GATES
 
 
+def test_bootstrap_receipt_requires_exact_schema_policy_asset_and_identity() -> None:
+    receipt = _bootstrap_receipt()
+
+    validated = evidence._validate_bootstrap_receipt(receipt)
+
+    assert validated["tool_version"] == "0.12.1"
+    assert validated["platform"] == "macos-arm64"
+    assert validated["source_commit"] == "329541a503de8a4d9bb021814f9c0875efe033c8"
+
+    receipt["unexpected"] = "field"
+    with pytest.raises(ValueError, match="fields do not match schema v1"):
+        evidence._validate_bootstrap_receipt(receipt)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "message"),
+    (
+        ("policy", "sha256", "0" * 64, "policy SHA-256"),
+        ("tool", "version", "0.12.2", "tool.version"),
+        ("tool", "asset_sha256", "0" * 64, "tool.asset_sha256"),
+        (
+            "provenance",
+            "source_repository",
+            "https://github.com/example/uv",
+            "provenance.source_repository",
+        ),
+        (
+            "provenance",
+            "signer_workflow_identity",
+            "https://github.com/example/uv/.github/workflows/release.yml@refs/heads/main",
+            "provenance.signer_workflow_identity",
+        ),
+    ),
+)
+def test_bootstrap_receipt_rejects_unreviewed_values(
+    section: str,
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    receipt = _bootstrap_receipt()
+    receipt[section][field] = value
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        evidence._validate_bootstrap_receipt(receipt)
+
+
+def test_bootstrap_receipt_must_record_success_and_utc_timestamp() -> None:
+    receipt = _bootstrap_receipt()
+    receipt["status"] = "failure"
+    receipt["failure_category"] = "UV_ARCHIVE_DIGEST_MISMATCH"
+
+    with pytest.raises(ValueError, match="status must be success"):
+        evidence._validate_bootstrap_receipt(receipt)
+
+    receipt = _bootstrap_receipt()
+    receipt["verified_at"] = "2026-08-09T12:34:56"
+    with pytest.raises(ValueError, match="verified_at must be an ISO UTC timestamp"):
+        evidence._validate_bootstrap_receipt(receipt)
+
+
 def test_generator_embeds_dispositions_interoperability_and_hashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -219,6 +321,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
     gates_path.write_text(json.dumps(_gates()), encoding="utf-8")
     interoperability_path = tmp_path / "interoperability.json"
     interoperability_path.write_text(json.dumps(_interoperability()), encoding="utf-8")
+    bootstrap_receipt_path = tmp_path / "uv-bootstrap.json"
+    bootstrap_receipt_path.write_text(json.dumps(_bootstrap_receipt()), encoding="utf-8")
     output = tmp_path / "release-evidence.md"
     monkeypatch.setattr(
         sys,
@@ -239,6 +343,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
             str(findings_path),
             "--interoperability",
             str(interoperability_path),
+            "--bootstrap-receipt",
+            str(bootstrap_receipt_path),
             "--output",
             str(output),
         ],
@@ -251,3 +357,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
     assert "ancestryllm-0.2.0.whl" in rendered
     assert "tests-and-coverage" in rendered
     assert "https://example.test/readiness-run#tests-and-coverage" in rendered
+    assert "Bootstrap verification" in rendered
+    assert "uv` `0.12.1" in rendered
+    assert "macos-arm64" in rendered
+    assert hashlib.sha256(bootstrap_receipt_path.read_bytes()).hexdigest() in rendered
+    assert "329541a503de8a4d9bb021814f9c0875efe033c8" in rendered

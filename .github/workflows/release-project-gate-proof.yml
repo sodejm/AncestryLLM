@@ -68,9 +68,12 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-release-project-proof
       - name: Prove strict verifier rejects a non-ready P0 fixture
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           uv run python -m pytest tests/test_verify_release_project.py -q

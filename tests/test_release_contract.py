@@ -294,19 +294,18 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
+    assert "uv sync --locked --extra dev" in release
+    assert "uv run --locked python scripts/verify_pypi_attestations.py" in release
+    assert "uvx" not in release
     assert "security-events: read" in readiness_codeql
     assert "upload-database: false" in readiness_codeql
     assert "if: ${{ always() }}" in readiness_codeql
     assert "upload: always" in codeql
     assert "upload: never" not in codeql
-    assert re.findall(
-        r"python -m pip install --disable-pip-version-check (uv\S*)",
-        release,
-    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
-    assert re.findall(
-        r"python -m pip install --disable-pip-version-check (uv\S*)",
-        readiness,
-    ) == ["uv==0.12.1", "uv==0.12.1", "uv==0.12.1"]
+    assert release.count("uses: ./.github/actions/setup-verified-uv") == 3
+    assert readiness.count("uses: ./.github/actions/setup-verified-uv") == 3
+    assert "pip install --disable-pip-version-check uv" not in release
+    assert "pip install --disable-pip-version-check uv" not in readiness
     assert release.count("attestations: true") == 1
     assert release.count("attestations: false") == 1
     assert "--actual downloaded" in release
@@ -326,14 +325,15 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     sources = {
         ".github/workflows/ci.yml": runner,
         ".github/workflows/release-readiness.yml": runner,
-        "Makefile": "$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py .",
+        "Makefile": "$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .",
     }
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     assert '#     "semgrep==1.170.0",' in script
     assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
     assert "uv==0.12.1" in project["optional-dependencies"]["dev"]
-    assert "pip install --upgrade pip uv==0.12.1" in makefile
+    assert "pip install --upgrade pip uv==0.12.1" not in makefile
+    assert "scripts/bootstrap_uv.py bootstrap" in makefile
     for relative_path, expected_command in sources.items():
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert content.count(expected_command) == 1
@@ -462,6 +462,19 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
     }
     assert "id-token: write" not in readiness
     assert "contents: write" not in readiness
+
+
+def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
+    readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "name: uv-bootstrap-readiness-package" in readiness
+    assert "--bootstrap-receipt evidence/bootstrap/uv-bootstrap.json" in readiness
+    assert readiness.count('"bootstrap-verification"') == 1
+
+    assert "--bootstrap-receipt .tools/receipts/uv-bootstrap.json" in release
+    assert "name: uv-bootstrap-release-build" in release
+    assert "--bootstrap-receipt bootstrap-receipt/uv-bootstrap.json" in release
 
 
 @pytest.mark.parametrize(

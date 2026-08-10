@@ -66,6 +66,7 @@ dev = [
     "mypy>=1.19,<3",
     "packaging>=25,<27",
     "pip-audit>=2.10,<3",
+    "pypi-attestations==0.0.30",
     "pre-commit>=4.5,<5",
     "pyinstaller>=6.17,<7",
     "pytest>=9,<10",

@@ -117,11 +117,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-          cache: pip
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: ${{ matrix.python }}
+          receipt-artifact-name: uv-bootstrap-readiness-quality-${{ matrix.python }}
       - name: Install locked environment
-        run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
-          uv sync --locked --all-extras
+        run: uv sync --locked --all-extras
       - name: Test with coverage
         run: uv run python -m pytest --verbose --cov --cov-report=term-missing
       - name: Static quality gates
@@ -153,10 +155,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-readiness-security
       - name: Dependency and static analysis
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           uv run pip-audit
           uv run --locked --script scripts/run_pinned_semgrep.py .
@@ -212,10 +217,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-readiness-package
       - name: Build deterministic distributions
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           uv run python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -281,6 +289,10 @@ jobs:
           path: evidence
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: uv-bootstrap-readiness-package
+          path: evidence/bootstrap
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
           name: release-codeql-sarif
           path: evidence/codeql-sarif
       - name: Create evidence manifest
@@ -300,6 +312,7 @@ jobs:
               run_url: $run_url,
               gates: (
                 [
+                  "bootstrap-verification",
                   "codeql",
                   "cross-platform-install",
                   "cyclonedx-sbom",
@@ -335,6 +348,7 @@ jobs:
             --gates evidence/gates.json \
             --findings evidence/findings-dispositions.json \
             --interoperability evidence/interoperability.json \
+            --bootstrap-receipt evidence/bootstrap/uv-bootstrap.json \
             --output evidence/release-evidence.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

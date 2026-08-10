@@ -158,15 +158,43 @@ def test_dependency_review_runs_on_hosted_ubuntu_with_bounded_duration() -> None
     assert "self-hosted" not in workflow
 
 
-def test_ci_pins_uv_bootstrap_version() -> None:
-    workflow = CI_PATH.read_text(encoding="utf-8")
-    installed_versions = re.findall(
-        r"python -m pip install --disable-pip-version-check (uv\S*)",
-        workflow,
-    )
+def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:
+    expected_counts = {
+        ".github/workflows/ci.yml": 6,
+        ".github/workflows/release-readiness.yml": 3,
+        ".github/workflows/release.yml": 3,
+        ".github/workflows/desktop-sidecar.yml": 2,
+        ".github/workflows/release-project-gate-proof.yml": 1,
+    }
 
-    assert installed_versions
-    assert set(installed_versions) == {"uv==0.12.1"}
+    for relative_path, expected_count in expected_counts.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert workflow.count("uses: ./.github/actions/setup-verified-uv") == expected_count
+        assert "pip install --disable-pip-version-check uv" not in workflow
+        assert "astral-sh/setup-uv@" not in workflow
+
+
+def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+
+    assert "actions/cache@" not in workflow
+    assert "~/.cache/uv" not in workflow
+    assert "${{ runner.os }}-uv-" not in workflow
+
+
+def test_stock_pip_consumer_smoke_jobs_remain_explicit_exceptions() -> None:
+    ci = CI_PATH.read_text(encoding="utf-8")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    for job in (_job(ci, "install-smoke"), _job(ci, "sdist-smoke")):
+        assert "pip install --disable-pip-version-check" in job
+        assert "setup-verified-uv" not in job
+    readiness_install = _job(readiness, "install")
+    release_install = _job(release, "verify-pypi-install")
+    for job in (readiness_install, release_install):
+        assert "pip install --disable-pip-version-check" in job
+        assert "setup-verified-uv" not in job
 
 
 def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> None:
@@ -181,7 +209,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
-    assert "-m uv lock --check" in makefile
+    assert "$(UV_BIN) lock --check" in makefile
     assert "pre-push: test lint typecheck security" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 

@@ -4,7 +4,8 @@ Each release workflow produces an immutable evidence bundle attached to its
 GitHub Release. The bundle identifies the semantic version, annotated tag and
 its version-dependent signing mode, commit,
 workflow run, artifact hashes, supported platform/Python matrix, SBOM, quality
-gates, security finding dispositions, and GEDCOM importer status.
+gates, verified-bootstrap identity, security finding dispositions, and GEDCOM
+importer status.
 
 Release evidence contains fictional or aggregate test data only. It must never
 contain genealogy payloads, credentials, databases, backups, local paths, logs,
@@ -36,3 +37,13 @@ run. The evidence generator requires the complete gate inventory, validates
 these versioned records, and copies them into both the readiness artifact and
 final GitHub Release. Do not change a non-verified vendor to `verified` until
 its linked, dated, fictional-data import record is reviewable.
+
+`bootstrap-verification` is a required gate. Its input is the schema-v1 receipt
+from the repository-local
+[verified uv bootstrap](../security/verified-uv-bootstrap.md), not a manually
+entered claim. The generator validates the receipt against the current policy,
+including its policy digest, normalized platform/architecture, exact `uv` and
+GitHub CLI assets and hashes, source repository and commit/ref, signer workflow,
+OIDC issuer, SLSA predicate, UTC timestamp, and success status. The manifest
+records that identity and the receipt digest. Unknown fields, omitted fields,
+non-success receipts, local paths, or identity drift fail evidence generation.

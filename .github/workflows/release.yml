@@ -302,9 +302,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-release-build
       - name: Rebuild deterministic artifacts and SBOM
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --all-extras
           uv run python scripts/build_release.py --output-dir dist
           uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
@@ -347,6 +351,7 @@ jobs:
             --gates dist/gates.json \
             --findings dist/findings-dispositions.json \
             --interoperability dist/interoperability.json \
+            --bootstrap-receipt .tools/receipts/uv-bootstrap.json \
             --output dist/release-evidence.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -411,6 +416,11 @@ jobs:
         with:
           python-version: "3.12"
           architecture: ${{ matrix.arch }}
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-release-desktop-${{ matrix.runner }}
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26.5.0"
@@ -430,7 +440,6 @@ jobs:
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
           uv sync --locked --extra desktop-build --no-install-project --no-build
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop release dependencies
@@ -1803,6 +1812,10 @@ jobs:
           path: python-release
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: uv-bootstrap-release-build
+          path: bootstrap-receipt
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
           name: imported-desktop-release-distributions
           path: desktop-release
       - name: Merge exact release assets and regenerate final evidence
@@ -1840,6 +1853,7 @@ jobs:
             --gates dist/gates.json \
             --findings dist/findings-dispositions.json \
             --interoperability dist/interoperability.json \
+            --bootstrap-receipt bootstrap-receipt/uv-bootstrap.json \
             --output dist/release-evidence.md
           python scripts/generate_release_checksums.py --directory dist
           python scripts/verify_release_assets.py --expected dist --actual dist
@@ -2003,6 +2017,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Set up verified uv
+        uses: ./.github/actions/setup-verified-uv
+        with:
+          python-version: "3.12"
+          receipt-artifact-name: uv-bootstrap-release-pypi-attestations
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-distributions
@@ -2026,8 +2045,8 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          python -m pip install --disable-pip-version-check uv==0.12.1
-          python scripts/verify_pypi_attestations.py \
+          uv sync --locked --extra dev
+          uv run --locked python scripts/verify_pypi_attestations.py \
             --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --verifier pypi-attestations==0.0.30 \

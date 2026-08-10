@@ -256,6 +256,16 @@ self-approval; do not make that change during the one-maintainer release.
    an input to the installer gate, not release-installer evidence by itself.
 8. Review the evidence artifact and confirm every required job succeeded.
 
+Every readiness, build, and release job that executes `uv` first uses the
+[verified uv bootstrap](security/verified-uv-bootstrap.md). Confirm the
+`bootstrap-verification` gate in `gates.json` is `verified`, and that the
+release manifest records the expected policy digest, `uv` release asset,
+GitHub CLI verifier archive, source repository and commit/ref, signer workflow,
+OIDC issuer, and SLSA predicate. A missing, failed, timestamp-invalid, or
+identity-mismatched schema-v1 receipt blocks release. The stock-`pip` wheel and
+sdist consumer smoke tests remain separate because they validate supported
+installation paths; they cannot build or authorize a release.
+
 At the exact approval points, a maintainer approves the release-preparation PR;
 the readiness operator attests the cleanup audit and approves its evidence; the
 maintainer approves creation and push of the annotated release tag; and `sodejm` approves

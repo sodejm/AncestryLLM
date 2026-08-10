@@ -106,6 +106,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "docs/_data/page_metadata.json": "docs/release-notes/0.6.0.md",
     # External-link exceptions and their operating policy.
     "docs/_data/external_link_exceptions.json": "docs/WIKI_OPERATIONS.md",
+    # Executable bootstrap trust roots and their reviewed update procedure.
+    "config/uv-bootstrap-policy.json": "docs/security/verified-uv-bootstrap.md",
 }
 
 # ---------------------------------------------------------------------------

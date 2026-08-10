@@ -1,0 +1,65 @@
+# Verify the pinned uv release before exposing it to repository workflows.
+name: Set up verified uv
+description: Verify uv release provenance and digests before repository commands run.
+
+inputs:
+  python-version:
+    description: Installed Python version included in the setup-uv cache key.
+    required: true
+  receipt-artifact-name:
+    description: Unique artifact name for the schema-v1 verification receipt.
+    required: false
+    default: uv-bootstrap-receipt
+
+outputs:
+  receipt-path:
+    description: Repository-relative path to the schema-v1 verification receipt.
+    value: ${{ steps.receipt.outputs.receipt_path }}
+  uv-path:
+    description: Path to the setup-uv-installed binary after re-verification.
+    value: ${{ steps.setup-uv.outputs.uv-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Select the verification receipt path
+      id: receipt
+      shell: bash
+      run: |
+        mkdir -p .tools/receipts
+        echo "receipt_path=.tools/receipts/uv-bootstrap.json" >> "$GITHUB_OUTPUT"
+
+    - name: Verify release provenance and bootstrap repository-local uv
+      id: preflight
+      shell: bash
+      run: >-
+        python scripts/bootstrap_uv.py bootstrap
+        --receipt "${{ steps.receipt.outputs.receipt_path }}"
+        --github-output "$GITHUB_OUTPUT"
+
+    - name: Install the preflighted uv release
+      id: setup-uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      with:
+        version: "0.12.1"
+        checksum: ${{ steps.preflight.outputs.checksum }}
+        download-from-astral-mirror: false
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+        cache-suffix: py-${{ inputs.python-version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Re-hash setup-uv before first execution
+      shell: bash
+      run: >-
+        python scripts/bootstrap_uv.py verify-installed
+        --uv-path "${{ steps.setup-uv.outputs.uv-path }}"
+
+    - name: Retain verified bootstrap receipt
+      if: ${{ always() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ inputs.receipt-artifact-name }}
+        path: ${{ steps.receipt.outputs.receipt_path }}
+        if-no-files-found: ignore
+        retention-days: 30

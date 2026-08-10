@@ -15,8 +15,14 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   lint, type-check, dependency-audit, and Semgrep gates. It also runs
   `make workflow-audit` when a pushed commit changes `.github/workflows/`.
 
-`make setup` installs the locked environment without changing Git hooks. This
-is the appropriate target for automation and disposable environments.
+`make setup` first runs the
+[verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the
+repository-local `.tools/uv/uv` binary to install the locked environment
+without changing Git hooks. The bootstrap refuses an unverified `uv` from
+`PATH`, re-hashes a cached local binary, and emits the sanitized
+`.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
+`uv` command may run. This is the appropriate target for automation and
+disposable environments.
 
 ## Headless shell policy
 
@@ -39,6 +45,21 @@ have the same command semantics regardless of the caller's interactive shell.
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
+
+Every workflow job that uses `uv` calls the repository-local
+`setup-verified-uv` composite action. The action performs the same policy
+preflight as local setup, passes the policy-selected checksum to the exact
+pinned `setup-uv` commit with Astral mirror downloads disabled, re-hashes the
+installed binary before execution, and retains the schema-v1 receipt. Its cache
+key includes `uv.lock`, Python version, runner operating system, and runner
+architecture. Release-readiness and release evidence include the receipt's
+policy digest and verified identity through the required
+`bootstrap-verification` gate.
+
+The explicitly enumerated wheel and source-distribution consumer smoke jobs
+continue to use stock `pip`. Those jobs test what supported non-`uv` consumers
+receive; they do not build release artifacts or provide an exception to the
+verified bootstrap for repository commands.
 
 The `PR gate` job aggregates repository-owned pull-request jobs behind one
 stable check name. A conditionally skipped workflow audit is accepted; every

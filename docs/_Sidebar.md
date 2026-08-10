@@ -44,6 +44,7 @@
 - [Wiki synchronization](WIKI_SYNC.md)
 - [Wiki operations and recovery](WIKI_OPERATIONS.md)
 - [Security response checklist](SECURITY_RESPONSE.md)
+- [Verified uv bootstrap](security/verified-uv-bootstrap.md)
 - [Documentation authoring guide](DOCS_AUTHORING.md)
 - [Release notes (planned v0.6)](release-notes/0.6.0.md)
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md)

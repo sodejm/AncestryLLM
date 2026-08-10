@@ -94,6 +94,7 @@ Concepts, rationale, and design context:
 - [Wiki synchronization](WIKI_SYNC.md) — reproduce the publishing step locally
 - [Wiki operations and recovery](WIKI_OPERATIONS.md) — dispatch, verify, rollback
 - [Security response checklist](SECURITY_RESPONSE.md)
+- [Verified uv bootstrap](security/verified-uv-bootstrap.md) — executable trust policy, receipts, and reviewed updates
 - [Documentation authoring guide](DOCS_AUTHORING.md) — Diátaxis map and authoring rules
 - [Release notes (planned v0.6)](release-notes/0.6.0.md) — release preparation, not a current release
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md) — exact-head verification, not release approval

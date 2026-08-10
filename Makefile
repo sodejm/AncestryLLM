@@ -3,8 +3,15 @@ SHELL := /bin/bash
 PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
+UV_TOOL_DIR := .tools/uv
+UV_RECEIPT := .tools/receipts/uv-bootstrap.json
+ifeq ($(OS),Windows_NT)
+UV_BIN := $(UV_TOOL_DIR)/uv.exe
+else
+UV_BIN := $(UV_TOOL_DIR)/uv
+endif
 
-.PHONY: help setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help verified-uv setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
 	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
@@ -25,21 +32,23 @@ desktop-security:
 	@pnpm --dir desktop security
 	@pnpm --dir desktop test:security
 
-setup:
+verified-uv:
+	@$(PYTHON) scripts/bootstrap_uv.py bootstrap --install-dir $(UV_TOOL_DIR) --receipt $(UV_RECEIPT) >/dev/null
+
+setup: verified-uv
 	@$(PYTHON) -m venv $(VENV_DIR)
-	@$(VENV_PYTHON) -m pip install --upgrade pip uv==0.12.1
-	@$(VENV_PYTHON) -m uv sync --active --all-extras --locked
+	@$(UV_BIN) sync --active --all-extras --locked
 
 bootstrap: setup hooks
 
 console:
 	@$(VENV_PYTHON) -m ancestryllm
 
-lock:
-	@$(VENV_PYTHON) -m uv lock
+lock: verified-uv
+	@$(UV_BIN) lock
 
-lock-check:
-	@$(VENV_PYTHON) -m uv lock --check
+lock-check: verified-uv
+	@$(UV_BIN) lock --check
 
 test:
 	@$(VENV_PYTHON) -m pytest --verbose
@@ -53,9 +62,9 @@ lint:
 typecheck:
 	@$(VENV_DIR)/bin/mypy src/ancestryllm
 
-security:
+security: verified-uv
 	@$(VENV_DIR)/bin/pip-audit
-	@$(VENV_DIR)/bin/uv run --locked --script scripts/run_pinned_semgrep.py .
+	@$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .
 
 pre-push: test lint typecheck security
 
@@ -68,8 +77,8 @@ package:
 workflow-audit:
 	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows
 
-code-docs-check:
-	@$(VENV_DIR)/bin/uv run python scripts/check_code_documentation.py
+code-docs-check: verified-uv
+	@$(UV_BIN) run python scripts/check_code_documentation.py
 
 hooks: setup
 	@$(VENV_DIR)/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
