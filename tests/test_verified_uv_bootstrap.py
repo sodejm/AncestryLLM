@@ -921,6 +921,14 @@ class _DownloadResponse(io.BytesIO):
         )
 
 
+class _ClosingDownloadResponse(_DownloadResponse):
+    def read1(self, size: int = -1) -> bytes:
+        chunk = super().read1(size)
+        if self.tell() == len(self.getvalue()):
+            self.fp = None
+        return chunk
+
+
 class _RecordingSocket:
     def __init__(self) -> None:
         self.timeouts: list[float] = []
@@ -991,6 +999,28 @@ def test_download_rejects_unreviewed_or_mismatched_sizes(
     assert not destination.exists()
 
 
+def test_download_stops_when_reviewed_content_length_closes_transport(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"abc"
+    monkeypatch.setattr(
+        bootstrap_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _ClosingDownloadResponse(payload, str(len(payload))),
+    )
+    destination = tmp_path / "asset.tar.gz"
+
+    bootstrap_module._download(
+        "https://github.com/example/release/asset.tar.gz",
+        destination,
+        len(payload),
+    )
+
+    assert destination.read_bytes() == payload
+
+
 def test_download_fails_when_the_bounded_deadline_expires(
     tmp_path: Path,
     bootstrap_module: Any,
@@ -1047,6 +1077,18 @@ def test_download_enforces_remaining_deadline_inside_each_read(
 
     assert response.socket.timeouts == pytest.approx([10.0, 0.5])
     assert not destination.exists()
+
+
+def test_download_finds_socket_through_urllib_response_wrapper(
+    bootstrap_module: Any,
+) -> None:
+    clock = {"now": 0.0}
+    response = _DeadlineResponse(clock)
+    response.fp = SimpleNamespace(fp=response.fp)
+
+    bootstrap_module._set_response_read_timeout(response, 4.5)
+
+    assert response.socket.timeouts == pytest.approx([4.5])
 
 
 @pytest.mark.parametrize(

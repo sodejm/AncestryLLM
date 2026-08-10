@@ -527,16 +527,21 @@ def _download_deadline_exceeded() -> NoReturn:
 
 
 def _set_response_read_timeout(response: Any, timeout: float) -> None:
-    stream = getattr(response, "fp", None)
-    raw_stream = getattr(stream, "raw", None)
-    transport = getattr(raw_stream, "_sock", None)
-    set_timeout = getattr(transport, "settimeout", None)
-    if not callable(set_timeout):
-        _fail(
-            "DOWNLOAD_FAILED",
-            "reviewed release asset transport cannot enforce bounded reads",
-        )
-    set_timeout(timeout)
+    stream = response
+    for _ in range(2):
+        stream = getattr(stream, "fp", None)
+        if stream is None:
+            break
+        raw_stream = getattr(stream, "raw", None)
+        transport = getattr(raw_stream, "_sock", None)
+        set_timeout = getattr(transport, "settimeout", None)
+        if callable(set_timeout):
+            set_timeout(timeout)
+            return
+    _fail(
+        "DOWNLOAD_FAILED",
+        "reviewed release asset transport cannot enforce bounded reads",
+    )
 
 
 def _read_download_chunk(response: Any, size: int, deadline: float) -> bytes:
@@ -597,7 +602,7 @@ def _download(url: str, destination: Path, expected_size: int) -> None:
             deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
             bytes_written = 0
             with destination.open("xb") as target:
-                while True:
+                while bytes_written < expected_size:
                     remaining = expected_size - bytes_written
                     chunk = _read_download_chunk(
                         response,
