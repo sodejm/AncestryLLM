@@ -78,7 +78,7 @@ jobs:
       - name: Install locked dependencies
         shell: bash
         run: |
-          uv sync --locked --all-extras
+          uv sync --locked --no-default-groups --group test
           pnpm --dir desktop install --frozen-lockfile
       - name: Verify API and workflow contracts
         shell: bash
@@ -93,7 +93,7 @@ jobs:
             --gate domainRoutesAbsentPassed \
             --gate providerNoneNetworkFreePassed \
             --gate redactionPassed \
-            -- uv run python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_verification_wrong_sidecar.py
+            -- uv run --no-sync python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_verification_wrong_sidecar.py
       - name: Verify desktop source
         shell: bash
         run: |
@@ -327,7 +327,7 @@ jobs:
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
-          uv sync --locked --extra desktop-build --no-install-project --no-build
+          uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop dependencies
         shell: bash

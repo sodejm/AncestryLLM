@@ -310,9 +310,9 @@ jobs:
           receipt-artifact-name: uv-bootstrap-release-build
       - name: Rebuild deterministic artifacts and SBOM
         run: |
-          uv sync --locked --all-extras
-          uv run python scripts/build_release.py --output-dir dist
-          uv run cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
+          uv sync --locked --no-default-groups --group build --group security
+          uv run --no-sync python scripts/build_release.py --output-dir dist
+          uv run --no-sync cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python
       - name: Compare approved readiness artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -442,7 +442,7 @@ jobs:
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
-          uv sync --locked --extra desktop-build --no-install-project --no-build
+          uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop release dependencies
         shell: bash
@@ -2050,8 +2050,8 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          uv sync --locked --group release-verifier
-          uv run --locked --group release-verifier python scripts/verify_pypi_attestations.py \
+          uv sync --locked --no-default-groups --group release-verifier
+          uv run --locked --no-default-groups --group release-verifier python scripts/verify_pypi_attestations.py \
             --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --verifier pypi-attestations==0.0.30 \

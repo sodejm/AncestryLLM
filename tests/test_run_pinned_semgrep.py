@@ -8,9 +8,9 @@ import sys
 import tarfile
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
-import yaml
 
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "run_pinned_semgrep.py"
 
@@ -33,18 +33,45 @@ class _Download:
         return self._content
 
 
+class _YamlError(Exception):
+    """Stand-in for PyYAML's parser error in the dependency-light test profile."""
+
+
+def _json_safe_load(payload: bytes | str) -> object:
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise _YamlError from error
+
+
+def _json_safe_dump(document: object, *, sort_keys: bool = False) -> str:
+    return json.dumps(document, sort_keys=sort_keys)
+
+
+def _rule_payload(*rules: dict[str, object], missed: int | None = None) -> bytes:
+    document: dict[str, Any] = {"rules": list(rules)}
+    if missed is not None:
+        document["missed"] = missed
+    return json.dumps(document, separators=(",", ":")).encode()
+
+
 def _load_runner() -> ModuleType:
     assert _SCRIPT.is_file(), "the pinned Semgrep runner must be checked in"
     spec = importlib.util.spec_from_file_location("run_pinned_semgrep", _SCRIPT)
     assert spec is not None and spec.loader is not None
     runner = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = runner
+    yaml_stub = ModuleType("yaml")
+    yaml_stub.YAMLError = _YamlError
+    yaml_stub.safe_load = _json_safe_load
+    yaml_stub.safe_dump = _json_safe_dump
     spec.loader.exec_module(runner)
+    runner._yaml_module = lambda: yaml_stub
     return runner
 
 
 def _semantic_rule_sha256(payload: bytes) -> str:
-    document = yaml.safe_load(payload)
+    document = json.loads(payload)
     assert isinstance(document, dict)
     rules = document.get("rules")
     assert isinstance(rules, list)
@@ -65,7 +92,7 @@ def _semantic_rule_sha256(payload: bytes) -> str:
     ("response_content", "response_url", "expected_error"),
     (
         (b"changed content here", "https://semgrep.dev/c/p/test", "content hash differs"),
-        (b"rules:\n- id: pinned\n", "https://semgrep.dev/c/p/redirected", "redirected"),
+        (_rule_payload({"id": "pinned"}), "https://semgrep.dev/c/p/redirected", "redirected"),
     ),
 )
 def test_rejects_changed_or_redirected_registry_content_before_writing_config(
@@ -76,7 +103,7 @@ def test_rejects_changed_or_redirected_registry_content_before_writing_config(
     expected_error: str,
 ) -> None:
     runner = _load_runner()
-    expected = b"rules:\n- id: pinned\n"
+    expected = _rule_payload({"id": "pinned"})
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
@@ -105,7 +132,7 @@ def test_rejects_changed_registry_size_before_writing_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _load_runner()
-    payload = b"rules:\n- id: pinned\n"
+    payload = _rule_payload({"id": "pinned"})
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
@@ -138,8 +165,8 @@ def test_accepts_each_reviewed_exact_bundle_revision(
 ) -> None:
     runner = _load_runner()
     payloads = (
-        b"rules:\n- id: zed\n- id: alpha\n",
-        b'{"rules":[{"id":"alpha"},{"id":"zed"}],"missed":923}\n',
+        _rule_payload({"id": "zed"}, {"id": "alpha"}),
+        _rule_payload({"id": "alpha"}, {"id": "zed"}, missed=923),
     )
     bundle = runner.RuleBundle(
         name="test",
@@ -169,8 +196,8 @@ def test_rejects_raw_pinned_bundle_with_changed_semantic_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _load_runner()
-    reviewed = b"rules:\n- id: pinned\n  message: reviewed\n"
-    changed = b"rules:\n- id: pinned\n  message: changed\n"
+    reviewed = _rule_payload({"id": "pinned", "message": "reviewed"})
+    changed = _rule_payload({"id": "pinned", "message": "changed"})
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
@@ -203,7 +230,7 @@ def test_retries_transient_unreviewed_registry_content_before_accepting_reviewed
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _load_runner()
-    reviewed = b"rules:\n- id: pinned\n"
+    reviewed = _rule_payload({"id": "pinned"})
     responses = iter((b"transient edge response", reviewed))
     bundle = runner.RuleBundle(
         name="test",
@@ -237,7 +264,7 @@ def test_reports_observed_content_after_bounded_registry_retries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _load_runner()
-    reviewed = b"rules:\n- id: pinned\n"
+    reviewed = _rule_payload({"id": "pinned"})
     unreviewed = b"persistently changed content"
     bundle = runner.RuleBundle(
         name="test",
@@ -341,7 +368,7 @@ def test_configures_commit_pinned_reviewed_archives() -> None:
 
 def test_selects_only_reviewed_registry_rules_and_rejects_missing_ids() -> None:
     runner = _load_runner()
-    payload = b"rules:\n- id: selected\n- id: irrelevant\n"
+    payload = _rule_payload({"id": "selected"}, {"id": "irrelevant"})
     bundle = runner.RuleBundle(
         name="test",
         url="https://semgrep.dev/c/p/test",
@@ -365,8 +392,8 @@ def test_selects_only_reviewed_registry_rules_and_rejects_missing_ids() -> None:
 
 def test_reads_only_reviewed_archive_members_and_checks_semantic_digest() -> None:
     runner = _load_runner()
-    reviewed = b"rules:\n- id: reviewed\n  message: useful\n"
-    ignored = b"rules:\n- id: ignored\n"
+    reviewed = _rule_payload({"id": "reviewed", "message": "useful"})
+    ignored = _rule_payload({"id": "ignored"})
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         for name, content in (("root/reviewed.yml", reviewed), ("root/ignored.yml", ignored)):
@@ -484,8 +511,8 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
 ) -> None:
     runner = _load_runner()
     payloads = {
-        "https://semgrep.dev/c/p/python": b"rules:\n- id: python\n  pattern: python()\n",
-        "https://semgrep.dev/c/p/secrets": b"rules:\n- id: secrets\n  pattern: secret()\n",
+        "https://semgrep.dev/c/p/python": _rule_payload({"id": "python", "pattern": "python()"}),
+        "https://semgrep.dev/c/p/secrets": _rule_payload({"id": "secrets", "pattern": "secret()"}),
     }
     bundles = tuple(
         runner.RuleBundle(
@@ -525,7 +552,7 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
             path.touch()
         calls.append(command)
         config_paths.append(Path(command[config_index]))
-        document = yaml.safe_load(config_paths[0].read_text(encoding="utf-8"))
+        document = json.loads(config_paths[0].read_text(encoding="utf-8"))
         assert [rule["id"] for rule in document["rules"]] == ["python", "secrets"]
         return SimpleNamespace(returncode=0)
 

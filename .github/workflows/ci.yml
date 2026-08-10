@@ -113,9 +113,9 @@ jobs:
           python-version: ${{ matrix.python }}
           receipt-artifact-name: uv-bootstrap-ci-test-${{ matrix.python }}
       - name: Install locked environment
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Tests
-        run: uv run python -m pytest --verbose --cov --cov-report=term-missing
+        run: uv run --no-sync python -m pytest --verbose --cov --cov-report=term-missing
 
   quality:
     name: quality
@@ -137,15 +137,15 @@ jobs:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-ci-quality
       - name: Install locked environment
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Lint, type check, and repository contracts
         run: |
-          uv run ruff check src tests scripts
-          uv run ruff format --check src tests scripts
-          uv run mypy src/ancestryllm
-          uv run python scripts/check_architecture_contracts.py
+          uv run --no-sync ruff check src tests scripts
+          uv run --no-sync ruff format --check src tests scripts
+          uv run --no-sync mypy src/ancestryllm
+          uv run --no-sync python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
-          uv run python scripts/check_code_documentation.py
+          uv run --no-sync python scripts/check_code_documentation.py
 
   security:
     name: security
@@ -174,15 +174,15 @@ jobs:
           receipt-artifact-name: uv-bootstrap-ci-security
       - name: Install locked environment for dependency checks
         if: needs.changes.outputs.dependencies == 'true'
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
         if: needs.changes.outputs.dependencies == 'true'
-        run: uv run pip-audit
+        run: uv run --no-sync pip-audit
       - name: Run pinned static security analysis
         run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Generate CycloneDX SBOM
         if: needs.changes.outputs.dependencies == 'true'
-        run: uv run cyclonedx-py environment --output-file sbom.json .venv/bin/python
+        run: uv run --no-sync cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: needs.changes.outputs.dependencies == 'true'
         with:
@@ -210,9 +210,9 @@ jobs:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-ci-package
       - name: Install locked environment
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --no-default-groups --group build
       - name: Build reproducible release artifacts
-        run: uv run python scripts/build_release.py --output-dir dist
+        run: uv run --no-sync python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions
@@ -292,8 +292,8 @@ jobs:
           receipt-artifact-name: uv-bootstrap-ci-workflow-audit
       - name: Audit workflow security
         run: |
-          uv sync --locked --all-extras
-          uv run zizmor --persona=pedantic .github/workflows .github/actions
+          uv sync --locked --no-default-groups --group security
+          uv run --no-sync zizmor --persona=pedantic .github/workflows .github/actions
 
   pr-gate:
     name: PR gate

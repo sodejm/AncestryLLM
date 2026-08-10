@@ -41,6 +41,14 @@ does not verify or install `uv`. The bootstrap never delegates verification to
 the executable on `PATH`: it reads the provisioned credential only after the
 policy-pinned GitHub CLI archive passes its own hash and archive checks.
 
+`uv` is supplied by this bootstrap, not by an application extra or PEP 735
+dependency group. After verification, `make setup` synchronizes every
+user-facing optional extra plus the ordinary `lint`, `typecheck`, `test`,
+`security`, and `build` groups. Purpose-specific Make and workflow gates use
+smaller locked profiles, and production PyPI verification alone installs
+`release-verifier`. See [Dependency maintenance](../DEPENDENCY_MAINTENANCE.md)
+for the complete group contract.
+
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on
 `PATH`. A cached repository-local executable is re-hashed against policy before

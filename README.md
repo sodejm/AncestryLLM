@@ -88,3 +88,6 @@ and the [provider guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/PR
   guides and reference material.
 - [Contribute to AncestryLLM](https://github.com/sodejm/AncestryLLM/blob/main/CONTRIBUTING.md)
   if you are working on the project itself.
+- [Maintain locked dependency environments](https://github.com/sodejm/AncestryLLM/blob/main/docs/DEPENDENCY_MAINTENANCE.md)
+  when changing application extras or repository tool groups. Source checkouts
+  use `make setup`; the former `dev` extra is no longer an installation path.

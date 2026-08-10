@@ -35,11 +35,14 @@ desktop-security:
 verified-uv:
 	@$(PYTHON) scripts/bootstrap_uv.py bootstrap --install-dir $(UV_TOOL_DIR) --receipt $(UV_RECEIPT) >/dev/null
 
-setup: verified-uv
+$(VENV_PYTHON):
 	@$(PYTHON) -m venv $(VENV_DIR)
-	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --all-extras --locked
 
-bootstrap: setup hooks
+setup: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --all-extras --group lint --group typecheck --group test --group security --group build
+
+bootstrap: hooks
+	@$(MAKE) setup
 
 console:
 	@$(VENV_PYTHON) -m ancestryllm
@@ -50,35 +53,48 @@ lock: verified-uv
 lock-check: verified-uv
 	@$(UV_BIN) lock --check
 
-test:
+test: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --extra all-llm --group test
 	@$(VENV_PYTHON) -m pytest --verbose
 
-lint:
+lint: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
 	@$(VENV_DIR)/bin/ruff check src tests scripts
 	@$(VENV_DIR)/bin/ruff format --check src tests scripts
 	@$(VENV_PYTHON) scripts/check_architecture_contracts.py
 	@./scripts/check_repository_safety.sh
 
-typecheck:
+typecheck: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group typecheck
 	@$(VENV_DIR)/bin/mypy src/ancestryllm
 
-security: verified-uv
+security: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
 	@$(VENV_DIR)/bin/pip-audit
 	@$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .
 
-pre-push: test lint typecheck security
+pre-push:
+	@$(MAKE) test
+	@$(MAKE) lint
+	@$(MAKE) typecheck
+	@$(MAKE) security
 
-sbom:
+sbom: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
 	@$(VENV_DIR)/bin/cyclonedx-py environment --output-file sbom.json $(VENV_PYTHON)
 
-package:
+package: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group build
 	@$(VENV_PYTHON) scripts/build_release.py --output-dir dist
 
-workflow-audit:
+workflow-audit: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group security
 	@$(VENV_DIR)/bin/zizmor --persona=pedantic .github/workflows .github/actions
 
-code-docs-check: verified-uv
-	@$(UV_BIN) run python scripts/check_code_documentation.py
+code-docs-check: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
+	@$(VENV_PYTHON) scripts/check_code_documentation.py
 
-hooks: setup
+hooks: verified-uv $(VENV_PYTHON)
+	@VIRTUAL_ENV="$(abspath $(VENV_DIR))" $(UV_BIN) sync --active --locked --no-default-groups --group lint
 	@$(VENV_DIR)/bin/pre-commit install --hook-type pre-commit --hook-type pre-push

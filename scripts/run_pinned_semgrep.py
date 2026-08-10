@@ -23,9 +23,8 @@ import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from urllib.parse import urlparse
-
-import yaml
 
 
 @dataclass(frozen=True)
@@ -184,6 +183,13 @@ RULE_ARCHIVES = (
 _DOWNLOAD_ATTEMPTS = 3
 
 
+def _yaml_module() -> ModuleType:
+    """Load the script-only YAML dependency after argument parsing."""
+    import yaml
+
+    return yaml
+
+
 def _validate_rule_url(url: str) -> None:
     parsed = urlparse(url)
     if (
@@ -209,6 +215,7 @@ def _validate_archive_url(url: str) -> None:
 
 
 def _load_rule_document(payload: bytes) -> dict[str, object]:
+    yaml = _yaml_module()
     try:
         document = yaml.safe_load(payload)
     except (UnicodeDecodeError, yaml.YAMLError) as error:
@@ -392,7 +399,7 @@ def _archive_rules(archive: RuleArchive, payload: bytes) -> list[dict[str, objec
     rules: list[dict[str, object]] = []
     for member in archive.members:
         rules.extend(_rules_from_payload(documents[member]))
-    semantic_payload = yaml.safe_dump({"rules": rules}, sort_keys=False).encode()
+    semantic_payload = _yaml_module().safe_dump({"rules": rules}, sort_keys=False).encode()
     if _semantic_rule_digest(semantic_payload) != archive.semantic_sha256:
         raise ValueError(f"Semgrep {archive.name} reviewed rules changed semantically")
     return rules
@@ -457,6 +464,7 @@ def _semgrep_executable() -> Path:
 
 def run_scan(targets: list[str]) -> int:
     """Run Semgrep against targets using only verified local rule files."""
+    yaml = _yaml_module()
     with tempfile.TemporaryDirectory(prefix="ancestryllm-semgrep-") as temp_dir:
         rule_groups: list[list[dict[str, object]]] = []
         for bundle in RULE_BUNDLES:

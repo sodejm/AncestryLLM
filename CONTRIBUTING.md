@@ -6,7 +6,11 @@ first execution and installs it under the ignored repository-local `.tools/`
 directory; do not substitute an unverified `uv` from `PATH`. See the
 [verified uv bootstrap guide](docs/security/verified-uv-bootstrap.md) for the
 required local GitHub authentication, trust policy, failure recovery, and
-reviewed update procedure. Define
+reviewed update procedure. `make setup` installs every user-facing optional
+extra plus the ordinary `lint`, `typecheck`, `test`, `security`, and `build`
+tool groups; the release-only `release-verifier` group remains isolated. See
+[dependency maintenance](docs/DEPENDENCY_MAINTENANCE.md) for the canonical
+group-to-command contract and lockfile review procedure. Define
 commands through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
 not presentation or dispatch adapters. Core and application contracts must
@@ -89,6 +93,14 @@ prompt/response, secrets, or person details; use clearly fictional fixtures.
 Releases follow [the release runbook](docs/RELEASING.md). Never publish from a
 workstation, use a long-lived package-index token, move a published tag, or
 bypass required checks.
+
+Repository tooling belongs in a purpose-specific PEP 735 dependency group, not
+in an application extra. Provider SDKs remain optional extras and must not be
+added to quality, security, or package environments without a demonstrated
+runtime import. Each canonical Make target re-synchronizes to its declared
+locked profile, so it must pass without tools inherited from another target.
+The verified bootstrap supplies `uv`; do not add `uv` to a dependency group or
+install it with `pip`.
 
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures
