@@ -272,7 +272,10 @@ def _validate_policy(payload: Any) -> dict[str, Any]:
         },
         "policy",
     )
-    if policy["schema_version"] != POLICY_SCHEMA_VERSION:
+    if (
+        type(policy["schema_version"]) is not int
+        or policy["schema_version"] != POLICY_SCHEMA_VERSION
+    ):
         _fail("POLICY_SCHEMA_UNSUPPORTED", "only bootstrap policy schema v1 is supported")
 
     uv = _expect_keys(
@@ -1004,11 +1007,18 @@ def _build_initialization_receipt() -> dict[str, Any]:
     }
 
 
-def _is_link_or_reparse_point(path: Path) -> bool:
+def _is_link_or_reparse_point(
+    path: Path,
+    *,
+    code: str,
+    message: str,
+) -> bool:
     try:
         path_status = os.lstat(path)
     except FileNotFoundError:
         return False
+    except OSError as exc:
+        raise BootstrapError(code, message) from exc
     windows_reparse_point = bool(getattr(path_status, "st_file_attributes", 0) & 0x400)
     return stat.S_ISLNK(path_status.st_mode) or windows_reparse_point
 
@@ -1124,7 +1134,7 @@ def _lock_windows_parent(
                 None,
             )
             if handle is None or handle == invalid_handle:
-                if _is_link_or_reparse_point(candidate):
+                if _is_link_or_reparse_point(candidate, code=code, message=message):
                     _fail(code, message)
                 last_error: Callable[[], int] = getattr(  # noqa: B009
                     ctypes,
@@ -1133,10 +1143,17 @@ def _lock_windows_parent(
                 raise OSError(last_error(), "could not lock destination directory")
             handle_value = int(handle)
             handles.append(handle_value)
-            candidate_status = os.lstat(candidate)
-            if _is_link_or_reparse_point(candidate) or not stat.S_ISDIR(candidate_status.st_mode):
+            try:
+                candidate_status = os.lstat(candidate)
+            except OSError as exc:
+                raise BootstrapError(code, message) from exc
+            if _is_link_or_reparse_point(
+                candidate,
+                code=code,
+                message=message,
+            ) or not stat.S_ISDIR(candidate_status.st_mode):
                 _fail(code, message)
-        if _is_link_or_reparse_point(destination):
+        if _is_link_or_reparse_point(destination, code=code, message=message):
             _fail(code, message)
         yield
     finally:
@@ -1481,7 +1498,7 @@ def _assert_path_without_symlinks(
 ) -> None:
     absolute_destination = Path(os.path.abspath(destination))
     for candidate in (absolute_destination, *absolute_destination.parents):
-        if _is_link_or_reparse_point(candidate):
+        if _is_link_or_reparse_point(candidate, code=code, message=message):
             _fail(code, message)
 
 

@@ -262,6 +262,35 @@ def test_bootstrap_receipt_requires_exact_schema_policy_asset_and_identity() -> 
         evidence._validate_bootstrap_receipt(receipt)
 
 
+@pytest.mark.parametrize("location", ("receipt", "receipt-policy"))
+def test_bootstrap_receipt_rejects_boolean_schema_versions(location: str) -> None:
+    receipt = _bootstrap_receipt()
+    if location == "receipt":
+        receipt["schema_version"] = True
+    else:
+        receipt["policy"]["schema_version"] = True
+
+    with pytest.raises(ValueError, match="schema_version must be 1"):
+        evidence._validate_bootstrap_receipt(receipt)
+
+
+def test_bootstrap_policy_rejects_boolean_schema_version(tmp_path: Path) -> None:
+    policy_path = Path(__file__).parents[1] / "config" / "uv-bootstrap-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["schema_version"] = True
+    modified_policy_path = tmp_path / "uv-bootstrap-policy.json"
+    modified_policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    receipt = _bootstrap_receipt()
+    receipt["policy"]["schema_version"] = True
+    receipt["policy"]["sha256"] = hashlib.sha256(modified_policy_path.read_bytes()).hexdigest()
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("bootstrap policy.schema_version must be 1"),
+    ):
+        evidence._validate_bootstrap_receipt(receipt, modified_policy_path)
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value", "message"),
     (

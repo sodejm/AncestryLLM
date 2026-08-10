@@ -310,15 +310,17 @@ def _validate_bootstrap_receipt(
         },
         "bootstrap receipt",
     )
-    if receipt["schema_version"] != 1:
+    if type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1:
         raise ValueError("bootstrap receipt.schema_version must be 1")
 
     policy = _load_object(policy_path, "bootstrap policy")
-    if policy.get("schema_version") != 1:
+    if type(policy.get("schema_version")) is not int or policy["schema_version"] != 1:
         raise ValueError("bootstrap policy.schema_version must be 1")
     receipt_policy = _exact_object_fields(
         receipt["policy"], {"schema_version", "sha256"}, "bootstrap receipt.policy"
     )
+    if type(receipt_policy["schema_version"]) is not int or receipt_policy["schema_version"] != 1:
+        raise ValueError("bootstrap receipt.policy.schema_version must be 1")
     if receipt_policy["schema_version"] != policy["schema_version"]:
         raise ValueError("bootstrap receipt.policy.schema_version does not match policy")
     policy_sha256 = _receipt_sha256(receipt_policy["sha256"], "bootstrap receipt policy SHA-256")

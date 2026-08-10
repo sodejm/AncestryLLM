@@ -737,6 +737,7 @@ def test_attestation_identity_mismatches_fail_closed(
     ("mutation", "error"),
     [
         (lambda policy: policy.update(schema_version=2), "POLICY_SCHEMA_UNSUPPORTED"),
+        (lambda policy: policy.update(schema_version=True), "POLICY_SCHEMA_UNSUPPORTED"),
         (lambda policy: policy["uv"].update(version="latest"), "POLICY_VALUE_INVALID"),
         (
             lambda policy: policy["uv"].update(
@@ -944,6 +945,68 @@ def test_symlinked_install_ancestor_fails_before_download(
     assert runner.commands == []
     assert not (outside / "uv" / "uv").exists()
     receipt = json.loads((tmp_path / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
+
+
+def test_non_directory_install_ancestor_fails_with_coded_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / ".tools").write_bytes(b"not a directory")
+    receipt_path = tmp_path / "receipt.json"
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="INSTALL_PATH_UNSAFE"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=repository / ".tools" / "uv",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert downloader.calls == []
+    assert runner.commands == []
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
+
+
+def test_install_path_inspection_failure_emits_coded_receipt(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    install_dir = tmp_path / "tools"
+    installed_uv = install_dir / "uv"
+    receipt_path = tmp_path / "receipt.json"
+    real_lstat = bootstrap_module.os.lstat
+
+    def fail_install_inspection(path: str | Path) -> Any:
+        if Path(path) == installed_uv:
+            raise PermissionError("unreadable install path")
+        return real_lstat(path)
+
+    monkeypatch.setattr(bootstrap_module.os, "lstat", fail_install_inspection)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="INSTALL_PATH_UNSAFE"):
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=install_dir,
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert downloader.calls == []
+    assert runner.commands == []
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["failure_category"] == "INSTALL_PATH_UNSAFE"
 
 
