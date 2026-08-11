@@ -1074,8 +1074,8 @@ test.describe('unpublished unpacked native package', () => {
         return { open, save, openRevocation, saveRevocation }
       })
 
-      expect(results.open.ok).toBe(true)
-      expect(results.save.ok).toBe(true)
+      expect(results.open.ok ? 'ok' : results.open.error.code).toBe('ok')
+      expect(results.save.ok ? 'ok' : results.save.error.code).toBe('ok')
       if (!results.open.ok || results.open.data === null
         || !results.save.ok || results.save.data === null) {
         throw new Error('Packaged file-grant mediation did not return both grants.')

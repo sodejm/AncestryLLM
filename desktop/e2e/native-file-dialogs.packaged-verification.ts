@@ -1,20 +1,37 @@
 /** Supplies deterministic native file selections only for packaged grant verification. */
-import { isAbsolute } from 'node:path'
+import { posix, win32 } from 'node:path'
 import type { NativeFileDialogPort } from '../src/main/file-grant-broker'
 
 const verificationMarker = 'ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION'
 const openPathVariable = 'ANCESTRYLLM_FILE_GRANT_OPEN_PATH'
 const savePathVariable = 'ANCESTRYLLM_FILE_GRANT_SAVE_PATH'
 
+export function normalizeVerificationSelection(
+  value: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const pathApi = platform === 'win32'
+    ? win32
+    : platform === 'darwin' || platform === 'linux'
+      ? posix
+      : null
+  if (pathApi === null || value.length === 0 || value.includes('\0')) return null
+
+  const candidate = platform === 'win32' ? value.replaceAll('/', '\\') : value
+  if (!pathApi.isAbsolute(candidate) || pathApi.normalize(candidate) !== candidate) return null
+  return candidate
+}
+
 function selectedPath(variable: string): string {
   if (process.env[verificationMarker] !== '1') {
     throw new Error('Packaged file-grant verification adapter is disabled.')
   }
   const value = process.env[variable]
-  if (typeof value !== 'string' || value.length === 0 || !isAbsolute(value)) {
+  const selection = typeof value === 'string' ? normalizeVerificationSelection(value) : null
+  if (selection === null) {
     throw new Error(`Packaged file-grant verification path is invalid: ${variable}`)
   }
-  return value
+  return selection
 }
 
 export function createNativeFileDialogPort(): NativeFileDialogPort {
