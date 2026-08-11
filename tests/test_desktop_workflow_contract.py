@@ -88,7 +88,8 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
     assert "OPENSSL_DIR" not in workflow
     assert "dumpbin /headers" not in workflow
     assert (
-        "uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build"
+        "uv sync --locked --no-default-groups --extra desktop-build --group test "
+        "--no-install-project --no-build"
     ) in workflow
     assert "uv pip install --python .venv --no-deps --editable ." in workflow
     assert workflow.count("uv run --no-sync") == 5

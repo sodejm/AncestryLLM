@@ -229,7 +229,8 @@ def test_workflows_install_only_the_groups_required_by_each_job() -> None:
             "uv sync --locked --no-default-groups --group test",
         ),
         (".github/workflows/desktop-sidecar.yml", "native-package"): (
-            "uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build",
+            "uv sync --locked --no-default-groups --extra desktop-build --group test "
+            "--no-install-project --no-build",
         ),
         (".github/workflows/release-project-gate-proof.yml", "validate"): (
             "uv sync --locked --no-default-groups --group test",
