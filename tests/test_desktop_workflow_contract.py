@@ -21,8 +21,13 @@ def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
     assert "inputs.commit_sha || github.sha" in workflow
     assert "pull_request:" not in workflow
     assert "github.event.pull_request" not in workflow
+    assert '[[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]' in workflow
+    assert 'if test "$EVENT_NAME" = "push"; then' in workflow
     assert "git fetch --no-tags origin main" in workflow
     assert 'test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"' in workflow
+    assert 'elif test "$EVENT_NAME" = "workflow_dispatch"; then' in workflow
+    assert 'test "$EXPECTED_HEAD" = "$GITHUB_SHA"' in workflow
+    assert 'echo "unsupported desktop verification event: $EVENT_NAME" >&2' in workflow
     assert "paths:" not in workflow
     assert "changes:" in workflow
     assert "desktop-security:" in workflow
@@ -253,4 +258,7 @@ def test_verification_document_covers_external_release_blockers() -> None:
     assert "ad hoc" in document
     assert "#231" in document
     assert "#131" in document
+    assert "full 40-character head SHA" in document
+    assert "immutable event SHA for the selected same-repository ref" in document
+    assert "does not receive release credentials" in document
     assert "Windows Server 2025" not in document

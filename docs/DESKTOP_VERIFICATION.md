@@ -2,9 +2,11 @@
 
 The `Desktop gate` is the always-reported aggregate for changes that can affect
 the bounded 0.5.0 Electron shell. It binds source, security, native sidecar, and
-unpublished packaged-runtime evidence to the exact protected `main` commit. The gate
-does not publish a release and must not be interpreted as installer, signing,
-notarization, or end-user platform approval.
+unpublished packaged-runtime evidence to one exact commit. Push executions bind
+that commit to protected `main`; an authorized manual dispatch can select an
+immutable same-repository branch commit to provide pre-merge native evidence.
+The gate does not publish a release and must not be interpreted as installer,
+signing, notarization, or end-user platform approval.
 
 ## Exact-head target matrix
 
@@ -37,6 +39,22 @@ Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
 Workflow-level path filters are not used: the in-workflow classifier may skip
 the expensive jobs, but `Desktop gate` still reports a result.
+
+For pre-merge verification, dispatch the workflow from the same-repository PR
+branch and supply its full 40-character head SHA:
+
+```console
+gh workflow run desktop-sidecar.yml --ref <branch> -f commit_sha=<full-head-sha>
+```
+
+The workflow rejects a symbolic or abbreviated `commit_sha`, proves that the
+checkout resolves to that exact object, and requires a manual target to equal
+GitHub's immutable event SHA for the selected same-repository ref. A normal push
+run additionally proves that the object equals `origin/main`. Manual dispatch
+does not receive release credentials or publish artifacts outside the ordinary
+read-only verification evidence; it exists to make the native pre-merge gate
+possible without granting forked pull-request code an automatic hosted execution
+path.
 
 ## Installer release matrix and signing boundary
 

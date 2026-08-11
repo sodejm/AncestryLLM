@@ -23,6 +23,7 @@ defaults:
 
 env:
   EXPECTED_HEAD: ${{ inputs.commit_sha || github.sha }}
+  EVENT_NAME: ${{ github.event_name }}
 
 jobs:
   changes:
@@ -40,9 +41,17 @@ jobs:
         id: classify
         shell: bash
         run: |
-          git fetch --no-tags origin main
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"
+          if test "$EVENT_NAME" = "push"; then
+            git fetch --no-tags origin main
+            test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"
+          elif test "$EVENT_NAME" = "workflow_dispatch"; then
+            test "$EXPECTED_HEAD" = "$GITHUB_SHA"
+          else
+            echo "unsupported desktop verification event: $EVENT_NAME" >&2
+            exit 2
+          fi
           echo "desktop=true" >> "$GITHUB_OUTPUT"
 
   desktop-security:
