@@ -120,6 +120,8 @@ describe('SidecarSupervisor', () => {
       probe: async () => undefined, tokenFactory: () => 'S'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
     })
+    const sessionInvalidated = vi.fn()
+    const unsubscribe = supervisor.onSessionInvalidated(sessionInvalidated)
 
     expect(supervisor.diagnostics()).toEqual({
       state: 'idle', failure: null, automaticRestartsRemaining: 0,
@@ -128,6 +130,7 @@ describe('SidecarSupervisor', () => {
     expect(supervisor.session()).toBeUndefined()
 
     await supervisor.start()
+    expect(sessionInvalidated).not.toHaveBeenCalled()
 
     expect(supervisor.diagnostics()).toEqual({
       state: 'ready', failure: null, automaticRestartsRemaining: 0,
@@ -141,8 +144,11 @@ describe('SidecarSupervisor', () => {
 
     sidecar.emit('exit', 1)
     await vi.waitFor(() => expect(supervisor.diagnostics().state).toBe('unavailable'))
+    expect(sessionInvalidated).toHaveBeenCalledOnce()
     expect(supervisor.session()).toBeUndefined()
     expect(supervisor.diagnostics().failure).toBe('crash_loop')
+    unsubscribe()
+    expect(() => unsubscribe()).not.toThrow()
   })
 
   it('keeps the bearer in the private stdin frame and validates readiness', async () => {

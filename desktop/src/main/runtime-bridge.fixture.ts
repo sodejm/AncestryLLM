@@ -1,8 +1,8 @@
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
-import type { AncestryBridge } from '../shared-contract/desktop'
+import type { MainDesktopBridge } from './ipc-handlers'
 
 interface FixtureRuntimeBridge {
-  bridge: AncestryBridge
+  bridge: MainDesktopBridge
   supervisor?: never
 }
 
@@ -11,6 +11,6 @@ export async function startRuntimeBridge(): Promise<FixtureRuntimeBridge> {
   return {
     bridge: createMockAncestryBridge(
       fixture === 'degraded' || fixture === 'unavailable' ? fixture : 'success',
-    ),
+    ) as MainDesktopBridge,
   }
 }

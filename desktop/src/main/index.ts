@@ -7,12 +7,15 @@ import {
   ipcMain,
   protocol,
   session,
-  type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron'
-import type { AncestryBridge } from '../shared-contract/desktop'
 import { completeAppShutdown } from './app-shutdown'
-import { registerDesktopIpcHandlers } from './ipc-handlers'
+import {
+  registerDesktopIpcHandlers,
+  type BridgeWebContents,
+  type DesktopIpcController,
+  type MainDesktopBridge,
+} from './ipc-handlers'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
   APP_ENTRY_URL,
@@ -39,13 +42,15 @@ if (primaryInstance) {
   protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
 }
 
-let bridge: AncestryBridge | undefined
+let bridge: MainDesktopBridge | undefined
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
 let sidecarSupervisor: SidecarSupervisor | undefined
 let shutdownAuthorized = false
 let shutdownPromise: Promise<void> | undefined
+let ipcController: DesktopIpcController | undefined
+let removeSidecarSessionListener: (() => void) | undefined
 
 function rendererPolicy() {
   return {
@@ -57,11 +62,6 @@ function rendererPolicy() {
 
 function isProductionRenderer(): boolean {
   return resolveRendererTarget(rendererPolicy()).value === APP_ENTRY_URL
-}
-
-function trustedSender(event: IpcMainInvokeEvent): boolean {
-  if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) return false
-  return isTrustedRendererUrl({ ...rendererPolicy(), senderUrl: event.senderFrame.url })
 }
 
 function denyWebContentsCapabilities(contents: WebContents): void {
@@ -96,11 +96,15 @@ if (primaryInstance) {
 
 function registerIpcHandlers(): void {
   if (!bridge) throw new Error('Runtime bridge is unavailable.')
-  registerDesktopIpcHandlers(
-    ipcMain,
-    bridge,
-    (event) => trustedSender(event as IpcMainInvokeEvent),
-  )
+  if (ipcController) throw new Error('Desktop IPC handlers are already registered.')
+  ipcController = registerDesktopIpcHandlers(ipcMain, bridge)
+}
+
+function disposeIpcBoundary(): void {
+  removeSidecarSessionListener?.()
+  removeSidecarSessionListener = undefined
+  ipcController?.dispose()
+  ipcController = undefined
 }
 
 function createWindow(): void {
@@ -121,6 +125,11 @@ function createWindow(): void {
   } finally {
     pendingWindowPreferences = null
   }
+  if (!ipcController) throw new Error('Desktop IPC handlers are unavailable.')
+  ipcController.authorizeWebContents(
+    window.webContents as unknown as BridgeWebContents,
+    (url) => isTrustedRendererUrl({ ...rendererPolicy(), senderUrl: url }),
+  )
   window.once('ready-to-show', () => {
     window.show()
     console.info(WINDOW_READY_RECORD)
@@ -136,13 +145,21 @@ if (primaryInstance) {
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     registerIpcHandlers()
+    removeSidecarSessionListener = sidecarSupervisor?.onSessionInvalidated(() => {
+      ipcController?.invalidateSidecarSession()
+    })
     createWindow()
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
   })
   app.on('before-quit', (event) => {
-    if (shutdownAuthorized || (!sidecarSupervisor && !shutdownPromise)) return
+    if (shutdownAuthorized) return
+    if (!sidecarSupervisor && !shutdownPromise) {
+      disposeIpcBoundary()
+      return
+    }
     event.preventDefault()
     if (!shutdownPromise && sidecarSupervisor) {
+      disposeIpcBoundary()
       const supervisor = sidecarSupervisor
       sidecarSupervisor = undefined
       shutdownPromise = completeAppShutdown(

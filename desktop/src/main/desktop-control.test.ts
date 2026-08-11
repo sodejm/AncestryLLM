@@ -58,6 +58,31 @@ describe('desktop control bridge', () => {
     expect(JSON.stringify(result)).not.toMatch(/abc|54321|Bearer/i)
   })
 
+  it('propagates cancellation to the sidecar client without converting it to a renderer error', async () => {
+    const cancelled = new Error('private cancellation reason')
+    const client = {
+      getCapabilities: vi.fn((signal?: AbortSignal) => new Promise<typeof manifest>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })),
+    }
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'packaged' },
+      supervisor: {
+        diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }),
+        retry: vi.fn(),
+      },
+      capabilitiesClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+    const controller = new AbortController()
+    const request = bridge.getCapabilities(controller.signal)
+
+    controller.abort(cancelled)
+
+    await expect(request).rejects.toBe(cancelled)
+    expect(client.getCapabilities).toHaveBeenCalledWith(controller.signal)
+  })
+
   it('updates preferences through a main-owned store and increments revision', async () => {
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },

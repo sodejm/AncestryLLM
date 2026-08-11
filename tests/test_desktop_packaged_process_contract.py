@@ -50,6 +50,17 @@ def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
     assert not re.search(r"--type=renderer", source)
 
 
+def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "running bounded packaged capability bridge burst" in source
+    assert "Array.from({ length: 32 }" in source
+    assert "Promise.all(" in source
+    assert "ancestry.getCapabilities()" in source
+    assert "allSuccessful: responses.every((result) => result.ok)" in source
+    assert "expect(capabilityBurst).toEqual" in source
+
+
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")

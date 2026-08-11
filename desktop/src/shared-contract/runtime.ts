@@ -17,6 +17,9 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'INVALID_REQUEST',
   'UNAUTHORIZED_SENDER',
   'INVALID_RESPONSE',
+  'BRIDGE_OVERLOADED',
+  'REQUEST_CANCELLED',
+  'REQUEST_TIMEOUT',
   'SIDECAR_UNAVAILABLE',
   'SIDECAR_REQUEST_FAILED',
   'PREFERENCES_UNAVAILABLE',
@@ -28,10 +31,15 @@ const startupFailures = ['startup_failed', 'startup_timeout', 'incompatible_buil
 const identifierPattern = /^[A-Za-z0-9._:-]+$/
 const dispatchKeyPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const record = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+const owns = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key)
 const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
-  Object.keys(value).length === keys.length && keys.every((key) => key in value)
+  Object.keys(value).length === keys.length && keys.every((key) => owns(value, key))
 const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
   Object.keys(value).every((key) => keys.includes(key))
 const bounded = (value: unknown, minimum: number, maximum: number): value is string =>
@@ -58,14 +66,14 @@ export function parseColorScheme(value: unknown): DesktopColorScheme {
 
 export function parsePreferenceUpdate(value: unknown): PreferenceUpdate {
   const keys = ['expectedRevision', 'colorScheme', 'reducedMotion', 'onboardingCompleted'] as const
-  if (!record(value) || !('expectedRevision' in value) || Object.keys(value).length < 2 || !onlyKeys(value, keys)) {
+  if (!record(value) || !owns(value, 'expectedRevision') || Object.keys(value).length < 2 || !onlyKeys(value, keys)) {
     throw new Error('Invalid preference update')
   }
   try {
     if (!integer(value.expectedRevision, 0, Number.MAX_SAFE_INTEGER)) throw new Error()
-    if ('colorScheme' in value) parseColorScheme(value.colorScheme)
-    if ('reducedMotion' in value && typeof value.reducedMotion !== 'boolean') throw new Error()
-    if ('onboardingCompleted' in value && typeof value.onboardingCompleted !== 'boolean') throw new Error()
+    if (owns(value, 'colorScheme')) parseColorScheme(value.colorScheme)
+    if (owns(value, 'reducedMotion') && typeof value.reducedMotion !== 'boolean') throw new Error()
+    if (owns(value, 'onboardingCompleted') && typeof value.onboardingCompleted !== 'boolean') throw new Error()
   } catch {
     throw new Error('Invalid preference update')
   }

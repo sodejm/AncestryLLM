@@ -18,7 +18,7 @@ describe('main-only sidecar capabilities client', () => {
     }) })
     const client = createSidecarCapabilitiesClient({ session: () => session, request })
     await expect(client.getCapabilities()).resolves.toMatchObject({ api: { contract: 'ancestryllm.internal-api/1' } })
-    expect(request).toHaveBeenCalledWith(session, '/api/v1/capabilities')
+    expect(request).toHaveBeenCalledWith(session, '/api/v1/capabilities', undefined)
   })
 
   it('fails closed when no authenticated session is available', async () => {
@@ -64,4 +64,29 @@ describe('main-only sidecar capabilities client', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   }, 5_000)
+
+  it('destroys an in-flight fixed-route request when its bridge operation is cancelled', async () => {
+    let acceptRequest!: () => void
+    const accepted = new Promise<void>((resolve) => { acceptRequest = resolve })
+    const server = createServer(() => { acceptRequest() })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const controller = new AbortController()
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+    })
+    const request = client.getCapabilities(controller.signal)
+    await accepted
+    controller.abort()
+    try {
+      await expect(request).rejects.toEqual(new SidecarClientError('cancelled'))
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
 })

@@ -65,7 +65,12 @@ The 0.5.0 preload bridge exposes exactly `getAppInfo`,
 and `updatePreferences`. The renderer never receives the sidecar port, bearer,
 endpoint, executable or preference-file path, stderr, raw sidecar or bridge
 errors, or stack traces. Electron main is the sole authenticated sidecar
-client.
+client. Main reauthorizes the exact registered `WebContents`, current main
+frame, and trusted application URL on every call; validates strict schemas and
+structured-clone bounds in both directions; and owns fixed concurrency, queue,
+coalescing, deadline, cancellation, and lifecycle-cleanup limits. There is no
+renderer-selected channel or endpoint. Saturation, timeout, cancellation, and
+internal failure cross the bridge only as stable redacted error codes.
 
 Supported 0.5.0 distribution uses manually installed installers after the
 platform-specific release gates pass. The official 0.x release workflow

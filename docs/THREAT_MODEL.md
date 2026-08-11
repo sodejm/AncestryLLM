@@ -10,8 +10,11 @@ a deterministic OpenAPI artifact. Issue #225 adds private-stdin bootstrap,
 bounded Electron supervision, native sidecar smoke tests, and unsigned unpacked
 package verification. Issue #102 adds pre-spawn, embedded-digest payload
 verification, bounded crash recovery, full-process-tree termination, and drain
-of the resources the current sidecar actually owns. It does not implement
-domain API routes, a renderer domain bridge, signed installers, plugins, or an
+of the resources the current sidecar actually owns. Issue #101 implements the
+exact six-method typed bridge with per-call sender/frame/origin authorization,
+strict clone/schema limits, bounded concurrency and queues, single-flight
+capability reads, deadlines, cancellation, and lifecycle cleanup. It does not
+implement domain API routes, file grants, signed installers, plugins, or an
 update channel. The diagrams, controls, abuse cases, and gates below define
 both this partial runtime and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
@@ -260,11 +263,20 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 |---|---|---|
 | `TM-R01` | Secure window defaults and weakened-future-window regression tests; global web-content and session denials; production E2E proves no renderer Node object, child-window creation, added privileged bridge method, or developer-tools keyboard escape. | The desktop security gate inspects the built `app.asar` and all eight declared fuses. Signing and cross-platform release evidence remain #132/#131. |
 | `TM-R02` | Exact `app://bundle` route/MIME/CSP tests reject encoded traversal, unknown assets, wrong hosts, and CSP bypass; production E2E proves fetch, WebSocket, and service-worker denial. | The fixed manifest is exercised from the production build. Packaged cross-platform XSS and model-output cases remain #131/#112. |
-| `TM-I01` | The #99 frozen bridge is not expanded for security reporting or external links; main-frame sender/origin checks remain in main; E2E asserts those methods are absent from the renderer. | Rich IPC proxy schemas, bounds, listener lifecycle, and sender/navigation-race coverage remain #101/#131. |
+| `TM-I01` | The #99 frozen bridge is not expanded for security reporting or external links; main-frame sender/origin checks remain in main; E2E asserts those methods are absent from the renderer. | Issue #101 owns the rich IPC proxy evidence below. Cross-platform adversarial packaged coverage remains #131. |
 | `TM-U01` | The lockfile and package policy have static regression coverage. | The unpacked application is inspected for `app.asar`, declared fuses, and supported ASAR-integrity metadata. Signing, notarization, provenance, updates, and rollback remain #132. |
 | `TM-C01` | Concurrency integrity: single-instance coordination, per-artifact output locks, optimistic revisions, and idempotency keys prevent duplicate mutations and concurrent publication. | Evidence pending under Issue #131 residual release-surface coverage. |
 | `TM-O01` | Privacy-minimal observability: allowlisted stable codes and hashes/counts only by default; no secrets, unrestricted paths, genealogy values, prompts, responses, or bootstrap material. | Runtime policy evidence remains tracked in Issue #131 residual controls. |
 | `TM-O02` | Runtime evidence hygiene: access-log suppression, structural redacted stderr, crash-dump/support-bundle policy, canary scans, and development-tool restrictions prevent payload capture. | Evidence pending in Issue #132 and related platform-runner checks. |
+
+### Issue #101 typed bridge evidence
+
+| Control | Source and runtime evidence | Packaged evidence and residual ownership |
+|---|---|---|
+| `TM-R01`, `TM-I01` | Exact channel registration and per-request checks require the registered `WebContents`, its exact current main frame, and the trusted application URL. Tests reject lookalike senders, subframes, stale authorizations, navigation races, destroyed renderers, arbitrary channels, and non-idempotent cleanup. | Packaged E2E keeps the frozen exact six-method bridge after reload and exercises its capability path. Cross-platform XSS and additional adversarial cases remain #131. |
+| `TM-D01` | Strict schema and structured-clone validation rejects unknown or inherited fields, custom prototypes, accessors, symbol or hidden keys, sparse arrays, cycles, repeated references, non-finite numbers, malformed values, and boundary-over byte/item/depth payloads before privileged work. Four active and eight queued non-coalesced operations are enforced per renderer; capability reads coalesce for at most 32 callers. Repeated stalled bursts prove underlying work remains capped after caller timeout. | Packaged E2E completes a 32-call capability burst under a fixed deadline. Exact-head hosted package rows are required before this evidence is credited for release. |
+| `TM-A01` | The bridge backend exposes only declared operations. The main-owned capability client uses the fixed authenticated route and accepts an abort signal; the renderer cannot select a route, endpoint, header, credential, or transport. | The packaged burst reaches the private sidecar through the declared method only. Local package runs cannot replace native exact-head hosted rows. |
+| `TM-O01` | Queue saturation, timeout, cancellation, validation failure, and internal failure map to allowlisted stable bridge codes without backend stacks, response bodies, bootstrap material, endpoints, ports, tokens, host details, or absolute paths. Tests assert overload remains redacted. | Release evidence must still pass the project-wide canary and support-artifact checks owned by #131/#132. |
 
 ### Issue #306 verified uv bootstrap evidence
 
@@ -420,7 +432,7 @@ or release evidence, never private payloads.
 
 | ID | Abuse case | Inherent risk | Controls, owner, gate, and planned negative test | Evidence-backed residual risk |
 |---|---|---|---|---|
-| `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy. The risk rating is not reduced while #101 sender/race coverage and the #131 adversarial suite remain pending. |
+| `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy; #101 proves exact sender/frame/origin authorization, strict bridge bounds, cancellation, and lifecycle cleanup at source level. The risk rating is not reduced until exact-head packaged rows and #131's broader adversarial suite pass. |
 | `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, pre-spawn payload integrity, verify-to-spawn replacement, and full-process-tree cleanup. | Not reduced: private bootstrap, manifest-bound payload verification, bounded supervision, current-resource drain, and full-tree cleanup are implemented, but the TOCTOU interval, replay/timing, exact-head hosted Windows and final platform evidence, and Issue #132 publisher signing remain pending. |
 | `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Not reduced: implementation and packaged evidence pending. |
 | `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Not reduced: worker and packaged evidence pending. |

@@ -266,6 +266,18 @@ target-assurance gates to pass.
   later domain adapter and are not exposed by the 0.5.0 shell.
 - The current bridge is frozen to `getAppInfo`, `getStartupDiagnostics`,
   `getCapabilities`, `retrySidecar`, `getPreferences`, and `updatePreferences`.
+  Electron main owns the exact channel map and accepts each request only from
+  the registered `WebContents`, its current main frame, and its exact trusted
+  application URL. Strict runtime schemas and structured-clone byte, item, and
+  depth limits apply in both directions; malformed prototypes, accessors,
+  symbols, sparse arrays, cycles, repeated references, and non-finite values
+  fail closed. Non-coalesced work is limited to four active and eight queued
+  operations per renderer, while capability reads coalesce for at most 32
+  callers. Absolute deadlines, navigation, renderer loss, bridge replacement,
+  sidecar-session invalidation, and shutdown cancel work with stable redacted
+  errors. An underlying operation retains its active slot until settlement
+  even after its caller times out, preventing hidden work from escaping the
+  concurrency cap.
   Preference updates carry the renderer-visible revision; main owns the storage
   boundary and rejects stale updates. The renderer advances past onboarding
   only after a fresh valid preference snapshot reports completion; malformed,
