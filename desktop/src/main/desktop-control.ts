@@ -1,7 +1,6 @@
 /** Builds the main-process bridge for safe app, sidecar, and preferences operations. */
 import {
   DESKTOP_PROTOCOL_VERSION,
-  type AncestryBridge,
   type AppInfo,
   type BridgeErrorCode,
   type BridgeResult,
@@ -13,6 +12,7 @@ import {
 } from '../shared-contract/desktop'
 import type { SidecarDiagnostics, SidecarLifecycleState } from './sidecar-supervisor'
 import { PreferencesConflictError, type PreferencesStore } from './preferences-store'
+import type { MainDesktopBridge } from './ipc-handlers'
 
 export { MemoryPreferencesStore, PreferencesConflictError } from './preferences-store'
 export type { PreferencesStore } from './preferences-store'
@@ -23,7 +23,11 @@ export interface SidecarControlPort {
 }
 
 export interface CapabilitiesClient {
-  getCapabilities(): Promise<CapabilityManifest>
+  getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest>
+}
+
+function requireActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason
 }
 
 function frozen<T extends object>(value: T): Readonly<T> {
@@ -63,44 +67,61 @@ export function createDesktopControlBridge(dependencies: Readonly<{
   supervisor: SidecarControlPort
   capabilitiesClient: CapabilitiesClient
   preferences: PreferencesStore
-}>): AncestryBridge {
+}>): MainDesktopBridge {
   const appInfo = frozen({ ...dependencies.appInfo })
   return frozen({
-    async getAppInfo() {
+    async getAppInfo(signal?: AbortSignal) {
+      requireActive(signal)
       return success(appInfo)
     },
-    async getStartupDiagnostics() {
+    async getStartupDiagnostics(signal?: AbortSignal) {
+      requireActive(signal)
       return success(safeDiagnostics(dependencies.supervisor.diagnostics()))
     },
-    async getCapabilities() {
+    async getCapabilities(signal?: AbortSignal) {
       try {
-        return success(await dependencies.capabilitiesClient.getCapabilities())
+        requireActive(signal)
+        const manifest = await dependencies.capabilitiesClient.getCapabilities(signal)
+        requireActive(signal)
+        return success(manifest)
       } catch {
+        requireActive(signal)
         const unavailable = dependencies.supervisor.diagnostics().state === 'unavailable'
         return unavailable
           ? failure('SIDECAR_UNAVAILABLE', 'The private service is unavailable.', 'Retry the service or restart AncestryLLM.')
           : failure('SIDECAR_REQUEST_FAILED', 'The private service did not return capabilities.', 'Try again or restart AncestryLLM.')
       }
     },
-    async retrySidecar() {
+    async retrySidecar(signal?: AbortSignal) {
       try {
+        requireActive(signal)
         await dependencies.supervisor.retry()
+        requireActive(signal)
         return success(safeDiagnostics(dependencies.supervisor.diagnostics()))
       } catch {
+        requireActive(signal)
         return failure('SIDECAR_UNAVAILABLE', 'The private service could not be restarted.', 'Restart AncestryLLM.')
       }
     },
-    async getPreferences() {
+    async getPreferences(signal?: AbortSignal) {
       try {
-        return success(await dependencies.preferences.get())
+        requireActive(signal)
+        const preferences = await dependencies.preferences.get()
+        requireActive(signal)
+        return success(preferences)
       } catch {
+        requireActive(signal)
         return failure('PREFERENCES_UNAVAILABLE', 'Desktop preferences are unavailable.', 'Restart AncestryLLM.')
       }
     },
-    async updatePreferences(update: PreferenceUpdate) {
+    async updatePreferences(update: PreferenceUpdate, signal?: AbortSignal) {
       try {
-        return success(await dependencies.preferences.update(update))
+        requireActive(signal)
+        const preferences = await dependencies.preferences.update(update)
+        requireActive(signal)
+        return success(preferences)
       } catch (cause) {
+        requireActive(signal)
         if (cause instanceof PreferencesConflictError) {
           return failure('PREFERENCES_CONFLICT', 'Desktop preferences changed before this update.', 'Reload preferences and try again.')
         }

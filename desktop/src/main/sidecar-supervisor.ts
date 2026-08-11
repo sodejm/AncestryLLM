@@ -175,6 +175,7 @@ export class SidecarSupervisor {
   private stopping = false
   private stopPromise: Promise<void> | undefined
   private manualRetryPromise: Promise<boolean> | undefined
+  private readonly sessionInvalidationListeners = new Set<() => void>()
 
   constructor(private readonly options: SidecarSupervisorOptions) {
     if (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0) {
@@ -245,6 +246,17 @@ export class SidecarSupervisor {
     return this.activeSession
   }
 
+  /** Notifies when an authenticated session is revoked or replaced, not on first acquisition. */
+  onSessionInvalidated(listener: () => void): () => void {
+    this.sessionInvalidationListeners.add(listener)
+    let subscribed = true
+    return () => {
+      if (!subscribed) return
+      subscribed = false
+      this.sessionInvalidationListeners.delete(listener)
+    }
+  }
+
   retry(): Promise<boolean> {
     if (this.manualRetryPromise) return this.manualRetryPromise
     if (
@@ -269,7 +281,7 @@ export class SidecarSupervisor {
     this.transition('stopping', null)
     const active = this.current
     this.current = undefined
-    this.activeSession = undefined
+    this.setActiveSession(undefined)
     const processes = new Set(this.pending)
     if (active) processes.add(active)
     this.stopPromise = Promise.allSettled(
@@ -313,14 +325,14 @@ export class SidecarSupervisor {
         throw new Error('Sidecar supervisor is stopping.')
       }
       this.current = sidecar
-      this.activeSession = Object.freeze({
+      this.setActiveSession(Object.freeze({
         host: '127.0.0.1',
         port: ready.port,
         contract: API_CONTRACT,
         appBuild: this.options.appBuild,
         sidecarBuild: ready.sidecar_build,
         bearerToken: token,
-      })
+      }))
       this.transition('ready', null)
       sidecar.once('exit', () => { this.handleExit(sidecar) })
     } catch (error) {
@@ -334,7 +346,7 @@ export class SidecarSupervisor {
   private handleExit(sidecar: RunningSidecar): void {
     if (this.stopping || this.current !== sidecar) return
     this.current = undefined
-    this.activeSession = undefined
+    this.setActiveSession(undefined)
     this.transition('restarting', null)
     void this.cleanupAndRestartAfterExit(sidecar)
   }
@@ -391,9 +403,25 @@ export class SidecarSupervisor {
   }
 
   private reportUnavailable(failure: SidecarFailure): void {
-    this.activeSession = undefined
+    this.setActiveSession(undefined)
     this.transition('unavailable', failure)
     this.options.onFatal?.(this.diagnostics())
+  }
+
+  private setActiveSession(
+    session: Readonly<AuthenticatedSidecarSession> | undefined,
+  ): void {
+    if (this.activeSession === session) return
+    const previous = this.activeSession
+    this.activeSession = session
+    if (!previous) return
+    for (const listener of [...this.sessionInvalidationListeners]) {
+      try {
+        listener()
+      } catch {
+        // Session invalidation must not affect sidecar lifecycle management.
+      }
+    }
   }
 
   private transition(state: SidecarLifecycleState, failure: SidecarFailure | null): void {

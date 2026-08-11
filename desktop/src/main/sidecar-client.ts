@@ -7,7 +7,7 @@ const CAPABILITIES_PATH = '/api/v1/capabilities'
 const MAX_RESPONSE_BYTES = 1_048_576
 const REQUEST_TIMEOUT_MS = 3_000
 
-export type SidecarClientFailure = 'unavailable' | 'request_failed' | 'invalid_response'
+export type SidecarClientFailure = 'unavailable' | 'request_failed' | 'invalid_response' | 'cancelled'
 
 export class SidecarClientError extends Error {
   constructor(readonly reason: SidecarClientFailure) {
@@ -25,19 +25,32 @@ export interface SidecarHttpResponse {
 export type SidecarRequest = (
   session: Readonly<AuthenticatedSidecarSession>,
   path: typeof CAPABILITIES_PATH,
+  signal?: AbortSignal,
 ) => Promise<SidecarHttpResponse>
 
 function requestFixedRoute(
   sidecar: Readonly<AuthenticatedSidecarSession>,
   path: typeof CAPABILITIES_PATH,
+  signal?: AbortSignal,
 ): Promise<SidecarHttpResponse> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new SidecarClientError('cancelled'))
+      return
+    }
     let responseStream: IncomingMessage | undefined
     let settled = false
+    const abort = () => {
+      const error = new SidecarClientError('cancelled')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }
     const finish = <T>(callback: (value: T) => void, value: T) => {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
       callback(value)
     }
     const resolveOnce = (value: SidecarHttpResponse) => finish(resolve, value)
@@ -88,6 +101,11 @@ function requestFixedRoute(
       request.destroy(error)
       rejectOnce(error)
     }, REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
     request.end()
   })
 }
@@ -95,19 +113,22 @@ function requestFixedRoute(
 export function createSidecarCapabilitiesClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
-}>): Readonly<{ getCapabilities(): Promise<CapabilityManifest> }> {
+}>): Readonly<{ getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest> }> {
   const request = dependencies.request ?? requestFixedRoute
   return Object.freeze({
-    async getCapabilities() {
+    async getCapabilities(signal?: AbortSignal) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
       const session = dependencies.session()
       if (!session) throw new SidecarClientError('unavailable')
       let response: SidecarHttpResponse
       try {
-        response = await request(session, CAPABILITIES_PATH)
+        response = await request(session, CAPABILITIES_PATH, signal)
       } catch (error) {
+        if (signal?.aborted) throw new SidecarClientError('cancelled')
         if (error instanceof SidecarClientError) throw error
         throw new SidecarClientError('request_failed')
       }
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
       if (response.statusCode !== 200 || !/^application\/json(?:\s*;|$)/i.test(response.contentType)
         || Buffer.byteLength(response.body, 'utf8') > MAX_RESPONSE_BYTES) {
         throw new SidecarClientError('invalid_response')

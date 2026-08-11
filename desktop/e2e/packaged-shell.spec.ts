@@ -752,6 +752,47 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
   const response = await page.reload()
   expect(await response?.headerValue('content-security-policy')).toBe(PRODUCTION_CSP)
 
+  const warmCapabilities = await withinDeadline(
+    'warming packaged capability bridge',
+    10_000,
+    () => page.evaluate(() => (
+      (window as unknown as {
+        ancestry: { getCapabilities(): Promise<{ ok: boolean }> }
+      }).ancestry.getCapabilities()
+    )),
+  )
+  expect(warmCapabilities.ok).toBe(true)
+
+  const capabilityBurst = await withinDeadline(
+    'running bounded packaged capability bridge burst',
+    10_000,
+    () => page.evaluate(async () => {
+      const ancestry = (window as unknown as {
+        ancestry: {
+          getCapabilities(): Promise<{
+            ok: boolean
+            error?: { code: string }
+          }>
+        }
+      }).ancestry
+      const responses = await Promise.all(
+        Array.from({ length: 32 }, () => ancestry.getCapabilities()),
+      )
+      return {
+        allSuccessful: responses.every((result) => result.ok),
+        count: responses.length,
+        errorCodes: [...new Set(responses.flatMap(
+          (result) => result.error ? [result.error.code] : [],
+        ))].sort(),
+      }
+    }),
+  )
+  expect(capabilityBurst).toEqual({
+    allSuccessful: true,
+    count: 32,
+    errorCodes: [],
+  })
+
   const externalRequests: string[] = []
   page.on('request', (request) => {
     if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())

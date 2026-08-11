@@ -104,17 +104,35 @@ port, or raw HTTP data.
 
 The frozen `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
-and `updatePreferences`. Main validates the sender, argument count, preference
-update schema, and runtime response schema before a value crosses IPC; preload
-validates again before exposing the result to the renderer. Preference updates
-require the last renderer-visible non-negative revision and return a coded
-conflict when it is stale. Packaged main persists the exact bounded preference
-schema in `preferences.json` beneath Electron's OS app-data directory. Writes
-are validated, serialized, and atomically replace the file without following a
-preference-file symlink. Missing and supported legacy data use safe defaults;
-corrupt and unsupported data produce stable path-free diagnostics and are not
-silently overwritten. The renderer receives neither the storage path nor any
-additional storage capability.
+and `updatePreferences`; there is no generic send, listen, route, or channel
+selection operation. Main accepts a call only from the registered
+`WebContents`, its exact current main frame, and the exact trusted
+`app://bundle/index.html` URL. It rechecks those facts on every request.
+Arguments and responses must also pass strict runtime schemas and a structured-
+clone policy that rejects unknown or inherited fields, accessors, symbol keys,
+sparse arrays, non-finite numbers, repeated references, cycles, excessive
+depth, and excessive UTF-8 bytes or item counts. Preload validates the response
+again before exposing it to the renderer.
+
+Main admits at most four non-coalesced operations per renderer and queues at
+most eight more. Capability reads share one in-flight operation for up to 32
+callers. Every call has an absolute five-second deadline; queue saturation,
+timeout, and cancellation return stable redacted codes rather than backend
+details. Navigation of the main frame, renderer exit or destruction, bridge
+replacement, sidecar-session loss or replacement, and application shutdown
+cancel and clean up affected work. Establishing the first healthy session does
+not cancel the retry that created it. Timed-out underlying operations continue
+to occupy an active slot until they actually settle, so an uncooperative
+backend cannot turn repeated renderer timeouts into unbounded hidden work.
+
+Preference updates require the last renderer-visible non-negative revision and
+return a coded conflict when it is stale. Packaged main persists the exact
+bounded preference schema in `preferences.json` beneath Electron's OS app-data
+directory. Writes are validated, serialized, and atomically replace the file
+without following a preference-file symlink. Missing and supported legacy data
+use safe defaults; corrupt and unsupported data produce stable path-free
+diagnostics and are not silently overwritten. The renderer receives neither
+the storage path nor any additional storage capability.
 
 ## Diagnostics and recovery
 

@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import type { AncestryBridge } from '../shared-contract/desktop'
 import { createDesktopControlBridge } from './desktop-control'
+import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
 import { createSidecarCapabilitiesClient } from './sidecar-client'
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
@@ -12,7 +12,7 @@ import {
 } from './sidecar-supervisor'
 
 export interface RuntimeBridge {
-  bridge: AncestryBridge
+  bridge: MainDesktopBridge
   supervisor?: SidecarSupervisor
 }
 
