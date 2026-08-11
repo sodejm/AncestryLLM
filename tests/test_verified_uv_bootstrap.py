@@ -1786,6 +1786,56 @@ def test_verify_installed_rehashes_before_running_uv(
     assert runner.commands == []
 
 
+@pytest.mark.parametrize(
+    ("architecture", "platform_key"),
+    [
+        ("AMD64", "windows-x86_64"),
+        ("ARM64", "windows-arm64"),
+    ],
+)
+def test_verify_installed_resolves_setup_uv_windows_output_to_executable(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    architecture: str,
+    platform_key: str,
+) -> None:
+    uv_binary = b"verified setup-uv Windows executable"
+    setup_uv_output_path = tmp_path / "uv"
+    installed_uv = tmp_path / "uv.exe"
+    installed_uv.write_bytes(uv_binary)
+    policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    policy["uv"]["assets"][platform_key]["binary_sha256"] = _sha256(uv_binary)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    runner = FixtureRunner("[]")
+
+    bootstrap_module.verify_installed_uv(
+        policy_path=policy_path,
+        uv_path=setup_uv_output_path,
+        runner=runner,
+        platform_id=("win32", architecture),
+    )
+
+    assert runner.commands == [(str(installed_uv), "--version")]
+
+
+def test_verify_installed_rejects_unexpected_windows_executable_name(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    runner = FixtureRunner("[]")
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="INSTALLED_UV_PATH_INVALID"):
+        bootstrap_module.verify_installed_uv(
+            policy_path=POLICY_PATH,
+            uv_path=tmp_path / "uvx.exe",
+            runner=runner,
+            platform_id=("win32", "ARM64"),
+        )
+
+    assert runner.commands == []
+
+
 def test_record_post_preflight_failure_overwrites_success_status(
     tmp_path: Path,
     bootstrap_module: Any,

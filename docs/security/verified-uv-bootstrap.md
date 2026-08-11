@@ -123,6 +123,10 @@ disabled, and re-hashes the action-installed executable before first use. The
 calling job grants the verifier `contents: read` and `attestations: read`; jobs
 retain only any additional job-specific scope already required by their release
 contract.
+On Windows, setup-uv reports its installed path without the `.exe` suffix. The
+post-install verifier resolves only that exact `uv` name to its sibling
+`uv.exe`; it does not search `PATH`, accept another executable name, or relax
+the policy-selected executable digest and version checks.
 The token is available only to the `gh attestation verify` subprocess; the
 verified GitHub CLI version probe and every `uv` subprocess receive an
 environment with GitHub token variables removed. The token is never written to
