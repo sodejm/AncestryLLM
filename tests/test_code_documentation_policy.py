@@ -168,6 +168,12 @@ class TestCheckInventory:
         diagnostics = check_inventory([key], tmp_path)
         assert not any("not-mapped" in d for d in diagnostics)
 
+    def test_dependency_audit_allowlist_maps_to_its_review_procedure(self) -> None:
+        assert (
+            NON_COMMENT_FORMAT_MAP["config/dependency-audit-exclusions.json"]
+            == "docs/DEPENDENCY_MAINTENANCE.md"
+        )
+
     def test_non_comment_format_with_missing_map_target_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

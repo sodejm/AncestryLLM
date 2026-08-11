@@ -26,13 +26,6 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      - id: ancestryllm-lockfile-consistency
-        name: Check uv lockfile consistency
-        entry: make lock-check
-        language: system
-        pass_filenames: false
-        files: ^(pyproject\.toml|uv\.lock)$
-
       - id: ancestryllm-workflow-audit
         name: Audit changed GitHub Actions workflows
         entry: make workflow-audit
@@ -40,6 +33,24 @@ repos:
         pass_filenames: false
         files: ^\.github/(actions|workflows)/
         stages: [pre-push]
+
+  # Commit corresponds to Ruff 0.16.1, matching the locked lint tool.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 39d9ac5938dadb73df0564a45f163e25ff9fa6e2
+    hooks:
+      - id: ruff-check
+        args: ["--no-fix"]
+        files: ^(src|tests|scripts)/
+      - id: ruff-format
+        args: ["--check"]
+        files: ^(src|tests|scripts)/
+
+  # Commit corresponds to the repository's verified uv 0.12.1 contract.
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 8ff2449591c8de025b17661ba76d60237a1ae62b
+    hooks:
+      - id: uv-lock
+        args: ["--check"]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

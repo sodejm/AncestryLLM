@@ -8,13 +8,20 @@ before changes can be released.
 
 Run targeted tests while editing. `make bootstrap` installs two hook tiers:
 
-- the commit hook scans staged content for secrets, private keys, malformed
-  files, merge markers, oversized files, and basic whitespace/line-ending
-  problems;
+- the commit hook retains the generic file-safety checks and local system
+  gitleaks scan, then uses exact-commit `astral-sh/ruff-pre-commit` hooks for
+  Ruff check and format-check behavior and exact-commit
+  `astral-sh/uv-pre-commit` for `uv lock --check`; the Ruff hooks do not apply
+  fixes;
 - the pre-push hook runs `make pre-push`, which expands to the canonical test,
   lint, type-check, dependency-audit, and Semgrep gates. It also runs
   `make workflow-audit` when a pushed commit changes `.github/workflows/` or
   `.github/actions/`.
+
+The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
+0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
+the checked-in GFM structural checks to every tracked Markdown file, whether
+or not a contributor installed the hooks.
 
 `make setup` first runs the
 [verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the

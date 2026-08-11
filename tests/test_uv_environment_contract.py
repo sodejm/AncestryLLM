@@ -91,7 +91,10 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "test": "$(UV_BIN) run --locked --group test pytest --verbose",
         "typecheck": "$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm",
         "typecheck-ty": ("$(UV_BIN) run --locked --group typecheck ty check src/ancestryllm"),
-        "dependency-audit": "$(UV_BIN) run --locked --group security pip-audit",
+        "dependency-audit": (
+            "$(UV_BIN) run --locked --group security python "
+            "scripts/run_dependency_audit.py --uv $(UV_BIN)"
+        ),
         "security-static": ("$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py ."),
         "package": (
             "$(UV_BIN) run --locked --group build python "

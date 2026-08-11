@@ -3,6 +3,8 @@
     "ms-python.python",
     "ms-python.vscode-pylance",
     "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
     "ms-azuretools.vscode-docker",
     "redhat.vscode-yaml",
     "mads-hartmann.bash-ide-vscode",

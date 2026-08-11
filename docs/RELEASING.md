@@ -241,6 +241,13 @@ self-approval; do not make that change during the one-maintainer release.
    `docs/release-evidence/<version>/`. Every finding needs an owner and expiry;
    every importer needs a dated evidence link, and only fictional-data manual
    imports may be marked verified.
+
+   Use `uv version --short` as a read-only confirmation of the project version.
+   Do not use `uv version <version>` to perform the release bump: the release
+   contract spans `.github/release-config.json`, `pyproject.toml`, and
+   `desktop/package.json` plus the packaged sidecar/build identity. Update and
+   verify those owned values together, regenerate the lock through `make lock`,
+   and let the release-configuration verifier reject any drift.
 4. Approve and merge a release-only preparation PR through the protected
    `main` ruleset, after required checks pass and conversations are resolved.
 5. Run the release-configuration verifier and confirm the exact configured

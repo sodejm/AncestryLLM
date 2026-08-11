@@ -115,6 +115,11 @@ mypy remains authoritative for CI, release readiness, and release evidence.
 The release-evidence result is still schema v1 `mypy`; it is not renamed to
 `type-check`.
 
+The checked-in `.vscode/settings.json` keeps Ruff as the Python formatter and
+linter while mypy remains the authoritative editor checker. No ty editor or
+cache ownership is configured during the advisory period; that change is
+permitted only in a separately accepted cutover.
+
 The conditional cutover must remain a separate change. It may proceed only if
 the complete gate in issue #309 passes without reduced strictness, broader
 suppressions, ignored modules, unsupported Python versions, crashes,

@@ -1,8 +1,6 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
-  "python.terminal.useEnvFile": true,
-  "python.envFile": "${workspaceFolder}/.env",
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   "python.testing.pytestArgs": ["tests"],
@@ -10,7 +8,23 @@
   "files.trimTrailingWhitespace": true,
   "files.eol": "\n",
   "editor.rulers": [88],
+  "ruff.enable": true,
+  "ruff.configuration": "${workspaceFolder}/pyproject.toml",
+  "ruff.configurationPreference": "filesystemFirst",
+  "ruff.lint.enable": true,
+  "ruff.fixAll": false,
+  "ruff.organizeImports": false,
+  "ruff.codeAction.fixViolation.enable": false,
+  "ruff.codeAction.disableRuleComment.enable": false,
+  "mypy-type-checker.importStrategy": "fromEnvironment",
+  "mypy-type-checker.args": [
+    "--config-file",
+    "${workspaceFolder}/pyproject.toml"
+  ],
+  "mypy-type-checker.reportingScope": "workspace",
   "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
     "editor.tabSize": 4,
     "editor.detectIndentation": false
   },
