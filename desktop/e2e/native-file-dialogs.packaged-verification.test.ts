@@ -1,3 +1,4 @@
+// Verifies packaged file-dialog selections are canonicalized narrowly and fail closed.
 import { describe, expect, it } from 'vitest'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 
