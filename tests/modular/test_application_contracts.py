@@ -152,6 +152,17 @@ def test_operation_contracts_cover_every_command_route_exactly() -> None:
     assert all(contract.key == key for key, contract in OPERATION_CONTRACTS.items())
 
 
+def test_application_contract_inventory_lists_every_deployment_operation() -> None:
+    documentation = (Path(__file__).parents[2] / "docs" / "APPLICATION_CONTRACTS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "| Deployment | `deployment.modes`, `deployment.status`, `deployment.preview`, "
+        "`deployment.switch`, `deployment.diagnose`, `deployment.metadata` |" in documentation
+    )
+
+
 def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> None:
     public_names = {
         "RootsMagicExportArtifact",

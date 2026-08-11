@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import pytest
 
@@ -84,6 +82,37 @@ def test_settings_patch_is_revision_checked_atomic_and_owner_only(tmp_path: Path
         )
     assert stale.value.code == "SETTINGS_REVISION_CONFLICT"
     assert AppConfig.load(config.config_path).max_query_rows == 250
+
+
+def test_config_save_finishes_fallible_permission_work_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    published = False
+    permission_hardened = False
+    original_replace = Path.replace
+    original_fchmod = os.fchmod
+
+    def tracked_replace(source: Path, target: Path) -> Path:
+        nonlocal published
+        result = original_replace(source, target)
+        published = True
+        return result
+
+    def permission_before_publication(descriptor: int, mode: int) -> None:
+        nonlocal permission_hardened
+        assert not published
+        permission_hardened = True
+        original_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(Path, "replace", tracked_replace)
+    monkeypatch.setattr(os, "fchmod", permission_before_publication)
+
+    config.save()
+
+    assert published is True
+    assert permission_hardened is True
 
 
 @pytest.mark.parametrize(

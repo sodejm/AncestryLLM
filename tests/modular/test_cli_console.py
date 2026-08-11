@@ -37,6 +37,16 @@ def _expected_tree_ref(tree: Path) -> str:
     return f"tree_{hashlib.sha256(os.fsencode(str(tree.resolve(strict=True)))).hexdigest()}"
 
 
+def _deployment_profile_payload(profile: DeploymentProfile) -> dict[str, object]:
+    return {
+        "schema_version": profile.schema_version,
+        "mode_code": profile.mode.value,
+        "topology_code": profile.topology.value,
+        "endpoint_origin": profile.endpoint_origin,
+        "endpoint_identity_sha256": profile.endpoint_identity_sha256,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class CommandCase:
     module: str
@@ -104,14 +114,53 @@ def command_cases(
         "--expected-revision",
         str(app_context.config.revision),
     )
+    deployment_modes = deployment.modes()
+    deployment_snapshot = deployment.snapshot()
+    deployment_diagnostic = deployment.diagnose()
+    deployment_metadata = deployment.metadata("support")
     return (
-        CommandCase("deployment", "modes", (), deployment.modes()),
-        CommandCase("deployment", "status", (), deployment.snapshot()),
+        CommandCase(
+            "deployment",
+            "modes",
+            (),
+            {
+                "modes": tuple(
+                    {
+                        "mode_code": item.mode.value,
+                        "label": item.label,
+                        "summary": item.summary,
+                        "consequences": item.consequences,
+                        "prerequisites": item.prerequisites,
+                        "default": item.default,
+                        "recommended": item.recommended,
+                        "advanced": item.advanced,
+                    }
+                    for item in deployment_modes
+                )
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "status",
+            (),
+            {
+                "schema_version": deployment_snapshot.schema_version,
+                "revision": deployment_snapshot.revision,
+                "profile": _deployment_profile_payload(deployment_snapshot.profile),
+            },
+        ),
         CommandCase(
             "deployment",
             "preview",
             target_arguments,
-            deployment_preview,
+            {
+                "schema_version": deployment_preview.schema_version,
+                "expected_revision": deployment_preview.expected_revision,
+                "current": _deployment_profile_payload(deployment_preview.current),
+                "target": _deployment_profile_payload(deployment_preview.target),
+                "consequences": deployment_preview.consequences,
+                "confirmation": deployment_preview.confirmation,
+            },
         ),
         CommandCase(
             "deployment",
@@ -122,14 +171,44 @@ def command_cases(
                 deployment_preview.confirmation,
                 "--unattended",
             ),
-            deployment.snapshot(),
+            {
+                "schema_version": deployment_snapshot.schema_version,
+                "revision": deployment_snapshot.revision,
+                "profile": _deployment_profile_payload(deployment_snapshot.profile),
+            },
         ),
-        CommandCase("deployment", "diagnose", (), deployment.diagnose()),
+        CommandCase(
+            "deployment",
+            "diagnose",
+            (),
+            {
+                "schema_version": deployment_diagnostic.schema_version,
+                "revision": deployment_diagnostic.revision,
+                "status_code": deployment_diagnostic.status,
+                "diagnostics": tuple(
+                    {
+                        "diagnostic_code": item.code,
+                        "status_code": item.status,
+                        "message": item.message,
+                        "remediation": item.remediation,
+                    }
+                    for item in deployment_diagnostic.diagnostics
+                ),
+            },
+        ),
         CommandCase(
             "deployment",
             "metadata",
             ("--purpose", "support"),
-            deployment.metadata("support"),
+            {
+                "schema_version": deployment_metadata.schema_version,
+                "purpose_code": deployment_metadata.purpose,
+                "deployment_schema_version": deployment_metadata.deployment_schema_version,
+                "config_revision": deployment_metadata.config_revision,
+                "mode_code": deployment_metadata.mode.value,
+                "topology_code": deployment_metadata.topology.value,
+                "endpoint_identity_sha256": deployment_metadata.endpoint_identity_sha256,
+            },
         ),
         CommandCase(
             "rootsmagic",
@@ -595,10 +674,10 @@ def test_nonlocal_profile_blocks_ordinary_commands_but_keeps_recovery_available(
 
     assert main(["--json", "deployment", "status"], app_context) == 0
     status = json.loads(capsys.readouterr().out)
-    assert status["profile"]["mode"] == "connect-remote"
+    assert status["profile"]["mode_code"] == "connect-remote"
     assert main(["--json", "deployment", "diagnose"], app_context) == 0
     diagnostic = json.loads(capsys.readouterr().out)
-    assert diagnostic["status"] == "failed"
+    assert diagnostic["status_code"] == "failed"
 
 
 @pytest.mark.parametrize(

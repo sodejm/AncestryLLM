@@ -12,6 +12,7 @@ from ancestryllm.application.deployment import (
     DeploymentObservation,
     DeploymentService,
 )
+from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.deployment import (
     DEPLOYMENT_SCHEMA_VERSION,
@@ -306,7 +307,8 @@ def test_interrupted_persistence_rolls_back_memory_and_disk(
     local = DeploymentProfile.local()
     preview = service.preview(local, schema_version=1, expected_revision=0)
 
-    def interrupted_save(_candidate: AppConfig) -> None:
+    def interrupted_save(_candidate: AppConfig, *, expected_revision: int | None = None) -> bool:
+        assert expected_revision == 0
         raise KeyboardInterrupt
 
     monkeypatch.setattr(AppConfig, "save", interrupted_save)
@@ -322,6 +324,40 @@ def test_interrupted_persistence_rolls_back_memory_and_disk(
     assert config.deployment == DeploymentProfile.host_remote_server()
     assert config.revision == 0
     assert config.config_path.read_bytes() == before
+
+
+def test_stale_deployment_switch_cannot_overwrite_a_settings_process(
+    tmp_path: Path,
+) -> None:
+    initial = _config(tmp_path, provider="openai")
+    initial.deployment = DeploymentProfile.host_remote_server()
+    initial.save()
+    stale_deployment = AppConfig.load(initial.config_path)
+    current_settings = AppConfig.load(initial.config_path)
+    deployment = DeploymentService(stale_deployment)
+    local = DeploymentProfile.local()
+    preview = deployment.preview(local, schema_version=1, expected_revision=0)
+
+    SettingsService(current_settings).patch(
+        schema_version=1,
+        expected_revision=0,
+        changes={"limits.max_query_rows": 250},
+    )
+
+    with pytest.raises(ConfigurationError) as raised:
+        deployment.switch(
+            local,
+            schema_version=1,
+            expected_revision=0,
+            confirmation=preview.confirmation,
+            unattended=True,
+        )
+
+    _assert_code(raised, "DEPLOYMENT_REVISION_CONFLICT")
+    persisted = AppConfig.load(initial.config_path)
+    assert persisted.revision == 1
+    assert persisted.max_query_rows == 250
+    assert persisted.deployment == DeploymentProfile.host_remote_server()
 
 
 def test_diagnostics_fail_closed_on_runtime_or_endpoint_substitution(tmp_path: Path) -> None:
@@ -357,6 +393,21 @@ def test_diagnostics_fail_closed_on_runtime_or_endpoint_substitution(tmp_path: P
     assert [item.code for item in local_report.diagnostics] == [
         "DEPLOYMENT_LISTENER_SCOPE_MISMATCH"
     ]
+
+
+def test_host_diagnostic_rejects_provider_none(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.deployment = DeploymentProfile.host_remote_server()
+
+    report = DeploymentService(config).diagnose(
+        DeploymentObservation(
+            mode=DeploymentMode.HOST_REMOTE_SERVER,
+            topology=DeploymentTopology.REMOTE_HOST,
+        )
+    )
+
+    assert report.status == "failed"
+    assert [item.code for item in report.diagnostics] == ["DEPLOYMENT_PROVIDER_CONFLICT"]
 
 
 def test_listener_scope_rejects_loopback_lookalike_hostnames(tmp_path: Path) -> None:

@@ -31,7 +31,7 @@ class DeploymentConfigPort(Protocol):
     default_provider: str
     deployment: DeploymentProfile
 
-    def save(self) -> None: ...
+    def save(self, *, expected_revision: int | None = None) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,12 +301,17 @@ class DeploymentService:
             candidate.deployment = selected
             candidate.revision = self.config.revision + 1
             try:
-                candidate.save()
+                saved = candidate.save(expected_revision=expected_revision)
             except OSError as exc:
                 raise _deployment_error(
                     "DEPLOYMENT_PERSISTENCE_FAILED",
                     "The deployment profile could not be persisted safely.",
                 ) from exc
+            if not saved:
+                raise _deployment_error(
+                    "DEPLOYMENT_REVISION_CONFLICT",
+                    "The deployment profile changed since it was read; reload and retry.",
+                )
             self.config.deployment = candidate.deployment
             self.config.revision = candidate.revision
             return self.snapshot()
@@ -366,12 +371,15 @@ class DeploymentService:
                     "The remote runtime is not authenticated for the stored profile.",
                     "Re-enroll through the reviewed authenticated remote workflow.",
                 )
-            if self.config.default_provider == "none":
-                fail(
-                    "DEPLOYMENT_PROVIDER_CONFLICT",
-                    "Provider none conflicts with a remote deployment profile.",
-                    "Recover to Local Desktop or separately select a reviewed provider.",
-                )
+        if (
+            profile.mode is not DeploymentMode.LOCAL_DESKTOP
+            and self.config.default_provider == "none"
+        ):
+            fail(
+                "DEPLOYMENT_PROVIDER_CONFLICT",
+                "Provider none conflicts with a remote deployment profile.",
+                "Recover to Local Desktop or separately select a reviewed provider.",
+            )
         if profile.mode is DeploymentMode.LOCAL_DESKTOP and any(
             not _is_loopback(host) for host in observed.listener_hosts
         ):
