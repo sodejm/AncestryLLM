@@ -27,23 +27,23 @@
     "setuptools": {
       "sdist": {
         "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "0aa651a4061751c257b1e3ce4c936fcf57014328e17ea5aa925b496744c63f65"
+        "sha256": "381606dc8beef94c0119e37149c2889041ed3fff543bc6c633838cb2de92e1e5"
       },
       "wheel": {
         "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1"
+        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
       }
     },
     "setuptools_from_sdist": {
       "wheel": {
         "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1"
+        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
       }
     },
     "uv_build_first": {
       "sdist": {
         "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2"
+        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
       },
       "wheel": {
         "filename": "ancestryllm-0.5.0-py3-none-any.whl",
@@ -59,7 +59,7 @@
     "uv_build_second": {
       "sdist": {
         "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2"
+        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
       },
       "wheel": {
         "filename": "ancestryllm-0.5.0-py3-none-any.whl",
@@ -117,11 +117,65 @@
     },
     "project_metadata": {
       "differences": {
-        "added": [],
-        "changed": [
-          "semantic"
+        "added": [
+          "dependency:alembic>=1.18,<2",
+          "dependency:anthropic>=0.71,<1 ; extra == 'all-llm'",
+          "dependency:anthropic>=0.71,<1 ; extra == 'anthropic'",
+          "dependency:fastapi>=0.116,<1",
+          "dependency:google-genai>=2.12,<3 ; extra == 'all-llm'",
+          "dependency:google-genai>=2.12,<3 ; extra == 'gemini'",
+          "dependency:httpx>=0.28,<1",
+          "dependency:jsonschema>=4.25.1,<4.27",
+          "dependency:keyring>=25.7,<26",
+          "dependency:ollama>=0.6,<1 ; extra == 'all-llm'",
+          "dependency:ollama>=0.6,<1 ; extra == 'ollama'",
+          "dependency:openai>=2.45,<3 ; extra == 'all-llm'",
+          "dependency:openai>=2.45,<3 ; extra == 'openai'",
+          "dependency:openai>=2.45,<3 ; extra == 'openrouter'",
+          "dependency:platformdirs>=4.5,<5",
+          "dependency:prompt-toolkit>=3.0.52,<4",
+          "dependency:pydantic>=2.12,<3",
+          "dependency:pyinstaller>=6.17,<7 ; extra == 'desktop-build'",
+          "dependency:python-dateutil>=2.9,<3",
+          "dependency:rapidfuzz>=3.14,<4",
+          "dependency:rich>=15,<16",
+          "dependency:sqlalchemy>=2.0,<3",
+          "dependency:sqlcipher3>=0.6.2,<0.7",
+          "dependency:sqlglot>=28,<31",
+          "dependency:tomli-w>=1.2,<2",
+          "dependency:uvicorn>=0.35,<1"
         ],
-        "removed": []
+        "changed": [
+          "requires-python"
+        ],
+        "removed": [
+          "dependency:alembic<2,>=1.18",
+          "dependency:anthropic<1,>=0.71; extra == \"all-llm\"",
+          "dependency:anthropic<1,>=0.71; extra == \"anthropic\"",
+          "dependency:fastapi<1,>=0.116",
+          "dependency:google-genai<3,>=2.12; extra == \"all-llm\"",
+          "dependency:google-genai<3,>=2.12; extra == \"gemini\"",
+          "dependency:httpx<1,>=0.28",
+          "dependency:jsonschema<4.27,>=4.25.1",
+          "dependency:keyring<26,>=25.7",
+          "dependency:ollama<1,>=0.6; extra == \"all-llm\"",
+          "dependency:ollama<1,>=0.6; extra == \"ollama\"",
+          "dependency:openai<3,>=2.45; extra == \"all-llm\"",
+          "dependency:openai<3,>=2.45; extra == \"openai\"",
+          "dependency:openai<3,>=2.45; extra == \"openrouter\"",
+          "dependency:platformdirs<5,>=4.5",
+          "dependency:prompt-toolkit<4,>=3.0.52",
+          "dependency:pydantic<3,>=2.12",
+          "dependency:pyinstaller<7,>=6.17; extra == \"desktop-build\"",
+          "dependency:python-dateutil<3,>=2.9",
+          "dependency:rapidfuzz<4,>=3.14",
+          "dependency:rich<16,>=15",
+          "dependency:sqlalchemy<3,>=2.0",
+          "dependency:sqlcipher3<0.7,>=0.6.2",
+          "dependency:sqlglot<31,>=28",
+          "dependency:tomli-w<2,>=1.2",
+          "dependency:uvicorn<1,>=0.35"
+        ]
       },
       "failure_code": "UVBEVAL_PROJECT_METADATA_DRIFT",
       "passed": false
@@ -244,7 +298,7 @@
       "differences": {
         "added": [],
         "changed": [
-          "semantic"
+          "header:generator[0]"
         ],
         "removed": []
       },
@@ -255,9 +309,38 @@
       "differences": {
         "added": [],
         "changed": [
-          "semantic"
+          "header:requires-dist[0]",
+          "header:requires-dist[10]",
+          "header:requires-dist[11]",
+          "header:requires-dist[12]",
+          "header:requires-dist[13]",
+          "header:requires-dist[14]",
+          "header:requires-dist[15]",
+          "header:requires-dist[16]",
+          "header:requires-dist[17]",
+          "header:requires-dist[18]",
+          "header:requires-dist[19]",
+          "header:requires-dist[1]",
+          "header:requires-dist[20]",
+          "header:requires-dist[21]",
+          "header:requires-dist[22]",
+          "header:requires-dist[23]",
+          "header:requires-dist[24]",
+          "header:requires-dist[25]",
+          "header:requires-dist[2]",
+          "header:requires-dist[3]",
+          "header:requires-dist[4]",
+          "header:requires-dist[5]",
+          "header:requires-dist[6]",
+          "header:requires-dist[7]",
+          "header:requires-dist[8]",
+          "header:requires-dist[9]",
+          "header:requires-python[0]"
         ],
-        "removed": []
+        "removed": [
+          "header:dynamic[0]",
+          "header:license-file[0]"
+        ]
       },
       "failure_code": "UVBEVAL_WHEEL_METADATA_DRIFT",
       "passed": false
@@ -285,8 +368,8 @@
   ],
   "schema_version": 1,
   "source": {
-    "commit": "e5f2a1da02b13cd4b8a8fccb365245c95fb92b97",
-    "source_date_epoch": 1786424517
+    "commit": "b94f5b8338079d05bd0b386df6c5ec9b33b55422",
+    "source_date_epoch": 1786426222
   },
   "status": "incompatible",
   "tools": {

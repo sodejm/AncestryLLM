@@ -12,8 +12,8 @@ semantic differences for the evaluated commit.
 | Production backend | `setuptools.build_meta` with `setuptools>=83` |
 | Candidate backend | `uv_build` resolved to 0.12.3 from `uv_build>=0.12.0,<0.13` |
 | Build frontend | Verified repository-local `uv 0.12.1` |
-| Evaluated source | `e5f2a1da02b13cd4b8a8fccb365245c95fb92b97` |
-| `SOURCE_DATE_EPOCH` | `1786424517` |
+| Evaluated source | `b94f5b8338079d05bd0b386df6c5ec9b33b55422` |
+| `SOURCE_DATE_EPOCH` | `1786426222` |
 | Evaluation status | **Incompatible** |
 | 0.7 decision | Adoption rejected/deferred under #305 for this candidate and configuration |
 
@@ -52,11 +52,11 @@ difference is normalized.
 
 | Backend and artifact | SHA-256 |
 | --- | --- |
-| setuptools sdist | `0aa651a4061751c257b1e3ce4c936fcf57014328e17ea5aa925b496744c63f65` |
-| setuptools wheel | `8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1` |
-| setuptools wheel reconstructed from sdist | `8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1` |
-| first `uv_build` sdist | `2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2` |
-| second `uv_build` sdist | `2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2` |
+| setuptools sdist | `381606dc8beef94c0119e37149c2889041ed3fff543bc6c633838cb2de92e1e5` |
+| setuptools wheel | `70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8` |
+| setuptools wheel reconstructed from sdist | `70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8` |
+| first `uv_build` sdist | `58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5` |
+| second `uv_build` sdist | `58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5` |
 | first `uv_build` wheel | `c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b` |
 | second `uv_build` wheel | `c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b` |
 | `uv_build` wheel reconstructed from sdist | `c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b` |
