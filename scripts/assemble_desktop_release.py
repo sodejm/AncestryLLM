@@ -171,10 +171,7 @@ def _positive_integer(value: int, label: str) -> int:
 
 
 def _required_gates(target: str, signing_mode: str) -> set[str]:
-    if signing_mode == "unsigned":
-        signing_gates = UNSIGNED_GATES
-    else:
-        signing_gates = set(TARGETS[target]["gates"])
+    signing_gates = UNSIGNED_GATES if signing_mode == "unsigned" else set(TARGETS[target]["gates"])
     return COMMON_GATES | signing_gates
 
 

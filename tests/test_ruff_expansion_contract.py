@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections import Counter
 from pathlib import Path
 
 from ancestryllm.api.contracts import CapabilityManifest
@@ -53,6 +54,52 @@ def test_performance_and_modernization_rules_are_enabled() -> None:
     selected = set(configuration["tool"]["ruff"]["lint"]["select"])
 
     assert {"PERF", "C4", "FURB"} <= selected
+
+
+def test_language_and_correctness_rules_are_enabled() -> None:
+    configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    lint = configuration["tool"]["ruff"]["lint"]
+    selected = set(lint["select"])
+
+    assert {"UP", "SIM", "RET", "PTH", "DTZ", "LOG", "ASYNC"} <= selected
+    new_families = ("UP", "SIM", "RET", "PTH", "DTZ", "LOG", "ASYNC")
+    assert all(
+        not rule.startswith(new_families)
+        for ignored in lint["per-file-ignores"].values()
+        for rule in ignored
+    )
+
+
+def test_language_and_correctness_suppressions_are_narrow_and_reviewed() -> None:
+    new_families = ("UP", "SIM", "RET", "PTH", "DTZ", "LOG", "ASYNC")
+    actual: Counter[tuple[str, str]] = Counter()
+    for directory in ("scripts", "src", "tests"):
+        for path in (ROOT / directory).rglob("*.py"):
+            relative = path.relative_to(ROOT).as_posix()
+            for match in re.finditer(
+                r"# noqa: ([A-Z][A-Z0-9]*(?:\s*,\s*[A-Z][A-Z0-9]*)*)",
+                path.read_text(encoding="utf-8"),
+            ):
+                for rule in re.split(r"\s*,\s*", match.group(1)):
+                    if rule.startswith(new_families):
+                        actual[(relative, rule)] += 1
+
+    assert actual == Counter(
+        {
+            ("scripts/bootstrap_uv.py", "PTH100"): 2,
+            ("scripts/snapshot_credential_file.py", "PTH100"): 1,
+            ("src/ancestryllm/api/contracts.py", "UP040"): 1,
+            ("src/ancestryllm/application/dto.py", "UP040"): 1,
+            ("src/ancestryllm/application/events.py", "UP040"): 1,
+            ("src/ancestryllm/application/executor.py", "UP040"): 2,
+            ("src/ancestryllm/core/publication.py", "PTH100"): 1,
+            ("src/ancestryllm/gedcom/identity.py", "DTZ001"): 1,
+            ("src/ancestryllm/gedcom/identity.py", "DTZ007"): 1,
+            ("src/ancestryllm/gedcom/sync_publication.py", "PTH100"): 4,
+            ("src/ancestryllm/gedcom/sync_publication.py", "PTH208"): 1,
+            ("tests/test_verified_uv_bootstrap.py", "DTZ001"): 1,
+        }
+    )
 
 
 def test_ci_uses_github_annotations_through_the_canonical_make_gate() -> None:

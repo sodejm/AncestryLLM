@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -106,10 +107,8 @@ def normalize_provider_error(
     headers = getattr(response, "headers", None)
     retry_after = headers.get("retry-after") if headers is not None else None
     if retry_after is not None:
-        try:
+        with suppress(TypeError, ValueError):
             details["retry_after_seconds"] = min(max(float(retry_after), 0.0), 60.0)
-        except (TypeError, ValueError):
-            pass
 
     if is_provider_cancellation(exc):
         return ProviderError(

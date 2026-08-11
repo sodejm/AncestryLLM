@@ -160,7 +160,7 @@ class LLMService:
                     status=status,
                     error_code=error_code,
                     started_at=started_at,
-                    completed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+                    completed_at=dt.datetime.now(dt.UTC).isoformat(),
                 )
             )
             session.commit()
@@ -173,7 +173,7 @@ class LLMService:
         provider = self._provider(planned_request)
         self.policy.authorize(planned_request, provider.capabilities, consent)
         canonical, request_hash = self._request_metadata(planned_request)
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         cache_hit = False
         try:
@@ -310,7 +310,7 @@ class LLMService:
         provider = self._provider(planned_request)
         self.policy.authorize(planned_request, provider.capabilities, consent)
         canonical, request_hash = self._request_metadata(planned_request)
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         return self._stream_lifecycle(
             planned_request,

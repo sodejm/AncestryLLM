@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 from ancestryllm.api.app import create_app
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from fastapi import FastAPI
 
     from ancestryllm.core.commands import ModuleDescriptor

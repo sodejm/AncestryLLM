@@ -7,6 +7,7 @@ import os
 import tempfile
 import tomllib
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,10 +36,8 @@ _TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress"}
 
 def _secure_directory(path: Path) -> Path:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
+    with suppress(OSError):
         path.chmod(0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -135,7 +134,7 @@ def _path_setting(
             section=section,
         )
     try:
-        return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+        return Path(os.path.expandvars(value)).expanduser().resolve()
     except (OSError, RuntimeError, ValueError) as exc:
         raise _config_error(
             f"The {section}.{field_name} setting must be a valid path.",
@@ -345,7 +344,7 @@ class AppConfig:
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, self.config_path)
+            temporary.replace(self.config_path)
             self.config_path.chmod(0o600)
         except Exception:
             temporary.unlink(missing_ok=True)

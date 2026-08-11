@@ -792,12 +792,16 @@ class SyncKernelResult(SyncValue):
             or self.failed_stage is not None
         ):
             raise ValueError("Successful non-publication results cannot contain failure metadata.")
-        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE}:
-            if self.plan is None or self.decisions:
-                raise ValueError("Non-publication success requires an undecided plan.")
-        if self.outcome is SyncOutcome.NO_CHANGE and self.plan is not None:
-            if self.plan.entries or self.plan.decisions:
-                raise ValueError("No-change results require an empty plan.")
+        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE} and (
+            self.plan is None or self.decisions
+        ):
+            raise ValueError("Non-publication success requires an undecided plan.")
+        if (
+            self.outcome is SyncOutcome.NO_CHANGE
+            and self.plan is not None
+            and (self.plan.entries or self.plan.decisions)
+        ):
+            raise ValueError("No-change results require an empty plan.")
 
     @property
     def committed(self) -> bool:

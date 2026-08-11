@@ -163,39 +163,41 @@ def _measure_request(
     first_token_at: float | None = None
     final_payload: Mapping[str, Any] | None = None
     try:
-        with httpx.Client(timeout=timeout_seconds) as client:
-            with client.stream(
+        with (
+            httpx.Client(timeout=timeout_seconds) as client,
+            client.stream(
                 "POST",
                 f"{endpoint}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": True, "options": profile_options},
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    payload = json.loads(line)
-                    if not isinstance(payload, Mapping):
-                        continue
-                    if payload.get("response") and first_token_at is None:
-                        first_token_at = time.monotonic()
-                        if cancel_after_first_token:
-                            return RequestMetrics(
-                                phase=phase,
-                                status="cancelled",
-                                wall_seconds=round(first_token_at - started, 6),
-                                ttft_seconds=round(first_token_at - started, 6),
-                                completion_tokens=None,
-                                completion_tokens_per_second=None,
-                                prompt_tokens=None,
-                                prompt_tokens_per_second=None,
-                                ollama_total_seconds=None,
-                                ollama_load_seconds=None,
-                                queue_delay_seconds=_queue_delay(queued_at, started),
-                                cancelled=True,
-                            )
-                    if payload.get("done") is True:
-                        final_payload = payload
-                        break
+            ) as response,
+        ):
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                payload = json.loads(line)
+                if not isinstance(payload, Mapping):
+                    continue
+                if payload.get("response") and first_token_at is None:
+                    first_token_at = time.monotonic()
+                    if cancel_after_first_token:
+                        return RequestMetrics(
+                            phase=phase,
+                            status="cancelled",
+                            wall_seconds=round(first_token_at - started, 6),
+                            ttft_seconds=round(first_token_at - started, 6),
+                            completion_tokens=None,
+                            completion_tokens_per_second=None,
+                            prompt_tokens=None,
+                            prompt_tokens_per_second=None,
+                            ollama_total_seconds=None,
+                            ollama_load_seconds=None,
+                            queue_delay_seconds=_queue_delay(queued_at, started),
+                            cancelled=True,
+                        )
+                if payload.get("done") is True:
+                    final_payload = payload
+                    break
     except httpx.TimeoutException:
         return RequestMetrics(
             phase=phase,

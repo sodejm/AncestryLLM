@@ -1659,7 +1659,8 @@ def test_initialization_failures_emit_minimal_sanitized_receipts(
     elif failure_point == "clock":
 
         def naive_now() -> datetime:
-            return datetime(2026, 8, 10)
+            # Deliberately exercise the bootstrap's rejection of a naive clock.
+            return datetime(2026, 8, 10)  # noqa: DTZ001
 
         now = naive_now
 

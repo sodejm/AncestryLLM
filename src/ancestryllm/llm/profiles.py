@@ -356,7 +356,7 @@ class ProviderProfileService:
             consent = ProviderRepository(session).get_consent(name)
             if consent is None:
                 raise AncestryError("CONSENT_NOT_FOUND", f"Consent profile not found: {name}")
-            consent.revoked_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            consent.revoked_at = dt.datetime.now(dt.UTC).isoformat()
             session.commit()
 
     def list_profiles(self) -> list[ProviderProfileModel]:

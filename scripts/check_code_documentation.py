@@ -24,6 +24,7 @@ import ast
 import re
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Final
 
@@ -399,11 +400,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. Documentation: every in-scope file must have a file-level statement.
     for rel in tracked:
-        try:
+        with suppress(ValueError):
             diagnostics.extend(check_file_documentation(rel, root))
-        except ValueError:
             # Already captured as unknown-extension above.
-            pass
 
     baseline = load_baseline(baseline_path)
     diagnostics = [diag for diag in diagnostics if diag not in baseline]

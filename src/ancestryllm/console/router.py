@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ancestryllm.console.parser import ParsedInvocation, parse_repl_invocation, split_repl_input
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from ancestryllm.core.context import AppContext
 
 
-class RouteKind(str, Enum):
+class RouteKind(StrEnum):
     OUTPUT = "output"
     EXECUTE = "execute"
     EXIT = "exit"

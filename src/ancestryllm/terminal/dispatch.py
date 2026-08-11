@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ancestryllm.application._secrets import SecretGrantRegistry
 from ancestryllm.application.results import CommandResult

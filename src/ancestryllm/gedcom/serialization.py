@@ -11,7 +11,7 @@ import logging
 import re
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -178,11 +178,11 @@ def write_quality_diagnostic(
 def write_gedcom(
     records: list[IndividualRecord],
     output_path: str | Path,
-    source_parsers: Optional[list[Any]] = None,
-    source_documents: Optional[list[ParsedSource]] = None,
-    pointer_map: Optional[dict[str, str]] = None,
-    include_individuals: Optional[set[str]] = None,
-    include_families: Optional[set[str]] = None,
+    source_parsers: list[Any] | None = None,
+    source_documents: list[ParsedSource] | None = None,
+    pointer_map: dict[str, str] | None = None,
+    include_individuals: set[str] | None = None,
+    include_families: set[str] | None = None,
     gedcom_version: str = "5.5.5",
 ) -> StagedFileToken:
     """Render and stage a loss-minimizing GEDCOM artifact."""

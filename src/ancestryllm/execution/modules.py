@@ -36,7 +36,7 @@ class ModulesExecutor:
                     (descriptor_payload(item) for item in self._registry.descriptors()),
                 )
             )
-        elif action == "enable":
+        if action == "enable":
             module_id = text(invocation, "module_id")
             self._registry.enable(module_id)
             result = SuccessResult(f"Enabled module: {module_id}")

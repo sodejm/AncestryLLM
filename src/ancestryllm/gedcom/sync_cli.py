@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Never, Sequence
+from typing import TYPE_CHECKING, Never
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from types import ModuleType
 
     from ancestryllm.gedcom.contracts import IdentityResolver

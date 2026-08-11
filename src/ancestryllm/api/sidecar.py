@@ -12,7 +12,7 @@ import json
 import socket
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, BinaryIO, NoReturn, Sequence
+from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 from uvicorn import Server
 
@@ -23,6 +23,8 @@ from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from fastapi import FastAPI
 
     from ancestryllm.core.commands import ModuleDescriptor

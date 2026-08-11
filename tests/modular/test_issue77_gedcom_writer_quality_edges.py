@@ -69,7 +69,7 @@ def test_public_writer_reparses_utf8_boundary_notes_without_loss(
     output = tmp_path / f"output-{physical_bytes}-{gedcom_version}.ged"
     # ``1 NOTE `` is seven ASCII bytes; include a two-byte UTF-8 character in
     # every case so the boundary is checked in bytes rather than characters.
-    note = "é" + "x" * (physical_bytes - len("1 NOTE ".encode("utf-8")) - 2)
+    note = "é" + "x" * (physical_bytes - len(b"1 NOTE ") - 2)
     source.write_bytes(
         _document(
             "0 @I1@ INDI",

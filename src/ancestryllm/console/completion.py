@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion, ThreadedCompleter
 
@@ -21,6 +21,8 @@ from ancestryllm.core.commands import (
 from ancestryllm.core.secrets import ENVIRONMENT_NAMES
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
+
     from prompt_toolkit.document import Document
 
     from ancestryllm.console.router import SessionRouter
@@ -435,13 +437,11 @@ def _positional_argument(arguments: Sequence[ArgumentSpec], consumed: int) -> Ar
     positionals = tuple(argument for argument in arguments if argument.positional)
     if not positionals:
         return None
-    index = 0
-    for argument in positionals:
+    for index, argument in enumerate(positionals):
         if index == consumed:
             return argument
         if argument.cardinality in {ArgumentCardinality.ONE_OR_MORE, ArgumentCardinality.REMAINDER}:
             return argument
-        index += 1
     return None
 
 

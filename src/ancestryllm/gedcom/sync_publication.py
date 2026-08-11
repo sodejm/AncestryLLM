@@ -8,6 +8,7 @@ import os
 import stat
 import sys
 import uuid
+from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,7 +92,7 @@ def _exclusive_rename_directory(
     if os.name == "nt":
         # MoveFileEx without MOVEFILE_REPLACE_EXISTING is what os.rename uses
         # on Windows.
-        os.rename(source, destination)
+        source.rename(destination)
         return
     library = ctypes.CDLL(None, use_errno=True)
     current_platform = str(sys.platform)
@@ -212,7 +213,7 @@ def _held_file_path(descriptor: int) -> Path:
         return Path(os.fsdecode(raw.split(b"\0", 1)[0]))
     if current_platform.startswith("linux"):
         try:
-            return Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            return Path(f"/proc/self/fd/{descriptor}").readlink()
         except OSError as exc:
             raise SyncError(
                 "SYNC_OUTPUT",
@@ -374,10 +375,8 @@ def _open_windows_shared_marker(path: Path, *, create: bool) -> int:
         return _windows_descriptor_from_handle(handle, descriptor_flags)
     except BaseException:
         if create:
-            try:
+            with suppress(OSError):
                 _windows_mark_handle_for_deletion(handle)
-            except OSError:
-                pass
         _windows_close_handle(handle)
         raise
 
@@ -474,7 +473,7 @@ def _delete_held_marker(
         elif directory_descriptor is not None:
             os.unlink(marker_name, dir_fd=directory_descriptor)
         else:
-            os.unlink(marker_path)
+            marker_path.unlink()
         deleted = True
     finally:
         if deleted or consume_on_failure:
@@ -586,8 +585,12 @@ def _capability_matches_selected(capability: _DirectoryCapability) -> bool:
         if capability.descriptor is not None:
             held = _DirectoryIdentity.from_stat(os.fstat(capability.descriptor))
             return selected_identity == held
-        return os.path.normcase(os.path.abspath(capability.selected_path)) == os.path.normcase(
-            os.path.abspath(_capability_current_path(capability))
+        # Compare lexical absolute spellings: resolving would follow a replaced
+        # directory link before the held-capability identity check can reject it.
+        return os.path.normcase(
+            os.path.abspath(capability.selected_path)  # noqa: PTH100
+        ) == os.path.normcase(
+            os.path.abspath(_capability_current_path(capability))  # noqa: PTH100
         )
     except (OSError, SyncError, ValueError):
         return False
@@ -762,7 +765,7 @@ def _cleanup_owned_flat_directory(
                     or not held_marker.same_object(current_marker)
                 ):
                     return False
-            entries = set(os.listdir(current_path))
+            entries = {entry.name for entry in current_path.iterdir()}
             expected_names = set(allowed_names)
             if marker_name is not None:
                 expected_names.add(marker_name)
@@ -854,7 +857,9 @@ def _cleanup_owned_flat_directory(
                 or not held_marker.same_object(current_marker)
             ):
                 return False
-        entries = set(os.listdir(descriptor))
+        # The directory descriptor is the security capability; pathlib cannot
+        # enumerate it without reopening a mutable pathname.
+        entries = set(os.listdir(descriptor))  # noqa: PTH208
         expected_names = set(allowed_names)
         if marker_name is not None:
             expected_names.add(marker_name)
@@ -1046,7 +1051,7 @@ def _ensure_release_root(path: Path) -> _DirectoryCapability:
     for _attempt in range(8):
         selected_candidate = path.parent / f".ancestryllm-release-root-{uuid.uuid4().hex}"
         try:
-            os.mkdir(selected_candidate, 0o700)
+            selected_candidate.mkdir(mode=0o700)
         except FileExistsError:
             continue
         except BaseException as exc:
@@ -1399,10 +1404,10 @@ def _remove_published_staging_marker(
             transaction.committed = True
             transaction.marker_descriptor = None
             return None
-        elif directory_descriptor is not None:
+        if directory_descriptor is not None:
             os.unlink(marker_name, dir_fd=directory_descriptor)
         else:
-            os.unlink(marker_path)
+            marker_path.unlink()
         if not _publication_destination_is_selected(
             destination_name,
             release_root,
@@ -1525,15 +1530,13 @@ def _publish_directory_no_clobber(
         ) from exc
     if _capability_matches_selected(release_root):
         return
-    try:
+    with suppress(OSError):
         _exclusive_rename_directory(
             destination,
             source,
             source_dir_fd=release_root.descriptor,
             destination_dir_fd=release_root.descriptor,
         )
-    except OSError:
-        pass
     raise SyncError(
         "SYNC_OUTPUT",
         "The release root changed during final publication.",
@@ -1586,8 +1589,12 @@ def _held_staging_location(
                 return None
             current_directory_path = marker_path.parent
         physical_root = _capability_current_path(release_root)
-        if os.path.normcase(os.path.abspath(current_directory_path.parent)) != os.path.normcase(
-            os.path.abspath(physical_root)
+        # Preserve non-resolving path comparison until the descriptor identities
+        # below prove that no parent substitution occurred.
+        if os.path.normcase(
+            os.path.abspath(current_directory_path.parent)  # noqa: PTH100
+        ) != os.path.normcase(
+            os.path.abspath(physical_root)  # noqa: PTH100
         ):
             return None
         current_directory_stat = os.lstat(current_directory_path)

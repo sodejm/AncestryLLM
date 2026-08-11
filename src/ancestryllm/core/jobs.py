@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import (
     CancellationError,
@@ -20,11 +21,12 @@ from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
     import contextlib
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 
-class JobState(str, Enum):
+class JobState(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -110,9 +112,12 @@ class JobReporter:
             raise ValueError("Progress operation must not be empty.")
         if (completed is None) is not (total is None):
             raise ValueError("Determinate progress requires both completed and total values.")
-        if completed is not None and total is not None:
-            if completed < 0 or total < 1 or completed > total:
-                raise ValueError("Progress values require 0 <= completed <= total and total >= 1.")
+        if (
+            completed is not None
+            and total is not None
+            and (completed < 0 or total < 1 or completed > total)
+        ):
+            raise ValueError("Progress values require 0 <= completed <= total and total >= 1.")
         self.check_cancelled()
         self._manager._report_progress(
             self.job_id,
@@ -497,10 +502,8 @@ class JobManager:
                 return self.get(job_id)
             future = record.future
         if future is not None:
-            try:
+            with suppress(CancelledError):
                 future.result(timeout=timeout)
-            except CancelledError:
-                pass
         return self.get(job_id)
 
     def active(self) -> tuple[JobSnapshot, ...]:

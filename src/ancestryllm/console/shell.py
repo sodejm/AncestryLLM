@@ -138,10 +138,8 @@ class ReplApplication:
         try:
             result = await self._run_prompt_loop()
         except BaseException:
-            try:
+            with contextlib.suppress(BaseException):
                 await self._shutdown()
-            except BaseException:  # noqa: BLE001, S110 - preserve the prompt failure
-                pass
             raise
         await self._shutdown()
         return result

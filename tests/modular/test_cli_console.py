@@ -11,7 +11,7 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
@@ -26,6 +26,8 @@ from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ancestryllm.core.context import AppContext
 
 

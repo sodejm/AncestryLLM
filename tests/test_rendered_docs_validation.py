@@ -253,7 +253,7 @@ def test_smoke_fetch_retries_transient_failures_with_bounded_backoff(
     class Response:
         status = 200
 
-        def __enter__(self) -> "Response":
+        def __enter__(self) -> Response:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -299,7 +299,7 @@ def test_smoke_fetch_rejects_redirects_outside_requested_route(
     class Response:
         status = 200
 
-        def __enter__(self) -> "Response":
+        def __enter__(self) -> Response:
             return self
 
         def __exit__(self, *_args: object) -> None:

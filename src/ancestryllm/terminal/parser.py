@@ -8,7 +8,7 @@ import io
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm import __version__
 from ancestryllm.application.executor import CommandArgument, CommandInvocation, CommandValue
@@ -31,6 +31,8 @@ from ancestryllm.core.help import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ancestryllm.application.dto import SecretGrantRef
 
 _ARGUMENT_TYPES: dict[ArgumentType, type[str] | type[int] | type[float] | type[Path]] = {

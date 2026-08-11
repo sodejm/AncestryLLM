@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, Protocol
@@ -578,10 +578,8 @@ def safe_extract_archive(archive_path: Path, destination: Path) -> None:
 
 
 def _discard_partial_download(destination: Path) -> None:
-    try:
+    with suppress(OSError):
         destination.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _download_deadline_exceeded() -> NoReturn:
@@ -595,10 +593,8 @@ def _close_download_response(response: Any) -> None:
     close_response = getattr(response, "close", None)
     if not callable(close_response):
         return
-    try:
+    with suppress(Exception):
         close_response()
-    except Exception:  # noqa: BLE001,S110 - preserve the coded failure
-        pass
 
 
 def _open_download_response(request: urllib.request.Request, deadline: float) -> Any:
@@ -1056,10 +1052,8 @@ def _open_posix_parent(
                     dir_fd=descriptor,
                 )
             except FileNotFoundError:
-                try:
+                with suppress(FileExistsError):
                     os.mkdir(component, mode=0o755, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
                 try:
                     child_descriptor = os.open(
                         component,
@@ -1077,10 +1071,8 @@ def _open_posix_parent(
         yield descriptor
     finally:
         if descriptor is not None:
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
 
 @contextmanager
@@ -1120,10 +1112,8 @@ def _lock_windows_parent(
         parents = tuple(reversed((destination.parent, *destination.parent.parents)))
         for candidate in parents:
             if not os.path.lexists(candidate):
-                try:
+                with suppress(FileExistsError):
                     candidate.mkdir()
-                except FileExistsError:
-                    pass
             handle = create_file(
                 str(candidate),
                 file_read_attributes,
@@ -1168,7 +1158,9 @@ def _anchored_parent(
     code: str,
     message: str,
 ) -> Iterator[tuple[Path, int | None]]:
-    absolute_destination = Path(os.path.abspath(destination))
+    # Keep the lexical absolute path: resolving symlinks here would hide an unsafe
+    # destination component before the explicit link/reparse-point checks below.
+    absolute_destination = Path(os.path.abspath(destination))  # noqa: PTH100
     if os.name == "nt":
         with _lock_windows_parent(absolute_destination, code=code, message=message):
             yield absolute_destination, None
@@ -1216,7 +1208,7 @@ def _commit_temporary_file(
     parent_fd: int | None,
 ) -> None:
     if parent_fd is None:
-        os.replace(temporary_name, destination)
+        Path(temporary_name).replace(destination)
         return
     os.replace(
         temporary_name,
@@ -1434,10 +1426,8 @@ def record_post_preflight_failure(path: Path, failure_category: str) -> dict[str
 def _discard_install_descriptor(descriptor: int | None) -> None:
     if descriptor is None:
         return
-    try:
+    with suppress(OSError):
         os.close(descriptor)
-    except OSError:
-        pass
 
 
 def _atomic_install(source: Path, destination: Path) -> None:
@@ -1466,8 +1456,10 @@ def _atomic_install(source: Path, destination: Path) -> None:
                     os.fsync(output.fileno())
                 if parent_fd is None:
                     # The verified tool must be directly executable after installation.
-                    os.chmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
-                        temporary_name, 0o700
+                    Path(
+                        temporary_name
+                    ).chmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                        0o700
                     )
                 _commit_temporary_file(temporary_name, anchored_destination, parent_fd)
             finally:
@@ -1496,7 +1488,8 @@ def _assert_path_without_symlinks(
     code: str,
     message: str,
 ) -> None:
-    absolute_destination = Path(os.path.abspath(destination))
+    # Do not resolve links before checking every lexical path component.
+    absolute_destination = Path(os.path.abspath(destination))  # noqa: PTH100
     for candidate in (absolute_destination, *absolute_destination.parents):
         if _is_link_or_reparse_point(candidate, code=code, message=message):
             _fail(code, message)

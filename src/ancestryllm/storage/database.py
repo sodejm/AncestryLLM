@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import secrets
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -162,10 +163,8 @@ class Database:
                 details={"error_type": type(exc).__name__},
             ) from exc
 
-        try:
+        with suppress(OSError):
             self.path.chmod(0o600)
-        except OSError:
-            pass
         event.listen(
             self._engine, "connect", lambda dbapi, _: dbapi.execute("PRAGMA foreign_keys=ON")
         )

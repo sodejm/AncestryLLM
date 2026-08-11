@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -155,7 +155,7 @@ def connected_tree_pointers(
     root_pointer: str,
     people: Sequence[IndividualRecord],
     source_records: Iterable[GedcomRecord],
-    merged_pointer_map: Optional[dict[str, str]] = None,
+    merged_pointer_map: dict[str, str] | None = None,
 ) -> tuple[set[str], set[str]]:
     """Return the complete family-connected component around one person.
 

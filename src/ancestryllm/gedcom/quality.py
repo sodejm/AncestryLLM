@@ -10,7 +10,7 @@ import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -70,7 +70,7 @@ class QualityFinding:
     evidence: tuple[str, ...] = field(default_factory=tuple)
     source_files: tuple[str, ...] = field(default_factory=tuple)
     direct_ancestor: bool = False
-    generation: Optional[int] = None
+    generation: int | None = None
     confidence: str = "deterministic"
     ai_why: str = ""
     ai_research: tuple[str, ...] = field(default_factory=tuple)
@@ -698,7 +698,7 @@ def analyze_quality(
     generations, cycles = ancestor_generations(root_pointer, source_records, mapping)
     parents, _children, spouses, families = _family_graph(source_records, mapping)
     findings: list[QualityFinding] = []
-    current_year = dt.date.today().year
+    current_year = dt.datetime.now(dt.UTC).year
     for person in people:
         cancellation_checkpoint()
         person_files = _record_source_files(person)

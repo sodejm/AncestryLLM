@@ -7,9 +7,10 @@ import re
 import uuid
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from types import ModuleType
 
 from ancestryllm.core.cancellation import (
@@ -135,7 +136,7 @@ def _header_export_date(
     core: ModuleType,
     ingress: FileIngressPolicy,
     expected: FileSnapshot,
-) -> Optional[str]:
+) -> str | None:
     """Read a usable HEAD.DATE without treating it as genealogical evidence."""
     try:
         first = next(core.iter_gedcom_records(path, ingress, expected))
@@ -185,7 +186,7 @@ def _snapshot_specs(
                 basis = "HEAD.DATE"
             else:
                 exported_at = dt.datetime.fromtimestamp(
-                    snapshot.modified_ns / 1_000_000_000, tz=dt.timezone.utc
+                    snapshot.modified_ns / 1_000_000_000, tz=dt.UTC
                 ).isoformat()
                 basis = "file-mtime"
         fingerprint = ingress.fingerprint(
@@ -217,8 +218,8 @@ def _new_manifest(
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "tree_id": str(uuid.uuid4()),
         "generation": 0,
-        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "created_at": dt.datetime.now(dt.UTC).isoformat(),
+        "updated_at": dt.datetime.now(dt.UTC).isoformat(),
         "master": {"path": str(master), "sha256": master_fingerprint.sha256},
         "parent_release": None,
         "release_root": str(release_root),

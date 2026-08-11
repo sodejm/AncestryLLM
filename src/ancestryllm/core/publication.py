@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unicodedata
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -200,7 +201,9 @@ def _portable_path_key(path: Path) -> tuple[str, ...]:
 
 
 def _path_key(path: Path) -> str:
-    return os.path.abspath(os.fspath(path))
+    # Reservation identity is keyed by lexical absolute spelling. Resolving here
+    # would collapse symlink paths before the separate ownership checks run.
+    return os.path.abspath(os.fspath(path))  # noqa: PTH100
 
 
 def _identity(path: Path) -> _PathIdentity:
@@ -327,10 +330,8 @@ def _remove_directory_if_owned(path: Path, expected: _PathIdentity) -> bool:
             return False
         finally:
             if parent_descriptor is not None:
-                try:
+                with suppress(OSError):
                     os.close(parent_descriptor)
-                except OSError:
-                    pass
     try:
         actual = _identity(path)
     except (FileNotFoundError, OSError):
@@ -410,10 +411,8 @@ def _create_private_quarantine(
     except BaseException:
         if descriptor is not None:
             prepared.quarantine_descriptor = None
-            try:
+            with suppress(BaseException):  # Creation failure is authoritative.
                 os.close(descriptor)
-            except BaseException:  # noqa: BLE001, S110 - creation failure is authoritative
-                pass
         try:
             removal_identity = identity or _identity(directory)
             _remove_directory_if_owned(directory, removal_identity)
@@ -444,10 +443,8 @@ def _close_quarantine(quarantine: _PrivateQuarantine) -> None:
                 removal_identity = at_path
         except OSError:
             pass
-        try:
+        with suppress(OSError):
             os.close(quarantine.descriptor)
-        except OSError:
-            pass
     else:
         try:
             at_path = _identity(quarantine.directory)
@@ -525,22 +522,20 @@ def _windows_unlink_if_owned(path: Path, expected: _PathIdentity) -> bool:
         if not expected.pristine(opened):
             return False
         delete_file = ctypes.c_ubyte(1)
-        if not set_file_information(
-            msvcrt.get_osfhandle(descriptor),
-            file_disposition_info,
-            ctypes.byref(delete_file),
-            ctypes.sizeof(delete_file),
-        ):
-            return False
-        return True
+        return bool(
+            set_file_information(
+                msvcrt.get_osfhandle(descriptor),
+                file_disposition_info,
+                ctypes.byref(delete_file),
+                ctypes.sizeof(delete_file),
+            )
+        )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return False
     finally:
         if descriptor is not None:
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
         elif handle is not None:
             close_handle(handle)
 
@@ -658,9 +653,7 @@ def _restore_open_descriptor(
     ):
         if destination_descriptor is not None:
             if destination_identity is None:
-                try:
-                    destination_identity = _PathIdentity.from_stat(os.fstat(destination_descriptor))
-                except (
+                with suppress(
                     AttributeError,
                     OSError,
                     RuntimeError,
@@ -669,10 +662,18 @@ def _restore_open_descriptor(
                     KeyboardInterrupt,
                     SystemExit,
                 ):
-                    pass
-            try:
+                    destination_identity = _PathIdentity.from_stat(os.fstat(destination_descriptor))
+            with suppress(
+                AttributeError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                KeyboardInterrupt,
+                SystemExit,
+            ):
                 cleanup_open_path(target, destination_descriptor)
-            except (
+            with suppress(
                 AttributeError,
                 OSError,
                 RuntimeError,
@@ -681,27 +682,13 @@ def _restore_open_descriptor(
                 KeyboardInterrupt,
                 SystemExit,
             ):
-                pass
-            try:
                 os.close(destination_descriptor)
-            except (
-                AttributeError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                KeyboardInterrupt,
-                SystemExit,
-            ):
-                pass
             if destination_identity is not None:
                 _unlink_if_owned(target, destination_identity)
         return False
     finally:
-        try:
+        with suppress(OSError):
             os.lseek(source_descriptor, original_offset, os.SEEK_SET)
-        except OSError:
-            pass
 
 
 def _unlink_if_owned(
@@ -809,10 +796,8 @@ def _unlink_if_owned(
             cleanup_lifecycle.quarantine_descriptor = None
     finally:
         if close_descriptor and owned_descriptor is not None:
-            try:
+            with suppress(OSError):
                 os.close(owned_descriptor)
-            except OSError:
-                pass
 
 
 def cleanup_open_path(path: Path, descriptor: int) -> bool:
@@ -917,7 +902,7 @@ def paths_alias(left: str | Path, right: str | Path) -> bool:
     except (OSError, RuntimeError, UnicodeError, ValueError):
         return True
     try:
-        return os.path.samefile(first, second)
+        return first.samefile(second)
     except FileNotFoundError:
         return False
     except (OSError, UnicodeError, ValueError):
@@ -993,9 +978,7 @@ def _cleanup_failed_staged_write(
 ) -> None:
     if owned:
         _refresh_failed_staged_write(path, reservation, descriptor)
-        try:
-            cleanup_open_path(path, descriptor)
-        except (
+        with suppress(
             AttributeError,
             OSError,
             RuntimeError,
@@ -1004,13 +987,11 @@ def _cleanup_failed_staged_write(
             KeyboardInterrupt,
             SystemExit,
         ):
-            pass
+            cleanup_open_path(path, descriptor)
 
 
 def _cleanup_failed_staged_path(path: Path) -> None:
-    try:
-        cleanup_staged_path(path)
-    except (
+    with suppress(
         AttributeError,
         OSError,
         RuntimeError,
@@ -1019,7 +1000,7 @@ def _cleanup_failed_staged_path(path: Path) -> None:
         KeyboardInterrupt,
         SystemExit,
     ):
-        pass
+        cleanup_staged_path(path)
 
 
 def write_staged_bytes(path: Path, payload: bytes) -> StagedFileToken:
@@ -1090,9 +1071,7 @@ def write_staged_bytes(path: Path, payload: bytes) -> StagedFileToken:
             owned=owned,
         )
         if not close_attempted:
-            try:
-                os.close(descriptor)
-            except (
+            with suppress(
                 AttributeError,
                 OSError,
                 RuntimeError,
@@ -1101,7 +1080,7 @@ def write_staged_bytes(path: Path, payload: bytes) -> StagedFileToken:
                 KeyboardInterrupt,
                 SystemExit,
             ):
-                pass
+                os.close(descriptor)
         _cleanup_failed_staged_path(path)
         raise
 
@@ -1273,9 +1252,7 @@ def _copy_regular_no_clobber(
     except BaseException:
         if destination_descriptor is not None:
             if copied is None:
-                try:
-                    copied = _PathIdentity.from_stat(os.fstat(destination_descriptor))
-                except (
+                with suppress(
                     AttributeError,
                     OSError,
                     RuntimeError,
@@ -1284,10 +1261,8 @@ def _copy_regular_no_clobber(
                     KeyboardInterrupt,
                     SystemExit,
                 ):
-                    pass
-            try:
-                cleanup_open_path(target, destination_descriptor)
-            except (
+                    copied = _PathIdentity.from_stat(os.fstat(destination_descriptor))
+            with suppress(
                 AttributeError,
                 OSError,
                 RuntimeError,
@@ -1296,11 +1271,9 @@ def _copy_regular_no_clobber(
                 KeyboardInterrupt,
                 SystemExit,
             ):
-                pass
+                cleanup_open_path(target, destination_descriptor)
             if not destination_close_attempted:
-                try:
-                    os.close(destination_descriptor)
-                except (
+                with suppress(
                     AttributeError,
                     OSError,
                     RuntimeError,
@@ -1309,13 +1282,11 @@ def _copy_regular_no_clobber(
                     KeyboardInterrupt,
                     SystemExit,
                 ):
-                    pass
+                    os.close(destination_descriptor)
         if copied is not None:
             _unlink_if_owned(target, copied)
         if source_descriptor >= 0 and not source_close_attempted:
-            try:
-                os.close(source_descriptor)
-            except (
+            with suppress(
                 AttributeError,
                 OSError,
                 RuntimeError,
@@ -1324,7 +1295,7 @@ def _copy_regular_no_clobber(
                 KeyboardInterrupt,
                 SystemExit,
             ):
-                pass
+                os.close(source_descriptor)
         raise
 
 
@@ -1343,21 +1314,21 @@ def _backup_target(artifact: _Artifact) -> None:
         _assert_pristine(target, expected)
         candidate = _candidate(target, "backup")
         if expected.file_type == stat.S_IFLNK:
-            link_value = os.readlink(target)
+            link_value = target.readlink()
             try:
                 try:
-                    os.symlink(link_value, candidate)
+                    candidate.symlink_to(link_value)
                 except FileExistsError:
                     continue
                 symlink_identity = _identity(candidate)
                 _assert_pristine(target, expected)
-                if os.readlink(candidate) != link_value:
+                if candidate.readlink() != link_value:
                     raise OSError("A publication backup changed while it was created.")
                 artifact.backup = _OwnedPath(candidate, symlink_identity)
             except BaseException:
                 try:
                     current = _identity(candidate)
-                    if current.file_type == stat.S_IFLNK and os.readlink(candidate) == link_value:
+                    if current.file_type == stat.S_IFLNK and candidate.readlink() == link_value:
                         _unlink_if_owned(candidate, current)
                 except BaseException:  # noqa: BLE001, S110 - preserve the creation failure
                     pass
@@ -1386,19 +1357,13 @@ def _cleanup_displacement_lifecycle(lifecycle: _DisplacementLifecycle) -> None:
     lifecycle.descriptor = None
     if descriptor is not None:
         if path is not None:
-            try:
+            with suppress(BaseException):  # Cleanup must continue.
                 cleanup_open_path(path, descriptor)
-            except BaseException:  # noqa: BLE001, S110 - cleanup must continue
-                pass
-        try:
+        with suppress(BaseException):  # Cleanup must continue.
             os.close(descriptor)
-        except BaseException:  # noqa: BLE001, S110 - cleanup must continue
-            pass
     if reservation is not None:
-        try:
+        with suppress(BaseException):  # Cleanup must continue.
             _unlink_if_owned(reservation.path, reservation.identity)
-        except BaseException:  # noqa: BLE001, S110 - cleanup must continue
-            pass
     elif path is not None:
         try:
             actual = _identity(path)
@@ -1594,10 +1559,8 @@ def _windows_transfer_handle_to_descriptor(
     try:
         return int(transferred_descriptor)
     except BaseException:
-        try:
+        with suppress(OSError, TypeError, ValueError):
             os.close(int(transferred_descriptor))
-        except (OSError, TypeError, ValueError):
-            pass
         raise
 
 
@@ -1681,10 +1644,8 @@ def _open_directory_capability(
         return
     except BaseException:
         prepared.destination = None
-        try:
+        with suppress(BaseException):  # Preserve the capability-creation failure.
             os.close(descriptor)
-        except BaseException:  # noqa: BLE001, S110 - capability creation failed
-            pass
         raise
 
 
@@ -1698,10 +1659,8 @@ def _directory_capability_matches_path(capability: _DirectoryCapability) -> bool
 
 
 def _close_directory_capability(capability: _DirectoryCapability) -> None:
-    try:
+    with suppress(BaseException):  # Cleanup must not alter publication state.
         os.close(capability.descriptor)
-    except BaseException:  # noqa: BLE001, S110 - cleanup must not alter publication state
-        pass
 
 
 def _fsync_directory_capability(capability: _DirectoryCapability) -> None:
@@ -1824,10 +1783,8 @@ def _open_verified_install_candidate(
         return
     except BaseException:
         prepared.descriptor = None
-        try:
+        with suppress(BaseException):  # Preserve the original preparation failure.
             os.close(descriptor)
-        except BaseException:  # noqa: BLE001, S110 - a failed close must not mask the cause
-            pass
         raise
 
 
@@ -1925,10 +1882,8 @@ def _cleanup_prepared_candidate(
             pass
         return
     if _PLATFORM == "win32":
-        try:
+        with suppress(BaseException):  # Preserve the triggering failure.
             _windows_delete_descriptor(descriptor)
-        except BaseException:  # noqa: BLE001, S110 - preserve the triggering failure
-            pass
         return
     try:
         held = _PathIdentity.from_stat(os.fstat(descriptor))
@@ -1999,10 +1954,8 @@ def _close_prepared_descriptor(prepared: _PreparedRegularInstall) -> None:
     prepared.descriptor = None
     if descriptor is None:
         return
-    try:
+    with suppress(BaseException):  # Cleanup must continue.
         os.close(descriptor)
-    except BaseException:  # noqa: BLE001, S110 - cleanup must continue
-        pass
 
 
 def _close_prepared_destination(prepared: _PreparedRegularInstall) -> None:
@@ -2013,10 +1966,8 @@ def _close_prepared_destination(prepared: _PreparedRegularInstall) -> None:
 
 
 def _close_private_quarantine_quietly(quarantine: _PrivateQuarantine) -> None:
-    try:
+    with suppress(BaseException):  # Cleanup must not change the outcome.
         _close_quarantine(quarantine)
-    except BaseException:  # noqa: BLE001, S110 - cleanup must not change the outcome
-        pass
 
 
 def _close_prepared_quarantine(prepared: _PreparedRegularInstall) -> None:
@@ -2034,10 +1985,8 @@ def _close_prepared_quarantine(prepared: _PreparedRegularInstall) -> None:
     descriptor = prepared.quarantine_descriptor
     prepared.quarantine_descriptor = None
     if descriptor is not None:
-        try:
+        with suppress(BaseException):  # Cleanup must continue.
             os.close(descriptor)
-        except BaseException:  # noqa: BLE001, S110 - cleanup must continue
-            pass
     directory = prepared.quarantine_directory
     identity = prepared.quarantine_identity
     if directory is not None:
@@ -2175,9 +2124,9 @@ def _install_no_clobber(
     _assert_pristine(source.path, source.identity)
     try:
         if source.identity.file_type == stat.S_IFLNK:
-            link_value = os.readlink(source.path)
+            link_value = source.path.readlink()
             try:
-                os.symlink(link_value, target)
+                target.symlink_to(link_value)
             except FileExistsError as exc:
                 raise OSError("A publication target appeared during the operation.") from exc
             installed = _OwnedPath(target, _identity(target))
@@ -2185,7 +2134,7 @@ def _install_no_clobber(
                 if installed.identity.file_type != stat.S_IFLNK:
                     raise OSError("The restored symbolic-link target changed during publication.")
                 _assert_pristine(source.path, source.identity)
-                if os.readlink(target) != link_value:
+                if target.readlink() != link_value:
                     raise OSError("The restored symbolic-link target changed during publication.")
             except BaseException:
                 _unlink_if_owned(installed.path, installed.identity)
@@ -2254,10 +2203,8 @@ def _displace_original(
                 artifact.displaced = _OwnedPath(reservation.path, moved_after_error)
                 lifecycle.transferred = True
             else:
-                try:
+                with suppress(BaseException):  # Preserve the displacement failure.
                     _unlink_if_owned(reservation.path, reservation.identity)
-                except BaseException:  # noqa: BLE001, S110 - preserve displacement failure
-                    pass
         elif artifact.displaced is not None:
             lifecycle.transferred = True
         _cleanup_displacement_lifecycle(lifecycle)
@@ -2490,10 +2437,8 @@ def publish_staged_bundle(
                 raise rollback_error from publish_error
             raise
         else:
-            try:
+            with suppress(BaseException):  # The validated commit is authoritative.
                 _cleanup_committed_bundle(prepared)
-            except BaseException:  # noqa: BLE001, S110 - validated commit is authoritative
-                pass
 
 
 __all__ = [

@@ -138,7 +138,7 @@ line-length = 100
 src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF", "TC", "PERF", "C4", "FURB"]
+select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF", "TC", "PERF", "C4", "FURB", "UP", "SIM", "RET", "PTH", "DTZ", "LOG", "ASYNC"]
 ignore = ["E501", "S101"]
 
 [tool.ruff.lint.flake8-type-checking]

@@ -87,19 +87,21 @@ class AnthropicProvider:
         system, messages = self._messages(request)
         stream_started = False
         try:
-            with self._client(request.timeout_seconds) as client:
-                with client.messages.stream(
+            with (
+                self._client(request.timeout_seconds) as client,
+                client.messages.stream(
                     model=request.model,
                     system=system,
                     messages=messages,
                     max_tokens=request.max_output_tokens,
                     temperature=request.temperature,
                     timeout=httpx.Timeout(request.timeout_seconds),
-                ) as stream:
-                    for text in stream.text_stream:
-                        if text:
-                            stream_started = True
-                            yield text
+                ) as stream,
+            ):
+                for text in stream.text_stream:
+                    if text:
+                        stream_started = True
+                        yield text
         except ProviderError:
             raise
         except Exception as exc:

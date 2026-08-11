@@ -7,7 +7,7 @@ import getpass
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
@@ -19,6 +19,8 @@ from ancestryllm.terminal.parser import build_parser
 from ancestryllm.terminal.presentation import PresentationAdapter
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from ancestryllm.application.results import CommandResult
     from ancestryllm.core.commands import ModuleDescriptor
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 from typing import TYPE_CHECKING
 
@@ -61,7 +60,7 @@ def test_secure_history_recovers_from_malformed_records_and_obeys_load_limit(
         + "\n",
         encoding="utf-8",
     )
-    os.chmod(history_path, 0o600)
+    history_path.chmod(0o600)
 
     history = _history(history_path, limit=3)
 

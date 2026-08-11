@@ -62,7 +62,8 @@ defined by the existing characterization policy.
 
 ### Regression evidence
 
-- Configured Ruff check and format check pass across all 347 Python files.
+- Configured Ruff check and format check pass across all configured repository
+  paths.
 - Strict mypy passes all 133 source files.
 - The focused provider, Pydantic, workflow, and benchmark contract has six
   passing tests.
@@ -118,24 +119,81 @@ observable transformations.
 
 ## Language and correctness rules
 
-The reviewed `UP`, `SIM`, `RET`, `PTH`, `DTZ`, `LOG`, and `ASYNC` batch is
-pending. It will preserve cross-platform path behavior, timezone-aware
-semantics, logging redaction, and cancellation boundaries.
+The third batch enables `UP`, `SIM`, `RET`, `PTH`, `DTZ`, `LOG`, and `ASYNC`.
+Ruff initially reported 240 findings:
+
+| Family | Findings | Disposition |
+| --- | ---: | --- |
+| `UP` | 90 | Modern annotations, aliases, enums, and standard-library APIs were reviewed against the Python 3.12 floor; one callable runtime alias remains explicit. |
+| `SIM` | 70 | Nested context managers and exception-only cleanup blocks were simplified without changing cleanup ownership or cancellation propagation. |
+| `PTH` | 73 | Ordinary filesystem calls use `pathlib`; eight lexical absolute-path calls and one descriptor enumeration remain narrowly suppressed at security boundaries. |
+| `DTZ` | 5 | Instant timestamps use aware UTC values; two timezone-free GEDCOM calendar operations and one fixed-time test fixture remain explicit exceptions. |
+| `RET` | 2 | Redundant branches were removed only where the preceding branch returns unconditionally. |
+| `LOG` | 0 | Enabled as reviewed policy coverage; the existing redacted logging paths already comply. |
+| `ASYNC` | 0 | Enabled as reviewed policy coverage; existing cancellation boundaries already comply. |
+| **Total** | **240** | The completed batch has zero Ruff findings and no broad suppression. |
+
+No unsafe bulk fix was applied. Safe-fix proposals were previewed by individual
+rule, reviewed, and then applied selectively; exception-suppression conversions
+were written by hand. One focused Windows marker rollback test caught a changed
+mutual-exclusion branch during review. Restoring the original `if`/`elif`
+relationship made the focused test pass before the wider batch was accepted.
+
+The 17 line-level suppressions are enforced as an exact inventory by the Ruff
+expansion contract. They preserve behavior that the mechanical modernization
+must not alter:
+
+- Bootstrap, credential snapshot, publication, and sync paths use lexical
+  absolute spellings until explicit symlink, reparse-point, or capability
+  checks complete. Replacing them with `Path.resolve()` would follow a link too
+  early and weaken the fail-closed check.
+- One sync cleanup enumerates an already-open directory descriptor. Reopening a
+  mutable pathname through `pathlib` would discard the held security
+  capability.
+- GEDCOM dates are calendar values rather than instants, so the parser retains
+  timezone-free sentinel and `strptime` values. Runtime and manifest timestamps
+  remain timezone-aware UTC.
+- `ProgressEvent` remains a callable runtime alias. The public `ErrorScalar`,
+  `JSONValue`, `CommandScalar`, and `CommandValue` aliases retain their prior
+  runtime and Pydantic schema behavior instead of adopting PEP 695 semantics.
+  The bootstrap receipt test retains its intentionally fixed naive fixture for
+  the injected clock.
+
+### Regression evidence
+
+- The focused cancellation, RootsMagic, file-ingress, publication,
+  incremental-recovery, credential-snapshot, and verified-bootstrap suites pass
+  all 790 tests.
+- Strict mypy passes all 133 source files; configured Ruff check and format check
+  pass the complete repository.
+- The complete core-contract capture again passes all 51 nodes, and its semantic
+  digest remains
+  `d4394e3eb52dba6b0302ad40d87e411981b0da35b715aff4ff885f82ce61799e`.
+
+The initial failing Ruff diagnostic set is the red observation for this
+static-policy change. Existing focused behavior and adversarial tests supplied
+the behavioral guardrails for path, rollback, GEDCOM, logging, and cancellation
+changes; the marker rollback regression was observed failing and fixed before
+the batch passed.
 
 ## Architecture and security impact
 
-The typing batch changes repository static-analysis policy and annotation-only
-import placement; it does not change an ancestry API, CLI command registry,
-service DTO, provider contract, GEDCOM representation, storage schema, FastAPI
-contract, or Electron boundary. The transport-neutral architecture documented
-in `ARCHITECTURE.md` is therefore unchanged. The runtime Pydantic and provider
-import contracts specifically guard the two import-placement boundaries that
-could otherwise affect application startup.
+These three batches change repository static-analysis policy and
+semantics-preserving implementation details; they do not change an ancestry
+API, CLI command registry, service DTO, provider contract, GEDCOM
+representation, storage schema, FastAPI contract, or Electron boundary. The
+transport-neutral architecture documented in `ARCHITECTURE.md` is therefore
+unchanged. Runtime Pydantic and provider-import contracts guard the two typing
+boundaries that could otherwise affect application startup, while the complete
+core characterization guards the parser, writer, provider-consent, recovery,
+and RootsMagic contracts.
 
 No runtime dependency, network operation, executable trust root, privilege,
 secret flow, or release-evidence schema is added. The verified `uv` bootstrap
 and locked `lint` group remain the acquisition and execution boundary for
-Ruff. Consequently the threat inventory and control ownership in
+Ruff. The retained lexical-path and descriptor exceptions preserve existing
+symlink, reparse-point, and race-resistant security checks rather than
+broadening them. Consequently the threat inventory and control ownership in
 `THREAT_MODEL.md` do not change. Existing controls remain intact: cloud calls
 require explicit provider selection and consent, `provider=none` stays
 network-free, RootsMagic sources remain immutable, and GEDCOM handling remains

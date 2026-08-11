@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, Iterable, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
 from ancestryllm.application.results import CommandResult, StructuredResult
 from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ancestryllm.application.dto import SecretGrantRef
     from ancestryllm.core.commands import DispatchKey
 
-CommandScalar: TypeAlias = str | int | float | bool | None
-CommandValue: TypeAlias = CommandScalar | tuple[str, ...]
+CommandScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - public facade
+CommandValue: TypeAlias = CommandScalar | tuple[str, ...]  # noqa: UP040 - public facade
 _MISSING: Final = object()
 
 

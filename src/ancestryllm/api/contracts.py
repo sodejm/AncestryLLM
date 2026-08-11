@@ -18,7 +18,7 @@ _STRICT_MODEL = ConfigDict(extra="forbid", frozen=True, strict=True)
 _SafeCode = Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._:-]+$")]
 _SafeText = Annotated[str, Field(min_length=1, max_length=512)]
 _BuildIdentity = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:+-]+$")]
-ErrorScalar: TypeAlias = str | int | float | bool | None
+ErrorScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - Pydantic schema
 
 
 class ApiVersion(BaseModel):

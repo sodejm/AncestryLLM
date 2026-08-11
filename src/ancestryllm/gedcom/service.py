@@ -6,7 +6,7 @@ import datetime as dt
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,8 +105,6 @@ __all__ = [
     "GedcomSyncResult",
 ]
 
-_ResultT = TypeVar("_ResultT")
-
 
 @dataclass(frozen=True, slots=True)
 class GedcomOperationResult:
@@ -152,7 +150,7 @@ def _opaque_ref(namespace: str, value: str) -> str:
     return f"{namespace}:{digest}"
 
 
-def _at_contract_boundary(operation: Callable[[], _ResultT]) -> _ResultT:
+def _at_contract_boundary[ResultT](operation: Callable[[], ResultT]) -> ResultT:
     """Translate current implementation failures into the stable domain contract."""
 
     try:

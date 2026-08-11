@@ -755,7 +755,7 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        os.replace(temporary, path)
+        temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
 

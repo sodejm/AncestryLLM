@@ -14,7 +14,7 @@ def new_id() -> str:
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
+    return dt.datetime.now(dt.UTC).isoformat()
 
 
 class Base(DeclarativeBase):

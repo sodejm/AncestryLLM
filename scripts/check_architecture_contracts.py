@@ -8,7 +8,10 @@ import ast
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping, Sequence
 
 PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.application",
@@ -1194,20 +1197,23 @@ def check_tree(
 
             target_adapter = _owner_for(target, ADAPTER_OWNERS)
             importer_adapter = _owner_for(reference.importer, ADAPTER_OWNERS)
-            if target_adapter is not None and reference.importer != "ancestryllm.__main__":
-                if importer_adapter != target_adapter:
-                    violations.append(
-                        Violation(
-                            path=reference.path,
-                            line=reference.line,
-                            code="ARCH202",
-                            message=(
-                                f"{reference.importer!r} crosses into adapter "
-                                f"{target_adapter!r} via {target!r}; depend on the "
-                                "application façade or add one exact, owned exception"
-                            ),
-                        )
+            if (
+                target_adapter is not None
+                and reference.importer != "ancestryllm.__main__"
+                and importer_adapter != target_adapter
+            ):
+                violations.append(
+                    Violation(
+                        path=reference.path,
+                        line=reference.line,
+                        code="ARCH202",
+                        message=(
+                            f"{reference.importer!r} crosses into adapter "
+                            f"{target_adapter!r} via {target!r}; depend on the "
+                            "application façade or add one exact, owned exception"
+                        ),
                     )
+                )
 
         allowed = exports.get(reference.imported)
         internal_gateways = PUBLIC_FACADE_INTERNAL_GATEWAYS.get(

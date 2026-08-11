@@ -8,7 +8,7 @@ from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
 from ancestryllm.application.results import StructuredResult, TableResult
@@ -22,15 +22,14 @@ if TYPE_CHECKING:
     from ancestryllm.llm.policy import ConsentGrant
 
 _MISSING: Final = object()
-_T = TypeVar("_T", str, int, bool)
 
 
-def _typed(
+def _typed[T: (str, int, bool)](
     invocation: CommandInvocation,
     name: str,
-    expected: type[_T],
-    default: _T | object = _MISSING,
-) -> _T:
+    expected: type[T],
+    default: T | object = _MISSING,
+) -> T:
     value = invocation.argument(name, default)
     if expected is int:
         valid = isinstance(value, int) and not isinstance(value, bool)
@@ -42,7 +41,7 @@ def _typed(
             f"Command argument {name!r} must be {expected.__name__}.",
             exit_code=2,
         )
-    return cast("_T", value)
+    return cast("T", value)
 
 
 def text(
