@@ -57,6 +57,33 @@ def test_evaluation_contract_keeps_setuptools_authoritative() -> None:
     assert "scripts/evaluate_uv_build.py --uv $(UV_BIN) --report $(UV_BUILD_REPORT)" in makefile
 
 
+@pytest.mark.parametrize(
+    "output",
+    (
+        "uv 0.12.1",
+        "uv 0.12.1 (329541a50 2026-07-31 aarch64-apple-darwin)",
+    ),
+)
+def test_evaluation_accepts_only_the_pinned_uv_release(output: str) -> None:
+    evaluation.validate_uv_version(output)
+
+
+@pytest.mark.parametrize(
+    "output",
+    (
+        "uv 0.12.0",
+        "uv 0.12.10",
+        "uv 0.12.1 unreviewed",
+        "uv latest",
+    ),
+)
+def test_evaluation_rejects_other_or_malformed_uv_versions(output: str) -> None:
+    with pytest.raises(evaluation.EvaluationError) as error:
+        evaluation.validate_uv_version(output)
+
+    assert error.value.code == "UVBEVAL_UV_VERSION"
+
+
 def test_candidate_overlay_changes_only_the_reviewed_build_configuration() -> None:
     original = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     candidate = evaluation.candidate_pyproject(original)

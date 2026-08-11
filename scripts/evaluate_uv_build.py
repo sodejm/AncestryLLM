@@ -89,6 +89,7 @@ PROJECT_FILE_PATHS = {
     *CANDIDATE_SOURCE_INCLUDES[2:],
 }
 DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+UV_VERSION_OUTPUT = re.compile(r"^uv (?P<version>[0-9]+\.[0-9]+\.[0-9]+)(?: \([^()\r\n]+\))?$")
 ACCEPTED_INPUT_DIFFERENCES = [
     {
         "code": "UVBEVAL_CANDIDATE_BUILD_CONFIGURATION",
@@ -146,6 +147,16 @@ class EvaluationError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
         super().__init__(message)
+
+
+def validate_uv_version(output: str) -> None:
+    """Require the pinned uv release while accepting its official build annotation."""
+    match = UV_VERSION_OUTPUT.fullmatch(output)
+    if match is None or match.group("version") != UV_VERSION:
+        raise EvaluationError(
+            "UVBEVAL_UV_VERSION",
+            f"expected uv {UV_VERSION}, received {output!r}",
+        )
 
 
 def _run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
@@ -838,11 +849,7 @@ def evaluate(uv: Path) -> dict[str, Any]:
             "uv_build evaluation requires a clean checkout",
         )
     uv_output = _run([str(uv), "--version"], cwd=ROOT)
-    if uv_output != f"uv {UV_VERSION}":
-        raise EvaluationError(
-            "UVBEVAL_UV_VERSION",
-            f"expected uv {UV_VERSION}, received {uv_output!r}",
-        )
+    validate_uv_version(uv_output)
 
     source_commit = _run(["git", "rev-parse", "HEAD"], cwd=ROOT)
     epoch = _run(["git", "show", "-s", "--format=%ct", "HEAD"], cwd=ROOT)
