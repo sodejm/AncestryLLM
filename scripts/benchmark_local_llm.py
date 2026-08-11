@@ -288,18 +288,18 @@ def run(
             cancel_after_first_token=cancel_after_first_token,
         )
     ]
-    for index in range(warm_runs):
-        requests.append(
-            _measure_request(
-                model=model,
-                endpoint=endpoint,
-                prompt=prompt,
-                profile_options=profile_options,
-                timeout_seconds=timeout_seconds,
-                phase=f"warm-{index + 1}",
-                cancel_after_first_token=cancel_after_first_token,
-            )
+    requests.extend(
+        _measure_request(
+            model=model,
+            endpoint=endpoint,
+            prompt=prompt,
+            profile_options=profile_options,
+            timeout_seconds=timeout_seconds,
+            phase=f"warm-{index + 1}",
+            cancel_after_first_token=cancel_after_first_token,
         )
+        for index in range(warm_runs)
+    )
     if queue_depth > 1:
         queued_at = time.monotonic()
         with ThreadPoolExecutor(max_workers=queue_depth) as executor:

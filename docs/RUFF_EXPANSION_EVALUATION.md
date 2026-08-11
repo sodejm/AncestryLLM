@@ -79,9 +79,42 @@ the supported Python 3.12-3.14 CI matrix remains authoritative.
 
 ## Performance and modernization rules
 
-The reviewed `PERF`, `C4`, and `FURB` batch is pending. It will record its
-diagnostic inventory and run the complete GEDCOM characterization and
-adversarial suites before the correctness batch begins.
+The second batch enables `PERF`, `C4`, and `FURB`. Ruff initially reported 35
+findings:
+
+| Rule | Findings | Disposition |
+| --- | ---: | --- |
+| `PERF401` | 18 | Append-only loops became generator-backed `list.extend` calls after review of source order, filtering, partial mutation, and exception timing. |
+| `C420` | 8 | Constant-valued comprehensions became `dict.fromkeys` only where the value is immutable; explicitly sorted key insertion remained sorted. |
+| `FURB162` | 6 | ISO timestamp parsing now relies on Python 3.12's native trailing-`Z` support, with existing UTC, offset, naive, and malformed-input tests retained. |
+| `FURB192` | 2 | Nonempty string sets use `min` instead of sorting the complete set before selecting the first lexical value. |
+| `C408` | 1 | One test-only `dict` constructor became an equivalent literal. |
+| **Total** | **35** | The completed batch has zero Ruff findings and adds no suppression. |
+
+No unsafe fix was applied. The complete proposed diff was previewed with Ruff,
+then each finding was changed by hand. GEDCOM finding collection, alternate-name
+serialization, RootsMagic continuation and family-member output, release-gate
+ordering, and architecture/audit violation ordering remain deterministic. The
+generator-backed extensions consume each source once and preserve incremental
+list population if construction raises.
+
+### Regression evidence
+
+- The focused release, desktop, GEDCOM, sync/recovery, RootsMagic,
+  architecture, characterization, benchmark, and Semgrep suites pass all 758
+  tests.
+- Strict mypy passes all 133 source files, and configured Ruff check passes the
+  complete repository.
+- The complete core-contract capture again passes all 51 nodes. Its semantic
+  digest remains
+  `d4394e3eb52dba6b0302ad40d87e411981b0da35b715aff4ff885f82ce61799e`,
+  exactly matching the typing-batch capture.
+
+This is a static-policy and semantics-preserving modernization batch, so no new
+behavioral red test applies. The Ruff configuration contract was observed
+failing before the rule families were selected; existing acceptance,
+rejection, adversarial, and characterization tests then guarded the potentially
+observable transformations.
 
 ## Language and correctness rules
 

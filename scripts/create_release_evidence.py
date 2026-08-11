@@ -433,7 +433,7 @@ def _validate_bootstrap_receipt(
         raise ValueError("bootstrap receipt.failure_category must be null for success")
     verified_at = _text(receipt["verified_at"], "bootstrap receipt.verified_at")
     try:
-        parsed_timestamp = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+        parsed_timestamp = datetime.fromisoformat(verified_at)
     except ValueError as exc:
         raise ValueError("bootstrap receipt.verified_at must be an ISO UTC timestamp") from exc
     if not verified_at.endswith("Z") or parsed_timestamp.utcoffset() != timedelta(0):

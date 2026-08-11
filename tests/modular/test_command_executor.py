@@ -184,9 +184,11 @@ def test_focused_executors_have_no_transport_frameworks_or_print_calls() -> None
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.startswith(FORBIDDEN_EXECUTOR_IMPORTS):
-                        violations.append(f"{path.name}: import {alias.name}")
+                violations.extend(
+                    f"{path.name}: import {alias.name}"
+                    for alias in node.names
+                    if alias.name.startswith(FORBIDDEN_EXECUTOR_IMPORTS)
+                )
             elif isinstance(node, ast.ImportFrom) and node.module is not None:
                 if node.module.startswith(FORBIDDEN_EXECUTOR_IMPORTS):
                     violations.append(f"{path.name}: from {node.module}")

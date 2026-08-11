@@ -78,8 +78,7 @@ def _text_lines(level: int, tag: str, value: Any) -> list[str]:
         return []
     first = f"{level} {tag}" + (f" {parts[0]}" if parts[0] else "")
     result = [first]
-    for part in parts[1:]:
-        result.append(f"{level + 1} CONT" + (f" {part}" if part else ""))
+    result.extend(f"{level + 1} CONT" + (f" {part}" if part else "") for part in parts[1:])
     return result
 
 
@@ -1078,9 +1077,11 @@ class RootsMagicMapper:
                 lines.append(f"1 HUSB {person_map[father]}")
             if mother in person_map:
                 lines.append(f"1 WIFE {person_map[mother]}")
-            for child_id in children_by_family.get(family_id, []):
-                if child_id in person_map:
-                    lines.append(f"1 CHIL {person_map[child_id]}")
+            lines.extend(
+                f"1 CHIL {person_map[child_id]}"
+                for child_id in children_by_family.get(family_id, [])
+                if child_id in person_map
+            )
             if profile == "preservation":
                 lines.extend(_extension_lines(row, _KNOWN_COLUMNS["family"], level=1))
             append_owned_payload(

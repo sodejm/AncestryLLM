@@ -474,8 +474,9 @@ def run_scan(targets: list[str]) -> int:
             config_path = Path(temp_dir) / f"{bundle.name}.yml"
             download_rule_bundle(bundle, config_path)
             rule_groups.append(_selected_bundle_rules(bundle, config_path.read_bytes()))
-        for archive in RULE_ARCHIVES:
-            rule_groups.append(_archive_rules(archive, _download_rule_archive(archive)))
+        rule_groups.extend(
+            _archive_rules(archive, _download_rule_archive(archive)) for archive in RULE_ARCHIVES
+        )
 
         rules, duplicate_count = _deduplicate_rules(rule_groups)
         config_path = Path(temp_dir) / "reviewed-rules.yml"

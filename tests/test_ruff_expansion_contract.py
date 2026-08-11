@@ -48,6 +48,13 @@ def test_typing_import_rules_are_enabled_without_blanket_policy() -> None:
     }
 
 
+def test_performance_and_modernization_rules_are_enabled() -> None:
+    configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    selected = set(configuration["tool"]["ruff"]["lint"]["select"])
+
+    assert {"PERF", "C4", "FURB"} <= selected
+
+
 def test_ci_uses_github_annotations_through_the_canonical_make_gate() -> None:
     for relative_path in (
         ".github/workflows/ci.yml",

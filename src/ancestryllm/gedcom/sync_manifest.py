@@ -80,7 +80,7 @@ def _validate_exported_at(timestamp: str) -> None:
     """Require one explicit export time to be valid ISO-8601 text."""
 
     try:
-        dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        dt.datetime.fromisoformat(timestamp)
     except ValueError as exc:
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -229,7 +229,7 @@ def _new_manifest(
         "blocks": {},
         "removed": [],
         "manual_tombstones": [],
-        "next_ids": {prefix: 1 for prefix in set(RECORD_PREFIXES.values()) | {"X"}},
+        "next_ids": dict.fromkeys(set(RECORD_PREFIXES.values()) | {"X"}, 1),
         "releases": [],
     }
 
@@ -248,7 +248,7 @@ def _manifest_timestamp(value: Any, field_name: str) -> dt.datetime:
     if not isinstance(value, str) or not value:
         raise _manifest_invalid(field_name)
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(value)
     except ValueError as exc:
         raise _manifest_invalid(field_name) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -352,7 +352,7 @@ def _validate_manifest(value: dict[str, Any]) -> None:
         ):
             raise _manifest_invalid("snapshots")
         try:
-            observed_at = dt.datetime.fromisoformat(snapshot["observed_at"].replace("Z", "+00:00"))
+            observed_at = dt.datetime.fromisoformat(snapshot["observed_at"])
         except ValueError as exc:
             raise _manifest_invalid("snapshots") from exc
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:

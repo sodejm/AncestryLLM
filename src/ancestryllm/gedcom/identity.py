@@ -2192,9 +2192,11 @@ def _record_to_gedcom_lines(record: IndividualRecord) -> str:
         )
         if name:
             lines.append(f"1 NAME {name}\n")
-        for alternate_name in record.alternate_names:
-            if alternate_name and alternate_name != record.full_name:
-                lines.append(f"1 NAME {alternate_name}\n")
+        lines.extend(
+            f"1 NAME {alternate_name}\n"
+            for alternate_name in record.alternate_names
+            if alternate_name and alternate_name != record.full_name
+        )
     if record.gender:
         lines.append(f"1 SEX {record.gender}\n")
 

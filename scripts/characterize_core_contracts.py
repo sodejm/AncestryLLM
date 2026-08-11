@@ -617,9 +617,11 @@ def compare_reports(
     if baseline.get("baseline_id") != candidate.get("baseline_id"):
         raise CharacterizationError("reports use different characterization baselines")
 
-    for field in ("fixture_digest", "semantic_digest"):
-        if baseline.get(field) != candidate.get(field):
-            violations.append({"gate": field, "reason": "deterministic contract changed"})
+    violations.extend(
+        {"gate": field, "reason": "deterministic contract changed"}
+        for field in ("fixture_digest", "semantic_digest")
+        if baseline.get(field) != candidate.get(field)
+    )
 
     baseline_dependencies = baseline.get("dependencies", {})
     candidate_dependencies = candidate.get("dependencies", {})

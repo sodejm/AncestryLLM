@@ -1107,7 +1107,7 @@ class GedcomService:
             if snapshot.exported_at is None:
                 continue
             try:
-                dt.datetime.fromisoformat(snapshot.exported_at.replace("Z", "+00:00"))
+                dt.datetime.fromisoformat(snapshot.exported_at)
             except ValueError:
                 exported_at_valid = False
 
