@@ -30,6 +30,24 @@ def test_soft_wrapped_link_labels_use_wiki_page_targets() -> None:
     )
 
 
+def test_link_parsing_stops_at_blank_line_block_boundaries() -> None:
+    markdown = (
+        "[literal\n\n"
+        "text](Missing.md)\n\n"
+        "`unclosed code span\n\n"
+        "[Guide](Guide.md)\n\n"
+        "closing backtick`\n"
+    )
+
+    assert wiki_links.rewrite_wiki_links(markdown) == (
+        "[literal\n\n"
+        "text](Missing.md)\n\n"
+        "`unclosed code span\n\n"
+        "[Guide](Guide)\n\n"
+        "closing backtick`\n"
+    )
+
+
 def test_non_page_targets_are_preserved() -> None:
     markdown = (
         "[External](https://example.com/Guide.md)\n"

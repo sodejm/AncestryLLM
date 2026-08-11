@@ -106,6 +106,9 @@ def rewrite_markdown_link_destinations(
                 flush_outside_fence()
                 fence_marker = fence.group("marker")
                 rewritten.append(line)
+            elif not line.strip():
+                flush_outside_fence()
+                rewritten.append(line)
             else:
                 outside_fence.append(line)
             continue
