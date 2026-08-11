@@ -14,10 +14,13 @@ import subprocess
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import NoReturn, Sequence
+from typing import TYPE_CHECKING, NoReturn
 
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import SIDECAR_BUILD
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 TIMEOUT_SECONDS = 10.0
 

@@ -11,12 +11,11 @@ import sqlite3
 import tempfile
 import threading
 import time
-from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, TypeAlias
+from typing import TYPE_CHECKING, Any
 
 from sqlglot import exp, parse
 
@@ -33,6 +32,9 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
     cleanup_open_path,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 DENIED_ACTIONS = {
     sqlite3.SQLITE_INSERT,
@@ -107,8 +109,8 @@ class TruncationMetadata:
     has_more: bool
 
 
-JsonScalar: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = JsonScalar | dict[str, str]
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | dict[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,10 +402,10 @@ class RootsMagicReader:
                 if handle is not None:
                     cls._windows_close_handle(handle)
         try:
-            value = os.stat(path)
+            value = path.stat()
         except (OSError, RuntimeError, ValueError):
             return None
-        if not os.path.isdir(path) or value.st_ino <= 0:
+        if not path.is_dir() or value.st_ino <= 0:
             return None
         return value.st_dev, value.st_ino
 
@@ -426,7 +428,7 @@ class RootsMagicReader:
             except ValueError:
                 continue
             relative = Path(relative_text)
-            if relative == Path(".") or relative.is_absolute() or ".." in relative.parts:
+            if relative == Path() or relative.is_absolute() or ".." in relative.parts:
                 continue
             if self._path_within(selected, root.path):
                 return root, relative

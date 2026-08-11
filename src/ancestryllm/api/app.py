@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
 
 from ancestryllm.api.capabilities import (
     ModuleDescriptorRegistry,
@@ -29,9 +27,15 @@ from ancestryllm.api.contracts import (
 )
 from ancestryllm.api.errors import error_response, request_error
 from ancestryllm.api.middleware import InternalApiMiddleware
-from ancestryllm.api.settings import ApiSettings
-from ancestryllm.application.executor import CommandExecutor
 from ancestryllm.core.errors import AncestryError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from fastapi.responses import JSONResponse
+
+    from ancestryllm.api.settings import ApiSettings
+    from ancestryllm.application.executor import CommandExecutor
 
 
 class ApiLifecycle(Protocol):
@@ -69,7 +73,7 @@ _HANDSHAKE_PARAMETERS: list[dict[str, object]] = [
 
 
 def _correlation_ref(request: Request) -> str:
-    return cast(str, request.state.correlation_ref)
+    return cast("str", request.state.correlation_ref)
 
 
 class InternalApiApplication(FastAPI):
@@ -84,17 +88,17 @@ class InternalApiApplication(FastAPI):
                 routes=self.routes,
             )
             components = schema.setdefault("components", {})
-            cast(dict[str, object], components)["securitySchemes"] = {
+            cast("dict[str, object]", components)["securitySchemes"] = {
                 "PrivateBearer": {
                     "type": "http",
                     "scheme": "bearer",
                     "description": "Fresh per-launch 256-bit bearer supplied privately by Electron main.",
                 }
             }
-            schemas = cast(dict[str, object], components.setdefault("schemas", {}))
+            schemas = cast("dict[str, object]", components.setdefault("schemas", {}))
             for model in (PaginationRequest, PageMetadata):
                 model_schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
-                definitions = cast(dict[str, object], model_schema.pop("$defs", {}))
+                definitions = cast("dict[str, object]", model_schema.pop("$defs", {}))
                 schemas.update(definitions)
                 schemas[model.__name__] = model_schema
             schema["security"] = [{"PrivateBearer": []}]

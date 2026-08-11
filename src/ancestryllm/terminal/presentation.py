@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from rich.console import Console
 from rich.text import Text
 
-from ancestryllm.application.dto import ErrorEnvelope
 from ancestryllm.application.errors import error_envelope
 from ancestryllm.application.results import (
     CommandResult,
@@ -22,7 +21,10 @@ from ancestryllm.application.results import (
     TableResult,
     WarningResult,
 )
-from ancestryllm.core.errors import AncestryError
+
+if TYPE_CHECKING:
+    from ancestryllm.application.dto import ErrorEnvelope
+    from ancestryllm.core.errors import AncestryError
 
 
 def to_plain(value: Any) -> Any:
@@ -31,7 +33,7 @@ def to_plain(value: Any) -> Any:
     if isinstance(value, CommandResult):
         return value.to_serializable()
     if is_dataclass(value):
-        return {key: to_plain(item) for key, item in asdict(cast(Any, value)).items()}
+        return {key: to_plain(item) for key, item in asdict(cast("Any", value)).items()}
     if isinstance(value, Path):
         raise TypeError("Presentation values must not contain Path host objects.")
     if isinstance(value, dict):

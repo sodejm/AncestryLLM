@@ -7,13 +7,16 @@ that useful semantic findings remain available in offline mode.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.gedcom.service import GedcomService
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _PRIVATE_MARKER = "PRIVATE-NAME-DO-NOT-DISCLOSE"
 _SENTINEL = b"preexisting-output-sentinel\n"

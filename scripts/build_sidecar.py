@@ -8,7 +8,10 @@ import platform
 import sysconfig
 import tempfile
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 EXECUTABLE_NAME = "ancestryllm-sidecar"

@@ -5,14 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Sequence
-
-from fastapi import FastAPI
+from typing import TYPE_CHECKING
 
 from ancestryllm.api.app import create_app
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
-from ancestryllm.core.commands import ModuleDescriptor
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from fastapi import FastAPI
+
+    from ancestryllm.core.commands import ModuleDescriptor
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 OPENAPI_ARTIFACT = _REPOSITORY_ROOT / "docs" / "api" / "openapi-v1.json"

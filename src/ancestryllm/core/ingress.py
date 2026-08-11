@@ -9,11 +9,11 @@ import math
 import os
 import stat
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import asdict, dataclass, fields
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
@@ -35,7 +35,7 @@ def _reject_json_constant(_constant: str) -> object:
     raise ValueError("non-finite JSON constant")
 
 
-class FileKind(str, Enum):
+class FileKind(StrEnum):
     """Supported public input classes."""
 
     CONFIG = "config"
@@ -924,7 +924,7 @@ class FileIngressPolicy:
                         limit=limit.max_nesting,
                     )
                 collection_items += len(item)
-                pending.extend((child, depth) for child in item.keys())
+                pending.extend((child, depth) for child in item)
                 pending.extend((child, depth) for child in item.values())
             elif isinstance(item, list):
                 depth = parent_depth + 1
@@ -1033,30 +1033,32 @@ class FileIngressPolicy:
         )
         digest = hashlib.sha256()
         try:
-            with os.fdopen(descriptor, "rb", closefd=True) as source:
-                with target.open("xb", buffering=0) as output:
-                    try:
-                        for chunk in self._bounded_chunks(source, kind):
-                            digest.update(chunk)
-                            remaining = memoryview(chunk)
-                            while remaining:
-                                written = output.write(remaining)
-                                if written is None or written <= 0:
-                                    raise OSError("The destination write made no progress.")
-                                remaining = remaining[written:]
-                        output.flush()
-                        os.fsync(output.fileno())
-                        current = FileSnapshot.from_stat(os.fstat(source.fileno()))
-                        if current != opened or digest.hexdigest() != expected.sha256:
-                            raise self._error(
-                                "FILE_INPUT_CHANGED",
-                                f"The {kind.value} input changed while it was being consumed.",
-                                kind,
-                            )
-                        self.assert_unchanged(selected, kind, opened)
-                    except BaseException:
-                        cleanup_open_path(target, output.fileno())
-                        raise
+            with (
+                os.fdopen(descriptor, "rb", closefd=True) as source,
+                target.open("xb", buffering=0) as output,
+            ):
+                try:
+                    for chunk in self._bounded_chunks(source, kind):
+                        digest.update(chunk)
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            written = output.write(remaining)
+                            if written is None or written <= 0:
+                                raise OSError("The destination write made no progress.")
+                            remaining = remaining[written:]
+                    output.flush()
+                    os.fsync(output.fileno())
+                    current = FileSnapshot.from_stat(os.fstat(source.fileno()))
+                    if current != opened or digest.hexdigest() != expected.sha256:
+                        raise self._error(
+                            "FILE_INPUT_CHANGED",
+                            f"The {kind.value} input changed while it was being consumed.",
+                            kind,
+                        )
+                    self.assert_unchanged(selected, kind, opened)
+                except BaseException:
+                    cleanup_open_path(target, output.fileno())
+                    raise
         except (FileExistsError, FileIngressError):
             raise
         except (OSError, RuntimeError, ValueError) as exc:

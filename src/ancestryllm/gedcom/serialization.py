@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ancestryllm.core.publication import StagedFileToken
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.publication import StagedFileToken
 from ancestryllm.gedcom.artifact_publication import stage_text_atomically
 from ancestryllm.gedcom.graph import (
     _ROOTED_AUXILIARY_RECORD_TAGS,
@@ -175,11 +178,11 @@ def write_quality_diagnostic(
 def write_gedcom(
     records: list[IndividualRecord],
     output_path: str | Path,
-    source_parsers: Optional[list[Any]] = None,
-    source_documents: Optional[list[ParsedSource]] = None,
-    pointer_map: Optional[dict[str, str]] = None,
-    include_individuals: Optional[set[str]] = None,
-    include_families: Optional[set[str]] = None,
+    source_parsers: list[Any] | None = None,
+    source_documents: list[ParsedSource] | None = None,
+    pointer_map: dict[str, str] | None = None,
+    include_individuals: set[str] | None = None,
+    include_families: set[str] | None = None,
     gedcom_version: str = "5.5.5",
 ) -> StagedFileToken:
     """Render and stage a loss-minimizing GEDCOM artifact."""

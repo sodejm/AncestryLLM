@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Final, Iterable, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
-from ancestryllm.application.dto import SecretGrantRef
 from ancestryllm.application.results import CommandResult, StructuredResult
-from ancestryllm.core.commands import DispatchKey
 from ancestryllm.core.errors import AncestryError
 
-CommandScalar: TypeAlias = str | int | float | bool | None
-CommandValue: TypeAlias = CommandScalar | tuple[str, ...]
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ancestryllm.application.dto import SecretGrantRef
+    from ancestryllm.core.commands import DispatchKey
+
+CommandScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - public facade
+CommandValue: TypeAlias = CommandScalar | tuple[str, ...]  # noqa: UP040 - public facade
 _MISSING: Final = object()
 
 
@@ -54,7 +58,7 @@ class CommandInvocation:
             if argument.name == name:
                 return argument.value
         if default is not _MISSING:
-            return cast(CommandValue, default)
+            return cast("CommandValue", default)
         raise AncestryError(
             "ARGUMENT_INVALID",
             f"Missing required command argument: {name}.",

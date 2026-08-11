@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.validation import validate_structured_output
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class AnthropicProvider:
@@ -85,19 +87,21 @@ class AnthropicProvider:
         system, messages = self._messages(request)
         stream_started = False
         try:
-            with self._client(request.timeout_seconds) as client:
-                with client.messages.stream(
+            with (
+                self._client(request.timeout_seconds) as client,
+                client.messages.stream(
                     model=request.model,
                     system=system,
                     messages=messages,
                     max_tokens=request.max_output_tokens,
                     temperature=request.temperature,
                     timeout=httpx.Timeout(request.timeout_seconds),
-                ) as stream:
-                    for text in stream.text_stream:
-                        if text:
-                            stream_started = True
-                            yield text
+                ) as stream,
+            ):
+                for text in stream.text_stream:
+                    if text:
+                        stream_started = True
+                        yield text
         except ProviderError:
             raise
         except Exception as exc:

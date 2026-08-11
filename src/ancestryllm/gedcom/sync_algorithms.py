@@ -11,14 +11,18 @@ import math
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from pathlib import Path
-from types import ModuleType
-from typing import Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+    from types import ModuleType
+
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,
 )
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.identity import individual_from_record
 from ancestryllm.gedcom.sync_contracts import (
     ATTACHMENT_TAGS,
@@ -218,7 +222,7 @@ def _merge_citations(
     left: Sequence[str],
     right: Sequence[str],
     core: ModuleType,
-) -> Optional[list[str]]:
+) -> list[str] | None:
     """Merge compatible citations, returning ``None`` on singleton conflicts."""
     if _citation_identity(left, core) != _citation_identity(right, core):
         return None
@@ -236,8 +240,8 @@ def _merge_citations(
         if key in seen:
             continue
         child_tag = core.parse_gedcom_line(child[0]).tag
-        merge_index: Optional[int] = None
-        merged_child: Optional[list[str]] = None
+        merge_index: int | None = None
+        merged_child: list[str] | None = None
         if child_tag in singleton_tags:
             blocks = _direct_blocks(result, core)
             for index, existing in enumerate(blocks):
@@ -273,7 +277,7 @@ def _merge_compatible_structure(
     left: Sequence[str],
     right: Sequence[str],
     core: ModuleType,
-) -> Optional[list[str]]:
+) -> list[str] | None:
     """Union compatible child structures without duplicating singleton fields.
 
     This helper is intentionally conservative.  It is primarily used for the
@@ -464,14 +468,10 @@ def _identifier_values(person: Any, core: ModuleType) -> set[str]:
     values: set[str] = set()
     for block in core._top_level_blocks(person.raw_lines):
         first = core.parse_gedcom_line(block[0])
-        if first.tag == "REFN" or first.tag in {
-            "_APID",
-            "_FSFTID",
-            "_MHID",
-            "_UID",
-        }:
-            if first.value.strip():
-                values.add(f"{first.tag}:{_normal_space(first.value)}")
+        if (
+            first.tag == "REFN" or first.tag in {"_APID", "_FSFTID", "_MHID", "_UID"}
+        ) and first.value.strip():
+            values.add(f"{first.tag}:{_normal_space(first.value)}")
     return values
 
 
@@ -834,7 +834,7 @@ def _reconcile_person_blocks(
         active[spec.source_id] = spec.snapshot_id
     active_snapshot_ids = set(active.values())
     block_registry: dict[str, dict[str, Any]] = copy.deepcopy(manifest.get("blocks", {}))
-    grouped: dict[str, list[tuple[Optional[SnapshotSpec], Any]]] = defaultdict(list)
+    grouped: dict[str, list[tuple[SnapshotSpec | None, Any]]] = defaultdict(list)
     source_spec_by_path = {str(spec.path): spec for spec in specs}
     tombstones = {
         (str(item.get("person", "")), str(item.get("block_hash", "")))
@@ -960,7 +960,7 @@ def _seed_snapshot_history(manifest: dict[str, Any], specs: Sequence[SnapshotSpe
                 "sha256": spec.sha256,
                 "exported_at": spec.exported_at,
                 "date_basis": spec.date_basis,
-                "observed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "observed_at": dt.datetime.now(dt.UTC).isoformat(),
             },
         )
         manifest["active_snapshots"][spec.source_id] = spec.snapshot_id

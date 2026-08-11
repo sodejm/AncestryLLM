@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
     "BUILTIN_MODULES",
@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 
-class ArgumentType(str, Enum):
+class ArgumentType(StrEnum):
     """Serializable value types understood by command transports."""
 
     STRING = "string"
@@ -33,7 +33,7 @@ class ArgumentType(str, Enum):
     PATH = "path"
 
 
-class ArgumentAction(str, Enum):
+class ArgumentAction(StrEnum):
     """Transport-neutral argument collection behavior."""
 
     STORE = "store"
@@ -41,7 +41,7 @@ class ArgumentAction(str, Enum):
     STORE_TRUE = "store_true"
 
 
-class ArgumentCardinality(str, Enum):
+class ArgumentCardinality(StrEnum):
     """Supported variable argument cardinalities."""
 
     OPTIONAL = "optional"
@@ -49,7 +49,7 @@ class ArgumentCardinality(str, Enum):
     REMAINDER = "remainder"
 
 
-class CompletionKind(str, Enum):
+class CompletionKind(StrEnum):
     """Semantic completion sources for a future interactive transport."""
 
     NONE = "none"

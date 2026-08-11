@@ -9,7 +9,10 @@ import os
 import stat
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class SnapshotError(RuntimeError):
@@ -20,7 +23,7 @@ def validate_source_metadata(
     metadata: os.stat_result,
     source_path: Path,
     *,
-    current_uid: Optional[int] = None,
+    current_uid: int | None = None,
 ) -> None:
     """Validate security properties on metadata from the open source descriptor."""
 
@@ -41,12 +44,14 @@ def validate_source_metadata(
 
 
 def _canonical_leaf_path(path: Path, description: str) -> Path:
-    absolute_path = os.path.abspath(os.fspath(path))
-    leaf_name = os.path.basename(absolute_path)
+    # Preserve the leaf spelling so the caller can reject rather than follow a
+    # credential-file symlink after canonicalizing only its parent directory.
+    absolute_path = Path(os.path.abspath(path))  # noqa: PTH100
+    leaf_name = absolute_path.name
     if not leaf_name:
         raise SnapshotError(f"{description} must name a file")
 
-    canonical_parent = os.path.realpath(os.path.dirname(absolute_path))
+    canonical_parent = os.path.realpath(absolute_path.parent)
     return Path(canonical_parent) / leaf_name
 
 
@@ -162,10 +167,10 @@ def snapshot_credential_file(
     if canonical_source == canonical_destination:
         raise SnapshotError("Credential source and snapshot destination must differ")
 
-    source_parent_descriptor: Optional[int] = None
-    source_descriptor: Optional[int] = None
-    destination_parent_descriptor: Optional[int] = None
-    destination_descriptor: Optional[int] = None
+    source_parent_descriptor: int | None = None
+    source_descriptor: int | None = None
+    destination_parent_descriptor: int | None = None
+    destination_descriptor: int | None = None
     destination_created = False
     snapshot_complete = False
 
@@ -240,7 +245,7 @@ def snapshot_credential_file(
             os.close(source_parent_descriptor)
 
 
-def _parse_args(arguments: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def _parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create one race-safe private credential snapshot."
     )
@@ -250,7 +255,7 @@ def _parse_args(arguments: Optional[Sequence[str]] = None) -> argparse.Namespace
     return parser.parse_args(arguments)
 
 
-def main(arguments: Optional[Sequence[str]] = None) -> int:
+def main(arguments: Sequence[str] | None = None) -> int:
     options = _parse_args(arguments)
     try:
         snapshot_credential_file(

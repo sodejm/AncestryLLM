@@ -7,9 +7,9 @@ import os
 import socket
 import stat
 import threading
-from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -37,6 +37,9 @@ from ancestryllm.gedcom import (
 )
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.gedcom.sync import execute_sync, run_sync
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
 
@@ -539,9 +542,9 @@ def simulated_windows_capabilities(monkeypatch):
             state["marker_delete_failures"] += 1
             raise PermissionError("fictional Windows marker deletion failure")
         if stat.S_ISDIR(value.st_mode):
-            os.rmdir(path)
+            path.rmdir()
         else:
-            os.unlink(path)
+            path.unlink()
 
     def rename_with_share_delete_assertion(
         source: Path,
@@ -622,7 +625,7 @@ class _ReplaceAfterHashPolicy(FileIngressPolicy):
     ) -> tuple[str, FileSnapshot]:
         result = super().sha256(path, kind, expected=expected)
         if Path(path).absolute() == self.target and not self.replaced:
-            os.replace(self.replacement, self.target)
+            self.replacement.replace(self.target)
             self.replaced = True
         return result
 
@@ -649,7 +652,7 @@ class _ReplaceAfterJsonPolicy(FileIngressPolicy):
             expected=expected,
         )
         if Path(path).absolute() == self.target and not self.replaced:
-            os.replace(self.replacement, self.target)
+            self.replacement.replace(self.target)
             self.replaced = True
         return value
 
@@ -676,7 +679,7 @@ class _ReplaceAfterTextReadPolicy(FileIngressPolicy):
             expected=expected,
         )
         if Path(path).absolute() == self.target and not self.replaced:
-            os.replace(self.replacement, self.target)
+            self.replacement.replace(self.target)
             self.replaced = True
 
 
@@ -835,7 +838,7 @@ def test_incremental_provider_postcheck_rejects_mutation_during_adjudication(
     def resolver_factory(_provider: str, _model: str, _consent: str | None):
         def resolve(left, right):
             provider_calls.append((left.pointer, right.pointer))
-            os.replace(replacement, snapshot)
+            replacement.replace(snapshot)
             return {}
 
         return resolve
@@ -1106,7 +1109,7 @@ def test_rebase_rejects_tampered_manifest_parent_before_indexing(
     edited = tmp_path / "edited.ged"
     edited.write_bytes(prior_master.read_bytes())
     replacement = _replace_copy(prior_master, b"Mira", b"Zira")
-    os.replace(replacement, prior_master)
+    replacement.replace(prior_master)
     index = Mock(side_effect=AssertionError("indexing must not run"))
     monkeypatch.setattr(sync_operations, "_master_block_index", index)
 
@@ -1720,7 +1723,7 @@ def test_sync_detects_release_root_swap_during_final_rename_without_touching_for
             and source_dir_fd is not None
         ):
             swapped = True
-            os.rename(releases, moved_root)
+            releases.rename(moved_root)
             releases.mkdir()
             foreign_sentinel.write_text("preserve foreign owner", encoding="utf-8")
         original_rename(
@@ -1771,7 +1774,7 @@ def test_staging_cleanup_rejects_untrusted_or_reused_directory_identity(
     ) = sync_publication._create_staging_directory(release_capability, ".gedcom-sync-")
     assert descriptor is not None
     moved_owned = tmp_path / "moved-owned-staging"
-    os.rename(staging, moved_owned)
+    staging.rename(moved_owned)
     staging.mkdir()
     sentinel = staging / "foreign-sentinel.txt"
     sentinel.write_text("preserve replacement", encoding="utf-8")
@@ -1929,7 +1932,7 @@ def test_staging_cleanup_stops_after_a_late_directory_swap(tmp_path: Path) -> No
         nonlocal swapped
         if not swapped and path == descriptor:
             swapped = True
-            os.rename(staging, moved_owned)
+            staging.rename(moved_owned)
             staging.mkdir()
             sentinel.write_text("preserve foreign owner", encoding="utf-8")
         return original_listdir(path)
@@ -1969,7 +1972,7 @@ def test_capability_tree_cleanup_stops_after_a_late_directory_swap(
         nonlocal swapped
         if not swapped and path == descriptor:
             swapped = True
-            os.rename(candidate, moved_owned)
+            candidate.rename(moved_owned)
             candidate.mkdir()
             sentinel.write_text("preserve foreign owner", encoding="utf-8")
         return original_listdir(path)
@@ -2302,7 +2305,7 @@ def test_moved_destination_and_failed_rollback_never_claims_commit(
         assert marker_descriptor is not None
         assert os.fstat(marker_descriptor).st_ino > 0
         physical_root = sync_publication._capability_current_path(release_root)
-        os.rename(physical_root / destination_name, moved_release)
+        (physical_root / destination_name).rename(moved_release)
         return False
 
     with (
@@ -2481,7 +2484,7 @@ def test_release_root_swap_at_marker_removal_rolls_back_in_held_root(
         nonlocal swapped
         if not swapped:
             swapped = True
-            os.rename(releases, moved_root)
+            releases.rename(moved_root)
             releases.mkdir()
             foreign_sentinel.write_text("preserve foreign owner", encoding="utf-8")
         return original_remove(
@@ -2537,7 +2540,7 @@ def test_release_root_swap_during_staging_mkdir_uses_held_root_for_cleanup(
         original_mkdir(*args, **kwargs)
         if not swapped and selected.name.startswith((".gedcom-sync-", ".gedcom-rebase-")):
             swapped = True
-            os.rename(releases, moved_root)
+            releases.rename(moved_root)
             releases.mkdir()
             foreign_sentinel.write_text("preserve foreign owner", encoding="utf-8")
 
@@ -2607,7 +2610,7 @@ def test_windows_candidate_mkdir_interruption_preserves_foreign_replacement(
         original_mkdir(*args, **kwargs)
         if selected.name.startswith(".ancestryllm-release-root-"):
             candidate = selected
-            os.rename(selected, moved_owned)
+            selected.rename(moved_owned)
             original_mkdir(selected)
             raise interruption("fictional Windows post-mkdir interruption")
 
@@ -2688,7 +2691,7 @@ def test_flat_cleanup_never_removes_late_empty_foreign_replacement(tmp_path: Pat
         if args[0] == staging_name and kwargs.get("dir_fd") == release_capability.descriptor:
             matching_stats += 1
             if matching_stats == 2:
-                os.rename(staging, moved_owned)
+                staging.rename(moved_owned)
                 staging.mkdir()
         return value
 

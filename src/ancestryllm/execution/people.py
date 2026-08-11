@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
-from ancestryllm.core.context import AppContext
 from ancestryllm.domain.models import LivingStatus
 from ancestryllm.execution.common import structured_result, text
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 class PeopleExecutor:

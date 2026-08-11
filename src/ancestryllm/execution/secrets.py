@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from ancestryllm.application._secrets import SecretGrantRegistry
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.common import optional_text, structured_result, text
+
+if TYPE_CHECKING:
+    from ancestryllm.application._secrets import SecretGrantRegistry
+    from ancestryllm.core.context import AppContext
 
 _DEFAULT_NAMES = (
     "openai.api_key",

@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ancestryllm.application.executor import CommandInvocation
 from ancestryllm.application.results import FileArtifactResult, TableResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.execution.common import structured_result, table_result
 from ancestryllm.execution.database import DatabaseExecutor
@@ -18,6 +17,10 @@ from ancestryllm.execution.gedcom import GedcomExecutor
 from ancestryllm.execution.modules import ModulesExecutor
 from ancestryllm.execution.rootsmagic import RootsMagicExecutor
 from ancestryllm.terminal.parser import build_parser, invocation_from_namespace
+
+if TYPE_CHECKING:
+    from ancestryllm.application.executor import CommandInvocation
+    from ancestryllm.core.context import AppContext
 
 
 def _invocation(tokens: list[str]) -> CommandInvocation:

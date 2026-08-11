@@ -57,7 +57,7 @@ def test_cancellation_during_publication_reports_pending_and_commits_complete_bu
             requested = True
             token.request()
         elif Path(source) != Path(destination):
-            os.replace(source, destination)
+            Path(source).replace(destination)
 
     with bind_cancellation_token(token), pytest.raises(CancellationError):
         publication_module.publish_staged_bundle(
@@ -84,7 +84,7 @@ def test_publication_failure_wins_when_it_races_cancellation(tmp_path: Path) -> 
         if Path(source) == Path(destination):
             token.request()
             raise OSError("fictional publication failure")
-        os.replace(source, destination)
+        Path(source).replace(destination)
 
     with (
         bind_cancellation_token(token),

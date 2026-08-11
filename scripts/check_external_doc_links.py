@@ -14,7 +14,7 @@ import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -147,7 +147,7 @@ def validate_exception_records(
     """Validate owned, reasoned, expiring exceptions against canonical links."""
     if not isinstance(records, list):
         return [ExternalLinkIssue("external-link exceptions must be a list")]
-    current = today or date.today()
+    current = today or datetime.now(UTC).date()
     errors: list[ExternalLinkIssue] = []
     seen: set[str] = set()
     for position, record in enumerate(records, start=1):

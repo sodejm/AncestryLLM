@@ -134,13 +134,15 @@ skip_covered = true
 fail_under = 75
 
 [tool.ruff]
-target-version = "py312"
 line-length = 100
 src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF"]
+select = ["E4", "E7", "E9", "F", "I", "B", "BLE", "S", "RUF", "TC", "PERF", "C4", "FURB", "UP", "SIM", "RET", "PTH", "DTZ", "LOG", "ASYNC"]
 ignore = ["E501", "S101"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["RUF003", "RUF059", "S105", "S106", "S108", "S603", "S607"]

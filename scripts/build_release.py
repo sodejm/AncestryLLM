@@ -222,22 +222,28 @@ def _normalize_sdist(path: Path, *, epoch: int) -> None:
             members.append((member, data))
 
     normalized = io.BytesIO()
-    with gzip.GzipFile(
-        filename="",
-        mode="wb",
-        compresslevel=9,
-        fileobj=normalized,
-        mtime=epoch,
-    ) as compressed:
-        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as output:
-            for member, data in members:
-                member.mtime = epoch
-                member.uid = 0
-                member.gid = 0
-                member.uname = ""
-                member.gname = ""
-                member.pax_headers = {}
-                output.addfile(member, io.BytesIO(data) if data is not None else None)
+    with (
+        gzip.GzipFile(
+            filename="",
+            mode="wb",
+            compresslevel=9,
+            fileobj=normalized,
+            mtime=epoch,
+        ) as compressed,
+        tarfile.open(
+            fileobj=compressed,
+            mode="w",
+            format=tarfile.PAX_FORMAT,
+        ) as output,
+    ):
+        for member, data in members:
+            member.mtime = epoch
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.pax_headers = {}
+            output.addfile(member, io.BytesIO(data) if data is not None else None)
     path.write_bytes(normalized.getvalue())
 
 
@@ -250,21 +256,23 @@ def build_release(output: Path) -> dict[str, str]:
     if any(output.iterdir()):
         raise RuntimeError(f"release output directory must be empty: {output}")
 
-    with tempfile.TemporaryDirectory(prefix="ancestryllm-build-a-") as first_name:
-        with tempfile.TemporaryDirectory(prefix="ancestryllm-build-b-") as second_name:
-            first = Path(first_name)
-            second = Path(second_name)
-            _build(first, epoch)
-            first_hashes = validate_artifacts(first, version)
-            _build(second, epoch)
-            second_hashes = validate_artifacts(second, version)
-            if first_hashes != second_hashes:
-                raise RuntimeError(
-                    "release builds are not reproducible:\n"
-                    f"first={first_hashes}\nsecond={second_hashes}"
-                )
-            for name in sorted(first_hashes):
-                shutil.copy2(first / name, output / name)
+    with (
+        tempfile.TemporaryDirectory(prefix="ancestryllm-build-a-") as first_name,
+        tempfile.TemporaryDirectory(prefix="ancestryllm-build-b-") as second_name,
+    ):
+        first = Path(first_name)
+        second = Path(second_name)
+        _build(first, epoch)
+        first_hashes = validate_artifacts(first, version)
+        _build(second, epoch)
+        second_hashes = validate_artifacts(second, version)
+        if first_hashes != second_hashes:
+            raise RuntimeError(
+                "release builds are not reproducible:\n"
+                f"first={first_hashes}\nsecond={second_hashes}"
+            )
+        for name in sorted(first_hashes):
+            shutil.copy2(first / name, output / name)
 
     checksum_path = output / "SHA256SUMS"
     checksum_path.write_text(

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from ancestryllm.application._secrets import SecretGrantRegistry
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import (
     CommandExecutor,
     CommandHandler,
     CommandInvocation,
     CommandOutcome,
 )
-from ancestryllm.application.ports import ProgressPort
 from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS, DispatchKey
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.execution.database import DatabaseExecutor
@@ -23,6 +22,11 @@ from ancestryllm.execution.prompts import PromptsExecutor
 from ancestryllm.execution.providers import ProvidersExecutor
 from ancestryllm.execution.rootsmagic import RootsMagicExecutor
 from ancestryllm.execution.secrets import SecretsExecutor
+
+if TYPE_CHECKING:
+    from ancestryllm.application._secrets import SecretGrantRegistry
+    from ancestryllm.application.ports import ProgressPort
+    from ancestryllm.core.context import AppContext
 
 
 class _EnabledModuleExecutor:

@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 MINIMUM_PYTHON = (3, 12)
 MAXIMUM_PYTHON = (3, 15)

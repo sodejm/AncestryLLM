@@ -6,14 +6,17 @@ import dataclasses
 import socket
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 import ancestryllm.rootsmagic.reader as reader_module
 from ancestryllm.cli import main
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.ingress import FileIngressLimits, FileKind
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def _set_limit(

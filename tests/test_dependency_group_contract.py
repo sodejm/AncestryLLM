@@ -122,7 +122,7 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
     assert moved | deliberately_removed | retained_as_extra == (
         OLD_DEV_DEPENDENCIES | NEW_ADVISORY_DEPENDENCIES
     )
-    assert NEW_ADVISORY_DEPENDENCIES <= moved
+    assert moved >= NEW_ADVISORY_DEPENDENCIES
     assert moved.isdisjoint(deliberately_removed | retained_as_extra)
     assert deliberately_removed.isdisjoint(retained_as_extra)
 

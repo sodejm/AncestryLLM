@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from types import ModuleType
-from typing import Never, Sequence
+from typing import TYPE_CHECKING, Never
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from types import ModuleType
+
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import (
     FileIngressPolicy,
 )
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.sync_contracts import (
     CancellationCheck,
     ResolverFactory,

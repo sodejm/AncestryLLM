@@ -12,10 +12,10 @@ import sqlite3
 import sys
 import threading
 import types
-from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
@@ -25,12 +25,16 @@ from prompt_toolkit.output import DummyOutput
 
 from ancestryllm.console.router import RouteKind, RouteResult
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileKind
-from ancestryllm.core.jobs import JobSnapshot
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
-from ancestryllm.llm.policy import ConsentGrant
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ancestryllm.core.context import AppContext
+    from ancestryllm.core.jobs import JobSnapshot
+    from ancestryllm.llm.policy import ConsentGrant
 
 
 @dataclass(frozen=True)

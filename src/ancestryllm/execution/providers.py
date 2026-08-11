@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.execution.common import (
     boolean,
     key_values,
@@ -14,6 +15,9 @@ from ancestryllm.execution.common import (
     text_values,
 )
 from ancestryllm.llm.contracts import DataClass
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 class ProvidersExecutor:

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ancestryllm.cli import build_parser
 from ancestryllm.console.parser import parse_repl_invocation, split_repl_input
 from ancestryllm.console.router import RouteKind, SessionRouter
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def _error_code(callable_object, *args: object) -> str:

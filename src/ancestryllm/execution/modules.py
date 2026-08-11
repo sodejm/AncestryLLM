@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.execution.common import descriptor_payload, table_result, text
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 _MODULE_COLUMNS = (
     "module_id",
@@ -32,7 +36,7 @@ class ModulesExecutor:
                     (descriptor_payload(item) for item in self._registry.descriptors()),
                 )
             )
-        elif action == "enable":
+        if action == "enable":
             module_id = text(invocation, "module_id")
             self._registry.enable(module_id)
             result = SuccessResult(f"Enabled module: {module_id}")

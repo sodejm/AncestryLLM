@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import FileArtifactResult, MarkdownResult
-from ancestryllm.core.context import AppContext
-from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.execution.common import (
     consent,
     integer,
@@ -20,6 +19,10 @@ from ancestryllm.execution.common import (
     text,
     text_values,
 )
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
+    from ancestryllm.core.ingress import FileIngressPolicy
 
 _GEDCOM_MEDIA_TYPE = "text/vnd.familysearch.gedcom"
 _REPORT_MEDIA_TYPE = "text/markdown"

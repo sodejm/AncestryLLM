@@ -13,7 +13,7 @@ import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Self, TypeAlias, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Self, TypeAlias, Union, cast, get_args, get_origin, get_type_hints
 
 CONTRACT_VERSION = "ancestryllm.application/0.3"
 MAX_BOUNDARY_JSON_BYTES = 1_048_576
@@ -22,8 +22,7 @@ MAX_TEXT_LENGTH = 65_536
 MAX_PROGRESS_TOTAL = 1_000_000_000
 
 Scalar = str | int | float | bool | None
-JSONValue: TypeAlias = Scalar | list["JSONValue"] | dict[str, "JSONValue"]
-_BoundaryT = TypeVar("_BoundaryT", bound="BoundaryDTO")
+JSONValue: TypeAlias = Scalar | list["JSONValue"] | dict[str, "JSONValue"]  # noqa: UP040
 
 
 class BoundaryDTO:
@@ -34,7 +33,7 @@ class BoundaryDTO:
     def to_serializable(self) -> JSONValue:
         """Return the strict-JSON value represented by this boundary object."""
 
-        return cast(JSONValue, _encode(self))
+        return cast("JSONValue", _encode(self))
 
     def to_json(self) -> str:
         """Serialize with stable ordering and strict JSON scalar behavior."""
@@ -142,10 +141,12 @@ def _field_names(value_type: object) -> tuple[str, ...]:
     declared = getattr(value_type, "__dataclass_fields__", None)
     if not isinstance(declared, Mapping) or not all(isinstance(name, str) for name in declared):
         raise TypeError("Boundary DTO types must be dataclasses.")
-    return tuple(cast(str, name) for name in declared)
+    return tuple(cast("str", name) for name in declared)
 
 
-def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> _BoundaryT:
+def _decode_dataclass[BoundaryT: BoundaryDTO](
+    cls: type[BoundaryT], value: Mapping[object, object]
+) -> BoundaryT:
     if any(not isinstance(key, str) for key in value):
         raise TypeError("Boundary DTO object keys must be strings.")
     annotations = get_type_hints(cls)
@@ -158,7 +159,7 @@ def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> 
     if missing:
         raise ValueError(f"Missing {cls.__name__} fields: {', '.join(sorted(missing))}")
     decoded = {
-        name: _decode(cast(Mapping[str, object], value)[name], annotations[name])
+        name: _decode(cast("Mapping[str, object]", value)[name], annotations[name])
         for name in sorted(expected)
     }
     return cls(**decoded)
@@ -189,7 +190,7 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
 
-def load_boundary(cls: type[_BoundaryT], payload: str) -> _BoundaryT:
+def load_boundary[BoundaryT: BoundaryDTO](cls: type[BoundaryT], payload: str) -> BoundaryT:
     """Load one exact DTO type from canonical-compatible strict JSON."""
 
     if len(payload.encode("utf-8")) > MAX_BOUNDARY_JSON_BYTES:
@@ -270,11 +271,10 @@ class ArtifactRef(BoundaryDTO):
             raise ValueError("media_type must be a bounded MIME type.")
         if not 0 <= self.size_bytes <= MAX_ARTIFACT_BYTES:
             raise ValueError("artifact size is outside the supported range.")
-        if self.sha256 is not None:
-            if len(self.sha256) != 64 or any(
-                char not in "0123456789abcdef" for char in self.sha256
-            ):
-                raise ValueError("sha256 must be a lowercase hexadecimal digest.")
+        if self.sha256 is not None and (
+            len(self.sha256) != 64 or any(char not in "0123456789abcdef" for char in self.sha256)
+        ):
+            raise ValueError("sha256 must be a lowercase hexadecimal digest.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,9 +358,12 @@ class ProgressUpdate(BoundaryDTO):
             raise ValueError("progress sequence is outside the supported range.")
         if (self.completed is None) is not (self.total is None):
             raise ValueError("progress requires both completed and total values.")
-        if self.completed is not None and self.total is not None:
-            if not 0 <= self.completed <= self.total <= MAX_PROGRESS_TOTAL:
-                raise ValueError("progress counts are outside the supported range.")
+        if (
+            self.completed is not None
+            and self.total is not None
+            and not 0 <= self.completed <= self.total <= MAX_PROGRESS_TOTAL
+        ):
+            raise ValueError("progress counts are outside the supported range.")
         if self.artifact_id is not None:
             _validate_identifier("artifact_id", self.artifact_id, prefix="art_")
 

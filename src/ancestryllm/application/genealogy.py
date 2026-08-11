@@ -108,7 +108,7 @@ class GenealogyAggregate:
     def change_summary(self) -> ChangeSummary:
         """Return deterministic created/updated/unchanged/conflict accounting."""
 
-        counts = {kind: 0 for kind in ChangeKind}
+        counts = dict.fromkeys(ChangeKind, 0)
         warnings = 0
         for change in self.changes:
             counts[change.kind] += 1
@@ -124,7 +124,7 @@ class GenealogyAggregate:
     def quality_summary(self) -> QualitySummary:
         """Return deterministic quality finding counts."""
 
-        counts = {kind: 0 for kind in QualityKind}
+        counts = dict.fromkeys(QualityKind, 0)
         for finding in self.quality_findings:
             counts[finding.kind] += 1
         return QualitySummary(

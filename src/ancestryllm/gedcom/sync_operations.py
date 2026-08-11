@@ -6,9 +6,14 @@ import copy
 import dataclasses
 import datetime as dt
 from collections import Counter, defaultdict
-from pathlib import Path
-from types import ModuleType
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+    from types import ModuleType
+
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.cancellation import (
     CancellationError,
@@ -22,7 +27,6 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.gedcom import sync_publication
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.sync_algorithms import (
     _block_key,
     _block_logical_identity,
@@ -285,10 +289,10 @@ def _perform_update(
     output_records = [head, *nonpeople]
     output_source = core.ParsedSource(master, output_records, {})
     next_generation = int(manifest.get("generation", 0)) + 1
-    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     release_name = f"g{next_generation:04d}-{timestamp}"
     manifest["generation"] = next_generation
-    manifest["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    manifest["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
     manifest["blocks"] = block_registry
     manifest["person_bindings"].update(bindings)
     manifest["record_aliases"].update(stats.record_aliases)
@@ -667,7 +671,7 @@ def _perform_rebase(
             accounting=_rebase_accounting(additions, deletions),
         )
     release_root_capability = sync_publication._ensure_release_root(release_root)
-    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     final_dir = release_root / f"g{next_generation:04d}-{timestamp}"
     published_artifacts = tuple(
         final_dir / name
@@ -707,7 +711,7 @@ def _perform_rebase(
         master_sha = _sha256_file(staging / "master.ged")
         prior = copy.deepcopy(manifest.get("master"))
         manifest["generation"] = next_generation
-        manifest["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        manifest["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
         manifest["parent_release"] = {
             "generation": next_generation - 1,
             "master": prior,

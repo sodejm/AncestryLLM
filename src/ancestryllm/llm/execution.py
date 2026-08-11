@@ -169,14 +169,16 @@ class ProviderExecutionCoordinator:
     ) -> Iterator[None]:
         """Admit one request and lease provider capacity for its active call."""
 
-        with self.admission(key, max_pending=max_pending):
-            with self.capacity(
+        with (
+            self.admission(key, max_pending=max_pending),
+            self.capacity(
                 key,
                 max_concurrency=max_concurrency,
                 timeout_seconds=timeout_seconds,
                 cancellation_check=cancellation_check,
-            ):
-                yield
+            ),
+        ):
+            yield
 
     def close(self) -> None:
         with self._lock:

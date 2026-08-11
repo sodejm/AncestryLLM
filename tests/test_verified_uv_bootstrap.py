@@ -15,13 +15,15 @@ import threading
 import time
 import tomllib
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "config" / "uv-bootstrap-policy.json"
@@ -1657,7 +1659,8 @@ def test_initialization_failures_emit_minimal_sanitized_receipts(
     elif failure_point == "clock":
 
         def naive_now() -> datetime:
-            return datetime(2026, 8, 10)
+            # Deliberately exercise the bootstrap's rejection of a naive clock.
+            return datetime(2026, 8, 10)  # noqa: DTZ001
 
         now = naive_now
 

@@ -128,7 +128,7 @@ def _validate_rfc3339(label: str, value: str) -> None:
         if offset_hour > 23 or offset_minute > 59:
             raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.") from exc
 
@@ -792,12 +792,16 @@ class SyncKernelResult(SyncValue):
             or self.failed_stage is not None
         ):
             raise ValueError("Successful non-publication results cannot contain failure metadata.")
-        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE}:
-            if self.plan is None or self.decisions:
-                raise ValueError("Non-publication success requires an undecided plan.")
-        if self.outcome is SyncOutcome.NO_CHANGE and self.plan is not None:
-            if self.plan.entries or self.plan.decisions:
-                raise ValueError("No-change results require an empty plan.")
+        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE} and (
+            self.plan is None or self.decisions
+        ):
+            raise ValueError("Non-publication success requires an undecided plan.")
+        if (
+            self.outcome is SyncOutcome.NO_CHANGE
+            and self.plan is not None
+            and (self.plan.entries or self.plan.decisions)
+        ):
+            raise ValueError("No-change results require an empty plan.")
 
     @property
     def committed(self) -> bool:

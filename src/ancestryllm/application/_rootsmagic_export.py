@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import os
 import unicodedata
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError, FileIngressError
@@ -25,6 +23,10 @@ from ancestryllm.gedcom.model import GedcomParseError
 from ancestryllm.gedcom.serializer import serialize_gedcom_document
 from ancestryllm.gedcom.validator import validate_gedcom_document
 from ancestryllm.rootsmagic.mapping import ExportReport, RootsMagicMapper
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 __all__ = ["RootsMagicExportResult", "RootsMagicExporter"]
 

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
 
 from ancestryllm.application.dto import ErrorEnvelope, FailureDetail
 from ancestryllm.core.errors import AncestryError, ProviderError
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True, slots=True)

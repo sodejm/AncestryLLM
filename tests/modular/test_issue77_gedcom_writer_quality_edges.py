@@ -7,13 +7,16 @@ and explicitly select the offline provider mode.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 from ancestryllm.gedcom.parser import iter_gedcom_records, parse_gedcom_line
 from ancestryllm.gedcom.service import GedcomService
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _document(*records: str, version: str = "5.5.5") -> bytes:
@@ -66,7 +69,7 @@ def test_public_writer_reparses_utf8_boundary_notes_without_loss(
     output = tmp_path / f"output-{physical_bytes}-{gedcom_version}.ged"
     # ``1 NOTE `` is seven ASCII bytes; include a two-byte UTF-8 character in
     # every case so the boundary is checked in bytes rather than characters.
-    note = "é" + "x" * (physical_bytes - len("1 NOTE ".encode("utf-8")) - 2)
+    note = "é" + "x" * (physical_bytes - len(b"1 NOTE ") - 2)
     source.write_bytes(
         _document(
             "0 @I1@ INDI",

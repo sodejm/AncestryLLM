@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 from ancestryllm.storage.models import (
     ConsentProfileModel,
@@ -16,6 +16,9 @@ from ancestryllm.storage.models import (
     ProviderProfileModel,
     WorkspaceModel,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(slots=True)

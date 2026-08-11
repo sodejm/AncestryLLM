@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import stat
-from collections.abc import Callable, Iterable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.history import History
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+    from pathlib import Path
 
 
 class SecureHistory(History):

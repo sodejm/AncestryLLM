@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,6 +11,10 @@ from ancestryllm.core import ingress as ingress_module
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.core.jobs import JobManager, JobState
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 @pytest.mark.parametrize(

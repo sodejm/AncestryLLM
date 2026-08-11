@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = [
     "DataClass",

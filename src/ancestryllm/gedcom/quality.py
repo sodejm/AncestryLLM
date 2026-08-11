@@ -8,12 +8,13 @@ import hashlib
 import json
 import re
 from collections import defaultdict, deque
-from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping, Sequence
+
     from ancestryllm.gedcom.contracts import QualityResolver
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
@@ -69,7 +70,7 @@ class QualityFinding:
     evidence: tuple[str, ...] = field(default_factory=tuple)
     source_files: tuple[str, ...] = field(default_factory=tuple)
     direct_ancestor: bool = False
-    generation: Optional[int] = None
+    generation: int | None = None
     confidence: str = "deterministic"
     ai_why: str = ""
     ai_research: tuple[str, ...] = field(default_factory=tuple)
@@ -565,35 +566,37 @@ def _analyze_source_structure(
         pointer_counts: dict[str, int] = defaultdict(int)
         for pointer in pointers:
             pointer_counts[pointer] += 1
-        for duplicate in sorted(pointer for pointer, count in pointer_counts.items() if count > 1):
-            findings.append(
-                _quality_finding(
-                    "DUPLICATE_XREF",
-                    "high",
-                    "structural",
-                    "Duplicate xref",
-                    f"The source declares {duplicate} more than once.",
-                    "Assign one unique xref to each level-zero record.",
-                    evidence=(duplicate,),
-                    source_files=(source_name,),
-                    generations=generations,
-                )
+        findings.extend(
+            _quality_finding(
+                "DUPLICATE_XREF",
+                "high",
+                "structural",
+                "Duplicate xref",
+                f"The source declares {duplicate} more than once.",
+                "Assign one unique xref to each level-zero record.",
+                evidence=(duplicate,),
+                source_files=(source_name,),
+                generations=generations,
             )
-        for pointer in sorted(set(pointers)):
-            if len(pointer) > 22 or not re.fullmatch(r"@[A-Za-z_][A-Za-z0-9_:-]*@", pointer):
-                findings.append(
-                    _quality_finding(
-                        "MALFORMED_XREF",
-                        "high",
-                        "structural",
-                        "Malformed xref",
-                        f"{pointer!r} is not a portable GEDCOM 5.5.5 xref.",
-                        "Replace it with a unique letter-led xref of at most 22 characters.",
-                        evidence=(pointer,),
-                        source_files=(source_name,),
-                        generations=generations,
-                    )
-                )
+            for duplicate in sorted(
+                pointer for pointer, count in pointer_counts.items() if count > 1
+            )
+        )
+        findings.extend(
+            _quality_finding(
+                "MALFORMED_XREF",
+                "high",
+                "structural",
+                "Malformed xref",
+                f"{pointer!r} is not a portable GEDCOM 5.5.5 xref.",
+                "Replace it with a unique letter-led xref of at most 22 characters.",
+                evidence=(pointer,),
+                source_files=(source_name,),
+                generations=generations,
+            )
+            for pointer in sorted(set(pointers))
+            if len(pointer) > 22 or re.fullmatch(r"@[A-Za-z_][A-Za-z0-9_:-]*@", pointer) is None
+        )
         declared = {record.pointer for record in records if record.pointer}
         for record in records:
             previous_level = 0
@@ -631,22 +634,22 @@ def _analyze_source_structure(
                         )
                     )
             references = _exact_pointer_references(record.lines)
-            for dangling in sorted(references - declared):
-                findings.append(
-                    _quality_finding(
-                        "DANGLING_REFERENCE",
-                        "high",
-                        "structural",
-                        "Dangling GEDCOM reference",
-                        f"{record.pointer or record.tag} references undefined {dangling}.",
-                        "Restore the referenced record or remove the broken edge.",
-                        people=((record.pointer,) if record.tag == "INDI" else ()),
-                        families=((record.pointer,) if record.tag == "FAM" else ()),
-                        evidence=(dangling,),
-                        source_files=(source_name,),
-                        generations=generations,
-                    )
+            findings.extend(
+                _quality_finding(
+                    "DANGLING_REFERENCE",
+                    "high",
+                    "structural",
+                    "Dangling GEDCOM reference",
+                    f"{record.pointer or record.tag} references undefined {dangling}.",
+                    "Restore the referenced record or remove the broken edge.",
+                    people=((record.pointer,) if record.tag == "INDI" else ()),
+                    families=((record.pointer,) if record.tag == "FAM" else ()),
+                    evidence=(dangling,),
+                    source_files=(source_name,),
+                    generations=generations,
                 )
+                for dangling in sorted(references - declared)
+            )
     return findings
 
 
@@ -695,7 +698,7 @@ def analyze_quality(
     generations, cycles = ancestor_generations(root_pointer, source_records, mapping)
     parents, _children, spouses, families = _family_graph(source_records, mapping)
     findings: list[QualityFinding] = []
-    current_year = dt.date.today().year
+    current_year = dt.datetime.now(dt.UTC).year
     for person in people:
         cancellation_checkpoint()
         person_files = _record_source_files(person)
@@ -718,20 +721,20 @@ def analyze_quality(
             )
         for tag, label in (("BIRT", "birth"), ("DEAT", "death")):
             facts = person.facts.get(tag, ())
-            for fact in facts:
-                if fact.date and not _valid_quality_date(fact.date):
-                    findings.append(
-                        _quality_finding(
-                            "INVALID_DATE",
-                            "high",
-                            "chronology",
-                            f"Invalid {label} date",
-                            f"{person.full_name or person.pointer} has {fact.date!r}.",
-                            "Verify the source and encode a valid GEDCOM date.",
-                            evidence=(tag, fact.date),
-                            **common,
-                        )
-                    )
+            findings.extend(
+                _quality_finding(
+                    "INVALID_DATE",
+                    "high",
+                    "chronology",
+                    f"Invalid {label} date",
+                    f"{person.full_name or person.pointer} has {fact.date!r}.",
+                    "Verify the source and encode a valid GEDCOM date.",
+                    evidence=(tag, fact.date),
+                    **common,
+                )
+                for fact in facts
+                if fact.date and not _valid_quality_date(fact.date)
+            )
             distinct = {fact.summary() for fact in facts if fact.summary()}
             if len(distinct) > 1:
                 findings.append(
@@ -836,33 +839,33 @@ def analyze_quality(
                     **common,
                 )
             )
-        for fact in person.occupations:
-            if not fact.value:
-                findings.append(
-                    _quality_finding(
-                        "INCOMPLETE_OCCUPATION",
-                        "low",
-                        "person",
-                        "Incomplete occupation",
-                        "An OCCU fact has no occupation value.",
-                        "Add the occupation text and supporting citation.",
-                        **common,
-                    )
-                )
-        for fact in person.residences:
-            if not fact.date or not fact.place:
-                findings.append(
-                    _quality_finding(
-                        "INCOMPLETE_RESIDENCE",
-                        "low",
-                        "person",
-                        "Incomplete residence",
-                        "A RESI fact is missing a date or place.",
-                        "Add the known date/place without fabricating precision.",
-                        evidence=(fact.summary(),),
-                        **common,
-                    )
-                )
+        findings.extend(
+            _quality_finding(
+                "INCOMPLETE_OCCUPATION",
+                "low",
+                "person",
+                "Incomplete occupation",
+                "An OCCU fact has no occupation value.",
+                "Add the occupation text and supporting citation.",
+                **common,
+            )
+            for fact in person.occupations
+            if not fact.value
+        )
+        findings.extend(
+            _quality_finding(
+                "INCOMPLETE_RESIDENCE",
+                "low",
+                "person",
+                "Incomplete residence",
+                "A RESI fact is missing a date or place.",
+                "Add the known date/place without fabricating precision.",
+                evidence=(fact.summary(),),
+                **common,
+            )
+            for fact in person.residences
+            if not fact.date or not fact.place
+        )
         if (
             person.birth_year is not None
             and person.death_year is not None

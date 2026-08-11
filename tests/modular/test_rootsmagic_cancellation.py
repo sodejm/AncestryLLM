@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -342,7 +341,7 @@ def test_bound_copy_cancellation_preserves_unrelated_replacement(
         nonlocal checkpoints
         checkpoints += 1
         if checkpoints == 1:
-            os.replace(replacement, destination)
+            replacement.replace(destination)
             raise CancellationError("cancel after destination replacement")
         original_checkpoint()
 
@@ -398,10 +397,13 @@ def test_real_operation_failure_is_not_masked_by_concurrent_cancellation(
     reader = RootsMagicReader([tmp_path])
     token = CancellationToken()
 
-    with pytest.raises(RuntimeError, match="real operation failure"):
-        with bind_cancellation_token(token), reader.connection(source):
-            token.request()
-            raise RuntimeError("real operation failure")
+    with (
+        pytest.raises(RuntimeError, match="real operation failure"),
+        bind_cancellation_token(token),
+        reader.connection(source),
+    ):
+        token.request()
+        raise RuntimeError("real operation failure")
 
 
 def test_connection_verifies_source_on_failure_without_masking_primary(
@@ -424,9 +426,8 @@ def test_connection_verifies_source_on_failure_without_masking_primary(
 
     monkeypatch.setattr(reader, "verify_source", verify_then_fail)
 
-    with pytest.raises(ValueError, match="primary operation failure"):
-        with reader.connection(source):
-            fail_final = True
-            raise ValueError("primary operation failure")
+    with pytest.raises(ValueError, match="primary operation failure"), reader.connection(source):
+        fail_final = True
+        raise ValueError("primary operation failure")
 
     assert final_verifications == 1

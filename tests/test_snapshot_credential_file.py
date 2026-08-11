@@ -82,7 +82,7 @@ def test_snapshot_copies_from_the_open_descriptor_when_path_is_replaced(
         ):
             source_open_count += 1
             if source_open_count == 1:
-                os.replace(replacement, source)
+                replacement.replace(source)
         return descriptor
 
     monkeypatch.setattr(module.os, "open", racing_open)

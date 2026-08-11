@@ -11,7 +11,7 @@ See ``docs/CODE_DOCUMENTATION.md`` for the full policy.
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from scripts.check_code_documentation import (
@@ -21,6 +21,9 @@ from scripts.check_code_documentation import (
     classify,
     main,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # classify() — extension and path-prefix rules

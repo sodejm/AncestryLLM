@@ -5,11 +5,14 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.rootsmagic.source import RootsMagicReader
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.rootsmagic.source import RootsMagicReader
 
 TABLE_ALIASES: dict[str, tuple[str, ...]] = {
     "person": ("PersonTable", "PeopleTable", "Person", "People"),

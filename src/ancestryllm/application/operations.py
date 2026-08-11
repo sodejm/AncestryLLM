@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
 
 from ancestryllm.application.dto import (
     ArtifactGrantRef,
@@ -23,6 +23,9 @@ from ancestryllm.application.dto import (
     ServiceResult,
 )
 from ancestryllm.core.commands import COMMAND_SPECIFICATIONS, DispatchKey
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True, slots=True)

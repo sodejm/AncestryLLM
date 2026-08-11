@@ -5,12 +5,17 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import os
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
-from ancestryllm.application._artifacts import _ArtifactRegistry
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from ancestryllm.application._artifacts import _ArtifactRegistry
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
+
 from ancestryllm.application.dto import ArtifactAccess, ProviderSelection
 from ancestryllm.application.errors import domain_failure_from_exception
 from ancestryllm.application.genealogy import GenealogyAggregate
@@ -93,16 +98,12 @@ from ancestryllm.gedcom.sync import (
     execute_sync as execute_sync_arguments,
 )
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
 
 __all__ = [
     "GedcomOperationResult",
     "GedcomService",
     "GedcomSyncResult",
 ]
-
-_ResultT = TypeVar("_ResultT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +150,7 @@ def _opaque_ref(namespace: str, value: str) -> str:
     return f"{namespace}:{digest}"
 
 
-def _at_contract_boundary(operation: Callable[[], _ResultT]) -> _ResultT:
+def _at_contract_boundary[ResultT](operation: Callable[[], ResultT]) -> ResultT:
     """Translate current implementation failures into the stable domain contract."""
 
     try:
@@ -1104,7 +1105,7 @@ class GedcomService:
             if snapshot.exported_at is None:
                 continue
             try:
-                dt.datetime.fromisoformat(snapshot.exported_at.replace("Z", "+00:00"))
+                dt.datetime.fromisoformat(snapshot.exported_at)
             except ValueError:
                 exported_at_valid = False
 

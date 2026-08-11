@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 from ancestryllm.cli import main
-from ancestryllm.core.context import AppContext
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.context import AppContext
 
 
 def _set_gedcom_limit(context: AppContext, **changes: int | None) -> None:

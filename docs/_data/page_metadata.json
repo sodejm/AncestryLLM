@@ -77,6 +77,10 @@
     "title": "ty advisory evaluation — AncestryLLM",
     "description": "Reproducible ty 0.0.69 diagnostics, checker-parity evidence, suppressions, timing, and conditional cutover disposition."
   },
+  "RUFF_EXPANSION_EVALUATION.md": {
+    "title": "Ruff rule-expansion evaluation — AncestryLLM",
+    "description": "Reviewed Ruff 0.16.1 diagnostics, import and startup contracts, batch evidence, and safety disposition."
+  },
   "ARCHITECTURE_CONTRACTS.md": {
     "title": "Architecture ownership and dependency contracts — AncestryLLM",
     "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."

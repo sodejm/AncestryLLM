@@ -8,7 +8,6 @@ import hmac
 import importlib
 import secrets
 import time
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import (
@@ -16,20 +15,22 @@ from ancestryllm.core.errors import (
     is_provider_cancellation,
     normalize_provider_error,
 )
-from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
 from ancestryllm.llm.execution import (
     CancellationCheck,
     ExactResultCache,
     ProviderExecutionCoordinator,
 )
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy
-from ancestryllm.llm.registry import ProviderRegistry
 from ancestryllm.llm.validation import validate_structured_output
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import LlmRunModel
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
     from ancestryllm.llm.profiles import ProviderProfileService
+    from ancestryllm.llm.registry import ProviderRegistry
+    from ancestryllm.storage.database import Database
 
 __all__ = ["LLMService"]
 
@@ -159,7 +160,7 @@ class LLMService:
                     status=status,
                     error_code=error_code,
                     started_at=started_at,
-                    completed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+                    completed_at=dt.datetime.now(dt.UTC).isoformat(),
                 )
             )
             session.commit()
@@ -172,7 +173,7 @@ class LLMService:
         provider = self._provider(planned_request)
         self.policy.authorize(planned_request, provider.capabilities, consent)
         canonical, request_hash = self._request_metadata(planned_request)
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         cache_hit = False
         try:
@@ -309,7 +310,7 @@ class LLMService:
         provider = self._provider(planned_request)
         self.policy.authorize(planned_request, provider.capabilities, consent)
         canonical, request_hash = self._request_metadata(planned_request)
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         return self._stream_lifecycle(
             planned_request,

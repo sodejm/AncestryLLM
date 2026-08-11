@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from typing import TextIO
-
-from prompt_toolkit.input import Input
-from prompt_toolkit.output import Output
+from typing import TYPE_CHECKING, TextIO
 
 from ancestryllm.console.shell import ReplApplication, run_repl
-from ancestryllm.core.context import AppContext
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from prompt_toolkit.input import Input
+    from prompt_toolkit.output import Output
+
+    from ancestryllm.core.context import AppContext
 
 
 class AncestryConsole(ReplApplication):

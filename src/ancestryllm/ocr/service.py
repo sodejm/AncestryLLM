@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import unicodedata
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
+
+if TYPE_CHECKING:
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
 
 GENEALOGY_SCHEMA = {
     "type": "object",

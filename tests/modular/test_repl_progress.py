@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
+
 from rich.console import Console
 
 import ancestryllm.console.progress as progress_module
 from ancestryllm.console.progress import JobProgressDisplay
 from ancestryllm.core.jobs import JobSnapshot, JobState, ProgressEvent
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _snapshot(

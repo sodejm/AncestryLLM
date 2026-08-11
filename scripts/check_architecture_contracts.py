@@ -8,7 +8,10 @@ import ast
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping, Sequence
 
 PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.application",
@@ -306,16 +309,16 @@ def _imports(root: Path, path: Path, module: str) -> tuple[ImportReference, ...]
     references: list[ImportReference] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                references.append(
-                    ImportReference(
-                        path=path,
-                        line=node.lineno,
-                        importer=module,
-                        imported=alias.name,
-                        names=(),
-                    )
+            references.extend(
+                ImportReference(
+                    path=path,
+                    line=node.lineno,
+                    importer=module,
+                    imported=alias.name,
+                    names=(),
                 )
+                for alias in node.names
+            )
         elif isinstance(node, ast.ImportFrom):
             imported = _resolve_from_module(module, is_package, node.module, node.level)
             references.append(
@@ -1031,34 +1034,34 @@ def check_repository_consumers(
         if matched is not None:
             used_exceptions.add(matched)
             continue
-        for target in private_targets:
-            violations.append(
-                Violation(
-                    path=reference.path,
-                    line=reference.line,
-                    code="ARCH501",
-                    message=(
-                        f"repository consumer {reference.importer!r} imports private GEDCOM "
-                        f"module {target!r}; use a declared façade symbol or add one exact "
-                        "implementation-characterization exception with a removal lifecycle"
-                    ),
-                )
+        violations.extend(
+            Violation(
+                path=reference.path,
+                line=reference.line,
+                code="ARCH501",
+                message=(
+                    f"repository consumer {reference.importer!r} imports private GEDCOM "
+                    f"module {target!r}; use a declared façade symbol or add one exact "
+                    "implementation-characterization exception with a removal lifecycle"
+                ),
             )
+            for target in private_targets
+        )
 
     if require_all_exceptions:
-        for exception in set(exceptions) - used_exceptions:
-            violations.append(
-                Violation(
-                    path=repository_root,
-                    line=1,
-                    code="ARCH502",
-                    message=(
-                        f"characterization import exception is stale or expanded: "
-                        f"{exception.importer!r} -> {exception.imported!r} {exception.names!r} "
-                        f"(owner: {exception.owner}; removal: {exception.lifecycle})"
-                    ),
-                )
+        violations.extend(
+            Violation(
+                path=repository_root,
+                line=1,
+                code="ARCH502",
+                message=(
+                    f"characterization import exception is stale or expanded: "
+                    f"{exception.importer!r} -> {exception.imported!r} {exception.names!r} "
+                    f"(owner: {exception.owner}; removal: {exception.lifecycle})"
+                ),
             )
+            for exception in set(exceptions) - used_exceptions
+        )
 
     return ArchitectureReport(
         violations=tuple(
@@ -1194,20 +1197,23 @@ def check_tree(
 
             target_adapter = _owner_for(target, ADAPTER_OWNERS)
             importer_adapter = _owner_for(reference.importer, ADAPTER_OWNERS)
-            if target_adapter is not None and reference.importer != "ancestryllm.__main__":
-                if importer_adapter != target_adapter:
-                    violations.append(
-                        Violation(
-                            path=reference.path,
-                            line=reference.line,
-                            code="ARCH202",
-                            message=(
-                                f"{reference.importer!r} crosses into adapter "
-                                f"{target_adapter!r} via {target!r}; depend on the "
-                                "application façade or add one exact, owned exception"
-                            ),
-                        )
+            if (
+                target_adapter is not None
+                and reference.importer != "ancestryllm.__main__"
+                and importer_adapter != target_adapter
+            ):
+                violations.append(
+                    Violation(
+                        path=reference.path,
+                        line=reference.line,
+                        code="ARCH202",
+                        message=(
+                            f"{reference.importer!r} crosses into adapter "
+                            f"{target_adapter!r} via {target!r}; depend on the "
+                            "application façade or add one exact, owned exception"
+                        ),
                     )
+                )
 
         allowed = exports.get(reference.imported)
         internal_gateways = PUBLIC_FACADE_INTERNAL_GATEWAYS.get(
@@ -1235,19 +1241,19 @@ def check_tree(
                 )
 
     if require_all_exceptions:
-        for exception in set(exceptions) - used_exceptions:
-            violations.append(
-                Violation(
-                    path=root,
-                    line=1,
-                    code="ARCH401",
-                    message=(
-                        f"temporary exception is stale or expanded: {exception.importer!r} -> "
-                        f"{exception.imported!r} {exception.names!r} "
-                        f"(owner: {exception.owner}; removal: {exception.issue})"
-                    ),
-                )
+        violations.extend(
+            Violation(
+                path=root,
+                line=1,
+                code="ARCH401",
+                message=(
+                    f"temporary exception is stale or expanded: {exception.importer!r} -> "
+                    f"{exception.imported!r} {exception.names!r} "
+                    f"(owner: {exception.owner}; removal: {exception.issue})"
+                ),
             )
+            for exception in set(exceptions) - used_exceptions
+        )
 
     return ArchitectureReport(
         violations=tuple(

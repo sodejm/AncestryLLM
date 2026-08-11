@@ -10,13 +10,14 @@ import logging
 import math
 import re
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from types import ModuleType
+
     from ancestryllm.gedcom.contracts import DuplicateDecision, IdentityResolver
 
 from ancestryllm.core.cancellation import CancellationError, cancellation_checkpoint
@@ -261,7 +262,8 @@ def normalise_gedcom_date(raw_date: str) -> str:
     try:
         from dateutil import parser as date_parser
 
-        sentinel = dt.datetime(1111, 11, 11)
+        # GEDCOM calendar dates are deliberately timezone-free, not instants.
+        sentinel = dt.datetime(1111, 11, 11)  # noqa: DTZ001
         parsed = date_parser.parse(original, default=sentinel, fuzzy=False)
         if re.fullmatch(r"[A-Za-z]+\s+\d{3,4}", original):
             result = f"{GEDCOM_MONTHS[parsed.month - 1]} {parsed.year}"
@@ -273,7 +275,8 @@ def normalise_gedcom_date(raw_date: str) -> str:
         # works when the optional dateutil dependency is not installed.
         for pattern in ("%B %d, %Y", "%d %B %Y", "%b %d, %Y", "%d %b %Y"):
             try:
-                parsed = dt.datetime.strptime(original, pattern)
+                # Preserve timezone-free genealogical calendar semantics.
+                parsed = dt.datetime.strptime(original, pattern)  # noqa: DTZ007
                 result = f"{parsed.day:02d} {GEDCOM_MONTHS[parsed.month - 1]} {parsed.year}"
                 return f"{qualifier} {result}".strip()
             except ValueError:
@@ -282,7 +285,7 @@ def normalise_gedcom_date(raw_date: str) -> str:
         return raw_date
 
 
-def _extract_year(date_value: str) -> Optional[int]:
+def _extract_year(date_value: str) -> int | None:
     """Extract the first four-digit year from a date or return ``None``."""
     match = re.search(r"\b(\d{4})\b", date_value or "")
     return int(match.group(1)) if match else None
@@ -552,12 +555,12 @@ class IndividualRecord:
         return " ".join(part.strip() for part in (self.given_name, self.surname) if part.strip())
 
     @property
-    def birth_year(self) -> Optional[int]:
+    def birth_year(self) -> int | None:
         """Return the birth year, if present."""
         return _extract_year(self.birth_date)
 
     @property
-    def death_year(self) -> Optional[int]:
+    def death_year(self) -> int | None:
         """Return the death year, if present."""
         return _extract_year(self.death_date)
 
@@ -746,7 +749,7 @@ def _fact_from_block(block: Sequence[str]) -> GenealogicalFact:
 
 def _most_complete_fact(
     facts: Sequence[GenealogicalFact],
-) -> Optional[GenealogicalFact]:
+) -> GenealogicalFact | None:
     """Choose a display fact while retaining every alternative for scoring."""
     if not facts:
         return None
@@ -1181,7 +1184,7 @@ def _sets_are_distant(left: set[int], right: set[int], years: int = 5) -> bool:
 def _other_fact_similarity(
     left: IndividualRecord,
     right: IndividualRecord,
-) -> Optional[float]:
+) -> float | None:
     """Aggregate matching standard facts not scored by dedicated components."""
     excluded = {"BIRT", "DEAT", "OCCU", "RESI"}
     common_tags = (left.facts.keys() & right.facts.keys()) - excluded
@@ -1577,7 +1580,7 @@ def _raw_pair_upper_bound(
 
 def estimate_duplicate_search(
     records: Sequence[IndividualRecord],
-    limits: Optional[DuplicateSearchLimits] = None,
+    limits: DuplicateSearchLimits | None = None,
     *,
     cross_source_only: bool = True,
 ) -> DuplicateSearchPlan:
@@ -1669,7 +1672,7 @@ def find_duplicate_candidates(
     records: list[IndividualRecord],
     threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
     *,
-    limits: Optional[DuplicateSearchLimits] = None,
+    limits: DuplicateSearchLimits | None = None,
 ) -> list[tuple[int, int, float]]:
     """Find cross-file candidates with bounded frequency-aware blocking."""
     if not 0 <= threshold <= 100:
@@ -1788,7 +1791,7 @@ def _confidence_value(verdict: Mapping[str, object]) -> float:
 def merge_two_records(
     primary: IndividualRecord,
     secondary: IndividualRecord,
-    ai_verdict: Optional[dict[str, object]] = None,
+    ai_verdict: dict[str, object] | None = None,
 ) -> IndividualRecord:
     """Merge summaries and complete raw blocks without deleting conflicts.
 
@@ -1913,9 +1916,9 @@ def merge_records(
     threshold: int = DEFAULT_SIMILARITY_THRESHOLD,
     auto: bool = False,
     identity_resolver: IdentityResolver | None = None,
-    pointer_map: Optional[dict[str, str]] = None,
-    decisions: Optional[list[MergeDecision]] = None,
-    duplicate_limits: Optional[DuplicateSearchLimits] = None,
+    pointer_map: dict[str, str] | None = None,
+    decisions: list[MergeDecision] | None = None,
+    duplicate_limits: DuplicateSearchLimits | None = None,
     duplicate_decision: DuplicateDecision | None = None,
 ) -> list[IndividualRecord]:
     """Merge candidate people while retaining every source fact and family edge.
@@ -2191,9 +2194,11 @@ def _record_to_gedcom_lines(record: IndividualRecord) -> str:
         )
         if name:
             lines.append(f"1 NAME {name}\n")
-        for alternate_name in record.alternate_names:
-            if alternate_name and alternate_name != record.full_name:
-                lines.append(f"1 NAME {alternate_name}\n")
+        lines.extend(
+            f"1 NAME {alternate_name}\n"
+            for alternate_name in record.alternate_names
+            if alternate_name and alternate_name != record.full_name
+        )
     if record.gender:
         lines.append(f"1 SEX {record.gender}\n")
 

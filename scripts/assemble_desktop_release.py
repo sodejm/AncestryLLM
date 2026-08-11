@@ -171,10 +171,7 @@ def _positive_integer(value: int, label: str) -> int:
 
 
 def _required_gates(target: str, signing_mode: str) -> set[str]:
-    if signing_mode == "unsigned":
-        signing_gates = UNSIGNED_GATES
-    else:
-        signing_gates = set(TARGETS[target]["gates"])
+    signing_gates = UNSIGNED_GATES if signing_mode == "unsigned" else set(TARGETS[target]["gates"])
     return COMMON_GATES | signing_gates
 
 
@@ -194,7 +191,7 @@ def create_target(args: argparse.Namespace) -> None:
     missing = required - gates
     unexpected = gates - required
     if missing:
-        raise ValueError(f"missing required verification gate: {sorted(missing)[0]}")
+        raise ValueError(f"missing required verification gate: {min(missing)}")
     if unexpected:
         raise ValueError(f"unexpected verification gates: {sorted(unexpected)}")
 
@@ -229,7 +226,7 @@ def create_target(args: argparse.Namespace) -> None:
         "target": args.target,
         "expectedOs": args.expected_os,
         "arch": args.arch,
-        "gates": {gate: True for gate in sorted(gates)},
+        "gates": dict.fromkeys(sorted(gates), True),
         "artifacts": artifacts,
     }
     _refuse_existing_output(args.output)
@@ -257,7 +254,7 @@ def create_validation_receipt(args: argparse.Namespace) -> None:
     missing = VALIDATION_GATES - gates
     unexpected = gates - VALIDATION_GATES
     if missing:
-        raise ValueError(f"missing required validation gate: {sorted(missing)[0]}")
+        raise ValueError(f"missing required validation gate: {min(missing)}")
     if unexpected:
         raise ValueError(f"unexpected validation gates: {sorted(unexpected)}")
 
@@ -282,7 +279,7 @@ def create_validation_receipt(args: argparse.Namespace) -> None:
         "actualOs": args.actual_os,
         "arch": args.arch,
         "hostArch": args.host_arch,
-        "gates": {gate: True for gate in sorted(gates)},
+        "gates": dict.fromkeys(sorted(gates), True),
         "installer": _artifact(installer),
         "workflow": {
             "runId": run_id,
@@ -384,7 +381,7 @@ def _validated_environments(
             raise ValueError(
                 f"desktop validation runner {runner} does not match the supported matrix"
             )
-        if payload.get("gates") != {gate: True for gate in sorted(VALIDATION_GATES)}:
+        if payload.get("gates") != dict.fromkeys(sorted(VALIDATION_GATES), True):
             raise ValueError(
                 f"desktop validation runner {runner} has incomplete verification gates"
             )
@@ -463,7 +460,7 @@ def aggregate(args: argparse.Namespace) -> None:
         ):
             raise ValueError(f"desktop target {target} does not match the supported matrix")
         required = _required_gates(target, signing_mode)
-        if payload.get("gates") != {gate: True for gate in sorted(required)}:
+        if payload.get("gates") != dict.fromkeys(sorted(required), True):
             raise ValueError(f"desktop target {target} has incomplete verification gates")
         artifacts = payload.get("artifacts")
         if not isinstance(artifacts, dict):

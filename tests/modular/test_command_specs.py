@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,8 +22,10 @@ from ancestryllm.core.commands import (
     CompletionKind,
     DispatchKey,
 )
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.modules import ModuleRegistry
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def _argument(command: str, action: str, name: str):

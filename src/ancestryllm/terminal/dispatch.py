@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ancestryllm.application._secrets import SecretGrantRegistry
-from ancestryllm.application.executor import CommandOutcome
-from ancestryllm.application.ports import ProgressPort
 from ancestryllm.application.results import CommandResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.runtime import create_command_executor
 from ancestryllm.terminal.parser import invocation_from_namespace
 from ancestryllm.terminal.presentation import PresentationAdapter
+
+if TYPE_CHECKING:
+    import argparse
+
+    from ancestryllm.application.executor import CommandOutcome
+    from ancestryllm.application.ports import ProgressPort
+    from ancestryllm.core.context import AppContext
 
 Emit = Callable[[CommandResult, bool], None]
 

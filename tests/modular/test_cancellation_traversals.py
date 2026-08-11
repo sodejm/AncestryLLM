@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import threading
-
-import pytest
+from typing import TYPE_CHECKING
 
 import ancestryllm.gedcom.graph as graph_module
 import ancestryllm.rootsmagic.exporter as exporter_module
@@ -13,6 +12,9 @@ from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.gedcom.identity import IndividualRecord
 from ancestryllm.gedcom.parser import GedcomRecord
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _pause_at_checkpoint(

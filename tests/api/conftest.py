@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +17,9 @@ from ancestryllm.api import (
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
 from ancestryllm.application.results import StructuredResult
 from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescriptor
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class FixtureRegistry:

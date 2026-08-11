@@ -7,10 +7,12 @@ import argparse
 import platform
 import sysconfig
 import tempfile
-from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 _build_sidecar_module = "scripts.build_sidecar" if __package__ else "build_sidecar"
 runtime_target: Callable[[str, str, str], str] = import_module(_build_sidecar_module).runtime_target

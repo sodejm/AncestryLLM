@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -11,6 +10,9 @@ from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.policy import validate_endpoint
 from ancestryllm.llm.validation import validate_structured_output
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class OpenAIProvider:

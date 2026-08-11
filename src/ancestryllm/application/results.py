@@ -6,14 +6,12 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import ancestryllm.application.dto as application_dto
-from ancestryllm.application.dto import (
-    ArtifactRef,
-    ErrorEnvelope,
-    JSONValue,
-)
+
+if TYPE_CHECKING:
+    from ancestryllm.application.dto import ArtifactRef, ErrorEnvelope, JSONValue
 
 
 class ResultKind(StrEnum):

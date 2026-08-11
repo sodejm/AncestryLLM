@@ -7,10 +7,9 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
@@ -36,6 +35,9 @@ from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file
 from ancestryllm.rootsmagic.service import RootsMagicService
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
 
 def _create_tree(path: Path, script: str) -> Path:
     connection = sqlite3.connect(path)
@@ -49,7 +51,7 @@ def _replace_directory_with_symlink(directory: Path, target: Path) -> Path:
     parked = directory.with_name(f"{directory.name}-parked")
     directory.rename(parked)
     try:
-        os.symlink(target, directory, target_is_directory=True)
+        directory.symlink_to(target, target_is_directory=True)
     except OSError as exc:
         parked.rename(directory)
         pytest.skip(f"Directory symlinks are unavailable: {type(exc).__name__}")
@@ -428,7 +430,7 @@ def test_wal_replacement_after_snapshot_copy_fails_before_atomic_export(
             copy_wal(source, destination, expected)
             replacement = tmp_path / "replacement-wal"
             replacement.write_bytes(replacement_bytes)
-            os.replace(replacement, source)
+            replacement.replace(source)
 
         monkeypatch.setattr(reader, "_copy_auxiliary_bound_to", copy_then_replace_wal)
 
@@ -482,9 +484,8 @@ def test_cancellation_during_wal_copy_cleans_owned_snapshot_only(
         monkeypatch.setattr(reader, "_copy_auxiliary_bound_to", copy_then_cancel)
         monkeypatch.setattr(reader_module.tempfile, "tempdir", str(tmp_path))
 
-        with pytest.raises(CancellationError):
-            with reader.connection(tree, fingerprint):
-                pytest.fail("The cancelled WAL snapshot must not open.")
+        with pytest.raises(CancellationError), reader.connection(tree, fingerprint):
+            pytest.fail("The cancelled WAL snapshot must not open.")
 
         assert {
             path: (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_mode)
@@ -668,7 +669,7 @@ def test_public_service_rejects_valid_tree_that_has_become_unreadable(
     source_descriptor = os.open(tree, os.O_RDONLY)
     service = _service(tmp_path)
     monkeypatch.setattr(reader_module.tempfile, "tempdir", str(tmp_path))
-    os.chmod(tree, 0)
+    tree.chmod(0)
     try:
         with pytest.raises(FileIngressError) as raised:
             service.query_sql(tree.name, "SELECT PersonID FROM PersonTable")
@@ -681,7 +682,7 @@ def test_public_service_rejects_valid_tree_that_has_become_unreadable(
         assert not list(tmp_path.glob("ancestry-rootsmagic-*"))
     finally:
         os.close(source_descriptor)
-        os.chmod(tree, original_mode & 0o777)
+        tree.chmod(original_mode & 0o777)
 
 
 @pytest.mark.parametrize("sidecar_suffix", ("-wal", "-shm", "-journal"))

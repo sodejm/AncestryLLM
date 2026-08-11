@@ -14,13 +14,16 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
 from docs_linking import DocumentationLinkError, SourceIndex, split_destination
 from rewrite_wiki_links import rewrite_markdown_link_destinations
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 _WIKI_LINK = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
 _MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
@@ -156,9 +159,11 @@ def _navigation_errors(source: Path, pages: Sequence[Path]) -> list[ValidationEr
         target_name = _normalize_target(target)
         # Wiki-style links address the flat Wiki namespace. Markdown links are
         # validated by the canonical path-aware pass below.
-        if style == "wiki" and ("/" in target_name or _unsafe_target(target_name)):
-            errors.append(ValidationError(f"unsafe sidebar target: {target}"))
-        elif target.startswith(("../", "/")) or _WINDOWS_DRIVE.match(target):
+        if (
+            (style == "wiki" and ("/" in target_name or _unsafe_target(target_name)))
+            or target.startswith(("../", "/"))
+            or _WINDOWS_DRIVE.match(target)
+        ):
             errors.append(ValidationError(f"unsafe sidebar target: {target}"))
         elif style == "wiki" and target_name not in known_pages:
             errors.append(ValidationError(f"broken sidebar target: {target}"))

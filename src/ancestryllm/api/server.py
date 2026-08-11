@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from starlette.types import ASGIApp
+from typing import TYPE_CHECKING
+
 from uvicorn import Config
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp
 
 LOOPBACK_HOST = "127.0.0.1"
 EPHEMERAL_PORT = 0
