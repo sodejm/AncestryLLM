@@ -416,16 +416,17 @@ class DeploymentService:
                 "DEPLOYMENT_METADATA_PURPOSE_INVALID",
                 "The deployment metadata purpose is unsupported.",
             )
-        profile = self.config.deployment
-        return DeploymentEvidence(
-            schema_version=1,
-            purpose=cast("DeploymentEvidencePurpose", purpose),
-            deployment_schema_version=profile.schema_version,
-            config_revision=self.config.revision,
-            mode=profile.mode,
-            topology=profile.topology,
-            endpoint_identity_sha256=profile.endpoint_identity_sha256,
-        )
+        with self._lock:
+            profile = self.config.deployment
+            return DeploymentEvidence(
+                schema_version=1,
+                purpose=cast("DeploymentEvidencePurpose", purpose),
+                deployment_schema_version=profile.schema_version,
+                config_revision=self.config.revision,
+                mode=profile.mode,
+                topology=profile.topology,
+                endpoint_identity_sha256=profile.endpoint_identity_sha256,
+            )
 
 
 __all__ = [

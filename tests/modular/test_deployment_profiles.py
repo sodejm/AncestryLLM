@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
@@ -455,6 +456,77 @@ def test_backup_and_support_metadata_are_redacted_and_deterministic(tmp_path: Pa
         assert "openai" not in encoded
         assert "secret" not in encoded.lower()
         assert "token" not in encoded.lower()
+
+
+def test_metadata_reads_profile_and_revision_as_one_transition_snapshot() -> None:
+    profile_read = threading.Event()
+    transition_attempted = threading.Event()
+    transition_finished = threading.Event()
+    transition_was_blocked = threading.Event()
+
+    class CoordinatedConfig:
+        default_provider = "openai"
+
+        def __init__(self) -> None:
+            self._deployment = _remote_profile()
+            self._revision = 7
+
+        @property
+        def deployment(self) -> DeploymentProfile:
+            profile = self._deployment
+            profile_read.set()
+            return profile
+
+        @deployment.setter
+        def deployment(self, profile: DeploymentProfile) -> None:
+            self._deployment = profile
+
+        @property
+        def revision(self) -> int:
+            assert transition_attempted.wait(timeout=2)
+            return self._revision
+
+        @revision.setter
+        def revision(self, revision: int) -> None:
+            self._revision = revision
+
+        def save(self, *, expected_revision: int | None = None) -> bool:
+            del expected_revision
+            return True
+
+    config = CoordinatedConfig()
+    service = DeploymentService(config)
+
+    def transition() -> None:
+        assert profile_read.wait(timeout=2)
+        if service._lock.acquire(blocking=False):
+            try:
+                config.deployment = DeploymentProfile.local()
+                config.revision = 8
+                transition_attempted.set()
+            finally:
+                service._lock.release()
+        else:
+            transition_was_blocked.set()
+            transition_attempted.set()
+            with service._lock:
+                config.deployment = DeploymentProfile.local()
+                config.revision = 8
+        transition_finished.set()
+
+    writer = threading.Thread(target=transition, daemon=True)
+    writer.start()
+
+    metadata = service.metadata("support")
+
+    assert transition_finished.wait(timeout=2)
+    writer.join(timeout=2)
+    assert not writer.is_alive()
+    assert transition_was_blocked.is_set()
+    assert metadata.mode is DeploymentMode.CONNECT_REMOTE
+    assert metadata.config_revision == 7
+    assert config.deployment == DeploymentProfile.local()
+    assert config.revision == 8
 
 
 def test_metadata_rejects_unknown_purpose(tmp_path: Path) -> None:
