@@ -23,6 +23,10 @@ from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.server import LOOPBACK_HOST, create_uvicorn_config
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
+from ancestryllm.application.secret_management import SecretManagementService
+from ancestryllm.application.settings import SettingsService
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.secrets import KeyringSecretStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -30,6 +34,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from ancestryllm.core.commands import ModuleDescriptor
+    from ancestryllm.core.secrets import SecretStore
 
 SIDECAR_BUILD = "0.5.0"
 MAX_LAUNCH_FRAME_BYTES = 4096
@@ -222,13 +227,22 @@ def readiness_line(frame: LaunchFrame, port: int) -> str:
     )
 
 
-def create_sidecar_app(frame: LaunchFrame) -> FastAPI:
+def create_sidecar_app(
+    frame: LaunchFrame,
+    *,
+    config: AppConfig | None = None,
+    secret_store: SecretStore | None = None,
+) -> FastAPI:
     """Compose the packaged control sidecar without any domain modules or routes."""
 
+    resolved_config = config if config is not None else AppConfig.load()
+    resolved_secret_store = secret_store if secret_store is not None else KeyringSecretStore()
     return create_app(
         settings=frame.settings(),
         registry=_EmptyRegistry(),
         executor=CommandExecutor(()),
+        settings_service=SettingsService(resolved_config),
+        secret_service=SecretManagementService(resolved_secret_store),
     )
 
 

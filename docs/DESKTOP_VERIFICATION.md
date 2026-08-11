@@ -8,6 +8,13 @@ immutable same-repository branch commit to provide pre-merge native evidence.
 The gate does not publish a release and must not be interpreted as installer,
 signing, notarization, or end-user platform approval.
 
+Issue #105 adds source-level contract, unit, API-redaction, and renderer tests
+for five non-secret settings plus write-only credential status, set, and delete
+operations. Those checks do not expand the already recorded six-method
+packaged bridge claim below. The later Issue #131 gate must update the package
+harness and exact-method evidence before a packaged application can claim the
+five new bridge operations.
+
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`

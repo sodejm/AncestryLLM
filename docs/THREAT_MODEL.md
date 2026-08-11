@@ -2,9 +2,9 @@
 
 ## Implementation status
 
-The 0.4.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
-shared command, application-service, and genealogy-core contracts. The isolated
-0.5.0 Issue #11 slice adds authenticated FastAPI health and capability routes,
+The 0.5.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
+shared command, application-service, and genealogy-core contracts. Its Issue
+#11 slice adds authenticated FastAPI health and capability routes,
 strict version/error contracts, fail-closed loopback server configuration, and
 a deterministic OpenAPI artifact. Issue #225 adds private-stdin bootstrap,
 bounded Electron supervision, native sidecar smoke tests, and unsigned unpacked
@@ -18,7 +18,12 @@ Issue #103 adds three path-free renderer methods over a main-owned opaque
 file-grant broker with native dialogs, purpose and format checks, bounded
 single-use grants, lifecycle revocation, fingerprint revalidation, replacement
 confirmation, alias denial, and output locks. It does not implement domain API
-routes, parser workers, signed installers, plugins, or an update channel. The
+routes. Unreleased Issue #105 adds optimistic-revision non-secret settings plus
+write-only OS-keyring credential status/set/delete through fixed authenticated
+routes and five fixed bridge methods. Credential values are never returned,
+persisted in renderer state, or represented in status DTOs, generated clients,
+logs, or fixtures. It does not implement provider execution, parser workers,
+signed installers, plugins, or an update channel. The
 diagrams, controls, abuse cases, and gates below define
 both this partial runtime and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
@@ -39,16 +44,18 @@ and independent-review evidence at its named gate.
 
 Sensitive assets are genealogy records, living-person status, notes, provider
 credentials, SQLCipher keys, prompts/responses, consent grants, RootsMagic
-source files, and Unreleased opaque desktop file grants. Later desktop assets
-additionally include internal API bootstrap material, event streams, plugin
+source files, Unreleased opaque desktop file grants, and internal API bootstrap
+material. Later desktop assets additionally include event streams and plugin
 packages, update metadata, release signatures, support evidence, OCI images and digests,
 generated Compose configuration, Docker contexts and sockets, workload
 credentials, remote-enrollment material, encrypted application volumes, and
 backups. Data crosses boundaries at
 prompt-toolkit/Rich REPL input, one-shot CLI input, GEDCOM/RootsMagic parsing,
 the OS keyring, encrypted database, configured provider endpoints, and exported
-files. A future desktop runtime adds crossings through a sandboxed Electron
-renderer and preload bridge and an authenticated FastAPI sidecar. The proposed
+files. The desktop runtime adds crossings through a sandboxed Electron renderer,
+the fixed preload bridge, Electron main, and an authenticated FastAPI sidecar;
+the credential value lifetime ends in the uncontrolled input and request path,
+while the renderer retains presence status only. The proposed
 deployment profiles additionally cross Electron Main to a host deployment
 supervisor, the supervisor to a selected Docker control plane, the host keyring
 to a secret broker, containers to private application networks and encrypted
@@ -240,7 +247,7 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-A01` | Private internal API: loopback port `0`, fresh 256-bit per-launch bearer through private stdin, exact host/version validation, no cookies/CORS/browser origins, and packaged docs disabled. |
 | `TM-A02` | Sidecar lifecycle: embedded-digest-bound exact payload-manifest verification before token creation and spawn, minimal environment, protocol/build handshake, one server worker, bounded restart, verified full-process-tree shutdown, current-resource drain, and privacy-minimal stderr. The macOS CI verification overlay excludes only the manifest-bound sidecar payload from Electron's second signing pass so signing cannot mutate those bytes after manifest creation; PyInstaller's nested signatures remain and the outer ad hoc application signature seals the resource tree. Manifest binding is not publisher signing; Issue #132 owns signing and notarization. |
 | `TM-A03` | Request integrity: authenticate every route before body parsing, compare credentials in constant time, reject proxy/origin/cookie headers and redirects, disable access logs, and require token-derived readiness proof. |
-| `TM-S01` | Secret boundary: Python `SecretStore` and the OS keyring are the only authority; renderer may set, delete, or check presence but can never read a value. |
+| `TM-S01` | Secret boundary: Python `SecretStore` and the OS keyring are the only write authority; renderer may set, delete, or check presence but can never read a value. Exact reference allowlists, presence-only status, read-only headless environment injection, verified deletion, stable redacted errors, and clearing the uncontrolled credential input before invocation and after every outcome keep values out of configuration, Electron storage, renderer state, generated contracts, logs, and fixtures. |
 | `TM-F01` | Opaque file grants: native dialogs create high-entropy, window/operation-scoped, expiring, revocable grant IDs; renderer never supplies or receives unrestricted paths. |
 | `TM-F02` | Backend file safety: regular-file checks, realpath/fingerprint revalidation, ingress budgets, source/output non-aliasing, immutable inputs, app-owned scratch space, atomic outputs, and failure cleanup. |
 | `TM-L01` | Provider policy: explicit provider/profile/model/consent; HTTPS, DNS/private-address, proxy, TLS, host, and redirect validation; no ambient-key selection; `provider=none` remains network-free. |
@@ -291,6 +298,14 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-I01`, `TM-F01` | Strict request and response schemas expose only `requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`; DTOs contain random opaque IDs and safe metadata but no paths, URIs, descriptors, resolver, or generic filesystem operation. Main binds each grant to the authorized renderer, exact purpose and access mode, application session, and one redemption; close, cross-document navigation, explicit revocation, and restart invalidate it. Trusted same-document routes retain the same renderer binding and every request still rechecks the exact frame and application URL. | The dedicated packaged scenario verifies the path-free public surface and explicit revocation without adding its fixture adapter to production builds. Domain consumption remains #114/#118. |
 | `TM-F02`, `TM-D01`, `TM-C01` | Main-owned native selection checks absolute normalized spelling, regular-file and one-link state, exact purpose-specific extension and content signature, byte limit, canonical identity, and filesystem fingerprint. Redemption reopens and revalidates inputs. Save replacement requires native confirmation followed by target revalidation; source/output aliases and concurrent output grants fail closed under canonical output locks. Tests cover corrupted/replaced/growing files, traversal and noncanonical spellings, symlinks, hard links, directories, devices/FIFOs where supported, size boundaries, wrong formats, stale/revoked/cross-renderer/cross-purpose grants, confirmation races, aliases, cancellation, and lock release. | Cross-platform exact-head packaged evidence covers native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation. Bounded parser workers, complete ingress budgets, and atomic publication remain #114/#118/#131. |
 | `TM-O01` | Stable grant failures and receipt fields omit paths, usernames, hostnames, environment values, temporary roots, and response bodies. Safe renderer metadata is limited to basename, kind, byte size, and replacement status. | The verification-only adapter is rejected by the production build scan; its sanitized schema-v1 evidence is bound into the hosted receipt. Broader support-artifact canary coverage remains #131/#132. |
+
+### Issue #105 settings and credential-management evidence
+
+| Control | Source and runtime evidence | Packaged evidence and residual ownership |
+|---|---|---|
+| `TM-S01`, `TM-I01` | `SettingsService` exposes reviewed metadata for exactly five non-secret settings and requires the current revision before one atomic owner-only `AppConfig` replacement. `SecretManagementService` accepts only six static credential references and returns only `present`, `missing`, or `unavailable`; set and delete are explicit operations, delete verifies absence, and an environment-managed value is read-only. The authenticated sidecar and static bridge expose only settings read/patch and credential status/set/delete. Strict schemas reject unknown, secret-shaped, stale, and malformed input. | Source tests prove no credential value appears in read/status responses, OpenAPI response schemas, bridge responses, renderer state, mocks, errors, or logs. Target-matched packaged canary and crash/support-artifact scans remain required under #131 before release credit. |
+| `TM-O01`, `TM-O02` | Keyring unavailable, locked, denied, and unverifiable outcomes map to stable redacted codes without response bodies or backend details. The renderer uses an uncontrolled password input, copies and clears it before invoking the bridge, clears again in `finally`, and caches only presence status. Plaintext configuration, Electron `safeStorage`, `localStorage`, IndexedDB, preferences, and mock fixtures are not credential stores. | Source-level component and contract tests cover success and failure lifetimes. Native keyring behavior and packaged renderer/crash/evidence canary scans remain #131/#132 release evidence. |
+| `TM-L01` | Updating a default-provider setting does not select a provider for the current operation, grant cloud consent, read a credential, or make a network request. `.env` files remain unloaded, environment credentials remain explicit headless injection, and `provider=none` remains network-free. | Provider execution, desktop consent/profile flow, redirect and endpoint controls, and their packaged network evidence remain owned by #108, #110, and #131. |
 
 ### Issue #306 verified uv bootstrap evidence
 
@@ -468,7 +483,7 @@ or release evidence, never private payloads.
 |---|---|---|---|---|
 | `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy; #101 proves exact sender/frame/origin authorization, strict bridge bounds, cancellation, and lifecycle cleanup at source level. The risk rating is not reduced until exact-head packaged rows and #131's broader adversarial suite pass. |
 | `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, pre-spawn payload integrity, verify-to-spawn replacement, and full-process-tree cleanup. | Not reduced: private bootstrap, manifest-bound payload verification, bounded supervision, current-resource drain, and full-tree cleanup are implemented, but the TOCTOU interval, replay/timing, exact-head hosted Windows and final platform evidence, and Issue #132 publisher signing remain pending. |
-| `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Not reduced: implementation and packaged evidence pending. |
+| `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Partially evidenced at source level: #105 proves exact reference allowlists, write-only requests, presence-only responses, input clearing, environment read-only handling, verified deletion, and redacted errors across service, API, bridge, renderer, and mock boundaries. The risk rating is not reduced until native keyring and packaged canary scans across UI, generated artifacts, crash/support output, backups, and release evidence pass under #123/#131. |
 | `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Partially evidenced: #103 proves path-free native selection, purpose and format checks, single-use lifecycle revocation, fingerprint and replacement-race rejection, source/output alias denial, output locking, cancellation, and sentinel preservation at source level. Its dedicated cross-platform packaged scenario proves native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation. Parser-worker isolation, complete ingress budgets, atomic publication, and the broader adversarial release surface remain #114/#118/#131. |
 | `AB-05` | Model Markdown uses HTML, SVG, handlers, schemes, images, links, or copied content to execute or exfiltrate. | High / Critical | `TM-R02`, `TM-L02`; #112, #131; G2. Negative: AST allowlist tests for script, HTML, SVG, URI, image, copy, external-link, and CSP cases. | Not reduced: renderer and packaged XSS evidence pending. |
 | `AB-06` | Provider/profile confusion, redirects, DNS changes, proxies, or ambient keys send living-person data to an unapproved endpoint. | Medium / Critical | `TM-L01`, `TM-S01`, `TM-O01`; #108, #110, #131; G1/G2. Negative: explicit-profile/consent, redirect, TLS/host/DNS revalidation, proxy denial, and network instrumentation proving `provider=none` is offline. | Not reduced: desktop contract and network evidence pending. |

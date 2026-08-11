@@ -16,7 +16,11 @@ from ancestryllm.api import (
 )
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
 from ancestryllm.application.results import StructuredResult
+from ancestryllm.application.secret_management import SecretManagementService
+from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescriptor
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.secrets import MemorySecretStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,12 +57,34 @@ def registered_keys() -> tuple[DispatchKey, ...]:
 
 
 @pytest.fixture
-def api_client(api_settings: ApiSettings, registered_keys: tuple[DispatchKey, ...]) -> TestClient:
+def secret_store() -> MemorySecretStore:
+    return MemorySecretStore({})
+
+
+@pytest.fixture
+def api_client(
+    api_settings: ApiSettings,
+    registered_keys: tuple[DispatchKey, ...],
+    secret_store: MemorySecretStore,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> TestClient:
     registry = FixtureRegistry(
         tuple(BUILTIN_MODULES[module_id] for module_id in ("gedcom", "providers", "secrets"))
     )
     executor = CommandExecutor((key, _complete) for key in registered_keys)
-    app = create_app(settings=api_settings, registry=registry, executor=executor)
+    config_root = tmp_path_factory.mktemp("api-config")
+    app = create_app(
+        settings=api_settings,
+        registry=registry,
+        executor=executor,
+        settings_service=SettingsService(
+            AppConfig(
+                config_path=config_root / "config.toml",
+                data_dir=config_root / "data",
+            )
+        ),
+        secret_service=SecretManagementService(secret_store),
+    )
     return TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False)
 
 

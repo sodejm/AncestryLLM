@@ -51,6 +51,21 @@ Secret operations are set, delete, and presence only; Python `SecretStore` and
 the OS keyring remain the sole authority. File choices become scoped opaque
 grants, not renderer-visible paths.
 
+The unreleased Issue #105 source contract exposes only the reviewed non-secret
+settings schema and the exact credential references owned by `SecretStore`.
+Credential status is limited to `present`, `missing`, or `unavailable`; no
+route, bridge response, mock fixture, or renderer state can read a value.
+Environment-injected credentials remain a read-only headless/CI input, and a
+desktop set or delete attempt fails closed until that injection is removed.
+A successful delete is reported only after the keyring confirms absence.
+
+The renderer uses an uncontrolled password field and clears its local value
+before every set request and again after every success or failure. It retains
+status only. Electron `safeStorage`, `localStorage`, IndexedDB, plaintext
+configuration, and any parallel Node-side credential store are not permitted.
+Editing a default-provider setting does not activate a provider or grant cloud
+consent; the normal explicit provider and consent checks still apply.
+
 Desktop capability discovery uses non-sensitive metadata. It must not probe
 private files, databases, keyrings, people, providers, or networks. Local,
 remote, sensitive, destructive, and Post-MVP states use text and icons as well

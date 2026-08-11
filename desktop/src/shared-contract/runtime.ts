@@ -1,6 +1,12 @@
 import {
   DESKTOP_PROTOCOL_VERSION,
+  applicationSettingKeys,
+  secretReferences,
   type AppInfo,
+  type ApplicationSetting,
+  type ApplicationSettingKey,
+  type ApplicationSettings,
+  type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
@@ -16,6 +22,10 @@ import {
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type SaveFileGrantRequest,
+  type SecretReference,
+  type SecretReferenceRequest,
+  type SecretSetRequest,
+  type SecretStatus,
   type StartupDiagnostics,
   fileGrantPurposes,
 } from './desktop'
@@ -34,6 +44,12 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'SIDECAR_REQUEST_FAILED',
   'PREFERENCES_UNAVAILABLE',
   'PREFERENCES_CONFLICT',
+  'SETTINGS_UNAVAILABLE',
+  'SETTINGS_CONFLICT',
+  'SETTINGS_INVALID',
+  'SECRET_STORE_UNAVAILABLE',
+  'SECRET_ENVIRONMENT_MANAGED',
+  'SECRET_INVALID',
   'FILE_SELECTION_INVALID',
   'FILE_TOO_LARGE',
   'FILE_GRANT_FORBIDDEN',
@@ -56,6 +72,8 @@ const safeDisplayNamePattern = /^[^/\\\u0000-\u001f\u007f]+$/
 const mediaTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/
 const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'markdown']
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
+const secretStatuses = ['present', 'missing', 'unavailable'] as const
+const providerValues = ['none', 'ollama', 'openai', 'anthropic', 'gemini', 'openrouter'] as const
 
 const record = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -104,6 +122,57 @@ export function parsePreferenceUpdate(value: unknown): PreferenceUpdate {
     throw new Error('Invalid preference update')
   }
   return deepFreeze({ ...value }) as PreferenceUpdate
+}
+
+function validSettingValue(key: ApplicationSettingKey, value: unknown): boolean {
+  if (key === 'providers.default') {
+    return typeof value === 'string' && providerValues.includes(value as typeof providerValues[number])
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false
+  if (key === 'limits.max_query_rows') return Number.isInteger(value) && value >= 1 && value <= 10_000
+  if (key === 'limits.max_output_chars') return Number.isInteger(value) && value >= 1_000 && value <= 5_000_000
+  if (key === 'limits.query_timeout_seconds') return value >= 0.1 && value <= 300
+  return value >= 1 && value <= 600
+}
+
+export function parseSettingsPatch(value: unknown): ApplicationSettingsPatch {
+  if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'changes'])
+    || value.schema_version !== 1 || !integer(value.expected_revision, 0, Number.MAX_SAFE_INTEGER)
+    || !record(value.changes) || Object.keys(value.changes).length < 1
+    || Object.keys(value.changes).length > applicationSettingKeys.length) {
+    throw new Error('Invalid settings patch')
+  }
+  for (const [key, item] of Object.entries(value.changes)) {
+    if (!applicationSettingKeys.includes(key as ApplicationSettingKey)
+      || !validSettingValue(key as ApplicationSettingKey, item)) {
+      throw new Error('Invalid settings patch')
+    }
+  }
+  return deepFreeze({
+    schema_version: 1,
+    expected_revision: value.expected_revision,
+    changes: { ...value.changes },
+  }) as ApplicationSettingsPatch
+}
+
+function parseSecretReference(value: unknown): SecretReference {
+  if (typeof value !== 'string' || !secretReferences.includes(value as SecretReference)) {
+    throw new Error('Invalid secret reference request')
+  }
+  return value as SecretReference
+}
+
+export function parseSecretReferenceRequest(value: unknown): SecretReferenceRequest {
+  if (!record(value) || !exactKeys(value, ['reference'])) throw new Error('Invalid secret reference request')
+  return deepFreeze({ reference: parseSecretReference(value.reference) })
+}
+
+export function parseSecretSetRequest(value: unknown): SecretSetRequest {
+  if (!record(value) || !exactKeys(value, ['reference', 'value'])) throw new Error('Invalid secret set request')
+  let reference: SecretReference
+  try { reference = parseSecretReference(value.reference) } catch { throw new Error('Invalid secret set request') }
+  if (!bounded(value.value, 1, 65_536)) throw new Error('Invalid secret set request')
+  return deepFreeze({ reference, value: value.value })
 }
 
 export function parseOpenFileGrantRequest(value: unknown): OpenFileGrantRequest {
@@ -192,6 +261,61 @@ function parsePreferences(value: unknown): LocalPreferences {
   return value as unknown as LocalPreferences
 }
 
+function expectedSettingDescriptor(key: ApplicationSettingKey): Readonly<{
+  type: ApplicationSetting['type']
+  allowedValues: readonly string[]
+  minimum: number | null
+  maximum: number | null
+}> {
+  switch (key) {
+    case 'providers.default': return { type: 'string', allowedValues: providerValues, minimum: null, maximum: null }
+    case 'limits.max_query_rows': return { type: 'integer', allowedValues: [], minimum: 1, maximum: 10_000 }
+    case 'limits.max_output_chars': return { type: 'integer', allowedValues: [], minimum: 1_000, maximum: 5_000_000 }
+    case 'limits.query_timeout_seconds': return { type: 'number', allowedValues: [], minimum: 0.1, maximum: 300 }
+    case 'limits.provider_timeout_seconds': return { type: 'number', allowedValues: [], minimum: 1, maximum: 600 }
+  }
+}
+
+function parseSettingField(value: unknown): ApplicationSetting {
+  if (!record(value)
+    || !exactKeys(value, ['key', 'label', 'help', 'type', 'value', 'default_value', 'validation', 'restart_required', 'sensitive'])
+    || !applicationSettingKeys.includes(value.key as ApplicationSettingKey)
+    || !bounded(value.label, 1, 128) || !bounded(value.help, 1, 512)
+    || typeof value.restart_required !== 'boolean' || value.sensitive !== false
+    || !record(value.validation)
+    || !exactKeys(value.validation, ['allowed_values', 'minimum', 'maximum'])
+    || !Array.isArray(value.validation.allowed_values)
+    || value.validation.allowed_values.some((item) => !bounded(item, 1, 64))) invalidResponse()
+  const key = value.key as ApplicationSettingKey
+  const expected = expectedSettingDescriptor(key)
+  const allowedValuesMatch = key === 'providers.default'
+    ? value.validation.allowed_values.length === expected.allowedValues.length
+      && value.validation.allowed_values.every((item, index) => item === expected.allowedValues[index])
+    : value.validation.allowed_values.length === 0
+  if (value.type !== expected.type || !validSettingValue(key, value.value)
+    || !validSettingValue(key, value.default_value)
+    || value.validation.minimum !== expected.minimum || value.validation.maximum !== expected.maximum
+    || !allowedValuesMatch) invalidResponse()
+  return value as unknown as ApplicationSetting
+}
+
+function parseSettings(value: unknown): ApplicationSettings {
+  if (!record(value) || !exactKeys(value, ['schema_version', 'revision', 'fields'])
+    || value.schema_version !== 1 || !integer(value.revision, 0, Number.MAX_SAFE_INTEGER)
+    || !Array.isArray(value.fields) || value.fields.length !== applicationSettingKeys.length) invalidResponse()
+  const fields = value.fields.map(parseSettingField)
+  const fieldKeys = new Set(fields.map((field) => field.key))
+  if (fieldKeys.size !== fields.length || applicationSettingKeys.some((key) => !fieldKeys.has(key))) invalidResponse()
+  return deepFreeze({ schema_version: 1, revision: value.revision as number, fields })
+}
+
+function parseSecretStatus(value: unknown): SecretStatus {
+  if (!record(value) || !exactKeys(value, ['reference', 'status'])
+    || !secretReferences.includes(value.reference as SecretReference)
+    || !secretStatuses.includes(value.status as typeof secretStatuses[number])) invalidResponse()
+  return value as unknown as SecretStatus
+}
+
 function expectedGrantShape(purpose: FileGrantPurpose): Readonly<{ access: 'read' | 'write'; format: FileFormat }> {
   switch (purpose) {
     case 'gedcom-read': return { access: 'read', format: 'gedcom' }
@@ -263,5 +387,7 @@ export const parseAppInfoResult = (value: unknown): BridgeResult<AppInfo> => par
 export const parseStartupDiagnosticsResult = (value: unknown): BridgeResult<StartupDiagnostics> => parseBridgeResult(value, parseStartupDiagnostics)
 export const parseCapabilitiesResult = (value: unknown): BridgeResult<CapabilityManifest> => parseBridgeResult(value, parseCapabilityManifest)
 export const parsePreferencesResult = (value: unknown): BridgeResult<LocalPreferences> => parseBridgeResult(value, parsePreferences)
+export const parseSettingsResult = (value: unknown): BridgeResult<ApplicationSettings> => parseBridgeResult(value, parseSettings)
+export const parseSecretStatusResult = (value: unknown): BridgeResult<SecretStatus> => parseBridgeResult(value, parseSecretStatus)
 export const parseFileGrantResult = (value: unknown): BridgeResult<FileGrant | null> => parseBridgeResult(value, parseNullableFileGrant)
 export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<FileGrantRevocation> => parseBridgeResult(value, parseFileGrantRevocation)

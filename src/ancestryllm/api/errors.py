@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from ancestryllm.api.contracts import ErrorEnvelope, FailureDetail
 from ancestryllm.application.errors import domain_failure_from_exception, map_domain_failure
 from ancestryllm.application.errors import error_envelope as application_error_envelope
+from ancestryllm.core.errors import AncestryError
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,22 @@ class ApiRequestError(Exception):
     code: str
     message: str
     remediation: str | None = None
+
+
+_SAFE_ANCESTRY_ERROR_STATUS = {
+    "KEYRING_DELETE_UNVERIFIED": 503,
+    "KEYRING_READ_FAILED": 503,
+    "KEYRING_UNAVAILABLE": 503,
+    "KEYRING_WRITE_UNVERIFIED": 503,
+    "SECRET_EMPTY": 400,
+    "SECRET_ENVIRONMENT_MANAGED": 409,
+    "SECRET_REFERENCE_UNKNOWN": 400,
+    "SETTINGS_FIELD_UNKNOWN": 400,
+    "SETTINGS_REVISION_CONFLICT": 409,
+    "SETTINGS_SAVE_FAILED": 500,
+    "SETTINGS_SCHEMA_UNSUPPORTED": 400,
+    "SETTINGS_VALUE_INVALID": 400,
+}
 
 
 def new_correlation_ref() -> str:
@@ -48,6 +65,13 @@ def _http_status(code: str) -> int:
 def error_envelope(error: Exception, *, correlation_ref: str) -> tuple[int, ErrorEnvelope]:
     if isinstance(error, ApiRequestError):
         return error.status_code, ErrorEnvelope(
+            code=error.code,
+            message=error.message,
+            remediation=error.remediation,
+            correlation_ref=correlation_ref,
+        )
+    if isinstance(error, AncestryError) and error.code in _SAFE_ANCESTRY_ERROR_STATUS:
+        return _SAFE_ANCESTRY_ERROR_STATUS[error.code], ErrorEnvelope(
             code=error.code,
             message=error.message,
             remediation=error.remediation,

@@ -309,7 +309,7 @@ The foundation sequence is:
 | `EL-06` / #101 | Typed context bridge and main-process API proxy. | #99, #11, #102, and #100 merged. |
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |
 | `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Internal API and bridge prerequisites merged. |
-| `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. | Internal API and bridge prerequisites merged. |
+| `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
 | `EL-36` / #131 | Desktop contract, security, accessibility, E2E, and performance evidence. | Begins with #99/#11; gates the MVP. |
 
 ## Exclusive ownership and coordination

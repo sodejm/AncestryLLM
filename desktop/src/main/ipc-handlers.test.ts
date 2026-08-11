@@ -24,6 +24,11 @@ const bridge = (): MainDesktopBridge => ({
   retrySidecar: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 0 })),
   getPreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 })),
   updatePreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'dark', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 1 })),
+  getSettings: vi.fn().mockResolvedValue(result({ schema_version: 1, revision: 0, fields: [] })),
+  updateSettings: vi.fn().mockResolvedValue(result({ schema_version: 1, revision: 1, fields: [] })),
+  getSecretStatus: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
+  setSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'present' })),
+  deleteSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
 })
 
 const grantId = `grt_${'a'.repeat(64)}` as FileGrantId
@@ -138,7 +143,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the nine declared static channels', () => {
+  it('registers exactly the fourteen declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -146,7 +151,7 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(9)
+    expect(handlers.size).toBe(14)
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {

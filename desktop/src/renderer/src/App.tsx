@@ -1,15 +1,19 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Heart, Home as HomeIcon, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
-import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type {
   AncestryBridge,
+  ApplicationSetting,
+  ApplicationSettingValue,
   BridgeErrorCode,
   BridgeResult,
   DesktopColorScheme,
   PreferenceUpdate,
+  SecretReference,
   StartupDiagnostics,
   StartupFailure,
 } from '../../shared-contract/desktop'
+import { secretReferences } from '../../shared-contract/desktop'
 import { Button } from './components/Button'
 
 type Route = 'home' | 'diagnostics' | 'settings'
@@ -40,6 +44,214 @@ const failureLabels: Record<Exclude<StartupFailure, null>, string> = {
 const failureLabel = (failure: StartupFailure): string => failure
   ? failureLabels[failure]
   : 'The desktop service needs attention.'
+
+const secretLabels: Readonly<Record<SecretReference, string>> = {
+  'openai.api_key': 'OpenAI API key',
+  'anthropic.api_key': 'Anthropic API key',
+  'gemini.api_key': 'Gemini API key',
+  'openrouter.api_key': 'OpenRouter API key',
+  'openrouter.management_key': 'OpenRouter management key',
+  'database.master_key': 'Database master key',
+}
+
+const statusLabel = (status: 'missing' | 'present' | 'unavailable'): string =>
+  `${status.charAt(0).toUpperCase()}${status.slice(1)}`
+
+function valueFromSettingInput(field: ApplicationSetting, input: HTMLInputElement | HTMLSelectElement): ApplicationSettingValue {
+  return field.type === 'string' ? input.value : Number(input.value)
+}
+
+function ApplicationSettingsPanel() {
+  const queryClient = useQueryClient()
+  const settings = useQuery({ queryKey: ['application-settings'], queryFn: () => ancestryBridge().getSettings() })
+  const [pendingKey, setPendingKey] = useState<ApplicationSetting['key'] | null>(null)
+  const [failure, setFailure] = useState<BridgeErrorCode | null>(null)
+  const data = settings.data?.ok ? settings.data.data : undefined
+  const queryFailure = settings.data && !settings.data.ok
+    ? settings.data.error.code
+    : settings.isError
+      ? 'INTERNAL_ERROR'
+      : null
+
+  const updateSetting = async (event: FormEvent<HTMLFormElement>, field: ApplicationSetting) => {
+    event.preventDefault()
+    if (!data || pendingKey) return
+    const control = event.currentTarget.elements.namedItem('setting')
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) return
+    setPendingKey(field.key)
+    setFailure(null)
+    try {
+      const result = await ancestryBridge().updateSettings({
+        schema_version: 1,
+        expected_revision: data.revision,
+        changes: { [field.key]: valueFromSettingInput(field, control) },
+      })
+      if (result.ok) {
+        queryClient.setQueryData(['application-settings'], result)
+      } else {
+        setFailure(result.error.code)
+      }
+      await settings.refetch()
+    } catch {
+      setFailure('INTERNAL_ERROR')
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
+  return <section className="settings-panel" aria-labelledby="application-settings-title">
+    <h2 id="application-settings-title">Application settings</h2>
+    <p>These values are stored atomically. Credential values are managed separately below.</p>
+    {settings.isPending && <p role="status">Loading application settings…</p>}
+    {(failure || queryFailure) && <div role="alert" className="error settings-error">
+      <AlertTriangle aria-hidden="true" />
+      <div>
+        <strong>{failure ? 'Application settings were not saved.' : 'Application settings are temporarily unavailable.'}</strong>
+        <p className="error-code">Code: {failure ?? queryFailure}</p>
+      </div>
+    </div>}
+    {data && <div className="application-settings-list">
+      {data.fields.map((field) => <form
+        className="application-setting"
+        key={`${data.revision}:${field.key}`}
+        onSubmit={(event) => { void updateSetting(event, field) }}
+      >
+        <label htmlFor={`setting-${field.key}`}>{field.label}</label>
+        <p id={`setting-help-${field.key}`} className="setting-help">{field.help}</p>
+        {field.type === 'string'
+          ? <select
+              id={`setting-${field.key}`}
+              name="setting"
+              defaultValue={String(field.value)}
+              aria-describedby={`setting-help-${field.key}`}
+              disabled={pendingKey !== null}
+            >
+              {field.validation.allowed_values.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          : <input
+              id={`setting-${field.key}`}
+              name="setting"
+              type="number"
+              defaultValue={field.value}
+              min={field.validation.minimum ?? undefined}
+              max={field.validation.maximum ?? undefined}
+              step={field.type === 'integer' ? 1 : 'any'}
+              aria-describedby={`setting-help-${field.key}`}
+              disabled={pendingKey !== null}
+              required
+            />}
+        <div className="setting-meta">
+          <span>Default: {field.default_value}</span>
+          {field.restart_required && <span>Restart required</span>}
+        </div>
+        <Button type="submit" disabled={pendingKey !== null}>
+          {pendingKey === field.key ? 'Saving…' : `Save ${field.label}`}
+        </Button>
+      </form>)}
+    </div>}
+  </section>
+}
+
+function SecretControl({ reference }: Readonly<{ reference: SecretReference }>) {
+  const queryClient = useQueryClient()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const label = secretLabels[reference]
+  const queryKey = ['secret-status', reference] as const
+  const status = useQuery({ queryKey, queryFn: () => ancestryBridge().getSecretStatus({ reference }) })
+  const [pending, setPending] = useState<'set' | 'delete' | null>(null)
+  const [failure, setFailure] = useState<BridgeErrorCode | null>(null)
+  const data = status.data?.ok ? status.data.data : undefined
+  const queryFailure = status.data && !status.data.ok
+    ? status.data.error.code
+    : status.isError
+      ? 'INTERNAL_ERROR'
+      : null
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (pending) return
+    const input = event.currentTarget.elements.namedItem('secret')
+    if (!(input instanceof HTMLInputElement) || input.value.length === 0) return
+    const value = input.value
+    input.value = ''
+    setPending('set')
+    setFailure(null)
+    try {
+      const result = await ancestryBridge().setSecret({ reference, value })
+      if (result.ok) {
+        queryClient.setQueryData(queryKey, result)
+      } else {
+        setFailure(result.error.code)
+      }
+      await status.refetch()
+    } catch {
+      setFailure('INTERNAL_ERROR')
+    } finally {
+      input.value = ''
+      setPending(null)
+    }
+  }
+
+  const remove = async () => {
+    if (pending) return
+    if (inputRef.current) inputRef.current.value = ''
+    setPending('delete')
+    setFailure(null)
+    try {
+      const result = await ancestryBridge().deleteSecret({ reference })
+      if (result.ok) {
+        queryClient.setQueryData(queryKey, result)
+      } else {
+        setFailure(result.error.code)
+      }
+      await status.refetch()
+    } catch {
+      setFailure('INTERNAL_ERROR')
+    } finally {
+      if (inputRef.current) inputRef.current.value = ''
+      setPending(null)
+    }
+  }
+
+  return <section className="credential-control" aria-label={`${label} credential settings`}>
+    <h3>{label}</h3>
+    {status.isPending
+      ? <p role="status">Checking status…</p>
+      : data
+        ? <p>{`Status: ${statusLabel(data.status)}`}</p>
+        : <p>Status: Unavailable</p>}
+    {(failure || queryFailure) && <p role="alert" className="error-code">Code: {failure ?? queryFailure}</p>}
+    <form onSubmit={(event) => { void save(event) }}>
+      <label htmlFor={`secret-${reference}`}>{label}</label>
+      <input
+        ref={inputRef}
+        id={`secret-${reference}`}
+        name="secret"
+        type="password"
+        autoComplete="new-password"
+        spellCheck={false}
+        disabled={pending !== null}
+        required
+      />
+      <div className="credential-actions">
+        <Button type="submit" disabled={pending !== null}>{pending === 'set' ? 'Saving…' : `Save ${label}`}</Button>
+        <Button type="button" variant="quiet" disabled={pending !== null} onClick={() => { void remove() }}>
+          {pending === 'delete' ? 'Deleting…' : `Delete ${label}`}
+        </Button>
+      </div>
+    </form>
+  </section>
+}
+
+function CredentialSettingsPanel() {
+  return <section className="settings-panel" aria-labelledby="credentials-title">
+    <h2 id="credentials-title">Credentials</h2>
+    <p>Credential values are write-only and stored in the operating system keyring. Existing values are never displayed.</p>
+    <div className="credential-grid">
+      {secretReferences.map((reference) => <SecretControl key={reference} reference={reference} />)}
+    </div>
+  </section>
+}
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
@@ -335,7 +547,7 @@ function Shell() {
 
       {route === 'settings' && <>
         <h1 ref={heading} tabIndex={-1}>Settings</h1>
-        <p className="lead">Choose how the desktop shell looks and moves.</p>
+        <p className="lead">Choose local preferences, application behavior, and write-only credentials.</p>
         {preferences.isPending && <p role="status">Loading preferences…</p>}
         {(preferenceFailure || preferenceQueryCode) && <div ref={preferenceAlert} tabIndex={-1} role="alert" className="error">
           <AlertTriangle aria-hidden="true" />
@@ -369,6 +581,8 @@ function Shell() {
               <span>Reduce motion</span>
             </label>
           </fieldset>
+          <ApplicationSettingsPanel />
+          <CredentialSettingsPanel />
         </div>
       </>}
     </main>

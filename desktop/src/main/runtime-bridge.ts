@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { createDesktopControlBridge } from './desktop-control'
 import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
-import { createSidecarCapabilitiesClient } from './sidecar-client'
+import { createSidecarClient } from './sidecar-client'
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
 import {
@@ -54,7 +54,7 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
       buildChannel: 'packaged',
     },
     supervisor,
-    capabilitiesClient: createSidecarCapabilitiesClient({ session: () => supervisor.session() }),
+    sidecarClient: createSidecarClient({ session: () => supervisor.session() }),
     preferences,
   })
 

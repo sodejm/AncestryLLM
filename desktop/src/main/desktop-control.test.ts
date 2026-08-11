@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
+import type { SidecarClient } from './sidecar-client'
 
 const manifest = {
   api: { namespace: '/api/v1', contract: 'ancestryllm.internal-api/1', application_contract: 'ancestryllm.application/0.3' },
@@ -8,17 +9,29 @@ const manifest = {
   pagination: { default_limit: 25, maximum_limit: 100, maximum_cursor_characters: 256 },
 } as const
 
+const sidecarClient = (
+  overrides: Partial<SidecarClient> = {},
+): SidecarClient => ({
+  getCapabilities: vi.fn().mockResolvedValue(manifest),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
+  getSecretStatus: vi.fn(),
+  setSecret: vi.fn(),
+  deleteSecret: vi.fn(),
+  ...overrides,
+})
+
 describe('desktop control bridge', () => {
   it('returns safe app information, diagnostics, capabilities, and preferences', async () => {
     const supervisor = {
       diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 2, manualRetriesRemaining: 1 }),
       retry: vi.fn().mockResolvedValue(true),
     }
-    const client = { getCapabilities: vi.fn().mockResolvedValue(manifest) }
+    const client = sidecarClient()
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
       supervisor,
-      capabilitiesClient: client,
+      sidecarClient: client,
       preferences: new MemoryPreferencesStore(),
     })
 
@@ -34,7 +47,7 @@ describe('desktop control bridge', () => {
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
       supervisor: { diagnostics, retry },
-      capabilitiesClient: { getCapabilities: vi.fn() },
+      sidecarClient: sidecarClient(),
       preferences: new MemoryPreferencesStore(),
     })
 
@@ -49,7 +62,7 @@ describe('desktop control bridge', () => {
         diagnostics: () => ({ state: 'unavailable' as const, failure: 'startup_failed' as const, automaticRestartsRemaining: 0, manualRetriesRemaining: 1 }),
         retry: vi.fn(),
       },
-      capabilitiesClient: { getCapabilities: vi.fn().mockRejectedValue(new Error('Bearer abc and port 54321 failed')) },
+      sidecarClient: sidecarClient({ getCapabilities: vi.fn().mockRejectedValue(new Error('Bearer abc and port 54321 failed')) }),
       preferences: new MemoryPreferencesStore(),
     })
 
@@ -60,18 +73,18 @@ describe('desktop control bridge', () => {
 
   it('propagates cancellation to the sidecar client without converting it to a renderer error', async () => {
     const cancelled = new Error('private cancellation reason')
-    const client = {
+    const client = sidecarClient({
       getCapabilities: vi.fn((signal?: AbortSignal) => new Promise<typeof manifest>((_resolve, reject) => {
         signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
       })),
-    }
+    })
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'packaged' },
       supervisor: {
         diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }),
         retry: vi.fn(),
       },
-      capabilitiesClient: client,
+      sidecarClient: client,
       preferences: new MemoryPreferencesStore(),
     })
     const controller = new AbortController()
@@ -87,7 +100,7 @@ describe('desktop control bridge', () => {
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
       supervisor: { diagnostics: () => ({ state: 'idle' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
-      capabilitiesClient: { getCapabilities: vi.fn() },
+      sidecarClient: sidecarClient(),
       preferences: new MemoryPreferencesStore(),
     })
     await expect(bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark', reducedMotion: true })).resolves.toMatchObject({ ok: true, data: { colorScheme: 'dark', reducedMotion: true, revision: 1 } })

@@ -2,10 +2,12 @@
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AppInfo,
+  type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
-  type CapabilityManifest,
   type PreferenceUpdate,
+  type SecretReferenceRequest,
+  type SecretSetRequest,
   type StartupDiagnostics,
   type StartupFailure,
   type StartupState,
@@ -13,6 +15,7 @@ import {
 import type { SidecarDiagnostics, SidecarLifecycleState } from './sidecar-supervisor'
 import { PreferencesConflictError, type PreferencesStore } from './preferences-store'
 import type { MainDesktopBridge } from './ipc-handlers'
+import { SidecarClientError, type SidecarClient } from './sidecar-client'
 
 export { MemoryPreferencesStore, PreferencesConflictError } from './preferences-store'
 export type { PreferencesStore } from './preferences-store'
@@ -20,10 +23,6 @@ export type { PreferencesStore } from './preferences-store'
 export interface SidecarControlPort {
   diagnostics(): Readonly<SidecarDiagnostics>
   retry(): Promise<boolean>
-}
-
-export interface CapabilitiesClient {
-  getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest>
 }
 
 function requireActive(signal?: AbortSignal): void {
@@ -65,7 +64,7 @@ function safeDiagnostics(value: Readonly<SidecarDiagnostics>): Readonly<StartupD
 export function createDesktopControlBridge(dependencies: Readonly<{
   appInfo: Readonly<AppInfo>
   supervisor: SidecarControlPort
-  capabilitiesClient: CapabilitiesClient
+  sidecarClient: SidecarClient
   preferences: PreferencesStore
 }>): MainDesktopBridge {
   const appInfo = frozen({ ...dependencies.appInfo })
@@ -81,7 +80,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
     async getCapabilities(signal?: AbortSignal) {
       try {
         requireActive(signal)
-        const manifest = await dependencies.capabilitiesClient.getCapabilities(signal)
+        const manifest = await dependencies.sidecarClient.getCapabilities(signal)
         requireActive(signal)
         return success(manifest)
       } catch {
@@ -126,6 +125,85 @@ export function createDesktopControlBridge(dependencies: Readonly<{
           return failure('PREFERENCES_CONFLICT', 'Desktop preferences changed before this update.', 'Reload preferences and try again.')
         }
         return failure('PREFERENCES_UNAVAILABLE', 'Desktop preferences could not be updated.', 'Try again or restart AncestryLLM.')
+      }
+    },
+    async getSettings(signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const settings = await dependencies.sidecarClient.getSettings(signal)
+        requireActive(signal)
+        return success(settings)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'settings_invalid') {
+          return failure('SETTINGS_INVALID', 'Application settings are invalid.', 'Reload settings and try again.')
+        }
+        return failure('SETTINGS_UNAVAILABLE', 'Application settings are unavailable.', 'Retry the service or restart AncestryLLM.')
+      }
+    },
+    async updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const settings = await dependencies.sidecarClient.updateSettings(update, signal)
+        requireActive(signal)
+        return success(settings)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'settings_conflict') {
+          return failure('SETTINGS_CONFLICT', 'Application settings changed before this update.', 'Reload settings and try again.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'settings_invalid') {
+          return failure('SETTINGS_INVALID', 'The application settings update was invalid.', 'Review the setting and try again.')
+        }
+        return failure('SETTINGS_UNAVAILABLE', 'Application settings could not be updated.', 'Try again or restart AncestryLLM.')
+      }
+    },
+    async getSecretStatus(request: SecretReferenceRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const status = await dependencies.sidecarClient.getSecretStatus(request, signal)
+        requireActive(signal)
+        return success(status)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'secret_invalid') {
+          return failure('SECRET_INVALID', 'The secret reference was invalid.', 'Reload settings and try again.')
+        }
+        return failure('SECRET_STORE_UNAVAILABLE', 'Secret status is unavailable.', 'Unlock the operating-system credential store and try again.')
+      }
+    },
+    async setSecret(request: SecretSetRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const status = await dependencies.sidecarClient.setSecret(request, signal)
+        requireActive(signal)
+        return success(status)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'secret_environment_managed') {
+          return failure('SECRET_ENVIRONMENT_MANAGED', 'This secret is managed by the environment.', 'Change it in the managed environment instead.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'secret_invalid') {
+          return failure('SECRET_INVALID', 'The secret update was invalid.', 'Enter a non-empty value and try again.')
+        }
+        return failure('SECRET_STORE_UNAVAILABLE', 'The secret could not be saved.', 'Unlock the operating-system credential store and try again.')
+      }
+    },
+    async deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const status = await dependencies.sidecarClient.deleteSecret(request, signal)
+        requireActive(signal)
+        return success(status)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'secret_environment_managed') {
+          return failure('SECRET_ENVIRONMENT_MANAGED', 'This secret is managed by the environment.', 'Change it in the managed environment instead.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'secret_invalid') {
+          return failure('SECRET_INVALID', 'The secret reference was invalid.', 'Reload settings and try again.')
+        }
+        return failure('SECRET_STORE_UNAVAILABLE', 'The secret could not be removed.', 'Unlock the operating-system credential store and try again.')
       }
     },
   })

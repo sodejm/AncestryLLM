@@ -86,7 +86,7 @@ provider modules are present in the characterization tests.
 
 | Flow | Current owner and protected behavior |
 |---|---|
-| Configuration and secrets | `AppConfig` owns non-secret values and private directories; `SecretStore` uses the OS keyring with an explicit headless/CI environment fallback. Configuration publication is atomic and `.env` is never auto-loaded. |
+| Configuration and secrets | `AppConfig` owns non-secret values and private directories. Its desktop service exposes exactly five reviewed fields through schema version 1, publishes owner-only configuration atomically, and rejects stale revisions. `SecretStore` is the sole OS-keyring authority; environment injection is a read-only headless/CI fallback. The desktop contract exposes only allowlisted status, set, and absence-verified delete operations. `.env` is never auto-loaded. |
 | Application state | `storage.Database` owns the writable SQLCipher workspace. It does not open a RootsMagic family tree. Repositories provide bounded session-level persistence to application services. |
 | GEDCOM merge and quality | `GedcomService` fingerprints immutable inputs, delegates parsing, identity, provenance, conflict, ordering, and serialization to the characterized GEDCOM kernel, revalidates inputs, stages new outputs, and publishes them atomically. Optional quality output is a coordinated secondary artifact. |
 | Incremental GEDCOM sync | `gedcom.incremental` treats `master.ged` plus its private manifest as the synchronization authority. It retains snapshot history, tombstones manual deletions, makes rebase explicit, and publishes or rolls back the coordinated bundle. |
@@ -145,9 +145,10 @@ not permission to change shipped behavior during characterization.
 
 - Command metadata is shared, but `cli.dispatch()` is still the application
   dispatcher and consumes `argparse.Namespace`.
-- There is no transport-neutral executor request/result envelope, port set,
-  artifact reference, or single stable application error mapper suitable for
-  CLI, REPL, future FastAPI, and future Electron adapters.
+- The transport-neutral executor request/result envelope, port set, artifact
+  references, and stable application error mapper now support CLI, REPL, and
+  the bounded internal FastAPI/Electron foundation. Later domain workflows
+  must keep using that shared boundary instead of defining UI-owned variants.
 - Several service results expose `Path` and other host-oriented values instead
   of serialization-only DTOs.
 - Provider generation contracts use Pydantic, so they are not the neutral core
@@ -156,8 +157,10 @@ not permission to change shipped behavior during characterization.
   serialization behavior are characterized but remain distributed across
   façade and centralized engine/synchronizer modules rather than one
   service-owned aggregate contract.
-- FastAPI and Electron are accepted future adapters only. Neither is an
-  implemented runtime, and neither may redefine service or genealogy behavior.
+- The authenticated FastAPI foundation and bounded Electron shell are now
+  implemented adapters. Their settings and credential-management source
+  contract remains private and transport-thin, and neither adapter may
+  redefine service, provider-consent, or genealogy behavior.
 
 ## Running and comparing the baseline
 

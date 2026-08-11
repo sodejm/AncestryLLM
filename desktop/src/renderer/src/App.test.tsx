@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AncestryBridge } from '../../shared-contract/desktop'
@@ -339,6 +339,141 @@ describe('accessible desktop shell', () => {
     expect(alert).toHaveTextContent('Code: PREFERENCES_CONFLICT')
     expect(alert).toHaveTextContent('Review the current settings and try again.')
     expect(alert).not.toHaveTextContent(/settings\.json|token=secret|private path/i)
+  })
+
+  it('updates one application setting with the last renderer-visible revision', async () => {
+    const base = await createCompletedBridge()
+    const updateSettings = vi.fn((request) => base.updateSettings(request))
+    const bridge: AncestryBridge = { ...base, updateSettings }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const rows = await screen.findByRole('spinbutton', { name: 'Maximum query rows' })
+    await userEvent.clear(rows)
+    await userEvent.type(rows, '250')
+    await userEvent.click(screen.getByRole('button', { name: 'Save Maximum query rows' }))
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      schema_version: 1,
+      expected_revision: 0,
+      changes: { 'limits.max_query_rows': 250 },
+    })
+    await waitFor(() => expect(rows).toHaveValue(250))
+  })
+
+  it('reloads the visible setting value after an optimistic revision conflict', async () => {
+    const base = await createCompletedBridge()
+    const initial = await base.getSettings()
+    if (!initial.ok) throw new Error('Expected the settings fixture to be available')
+    const refreshed = {
+      ok: true as const,
+      protocolVersion: '1' as const,
+      data: {
+        ...initial.data,
+        revision: 1,
+        fields: initial.data.fields.map((field) => field.key === 'limits.max_query_rows'
+          ? { ...field, value: 500 }
+          : field),
+      },
+    }
+    const getSettings = vi.fn()
+      .mockImplementationOnce(() => base.getSettings())
+      .mockResolvedValue(refreshed)
+    const updateSettings = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'SETTINGS_CONFLICT',
+        message: 'raw stale revision details',
+        remediation: 'raw conflict remediation',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, getSettings, updateSettings }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const rows = await screen.findByRole('spinbutton', { name: 'Maximum query rows' })
+    await userEvent.clear(rows)
+    await userEvent.type(rows, '250')
+    await userEvent.click(screen.getByRole('button', { name: 'Save Maximum query rows' }))
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      schema_version: 1,
+      expected_revision: 0,
+      changes: { 'limits.max_query_rows': 250 },
+    })
+    expect(await screen.findByText('Code: SETTINGS_CONFLICT')).toBeVisible()
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Maximum query rows' })).toHaveValue(500))
+    expect(document.body).not.toHaveTextContent(/raw stale revision details|raw conflict remediation/i)
+  })
+
+  it('clears credential form state immediately and exposes status only', async () => {
+    const base = await createCompletedBridge()
+    const setSecret = vi.fn((request) => base.setSecret(request))
+    const bridge: AncestryBridge = { ...base, setSecret }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const credential = await screen.findByRole('region', { name: 'OpenAI API key credential settings' })
+    const input = within(credential).getByLabelText('OpenAI API key')
+    const canary = 'credential-value-that-must-not-render'
+    await userEvent.type(input, canary)
+    await userEvent.click(within(credential).getByRole('button', { name: 'Save OpenAI API key' }))
+
+    expect(input).toHaveValue('')
+    expect(setSecret).toHaveBeenCalledWith({ reference: 'openai.api_key', value: canary })
+    expect(await within(credential).findByText('Status: Present')).toBeVisible()
+    expect(document.body).not.toHaveTextContent(canary)
+  })
+
+  it('clears credentials after a failed write and renders only a stable code', async () => {
+    const base = await createCompletedBridge()
+    const setSecret = vi.fn().mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'SECRET_STORE_UNAVAILABLE',
+        message: 'credential=raw-secret at /Users/example/keyring',
+        remediation: 'Inspect private stderr on port 43117.',
+      },
+    })
+    const bridge: AncestryBridge = { ...base, setSecret }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const credential = await screen.findByRole('region', { name: 'OpenAI API key credential settings' })
+    const input = within(credential).getByLabelText('OpenAI API key')
+    await userEvent.type(input, 'raw-secret')
+    await userEvent.click(within(credential).getByRole('button', { name: 'Save OpenAI API key' }))
+
+    expect(input).toHaveValue('')
+    expect(await within(credential).findByText('Code: SECRET_STORE_UNAVAILABLE')).toBeVisible()
+    expect(document.body).not.toHaveTextContent(/raw-secret|\/Users\/example|43117|stderr/i)
+  })
+
+  it('requires an explicit delete and proves the credential is absent afterward', async () => {
+    const base = await createCompletedBridge()
+    const deleteSecret = vi.fn((request) => base.deleteSecret(request))
+    const bridge: AncestryBridge = { ...base, deleteSecret }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const credential = await screen.findByRole('region', { name: 'OpenAI API key credential settings' })
+    const input = within(credential).getByLabelText('OpenAI API key')
+    await userEvent.type(input, 'transient-value')
+    await userEvent.click(within(credential).getByRole('button', { name: 'Save OpenAI API key' }))
+    expect(await within(credential).findByText('Status: Present')).toBeVisible()
+    await userEvent.type(input, 'value-that-delete-must-clear')
+    await userEvent.click(within(credential).getByRole('button', { name: 'Delete OpenAI API key' }))
+    expect(input).toHaveValue('')
+    expect(deleteSecret).toHaveBeenCalledWith({ reference: 'openai.api_key' })
+    expect(await within(credential).findByText('Status: Missing')).toBeVisible()
+    expect(document.body).not.toHaveTextContent('value-that-delete-must-clear')
   })
 
   it('does not reuse a stale revision while a preference update is pending', async () => {

@@ -54,10 +54,11 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--background); }
-a, button, input { outline-offset: 4px; }
+a, button, input, select { outline-offset: 4px; }
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 [tabindex="-1"]:focus-visible { outline: 3px solid var(--accent); }
 
 .app-shell {
@@ -178,7 +179,7 @@ h2 { margin-top: 0; font-size: 1.25rem; }
 .error p { margin-bottom: 0; }
 .error-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9rem; }
 
-.settings-stack { display: grid; gap: 1rem; max-width: 36rem; }
+.settings-stack { display: grid; gap: 1rem; max-width: 48rem; }
 fieldset {
   display: flex;
   flex-wrap: wrap;
@@ -191,6 +192,46 @@ fieldset {
 
 fieldset label { display: inline-flex; align-items: center; gap: .45rem; }
 .option-label { text-transform: capitalize; }
+
+.settings-panel {
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  background: var(--surface);
+}
+
+.settings-panel > p { color: var(--muted); }
+.settings-error { margin-top: 1rem; }
+.application-settings-list,
+.credential-grid { display: grid; gap: 1rem; }
+
+.application-setting,
+.credential-control {
+  display: grid;
+  gap: .65rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.application-setting > label,
+.credential-control h3 { margin: 0; font-weight: 700; }
+.setting-help { margin: 0; color: var(--muted); }
+.application-setting input,
+.application-setting select,
+.credential-control input {
+  width: min(100%, 28rem);
+  border: 1px solid var(--border);
+  border-radius: .35rem;
+  padding: .6rem;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+.application-setting .button { justify-self: start; }
+.setting-meta { display: flex; flex-wrap: wrap; gap: .75rem; color: var(--muted); font-size: .9rem; }
+.credential-control form { display: grid; gap: .65rem; }
+.credential-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
 
 @media (max-width: 48rem) {
   .app-shell { grid-template: auto auto 1fr / 1fr; }

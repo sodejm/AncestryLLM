@@ -26,6 +26,26 @@ describe('main-only sidecar capabilities client', () => {
     await expect(client.getCapabilities()).rejects.toEqual(new SidecarClientError('unavailable'))
   })
 
+  it('deletes through the fixed secret route without serializing a request body', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ reference: 'openai.api_key', status: 'missing' }),
+    })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+    await expect(client.deleteSecret({ reference: 'openai.api_key' })).resolves.toEqual({
+      reference: 'openai.api_key',
+      status: 'missing',
+    })
+    expect(request).toHaveBeenCalledWith(
+      session,
+      '/api/v1/secrets/openai.api_key/delete',
+      undefined,
+      { method: 'POST' },
+    )
+  })
+
   it('rejects malformed, oversized, and unsuccessful responses', async () => {
     for (const response of [
       { statusCode: 200, contentType: 'application/json', body: '{' },

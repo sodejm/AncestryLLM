@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass, field
+from hmac import compare_digest
 from typing import Any, Protocol, cast
 
 from ancestryllm.core.errors import StorageError
+from ancestryllm.domain.secrets import SUPPORTED_SECRET_REFERENCES
 
 KEYRING_SERVICE = "AncestryLLM"
 REDACTED_VALUE = "[REDACTED]"
@@ -19,6 +21,8 @@ ENVIRONMENT_NAMES = {
     "openrouter.management_key": "OPENROUTER_MANAGEMENT_KEY",
     "database.master_key": "ANCESTRYLLM_DATABASE_KEY",
 }
+if frozenset(ENVIRONMENT_NAMES) != SUPPORTED_SECRET_REFERENCES:
+    raise RuntimeError("Secret reference configuration is inconsistent.")
 
 
 @dataclass(slots=True)
@@ -74,6 +78,7 @@ class KeyringSecretStore:
         return keyring
 
     def get(self, name: str) -> str | None:
+        environment_name = self._environment_name(name)
         keyring_error: Exception | None
         try:
             value = self._keyring().get_password(self.service_name, name)
@@ -86,9 +91,6 @@ class KeyringSecretStore:
             secret_value = cast("str", value)
             self.register_sensitive(secret_value)
             return secret_value
-        environment_name = ENVIRONMENT_NAMES.get(
-            name, f"ANCESTRYLLM_SECRET_{name.upper().replace('.', '_')}"
-        )
         environment_value = os.getenv(environment_name)
         if environment_value:
             self.register_sensitive(environment_value)
@@ -96,37 +98,63 @@ class KeyringSecretStore:
         if keyring_error is not None:
             raise StorageError(
                 "KEYRING_READ_FAILED",
-                f"The OS keyring could not read secret reference {name!r}.",
+                "The OS keyring could not read the requested credential.",
                 "Unlock or repair the OS credential store; never place the value on the command line.",
-                details={"error_type": type(keyring_error).__name__},
             ) from keyring_error
         return None
 
     def set(self, name: str, value: str) -> None:
+        environment_name = self._environment_name(name)
+        self._reject_environment_managed(environment_name)
         if not value:
             raise StorageError("SECRET_EMPTY", "Empty secret values are not stored.")
         self.register_sensitive(value)
         try:
-            self._keyring().set_password(self.service_name, name, value)
+            keyring = self._keyring()
+            keyring.set_password(self.service_name, name, value)
+            stored = keyring.get_password(self.service_name, name)
         except Exception as exc:
             raise StorageError(
-                "KEYRING_WRITE_FAILED",
-                f"The OS keyring could not store secret reference {name!r}.",
+                "KEYRING_WRITE_UNVERIFIED",
+                "The OS keyring could not verify the credential write.",
                 "Unlock or configure a supported OS credential store.",
-                details={"error_type": type(exc).__name__},
             ) from exc
+        if not isinstance(stored, str) or not compare_digest(stored, value):
+            raise StorageError(
+                "KEYRING_WRITE_UNVERIFIED",
+                "The OS keyring could not verify the credential write.",
+            )
 
     def delete(self, name: str) -> None:
+        environment_name = self._environment_name(name)
+        self._reject_environment_managed(environment_name)
         try:
-            self._keyring().delete_password(self.service_name, name)
+            keyring = self._keyring()
+            existing = keyring.get_password(self.service_name, name)
         except Exception as exc:
-            error_name = type(exc).__name__
-            if error_name not in {"PasswordDeleteError", "KeyringError"}:
-                raise StorageError(
-                    "KEYRING_DELETE_FAILED",
-                    f"The OS keyring could not delete secret reference {name!r}.",
-                    details={"error_type": error_name},
-                ) from exc
+            raise StorageError(
+                "KEYRING_READ_FAILED",
+                "The OS keyring could not read the requested credential.",
+            ) from exc
+        if existing is None:
+            return
+        delete_error: Exception | None = None
+        try:
+            keyring.delete_password(self.service_name, name)
+        except Exception as exc:  # noqa: BLE001 - deletion must be verified below
+            delete_error = exc
+        try:
+            remaining = keyring.get_password(self.service_name, name)
+        except Exception as exc:
+            raise StorageError(
+                "KEYRING_DELETE_UNVERIFIED",
+                "Credential deletion could not be verified.",
+            ) from exc
+        if remaining is not None:
+            raise StorageError(
+                "KEYRING_DELETE_UNVERIFIED",
+                "Credential deletion could not be verified.",
+            ) from delete_error
 
     def present(self, name: str) -> bool:
         return self.get(name) is not None
@@ -136,6 +164,25 @@ class KeyringSecretStore:
 
     def redact(self, text: str) -> str:
         return self._redactor.redact(text)
+
+    @staticmethod
+    def _environment_name(name: str) -> str:
+        try:
+            return ENVIRONMENT_NAMES[name]
+        except KeyError as exc:
+            raise StorageError(
+                "SECRET_REFERENCE_UNKNOWN",
+                "The secret reference is not supported.",
+            ) from exc
+
+    @staticmethod
+    def _reject_environment_managed(environment_name: str) -> None:
+        if os.getenv(environment_name):
+            raise StorageError(
+                "SECRET_ENVIRONMENT_MANAGED",
+                "Environment-injected credentials are read-only.",
+                "Remove the environment injection before changing this credential.",
+            )
 
 
 @dataclass(slots=True)
