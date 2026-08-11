@@ -17,6 +17,12 @@ from ancestryllm.api.contracts import (
     PaginationPolicy,
     PaginationRequest,
     RequestSizePolicy,
+    SecretSetRequest,
+    SecretStatusResponse,
+    SettingFieldResponse,
+    SettingsPatchRequest,
+    SettingsResponse,
+    SettingValidationResponse,
 )
 from ancestryllm.api.errors import error_response
 from ancestryllm.api.server import create_uvicorn_config
@@ -41,6 +47,12 @@ __all__ = [
     "PaginationPolicy",
     "PaginationRequest",
     "RequestSizePolicy",
+    "SecretSetRequest",
+    "SecretStatusResponse",
+    "SettingFieldResponse",
+    "SettingValidationResponse",
+    "SettingsPatchRequest",
+    "SettingsResponse",
     "create_app",
     "create_uvicorn_config",
     "error_response",

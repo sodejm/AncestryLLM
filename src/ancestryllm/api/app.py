@@ -24,6 +24,12 @@ from ancestryllm.api.contracts import (
     HealthResponse,
     PageMetadata,
     PaginationRequest,
+    SecretSetRequest,
+    SecretStatusResponse,
+    SettingFieldResponse,
+    SettingsPatchRequest,
+    SettingsResponse,
+    SettingValidationResponse,
 )
 from ancestryllm.api.errors import error_response, request_error
 from ancestryllm.api.middleware import InternalApiMiddleware
@@ -36,6 +42,8 @@ if TYPE_CHECKING:
 
     from ancestryllm.api.settings import ApiSettings
     from ancestryllm.application.executor import CommandExecutor
+    from ancestryllm.application.secret_management import SecretManagementService, SecretStatus
+    from ancestryllm.application.settings import SettingField, SettingsService, SettingsSnapshot
 
 
 class ApiLifecycle(Protocol):
@@ -51,10 +59,14 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorEnvelope, "description": "The private bearer is invalid."},
     404: {"model": ErrorEnvelope, "description": "The route is not exposed."},
     405: {"model": ErrorEnvelope, "description": "The method is not accepted."},
-    409: {"model": ErrorEnvelope, "description": "The paired build identity differs."},
+    409: {
+        "model": ErrorEnvelope,
+        "description": "The request conflicts with the current protected state.",
+    },
     413: {"model": ErrorEnvelope, "description": "The request is too large."},
     415: {"model": ErrorEnvelope, "description": "The content type is not accepted."},
     500: {"model": ErrorEnvelope, "description": "The request failed safely."},
+    503: {"model": ErrorEnvelope, "description": "Secure credential storage is unavailable."},
 }
 _HANDSHAKE_PARAMETERS: list[dict[str, object]] = [
     {
@@ -74,6 +86,36 @@ _HANDSHAKE_PARAMETERS: list[dict[str, object]] = [
 
 def _correlation_ref(request: Request) -> str:
     return cast("str", request.state.correlation_ref)
+
+
+def _setting_field_response(field: SettingField) -> SettingFieldResponse:
+    return SettingFieldResponse(
+        key=field.key,
+        label=field.label,
+        help=field.help,
+        type=field.type,
+        value=field.value,
+        default_value=field.default_value,
+        validation=SettingValidationResponse(
+            allowed_values=field.validation.allowed_values,
+            minimum=field.validation.minimum,
+            maximum=field.validation.maximum,
+        ),
+        restart_required=field.restart_required,
+        sensitive=False,
+    )
+
+
+def _settings_response(snapshot: SettingsSnapshot) -> SettingsResponse:
+    return SettingsResponse(
+        schema_version=snapshot.schema_version,
+        revision=snapshot.revision,
+        fields=tuple(_setting_field_response(field) for field in snapshot.fields),
+    )
+
+
+def _secret_status_response(status: SecretStatus) -> SecretStatusResponse:
+    return SecretStatusResponse(reference=status.reference, status=status.status)
 
 
 class InternalApiApplication(FastAPI):
@@ -112,6 +154,8 @@ def create_app(
     settings: ApiSettings,
     registry: ModuleDescriptorRegistry,
     executor: CommandExecutor,
+    settings_service: SettingsService,
+    secret_service: SecretManagementService,
     lifecycle: ApiLifecycle | None = None,
 ) -> FastAPI:
     """Create the internal control surface over existing application contracts."""
@@ -178,6 +222,67 @@ def create_app(
     )
     def get_capabilities() -> CapabilityManifest:
         return capability_manifest(registry, executor, settings)
+
+    @app.get(
+        f"{API_NAMESPACE}/settings",
+        response_model=SettingsResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalSettings",
+        tags=["settings"],
+    )
+    def get_settings() -> SettingsResponse:
+        return _settings_response(settings_service.snapshot())
+
+    @app.patch(
+        f"{API_NAMESPACE}/settings",
+        response_model=SettingsResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="patchInternalSettings",
+        tags=["settings"],
+    )
+    def patch_settings(request: SettingsPatchRequest) -> SettingsResponse:
+        return _settings_response(
+            settings_service.patch(
+                schema_version=request.schema_version,
+                expected_revision=request.expected_revision,
+                changes=request.changes,
+            )
+        )
+
+    @app.get(
+        f"{API_NAMESPACE}/secrets/{{reference}}/status",
+        response_model=SecretStatusResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalSecretStatus",
+        tags=["secrets"],
+    )
+    def get_secret_status(reference: str) -> SecretStatusResponse:
+        return _secret_status_response(secret_service.status(reference))
+
+    @app.post(
+        f"{API_NAMESPACE}/secrets/{{reference}}/set",
+        response_model=SecretStatusResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="setInternalSecret",
+        tags=["secrets"],
+    )
+    def set_secret(reference: str, request: SecretSetRequest) -> SecretStatusResponse:
+        return _secret_status_response(secret_service.set(reference, request.value))
+
+    @app.post(
+        f"{API_NAMESPACE}/secrets/{{reference}}/delete",
+        response_model=SecretStatusResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="deleteInternalSecret",
+        tags=["secrets"],
+    )
+    def delete_secret(reference: str) -> SecretStatusResponse:
+        return _secret_status_response(secret_service.delete(reference))
 
     return app
 

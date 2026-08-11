@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 from ancestryllm.api.app import create_app
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
+from ancestryllm.application.secret_management import SecretManagementService
+from ancestryllm.application.settings import SettingsService
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.secrets import MemorySecretStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -37,6 +41,13 @@ def contract_app() -> FastAPI:
         ),
         registry=_EmptyRegistry(),
         executor=CommandExecutor(()),
+        settings_service=SettingsService(
+            AppConfig(
+                config_path=Path("openapi-contract.toml"),
+                data_dir=Path("openapi-contract-data"),
+            )
+        ),
+        secret_service=SecretManagementService(MemorySecretStore({})),
     )
 
 

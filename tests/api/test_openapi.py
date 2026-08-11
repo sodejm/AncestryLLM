@@ -38,6 +38,10 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
     assert json.loads(committed)["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
         f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/settings",
+        f"{API_NAMESPACE}/secrets/{{reference}}/delete",
+        f"{API_NAMESPACE}/secrets/{{reference}}/set",
+        f"{API_NAMESPACE}/secrets/{{reference}}/status",
     }
     schemas = json.loads(committed)["components"]["schemas"]
     assert {"PaginationRequest", "PageMetadata"} <= schemas.keys()

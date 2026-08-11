@@ -8,15 +8,20 @@ import {
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 
 const bridgeMethods = [
+  'deleteSecret',
   'getAppInfo',
   'getCapabilities',
   'getPreferences',
+  'getSecretStatus',
+  'getSettings',
   'getStartupDiagnostics',
   'requestOpenFileGrant',
   'requestSaveFileGrant',
   'retrySidecar',
   'revokeFileGrant',
+  'setSecret',
   'updatePreferences',
+  'updateSettings',
 ]
 
 async function launchShell(fixture: 'success' | 'degraded' = 'success') {
@@ -34,21 +39,22 @@ async function expectProductionNavigation(page: Page) {
   await expect(navigation.getByRole('link')).toHaveText(['Home', 'Diagnostics', 'Settings'])
 }
 
-async function expectNoUnsupportedSurfaces(page: Page) {
+async function expectNoUnsupportedSurfaces(page: Page, allowProviderSettings = false) {
   const main = page.getByRole('main')
-  for (const prohibited of [
+  const prohibited = [
     /Component gallery/i,
     /Primary action/i,
     /Quiet action/i,
     /\bgenealogy\b/i,
-    /\bproviders?\b/i,
     /\bcloud\b/i,
     /\baccounts?\b/i,
     /\bjobs?\b/i,
     /\bchat\b/i,
     /\bupdaters?\b/i,
-  ]) {
-    await expect(main).not.toContainText(prohibited)
+  ]
+  if (!allowProviderSettings) prohibited.push(/\bproviders?\b/i)
+  for (const pattern of prohibited) {
+    await expect(main).not.toContainText(pattern)
   }
 }
 
@@ -191,7 +197,7 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
     await expectNoUnsupportedSurfaces(page)
 
     await page.getByRole('link', { name: 'Settings' }).click()
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeFocused()
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeFocused()
     const theme = main.getByRole('group', { name: 'Theme' })
     await expect(theme.getByRole('radio')).toHaveCount(3)
     await expect(theme.getByRole('radio', { name: 'system' })).toBeChecked()
@@ -200,7 +206,7 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
     await reducedMotion.click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.reducedMotion)).toBe('true')
     await expect(reducedMotion).toBeChecked()
-    await expectNoUnsupportedSurfaces(page)
+    await expectNoUnsupportedSurfaces(page, true)
   } finally {
     await app.close()
   }

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { settingsFixture } from '../mock-bridge/fixtures'
 import {
   parseAppInfoResult,
   parseArtifactRef,
@@ -9,6 +10,11 @@ import {
   parseFileGrantResult,
   parseFileGrantRevocationResult,
   parseOpenFileGrantRequest,
+  parseSecretReferenceRequest,
+  parseSecretSetRequest,
+  parseSecretStatusResult,
+  parseSettingsPatch,
+  parseSettingsResult,
   parsePreferenceUpdate,
   parsePreferencesResult,
   parseSaveFileGrantRequest,
@@ -111,6 +117,65 @@ const fileGrantResult = {
 } as const
 
 describe('runtime bridge validation', () => {
+  it('accepts exact settings and write-only secret contracts', () => {
+    expect(parseSettingsPatch({
+      schema_version: 1,
+      expected_revision: 3,
+      changes: { 'providers.default': 'openai' },
+    })).toMatchObject({ expected_revision: 3 })
+    expect(parseSettingsResult(settingsFixture)).toMatchObject({
+      ok: true,
+      data: { revision: 0 },
+    })
+    expect(parseSecretReferenceRequest({ reference: 'openai.api_key' })).toEqual({ reference: 'openai.api_key' })
+    expect(parseSecretSetRequest({ reference: 'openai.api_key', value: 'private-test-value' })).toEqual({
+      reference: 'openai.api_key',
+      value: 'private-test-value',
+    })
+    expect(parseSecretStatusResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { reference: 'openai.api_key', status: 'present' },
+    })).toMatchObject({ ok: true, data: { status: 'present' } })
+  })
+
+  it('rejects unknown settings, secret references, readback fields, and unbounded secret input', () => {
+    expect(() => parseSettingsPatch({
+      schema_version: 1,
+      expected_revision: 0,
+      changes: { 'providers.api_key': 'secret' },
+    })).toThrow('Invalid settings patch')
+    expect(() => parseSecretReferenceRequest({ reference: 'attacker.controlled' })).toThrow('Invalid secret reference request')
+    expect(() => parseSecretSetRequest({ reference: 'openai.api_key', value: '' })).toThrow('Invalid secret set request')
+    expect(() => parseSecretSetRequest({ reference: 'openai.api_key', value: 'x'.repeat(65_537) })).toThrow('Invalid secret set request')
+    expect(() => parseSecretStatusResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { reference: 'openai.api_key', status: 'present', value: 'must-not-cross-bridge' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseSettingsResult({
+      ...settingsFixture,
+      data: { ...settingsFixture.data, fields: settingsFixture.data.fields.slice(0, -1) },
+    })).toThrow('Invalid bridge response')
+    const providerField = settingsFixture.data.fields[0]!
+    expect(() => parseSettingsResult({
+      ...settingsFixture,
+      data: {
+        ...settingsFixture.data,
+        fields: [
+          {
+            ...providerField,
+            validation: {
+              ...providerField.validation,
+              allowed_values: providerField.validation.allowed_values.slice(0, -1),
+            },
+          },
+          ...settingsFixture.data.fields.slice(1),
+        ],
+      },
+    })).toThrow('Invalid bridge response')
+  })
+
   it('accepts exact versioned results for each renderer-safe response', () => {
     expect(parseAppInfoResult({ ok: true, protocolVersion: '1', data: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' } }).ok).toBe(true)
     expect(parseStartupDiagnosticsResult({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'startup_failed', automaticRestartsRemaining: 0, manualRetriesRemaining: 1 } }).ok).toBe(true)

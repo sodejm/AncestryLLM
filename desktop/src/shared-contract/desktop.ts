@@ -66,6 +66,65 @@ export type PreferenceUpdate = Readonly<{
   onboardingCompleted?: boolean
 }>
 
+export const applicationSettingKeys = Object.freeze([
+  'providers.default',
+  'limits.max_query_rows',
+  'limits.max_output_chars',
+  'limits.query_timeout_seconds',
+  'limits.provider_timeout_seconds',
+] as const)
+
+export type ApplicationSettingKey = typeof applicationSettingKeys[number]
+export type ApplicationSettingValue = string | number
+export type ApplicationSettingType = 'string' | 'integer' | 'number'
+
+export interface ApplicationSettingValidation {
+  allowed_values: readonly string[]
+  minimum: number | null
+  maximum: number | null
+}
+
+export interface ApplicationSetting {
+  key: ApplicationSettingKey
+  label: string
+  help: string
+  type: ApplicationSettingType
+  value: ApplicationSettingValue
+  default_value: ApplicationSettingValue
+  validation: Readonly<ApplicationSettingValidation>
+  restart_required: boolean
+  sensitive: false
+}
+
+export interface ApplicationSettings {
+  schema_version: 1
+  revision: number
+  fields: readonly ApplicationSetting[]
+}
+
+export type ApplicationSettingsPatch = Readonly<{
+  schema_version: 1
+  expected_revision: number
+  changes: Readonly<Partial<Record<ApplicationSettingKey, ApplicationSettingValue>>>
+}>
+
+export const secretReferences = Object.freeze([
+  'openai.api_key',
+  'anthropic.api_key',
+  'gemini.api_key',
+  'openrouter.api_key',
+  'openrouter.management_key',
+  'database.master_key',
+] as const)
+
+export type SecretReference = typeof secretReferences[number]
+export type SecretReferenceRequest = Readonly<{ reference: SecretReference }>
+export type SecretSetRequest = Readonly<{ reference: SecretReference; value: string }>
+export interface SecretStatus {
+  reference: SecretReference
+  status: 'present' | 'missing' | 'unavailable'
+}
+
 export const fileGrantPurposes = Object.freeze([
   'gedcom-read',
   'rootsmagic-read',
@@ -128,6 +187,12 @@ export type BridgeErrorCode =
   | 'SIDECAR_REQUEST_FAILED'
   | 'PREFERENCES_UNAVAILABLE'
   | 'PREFERENCES_CONFLICT'
+  | 'SETTINGS_UNAVAILABLE'
+  | 'SETTINGS_CONFLICT'
+  | 'SETTINGS_INVALID'
+  | 'SECRET_STORE_UNAVAILABLE'
+  | 'SECRET_ENVIRONMENT_MANAGED'
+  | 'SECRET_INVALID'
   | 'FILE_SELECTION_INVALID'
   | 'FILE_TOO_LARGE'
   | 'FILE_GRANT_FORBIDDEN'
@@ -154,6 +219,11 @@ export interface AncestryBridge {
   retrySidecar(): Promise<BridgeResult<StartupDiagnostics>>
   getPreferences(): Promise<BridgeResult<LocalPreferences>>
   updatePreferences(update: PreferenceUpdate): Promise<BridgeResult<LocalPreferences>>
+  getSettings(): Promise<BridgeResult<ApplicationSettings>>
+  updateSettings(update: ApplicationSettingsPatch): Promise<BridgeResult<ApplicationSettings>>
+  getSecretStatus(request: SecretReferenceRequest): Promise<BridgeResult<SecretStatus>>
+  setSecret(request: SecretSetRequest): Promise<BridgeResult<SecretStatus>>
+  deleteSecret(request: SecretReferenceRequest): Promise<BridgeResult<SecretStatus>>
   requestOpenFileGrant(request: OpenFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   requestSaveFileGrant(request: SaveFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   revokeFileGrant(grantId: FileGrantId): Promise<BridgeResult<FileGrantRevocation>>
@@ -166,6 +236,11 @@ export const desktopChannels = Object.freeze({
   retrySidecar: 'ancestry:desktop:retry-sidecar',
   getPreferences: 'ancestry:desktop:get-preferences',
   updatePreferences: 'ancestry:desktop:update-preferences',
+  getSettings: 'ancestry:desktop:get-settings',
+  updateSettings: 'ancestry:desktop:update-settings',
+  getSecretStatus: 'ancestry:desktop:get-secret-status',
+  setSecret: 'ancestry:desktop:set-secret',
+  deleteSecret: 'ancestry:desktop:delete-secret',
   requestOpenFileGrant: 'ancestry:desktop:request-open-file-grant',
   requestSaveFileGrant: 'ancestry:desktop:request-save-file-grant',
   revokeFileGrant: 'ancestry:desktop:revoke-file-grant',

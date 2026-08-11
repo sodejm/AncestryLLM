@@ -23,6 +23,14 @@ desktop genealogy or domain routes, files, jobs, providers, cloud accounts, or
 updater flows. Desktop genealogy workflows are not available yet; use the CLI
 or interactive prompt for supported genealogy work.
 
+The current unreleased 0.6 source adds a narrow desktop settings and credential
+management foundation. It can update five reviewed non-secret settings and can
+set, delete, or report only the presence of allowlisted credentials through the
+OS keyring. It cannot read credential values, select consent on your behalf,
+make a provider call, or run a genealogy workflow. This development surface is
+not part of the released 0.5.0 installer until its packaged verification gates
+pass.
+
 ## Start here
 
 Choose the path that matches how you want to use AncestryLLM.

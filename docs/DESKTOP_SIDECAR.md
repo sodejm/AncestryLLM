@@ -3,9 +3,11 @@
 Issue #225 adds the control-only native sidecar used by the packaged Electron
 main process. Issue #102 hardens its payload verification and process-tree
 supervision. Issue #226 adds the narrow typed bridge that lets the renderer
-read sanitized control state without becoming a sidecar client. Neither change
-exposes genealogy, job, chat, provider, cloud-account, updater, or generic
-command routes; the sidecar is not a domain-data transport.
+read sanitized control state without becoming a sidecar client. Issue #105 adds
+an unreleased 0.6 source boundary for atomic non-secret settings and write-only
+credential management. None of these changes exposes genealogy, job, chat,
+provider execution, cloud-account, updater, or generic command routes; the
+sidecar is not a domain-data transport.
 The [desktop shell guide](DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -63,7 +65,10 @@ channel, or staged rollout.
    command-line arguments, environment variables, renderer state, readiness
    output, or diagnostics.
 5. The sidecar forces `provider=none`, binds IPv4 `127.0.0.1` on port `0`, and
-   exposes only authenticated `/api/v1/health` and `/api/v1/capabilities`.
+   exposes authenticated fixed routes only. The released 0.5.0 composition has
+   `/api/v1/health` and `/api/v1/capabilities`; the unreleased #105 source adds
+   `/api/v1/settings` plus fixed status, set, and delete operations beneath
+   `/api/v1/secrets/{reference}`. It still has no generic route dispatcher.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -98,14 +103,18 @@ is `ready`; the session is cleared before restart, failure, or shutdown. The
 interface also exposes sanitized lifecycle diagnostics and one application-
 lifetime manual retry. Concurrent retry requests share a single launch attempt,
 and an exhausted retry is a deterministic no-op. Electron main uses the session
-only for authenticated `/api/v1/capabilities` requests. The bridge exposes the
-result, sanitized diagnostics, and retry outcome, but never the session, bearer,
-port, or raw HTTP data.
+only for authenticated requests to its fixed capability, settings, and
+credential-management routes. The bridge exposes the typed result, sanitized
+diagnostics, and retry outcome, but never the session, bearer, port, raw HTTP
+data, or a credential value.
 
-The frozen `window.ancestry` surface contains exactly `getAppInfo`,
+The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
-and `updatePreferences`; there is no generic send, listen, route, or channel
-selection operation. Main accepts a call only from the registered
+and `updatePreferences`. The current unreleased source adds three opaque
+file-grant methods and exactly five settings/credential methods:
+`getSettings`, `updateSettings`, `getSecretStatus`, `setSecret`, and
+`deleteSecret`. There is no generic send, listen, route, or channel selection
+operation. Main accepts a call only from the registered
 `WebContents`, its exact current main frame, and the exact trusted
 `app://bundle/index.html` URL. It rechecks those facts on every request.
 Arguments and responses must also pass strict runtime schemas and a structured-
@@ -136,6 +145,27 @@ without following a preference-file symlink. Missing and supported legacy data
 use safe defaults; corrupt and unsupported data produce stable path-free
 diagnostics and are not silently overwritten. The renderer receives neither
 the storage path nor any additional storage capability.
+
+Application settings use a separate Python-owned schema and revision. A read
+returns the complete five-setting catalog with reviewed labels, help, types,
+defaults, validation bounds, restart flags, sensitivity flags, and current
+values. A patch supplies the exact visible revision and only changed
+allowlisted keys. The service rejects stale revisions, unknown keys, sensitive
+settings, invalid values, missing schema fields, and unsupported schema
+versions before serializing one atomic `AppConfig` replacement. The renderer
+cannot select a storage path or submit an arbitrary configuration object.
+
+Credential management is narrower still. Python owns the exact secret-reference
+allowlist and exposes only `present`, `missing`, or `unavailable` status plus
+explicit set and delete operations. The set request contains one write-only
+value and no read route or response can return it. The OS keyring remains the
+sole writable authority. Credentials sourced from the environment are
+read-only, and unavailable or locked keyring behavior fails closed with stable
+redacted codes instead of using Electron `safeStorage`, renderer storage, or a
+plaintext file. A successful delete is returned only after an immediate
+presence check proves absence. Main, preload, mock fixtures, and renderer
+caches retain only status metadata; the renderer clears its password input
+before awaiting the bridge and again after every attempt.
 
 ## Diagnostics and recovery
 

@@ -16,19 +16,21 @@ and the accepted, not-yet-implemented deployment direction in
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
-The published `0.4.0` runtime is a single-user, local-first Python application
+The released `0.5.0` runtime is a single-user, local-first Python application
 for genealogy research. It combines deterministic RootsMagic and GEDCOM
-workflows with optional LLM assistance. Isolated `0.5.0` work adds an
+workflows with optional LLM assistance. Version `0.5.0` adds an
 authenticated FastAPI control adapter for health and capability discovery, a
 UI-only Electron shell with Home, Diagnostics, a sanitized capability summary,
 local visual Settings, and a bounded first-run Home welcome, plus native
 packaged-sidecar build, pre-spawn payload verification, full-process-tree
 supervision, and bounded shutdown drain.
-The API exposes no genealogy, provider, domain, or generic command-dispatch
-route. The renderer bridge retains the six bounded control methods from 0.5.0
-and adds three path-free, opaque file-grant methods in Unreleased code;
-development uses deterministic fictional data, and packaged Electron main
-alone may call the authenticated fixed capabilities route. A supported 0.x
+Unreleased source work adds three path-free opaque file-grant methods and five
+fixed settings/credential methods. The latter expose only reviewed non-secret
+settings metadata and presence-only credential status; secret values are
+write-only and never return across HTTP or IPC. The API exposes no genealogy,
+provider execution, domain, or generic command-dispatch route. Development uses
+deterministic fictional data, and packaged Electron main alone may call the
+authenticated fixed routes. A supported 0.x
 desktop release requires a target-matched,
 manually installed official unsigned installer and all release assurance gates.
 macOS and Windows can display an unknown-publisher or Gatekeeper prompt; users
@@ -89,8 +91,8 @@ flowchart LR
     GED["GEDCOM files and\nrelease bundles"]
     LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
-    ControlAPI["Versioned FastAPI control adapter\nhealth/capabilities in 0.5.0 source"]
-    Desktop["Bounded Electron shell\n0.5.0 control surface"]
+    ControlAPI["Versioned FastAPI control adapter\n0.5 health/capabilities; Unreleased settings/credentials"]
+    Desktop["Bounded Electron shell\n0.5 control surface; Unreleased fixed extensions"]
     Future["Desktop domain API adapters\nlater roadmap"]
 
     Operator --> CLI
@@ -154,7 +156,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/cli.py` | Thin one-shot compatibility adapter and application entry point over the shared terminal path. |
 | `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL input, session, completion, and job adapter. |
 | `src/ancestryllm/terminal/` | Shared terminal parser, invocation translation, presentation, and dispatch composition used by CLI and REPL. |
-| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. |
+| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. Unreleased `SettingsService` and `SecretManagementService` own the reviewed non-secret settings and write-only credential use cases. |
 | `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
 | `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
@@ -166,8 +168,8 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; six 0.5 control methods plus three scoped opaque file-grant methods; main-owned native dialogs, path mediation, revocation, and output locks; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
+| `src/ancestryllm/api/` | Internal FastAPI control adapter: authenticated health/capability discovery in 0.5.0 plus Unreleased fixed settings read/patch and credential status/set/delete routes, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no credential value, provider execution, domain, or generic command route. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; six 0.5 control methods plus three scoped opaque file-grant and five fixed settings/credential methods in Unreleased source; main-owned native dialogs, path mediation, revocation, and output locks; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route clients; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Settings DTOs contain only reviewed non-secret fields and presence-only credential status. Genealogy integration, provider execution, domain routes, and updating are excluded. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -266,9 +268,12 @@ target-assurance gates to pass.
   backend-for-frontend. Main validates the sender/frame/origin, supervises the
   sidecar, and proxies only declared endpoints. The original control surface is
   `getAppInfo`, `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`,
-  `getPreferences`, and `updatePreferences`; Unreleased code adds only
-  `requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`.
-  Their strict DTOs contain opaque IDs and safe display metadata, never paths.
+  `getPreferences`, and `updatePreferences`. Unreleased code adds
+  `requestOpenFileGrant`, `requestSaveFileGrant`, `revokeFileGrant`,
+  `getSettings`, `patchSettings`, `getSecretStatus`, `setSecret`, and
+  `deleteSecret`. File-grant DTOs contain opaque IDs and safe display metadata,
+  never paths; settings and credential DTOs contain only reviewed non-secret
+  metadata and presence-only status.
 - Electron main alone owns native file dialogs and the grant-to-path map. It
   validates regular files, link count, exact purpose, content signature, size,
   canonical identity, and filesystem fingerprint before issuing random 256-bit
@@ -303,6 +308,12 @@ target-assurance gates to pass.
   boundary and rejects stale updates. The renderer advances past onboarding
   only after a fresh valid preference snapshot reports completion; malformed,
   unavailable, or conflicting state remains gated.
+  Unreleased settings updates likewise carry an exact revision and replace the
+  complete owner-only `AppConfig` atomically. The renderer uses uncontrolled
+  password inputs, copies and clears a value before invoking the bridge, clears
+  again after every outcome, and retains only presence status. Electron
+  `safeStorage`, renderer storage, preferences, logs, and bridge caches are not
+  credential stores.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
   lifecycle plus a bounded single-flight manual retry. Manifest-bound integrity
@@ -333,8 +344,10 @@ target-assurance gates to pass.
 - A loopback-only FastAPI sidecar authenticates every request before body
   parsing and adapts versioned DTOs to application services. The source-level
   Issue #11 foundation, Issue #225 packaged runtime, and Issue #102 supervision
-  hardening implement only authenticated health and capability discovery;
-  domain routers remain separately owned future work. It does not
+  hardening implement authenticated health and capability discovery. Unreleased
+  Issue #105 adds only fixed settings read/patch and credential
+  status/set/delete routes; domain and provider-execution routers remain
+  separately owned future work. It does not
   import CLI or console presentation and is not a public API.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
@@ -462,6 +475,13 @@ limits are clamped to safe ranges, directories are owner-only where the
 platform permits it, and configuration is saved through an fsynced temporary
 file plus `os.replace` with mode `0600`.
 
+Unreleased `SettingsService` publishes a schema version, an optimistic revision,
+and reviewed metadata for exactly five settings: default provider, query row
+and output limits, and query/provider timeouts. A patch must name only those
+fields and carry the current revision; validation completes before one atomic
+whole-file replacement. Unknown fields, secret-shaped fields, and stale
+revisions fail with stable coded errors.
+
 The configuration currently controls:
 
 - configured RootsMagic directories;
@@ -562,12 +582,20 @@ streaming only, with no autonomous tool-use surface.
 ### Secrets
 
 `SecretStore` is the only secret contract. Production uses the OS keyring under
-the `AncestryLLM` service name. Environment injection is a fallback for
-headless/CI use; keyring values take precedence. Tests use `MemorySecretStore`.
-Secret status reports only presence, never values.
+the `AncestryLLM` service name. Environment injection is a read-only fallback
+for headless/CI use; keyring values take precedence and an environment-managed
+reference cannot be overwritten or deleted through the application. Tests use
+`MemorySecretStore`. Secret status reports only `present`, `missing`, or
+`unavailable`, never values.
 
 Registered secret references cover the SQLCipher master key plus OpenAI,
 Anthropic, Gemini, and OpenRouter credentials. Ollama needs no stored API key.
+Unreleased `SecretManagementService` accepts only that exact reference
+allowlist, exposes explicit set/delete operations, and verifies absence before a
+delete succeeds. Keyring unavailable, locked, denied, or unverifiable outcomes
+fail closed with stable redacted errors. Plaintext configuration, Electron
+`safeStorage`, renderer storage, generated contracts, logs, and fixtures are
+not secret stores and never receive credential values.
 
 ### SQLCipher lifecycle
 
@@ -1121,7 +1149,7 @@ developer has not installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated control bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap and unsigned unpacked package assembly, Issue #102's embedded-digest payload verification, bounded supervision, full-process-tree cleanup, current-resource drain, smoke testing, and exact-head process-tree evidence, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. Unreleased Issue #103 adds three path-free renderer methods over a main-owned opaque file-grant broker with native open/save dialogs, strict purpose and format checks, 256-bit renderer/session/single-use grant IDs, lifecycle revocation, fingerprint revalidation, replacement confirmation, source/output alias denial, and output locks. Main-only resolution remains an adapter boundary for future use of the existing Python file-ingress policy; no genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. The Issue #103 dedicated packaged verification fixture is excluded from production and checked across the platform matrix; worker isolation, full parser budgets, and atomic publication remain owned by #114, #118, and #131. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated control bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap and unsigned unpacked package assembly, Issue #102's embedded-digest payload verification, bounded supervision, full-process-tree cleanup, current-resource drain, smoke testing, and exact-head process-tree evidence, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. Unreleased Issue #103 adds three path-free renderer methods over a main-owned opaque file-grant broker. Unreleased Issue #105 adds exact-revision atomic settings read/patch plus write-only OS-keyring credential status/set/delete through five fixed bridge methods and fixed authenticated routes; DTOs, errors, OpenAPI responses, renderer state, and mock fixtures never expose credential values. No genealogy integration, provider execution, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim for the Unreleased additions requires target-matched packaged verification and Issue #131's adversarial secret-leak evidence. The Issue #103 dedicated packaged verification fixture is excluded from production and checked across the platform matrix; worker isolation, full parser budgets, and atomic publication remain owned by #114, #118, and #131. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
 | Container and advanced remote deployment profiles | ADR-0026 accepts Local Desktop, Connect Remote, and single-household Host Remote as a target architecture. No container or remote profile is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 

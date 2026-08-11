@@ -19,6 +19,7 @@ from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
 
 APP_NAME = "ancestryllm"
+CONFIG_SCHEMA_VERSION = 1
 DEFAULT_MODULES = ("gedcom", "rootsmagic", "ocr", "prompts", "people", "providers", "secrets")
 _SECTION_KEYS = {
     "storage": {"data_dir", "family_tree_dirs"},
@@ -31,7 +32,7 @@ _SECTION_KEYS = {
         "provider_timeout_seconds",
     },
 }
-_TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress"}
+_TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress", "schema_version", "revision"}
 
 
 def _secure_directory(path: Path) -> Path:
@@ -156,6 +157,8 @@ class AppConfig:
     query_timeout_seconds: float = 10.0
     provider_timeout_seconds: float = 60.0
     file_ingress: FileIngressLimits = field(default_factory=FileIngressLimits)
+    schema_version: int = CONFIG_SCHEMA_VERSION
+    revision: int = 0
 
     @property
     def database_path(self) -> Path:
@@ -229,6 +232,16 @@ class AppConfig:
             ) from exc
         if set(payload) - _TOP_LEVEL_KEYS:
             raise _config_error("The configuration contains an unsupported top-level section.")
+        schema_version = payload.get("schema_version", CONFIG_SCHEMA_VERSION)
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != CONFIG_SCHEMA_VERSION
+        ):
+            raise _config_error("The configuration schema version is unsupported.")
+        revision = payload.get("revision", 0)
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise _config_error("The configuration revision must be a non-negative integer.")
         storage = _section(payload, "storage")
         modules = _section(payload, "modules")
         providers = _section(payload, "providers")
@@ -316,11 +329,15 @@ class AppConfig:
             query_timeout_seconds=query_timeout_seconds,
             provider_timeout_seconds=provider_timeout_seconds,
             file_ingress=file_ingress,
+            schema_version=schema_version,
+            revision=revision,
         )
 
     def save(self) -> None:
         self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "revision": self.revision,
             "storage": {
                 "data_dir": str(self.data_dir),
                 "family_tree_dirs": [str(path) for path in self.family_tree_dirs],

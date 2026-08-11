@@ -1,21 +1,33 @@
 # Internal API contract
 
-Issue #11 establishes the source-level control-plane contract for the first
-Electron release planned as `0.5.0`. It is a private, authenticated,
-IPv4-loopback FastAPI adapter over the existing application contracts. It is
-not a public, LAN, browser, or multi-user API.
+Issue #11 established the source-level control-plane contract released with the
+first Electron shell in `0.5.0`. Issue #105 adds the unreleased 0.6 contract for
+atomic non-secret settings and write-only credential management. This remains a
+private, authenticated, IPv4-loopback FastAPI adapter over transport-neutral
+application contracts. It is not a public, LAN, browser, or multi-user API.
 
-The foundation exposes exactly two read-only routes:
+The released foundation exposes two read-only routes:
 
 - `GET /api/v1/health` verifies the private bearer, API contract, paired app
   build, and token-derived readiness proof.
 - `GET /api/v1/capabilities` projects only enabled `ModuleDescriptor` actions
   that also have a registered `CommandExecutor` handler.
 
-There is no generic command-dispatch route and no genealogy, GEDCOM,
-RootsMagic, provider, secret, storage, file, job, or other domain route in this
-slice. Those routes remain separately owned follow-on work and must adapt the
-same transport-neutral application services.
+The unreleased #105 source adds four fixed path shapes and five operations:
+
+- `GET /api/v1/settings` returns the complete versioned five-setting catalog
+  and current optimistic revision.
+- `PATCH /api/v1/settings` applies an exact-revision patch atomically.
+- `GET /api/v1/secrets/{reference}/status` returns only `present`, `missing`,
+  or `unavailable`.
+- `POST /api/v1/secrets/{reference}/set` accepts one write-only value.
+- `POST /api/v1/secrets/{reference}/delete` deletes and verifies absence.
+
+Together, the API has six exact path templates. There is no generic command or
+route dispatcher and no genealogy, GEDCOM, RootsMagic, provider execution,
+storage, file, job, or other domain route. The credential routes cannot read a
+secret value. Separately owned follow-on work must adapt the same
+transport-neutral application services.
 
 ## Security boundary
 
@@ -26,6 +38,17 @@ returns strict, sanitized error envelopes. Uvicorn is configured for loopback
 port `0`, a bounded graceful shutdown, disabled access logging, and no trusted
 proxy headers. Runtime OpenAPI and interactive documentation routes are
 disabled.
+
+Settings reads expose only reviewed metadata and non-secret current values.
+Patch requests require schema version 1, the last visible revision, and
+allowlisted keys; unknown, sensitive, invalid, or stale changes fail before an
+atomic `AppConfig` replacement. Credential references are exact allowlisted
+identifiers. Secret values are marked `writeOnly` in OpenAPI, excluded from all
+responses and examples, and never placed in error details, correlation data,
+logs, or generated fixtures. The OS keyring is the only writable credential
+authority. Environment-managed credentials are read-only; an unavailable or
+locked keyring fails closed with a stable sanitized code and no plaintext
+fallback.
 
 The bearer and paired build identities are immutable constructor inputs for a
 private supervisor channel. Issue #225 implements that packaged channel: the
@@ -59,6 +82,9 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 
 ## Release boundary
 
-This source-level work may be developed in an isolated `0.5.0` worktree, but it
-must not modify or displace the `0.4.0` release work. Version `0.5.0` cannot be
-released until Issue #193 is complete and `0.4.0` has been released.
+The health and capability contract shipped with the bounded `0.5.0` control
+shell. The settings and credential-management operations are source-level work
+for `0.6.0`; they are not a released user surface until the applicable desktop
+packaging, security, and exact-head verification gates pass. Their presence in
+the committed OpenAPI artifact does not enable a public API, provider call,
+cloud consent, or genealogy workflow.

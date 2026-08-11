@@ -2,10 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   desktopChannels,
   type AncestryBridge,
+  type ApplicationSettingsPatch,
   type FileGrantId,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type SaveFileGrantRequest,
+  type SecretReferenceRequest,
+  type SecretSetRequest,
 } from '../shared-contract/desktop'
 import {
   parseAppInfoResult,
@@ -17,6 +20,11 @@ import {
   parsePreferenceUpdate,
   parsePreferencesResult,
   parseSaveFileGrantRequest,
+  parseSecretReferenceRequest,
+  parseSecretSetRequest,
+  parseSecretStatusResult,
+  parseSettingsPatch,
+  parseSettingsResult,
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 
@@ -28,6 +36,19 @@ const ancestry: AncestryBridge = Object.freeze({
   getPreferences: async () => parsePreferencesResult(await ipcRenderer.invoke(desktopChannels.getPreferences)),
   updatePreferences: async (update: PreferenceUpdate) => parsePreferencesResult(
     await ipcRenderer.invoke(desktopChannels.updatePreferences, parsePreferenceUpdate(update)),
+  ),
+  getSettings: async () => parseSettingsResult(await ipcRenderer.invoke(desktopChannels.getSettings)),
+  updateSettings: async (update: ApplicationSettingsPatch) => parseSettingsResult(
+    await ipcRenderer.invoke(desktopChannels.updateSettings, parseSettingsPatch(update)),
+  ),
+  getSecretStatus: async (request: SecretReferenceRequest) => parseSecretStatusResult(
+    await ipcRenderer.invoke(desktopChannels.getSecretStatus, parseSecretReferenceRequest(request)),
+  ),
+  setSecret: async (request: SecretSetRequest) => parseSecretStatusResult(
+    await ipcRenderer.invoke(desktopChannels.setSecret, parseSecretSetRequest(request)),
+  ),
+  deleteSecret: async (request: SecretReferenceRequest) => parseSecretStatusResult(
+    await ipcRenderer.invoke(desktopChannels.deleteSecret, parseSecretReferenceRequest(request)),
   ),
   requestOpenFileGrant: async (request: OpenFileGrantRequest) => parseFileGrantResult(
     await ipcRenderer.invoke(desktopChannels.requestOpenFileGrant, parseOpenFileGrantRequest(request)),

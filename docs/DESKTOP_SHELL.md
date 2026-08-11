@@ -106,6 +106,51 @@ reopens and revalidates the source under its own bounded policy before parsing
 or publication. Until that adapter ships, the grant broker provides no GEDCOM,
 RootsMagic, import, export, or report workflow.
 
+## Unreleased settings and credential-management foundation
+
+Issue #105 adds the source-level settings and credential-management boundary
+planned for 0.6.0. It does not expand the released 0.5.0 shell and does not
+enable provider execution, cloud consent, genealogy operations, or arbitrary
+sidecar access.
+
+The renderer can read the complete versioned settings catalog and submit one
+exact optimistic-revision patch. The catalog exposes only five reviewed,
+non-secret settings: the default provider choice and four bounded query/output
+limits. Each entry supplies its label, help text, type, safe default, allowed
+values or numeric bounds, restart requirement, sensitivity marker, and current
+value. The Python `SettingsService` validates the whole update before
+`AppConfig` atomically replaces the repository-owned configuration; unknown,
+sensitive, invalid, or stale-revision changes fail closed.
+
+Credential controls are intentionally write-only. The bridge adds only these
+five fixed operations:
+
+- `getSettings`
+- `updateSettings`
+- `getSecretStatus`
+- `setSecret`
+- `deleteSecret`
+
+Secret references are selected from a fixed Python-owned allowlist. Reads
+return only `present`, `missing`, or `unavailable`; no response can return a
+credential value. Save and delete require separate explicit actions, and a
+successful delete is reported only after the OS-keyring-backed store proves
+the credential is absent. Credentials supplied through the process
+environment remain usable by headless workflows but are read-only through this
+interface. An unavailable or locked keyring, an environment-managed
+credential, or any attempted plaintext fallback produces a stable redacted
+failure.
+
+The renderer's password field is uncontrolled and is cleared before the
+asynchronous request begins and again after every success or failure. Secret
+values are never retained in React state, query caches, bridge fixtures,
+responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
+configuration. The renderer still has no direct keyring or network access.
+Together with the three unreleased file-grant methods, the current development
+bridge therefore contains fourteen fixed methods: the six released control
+methods, three opaque file-grant methods, and five settings/credential methods.
+There is still no generic send, listen, route-selection, or command operation.
+
 The separately accepted
 [deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md)
 defines future container and advanced remote targets. It does not expand the
@@ -173,3 +218,9 @@ preferences, accessibility and hardening controls, and inspects the packaged
 fuses. It does not launch an installer. Manual installation and actual Windows
 11 execution remain separate release gates; trusted signing becomes a release
 gate at v1.0.0.
+
+Issue #105's source suites additionally verify revision conflicts, strict
+settings metadata, write-only secret schemas, keyring failure behavior,
+credential deletion, bridge redaction, and password-field lifetime. Packaged
+settings and credential-management evidence remains owned by the 0.6 desktop
+verification work; source tests alone do not make the feature released.

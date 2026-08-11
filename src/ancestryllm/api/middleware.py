@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hmac
+import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
 from ancestryllm.api.contracts import (
@@ -23,7 +25,9 @@ if TYPE_CHECKING:
 
     from ancestryllm.api.settings import ApiSettings
 
-_ALLOWED_ROUTES: Final = frozenset({f"{API_NAMESPACE}/health", f"{API_NAMESPACE}/capabilities"})
+_SECRET_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/secrets/[a-z0-9_.-]{{1,96}}/(status|set|delete)$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -56,6 +60,28 @@ _SECURITY_HEADERS: Final = (
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutePolicy:
+    method: str
+    accepts_json: bool = False
+
+
+def _route_policy(path: str) -> _RoutePolicy | None:
+    if path in {f"{API_NAMESPACE}/health", f"{API_NAMESPACE}/capabilities"}:
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/settings":
+        return _RoutePolicy("PATCH", accepts_json=True)
+    match = _SECRET_ROUTE.fullmatch(path)
+    if match is None:
+        return None
+    operation = match.group(1)
+    if operation == "status":
+        return _RoutePolicy("GET")
+    if operation == "set":
+        return _RoutePolicy("POST", accepts_json=True)
+    return _RoutePolicy("POST")
 
 
 def _header_map(scope: Scope) -> dict[bytes, list[bytes]]:
@@ -103,7 +129,7 @@ def _authenticate(headers: dict[bytes, list[bytes]], settings: ApiSettings) -> N
         )
 
 
-def _validate_request(scope: Scope, settings: ApiSettings) -> None:
+def _validate_request(scope: Scope, settings: ApiSettings) -> _RoutePolicy:
     headers = _header_map(scope)
     _authenticate(headers, settings)
 
@@ -132,11 +158,15 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
         )
 
     path = cast("str", scope.get("path", ""))
-    if path not in _ALLOWED_ROUTES:
+    policy = _route_policy(path)
+    if policy is None:
         raise request_error(
             404, "ROUTE_UNAVAILABLE", "The requested internal API route is unavailable."
         )
-    if scope.get("method") != "GET":
+    method = cast("str", scope.get("method", ""))
+    if path == f"{API_NAMESPACE}/settings" and method == "GET":
+        policy = _RoutePolicy("GET")
+    if method != policy.method:
         raise request_error(
             405, "METHOD_NOT_ALLOWED", "The internal API route does not accept this method."
         )
@@ -146,11 +176,22 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
             "REQUEST_QUERY_FORBIDDEN",
             "The internal API control routes do not accept query parameters.",
         )
-    if b"content-type" in headers:
+    content_type = _one_header(headers, b"content-type")
+    if policy.accepts_json:
+        if (
+            content_type is None
+            or content_type.split(b";", 1)[0].strip().lower() != b"application/json"
+        ):
+            raise request_error(
+                415,
+                "REQUEST_CONTENT_TYPE_REQUIRED",
+                "The internal API route accepts only JSON request bodies.",
+            )
+    elif content_type is not None:
         raise request_error(
             415,
             "REQUEST_CONTENT_TYPE_FORBIDDEN",
-            "The internal API control routes do not accept a content type.",
+            "The internal API route does not accept a content type.",
         )
 
     raw_length = _one_header(headers, b"content-length")
@@ -169,12 +210,13 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
             raise request_error(
                 413, "REQUEST_TOO_LARGE", "The request exceeds the internal API size limit."
             )
-        if content_length:
+        if content_length and not policy.accepts_json:
             raise request_error(
                 400,
                 "REQUEST_BODY_FORBIDDEN",
-                "The internal API control routes do not accept a request body.",
+                "The internal API route does not accept a request body.",
             )
+    return policy
 
 
 async def _verify_empty_body(receive: Receive) -> Receive:
@@ -200,6 +242,37 @@ async def _verify_empty_body(receive: Receive) -> Receive:
     return replay_first_message
 
 
+async def _buffer_bounded_body(receive: Receive, *, maximum_bytes: int) -> Receive:
+    messages: list[Message] = []
+    total = 0
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message["type"] != "http.request":
+            break
+        total += len(cast("bytes", message.get("body", b"")))
+        if total > maximum_bytes:
+            raise request_error(
+                413,
+                "REQUEST_TOO_LARGE",
+                "The request exceeds the internal API size limit.",
+            )
+        if not message.get("more_body", False):
+            break
+
+    index = 0
+
+    async def replay_messages() -> Message:
+        nonlocal index
+        if index < len(messages):
+            message = messages[index]
+            index += 1
+            return message
+        return await receive()
+
+    return replay_messages
+
+
 class InternalApiMiddleware:
     def __init__(self, app: ASGIApp, *, settings: ApiSettings) -> None:
         self._app = app
@@ -215,8 +288,14 @@ class InternalApiMiddleware:
         state["correlation_ref"] = correlation_ref
         secured_send = self._secured_send(send, correlation_ref)
         try:
-            _validate_request(scope, self._settings)
-            receive = await _verify_empty_body(receive)
+            policy = _validate_request(scope, self._settings)
+            if policy.accepts_json:
+                receive = await _buffer_bounded_body(
+                    receive,
+                    maximum_bytes=self._settings.request_policy.max_body_bytes,
+                )
+            else:
+                receive = await _verify_empty_body(receive)
         except ApiRequestError as error:
             await error_response(error, correlation_ref=correlation_ref)(
                 scope, receive, secured_send

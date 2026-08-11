@@ -3,6 +3,8 @@ import {
   DESKTOP_PROTOCOL_VERSION,
   desktopChannels,
   type AncestryBridge,
+  type ApplicationSettings,
+  type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
@@ -13,6 +15,9 @@ import {
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type SaveFileGrantRequest,
+  type SecretReferenceRequest,
+  type SecretSetRequest,
+  type SecretStatus,
 } from '../shared-contract/desktop'
 import {
   parseAppInfoResult,
@@ -24,6 +29,11 @@ import {
   parsePreferenceUpdate,
   parsePreferencesResult,
   parseSaveFileGrantRequest,
+  parseSecretReferenceRequest,
+  parseSecretSetRequest,
+  parseSecretStatusResult,
+  parseSettingsPatch,
+  parseSettingsResult,
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
@@ -50,6 +60,11 @@ export interface MainDesktopBridge extends Omit<
   retrySidecar(signal?: AbortSignal): ReturnType<AncestryBridge['retrySidecar']>
   getPreferences(signal?: AbortSignal): ReturnType<AncestryBridge['getPreferences']>
   updatePreferences(update: PreferenceUpdate, signal?: AbortSignal): ReturnType<AncestryBridge['updatePreferences']>
+  getSettings(signal?: AbortSignal): ReturnType<AncestryBridge['getSettings']>
+  updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal): ReturnType<AncestryBridge['updateSettings']>
+  getSecretStatus(request: SecretReferenceRequest, signal?: AbortSignal): ReturnType<AncestryBridge['getSecretStatus']>
+  setSecret(request: SecretSetRequest, signal?: AbortSignal): ReturnType<AncestryBridge['setSecret']>
+  deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal): ReturnType<AncestryBridge['deleteSecret']>
 }
 
 export interface MainFileGrantBroker {
@@ -141,6 +156,12 @@ const requestLimits = Object.freeze({
   maxDepth: 4,
   maxItems: 32,
   maxStringCharacters: 256,
+})
+const secretRequestLimits = Object.freeze({
+  maxBytes: 66_000,
+  maxDepth: 3,
+  maxItems: 4,
+  maxStringCharacters: 65_536,
 })
 const responseLimits = Object.freeze({
   maxBytes: 1_100_000,
@@ -448,6 +469,86 @@ export function registerDesktopIpcHandlers(
       timeoutMs,
       (signal) => bridge.updatePreferences(update, signal),
       parsePreferencesResult,
+    )
+  })
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.getSettings,
+    authorize,
+    (signal) => bridge.getSettings(signal),
+    parseSettingsResult,
+    timeoutMs,
+  )
+  ipc.handle(desktopChannels.updateSettings, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ApplicationSettings>()
+    if (args.length !== 1) return invalidRequest<ApplicationSettings>()
+    let update: ApplicationSettingsPatch
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      update = parseSettingsPatch(args[0])
+    } catch {
+      return invalidRequest<ApplicationSettings>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.updateSettings(update, signal),
+      parseSettingsResult,
+    )
+  })
+  ipc.handle(desktopChannels.getSecretStatus, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<SecretStatus>()
+    if (args.length !== 1) return invalidRequest<SecretStatus>()
+    let request: SecretReferenceRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseSecretReferenceRequest(args[0])
+    } catch {
+      return invalidRequest<SecretStatus>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.getSecretStatus(request, signal),
+      parseSecretStatusResult,
+    )
+  })
+  ipc.handle(desktopChannels.setSecret, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<SecretStatus>()
+    if (args.length !== 1) return invalidRequest<SecretStatus>()
+    let request: SecretSetRequest
+    try {
+      validateStructuredClone(args[0], secretRequestLimits)
+      request = parseSecretSetRequest(args[0])
+    } catch {
+      return invalidRequest<SecretStatus>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.setSecret(request, signal),
+      parseSecretStatusResult,
+    )
+  })
+  ipc.handle(desktopChannels.deleteSecret, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<SecretStatus>()
+    if (args.length !== 1) return invalidRequest<SecretStatus>()
+    let request: SecretReferenceRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseSecretReferenceRequest(args[0])
+    } catch {
+      return invalidRequest<SecretStatus>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.deleteSecret(request, signal),
+      parseSecretStatusResult,
     )
   })
   ipc.handle(desktopChannels.requestOpenFileGrant, async (event, ...args) => {

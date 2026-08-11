@@ -104,6 +104,10 @@ def test_packaged_sidecar_adds_no_domain_routes() -> None:
     assert {route.path for route in app.routes if isinstance(route, APIRoute)} == {
         "/api/v1/capabilities",
         "/api/v1/health",
+        "/api/v1/secrets/{reference}/delete",
+        "/api/v1/secrets/{reference}/set",
+        "/api/v1/secrets/{reference}/status",
+        "/api/v1/settings",
     }
 
 

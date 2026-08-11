@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Annotated, Literal, TypeAlias, cast
+from typing import Annotated, Any, Literal, TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -102,6 +102,72 @@ class HealthResponse(BaseModel):
     readiness_proof: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
+class SettingValidationResponse(BaseModel):
+    """Reviewed renderer constraints for one non-secret setting."""
+
+    model_config = _STRICT_MODEL
+
+    allowed_values: Annotated[tuple[str, ...], Field(max_length=32)] = ()
+    minimum: int | float | None = None
+    maximum: int | float | None = None
+
+
+class SettingFieldResponse(BaseModel):
+    """One renderer-safe setting descriptor."""
+
+    model_config = _STRICT_MODEL
+
+    key: Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[a-z0-9_.-]+$")]
+    label: Annotated[str, Field(min_length=1, max_length=128)]
+    help: Annotated[str, Field(min_length=1, max_length=512)]
+    type: Literal["string", "integer", "number"]
+    value: str | int | float
+    default_value: str | int | float
+    validation: SettingValidationResponse
+    restart_required: bool = False
+    sensitive: Literal[False] = False
+
+
+class SettingsResponse(BaseModel):
+    """Versioned settings snapshot with an optimistic-lock revision."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Annotated[int, Field(ge=1, json_schema_extra={"const": 1})]
+    revision: Annotated[int, Field(ge=0)]
+    fields: Annotated[tuple[SettingFieldResponse, ...], Field(min_length=1, max_length=32)]
+
+
+class SettingsPatchRequest(BaseModel):
+    """Allowlisted settings changes based on a previously read revision."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Annotated[int, Field(ge=1, json_schema_extra={"const": 1})]
+    expected_revision: Annotated[int, Field(ge=0)]
+    changes: Annotated[dict[str, Any], Field(min_length=1, max_length=32)]
+
+
+class SecretSetRequest(BaseModel):
+    """Write-only secret input that is never returned by the API."""
+
+    model_config = _STRICT_MODEL
+
+    value: Annotated[
+        str,
+        Field(min_length=1, max_length=65_536, repr=False, json_schema_extra={"writeOnly": True}),
+    ]
+
+
+class SecretStatusResponse(BaseModel):
+    """Credential presence without credential readback."""
+
+    model_config = _STRICT_MODEL
+
+    reference: Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[a-z0-9_.-]+$")]
+    status: Literal["present", "missing", "unavailable"]
+
+
 class FailureDetail(BaseModel):
     model_config = _STRICT_MODEL
 
@@ -154,4 +220,10 @@ __all__ = [
     "PaginationPolicy",
     "PaginationRequest",
     "RequestSizePolicy",
+    "SecretSetRequest",
+    "SecretStatusResponse",
+    "SettingFieldResponse",
+    "SettingValidationResponse",
+    "SettingsPatchRequest",
+    "SettingsResponse",
 ]
