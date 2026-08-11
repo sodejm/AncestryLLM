@@ -327,6 +327,13 @@ def test_configures_reviewed_python_registry_bundle() -> None:
         )
         in python.revisions
     )
+    assert (
+        runner.RuleRevision(
+            sha256="2fd889488c318acc98cdf84fc3736ed5b9b20c68ca5ea619af35cac716f961e7",
+            size=487_962,
+        )
+        in python.revisions
+    )
 
 
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:
