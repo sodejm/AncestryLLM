@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import NoReturn
 
 ARMED_RECORD: dict[str, object] = {
-    "expected_job_result": "failure",
+    "expected_job_result": "cancelled",
     "fixture": "fictional-ci-timeout-v1",
     "hang_seconds": 300,
     "schema_version": 1,
@@ -56,7 +56,7 @@ def _confirm(armed: Path, job_result: str, output: Path) -> None:
     if job_result != record["expected_job_result"]:
         _fail(
             "CI_TIMEOUT_PROOF_UNEXPECTED_RESULT",
-            "exercise job did not fail at its timeout",
+            "exercise job was not cancelled at its timeout",
         )
     _write_record(
         output,
@@ -79,7 +79,7 @@ def _parser() -> argparse.ArgumentParser:
 
     confirm = commands.add_parser(
         "confirm",
-        help="confirm that the hosted exercise failed at its job timeout",
+        help="confirm that the hosted exercise was cancelled at its job timeout",
     )
     confirm.add_argument("--armed", type=Path, required=True)
     confirm.add_argument("--job-result", required=True)

@@ -33,7 +33,7 @@ def test_timeout_proof_records_are_deterministic_and_sanitized(tmp_path: Path) -
         "--armed",
         str(armed_one),
         "--job-result",
-        "failure",
+        "cancelled",
         "--output",
         str(confirmed),
     )
@@ -43,7 +43,7 @@ def test_timeout_proof_records_are_deterministic_and_sanitized(tmp_path: Path) -
     assert confirmation.returncode == 0, confirmation.stderr
     assert armed_one.read_bytes() == armed_two.read_bytes()
     assert json.loads(armed_one.read_text(encoding="utf-8")) == {
-        "expected_job_result": "failure",
+        "expected_job_result": "cancelled",
         "fixture": "fictional-ci-timeout-v1",
         "hang_seconds": 300,
         "schema_version": 1,
@@ -51,7 +51,7 @@ def test_timeout_proof_records_are_deterministic_and_sanitized(tmp_path: Path) -
         "timeout_minutes": 1,
     }
     assert json.loads(confirmed.read_text(encoding="utf-8")) == {
-        "exercise_job_result": "failure",
+        "exercise_job_result": "cancelled",
         "fixture": "fictional-ci-timeout-v1",
         "schema_version": 1,
         "status": "confirmed",
@@ -63,7 +63,9 @@ def test_timeout_proof_records_are_deterministic_and_sanitized(tmp_path: Path) -
     assert "secret" not in combined.lower()
 
 
-def test_timeout_proof_rejects_unknown_fields_and_nonfailure_results(tmp_path: Path) -> None:
+def test_timeout_proof_rejects_unknown_fields_and_noncancelled_results(
+    tmp_path: Path,
+) -> None:
     armed = tmp_path / "armed.json"
     output = tmp_path / "confirmed.json"
     assert _run("arm", "--output", str(armed)).returncode == 0
@@ -76,7 +78,7 @@ def test_timeout_proof_rejects_unknown_fields_and_nonfailure_results(tmp_path: P
         "--armed",
         str(armed),
         "--job-result",
-        "failure",
+        "cancelled",
         "--output",
         str(output),
     )
@@ -92,12 +94,12 @@ def test_timeout_proof_rejects_unknown_fields_and_nonfailure_results(tmp_path: P
         "--armed",
         str(armed),
         "--job-result",
-        "success",
+        "failure",
         "--output",
         str(output),
     )
     assert unexpected_result.returncode == 2
     assert unexpected_result.stderr == (
-        "CI_TIMEOUT_PROOF_UNEXPECTED_RESULT: exercise job did not fail at its timeout\n"
+        "CI_TIMEOUT_PROOF_UNEXPECTED_RESULT: exercise job was not cancelled at its timeout\n"
     )
     assert not output.exists()
