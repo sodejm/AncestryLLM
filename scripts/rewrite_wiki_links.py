@@ -12,9 +12,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})")
-_INLINE_CODE = re.compile(r"(?P<marker>`+).*?(?P=marker)")
+_INLINE_CODE = re.compile(r"(?P<marker>`+).*?(?P=marker)", flags=re.DOTALL)
 _MARKDOWN_LINK = re.compile(
-    r"(?P<prefix>!?\[[^\]\n]*\]\()"
+    r"(?P<prefix>!?\[[^\]]*\]\()"
     r"(?P<destination>[^)\n]+)"
     r"(?P<suffix>\))"
 )
@@ -52,24 +52,26 @@ def _rewrite_links(
     return _MARKDOWN_LINK.sub(replace, fragment)
 
 
-def _rewrite_line(
-    line: str,
+def _rewrite_fragment(
+    fragment: str,
     rewrite_destination: Callable[[str], str],
     *,
     include_images: bool,
 ) -> str:
     rewritten: list[str] = []
     cursor = 0
-    for match in _INLINE_CODE.finditer(line):
+    for match in _INLINE_CODE.finditer(fragment):
         rewritten.append(
             _rewrite_links(
-                line[cursor : match.start()], rewrite_destination, include_images=include_images
+                fragment[cursor : match.start()],
+                rewrite_destination,
+                include_images=include_images,
             )
         )
         rewritten.append(match.group(0))
         cursor = match.end()
     rewritten.append(
-        _rewrite_links(line[cursor:], rewrite_destination, include_images=include_images)
+        _rewrite_links(fragment[cursor:], rewrite_destination, include_images=include_images)
     )
     return "".join(rewritten)
 
@@ -82,17 +84,30 @@ def rewrite_markdown_link_destinations(
 ) -> str:
     """Rewrite Markdown links and images without changing code examples."""
     rewritten: list[str] = []
+    outside_fence: list[str] = []
     fence_marker: str | None = None
+
+    def flush_outside_fence() -> None:
+        if not outside_fence:
+            return
+        rewritten.append(
+            _rewrite_fragment(
+                "".join(outside_fence),
+                rewrite_destination,
+                include_images=include_images,
+            )
+        )
+        outside_fence.clear()
+
     for line in markdown.splitlines(keepends=True):
         fence = _FENCE.match(line)
         if fence_marker is None:
             if fence is not None:
+                flush_outside_fence()
                 fence_marker = fence.group("marker")
                 rewritten.append(line)
             else:
-                rewritten.append(
-                    _rewrite_line(line, rewrite_destination, include_images=include_images)
-                )
+                outside_fence.append(line)
             continue
 
         rewritten.append(line)
@@ -102,6 +117,7 @@ def rewrite_markdown_link_destinations(
             and len(fence.group("marker")) >= len(fence_marker)
         ):
             fence_marker = None
+    flush_outside_fence()
     return "".join(rewritten)
 
 
