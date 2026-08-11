@@ -293,6 +293,12 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 |---|---|---|
 | `TM-U01`, `TM-U03`, `TM-B01` | The candidate `uv_build>=0.12.0,<0.13` resolves through the complete lock and verified `uv` bootstrap. A clean-commit harness supplies identical source trees, environment allowlist, Python, and source epoch; validates ZIP and tar members before inspection; compares explicit file allowlists, payload bytes, semantic metadata, entry points, `RECORD`, installation, sdist reconstruction, and two consecutive candidate builds; and emits a sanitized closed-schema record with stable failure codes. | Setuptools remains authoritative because the candidate omits license and metadata files, adds an unexpected private source file, and changes semantic wheel metadata and records. Only archive order and metadata timestamps are normalized; drift, nondeterminism, unsafe members, missing evidence, paths, or unknown schema fields fail closed. The evaluation adds no runtime dependency, network path, credential exposure, provider behavior, genealogy data flow, API, CLI, storage, FastAPI, or Electron boundary. |
 
+### Issue #312 Astral cleanup evidence
+
+| Control | Source and workflow evidence | Security and architecture disposition |
+|---|---|---|
+| `TM-U01`, `TM-U03` | Exact-commit upstream Ruff and uv hooks match the locked tool versions; local system gitleaks and the canonical pre-push gates remain. The locked dependency auditor exports every extra and group, proves normalized lock/export parity against a closed-schema allowlist, and fails before pip-audit on omissions or unknown exclusions. All tracked Markdown receives deterministic GFM structural validation, and editor settings keep strict mypy authoritative while ty remains advisory. | These are repository-tooling controls only. They add no application runtime dependency, provider import, network path, credential exposure, genealogy data flow, or CLI/API/storage/FastAPI/Electron boundary. Ruff hooks cannot apply fixes, the dependency audit does not replace Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL, and the `provider=none`, RootsMagic, GEDCOM, and release fail-closed properties remain unchanged. |
+
 ### Issue #11 source-level evidence
 
 The isolated 0.5.0 foundation implements and tests the source-level subset of

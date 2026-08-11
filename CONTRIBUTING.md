@@ -112,6 +112,12 @@ CI exposes that result in a separate nonblocking step. See the
 [ty advisory evaluation](docs/TY_ADVISORY_EVALUATION.md) before interpreting
 its diagnostics or proposing the separately gated 0.7 cutover.
 
+The checked-in VS Code profile recommends `charliermarsh.ruff` for Python
+linting and formatting and `ms-python.mypy-type-checker` for the authoritative
+type check. It reads project configuration from `pyproject.toml`, disables
+unsafe automatic fixes, and does not automatically load `.env`. Other editors
+must preserve the same Ruff, strict-mypy, and secret-loading boundaries.
+
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures
 must be synthetic and source files must remain hash-identical after tests.

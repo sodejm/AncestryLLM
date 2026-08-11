@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -269,12 +271,47 @@ def test_stock_pip_consumer_smoke_jobs_remain_explicit_exceptions() -> None:
 def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> None:
     hooks = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    bootstrap_policy = json.loads(
+        (ROOT / "config/uv-bootstrap-policy.json").read_text(encoding="utf-8")
+    )
 
     assert "default_stages: [pre-commit]" in hooks
     assert "entry: make pre-push" in hooks
     assert "entry: make workflow-audit" in hooks
-    assert "entry: make lock-check" in hooks
-    assert "files: ^(pyproject\\.toml|uv\\.lock)$" in hooks
+    assert "id: gitleaks" in hooks
+    assert "repo: https://github.com/pre-commit/pre-commit-hooks" in hooks
+
+    ruff_hook = """  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 39d9ac5938dadb73df0564a45f163e25ff9fa6e2
+    hooks:
+      - id: ruff-check
+        args: ["--no-fix"]
+        files: ^(src|tests|scripts)/
+      - id: ruff-format
+        args: ["--check"]
+        files: ^(src|tests|scripts)/
+"""
+    uv_hook = """  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 8ff2449591c8de025b17661ba76d60237a1ae62b
+    hooks:
+      - id: uv-lock
+        args: ["--check"]
+"""
+    assert ruff_hook in hooks
+    assert uv_hook in hooks
+    assert "ancestryllm-lockfile-consistency" not in hooks
+    assert "entry: make lock-check" not in hooks
+    assert "--fix" not in ruff_hook
+    assert "--unsafe-fixes" not in hooks
+
+    lock_versions = {
+        package["name"]: package["version"] for package in lock["package"] if "version" in package
+    }
+    assert lock_versions["ruff"] == "0.16.1"
+    assert bootstrap_policy["uv"]["version"] == "0.12.1"
+    assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
+
     workflow_filter = r"^\.github/(actions|workflows)/"
     assert f"files: {workflow_filter}" in hooks
     assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")

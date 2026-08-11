@@ -31,19 +31,31 @@ Choose the path that matches how you want to use AncestryLLM.
 
 You will need Python 3.12 through 3.14 and a working OS credential store.
 
-1. Install [pipx](https://pipx.pypa.io/) if you do not already use it.
-2. Install AncestryLLM and confirm it is available:
+1. Install AncestryLLM as an isolated command with either
+   [uv](https://docs.astral.sh/uv/guides/tools/) or
+   [pipx](https://pipx.pypa.io/):
 
    ```bash
+   uv tool install ancestryllm
+   # or
    pipx install ancestryllm
    ancestry --version
    ```
 
-   For optional AI assistance, use `pipx install 'ancestryllm[all-llm]'` in
-   place of the preceding install command. Installing an extra still does not
-   select a provider or authorize a cloud call.
+   If you are already working in an activated virtual environment, ordinary
+   `pip` remains supported:
 
-3. Run `ancestry --help` to see available commands, or run `ancestry` to open
+   ```bash
+   python -m pip install ancestryllm
+   ```
+
+   For optional AI assistance, use
+   `uv tool install 'ancestryllm[all-llm]'`,
+   `pipx install 'ancestryllm[all-llm]'`, or the corresponding ordinary
+   `pip` command in place of the base install. Installing an extra still does
+   not select a provider or authorize a cloud call.
+
+2. Run `ancestry --help` to see available commands, or run `ancestry` to open
    the interactive prompt.
 
 On a minimal or headless system, first follow the

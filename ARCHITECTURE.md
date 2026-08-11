@@ -921,6 +921,11 @@ plugins:
 - `prepare_pages_source.py` validates the same canonical documentation and
   creates an isolated Jekyll staging tree with layout metadata and Pages-style
   local links. It never changes `docs/`.
+- `scripts/run_dependency_audit.py` exports the complete locked graph,
+  compares its normalized package identities with `uv.lock`, and only then
+  invokes the locked dependency auditor. `scripts/check_gfm_markdown.py`
+  applies the repository's deterministic GFM structural checks to every
+  tracked Markdown file.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -999,6 +1004,11 @@ python-build-standalone executable trust chain. It does not add an application
 dependency or alter CLI commands, service DTOs, provider selection, GEDCOM
 handling, storage, FastAPI contracts, or Electron boundaries.
 
+The #312 hooks, complete audit export, Markdown validation, installation
+guidance, and VS Code settings are repository tooling only. They add no
+application interface, runtime package, data flow, privilege boundary, cloud
+consent path, or genealogy-format behavior.
+
 Tests are intentionally split by risk:
 
 - `tests/modular/` covers composition, console restrictions, provider policy,
@@ -1016,10 +1026,12 @@ covered by the standard strict type and Ruff gates without targeted exceptions.
 Changes to a physical owner require focused regression tests and may not expand
 the exact compatibility-import surface.
 
-The pre-commit configuration adds gitleaks, private-key detection, large-file
-checks, format/whitespace checks, and a no-direct-commit-to-`main` guard. CI and
-the repository safety script are authoritative even if a developer has not
-installed local hooks.
+The pre-commit configuration retains local system gitleaks, private-key
+detection, large-file checks, format/whitespace checks, and a
+no-direct-commit-to-`main` guard. Exact-commit upstream Ruff hooks perform only
+check and format-check behavior, and the exact-commit uv hook checks lock
+consistency. CI and the repository safety script are authoritative even if a
+developer has not installed local hooks.
 
 ## Current capability and assurance status
 

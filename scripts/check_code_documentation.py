@@ -109,6 +109,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "docs/_data/external_link_exceptions.json": "docs/WIKI_OPERATIONS.md",
     # Executable bootstrap trust roots and their reviewed update procedure.
     "config/uv-bootstrap-policy.json": "docs/security/verified-uv-bootstrap.md",
+    # Dependency-audit export exclusions and their fail-closed review procedure.
+    "config/dependency-audit-exclusions.json": "docs/DEPENDENCY_MAINTENANCE.md",
 }
 
 # ---------------------------------------------------------------------------

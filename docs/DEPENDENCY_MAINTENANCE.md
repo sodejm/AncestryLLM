@@ -21,7 +21,7 @@ The dependency groups are:
 
 | Group | Purpose | Canonical consumers |
 |---|---|---|
-| `lint` | Ruff, pre-commit, and repository checks | `make lint`, `make hooks`, and CI quality jobs |
+| `lint` | Ruff, pre-commit, GFM Markdown validation, and repository checks | `make lint`, `make markdown-check`, `make hooks`, and CI quality jobs |
 | `typecheck` | Strict mypy, third-party type information, and exact ty advisory evaluation | `make typecheck`, `make typecheck-ty`, and CI quality jobs |
 | `test` | Pytest and coverage | `make test`, Python test matrices, and release-project proof jobs |
 | `security` | Dependency audit, SBOM, and workflow audit tools | `make security`, `make sbom`, `make workflow-audit`, and matching workflow jobs |
@@ -68,6 +68,24 @@ repository consumer; it may still appear transitively in `uv.lock`. The
 verified bootstrap supplies `uv`, so the lock intentionally contains no direct
 `uv` environment dependency.
 
+## Complete dependency-audit export
+
+`make dependency-audit` executes `scripts/run_dependency_audit.py` from the
+locked `security` group. The runner generates its input with the exact command
+`uv export --locked --all-extras --all-groups`, then compares normalized
+package-name/version pairs with every applicable package in `uv.lock` before
+allowing `pip-audit` to run. A missing provider extra, desktop-build package,
+dependency-group tool, release verifier, or transitive dependency fails closed
+instead of silently narrowing the audit.
+
+The closed-schema allowlist at
+`config/dependency-audit-exclusions.json` documents the only formal export
+exception: the editable source project itself. Unknown fields, duplicate or
+unused entries, unpinned export records, and lock/export drift are stable coded
+errors. `pip-audit` still runs from the locked `security` group with hashes and
+strict dependency processing; this completeness check does not replace
+Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL.
+
 ## Update procedure
 
 1. Edit the narrow direct dependency in `pyproject.toml`. Keep application
@@ -102,6 +120,9 @@ consumer installation and do not build or authorize release artifacts.
   pass `--no-default-groups`, and invoke that target without command drift.
 - Semgrep continues through the independently pinned script even though the
   surrounding security tools come from the `security` group.
+- The dependency-audit export covers all extras and groups, and its normalized
+  package pairs match `uv.lock` except for the reviewed, used source-project
+  entry in `config/dependency-audit-exclusions.json`.
 - Production release verification installs only `release-verifier`; release
   construction does not inherit it. Full local setup intentionally includes
   every group.

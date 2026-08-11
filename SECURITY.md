@@ -116,6 +116,15 @@ re-hashed before use, and release evidence requires a sanitized successful
 receipt. This control is specific to the repository's `uv` bootstrap and does
 not establish trust in unrelated deployment or application update channels.
 
+The dependency-audit input is generated from the locked graph with all extras
+and dependency groups. `scripts/run_dependency_audit.py` compares normalized
+exported package identities with `uv.lock` before the locked auditor executes;
+the closed-schema `config/dependency-audit-exclusions.json` permits only the
+editable source project that the export cannot represent as a pinned index
+artifact. Missing, extra, unpinned, duplicate, unknown, or unused records fail
+closed. This completeness control supplements rather than replaces Semgrep,
+zizmor, CycloneDX, gitleaks, TruffleHog, and CodeQL.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;

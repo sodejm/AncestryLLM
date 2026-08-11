@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "excluded_lock_packages": [
+    {
+      "name": "ancestryllm",
+      "source": {
+        "editable": "."
+      },
+      "export_requirement": "-e .",
+      "reason": "The editable workspace root has no pinned registry artifact for pip-audit; every resolved dependency remains included."
+    }
+  ]
+}
