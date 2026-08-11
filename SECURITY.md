@@ -37,11 +37,14 @@ GEDCOM and RootsMagic files, the SQLCipher workspace and OS credential store,
 generated local artifacts, configuration, and explicitly selected local or
 remote LLM providers.
 
-FastAPI, Electron, browser renderers, multi-user service operation, plugins,
-automatic updating, and vector retrieval are not implemented or supported
-runtime surfaces. Their roadmap controls in
-[the threat model](docs/THREAT_MODEL.md) are design requirements, not evidence
-of an effective control and not a reason to reduce current risk.
+FastAPI and Electron development foundations exist in Unreleased source, but
+no browser, public/LAN, container, remote, or multi-user application runtime is
+supported. Issue #363's Electron-Main-only Docker-control foundation is
+deliberately unwired and starts no genealogy workload. Plugins, automatic
+updating, and vector retrieval also remain unimplemented. Roadmap controls in
+[the threat model](docs/THREAT_MODEL.md) are design requirements unless their
+owning issue has produced the named evidence; partial foundation evidence is
+not a reason to credit an unavailable runtime.
 
 The local operator is trusted to choose files, provider profiles, and consent.
 Imported GEDCOM and RootsMagic content, prompt variables, OCR text, provider
@@ -134,6 +137,26 @@ by #131 as the `version-1-security-dependencies` release-evidence gate. This
 control still trusts authorized maintainers and GitHub's Project, issue,
 dependency, API, and token enforcement; missing access or unverifiable hosted
 state blocks release rather than passing.
+
+Issue #363's host-only container-control foundation treats Docker authority as
+host-administrative. It accepts only a closed, app-owned Unix endpoint and
+exact context/profile identity, ignores ambient Docker selection, verifies the
+socket and engine before and after operations, validates digest-pinned hardened
+plans, and offers bounded no-shell inspection and lifecycle methods only inside
+Electron Main. Exact ownership labels and names prevent adopting or deleting
+foreign resources; destructive start, repair, and uninstall plans require a
+short-lived one-use authorization bound to the operation. The Docker socket,
+CLI, context, generic subprocess authority, and lifecycle API never cross into
+preload, renderer, shared DTOs, or containers.
+
+An isolated macOS arm64 exercise records successful start, stop, repair,
+preserve-data uninstall, restart, delete-data uninstall, cleanup, and unchanged
+ambient Docker identity in a sanitized
+[native evidence receipt](docs/release-evidence/issue-363-macos-arm64-container-supervisor.json).
+That record does not establish a supported application runtime or reduce the
+remaining risk for workload identity, secrets, genealogy data, migration,
+backup/recovery, resource exhaustion, other native platforms, packaged
+integration, or independent G5/G7 review.
 
 Current limitations that must not be credited as controls include:
 

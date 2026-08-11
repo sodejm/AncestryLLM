@@ -29,7 +29,12 @@ default, reviewed mode descriptions, revision-bound previews, explicit
 confirmation, atomic local recovery, fail-closed runtime diagnostics, and
 redacted backup/support metadata. It does not start containers, enroll a
 remote client, host a server, widen a listener, or move genealogy data. The
-diagrams, controls, abuse cases, and gates below define
+Unreleased Issue #363 adds an unwired, Electron-Main-only host container-control
+foundation. It validates an app-owned local Docker endpoint and exact hardened
+plans, ignores ambient daemon selection, and performs only bounded inspection
+and lifecycle operations over exactly owned resources. It starts no application
+workload and exposes no Docker authority to preload, renderer, shared DTOs, or
+containers. The diagrams, controls, abuse cases, and gates below define
 both this partial runtime and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
 passed. Each
@@ -39,13 +44,15 @@ verification before a planned control can be treated as effective.
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 local-first multi-container backend, an advanced remote-client profile, and a
 separately operated remote-server profile as the target architecture. Issue
-#347 implements only the profile-selection portion of `TM-M01`; no container or
-remote runtime is implemented or supported. The deployment diagrams, the
-remaining portions of `TM-M01` through `TM-B01`, `STR-H-*` through `STR-M-*`
-and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below remain requirements
-for planned work. No deployment risk rating is reduced until the owning issue
-provides native-runtime, negative-test, and independent-review evidence at its
-named gate.
+#347 implements only the profile-selection portion of `TM-M01`; Issue #363
+implements only the host-control subset of `TM-H01`, `TM-B01`, `TM-O01`, and
+`TM-C01`. No application container or remote runtime is implemented or
+supported. The deployment diagrams, remaining controls, `STR-H-*` through
+`STR-M-*` and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below remain
+requirements for planned work. The #363 native macOS arm64 receipt supports its
+narrow evidence disposition below, but no deployment risk rating is reduced
+until the owning runtime issues provide complete native-platform,
+negative-test, and independent-review evidence at their named gates.
 
 ## Assets and trust boundaries
 
@@ -169,9 +176,11 @@ flowchart LR
 
 ## Proposed container and remote deployment data flow
 
-These flows are design targets owned by #346 and its dependent work. They do
-not describe the current runtime and they must remain unavailable until their
-respective assurance gates pass.
+These flows are design targets owned by #346 and its dependent work. Issue #363
+implements only the unwired Main-to-supervisor-to-selected-engine control
+segment; it does not instantiate any depicted application container, network,
+secret, volume, listener, or data flow. The complete runtimes must remain
+unavailable until their respective assurance gates pass.
 
 ```mermaid
 flowchart LR
@@ -319,6 +328,15 @@ produced the required evidence.
 | `TM-S01`, `TM-I01` | `SettingsService` exposes reviewed metadata for exactly five non-secret settings and requires the current revision before one atomic owner-only `AppConfig` replacement. `SecretManagementService` accepts only six static credential references and returns only `present`, `missing`, or `unavailable`; set and delete are explicit operations, delete verifies absence, and an environment-managed value is read-only. The authenticated sidecar and static bridge expose only settings read/patch and credential status/set/delete. Strict schemas reject unknown, secret-shaped, stale, and malformed input. | Source tests prove no credential value appears in read/status responses, OpenAPI response schemas, bridge responses, renderer state, mocks, errors, or logs. Target-matched packaged canary and crash/support-artifact scans remain required under #131 before release credit. |
 | `TM-O01`, `TM-O02` | Keyring unavailable, locked, denied, and unverifiable outcomes map to stable redacted codes without response bodies or backend details. The renderer uses an uncontrolled password input, copies and clears it before invoking the bridge, clears again in `finally`, and caches only presence status. Plaintext configuration, Electron `safeStorage`, `localStorage`, IndexedDB, preferences, and mock fixtures are not credential stores. | Source-level component and contract tests cover success and failure lifetimes. Native keyring behavior and packaged renderer/crash/evidence canary scans remain #131/#132 release evidence. |
 | `TM-L01` | Updating a default-provider setting does not select a provider for the current operation, grant cloud consent, read a credential, or make a network request. `.env` files remain unloaded, environment credentials remain explicit headless injection, and `provider=none` remains network-free. | Provider execution, desktop consent/profile flow, redirect and endpoint controls, and their packaged network evidence remain owned by #108, #110, and #131. |
+
+### Issue #363 host container-control evidence
+
+| Control | Source and native evidence | Residual ownership |
+|---|---|---|
+| `TM-H01`, `TM-B01` | Closed schema-v1 policy and plan validation admits only the application-owned Unix socket, context, CLI configuration, Compose project, working directory, exact labels, digest-pinned native-architecture image, and fixed lifecycle operation selected by policy. It rejects ambient Docker selectors, TCP/SSH/named-pipe endpoints, symlinked or replaced sockets, wrong owner/mode/engine identity, architecture or project drift, unknown fields, unsafe Compose features, and conflicting resources. Endpoint and engine identity are checked before and after every bounded no-shell process; the runner supplies fixed argument vectors, a minimal environment, output/input/time limits, process-group termination, and stable redacted failures. | The implemented Main-only interface is deliberately unwired and cannot start an application runtime. OCI provenance, image SBOM/license evidence, rollback policy, runtime acquisition, and additional native platforms remain #353 and #358-#362. Independent G5 release evidence remains required. |
+| `TM-K01`, `TM-C01` | Accepted plans require a non-root user, read-only root filesystem, all capabilities dropped, `no-new-privileges`, explicit CPU/memory/PID/log limits, named volumes only, internal networks, and loopback-only published ports. Inventory reconciles only exact project/name/label matches, deduplicates identical records, preserves collisions, and never broad-scans or removes unrelated resources. Start, repair, and uninstall require exact operation-bound authorization; stop is non-destructive. Preserve and delete uninstall plans are separate validated operations. | The isolated macOS ARM64 lifecycle exercise proves start, stop, repair, preserve, restart, and explicit delete behavior for a harmless fixture. It does not prove application images, genealogy volumes, secret delivery, migration, upgrade, rollback, interruption recovery, filesystem isolation, daemon escape resistance, or production resource budgets; those remain #348, #349, #351, #358, #364, and #365. |
+| `TM-I01`, `TM-O01` | The typed host-control port and process runner live only in Electron Main; boundary tests reject them from preload, renderer, and shared contracts, and neither the renderer nor any container receives Docker authority. Errors and the schema-v1 native receipt are limited to stable codes and reviewed structural identity, excluding arguments, output, environment, credentials, hostnames, usernames, paths, sockets, ports, and temporary state. | Future #348 wiring requires a separately reviewed narrow Main integration and must not widen the frozen renderer bridge or make the control plane reachable from application containers. Packaged canary and support-artifact evidence remains #131/#132. |
+| Native macOS ARM64 proof | An isolated Colima profile and application-owned Docker context completed the exact source-level start, stop, repair, preserve, restart, and delete sequence against the pinned fixture digest. The run verified daemon identity across operations, left no owned container/network/volume, removed the isolated profile, and proved the user's default Docker context and engine were unchanged. The sanitized receipt is `docs/release-evidence/issue-363-macos-arm64-container-supervisor.json`. | This is narrow host-control evidence only. It is not application-runtime, data, secret, network, persistence, install, upgrade, rollback, cross-platform, packaged, or complete G5/G7 evidence, and it does not reduce the inherent platform-risk rating by itself. |
 
 ### Issue #306 verified uv bootstrap evidence
 
@@ -505,7 +523,7 @@ or release evidence, never private payloads.
 | `AB-09` | A compromised update channel serves a valid old release, wrong-platform sidecar, mutable artifact, or expired metadata. | Low / Critical | `TM-U01`, `TM-U02`; #102, #131, #132; G4. Negative: offline signature, expiry, anti-rollback, hash/size/platform/version, revoked key, interruption, and recovery. | Not reduced: distribution remains disabled pending evidence. |
 | `AB-10` | Two app instances or jobs publish the same output or repeat a mutation after a crash. | Medium / High | `TM-C01`, `TM-E01`, `TM-F02`; #104, #117, #129, #131; G2/G3. Negative: single instance, idempotency, optimistic revision, artifact lock, crash recovery, and duplicate terminal state. | Not reduced: concurrency and packaged evidence pending. |
 | `AB-11` | Profile confusion or an installer/runtime default silently changes Local Desktop into Connect Remote or Host Remote. | Medium / Critical | `TM-M01`, `TM-O01`; #346, #347, #358; G5-G7. Negative: missing/unknown settings, ambient environment, discovery, repair, upgrade, downgrade, cancellation, and stale profile state retain local-only behavior. | Partially evidenced at source level: #347 proves the Local Desktop default, strict schema/topology validation, environment-smuggling resistance, revision- and target-bound confirmation, atomic recovery, exact endpoint/identity diagnostics, non-loopback rejection, and non-local runtime denial. The risk rating is not reduced until native first-run/settings presentation, installer/upgrade behavior, and G5-G7 runtime evidence pass. |
-| `AB-12` | A malicious Docker context, socket, daemon, or Compose response tricks the supervisor into host-administrative operations. | Medium / Critical | `TM-H01`, `TM-B01`; #363; G5. Negative: ambient contexts, socket replacement, remote endpoint, unsafe Compose fields, resource collisions, and unallowlisted Engine methods fail closed. | Not reduced: supervisor and daemon-identity evidence pending. |
+| `AB-12` | A malicious Docker context, socket, daemon, or Compose response tricks the supervisor into host-administrative operations. | Medium / Critical | `TM-H01`, `TM-B01`; #363; G5. Negative: ambient contexts, socket replacement, remote endpoint, unsafe Compose fields, resource collisions, and unallowlisted Engine methods fail closed. | Partially evidenced: #363 proves the closed policy/plan schemas, app-owned local endpoint and engine-identity checks, ambient-selector rejection, fixed bounded no-shell operations, resource-conflict preservation, and one isolated macOS ARM64 lifecycle. The rating is not reduced until the remaining native platforms, application-runtime integration, OCI acquisition/provenance, and independent G5 evidence pass. |
 | `AB-13` | A daemon, VM, container runtime, or kernel compromise escapes isolation and reaches host or genealogy data. | Medium / Critical | `TM-H01`, `TM-K01`; #348, #349, #364, #365; G5/G7. Negative: privileged/root execution, host namespaces, devices, broad mounts/capabilities, socket access, and unsupported runtime modes are rejected. | Inherent platform risk remains; no residual reduction without native hardening evidence and a current risk review. |
 | `AB-14` | Containers exhaust CPU, memory, PIDs, storage, inodes, connections, or logs and make data or recovery unavailable. | High / High | `TM-K01`, `TM-D01`; #349, #364, #365; G5/G7. Negative: quota one-over, fork/connection storm, disk/inode full, log growth, restart loop, and shutdown tests preserve bounded host control. | Not reduced: resource-budget and recovery evidence pending. |
 | `AB-15` | A sibling container, local process, DNS/proxy manipulation, or network attachment impersonates a workload or moves laterally. | Medium / Critical | `TM-N01`, `TM-A03`; #199, #350; G5/G6. Negative: wrong workload/audience/route, replay, alias collision, dual-homing, IPv4/IPv6 wildcard, and direct-backend access are denied. | Not reduced: topology and workload-authentication evidence pending. |
@@ -513,7 +531,7 @@ or release evidence, never private payloads.
 | `AB-17` | TLS, DNS, proxy trust, OIDC, session, CSRF, authorization, or clock failure exposes Host Remote or grants the wrong identity. | High / Critical | `TM-G01`, `TM-N01`; #107, #355, #356; G6. Negative: invalid certificate/issuer/audience/origin, forged headers, login mix-up, fixation/revocation, CSRF, anonymous routes, and wrong-user access fail closed. | Not reduced: remote edge/identity implementation and external tests pending. |
 | `AB-18` | Enrollment or endpoint material is stolen, replayed, logged, placed in a URL, or binds a client to an attacker server/account. | Medium / Critical | `TM-X01`, `TM-S01`; #357; G6. Negative: redirect/deep-link hijack, endpoint substitution, callback mix-up, expiry/replay, clipboard/history/log leakage, and cross-profile reuse fail closed. | Not reduced: enrollment implementation and adversarial evidence pending. |
 | `AB-19` | A registry, mutable tag, wrong-architecture image, bootstrap package, or package repository supplies a compromised deployment. | Medium / Critical | `TM-B01`, `TM-U01`, `TM-U02`, `TM-U03`; #306, #132, #353, #358-#362; G7. Negative: digest/platform/provenance/SBOM/license mismatch, rollback/freeze, mirror substitution, unsafe archive/hook, and interrupted acquisition preserve the trusted version. | Not yet reduced: #306 implementation, offline negative tests, and local macOS ARM64 live proof cover only `uv`; exact-head native supported-platform results and all non-`uv` publication/acquisition controls remain pending. |
-| `AB-20` | Repair, migration, upgrade, rollback, uninstall, or orphan cleanup mutates data or deletes unrelated resources. | Medium / Critical | `TM-H01`, `TM-V01`, `TM-C01`; #123, #358, #363; G5-G7. Negative: label/name collision, partial migration, power loss, cancellation, wrong-profile restore, and preserve/export/delete choices retain recoverable prior state. | Not reduced: lifecycle implementation and destructive-path evidence pending. |
+| `AB-20` | Repair, migration, upgrade, rollback, uninstall, or orphan cleanup mutates data or deletes unrelated resources. | Medium / Critical | `TM-H01`, `TM-V01`, `TM-C01`; #123, #358, #363; G5-G7. Negative: label/name collision, partial migration, power loss, cancellation, wrong-profile restore, and preserve/export/delete choices retain recoverable prior state. | Partially evidenced: #363 proves exact owned-resource inventory, collision preservation, operation-bound authorization, non-destructive stop, distinct preserve/delete uninstall plans, and an isolated native lifecycle that left no owned resources. The rating is not reduced because application data migration, upgrade, rollback, interruption, export, backup, restore, and production orphan recovery remain pending under #123/#351/#358 and G5-G7. |
 | `AB-21` | A trusted remote operator, compromised host root, or support workflow reads plaintext genealogy data or secrets. | Medium / Critical | `TM-V01`, `TM-O02`, explicit operator trust; #346, #351, #358; G6/G7. Negative: least-data support bundles, access/log canaries, backup custody, and operator disclosure are verified. | Residual host-root access is unavoidable and must be explicitly accepted by the data owner; no multi-tenant claim is permitted. |
 | `AB-22` | Project ownership, release iterations, or dependency relationships are missing, contradictory, or changed so Version 1 security work can appear ready out of order. | High / High | `TM-U05`; #369 and #131; G2/G7. Negative: exact owner/iteration and native-edge fixtures cover omissions, reversal, cycles, inversion, premature closure, incomplete pagination, stale policy digests, and substituted evidence. | Reduced to Medium only while the policy-bound exact-head gate passes. Authorized maintainer compromise and GitHub Project/API integrity remain trusted residuals; unavailable or unverifiable hosted state blocks release. |
 

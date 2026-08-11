@@ -29,7 +29,9 @@ Every unattended transition requires the current schema and configuration
 revision, the exact confirmation returned by a separate preview, and the
 literal `--unattended` flag. Only Local Desktop can currently be activated.
 Connect Remote activation is reserved for authenticated enrollment in #357;
-Host Remote activation is reserved for the reviewed bootstrap in #348/#363.
+Host Remote activation is reserved for the reviewed runtime integration in
+#348. The host-only container-control foundation in #363 does not activate a
+profile.
 Profile selection never starts a listener, container, supervisor, or remote
 session, and never copies, exports, imports, or uploads a family tree.
 
@@ -43,6 +45,60 @@ and Local Desktop recovery available.
 
 This guide does not authorize using the current private sidecar as a network
 service or provide a current Host Remote runbook.
+
+## Host container-control foundation
+
+Unreleased 0.6 source contains a deliberately unwired, Electron-Main-only
+control foundation for #348 and #349. It is not reachable from the renderer,
+preload bridge, shared renderer types, deployment-profile executor, CLI, or
+application containers, and it does not start a container during ordinary
+application execution. No public or supported container runtime is introduced.
+
+The closed schema-v1 policy and plan currently accept only native Darwin arm64
+with an app-owned runtime profile, Docker context, Unix socket, Docker
+configuration directory, working directory, exact Engine identity and
+compatibility, and exact Compose project labels. Before and after every
+lifecycle action, the supervisor verifies the canonical socket path, owner,
+mode, device and inode, endpoint, runtime profile, context, Engine ID, server
+and API versions, operating system, architecture, and required security
+options. Ambient `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, PATH
+selection, and alternate endpoints are not authority. Docker and Compose run
+by absolute executable path with a minimal environment, fixed arguments,
+bounded input, output, and time, no shell, process-tree termination, and
+redacted stable failures.
+
+Validated plans require digest-pinned images, a numeric non-root user,
+read-only roots, `cap_drop: [ALL]`, `no-new-privileges`, init, app-owned named
+volumes, internal networks, and loopback-only TCP publication. Host paths,
+devices, host namespaces, privileged execution, writable roots, extra
+capabilities, unowned labels, and ambiguous or colliding resources fail
+closed. Discovery and reconciliation use the exact project identity and three
+app-owned labels; conflicting resources are reported and never adopted.
+Start, repair, and preserve/delete uninstall require a short-lived token bound
+to that exact operation. Stop is bounded but does not delete resources.
+
+Stable control failures are `INVALID_POLICY`, `INVALID_PLAN`,
+`ENDPOINT_UNTRUSTED`, `ENDPOINT_CHANGED`, `ENGINE_UNTRUSTED`,
+`RESOURCE_CONFLICT`, `AUTHORIZATION_REQUIRED`, and `CONTROL_FAILED`. Stable
+process failures are `PROCESS_REQUEST_INVALID`, `PROCESS_INPUT_LIMIT`,
+`PROCESS_OUTPUT_LIMIT`, `PROCESS_TIMEOUT`, `PROCESS_EXIT`, and
+`PROCESS_RESPONSE_INVALID`. These codes are developer evidence, not an
+end-user Host Remote troubleshooting interface.
+
+The sanitized
+[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
+record verifies this control subset against an isolated, app-owned Colima
+profile. It exercises start, stop, repair, preserve/delete uninstall, exact
+inventory, hardening inspection, ambient-selection rejection, and complete
+owned-resource cleanup while leaving the default Docker context and engine
+unchanged. It proves neither an application image nor a supported runtime.
+
+Remaining work includes runtime acquisition and selection, application images,
+the host secret broker, profile activation, grant-authorized read-only family
+tree mounts, authenticated workloads, storage migration and backup, upgrade
+and rollback, interruption recovery, resource/readiness/listener budgets, the
+full `G5`/`G7` evidence set, and every additional OS, architecture, Engine, and
+Compose row claimed by a future release.
 
 Before any profile release, a separate operator runbook must cover every
 claimed native host and architecture, Docker Engine API and Compose

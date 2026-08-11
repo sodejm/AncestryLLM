@@ -1,6 +1,6 @@
 # ADR-0026: Local-first container and advanced remote deployment profiles
 
-- Status: Accepted architecture; profile control plane implemented; runtime gates remain open
+- Status: Accepted architecture; profile control plane and host control foundation implemented; runtime gates remain open
 - Date: 2026-08-09
 - Decision owner: AncestryLLM maintainer
 - Supersedes: no prior ADR
@@ -15,15 +15,20 @@ FastAPI sidecar. Issue #346 asks whether later releases may reuse that service
 surface in containers and, only after an explicit operator decision, across a
 remote boundary.
 
-This ADR accepts the target architecture. Unreleased Issue #347 implements only
-the shared, non-secret deployment-profile control plane: the schema, Local
-Desktop default, reviewed mode copy, explicit previews, confirmation-bound
-local recovery, diagnostics, and redacted backup/support metadata. The current
-release still has no supported container, LAN, public, browser, or remote
-runtime. Each non-local profile remains unavailable until its linked issues,
-threat-model gates, native-platform evidence, operator documentation, and
-release decision pass. In particular, accepting Host Remote does not make the
-current internal API public and does not approve a multi-user service.
+This ADR accepts the target architecture. Unreleased Issue #347 implements the
+shared, non-secret deployment-profile control plane: the schema, Local Desktop
+default, reviewed mode copy, explicit previews, confirmation-bound local
+recovery, diagnostics, and redacted backup/support metadata. Issue #363 adds a
+host-only minimum container-control foundation inside Electron Main, with an
+exact policy and plan, app-owned Docker selection, bounded lifecycle commands,
+and owned-resource reconciliation. It remains deliberately unwired from the
+profile executor, renderer, application image, secret broker, and genealogy
+services. The current release still has no supported container, LAN, public,
+browser, or remote application runtime. Each non-local profile remains
+unavailable until its linked issues, threat-model gates, native-platform
+evidence, operator documentation, and release decision pass. In particular,
+accepting Host Remote does not make the current internal API public and does
+not approve a multi-user service.
 
 ## Decision
 
@@ -51,6 +56,31 @@ a listener, discovers a server, moves a family tree, or migrates data. The
 current executor can safely retain or recover Local Desktop; Connect Remote and
 Host Remote activation fail closed until their enrollment and host-setup
 authorities exist.
+
+Issue #363 establishes the minimum host-only control interface required by
+#348 and #349. Its closed schema-v1 policy binds Darwin arm64 to an app-owned
+runtime profile, Docker context, Unix socket, configuration directory, working
+directory, Engine identity and compatibility range, and exact Compose resource
+labels. Before and after a lifecycle command, Main revalidates the socket's
+canonical identity, owner, mode, device and inode, the selected endpoint, and
+the Engine identity. It ignores ambient Docker selection and runs only fixed,
+bounded, no-shell commands with a minimal environment. Start, repair, and both
+uninstall choices require operation-bound authorization; stop is bounded but
+non-destructive. The accepted plan requires immutable image digests, a non-root
+user, a read-only root filesystem, all capabilities dropped,
+`no-new-privileges`, named volumes, internal networks, and loopback-only ports.
+Only exact app-owned resources may be reconciled. Neither the renderer nor any
+container receives the socket, context, executable, generic process authority,
+or a supervisor bridge. This foundation does not yet select or install a
+runtime, render an application image, broker secrets, grant family-tree
+sources, migrate storage, activate a profile, or expose an application route.
+
+The native macOS arm64 evidence record exercises the #363 subset against an
+isolated Colima profile and app-owned context, including start, stop, repair,
+preserving uninstall, deleting uninstall, conflict rejection, and cleanup:
+[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json).
+It does not satisfy the remaining `G5` or `G7` runtime, application-image,
+secret, storage, workload, budget, recovery, or cross-platform gates.
 
 The offline invariant is stronger than a provider-egress restriction:
 `provider=none` is incompatible with Connect Remote and Host Remote. Selecting
@@ -339,6 +369,7 @@ risk blocks the affected gate.
 | #98 | Architecture and threat-model approval precede implementation. | Closed baseline; ADR-0026 adds, not replaces, its gates. |
 | #101 | Electron Main is the only renderer-host authority; use the existing typed bridge and application contracts. | Open implementation dependency. |
 | #102 | Reusable supervision, one active backend, bounded readiness/recovery, no renderer/container Docker socket. | Open lifecycle dependency. |
+| #363 | Electron Main is the sole Docker authority; endpoint, Engine, plan, and owned-resource identity fail closed around bounded lifecycle operations. | Host-control foundation and one native macOS arm64 evidence row implemented; runtime integration and remaining platform/release evidence stay open. |
 | #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Closed source-level secret foundation; runtime broker evidence remains open. |
 | #107 | Local convenience still authenticates traffic; Host Remote needs explicit TLS, identity, authorization, enrollment, and recovery. | Open authentication dependency. |
 | #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Open settings/consent dependency. |
@@ -377,4 +408,5 @@ domain behavior.
 The cost is a larger native-platform test matrix, a privileged host supervisor,
 operator-facing lifecycle and recovery work, runtime/license maintenance, and
 substantial remote identity and ingress assurance. Until those costs are paid
-and independently reviewed, no profile described here is supported or shipped.
+and independently reviewed, no container or remote application runtime
+described here is supported or shipped.
