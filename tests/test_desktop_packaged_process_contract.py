@@ -83,7 +83,7 @@ def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> Non
         r"maxRetries: 10,\s*retryDelay: 100,\s*\}\)\s*\}",
         source,
     )
-    assert source.count("await removeTemporaryPackage(root)") == 4
+    assert source.count("await removeTemporaryPackage(root)") == 5
 
 
 def test_packaged_cleanup_terminates_the_windows_process_tree_with_a_deadline() -> None:

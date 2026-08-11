@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly six deterministic, deeply frozen methods', async () => {
+  it('exposes exactly nine deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
       'getAppInfo',
       'getCapabilities',
       'getPreferences',
       'getStartupDiagnostics',
+      'requestOpenFileGrant',
+      'requestSaveFileGrant',
       'retrySidecar',
+      'revokeFileGrant',
       'updatePreferences',
     ])
     expect(await bridge.getStartupDiagnostics()).toEqual(await bridge.getStartupDiagnostics())

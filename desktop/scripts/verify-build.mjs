@@ -19,6 +19,11 @@ const prohibitedProductionFixtureContent = [
   /ANCESTRYLLM_DESKTOP_SECURITY_E2E/,
   /__ancestryllmSecurityStateForTests/,
 ]
+const prohibitedPackagedFileGrantContent = [
+  /ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION/,
+  /ANCESTRYLLM_FILE_GRANT_OPEN_PATH/,
+  /ANCESTRYLLM_FILE_GRANT_SAVE_PATH/,
+]
 async function files(root) { return (await readdir(root, { withFileTypes: true })).flatMap((entry) => entry.isDirectory() ? [] : [join(root, entry.name)]) }
 async function walk(root) {
   const entries = await readdir(root, { withFileTypes: true }); const output = []
@@ -28,7 +33,10 @@ async function walk(root) {
   }
   return output
 }
-export async function inspectBuild(root, { allowFixtures = false } = {}) {
+export async function inspectBuild(
+  root,
+  { allowFixtures = false, allowPackagedFileGrants = false } = {},
+) {
   const all = await walk(root)
   for (const file of all) {
     const name = file.split('/').at(-1)
@@ -41,6 +49,12 @@ export async function inspectBuild(root, { allowFixtures = false } = {}) {
         ? undefined
         : prohibitedProductionFixtureContent.find((pattern) => pattern.test(content))
       if (fixtureMatch) throw new Error(`Prohibited production fixture content in ${name}: ${fixtureMatch.source}`)
+      const packagedFileGrantMatch = allowPackagedFileGrants
+        ? undefined
+        : prohibitedPackagedFileGrantContent.find((pattern) => pattern.test(content))
+      if (packagedFileGrantMatch) {
+        throw new Error(`Prohibited packaged file-grant verification content in ${name}: ${packagedFileGrantMatch.source}`)
+      }
     }
   }
   if ((await files(root)).length === 0 && all.length === 0) throw new Error('Build output is empty')
@@ -52,7 +66,10 @@ export function resolveBuildOutputPath(moduleUrl, options) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const count = await inspectBuild(
     resolveBuildOutputPath(import.meta.url),
-    { allowFixtures: process.argv.includes('--fixture') },
+    {
+      allowFixtures: process.argv.includes('--fixture'),
+      allowPackagedFileGrants: process.argv.includes('--packaged-file-grants'),
+    },
   )
   console.log(`Verified ${count} build artifacts: no development-only gallery copy, source maps, embedded remote network endpoints, credentials, or updater metadata.`)
 }

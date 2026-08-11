@@ -96,6 +96,7 @@ logs/
 node_modules
 desktop/out/
 desktop/release/
+desktop/release-file-grant-verification/
 desktop/test-results/
 desktop/playwright-report/
 desktop/sbom.cdx.json

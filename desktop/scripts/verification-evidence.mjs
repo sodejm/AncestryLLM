@@ -18,6 +18,7 @@ const SHA256 = /^[0-9a-f]{64}$/
 const EVIDENCE_SCHEMA_VERSION = 2
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
 const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
+const FILE_GRANT_EVIDENCE_KIND = 'ancestryllm-packaged-file-grant-evidence'
 const METRIC_NAMES = Object.freeze([
   'coldLaunchMs',
   'warmLaunchMs',
@@ -255,6 +256,40 @@ const FAULT_SCENARIOS = Object.freeze({
   }),
 })
 
+const FILE_GRANT_OBSERVATIONS = Object.freeze({
+  openGrantOpaque: true,
+  openMetadataValidated: true,
+  saveGrantOpaque: true,
+  replacementConfirmed: true,
+  revocationPassed: true,
+  selectedPathsAbsent: true,
+})
+
+function validatedFileGrantEvidence(value) {
+  assert.deepEqual(
+    Object.keys(value ?? {}).sort(),
+    ['kind', 'observations', 'schemaVersion', 'status', 'verificationOnlyDialogAdapter'].sort(),
+    'packaged file-grant evidence must use the exact schema',
+  )
+  assert.equal(value.schemaVersion, 1, 'packaged file-grant evidence has an unsupported schema')
+  assert.equal(value.kind, FILE_GRANT_EVIDENCE_KIND, 'packaged file-grant evidence has the wrong kind')
+  assert.equal(value.status, 'passed', 'packaged file-grant evidence did not pass')
+  assert.equal(value.verificationOnlyDialogAdapter, true, 'packaged file-grant evidence did not use the verification-only dialog adapter')
+  assert.deepEqual(
+    Object.keys(value.observations ?? {}).sort(),
+    Object.keys(FILE_GRANT_OBSERVATIONS).sort(),
+    'packaged file-grant observations must use the exact schema',
+  )
+  assert.deepEqual(value.observations, FILE_GRANT_OBSERVATIONS, 'packaged file-grant observations are incomplete')
+  return Object.freeze({
+    schemaVersion: value.schemaVersion,
+    kind: value.kind,
+    status: value.status,
+    verificationOnlyDialogAdapter: value.verificationOnlyDialogAdapter,
+    observations: Object.freeze({ ...value.observations }),
+  })
+}
+
 function validatedFaultEvidence(value, expected) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
@@ -304,6 +339,8 @@ export function createTargetEvidence(input) {
   const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead)
   const metricsArtifact = artifactDigest(input.metricsBytes)
   const fuseInspectionArtifact = artifactDigest(input.fuseInspectionBytes)
+  const fileGrantEvidenceArtifact = artifactDigest(input.fileGrantEvidenceBytes)
+  const fileGrantMediation = validatedFileGrantEvidence(input.fileGrantMediation)
   const faultArtifacts = Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([gate, scenario]) => {
     const bytes = input[`${scenario.artifact}Bytes`]
     const document = input[scenario.artifact]
@@ -318,6 +355,12 @@ export function createTargetEvidence(input) {
   )
   assertArtifactBound(derived.receipts.packageRuntimePassed, 'metrics', metricsArtifact, 'packaged runtime metrics')
   assertArtifactBound(derived.receipts.fusesInspectedPassed, 'fuseInspection', fuseInspectionArtifact, 'fuse inspection')
+  assertArtifactBound(
+    derived.receipts.packagedFileGrantSmokePassed,
+    'fileGrantEvidence',
+    fileGrantEvidenceArtifact,
+    'packaged file-grant mediation',
+  )
   const performance = performanceEvidence(input.runner, input.metrics)
   const inspection = validatedFuseInspection(input.fuseInspection, expected)
 
@@ -340,14 +383,17 @@ export function createTargetEvidence(input) {
     fusesInspected: derived.gates.fusesInspectedPassed,
     rendererZeroEgressCanary: derived.gates.rendererZeroEgressCanaryPassed,
     normalLaunchDebugSurfaceAbsent: derived.gates.normalLaunchDebugSurfaceAbsentPassed,
+    packagedFileGrantSmoke: derived.gates.packagedFileGrantSmokePassed,
     performancePassed: performance.passed,
     gates: derived.gates,
     receipts: derived.receipts,
     artifacts: Object.freeze({
       metrics: metricsArtifact,
       fuseInspection: fuseInspectionArtifact,
+      fileGrantEvidence: fileGrantEvidenceArtifact,
       ...faultArtifacts,
     }),
+    fileGrantMediation,
     faultScenarios: Object.freeze(Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([, scenario]) => [
       scenario.name,
       validatedFaultEvidence(input[scenario.artifact], scenario),
@@ -431,12 +477,31 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.fusesInspected, value.gates.fusesInspectedPassed)
   assert.equal(value.rendererZeroEgressCanary, value.gates.rendererZeroEgressCanaryPassed)
   assert.equal(value.normalLaunchDebugSurfaceAbsent, value.gates.normalLaunchDebugSurfaceAbsentPassed)
+  assert.equal(value.packagedFileGrantSmoke, value.gates.packagedFileGrantSmokePassed)
   assert.equal(value.performancePassed, true)
 
   validateDigest(value.artifacts?.metrics, `${value.runner} metrics artifact`)
   validateDigest(value.artifacts?.fuseInspection, `${value.runner} fuse inspection artifact`)
+  validateDigest(value.artifacts?.fileGrantEvidence, `${value.runner} packaged file-grant evidence artifact`)
   assertArtifactBound(receipts.packageRuntimePassed, 'metrics', value.artifacts.metrics, `${value.runner} packaged runtime metrics`)
   assertArtifactBound(receipts.fusesInspectedPassed, 'fuseInspection', value.artifacts.fuseInspection, `${value.runner} fuse inspection`)
+  assertArtifactBound(
+    receipts.packagedFileGrantSmokePassed,
+    'fileGrantEvidence',
+    value.artifacts.fileGrantEvidence,
+    `${value.runner} packaged file-grant mediation`,
+  )
+
+  const fileGrantEvidenceFile = findArtifactFile(
+    files,
+    value.artifacts.fileGrantEvidence,
+    `${value.runner} packaged file-grant evidence artifact`,
+  )
+  assert.deepEqual(
+    value.fileGrantMediation,
+    validatedFileGrantEvidence(fileGrantEvidenceFile.value),
+    `${value.runner} packaged file-grant evidence differs from its downloaded artifact`,
+  )
 
   for (const [gate, scenario] of Object.entries(FAULT_SCENARIOS)) {
     const artifact = value.artifacts?.[scenario.artifact]
@@ -565,7 +630,7 @@ export async function runCli([command, ...args]) {
   const common = new Set(['git-head', 'output'])
   let allowed
   if (command === 'target') {
-    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'integrity-evidence', 'receipts'])
+    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'file-grant-evidence', 'withhold-evidence', 'restart-evidence', 'integrity-evidence', 'receipts'])
   } else if (command === 'security') {
     allowed = new Set([...common, 'sbom', 'receipts'])
   } else if (command === 'aggregate') {
@@ -582,6 +647,7 @@ export async function runCli([command, ...args]) {
   if (command === 'target') {
     const metricsBytes = await readFile(required(values, 'metrics'))
     const fuseInspectionBytes = await readFile(required(values, 'fuse-inspection'))
+    const fileGrantEvidenceBytes = await readFile(required(values, 'file-grant-evidence'))
     const withholdEvidenceBytes = await readFile(required(values, 'withhold-evidence'))
     const restartEvidenceBytes = await readFile(required(values, 'restart-evidence'))
     const integrityEvidenceBytes = await readFile(required(values, 'integrity-evidence'))
@@ -598,6 +664,8 @@ export async function runCli([command, ...args]) {
       metricsBytes,
       fuseInspection: JSON.parse(fuseInspectionBytes.toString('utf8')),
       fuseInspectionBytes,
+      fileGrantMediation: JSON.parse(fileGrantEvidenceBytes.toString('utf8')),
+      fileGrantEvidenceBytes,
       withholdEvidence: JSON.parse(withholdEvidenceBytes.toString('utf8')),
       withholdEvidenceBytes,
       restartEvidence: JSON.parse(restartEvidenceBytes.toString('utf8')),

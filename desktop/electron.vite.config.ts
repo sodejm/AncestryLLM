@@ -5,7 +5,17 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
-const fixtureBuild = ['dev', 'build:e2e'].includes(process.env.npm_lifecycle_event ?? '')
+const lifecycle = process.env.npm_lifecycle_event ?? ''
+const fixtureBuild = ['dev', 'build:e2e'].includes(lifecycle)
+const packagedFileGrantBuild = lifecycle === 'build:packaged-file-grants'
+const mainAliases = {
+  ...(fixtureBuild
+    ? { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') }
+    : {}),
+  ...(packagedFileGrantBuild
+    ? { './native-file-dialogs': resolve('e2e/native-file-dialogs.packaged-verification.ts') }
+    : {}),
+}
 const sidecarManifest = resolve(
   'build',
   'sidecar',
@@ -22,8 +32,8 @@ export default defineConfig({
     define: {
       __ANCESTRYLLM_SIDECAR_MANIFEST_SHA256__: JSON.stringify(sidecarManifestSha256),
     },
-    ...(fixtureBuild
-      ? { resolve: { alias: { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') } } }
+    ...(Object.keys(mainAliases).length > 0
+      ? { resolve: { alias: mainAliases } }
       : {}),
     build: { sourcemap: false },
   },

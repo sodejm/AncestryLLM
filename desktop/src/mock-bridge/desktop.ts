@@ -2,6 +2,8 @@ import {
   DESKTOP_PROTOCOL_VERSION,
   type AncestryBridge,
   type BridgeResult,
+  type FileGrant,
+  type FileGrantRevocation,
   type LocalPreferences,
   type PreferenceUpdate,
 } from '../shared-contract/desktop'
@@ -56,6 +58,19 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         revision: preferences.revision + 1,
       })
       return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: preferences }) as BridgeResult<LocalPreferences>
+    },
+    async requestOpenFileGrant() {
+      return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: null }) as BridgeResult<FileGrant | null>
+    },
+    async requestSaveFileGrant() {
+      return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: null }) as BridgeResult<FileGrant | null>
+    },
+    async revokeFileGrant() {
+      return deepFreeze({
+        ok: true,
+        protocolVersion: DESKTOP_PROTOCOL_VERSION,
+        data: { revoked: true as const },
+      }) as BridgeResult<FileGrantRevocation>
     },
   })
 }

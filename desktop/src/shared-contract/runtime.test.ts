@@ -3,9 +3,15 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   parseAppInfoResult,
+  parseArtifactRef,
   parseCapabilitiesResult,
+  parseFileGrantId,
+  parseFileGrantResult,
+  parseFileGrantRevocationResult,
+  parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
+  parseSaveFileGrantRequest,
   parseStartupDiagnosticsResult,
 } from './runtime'
 
@@ -82,6 +88,27 @@ const firstAction = (manifest: MutableManifest): MutableAction => {
 }
 
 const capabilityResult = (data: MutableManifest) => ({ ok: true, protocolVersion: '1', data })
+const grantId = `grt_${'a'.repeat(64)}`
+const fileGrantResult = {
+  ok: true,
+  protocolVersion: '1',
+  data: {
+    grantId,
+    purpose: 'gedcom-read',
+    access: 'read',
+    scope: {
+      originatingWindow: 'requesting-window',
+      lifetime: 'app-session',
+      redemption: 'single-use',
+    },
+    metadata: {
+      displayName: 'fictional.ged',
+      format: 'gedcom',
+      sizeBytes: 26,
+      validation: 'validated-input',
+    },
+  },
+} as const
 
 describe('runtime bridge validation', () => {
   it('accepts exact versioned results for each renderer-safe response', () => {
@@ -101,6 +128,68 @@ describe('runtime bridge validation', () => {
     expect(() => parsePreferenceUpdate({})).toThrow('Invalid preference update')
     expect(() => parseAppInfoResult({ ok: true, protocolVersion: '1', data: {}, surprise: true })).toThrow('Invalid bridge response')
     expect(() => parseAppInfoResult({ ok: false, protocolVersion: '1', error: { code: 'INTERNAL_ERROR', message: 'x'.repeat(241), remediation: 'Restart AncestryLLM.' } })).toThrow('Invalid bridge response')
+  })
+
+  it('accepts exact path-free file-grant requests, results, revocations, and artifact references', () => {
+    expect(parseOpenFileGrantRequest({ purpose: 'gedcom-read' })).toEqual({ purpose: 'gedcom-read' })
+    expect(parseSaveFileGrantRequest({ purpose: 'markdown-write', suggestedName: 'family-summary.md' })).toEqual({
+      purpose: 'markdown-write',
+      suggestedName: 'family-summary.md',
+    })
+    expect(parseFileGrantId(grantId)).toBe(grantId)
+    expect(parseFileGrantResult(fileGrantResult)).toEqual(fileGrantResult)
+    expect(parseFileGrantResult({ ok: true, protocolVersion: '1', data: null })).toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: null,
+    })
+    expect(parseFileGrantRevocationResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { revoked: true },
+    }).ok).toBe(true)
+    expect(parseArtifactRef({
+      artifact_id: `art_${'b'.repeat(32)}`,
+      artifact_type: 'gedcom_export',
+      media_type: 'text/vnd.gedcom',
+      sha256: 'c'.repeat(64),
+      size_bytes: 42,
+      status: 'staged',
+    })).toMatchObject({ artifact_type: 'gedcom_export', status: 'staged' })
+  })
+
+  it('rejects renderer paths, malformed IDs, unknown fields, and incoherent grant metadata', () => {
+    expect(() => parseOpenFileGrantRequest({ purpose: 'gedcom-read', path: '/private/tree.ged' })).toThrow('Invalid open-file grant request')
+    expect(() => parseSaveFileGrantRequest({ purpose: 'gedcom-write', suggestedName: '../tree.ged' })).toThrow('Invalid save-file grant request')
+    expect(() => parseFileGrantId('grt_predictable')).toThrow('Invalid file-grant ID')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, path: '/private/tree.ged' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, access: 'write' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, scope: { ...fileGrantResult.data.scope, lifetime: 'forever' } },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: {
+        ...fileGrantResult.data,
+        metadata: { ...fileGrantResult.data.metadata, validation: 'replacement-confirmed' },
+      },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseArtifactRef({
+      artifact_id: `art_${'b'.repeat(32)}`,
+      artifact_type: 'gedcom_export',
+      media_type: 'text/vnd.gedcom',
+      sha256: 'c'.repeat(64),
+      size_bytes: 42,
+      status: 'staged',
+      path: '/private/tree.ged',
+    })).toThrow('Invalid bridge response')
   })
 
   it('rejects OpenAPI capability drift and unsafe extra fields', () => {

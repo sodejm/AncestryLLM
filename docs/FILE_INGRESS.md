@@ -92,6 +92,56 @@ provider execution. An excess fails locally as
 `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` with exit code `2` and sanitized limit
 details; no schema values, question text, or provider request are emitted.
 
+## Electron opaque file grants
+
+Unreleased Issue #103 places native desktop file selection behind the same
+fail-closed design. The sandboxed renderer may call only
+`requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`. A
+successful response contains a random `FileGrantId` and path-free
+`FileMetadata`/`ArtifactRef` display fields; it never contains a directory,
+absolute path, URI, descriptor, or filesystem handle. Cancellation returns a
+typed cancelled result and creates neither a grant nor a temporary output.
+
+Electron main owns the native dialogs and the private grant-to-path map. Before
+issuing a read grant it requires an absolute normalized selection, a regular
+non-symbolic file with one link, the exact purpose-specific extension and
+content signature, a bounded byte size, and a captured canonical filesystem
+identity and fingerprint. Save grants validate the selected parent and target,
+require explicit native confirmation before replacement, revalidate the target
+after confirmation, deny source/output aliases, and reserve the canonical
+output under a main-owned lock. Directories, symbolic links, hard-link aliases,
+devices, FIFOs, traversal spellings, replaced or growing files, mismatched
+formats, over-limit inputs, stale grants, and conflicting outputs fail with a
+stable sanitized code.
+
+Each grant is bound to one renderer, exact purpose, access mode, application
+session, and redemption. It cannot be upgraded or transferred. Explicit
+revocation, renderer close or navigation, and application restart invalidate
+it. Only trusted main-process code can call `resolveReadGrant` or
+`resolveWriteGrant`; those operations consume the grant and revalidate its
+identity before returning an internal path. The renderer cannot invoke either
+resolver. A future Python integration must reopen that internal path through
+the shared policy above and retain its descriptor/fingerprint checks through
+parsing, worker execution, and atomic publication.
+
+The broker uses these path-free failure categories:
+
+- `FILE_SELECTION_INVALID`
+- `FILE_TOO_LARGE`
+- `FILE_GRANT_FORBIDDEN`
+- `FILE_GRANT_REVOKED`
+- `FILE_GRANT_STALE`
+- `FILE_GRANT_CONFLICT`
+- `FILE_DIALOG_FAILED`
+
+Renderer-visible messages and packaged evidence contain no path. The design
+rejects renderer-supplied paths, drag-and-drop path trust, extension-only
+validation, directory or persistent grants, direct renderer filesystem APIs,
+unbounded reads, and overwrite of immutable inputs. A future container worker
+may receive only broker-verified bytes staged in application-owned scratch
+storage; it must not receive a raw host path. RootsMagic remains read-only, and
+remote artifact references remain opaque and path-free.
+
 ## Configuration
 
 Overrides belong only in the normal non-secret `config.toml` boundary. No

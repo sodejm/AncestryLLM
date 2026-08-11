@@ -44,3 +44,29 @@ test('production build inspection rejects fixture bridge and test-hook machinery
     await assert.rejects(inspectBuild(join(root, 'out')))
   }
 })
+
+test('production build inspection rejects packaged file-grant verification selectors', async () => {
+  for (const contents of [
+    'process.env.ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION',
+    'process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH',
+    'process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH',
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+    await mkdir(join(root, 'out'))
+    await writeFile(join(root, 'out', 'index.js'), contents)
+    await assert.rejects(inspectBuild(join(root, 'out')))
+  }
+})
+
+test('packaged file-grant build permits only its dedicated verification selectors', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+  await mkdir(join(root, 'out'))
+  await writeFile(
+    join(root, 'out', 'index.js'),
+    'process.env.ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION; process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH; process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH',
+  )
+  await inspectBuild(join(root, 'out'), { allowPackagedFileGrants: true })
+
+  await writeFile(join(root, 'out', 'index.js'), 'process.env.ANCESTRYLLM_DESKTOP_FIXTURE')
+  await assert.rejects(inspectBuild(join(root, 'out'), { allowPackagedFileGrants: true }))
+})

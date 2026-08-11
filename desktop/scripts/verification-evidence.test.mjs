@@ -113,6 +113,23 @@ function faultEvidence(scenario, observations) {
   }
 }
 
+function fileGrantEvidence() {
+  return {
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-file-grant-evidence',
+    status: 'passed',
+    verificationOnlyDialogAdapter: true,
+    observations: {
+      openGrantOpaque: true,
+      openMetadataValidated: true,
+      saveGrantOpaque: true,
+      replacementConfirmed: true,
+      revocationPassed: true,
+      selectedPathsAbsent: true,
+    },
+  }
+}
+
 function targetFixture(row, observed = metrics) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
   const metricsBytes = encoded(observed)
@@ -144,6 +161,8 @@ function targetFixture(row, observed = metrics) {
   const withholdEvidenceBytes = encoded(withholdEvidence)
   const restartEvidenceBytes = encoded(restartEvidence)
   const integrityEvidenceBytes = encoded(integrityEvidence)
+  const fileGrantMediation = fileGrantEvidence()
+  const fileGrantEvidenceBytes = encoded(fileGrantMediation)
   const runtimeReceipt = receiptRecord(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed', 'normalLaunchDebugSurfaceAbsentPassed'],
     { metrics: digest(metricsBytes) },
@@ -159,6 +178,11 @@ function targetFixture(row, observed = metrics) {
     ['fusesInspectedPassed'],
     { fuseInspection: digest(fuseInspectionBytes) },
     ['node', 'scripts/inspect-package-fuses.mjs'],
+  )
+  const fileGrantReceipt = receiptRecord(
+    ['packagedFileGrantSmokePassed'],
+    { fileGrantEvidence: digest(fileGrantEvidenceBytes) },
+    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'mediates opaque packaged open and save file grants'],
   )
   const withholdReceipt = receiptRecord(
     ['packagedSidecarWithholdRetryPassed'],
@@ -183,6 +207,7 @@ function targetFixture(row, observed = metrics) {
     processTreeGuardReceipt,
     sidecarReceipt,
     fuseReceipt,
+    fileGrantReceipt,
     withholdReceipt,
     restartReceipt,
     integrityReceipt,
@@ -200,6 +225,8 @@ function targetFixture(row, observed = metrics) {
     metricsBytes,
     fuseInspection: inspection,
     fuseInspectionBytes,
+    fileGrantMediation,
+    fileGrantEvidenceBytes,
     withholdEvidence,
     withholdEvidenceBytes,
     restartEvidence,
@@ -212,6 +239,7 @@ function targetFixture(row, observed = metrics) {
     evidence,
     metricsBytes,
     fuseInspectionBytes,
+    fileGrantEvidenceBytes,
     withholdEvidenceBytes,
     restartEvidenceBytes,
     integrityEvidenceBytes,
@@ -240,6 +268,8 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
   assert.equal(evidence.packageRuntime, true)
   assert.equal(evidence.rendererZeroEgressCanary, true)
   assert.equal(evidence.normalLaunchDebugSurfaceAbsent, true)
+  assert.equal(evidence.packagedFileGrantSmoke, true)
+  assert.deepEqual(evidence.fileGrantMediation, fileGrantEvidence())
   assert.equal(evidence.signingVerified, false)
   assert.equal(evidence.hostArch, 'arm64')
   assert.equal(evidence.arch, 'arm64')
@@ -261,6 +291,8 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
     metricsBytes: fixture.metricsBytes,
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
@@ -306,6 +338,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: Buffer.from('{}'),
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
@@ -338,6 +372,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: linuxFixture.metricsBytes,
     fuseInspection: wrong,
     fuseInspectionBytes: wrongBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: linuxFixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(linuxFixture.withholdEvidenceBytes),
     withholdEvidenceBytes: linuxFixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(linuxFixture.restartEvidenceBytes),
@@ -380,6 +416,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
     await writeFile(join(runnerRoot, 'evidence.json'), encoded(fixture.evidence))
     await writeFile(join(runnerRoot, 'metrics.json'), fixture.metricsBytes)
     await writeFile(join(runnerRoot, 'fuse-inspection.json'), fixture.fuseInspectionBytes)
+    await writeFile(join(runnerRoot, 'file-grant-mediation.json'), fixture.fileGrantEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-withhold-retry.json'), fixture.withholdEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-restart-exhaustion-quit.json'), fixture.restartEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-integrity-substitution.json'), fixture.integrityEvidenceBytes)

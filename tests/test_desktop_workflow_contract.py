@@ -120,7 +120,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
-    assert workflow.count("node desktop/scripts/run-packaged-tests.mjs") == 4
+    assert workflow.count("node desktop/scripts/run-packaged-tests.mjs") == 5
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
@@ -135,10 +135,12 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "--receipts" in workflow
     assert "--artifact metrics=" in workflow
     assert "--artifact fuseInspection=" in workflow
+    assert "--artifact fileGrantEvidence=" in workflow
     assert "--artifact sbom=" in workflow
     assert "--audit-passed" not in workflow
     assert "desktop/release/" not in workflow
     assert "--config electron-builder.verification.yml" in workflow
+    assert "--config electron-builder.file-grant-verification.yml" in workflow
 
     builder = VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
     assert "extends: ./electron-builder.yml" in builder
@@ -182,11 +184,36 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     assert "ANCESTRYLLM_SUBSTITUTED_SIDECAR" not in production_sources
 
 
+def test_workflow_binds_packaged_file_grant_mediation_without_production_dialog_hooks() -> None:
+    workflow = _workflow()
+
+    assert "ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_OPEN_PATH=" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_SAVE_PATH=" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_EVIDENCE=" in workflow
+    assert "packaged-file-grants.json" in workflow
+    assert "--gate packagedFileGrantSmokePassed" in workflow
+    assert '--artifact fileGrantEvidence="$ANCESTRYLLM_FILE_GRANT_EVIDENCE"' in workflow
+    assert '--file-grant-evidence "$ROW_ROOT/file-grant-mediation.json"' in workflow
+    assert "desktop/release-file-grant-verification" in workflow
+
+    production_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "desktop" / "src").rglob("*"))
+        if path.is_file()
+    )
+    assert "ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_OPEN_PATH" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_SAVE_PATH" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_EVIDENCE" not in production_sources
+
+
 def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator() -> None:
     workflow = _workflow()
 
     expected_scenarios = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence",
+        "mediates opaque packaged open and save file grants",
         "withholds and restores the packaged sidecar through Diagnostics retry",
         "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
         "rejects a target-native substituted packaged sidecar before spawn",
@@ -207,6 +234,7 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
     )
     expected_evidence_paths = (
         'ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"',
+        'ANCESTRYLLM_FILE_GRANT_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-mediation.json"',
         'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
         'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
         'ANCESTRYLLM_INTEGRITY_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution.json"',
@@ -219,6 +247,7 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
         '--withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json"',
         '--restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
         '--integrity-evidence "$ROW_ROOT/sidecar-integrity-substitution.json"',
+        '--file-grant-evidence "$ROW_ROOT/file-grant-mediation.json"',
     )
     for evidence_path in expected_recorded_evidence:
         assert evidence_path in workflow
