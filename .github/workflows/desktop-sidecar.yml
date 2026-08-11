@@ -338,7 +338,7 @@ jobs:
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
-          uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build
+          uv sync --locked --no-default-groups --extra desktop-build --group test --no-install-project --no-build
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop dependencies
         shell: bash
