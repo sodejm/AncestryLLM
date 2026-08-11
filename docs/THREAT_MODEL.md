@@ -281,6 +281,12 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 |---|---|---|
 | `TM-U01`, `TM-U03` | `[tool.uv]` requires exactly `uv` 0.12.1, selects only a system interpreter, and disables Python downloads; `.python-version` defaults to 3.12 while a fail-closed preflight admits only Python 3.12-3.14 with stable coded errors. Make owns bootstrap, setup, lock, test, lint, typing, security, package, hook, and workflow-audit commands. Static workflow contracts prove canonical CI, readiness, and release jobs invoke those same Make targets after any allowed narrow group synchronization and retain exact SHA-pinned `actions/setup-python` plus the 3.12-3.14 test matrix. | No python-build-standalone executable trust chain is added, and a missing or unsupported system interpreter cannot trigger a download or unverified fallback. The change affects repository tooling only; application dependencies, runtime data flow, privilege boundaries, CLI/API/provider behavior, GEDCOM and RootsMagic safety, storage, FastAPI, and Electron boundaries remain unchanged. |
 
+### Issue #309 ty advisory evidence
+
+| Control | Source and workflow evidence | Security and architecture disposition |
+|---|---|---|
+| `TM-U01`, `TM-U03` | The `typecheck` group pins exact `ty==0.0.69` with lockfile artifact hashes. Make owns the complete-tree command and preserves ty's status; workflow contracts require a dedicated `continue-on-error` quality step without shell masking while strict mypy remains blocking. Isolated fixtures distinguish missed diagnostics from checker execution failures with stable codes, and the published evaluation records all diagnostic categories and unchanged suppression counts. | The candidate checker is acquired only through the verified, locked toolchain and receives no application data or credentials. It adds no runtime package, network path, privilege, provider import, or trust fallback. The focused progress-adapter keyword fix restores its declared protocol contract; provider consent, network-free `provider=none`, immutable RootsMagic sources, loss-minimal GEDCOM behavior, storage, FastAPI, and Electron boundaries remain unchanged. |
+
 ### Issue #11 source-level evidence
 
 The isolated 0.5.0 foundation implements and tests the source-level subset of

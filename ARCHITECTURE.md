@@ -949,6 +949,7 @@ The Make targets are the command contract:
 | `make test` | Pytest regression and characterization suite. |
 | `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
+| `make typecheck-ty` | Exact ty advisory evaluation over the complete `ancestryllm` source tree, preserving its real status. |
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
 | `make sbom` | CycloneDX environment SBOM. |
 | `make package` | Locked build-group construction and artifact validation. |
@@ -971,6 +972,17 @@ instead of repeating it.
 Semgrep remains an independently pinned pull-request gate. CodeQL runs on
 pushes, pull requests, and a weekly schedule. Dependabot covers Python and
 GitHub Actions. Pinned action commit SHAs reduce workflow supply-chain drift.
+
+For the 0.6 advisory period, exact `ty 0.0.69` runs separately with
+`continue-on-error: true`; strict mypy with `pydantic.mypy` remains the blocking
+type checker and the release-evidence result remains schema-v1 `mypy`. The
+advisory parity harness uses isolated invalid language and Pydantic fixtures,
+while the complete-tree evaluation records 58 unresolved checker, model, and
+third-party typing diagnostics in CI's narrow quality profile. Installing every
+optional provider SDK resolves five import diagnostics but leaves 53; neither
+profile passes. The conditional 0.7 cutover is a separate architecture decision
+and cannot proceed without full-tree parity and the existing supported Python
+range.
 
 This environment ownership changes repository tooling only and adds no
 python-build-standalone executable trust chain. It does not add an application

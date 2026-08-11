@@ -22,7 +22,7 @@ The dependency groups are:
 | Group | Purpose | Canonical consumers |
 |---|---|---|
 | `lint` | Ruff, pre-commit, and repository checks | `make lint`, `make hooks`, and CI quality jobs |
-| `typecheck` | Strict mypy and third-party type information | `make typecheck` and CI quality jobs |
+| `typecheck` | Strict mypy, third-party type information, and exact ty advisory evaluation | `make typecheck`, `make typecheck-ty`, and CI quality jobs |
 | `test` | Pytest and coverage | `make test`, Python test matrices, and release-project proof jobs |
 | `security` | Dependency audit, SBOM, and workflow audit tools | `make security`, `make sbom`, `make workflow-audit`, and matching workflow jobs |
 | `build` | Distribution construction and artifact validation | `make package` and package/release build jobs |
@@ -34,6 +34,15 @@ graph. Canonical gates use exact `uv run --locked --group ...` commands. A
 purpose-specific workflow may first synchronize a smaller profile with
 `--no-default-groups`, but it then invokes the same Make target without changing
 the actual command or flags.
+
+`ty==0.0.69` is deliberately exact because the 0.6 work is a reproducible
+advisory evaluation, not a floating checker migration. `make typecheck-ty`
+preserves its real exit status in a dedicated nonblocking CI step. Strict mypy,
+`types-python-dateutil`, and `pydantic.mypy` remain authoritative until every
+conditional cutover gate passes. See the
+[ty advisory evaluation](TY_ADVISORY_EVALUATION.md) for the current diagnostic
+triage, the quality-profile and all-extras counts, and the failed cutover
+conditions.
 
 Provider SDKs remain user-facing optional extras: `ollama`, `openai`,
 `anthropic`, `gemini`, `openrouter`, and the aggregate `all-llm`. The Python
