@@ -26,7 +26,7 @@ from ancestryllm.api.errors import error_envelope as api_error_envelope
 from ancestryllm.api.openapi import contract_app
 from ancestryllm.application.errors import domain_failure_from_exception, map_domain_failure
 from ancestryllm.application.errors import error_envelope as application_error_envelope
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, StorageError
 from ancestryllm.terminal.presentation import PresentationAdapter
 
 if TYPE_CHECKING:
@@ -250,3 +250,33 @@ def test_service_cli_json_and_api_error_semantics_do_not_drift() -> None:
     status_code, api_envelope = api_error_envelope(error, correlation_ref=correlation_ref)
     assert status_code == 400
     assert api_envelope.model_dump(mode="json") == json.loads(output.getvalue())
+
+
+def test_backup_collision_error_is_sanitized_at_structured_boundaries() -> None:
+    private_path = "/Users/PRIVATE-USERNAME-CANARY/PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    error = StorageError(
+        "BACKUP_EXISTS",
+        f"Backup destination already exists: {private_path}",
+    )
+    sanitized = map_domain_failure(domain_failure_from_exception(error))
+    application_envelope = application_error_envelope(
+        sanitized,
+        correlation_ref="api_" + ("c" * 32),
+    )
+    status_code, api_envelope = api_error_envelope(
+        error,
+        correlation_ref="api_" + ("c" * 32),
+    )
+    rendered = json.dumps(
+        {
+            "application": application_envelope.to_serializable(),
+            "api": api_envelope.model_dump(mode="json"),
+        },
+        sort_keys=True,
+    )
+
+    assert sanitized.code == "APPLICATION_FAILURE"
+    assert status_code == 500
+    assert private_path not in rendered
+    assert "PRIVATE-USERNAME-CANARY" not in rendered
+    assert "PRIVATE-FICTIONAL-FAMILY-BACKUP.db" not in rendered

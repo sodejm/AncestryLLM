@@ -210,7 +210,11 @@ class Database:
         """Create an encrypted backup using SQLCipher's online backup API."""
         cancellation_checkpoint()
         if os.path.lexists(destination):
-            raise StorageError("BACKUP_EXISTS", f"Backup destination already exists: {destination}")
+            raise StorageError(
+                "BACKUP_EXISTS",
+                "The backup destination already exists.",
+                "Choose a different destination or remove the existing item before retrying.",
+            )
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         staged = staging_path(destination)
         try:

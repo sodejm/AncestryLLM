@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
+import secrets
 import threading
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from contextlib import suppress
@@ -158,6 +160,7 @@ class JobManager:
         self._lock = threading.RLock()
         self._records: dict[str, _JobRecord] = {}
         self._resource_locks: dict[str, threading.Lock] = {}
+        self._resource_identifier_key = secrets.token_bytes(32)
         self._listeners: list[Callable[[JobSnapshot], None]] = []
         self._next_id = 1
         self._closed = False
@@ -201,6 +204,7 @@ class JobManager:
                 "Wait for a job to finish, then retry.",
             )
         normalized_keys = tuple(sorted(set(resource_keys)))
+        public_resource_keys = self._public_resource_keys(normalized_keys)
         with self._lock:
             job_id = f"j{self._next_id:06d}"
             self._next_id += 1
@@ -211,7 +215,7 @@ class JobManager:
                 submitted_at=_timestamp(),
                 started_at=None,
                 finished_at=None,
-                resource_keys=normalized_keys,
+                resource_keys=public_resource_keys,
             )
             token = CancellationToken()
             record = _JobRecord(snapshot, token)
@@ -233,6 +237,19 @@ class JobManager:
         with self._lock:
             record.future = future
         return snapshot
+
+    def _public_resource_keys(self, resource_keys: tuple[str, ...]) -> tuple[str, ...]:
+        """Return manager-local opaque identifiers for public job snapshots."""
+
+        return tuple(
+            "resource_"
+            + hmac.digest(
+                self._resource_identifier_key,
+                resource_key.encode("utf-8", errors="surrogatepass"),
+                "sha256",
+            ).hex()
+            for resource_key in resource_keys
+        )
 
     def _execute(
         self,

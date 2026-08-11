@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import threading
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager, JobReporter, JobSnapshot, JobState
+from ancestryllm.terminal.presentation import to_plain
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> None:
@@ -43,6 +49,48 @@ def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> No
     )
     assert secret not in repr(failed_snapshot)
     assert [item.job_id for item in manager.list(JobState.FAILED)] == [failed.job_id]
+
+
+def test_job_snapshots_expose_opaque_resource_references_without_paths(
+    tmp_path: Path,
+) -> None:
+    private_database = str(
+        tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-DATABASE-PATH" / "workspace.db"
+    )
+    private_backup = str(tmp_path / "PRIVATE-HOME-CANARY" / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db")
+    manager = JobManager(max_workers=1, max_pending=2)
+    try:
+        first = manager.submit(
+            "first",
+            lambda: None,
+            resource_keys=(private_database, private_backup),
+        )
+        second = manager.submit(
+            "second",
+            lambda: None,
+            resource_keys=(private_database,),
+        )
+        first = manager.wait(first.job_id, timeout=2)
+        second = manager.wait(second.job_id, timeout=2)
+    finally:
+        manager.shutdown()
+
+    assert len(first.resource_keys) == 2
+    assert all(
+        resource_ref.startswith("resource_") and len(resource_ref) == 73
+        for resource_ref in first.resource_keys
+    )
+    assert set(second.resource_keys) < set(first.resource_keys)
+    rendered = json.dumps(to_plain([first, second]), sort_keys=True)
+    for private_value in (
+        private_database,
+        private_backup,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        "PRIVATE-DATABASE-PATH",
+        "PRIVATE-FICTIONAL-FAMILY-BACKUP.db",
+    ):
+        assert private_value not in rendered
 
 
 def test_job_reporter_retains_redacted_actionable_outcome() -> None:
