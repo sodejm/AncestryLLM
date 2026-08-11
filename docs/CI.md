@@ -45,7 +45,7 @@ group and calls `make lock-check`, whose canonical command is
 |---|---|
 | Local full setup | All application extras and every dependency group, including `release-verifier` |
 | Python test matrix | `test` plus `all-llm` |
-| Quality | `lint` plus `typecheck` |
+| Quality | `lint` plus `typecheck`; exact ty is installed only for its visible advisory step |
 | Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
 | Package and release construction | `build`; release construction also installs `security` only for SBOM generation |
 | Production PyPI artifact verification | `release-verifier` only |
@@ -61,6 +61,17 @@ security-evidence job installs `security`. This prevents a successful gate from
 depending on packages left behind by another profile. The exact profiles and
 maintenance procedure are documented in [Dependency
 maintenance](DEPENDENCY_MAINTENANCE.md).
+
+The Python 3.12 quality job keeps `make typecheck` as the blocking strict-mypy
+gate. A separate `make typecheck-ty` step runs exact `ty 0.0.69` over
+`src/ancestryllm` with `continue-on-error: true`; it does not use `|| true`, so
+the Actions UI retains ty's actual status. Release readiness and release
+evidence continue to require the schema-v1 `mypy` result. The counts, parity
+fixtures, Pydantic limitations, timings, and cutover disposition are recorded
+in the [ty advisory evaluation](TY_ADVISORY_EVALUATION.md). Its authoritative
+58-diagnostic count uses this provider-free quality profile; a documented
+all-extras setup resolves five optional provider imports without satisfying the
+cutover gate.
 
 ## Headless shell policy
 

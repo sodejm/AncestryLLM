@@ -17,10 +17,10 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
 export UV_PYTHON := $(PYTHON)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint typecheck dependency-audit security-static security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint typecheck typecheck-ty dependency-audit security-static security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck typecheck-ty security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
 
 desktop-install:
 	@pnpm --dir desktop install --frozen-lockfile
@@ -71,6 +71,9 @@ lint: verified-uv
 
 typecheck: verified-uv
 	@$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm
+
+typecheck-ty: verified-uv
+	@$(UV_BIN) run --locked --group typecheck ty check src/ancestryllm
 
 dependency-audit: verified-uv
 	@$(UV_BIN) run --locked --group security pip-audit

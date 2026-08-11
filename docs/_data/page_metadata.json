@@ -73,6 +73,10 @@
     "title": "Dependency maintenance — AncestryLLM",
     "description": "Purpose-specific dependency groups, locked environment profiles, and the reviewed dependency update procedure."
   },
+  "TY_ADVISORY_EVALUATION.md": {
+    "title": "ty advisory evaluation — AncestryLLM",
+    "description": "Reproducible ty 0.0.69 diagnostics, checker-parity evidence, suppressions, timing, and conditional cutover disposition."
+  },
   "ARCHITECTURE_CONTRACTS.md": {
     "title": "Architecture ownership and dependency contracts — AncestryLLM",
     "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."

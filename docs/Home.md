@@ -73,6 +73,7 @@ Factual, accurate information to look up:
 - [Versioning and compatibility](VERSIONING.md)
 - [Bounded file ingress](FILE_INGRESS.md)
 - [Continuous integration](CI.md)
+- [ty advisory evaluation](TY_ADVISORY_EVALUATION.md) — 0.6 checker evidence and cutover disposition
 - [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Command executor](COMMAND_EXECUTOR.md)
 - [Built-in module authoring](MODULE_AUTHORING.md) — constraints, registration, and tests

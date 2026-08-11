@@ -105,6 +105,13 @@ the same Make target without changing the command or its flags. The verified
 bootstrap supplies `uv`; do not add `uv` to a dependency group, install it with
 `pip`, use `uvx` or `uv run --with`, or enable Python downloads.
 
+During the 0.6 advisory period, `make typecheck` remains the authoritative
+strict-mypy gate with the Pydantic plugin. `make typecheck-ty` runs exact
+`ty 0.0.69` across the same complete source tree and preserves its real status;
+CI exposes that result in a separate nonblocking step. See the
+[ty advisory evaluation](docs/TY_ADVISORY_EVALUATION.md) before interpreting
+its diagnostics or proposing the separately gated 0.7 cutover.
+
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures
 must be synthetic and source files must remain hash-identical after tests.
