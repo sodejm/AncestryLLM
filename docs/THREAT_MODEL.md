@@ -287,6 +287,12 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 |---|---|---|
 | `TM-U01`, `TM-U03` | The `typecheck` group pins exact `ty==0.0.69` with lockfile artifact hashes. Make owns the complete-tree command and preserves ty's status; workflow contracts require a dedicated `continue-on-error` quality step without shell masking while strict mypy remains blocking. Isolated fixtures distinguish missed diagnostics from checker execution failures with stable codes, and the published evaluation records all diagnostic categories and unchanged suppression counts. | The candidate checker is acquired only through the verified, locked toolchain and receives no application data or credentials. It adds no runtime package, network path, privilege, provider import, or trust fallback. The focused progress-adapter keyword fix restores its declared protocol contract; provider consent, network-free `provider=none`, immutable RootsMagic sources, loss-minimal GEDCOM behavior, storage, FastAPI, and Electron boundaries remain unchanged. |
 
+### Issue #311 uv_build evaluation evidence
+
+| Control | Source and workflow evidence | Security and architecture disposition |
+|---|---|---|
+| `TM-U01`, `TM-U03`, `TM-B01` | The candidate `uv_build>=0.12.0,<0.13` resolves through the complete lock and verified `uv` bootstrap. A clean-commit harness supplies identical source trees, environment allowlist, Python, and source epoch; validates ZIP and tar members before inspection; compares explicit file allowlists, payload bytes, semantic metadata, entry points, `RECORD`, installation, sdist reconstruction, and two consecutive candidate builds; and emits a sanitized closed-schema record with stable failure codes. | Setuptools remains authoritative because the candidate omits license and metadata files, adds an unexpected private source file, and changes semantic wheel metadata and records. Only archive order and metadata timestamps are normalized; drift, nondeterminism, unsafe members, missing evidence, paths, or unknown schema fields fail closed. The evaluation adds no runtime dependency, network path, credential exposure, provider behavior, genealogy data flow, API, CLI, storage, FastAPI, or Electron boundary. |
+
 ### Issue #11 source-level evidence
 
 The isolated 0.5.0 foundation implements and tests the source-level subset of

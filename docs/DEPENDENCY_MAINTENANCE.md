@@ -25,7 +25,7 @@ The dependency groups are:
 | `typecheck` | Strict mypy, third-party type information, and exact ty advisory evaluation | `make typecheck`, `make typecheck-ty`, and CI quality jobs |
 | `test` | Pytest and coverage | `make test`, Python test matrices, and release-project proof jobs |
 | `security` | Dependency audit, SBOM, and workflow audit tools | `make security`, `make sbom`, `make workflow-audit`, and matching workflow jobs |
-| `build` | Distribution construction and artifact validation | `make package` and package/release build jobs |
+| `build` | Distribution construction, artifact validation, and isolated backend evaluation | `make package`, `make evaluate-uv-build`, and package/release build jobs |
 | `release-verifier` | Exact PyPI attestation verifier | Release artifact verification only |
 
 `make setup` runs `uv sync --locked --all-extras --all-groups`, including the
@@ -43,6 +43,15 @@ conditional cutover gate passes. See the
 [ty advisory evaluation](TY_ADVISORY_EVALUATION.md) for the current diagnostic
 triage, the quality-profile and all-extras counts, and the failed cutover
 conditions.
+
+`uv_build>=0.12.0,<0.13` belongs to `build` only as the locked candidate for
+the isolated 0.6 backend evaluation. The production `[build-system]` remains
+`setuptools.build_meta`, and `make package` plus every release workflow retain
+the established setuptools normalization and validation path. From a clean
+checkout, `make evaluate-uv-build` compares both backends under one source
+epoch and writes a schema-v1 report; its nonzero incompatible result must not
+be masked. The checked [uv_build evaluation](UV_BUILD_EVALUATION.md) records
+why adoption is rejected/deferred for the candidate configuration.
 
 Provider SDKs remain user-facing optional extras: `ollama`, `openai`,
 `anthropic`, `gemini`, `openrouter`, and the aggregate `all-llm`. The Python

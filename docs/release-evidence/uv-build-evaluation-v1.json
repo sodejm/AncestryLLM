@@ -1,0 +1,387 @@
+{
+  "accepted_input_differences": [
+    {
+      "code": "UVBEVAL_CANDIDATE_BUILD_CONFIGURATION",
+      "paths": [
+        "pyproject.toml"
+      ]
+    }
+  ],
+  "accepted_output_normalizations": [
+    {
+      "code": "UVBEVAL_ARCHIVE_MEMBER_ORDER",
+      "scope": [
+        "sdist",
+        "wheel"
+      ]
+    },
+    {
+      "code": "UVBEVAL_ARCHIVE_METADATA_TIMESTAMPS",
+      "scope": [
+        "sdist",
+        "wheel"
+      ]
+    }
+  ],
+  "artifacts": {
+    "setuptools": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "381606dc8beef94c0119e37149c2889041ed3fff543bc6c633838cb2de92e1e5"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
+      }
+    },
+    "setuptools_from_sdist": {
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
+      }
+    },
+    "uv_build_first": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    },
+    "uv_build_from_sdist": {
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    },
+    "uv_build_second": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    }
+  },
+  "comparisons": {
+    "entry_points": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_ENTRYPOINT_DRIFT",
+      "passed": true
+    },
+    "migration_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_MIGRATION_PATH_DRIFT",
+      "passed": true
+    },
+    "module_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_MODULE_PATH_DRIFT",
+      "passed": true
+    },
+    "package_data_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_PACKAGE_DATA_DRIFT",
+      "passed": true
+    },
+    "project_files": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": [
+          "LICENSE"
+        ]
+      },
+      "failure_code": "UVBEVAL_PROJECT_FILE_DRIFT",
+      "passed": false
+    },
+    "project_metadata": {
+      "differences": {
+        "added": [
+          "dependency:alembic>=1.18,<2",
+          "dependency:anthropic>=0.71,<1 ; extra == 'all-llm'",
+          "dependency:anthropic>=0.71,<1 ; extra == 'anthropic'",
+          "dependency:fastapi>=0.116,<1",
+          "dependency:google-genai>=2.12,<3 ; extra == 'all-llm'",
+          "dependency:google-genai>=2.12,<3 ; extra == 'gemini'",
+          "dependency:httpx>=0.28,<1",
+          "dependency:jsonschema>=4.25.1,<4.27",
+          "dependency:keyring>=25.7,<26",
+          "dependency:ollama>=0.6,<1 ; extra == 'all-llm'",
+          "dependency:ollama>=0.6,<1 ; extra == 'ollama'",
+          "dependency:openai>=2.45,<3 ; extra == 'all-llm'",
+          "dependency:openai>=2.45,<3 ; extra == 'openai'",
+          "dependency:openai>=2.45,<3 ; extra == 'openrouter'",
+          "dependency:platformdirs>=4.5,<5",
+          "dependency:prompt-toolkit>=3.0.52,<4",
+          "dependency:pydantic>=2.12,<3",
+          "dependency:pyinstaller>=6.17,<7 ; extra == 'desktop-build'",
+          "dependency:python-dateutil>=2.9,<3",
+          "dependency:rapidfuzz>=3.14,<4",
+          "dependency:rich>=15,<16",
+          "dependency:sqlalchemy>=2.0,<3",
+          "dependency:sqlcipher3>=0.6.2,<0.7",
+          "dependency:sqlglot>=28,<31",
+          "dependency:tomli-w>=1.2,<2",
+          "dependency:uvicorn>=0.35,<1"
+        ],
+        "changed": [
+          "requires-python"
+        ],
+        "removed": [
+          "dependency:alembic<2,>=1.18",
+          "dependency:anthropic<1,>=0.71; extra == \"all-llm\"",
+          "dependency:anthropic<1,>=0.71; extra == \"anthropic\"",
+          "dependency:fastapi<1,>=0.116",
+          "dependency:google-genai<3,>=2.12; extra == \"all-llm\"",
+          "dependency:google-genai<3,>=2.12; extra == \"gemini\"",
+          "dependency:httpx<1,>=0.28",
+          "dependency:jsonschema<4.27,>=4.25.1",
+          "dependency:keyring<26,>=25.7",
+          "dependency:ollama<1,>=0.6; extra == \"all-llm\"",
+          "dependency:ollama<1,>=0.6; extra == \"ollama\"",
+          "dependency:openai<3,>=2.45; extra == \"all-llm\"",
+          "dependency:openai<3,>=2.45; extra == \"openai\"",
+          "dependency:openai<3,>=2.45; extra == \"openrouter\"",
+          "dependency:platformdirs<5,>=4.5",
+          "dependency:prompt-toolkit<4,>=3.0.52",
+          "dependency:pydantic<3,>=2.12",
+          "dependency:pyinstaller<7,>=6.17; extra == \"desktop-build\"",
+          "dependency:python-dateutil<3,>=2.9",
+          "dependency:rapidfuzz<4,>=3.14",
+          "dependency:rich<16,>=15",
+          "dependency:sqlalchemy<3,>=2.0",
+          "dependency:sqlcipher3<0.7,>=0.6.2",
+          "dependency:sqlglot<31,>=28",
+          "dependency:tomli-w<2,>=1.2",
+          "dependency:uvicorn<1,>=0.35"
+        ]
+      },
+      "failure_code": "UVBEVAL_PROJECT_METADATA_DRIFT",
+      "passed": false
+    },
+    "record": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "ancestryllm-0.5.0.dist-info/METADATA",
+          "ancestryllm-0.5.0.dist-info/WHEEL",
+          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+        ],
+        "removed": [
+          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.5.0.dist-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_RECORD_DRIFT",
+      "passed": false
+    },
+    "sdist_payload_except_controlled_build_configuration": {
+      "differences": {
+        "added": [
+          "pyproject.toml.orig"
+        ],
+        "changed": [
+          "PKG-INFO"
+        ],
+        "removed": [
+          "LICENSE",
+          "setup.cfg",
+          "src/ancestryllm.egg-info/PKG-INFO",
+          "src/ancestryllm.egg-info/SOURCES.txt",
+          "src/ancestryllm.egg-info/dependency_links.txt",
+          "src/ancestryllm.egg-info/entry_points.txt",
+          "src/ancestryllm.egg-info/requires.txt",
+          "src/ancestryllm.egg-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_SDIST_PAYLOAD_DRIFT",
+      "passed": false
+    },
+    "setuptools_allowlists": {
+      "differences": {
+        "blocked": [],
+        "missing": [],
+        "unexpected": [],
+        "wheel_blocked": [],
+        "wheel_unexpected": []
+      },
+      "failure_code": "UVBEVAL_SETUPTOOLS_ALLOWLIST_VIOLATION",
+      "passed": true
+    },
+    "setuptools_install_import_entrypoint": {
+      "differences": [],
+      "failure_code": "UVBEVAL_SETUPTOOLS_INSTALL_SMOKE_FAILED",
+      "passed": true
+    },
+    "setuptools_sdist_reconstruction": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_SETUPTOOLS_RECONSTRUCTION_DRIFT",
+      "passed": true
+    },
+    "uv_build_allowlists": {
+      "differences": {
+        "blocked": [],
+        "missing": [
+          "LICENSE"
+        ],
+        "unexpected": [
+          "pyproject.toml.orig"
+        ],
+        "wheel_blocked": [],
+        "wheel_unexpected": []
+      },
+      "failure_code": "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
+      "passed": false
+    },
+    "uv_build_install_import_entrypoint": {
+      "differences": [],
+      "failure_code": "UVBEVAL_UV_BUILD_INSTALL_SMOKE_FAILED",
+      "passed": true
+    },
+    "uv_build_reproducibility": {
+      "differences": [],
+      "failure_code": "UVBEVAL_CANDIDATE_NOT_REPRODUCIBLE",
+      "passed": true
+    },
+    "uv_build_sdist_reconstruction": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_UV_BUILD_RECONSTRUCTION_DRIFT",
+      "passed": true
+    },
+    "wheel_archive_contents": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "ancestryllm-0.5.0.dist-info/METADATA",
+          "ancestryllm-0.5.0.dist-info/RECORD",
+          "ancestryllm-0.5.0.dist-info/WHEEL",
+          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+        ],
+        "removed": [
+          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.5.0.dist-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
+      "passed": false
+    },
+    "wheel_descriptor": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "header:generator[0]"
+        ],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
+      "passed": false
+    },
+    "wheel_metadata": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "header:requires-dist[0]",
+          "header:requires-dist[10]",
+          "header:requires-dist[11]",
+          "header:requires-dist[12]",
+          "header:requires-dist[13]",
+          "header:requires-dist[14]",
+          "header:requires-dist[15]",
+          "header:requires-dist[16]",
+          "header:requires-dist[17]",
+          "header:requires-dist[18]",
+          "header:requires-dist[19]",
+          "header:requires-dist[1]",
+          "header:requires-dist[20]",
+          "header:requires-dist[21]",
+          "header:requires-dist[22]",
+          "header:requires-dist[23]",
+          "header:requires-dist[24]",
+          "header:requires-dist[25]",
+          "header:requires-dist[2]",
+          "header:requires-dist[3]",
+          "header:requires-dist[4]",
+          "header:requires-dist[5]",
+          "header:requires-dist[6]",
+          "header:requires-dist[7]",
+          "header:requires-dist[8]",
+          "header:requires-dist[9]",
+          "header:requires-python[0]"
+        ],
+        "removed": [
+          "header:dynamic[0]",
+          "header:license-file[0]"
+        ]
+      },
+      "failure_code": "UVBEVAL_WHEEL_METADATA_DRIFT",
+      "passed": false
+    },
+    "wheel_package_payload": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_WHEEL_PAYLOAD_DRIFT",
+      "passed": true
+    }
+  },
+  "evaluation": "setuptools-vs-uv_build",
+  "failure_codes": [
+    "UVBEVAL_PROJECT_FILE_DRIFT",
+    "UVBEVAL_PROJECT_METADATA_DRIFT",
+    "UVBEVAL_RECORD_DRIFT",
+    "UVBEVAL_SDIST_PAYLOAD_DRIFT",
+    "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
+    "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
+    "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
+    "UVBEVAL_WHEEL_METADATA_DRIFT"
+  ],
+  "schema_version": 1,
+  "source": {
+    "commit": "b94f5b8338079d05bd0b386df6c5ec9b33b55422",
+    "source_date_epoch": 1786426222
+  },
+  "status": "incompatible",
+  "tools": {
+    "build_frontend": "uv 0.12.1",
+    "python": "3.14.6",
+    "setuptools": {
+      "requirement": "setuptools>=83",
+      "version": "83.0.0"
+    },
+    "uv_build": {
+      "requirement": "uv_build>=0.12.0,<0.13",
+      "version": "0.12.3"
+    }
+  }
+}

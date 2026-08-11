@@ -81,6 +81,10 @@
     "title": "Ruff rule-expansion evaluation — AncestryLLM",
     "description": "Reviewed Ruff 0.16.1 diagnostics, import and startup contracts, batch evidence, and safety disposition."
   },
+  "UV_BUILD_EVALUATION.md": {
+    "title": "uv_build evaluation — AncestryLLM",
+    "description": "Reproducible setuptools and uv_build artifact comparison, semantic drift evidence, and fail-closed backend disposition."
+  },
   "ARCHITECTURE_CONTRACTS.md": {
     "title": "Architecture ownership and dependency contracts — AncestryLLM",
     "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."

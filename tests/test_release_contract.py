@@ -493,6 +493,7 @@ def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
     "script",
     (
         "scripts/build_release.py",
+        "scripts/evaluate_uv_build.py",
         "scripts/create_release_evidence.py",
         "scripts/generate_release_checksums.py",
         "scripts/run_pinned_semgrep.py",

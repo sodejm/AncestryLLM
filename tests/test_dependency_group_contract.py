@@ -30,6 +30,7 @@ EXPECTED_GROUPS = {
         "packaging>=25,<27",
         "setuptools>=83,<84",
         "twine>=6.2,<8",
+        "uv_build>=0.12.0,<0.13",
         "wheel>=0.45,<1",
     ],
     "release-verifier": ["pypi-attestations==0.0.30"],
@@ -73,6 +74,7 @@ OLD_DEV_DEPENDENCIES = {
     "zizmor==1.29.0",
 }
 NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.69"}
+NEW_BUILD_EVALUATION_DEPENDENCIES = {"uv_build>=0.12.0,<0.13"}
 
 
 def _project() -> dict[str, Any]:
@@ -120,9 +122,10 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
     retained_as_extra = set(extras["desktop-build"])
 
     assert moved | deliberately_removed | retained_as_extra == (
-        OLD_DEV_DEPENDENCIES | NEW_ADVISORY_DEPENDENCIES
+        OLD_DEV_DEPENDENCIES | NEW_ADVISORY_DEPENDENCIES | NEW_BUILD_EVALUATION_DEPENDENCIES
     )
     assert moved >= NEW_ADVISORY_DEPENDENCIES
+    assert moved >= NEW_BUILD_EVALUATION_DEPENDENCIES
     assert moved.isdisjoint(deliberately_removed | retained_as_extra)
     assert deliberately_removed.isdisjoint(retained_as_extra)
 
@@ -174,6 +177,7 @@ def test_make_profiles_select_only_their_declared_groups() -> None:
         "security-static": set(),
         "sbom": {"security"},
         "package": {"build"},
+        "evaluate-uv-build": {"build"},
         "workflow-audit": {"security"},
         "code-docs-check": {"lint"},
         "hooks": {"lint"},
