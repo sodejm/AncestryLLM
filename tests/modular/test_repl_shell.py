@@ -1197,6 +1197,43 @@ def test_repl_ocr_ingress_failure_is_offline_and_payload_safe(
     provider_call.assert_not_called()
 
 
+def test_repl_backup_collision_snapshot_hides_host_paths(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    private_parent = tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-HOME-CANARY"
+    private_parent.mkdir(parents=True)
+    destination = private_parent / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    destination.write_bytes(b"existing encrypted backup sentinel")
+
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(application.execute_line(f"database backup {shlex.quote(str(destination))}"))
+        failed = application.jobs.wait("j000001", timeout=2)
+        asyncio.run(application.execute_line("jobs show j000001"))
+        application.jobs.shutdown()
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "BACKUP_EXISTS"
+    assert failed.error_message == "The backup destination already exists."
+    assert failed.error_remediation == (
+        "Choose a different destination or remove the existing item before retrying."
+    )
+    assert failed.resource_keys
+    assert all(resource_ref.startswith("resource_") for resource_ref in failed.resource_keys)
+    rendered = stdout.getvalue() + stderr.getvalue() + json.dumps(shell_module.to_plain(failed))
+    for private_value in (
+        str(destination),
+        destination.name,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        str(app_context.database.path),
+    ):
+        assert private_value not in rendered
+    assert destination.read_bytes() == b"existing encrypted backup sentinel"
+
+
 def test_shell_dispatches_direct_commands_off_the_event_loop(
     shell_module, app_context: AppContext, monkeypatch
 ) -> None:

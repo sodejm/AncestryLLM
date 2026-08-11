@@ -956,6 +956,37 @@ def test_database_json_results_hide_host_paths(
     assert "PRIVATE-HOST-DATABASE-PATH" not in diagnostic_output
 
 
+def test_database_backup_collision_cli_error_hides_host_paths(
+    app_context: AppContext,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_parent = tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-HOME-CANARY"
+    private_parent.mkdir(parents=True)
+    destination = private_parent / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    destination.write_bytes(b"existing encrypted backup sentinel")
+
+    assert main(["database", "backup", str(destination)], app_context) == 1
+
+    captured = capsys.readouterr()
+    rendered = captured.out + captured.err
+    normalized_rendered = " ".join(rendered.split())
+    assert "[BACKUP_EXISTS] The backup destination already exists." in normalized_rendered
+    assert (
+        "How to fix: Choose a different destination or remove the existing item before retrying."
+        in normalized_rendered
+    )
+    for private_value in (
+        str(destination),
+        destination.name,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        str(app_context.database.path),
+    ):
+        assert private_value not in rendered
+    assert destination.read_bytes() == b"existing encrypted backup sentinel"
+
+
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert (3, 12) <= sys.version_info[:2] < (3, 15)
     repository = Path(__file__).resolve().parents[2]

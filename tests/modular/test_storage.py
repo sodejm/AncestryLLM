@@ -92,6 +92,41 @@ def test_backup_rejects_and_preserves_a_dangling_destination_symlink(tmp_path: P
     assert not list(tmp_path.glob(".ancestry-publish-*"))
 
 
+def test_backup_collision_error_and_logs_do_not_disclose_destination(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_parent = tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-HOME-CANARY"
+    private_parent.mkdir(parents=True)
+    destination = private_parent / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    destination.write_bytes(b"existing encrypted backup sentinel")
+    database = Database(
+        tmp_path / "PRIVATE-DATABASE-PATH" / "workspace.db",
+        MemorySecretStore({}),
+    )
+
+    with caplog.at_level("DEBUG"), pytest.raises(StorageError) as raised:
+        database.backup(destination)
+
+    assert raised.value.code == "BACKUP_EXISTS"
+    assert raised.value.message == "The backup destination already exists."
+    assert raised.value.remediation == (
+        "Choose a different destination or remove the existing item before retrying."
+    )
+    rendered = raised.value.render() + caplog.text
+    for private_value in (
+        str(destination),
+        destination.name,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        str(database.path),
+        "PRIVATE-DATABASE-PATH",
+    ):
+        assert private_value not in rendered
+    assert destination.read_bytes() == b"existing encrypted backup sentinel"
+    assert not list(private_parent.glob(".ancestry-publish-*"))
+
+
 def test_cancelled_backup_removes_unpublished_staging_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

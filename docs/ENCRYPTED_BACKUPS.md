@@ -5,6 +5,12 @@ is written with restrictive permissions through SQLCipher's online backup API.
 The backup uses the same key reference held in the OS keyring; copying only the
 database without securely backing up that key is not a recovery strategy.
 
+If the destination already exists, the command fails with `BACKUP_EXISTS`
+without printing the destination path. Choose a different destination or remove
+the existing item only after confirming it is no longer needed. The existing
+item remains unchanged, and the failed command does not publish a partial
+backup.
+
 Keep database and key backups separate. Test recovery on an offline machine by
 restoring the key into an OS credential store, opening a copy, checking the
 schema revision, and running integrity checks. Plain SQLite files and wrong keys
