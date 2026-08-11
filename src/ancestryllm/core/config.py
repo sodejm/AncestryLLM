@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 import math
 import os
+import stat
 import tempfile
 import tomllib
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 import tomli_w
 from platformdirs import user_config_path, user_data_path
 
+from ancestryllm.core.deployment import DeploymentProfile
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
 
@@ -31,6 +34,13 @@ _SECTION_KEYS = {
         "query_timeout_seconds",
         "provider_timeout_seconds",
     },
+    "deployment": {
+        "schema_version",
+        "mode",
+        "topology",
+        "endpoint_origin",
+        "endpoint_identity_sha256",
+    },
 }
 _TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress", "schema_version", "revision"}
 
@@ -40,6 +50,44 @@ def _secure_directory(path: Path) -> Path:
     with suppress(OSError):
         path.chmod(0o700)
     return path
+
+
+@contextmanager
+def _exclusive_config_lock(path: Path) -> Iterator[None]:
+    """Serialize config publication across processes without replacing the lock inode."""
+
+    flags = os.O_RDWR | os.O_CREAT
+    for optional_flag in ("O_CLOEXEC", "O_NOINHERIT", "O_NOFOLLOW"):
+        flags |= getattr(os, optional_flag, 0)
+    descriptor = os.open(path, flags, 0o600)
+    lock_module: Any | None = None
+    locked = False
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("The configuration lock must be a regular file.")
+        os.fchmod(descriptor, 0o600)
+        if os.name == "nt":
+            lock_module = importlib.import_module("msvcrt")
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\0")
+                os.fsync(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            lock_module.locking(descriptor, lock_module.LK_LOCK, 1)
+        else:
+            lock_module = importlib.import_module("fcntl")
+            lock_module.flock(descriptor, lock_module.LOCK_EX)
+        locked = True
+        yield
+    finally:
+        if locked and lock_module is not None:
+            with suppress(OSError):
+                if os.name == "nt":
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    lock_module.locking(descriptor, lock_module.LK_UNLCK, 1)
+                else:
+                    lock_module.flock(descriptor, lock_module.LOCK_UN)
+        with suppress(OSError):
+            os.close(descriptor)
 
 
 def _config_error(message: str, *, section: str | None = None) -> ConfigurationError:
@@ -157,6 +205,7 @@ class AppConfig:
     query_timeout_seconds: float = 10.0
     provider_timeout_seconds: float = 60.0
     file_ingress: FileIngressLimits = field(default_factory=FileIngressLimits)
+    deployment: DeploymentProfile = field(default_factory=DeploymentProfile.local)
     schema_version: int = CONFIG_SCHEMA_VERSION
     revision: int = 0
 
@@ -246,6 +295,11 @@ class AppConfig:
         modules = _section(payload, "modules")
         providers = _section(payload, "providers")
         limits = _section(payload, "limits")
+        deployment = (
+            DeploymentProfile.from_mapping(payload["deployment"])
+            if "deployment" in payload
+            else DeploymentProfile.local()
+        )
         configured_data = storage.get("data_dir")
         if configured_data is not None:
             configured_data = _string(
@@ -329,11 +383,12 @@ class AppConfig:
             query_timeout_seconds=query_timeout_seconds,
             provider_timeout_seconds=provider_timeout_seconds,
             file_ingress=file_ingress,
+            deployment=deployment,
             schema_version=schema_version,
             revision=revision,
         )
 
-    def save(self) -> None:
+    def save(self, *, expected_revision: int | None = None) -> bool:
         self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload: dict[str, Any] = {
             "schema_version": self.schema_version,
@@ -351,18 +406,26 @@ class AppConfig:
                 "provider_timeout_seconds": self.provider_timeout_seconds,
             },
             "file_ingress": self.file_ingress.to_mapping(),
+            "deployment": self.deployment.to_mapping(),
         }
         encoded = tomli_w.dumps(payload).encode("utf-8")
-        fd, temporary_name = tempfile.mkstemp(prefix=".config-", dir=self.config_path.parent)
-        temporary = Path(temporary_name)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temporary.replace(self.config_path)
-            self.config_path.chmod(0o600)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
+        lock_path = self.config_path.with_name(f".{self.config_path.name}.lock")
+        with _exclusive_config_lock(lock_path):
+            actual_revision = (
+                AppConfig.load(self.config_path).revision if self.config_path.exists() else 0
+            )
+            if expected_revision is not None and actual_revision != expected_revision:
+                return False
+            fd, temporary_name = tempfile.mkstemp(prefix=".config-", dir=self.config_path.parent)
+            temporary = Path(temporary_name)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                temporary.replace(self.config_path)
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        return True

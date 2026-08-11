@@ -25,7 +25,7 @@ class SettingsConfigPort(Protocol):
     query_timeout_seconds: float
     provider_timeout_seconds: float
 
-    def save(self) -> None: ...
+    def save(self, *, expected_revision: int | None = None) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,12 +225,17 @@ class SettingsService:
                     assert isinstance(validated, (int, float))
                     candidate.provider_timeout_seconds = float(validated)
             try:
-                candidate.save()
+                saved = candidate.save(expected_revision=expected_revision)
             except OSError as exc:
                 raise _settings_error(
                     "SETTINGS_SAVE_FAILED",
                     "Settings could not be stored safely.",
                     exit_code=1,
                 ) from exc
+            if not saved:
+                raise _settings_error(
+                    "SETTINGS_REVISION_CONFLICT",
+                    "Settings changed since they were read; reload and retry.",
+                )
             self.config = candidate
             return self.snapshot()

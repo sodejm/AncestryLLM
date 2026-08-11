@@ -77,3 +77,58 @@ and failed integrity checks.
 `DATABASE_KEY_MISSING` are fail-closed protections.  Stop using the affected
 file and follow the encrypted-backup recovery process; never force a plaintext
 fallback or generate a replacement key for an existing workspace.
+
+## Deployment-profile diagnostics and recovery
+
+Inspect the stored non-secret profile and compare it with the current native
+runtime before troubleshooting another command:
+
+```console
+ancestry --json deployment status
+ancestry --json deployment diagnose
+```
+
+Local Desktop is the default when the `[deployment]` table is absent. Unknown
+fields, malformed values, unsupported schema versions, invalid mode/topology
+pairs, and incomplete remote identities reject configuration loading. Preserve
+a copy of the configuration before repair. Restore a known-good file or review
+and remove only the invalid `[deployment]` table to recover the safe Local
+Desktop default; do not rewrite provider, storage, or secret state as part of
+profile recovery.
+
+A valid non-local stored profile blocks ordinary commands while its remote or
+host runtime is unavailable. Profile status, diagnostics, previews, redacted
+metadata, and recovery remain accessible. Recover to Local Desktop by using
+the schema and revision from `status`, then bind the switch to a fresh preview:
+
+```console
+ancestry --json deployment preview \
+  --mode local-desktop \
+  --schema-version <schema-version> \
+  --expected-revision <revision>
+
+ancestry --json deployment switch \
+  --mode local-desktop \
+  --schema-version <schema-version> \
+  --expected-revision <revision> \
+  --confirm <confirmation-from-preview> \
+  --unattended
+```
+
+The command-line switch is deliberately unattended-only: omitting
+`--unattended`, changing the target, or using a stale revision or confirmation
+fails without mutation. An interrupted atomic save preserves the prior file.
+No profile operation starts a listener or container, discovers a service, or
+moves genealogy data.
+
+| Code | Meaning | Required action |
+|---|---|---|
+| `DEPLOYMENT_PROFILE_INVALID` | Stored or requested profile structure is invalid. | Restore reviewed schema-v1 structure or recover to an absent `[deployment]` table. |
+| `DEPLOYMENT_SCHEMA_UNSUPPORTED` | The requested command schema is not exactly v1. | Reload status and use its exact schema version; do not downgrade stored state. |
+| `DEPLOYMENT_REVISION_CONFLICT` | Configuration changed after it was read. | Reload status and preview the exact target again. |
+| `DEPLOYMENT_CONFIRMATION_INVALID` | Confirmation does not bind to the exact target and revision. | Discard it and obtain a fresh preview. |
+| `DEPLOYMENT_PERSISTENCE_FAILED` | The atomic configuration update could not be published. | Leave the original configuration in place, repair filesystem access, and retry from status. |
+| `DEPLOYMENT_RUNTIME_MISMATCH` | Stored intent has no active reviewed runtime. | Diagnose the mismatch or explicitly recover to Local Desktop. |
+| `DEPLOYMENT_PROVIDER_CONFLICT` | `provider=none` is paired with a non-local profile. | Recover to Local Desktop; provider and consent changes remain separate. |
+| `DEPLOYMENT_ENROLLMENT_REQUIRED` | Connect Remote lacks its reviewed authenticated enrollment. | Keep Local Desktop until Issue #357 ships. |
+| `DEPLOYMENT_HOST_SETUP_REQUIRED` | Host Remote lacks its reviewed headless setup authority. | Keep Local Desktop until Issues #348 and #363 ship. |

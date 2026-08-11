@@ -1,6 +1,6 @@
 # ADR-0026: Local-first container and advanced remote deployment profiles
 
-- Status: Accepted architecture; implementation and release gates remain open
+- Status: Accepted architecture; profile control plane implemented; runtime gates remain open
 - Date: 2026-08-09
 - Decision owner: AncestryLLM maintainer
 - Supersedes: no prior ADR
@@ -15,12 +15,15 @@ FastAPI sidecar. Issue #346 asks whether later releases may reuse that service
 surface in containers and, only after an explicit operator decision, across a
 remote boundary.
 
-This ADR **accepts the target architecture**, not an implementation or support
-claim. The current release still has no supported container, LAN, public,
-browser, or remote runtime. Each profile remains unavailable until its linked
-issues, threat-model gates, native-platform evidence, operator documentation,
-and release decision pass. In particular, accepting Host Remote does not make
-the current internal API public and does not approve a multi-user service.
+This ADR accepts the target architecture. Unreleased Issue #347 implements only
+the shared, non-secret deployment-profile control plane: the schema, Local
+Desktop default, reviewed mode copy, explicit previews, confirmation-bound
+local recovery, diagnostics, and redacted backup/support metadata. The current
+release still has no supported container, LAN, public, browser, or remote
+runtime. Each non-local profile remains unavailable until its linked issues,
+threat-model gates, native-platform evidence, operator documentation, and
+release decision pass. In particular, accepting Host Remote does not make the
+current internal API public and does not approve a multi-user service.
 
 ## Decision
 
@@ -40,6 +43,14 @@ Three explicit deployment intents are accepted:
    identity provider, firewall, backups, upgrades, and recovery. Only the TLS
    gateway is public. Internal application services remain private and
    authenticated.
+
+Issue #347 persists those intents as a versioned configuration contract shared
+by CLI, future desktop first-run/settings UI, diagnostics, upgrades, backup
+metadata, and support evidence. A profile switch never starts a runtime, opens
+a listener, discovers a server, moves a family tree, or migrates data. The
+current executor can safely retain or recover Local Desktop; Connect Remote and
+Host Remote activation fail closed until their enrollment and host-setup
+authorities exist.
 
 The offline invariant is stronger than a provider-egress restriction:
 `provider=none` is incompatible with Connect Remote and Host Remote. Selecting
@@ -328,7 +339,7 @@ risk blocks the affected gate.
 | #98 | Architecture and threat-model approval precede implementation. | Closed baseline; ADR-0026 adds, not replaces, its gates. |
 | #101 | Electron Main is the only renderer-host authority; use the existing typed bridge and application contracts. | Open implementation dependency. |
 | #102 | Reusable supervision, one active backend, bounded readiness/recovery, no renderer/container Docker socket. | Open lifecycle dependency. |
-| #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Open secret dependency. |
+| #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Closed source-level secret foundation; runtime broker evidence remains open. |
 | #107 | Local convenience still authenticates traffic; Host Remote needs explicit TLS, identity, authorization, enrollment, and recovery. | Open authentication dependency. |
 | #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Open settings/consent dependency. |
 | #123 | SQLCipher data and key remain separate; migrations and cross-container backup/restore fail safely. | Open persistence dependency. |

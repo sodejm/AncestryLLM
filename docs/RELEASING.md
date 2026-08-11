@@ -20,12 +20,14 @@ evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
 iteration, currently `v0.5.0 — Foundation`, is authoritative for future
 release readiness.
 
-## Future deployment-profile release gate
+## Future deployment-runtime release gate
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
-target, not a current availability claim. A profile remains unavailable until
-its row below and the common conditions pass. A gate or subset assigned to one
-profile does not block an independent profile whose own row is complete.
+runtime target, not a current availability claim. The source-level profile
+control plane does not make a container or remote runtime available. Each
+runtime remains unavailable until its row below and the common conditions
+pass. A gate or subset assigned to one profile does not block an independent
+profile whose own row is complete.
 
 | Profile | Required threat-model evidence |
 |---|---|

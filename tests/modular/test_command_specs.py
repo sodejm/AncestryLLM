@@ -142,6 +142,43 @@ def test_build_parser_preserves_argument_types_defaults_and_groups() -> None:
         )
 
 
+def test_deployment_switch_requires_explicit_unattended_acknowledgement() -> None:
+    parser = cli.build_parser()
+    base = [
+        "deployment",
+        "switch",
+        "--mode",
+        "local-desktop",
+        "--schema-version",
+        "1",
+        "--expected-revision",
+        "0",
+        "--confirm",
+        "confirm-deployment-fictional",
+    ]
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(base)
+
+    parsed = parser.parse_args([*base, "--unattended"])
+    assert parsed.unattended is True
+    assert parsed.dispatch_key == DispatchKey("deployment", "switch")
+
+
+def test_deployment_endpoint_arguments_are_marked_sensitive_and_exact() -> None:
+    origin = _argument("deployment", "preview", "endpoint_origin")
+    identity = _argument("deployment", "preview", "endpoint_identity_sha256")
+
+    assert origin.sensitive is True
+    assert origin.flags == ("--endpoint-origin",)
+    assert identity.flags == ("--endpoint-identity-sha256",)
+    assert _argument("deployment", "preview", "mode").choices == (
+        "local-desktop",
+        "connect-remote",
+        "host-remote-server",
+    )
+
+
 def test_cli_help_is_rendered_from_command_specifications(capsys) -> None:
     specification = COMMAND_SPECIFICATIONS["rootsmagic"]
     with pytest.raises(SystemExit) as raised:

@@ -11,7 +11,7 @@ with the implemented shared execution contract in
 [`docs/COMMAND_EXECUTOR.md`](docs/COMMAND_EXECUTOR.md),
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
-and the accepted, not-yet-implemented deployment direction in
+and the accepted deployment direction and implemented profile control plane in
 [`docs/ADR-0026-local-first-container-remote-deployment.md`](docs/ADR-0026-local-first-container-remote-deployment.md),
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
@@ -39,9 +39,10 @@ Unsigned CI artifacts and unpacked development builds are verification inputs
 only. Version 0.5.0 has no updater or background update channel.
 
 There is no current supported production browser, public/LAN, container, or
-remote runtime. ADR-0026 accepts a planned single-household container backend
-and advanced self-supported remote profile, but neither is implemented or
-available. It does not accept a browser client, general public API, multi-user
+remote runtime. Unreleased source implements ADR-0026's versioned,
+local-default deployment-profile control plane, but not the container backend,
+remote enrollment, host bootstrap, or remote runtime. It does not accept a
+browser client, general public API, multi-user
 server, or multi-tenant service. The one-shot CLI and interactive console
 remain the implemented genealogy-capable user-facing adapters. Every adapter
 must consume the same application contracts and services without depending on
@@ -156,10 +157,10 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/cli.py` | Thin one-shot compatibility adapter and application entry point over the shared terminal path. |
 | `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL input, session, completion, and job adapter. |
 | `src/ancestryllm/terminal/` | Shared terminal parser, invocation translation, presentation, and dispatch composition used by CLI and REPL. |
-| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. Unreleased `SettingsService` and `SecretManagementService` own the reviewed non-secret settings and write-only credential use cases. |
-| `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, OCR, and database commands. |
+| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. Unreleased `SettingsService`, `SecretManagementService`, and `DeploymentService` own reviewed non-secret settings, write-only credentials, and explicit deployment intent. |
+| `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, deployment profiles, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
-| `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
+| `src/ancestryllm/core/` | Configuration, typed deployment-profile schema, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, and diagnostics. |
 | `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. |
@@ -371,7 +372,7 @@ are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 ### Accepted deployment profiles
 
 [ADR-0026](docs/ADR-0026-local-first-container-remote-deployment.md) ratifies
-three later deployment intents while preserving the current runtime boundary:
+three deployment intents while preserving the current runtime boundary:
 
 - **Local Desktop** remains the default. It has no non-loopback listener. A
   future container backend may replace the native sidecar only behind the same
@@ -383,6 +384,17 @@ three later deployment intents while preserving the current runtime boundary:
   one trusted household. Only a validated TLS edge may be public; internal
   gateway, worker, data, administrative, and Docker services remain private
   and independently authenticated. Network membership is not identity.
+
+Unreleased source implements only the transport-neutral profile control plane:
+schema-v1 parsing, an absent-profile migration to Local Desktop, optimistic
+revision checks, exact target-bound preview confirmation, atomic Local Desktop
+recovery, mismatch diagnostics, and redacted backup/support metadata. The
+`deployment` command family exposes those capabilities to headless tooling.
+Unknown schemas, malformed topology, stale revisions, endpoint substitution,
+and ambient environment state fail closed. Connect Remote activation remains
+owned by authenticated enrollment in #357; Host Remote activation remains
+owned by the host bootstrap in #348/#363. This layer starts no listener,
+container, supervisor, or remote session and moves no genealogy data.
 
 `provider=none` is incompatible with Connect Remote and Host Remote. It forces
 Local Desktop/local execution and opens no network socket; endpoint state,
@@ -399,8 +411,10 @@ This is not individual multi-user authorization. Unrelated or mutually
 distrusting households require separate hosts, secrets, volumes, and identity
 realms.
 
-Electron Main owns profile state, enrollment, API use, error sanitization, and
-the narrow host lifecycle boundary. The sandboxed renderer receives no Node,
+The shared Python service owns persistent profile state, revision-bound
+transitions, diagnostics, and redacted evidence. Future Electron Main adapters
+own presentation, enrollment API use, error sanitization, and the narrow host
+lifecycle boundary without redefining that service contract. The sandboxed renderer receives no Node,
 filesystem, raw network, Docker socket or client credential, API/enrollment
 bearer, keyring value, provider secret, SQLCipher key, or unrestricted path.
 It uses only a fixed, typed, versioned preload bridge. Profile changes clear
@@ -474,6 +488,12 @@ the user configuration and data directories. `ANCESTRYLLM_CONFIG_DIR` and
 limits are clamped to safe ranges, directories are owner-only where the
 platform permits it, and configuration is saved through an fsynced temporary
 file plus `os.replace` with mode `0600`.
+
+The optional schema-v1 `[deployment]` table records only explicit non-secret
+mode, topology, and—after reviewed remote enrollment—canonical endpoint origin
+and endpoint-identity digest. An absent table safely resolves to Local Desktop;
+unknown schemas, fields, topology combinations, and endpoint forms are rejected.
+Environment variables and service discovery cannot select or alter a mode.
 
 Unreleased `SettingsService` publishes a schema version, an optimistic revision,
 and reviewed metadata for exactly five settings: default provider, query row
@@ -1150,7 +1170,7 @@ developer has not installed local hooks.
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated control bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap and unsigned unpacked package assembly, Issue #102's embedded-digest payload verification, bounded supervision, full-process-tree cleanup, current-resource drain, smoke testing, and exact-head process-tree evidence, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. Unreleased Issue #103 adds three path-free renderer methods over a main-owned opaque file-grant broker. Unreleased Issue #105 adds exact-revision atomic settings read/patch plus write-only OS-keyring credential status/set/delete through five fixed bridge methods and fixed authenticated routes; DTOs, errors, OpenAPI responses, renderer state, and mock fixtures never expose credential values. No genealogy integration, provider execution, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim for the Unreleased additions requires target-matched packaged verification and Issue #131's adversarial secret-leak evidence. The Issue #103 dedicated packaged verification fixture is excluded from production and checked across the platform matrix; worker isolation, full parser budgets, and atomic publication remain owned by #114, #118, and #131. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
-| Container and advanced remote deployment profiles | ADR-0026 accepts Local Desktop, Connect Remote, and single-household Host Remote as a target architecture. No container or remote profile is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before availability. |
+| Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. No container or remote runtime is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before runtime availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

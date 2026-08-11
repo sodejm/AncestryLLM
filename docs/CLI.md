@@ -25,6 +25,7 @@ console keeps running and renders a safe REPL usage error.
 | `people` | `list`, `add` | Maintain the encrypted research-person workspace. |
 | `providers` | `list`, `create`, `consent`, `revoke` | Configure explicitly selected local/cloud profiles and cloud consent. |
 | `secrets` | `set`, `delete`, `status` | Manage OS-keyring secret references. |
+| `deployment` | `modes`, `status`, `preview`, `switch`, `diagnose`, `metadata` | Inspect and safely recover the versioned deployment profile. |
 | `ocr` | `extract` | Extract structured data from an input text file through an approved provider. |
 | `database` | `backup DESTINATION`, `diagnose` | Create a backup or run read-only setup checks. |
 
@@ -38,6 +39,49 @@ credential store.
 Run `database diagnose` for privacy-safe, read-only SQLCipher and credential-store
 checks. The [setup diagnostics](SETUP_DIAGNOSTICS.md) guide explains its stable
 JSON output and remediation routes.
+
+### Deployment profiles
+
+`deployment modes` returns renderer-safe copy for Local Desktop, Connect to
+Remote, and Host Remote Server. Local Desktop is both the default and the
+recommended choice. The two remote choices are intentionally visible as
+advanced plans, but their runtimes are not activated by this command family.
+
+Use `deployment status` to obtain the current schema version and configuration
+revision. Preview the exact target before changing anything, then pass the
+preview's target-bound confirmation to a separate `switch` command. Headless
+switches also require the literal `--unattended` acknowledgement:
+
+```bash
+ancestry --json deployment status
+ancestry --json deployment preview \
+  --mode local-desktop --schema-version 1 --expected-revision 7
+ancestry --json deployment switch \
+  --mode local-desktop --schema-version 1 --expected-revision 7 \
+  --confirm confirm-deployment-REVIEWED_VALUE --unattended
+```
+
+Replace the example revision and confirmation with values returned by the same
+configuration's `status` and `preview` calls. A stale revision, changed target,
+or reused confirmation fails closed. Only Local Desktop activation is
+implemented. A Connect to Remote preview additionally requires an exact HTTPS
+origin and lowercase SHA-256 endpoint identity through `--endpoint-origin` and
+`--endpoint-identity-sha256`; activation still requires the future authenticated
+enrollment flow. Host Remote activation likewise requires its future reviewed
+host bootstrap. Do not place credentials, tokens, or recovery material in
+endpoint arguments.
+
+`deployment diagnose` compares the stored intent with this local runtime and
+returns stable mismatch codes without contacting a server. `deployment
+metadata --purpose backup` and `--purpose support` emit only schema, revision,
+mode, topology, and an optional endpoint-identity digest. They omit the endpoint
+origin, credentials, provider, paths, host details, and genealogy data.
+
+The profile contract never discovers a mode from the environment or local
+services, never widens a listener, and never moves family-tree data. A valid
+non-local profile blocks ordinary commands until its separately authorized
+runtime exists or the user explicitly recovers to Local Desktop. Provider
+selection and cloud consent remain independent decisions.
 
 ## Exit codes
 

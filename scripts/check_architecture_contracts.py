@@ -23,6 +23,7 @@ PUBLIC_FACADE_MODULES: Final[tuple[str, ...]] = (
     "ancestryllm.application.ports",
     "ancestryllm.cli",
     "ancestryllm.core.commands",
+    "ancestryllm.core.deployment",
     "ancestryllm.core.errors",
     "ancestryllm.core.modules",
     "ancestryllm.domain",
@@ -139,6 +140,7 @@ PURE_CORE_MODULES: Final[frozenset[str]] = frozenset(
     {
         "ancestryllm.core.cancellation",
         "ancestryllm.core.commands",
+        "ancestryllm.core.deployment",
         "ancestryllm.core.errors",
     }
 )

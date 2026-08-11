@@ -31,6 +31,14 @@ make a provider call, or run a genealogy workflow. This development surface is
 not part of the released 0.5.0 installer until its packaged verification gates
 pass.
 
+Unreleased 0.6 source also introduces the deployment-profile control plane.
+Local Desktop is the preselected, recommended mode. The CLI can inspect,
+preview, diagnose, and explicitly recover the versioned profile without
+discovering a mode from the network, environment, Docker, or ambient services.
+Connect to Remote and Host Remote Server remain advanced, unavailable runtime
+choices until their separate enrollment, host-bootstrap, and release gates
+pass; selecting a profile never starts a listener or moves genealogy data.
+
 ## Start here
 
 Choose the path that matches how you want to use AncestryLLM.

@@ -49,6 +49,7 @@ the shared command specifications:
 | Providers | `providers.list`, `providers.create`, `providers.consent`, `providers.revoke` |
 | Secrets | `secrets.set`, `secrets.delete`, `secrets.status` |
 | OCR | `ocr.extract` |
+| Deployment | `deployment.modes`, `deployment.status`, `deployment.preview`, `deployment.switch`, `deployment.diagnose`, `deployment.metadata` |
 | Database | `database.backup`, `database.diagnose` |
 
 This inventory is the only application-operation registry. Terminal, HTTP, and
