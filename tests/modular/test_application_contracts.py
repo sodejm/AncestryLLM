@@ -148,7 +148,7 @@ def test_operation_contracts_cover_every_command_route_exactly() -> None:
     }
 
     assert set(OPERATION_CONTRACTS) == command_keys
-    assert len(OPERATION_CONTRACTS) == 26
+    assert len(OPERATION_CONTRACTS) == 32
     assert all(contract.key == key for key, contract in OPERATION_CONTRACTS.items())
 
 

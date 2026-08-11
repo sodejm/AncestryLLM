@@ -15,6 +15,7 @@ from typing import Any
 import tomli_w
 from platformdirs import user_config_path, user_data_path
 
+from ancestryllm.core.deployment import DeploymentProfile
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
 
@@ -30,6 +31,13 @@ _SECTION_KEYS = {
         "max_output_chars",
         "query_timeout_seconds",
         "provider_timeout_seconds",
+    },
+    "deployment": {
+        "schema_version",
+        "mode",
+        "topology",
+        "endpoint_origin",
+        "endpoint_identity_sha256",
     },
 }
 _TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress", "schema_version", "revision"}
@@ -157,6 +165,7 @@ class AppConfig:
     query_timeout_seconds: float = 10.0
     provider_timeout_seconds: float = 60.0
     file_ingress: FileIngressLimits = field(default_factory=FileIngressLimits)
+    deployment: DeploymentProfile = field(default_factory=DeploymentProfile.local)
     schema_version: int = CONFIG_SCHEMA_VERSION
     revision: int = 0
 
@@ -246,6 +255,11 @@ class AppConfig:
         modules = _section(payload, "modules")
         providers = _section(payload, "providers")
         limits = _section(payload, "limits")
+        deployment = (
+            DeploymentProfile.from_mapping(payload["deployment"])
+            if "deployment" in payload
+            else DeploymentProfile.local()
+        )
         configured_data = storage.get("data_dir")
         if configured_data is not None:
             configured_data = _string(
@@ -329,6 +343,7 @@ class AppConfig:
             query_timeout_seconds=query_timeout_seconds,
             provider_timeout_seconds=provider_timeout_seconds,
             file_ingress=file_ingress,
+            deployment=deployment,
             schema_version=schema_version,
             revision=revision,
         )
@@ -351,6 +366,7 @@ class AppConfig:
                 "provider_timeout_seconds": self.provider_timeout_seconds,
             },
             "file_ingress": self.file_ingress.to_mapping(),
+            "deployment": self.deployment.to_mapping(),
         }
         encoded = tomli_w.dumps(payload).encode("utf-8")
         fd, temporary_name = tempfile.mkstemp(prefix=".config-", dir=self.config_path.parent)
@@ -363,6 +379,6 @@ class AppConfig:
                 os.fsync(handle.fileno())
             temporary.replace(self.config_path)
             self.config_path.chmod(0o600)
-        except Exception:
+        except BaseException:
             temporary.unlink(missing_ok=True)
             raise

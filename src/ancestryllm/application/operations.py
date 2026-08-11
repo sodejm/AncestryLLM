@@ -202,6 +202,41 @@ class DiagnosticRecord(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class DeploymentProfileRecord(BoundaryDTO):
+    """Versioned non-secret deployment intent for adapter presentation."""
+
+    schema_version: int
+    mode_code: str
+    topology_code: str
+    endpoint_origin: str | None
+    endpoint_identity_sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentModeRecord(BoundaryDTO):
+    """Renderer-neutral mode copy and selection constraints."""
+
+    mode_code: str
+    label: str
+    summary: str
+    consequences: tuple[str, ...]
+    prerequisites: tuple[str, ...]
+    default: bool
+    recommended: bool
+    advanced: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnosticRecord(BoundaryDTO):
+    """One coded deployment diagnostic without host or credential details."""
+
+    diagnostic_code: str
+    status_code: str
+    message: str
+    remediation: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ModulesListRequest(ServiceRequest):
     """List configured module descriptors."""
 
@@ -660,6 +695,108 @@ class OcrExtractResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class DeploymentModesRequest(ServiceRequest):
+    """List reviewed deployment choices."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentModesResult(ServiceResult):
+    """Reviewed deployment choices in deterministic presentation order."""
+
+    modes: tuple[DeploymentModeRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStatusRequest(ServiceRequest):
+    """Read stored deployment intent."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStatusResult(ServiceResult):
+    """Stored intent and optimistic-lock revision."""
+
+    schema_version: int
+    revision: int
+    profile: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPreviewRequest(ServiceRequest):
+    """Preview an exact deployment target without mutation."""
+
+    schema_version: int
+    expected_revision: int
+    target: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPreviewResult(ServiceResult):
+    """Target-bound switch consequences and confirmation."""
+
+    schema_version: int
+    expected_revision: int
+    current: DeploymentProfileRecord
+    target: DeploymentProfileRecord
+    consequences: tuple[str, ...]
+    confirmation: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentSwitchRequest(ServiceRequest):
+    """Apply one previously previewed deployment target."""
+
+    schema_version: int
+    expected_revision: int
+    target: DeploymentProfileRecord
+    confirmation: str
+    unattended: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentSwitchResult(ServiceResult):
+    """Persisted deployment intent after a successful switch."""
+
+    schema_version: int
+    revision: int
+    profile: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnoseRequest(ServiceRequest):
+    """Compare stored intent with sanitized runtime facts."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnoseResult(ServiceResult):
+    """Aggregate fail-closed deployment diagnostics."""
+
+    schema_version: int
+    revision: int
+    status_code: str
+    diagnostics: tuple[DeploymentDiagnosticRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentMetadataRequest(ServiceRequest):
+    """Request redacted deployment evidence for an allowlisted purpose."""
+
+    purpose_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentMetadataResult(ServiceResult):
+    """Privacy-minimal deployment evidence for backup or support metadata."""
+
+    schema_version: int
+    purpose_code: str
+    deployment_schema_version: int
+    config_revision: int
+    mode_code: str
+    topology_code: str
+    endpoint_identity_sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseBackupRequest(ServiceRequest):
     """Create a database backup at one granted output."""
 
@@ -719,6 +856,12 @@ _CONTRACT_TYPES = (
     ("secrets", "delete", SecretDeleteRequest, SecretDeleteResult),
     ("secrets", "status", SecretStatusRequest, SecretStatusResult),
     ("ocr", "extract", OcrExtractRequest, OcrExtractResult),
+    ("deployment", "modes", DeploymentModesRequest, DeploymentModesResult),
+    ("deployment", "status", DeploymentStatusRequest, DeploymentStatusResult),
+    ("deployment", "preview", DeploymentPreviewRequest, DeploymentPreviewResult),
+    ("deployment", "switch", DeploymentSwitchRequest, DeploymentSwitchResult),
+    ("deployment", "diagnose", DeploymentDiagnoseRequest, DeploymentDiagnoseResult),
+    ("deployment", "metadata", DeploymentMetadataRequest, DeploymentMetadataResult),
     ("database", "backup", DatabaseBackupRequest, DatabaseBackupResult),
     ("database", "diagnose", DatabaseDiagnoseRequest, DatabaseDiagnoseResult),
 )
@@ -751,6 +894,21 @@ __all__ = [
     "DatabaseBackupResult",
     "DatabaseDiagnoseRequest",
     "DatabaseDiagnoseResult",
+    "DeploymentDiagnoseRequest",
+    "DeploymentDiagnoseResult",
+    "DeploymentDiagnosticRecord",
+    "DeploymentMetadataRequest",
+    "DeploymentMetadataResult",
+    "DeploymentModeRecord",
+    "DeploymentModesRequest",
+    "DeploymentModesResult",
+    "DeploymentPreviewRequest",
+    "DeploymentPreviewResult",
+    "DeploymentProfileRecord",
+    "DeploymentStatusRequest",
+    "DeploymentStatusResult",
+    "DeploymentSwitchRequest",
+    "DeploymentSwitchResult",
     "DiagnosticRecord",
     "GedcomMergeRequest",
     "GedcomMergeResult",
