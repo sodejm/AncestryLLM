@@ -1,3 +1,4 @@
+/** Mediates native file selections through opaque, validated, single-use grants. */
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path'

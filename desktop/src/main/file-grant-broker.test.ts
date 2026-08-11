@@ -1,3 +1,4 @@
+/** Verifies opaque file grants remain bounded, owner-scoped, and stale-safe. */
 import { link, mkdir, mkdtemp, readdir, rename, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'

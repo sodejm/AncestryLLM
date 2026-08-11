@@ -1,3 +1,4 @@
+/** Renders sanitized file-grant metadata without exposing native paths. */
 import type { FileGrant } from '../../../shared-contract/desktop'
 
 function readableSize(bytes: number): string {

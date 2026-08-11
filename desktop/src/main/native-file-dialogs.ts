@@ -1,3 +1,4 @@
+/** Adapts Electron native dialogs to the bounded file-grant selection port. */
 import { BrowserWindow, dialog, type WebContents } from 'electron'
 import type { FileReadPurpose, FileWritePurpose } from '../shared-contract/desktop'
 import {

@@ -1,3 +1,4 @@
+/** Verifies native file dialogs enforce owner, purpose, and replacement boundaries. */
 import { describe, expect, it, vi } from 'vitest'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 

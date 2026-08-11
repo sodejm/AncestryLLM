@@ -1,3 +1,4 @@
+/** Supplies deterministic native file selections only for packaged grant verification. */
 import { isAbsolute } from 'node:path'
 import type { NativeFileDialogPort } from '../src/main/file-grant-broker'
 

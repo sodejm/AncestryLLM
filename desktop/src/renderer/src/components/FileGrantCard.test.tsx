@@ -1,3 +1,4 @@
+/** Verifies the file-grant card renders sanitized metadata and replacement intent. */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FileGrantCard } from './FileGrantCard'
