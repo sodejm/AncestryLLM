@@ -304,3 +304,79 @@ def test_report_schema_documents_the_only_output_normalizations() -> None:
             "scope": ["sdist", "wheel"],
         },
     ]
+
+
+def test_install_smoke_uses_verified_uv_and_the_locked_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uv = tmp_path / "uv"
+    wheel = tmp_path / "ancestryllm-0.5.0-py3-none-any.whl"
+    destination = tmp_path / "installed"
+    environment = {"UV_OFFLINE": "1"}
+    commands: list[tuple[list[str], Path, dict[str, str] | None]] = []
+
+    def record(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
+        commands.append((command, cwd, env))
+        return ""
+
+    monkeypatch.setattr(evaluation, "_run", record)
+
+    assert evaluation._install_smoke(uv, wheel, "0.5.0", destination, environment) == []
+    assert commands[0] == (
+        [
+            str(uv),
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--python",
+            evaluation.sys.executable,
+            "--target",
+            str(destination),
+            str(wheel),
+        ],
+        destination,
+        environment,
+    )
+    assert commands[1][0][:4] == [
+        evaluation.sys.executable,
+        "-I",
+        "-c",
+        evaluation.INSTALL_SMOKE_CHECK,
+    ]
+    assert commands[1][0][4:] == [str(destination), "0.5.0"]
+    assert commands[1][1:] == (destination, environment)
+
+
+@pytest.mark.parametrize(
+    ("failing_call", "expected"),
+    ((1, ["install"]), (2, ["import-metadata-entrypoint-help"])),
+)
+def test_install_smoke_reports_a_stable_failure_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failing_call: int,
+    expected: list[str],
+) -> None:
+    calls = 0
+
+    def fail_selected(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
+        del command, cwd, env
+        nonlocal calls
+        calls += 1
+        if calls == failing_call:
+            raise evaluation.EvaluationError("UVBEVAL_COMMAND_FAILED", "expected")
+        return ""
+
+    monkeypatch.setattr(evaluation, "_run", fail_selected)
+
+    assert (
+        evaluation._install_smoke(
+            tmp_path / "uv",
+            tmp_path / "ancestryllm.whl",
+            "0.5.0",
+            tmp_path / "installed",
+            {"UV_OFFLINE": "1"},
+        )
+        == expected
+    )

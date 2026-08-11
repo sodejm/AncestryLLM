@@ -19,7 +19,6 @@ import sys
 import tarfile
 import tempfile
 import tomllib
-import venv
 import zipfile
 from email import policy
 from email.parser import BytesParser
@@ -90,6 +89,37 @@ PROJECT_FILE_PATHS = {
 }
 DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 UV_VERSION_OUTPUT = re.compile(r"^uv (?P<version>[0-9]+\.[0-9]+\.[0-9]+)(?: \([^()\r\n]+\))?$")
+INSTALL_SMOKE_CHECK = """\
+from importlib.metadata import distribution
+from pathlib import Path
+import sys
+
+target = Path(sys.argv[1]).resolve()
+expected_version = sys.argv[2]
+sys.path.insert(0, str(target))
+
+installed = distribution("ancestryllm")
+assert installed.version == expected_version
+entrypoints = [
+    entrypoint
+    for entrypoint in installed.entry_points
+    if entrypoint.group == "console_scripts" and entrypoint.name == "ancestry"
+]
+assert [entrypoint.value for entrypoint in entrypoints] == ["ancestryllm.cli:main"]
+
+import ancestryllm
+
+assert Path(ancestryllm.__file__).resolve().is_relative_to(target)
+main = entrypoints[0].load()
+sys.argv = ["ancestry", "--help"]
+try:
+    result = main()
+except SystemExit as error:
+    if error.code not in (0, None):
+        raise
+else:
+    assert result in (0, None)
+"""
 ACCEPTED_INPUT_DIFFERENCES = [
     {
         "code": "UVBEVAL_CANDIDATE_BUILD_CONFIGURATION",
@@ -563,41 +593,49 @@ def _extract_sdist(archive: Path, destination: Path) -> Path:
     return destination
 
 
-def _install_smoke(wheel: Path, version: str, destination: Path) -> bool:
-    builder = venv.EnvBuilder(with_pip=True, system_site_packages=True)
-    builder.create(destination)
-    if os.name == "nt":
-        python = destination / "Scripts" / "python.exe"
-        ancestry = destination / "Scripts" / "ancestry.exe"
-    else:
-        python = destination / "bin" / "python"
-        ancestry = destination / "bin" / "ancestry"
-    check = (
-        "from importlib.metadata import entry_points, version; "
-        "from pathlib import Path; import ancestryllm, sys; "
-        f"assert version('ancestryllm') == {version!r}; "
-        "assert Path(ancestryllm.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); "
-        "assert any(ep.name == 'ancestry' and ep.value == 'ancestryllm.cli:main' "
-        "for ep in entry_points(group='console_scripts'))"
-    )
+def _install_smoke(
+    uv: Path,
+    wheel: Path,
+    version: str,
+    destination: Path,
+    environment: dict[str, str],
+) -> list[str]:
+    destination.mkdir(parents=True, exist_ok=False)
     try:
         _run(
             [
-                str(python),
-                "-m",
+                str(uv),
                 "pip",
                 "install",
-                "--disable-pip-version-check",
                 "--no-deps",
+                "--no-index",
+                "--python",
+                sys.executable,
+                "--target",
+                str(destination),
                 str(wheel),
             ],
             cwd=destination,
+            env=environment,
         )
-        _run([str(python), "-I", "-c", check], cwd=destination)
-        _run([str(ancestry), "--help"], cwd=destination)
     except EvaluationError:
-        return False
-    return True
+        return ["install"]
+    try:
+        _run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                INSTALL_SMOKE_CHECK,
+                str(destination),
+                version,
+            ],
+            cwd=destination,
+            env=environment,
+        )
+    except EvaluationError:
+        return ["import-metadata-entrypoint-help"]
+    return []
 
 
 def _safe_report_value(value: Any) -> None:
@@ -1121,25 +1159,29 @@ def evaluate(uv: Path) -> dict[str, Any]:
             "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
         )
 
-        setuptools_smoke = _install_smoke(
+        setuptools_smoke_failures = _install_smoke(
+            uv,
             setuptools_wheel,
             version,
             temporary / "install-setuptools",
+            environment,
         )
-        uv_build_smoke = _install_smoke(
+        uv_build_smoke_failures = _install_smoke(
+            uv,
             uv_build_wheel_a,
             version,
             temporary / "install-uv-build",
+            environment,
         )
         comparisons["setuptools_install_import_entrypoint"] = _boolean_result(
-            setuptools_smoke,
+            not setuptools_smoke_failures,
             "UVBEVAL_SETUPTOOLS_INSTALL_SMOKE_FAILED",
-            [] if setuptools_smoke else ["install-import-entrypoint"],
+            setuptools_smoke_failures,
         )
         comparisons["uv_build_install_import_entrypoint"] = _boolean_result(
-            uv_build_smoke,
+            not uv_build_smoke_failures,
             "UVBEVAL_UV_BUILD_INSTALL_SMOKE_FAILED",
-            [] if uv_build_smoke else ["install-import-entrypoint"],
+            uv_build_smoke_failures,
         )
 
         artifact_records = {
