@@ -118,12 +118,15 @@ Main admits at most four non-coalesced operations per renderer and queues at
 most eight more. Capability reads share one in-flight operation for up to 32
 callers. Every call has an absolute five-second deadline; queue saturation,
 timeout, and cancellation return stable redacted codes rather than backend
-details. Navigation of the main frame, renderer exit or destruction, bridge
-replacement, sidecar-session loss or replacement, and application shutdown
-cancel and clean up affected work. Establishing the first healthy session does
-not cancel the retry that created it. Timed-out underlying operations continue
-to occupy an active slot until they actually settle, so an uncooperative
-backend cannot turn repeated renderer timeouts into unbounded hidden work.
+details. Cross-document or unclassifiable navigation of the main frame,
+renderer exit or destruction, bridge replacement, sidecar-session loss or
+replacement, and application shutdown cancel and clean up affected work.
+Trusted same-document application route changes preserve work; main still
+rechecks the exact current frame and trusted URL on every request. Establishing
+the first healthy session does not cancel the retry that created it. Timed-out
+underlying operations continue to occupy an active slot until they actually
+settle, so an uncooperative backend cannot turn repeated renderer timeouts into
+unbounded hidden work.
 
 Preference updates require the last renderer-visible non-negative revision and
 return a coded conflict when it is stale. Packaged main persists the exact

@@ -91,10 +91,13 @@ checks the selected object's regular-file and link state, purpose-specific
 extension and content signature, bounded size, canonical identity, and
 filesystem fingerprint. Grants are bound to the requesting renderer, exact
 purpose and access mode, current application session, and one redemption.
-Explicit revocation, renderer close or navigation, and application restart
-invalidate them. Existing-output replacement requires a native confirmation
-and identity revalidation; source/output aliases and concurrent output grants
-fail closed under main-owned locks.
+Explicit revocation, renderer close or cross-document navigation, and
+application restart invalidate them. Trusted same-document routes such as the
+application's hash-based Home, Diagnostics, and Settings transitions preserve
+the renderer identity and its grants; each bridge request still rechecks the
+exact main frame and trusted application URL. Existing-output replacement
+requires a native confirmation and identity revalidation; source/output aliases
+and concurrent output grants fail closed under main-owned locks.
 
 Only a trusted main-process adapter may redeem a grant through
 `resolveReadGrant` or `resolveWriteGrant`. A future genealogy integration must

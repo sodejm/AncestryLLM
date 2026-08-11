@@ -116,13 +116,15 @@ stable sanitized code.
 
 Each grant is bound to one renderer, exact purpose, access mode, application
 session, and redemption. It cannot be upgraded or transferred. Explicit
-revocation, renderer close or navigation, and application restart invalidate
-it. Only trusted main-process code can call `resolveReadGrant` or
-`resolveWriteGrant`; those operations consume the grant and revalidate its
-identity before returning an internal path. The renderer cannot invoke either
-resolver. A future Python integration must reopen that internal path through
-the shared policy above and retain its descriptor/fingerprint checks through
-parsing, worker execution, and atomic publication.
+revocation, renderer close or cross-document navigation, and application
+restart invalidate it. Trusted same-document application route changes retain
+the existing renderer-bound grant. Only trusted main-process code can call
+`resolveReadGrant` or `resolveWriteGrant`; those operations consume the grant
+and revalidate its identity before returning an internal path. The renderer
+cannot invoke either resolver. A future Python integration must reopen that
+internal path through the shared policy above and retain its
+descriptor/fingerprint checks through parsing, worker execution, and atomic
+publication.
 
 The broker uses these path-free failure categories:
 
