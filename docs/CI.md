@@ -117,6 +117,33 @@ have the same command semantics regardless of the caller's interactive shell.
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
 
+## Version 1 security dependency governance
+
+The release-project proof, release-readiness, and release workflows use the
+same checked-in GraphQL query and schema-v1 policy to validate Version 1
+security sequencing. The policy names the exact Project and repository, the
+required issue owner and release iteration, every required native GitHub
+`blocked by` relationship, the permitted iteration order, and #131 as the
+release-evidence consumer. Workflow-local variants of the query are rejected
+by contract tests.
+
+The verifier fails closed with stable coded errors when Project pagination or a
+required field cannot be verified, an issue is missing, ownership or iteration
+is wrong, an edge is missing or contradicted by its reverse, the graph has a
+cycle, a prerequisite is scheduled after its dependent, or a dependent is
+closed while a prerequisite remains open. Its schema-v1 JSON report contains
+only issue numbers, reviewed Project coordinates, dependency pairs, the
+canonical policy digest, and status. It excludes titles, bodies, comments,
+tokens, environment values, user paths, and response bodies.
+
+Release evidence accepts the `version-1-security-dependencies` result only when
+the report matches the current policy digest and exact policy-derived issue,
+dependency, Project, repository, and #131 consumer sets. A stale, substituted,
+partial, or structurally unknown report cannot satisfy the gate. This control
+still relies on authorized GitHub maintainers plus GitHub's Project, issue,
+dependency, API, and token behavior; API unavailability or insufficient access
+leaves the gate incomplete rather than passing.
+
 ## Job timeout governance
 
 Every job in the required CI, CodeQL, dependency-review, desktop, release-project

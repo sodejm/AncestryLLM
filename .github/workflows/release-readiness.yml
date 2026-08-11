@@ -81,7 +81,8 @@ jobs:
           project_priority="$(jq -r '.project.priority' .github/release-config.json)"
           project_status="$(jq -r '.project.status' .github/release-config.json)"
           project_validation="$(jq -r '.project.validation' .github/release-config.json)"
-          project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
+          project_query="$(< config/release-project-query-v1.graphql)"
+          mkdir -p "$RUNNER_TEMP/version-1-security-gate"
           test -n "$PROJECT_READ_TOKEN" || {
             echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
             exit 1
@@ -97,10 +98,18 @@ jobs:
               --iteration "$project_iteration" \
               --priority "$project_priority" \
               --status "$project_status" \
-              --validation "$project_validation"
+              --validation "$project_validation" \
+              --security-policy config/version-1-security-policy.json \
+              --security-report "$RUNNER_TEMP/version-1-security-gate/report.json"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: version-1-security-gate
+          path: ${{ runner.temp }}/version-1-security-gate/report.json
+          if-no-files-found: error
+          retention-days: 90
 
   quality:
     name: quality (${{ matrix.python }})
@@ -312,6 +321,10 @@ jobs:
           path: evidence/bootstrap
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: version-1-security-gate
+          path: evidence/version-1-security-gate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
           name: release-codeql-sarif
           path: evidence/codeql-sarif
       - name: Create evidence manifest
@@ -346,6 +359,7 @@ jobs:
                   "secret-scan",
                   "semgrep",
                   "tests-and-coverage",
+                  "version-1-security-dependencies",
                   "workflow-security-analysis"
                 ]
                 | map({
@@ -368,6 +382,7 @@ jobs:
             --findings evidence/findings-dispositions.json \
             --interoperability evidence/interoperability.json \
             --bootstrap-receipt evidence/bootstrap/uv-bootstrap.json \
+            --security-dependency-report evidence/version-1-security-gate/report.json \
             --output evidence/release-evidence.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -144,7 +144,8 @@ jobs:
           python scripts/verify_release_configuration.py \
             --config .github/release-config.json \
             --version "$version"
-          project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
+          project_query="$(< config/release-project-query-v1.graphql)"
+          mkdir -p "$RUNNER_TEMP/version-1-security-gate"
           test -n "$PROJECT_READ_TOKEN" || {
             echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
             exit 1
@@ -160,7 +161,9 @@ jobs:
               --iteration "$project_iteration" \
               --priority "$project_priority" \
               --status "$project_status" \
-              --validation "$project_validation"
+              --validation "$project_validation" \
+              --security-policy config/version-1-security-policy.json \
+              --security-report "$RUNNER_TEMP/version-1-security-gate/report.json"
           test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$commit"
           ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME")"
           test "$(jq -r '.object.type' <<<"$ref_json")" = "tag"
@@ -231,6 +234,7 @@ jobs:
           mkdir approved
           gh run download "$readiness_run" --repo "$GITHUB_REPOSITORY" \
             --name release-evidence --dir approved
+          test -f approved/version-1-security-gate/report.json
           grep -F -- "- Version: \`$version\`" approved/release-evidence.md
           grep -F -- "- Commit: \`$commit\`" approved/release-evidence.md
           test "$(jq -r '.release' approved/gates.json)" = "$version"
@@ -333,6 +337,8 @@ jobs:
           cp approved/gates.json dist/gates.json
           cp approved/findings-dispositions.json dist/findings-dispositions.json
           cp approved/interoperability.json dist/interoperability.json
+          cp approved/version-1-security-gate/report.json \
+            dist/version-1-security-gate-report.json
           cp approved/release-evidence.md dist/readiness-evidence.md
           cp "docs/release-notes/$VERSION.md" dist/release-notes.md
           printf '\n\n' >> dist/release-notes.md
@@ -355,6 +361,7 @@ jobs:
             --findings dist/findings-dispositions.json \
             --interoperability dist/interoperability.json \
             --bootstrap-receipt .tools/receipts/uv-bootstrap.json \
+            --security-dependency-report dist/version-1-security-gate-report.json \
             --output dist/release-evidence.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1863,6 +1870,7 @@ jobs:
             --findings dist/findings-dispositions.json \
             --interoperability dist/interoperability.json \
             --bootstrap-receipt bootstrap-receipt/uv-bootstrap.json \
+            --security-dependency-report dist/version-1-security-gate-report.json \
             --output dist/release-evidence.md
           python scripts/generate_release_checksums.py --directory dist
           python scripts/verify_release_assets.py --expected dist --actual dist
