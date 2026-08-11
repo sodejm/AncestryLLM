@@ -72,6 +72,9 @@ class TestClassify:
     def test_toml_pyproject(self) -> None:
         assert classify("pyproject.toml") == "first-party-config-exec"
 
+    def test_graphql_query(self) -> None:
+        assert classify("config/release-project-query-v1.graphql") == ("first-party-config-exec")
+
     def test_makefile(self) -> None:
         assert classify("Makefile") == "first-party-config-exec"
 
@@ -172,6 +175,11 @@ class TestCheckInventory:
         assert (
             NON_COMMENT_FORMAT_MAP["config/dependency-audit-exclusions.json"]
             == "docs/DEPENDENCY_MAINTENANCE.md"
+        )
+
+    def test_security_dependency_policy_maps_to_release_procedure(self) -> None:
+        assert (
+            NON_COMMENT_FORMAT_MAP["config/version-1-security-policy.json"] == "docs/RELEASING.md"
         )
 
     def test_non_comment_format_with_missing_map_target_fails(

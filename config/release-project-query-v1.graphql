@@ -1,3 +1,4 @@
+# Shared schema-v1 query for fail-closed Version 1 release-project verification.
 query($owner: String!, $number: Int!, $endCursor: String) {
   user(login: $owner) {
     projectV2(number: $number) {
