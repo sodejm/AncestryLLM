@@ -355,6 +355,59 @@ def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
         ),
     }
     assert verifier["reviewed_update_procedure"].startswith("docs/")
+    assert uv["assets"]["windows-x86_64"]["binary_path"] == "uv.exe"
+    assert uv["assets"]["windows-arm64"]["binary_path"] == "uv.exe"
+
+
+@pytest.mark.parametrize(
+    ("architecture", "platform_key"),
+    [
+        ("AMD64", "windows-x86_64"),
+        ("ARM64", "windows-arm64"),
+    ],
+)
+def test_windows_uv_archives_use_the_reviewed_flat_executable_member(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    architecture: str,
+    platform_key: str,
+) -> None:
+    gh_binary = b"verified fixture gh.exe"
+    uv_binary = b"verified fixture uv.exe"
+    gh_archive = _zip_archive("bin/gh.exe", gh_binary)
+    uv_archive = _zip_archive("uv.exe", uv_binary)
+
+    payload = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    uv_asset = payload["uv"]["assets"][platform_key]
+    uv_asset["sha256"] = _sha256(uv_archive)
+    uv_asset["size_bytes"] = len(uv_archive)
+    uv_asset["binary_path"] = "uv.exe"
+    uv_asset["binary_sha256"] = _sha256(uv_binary)
+    gh_asset = payload["github_cli"]["assets"][platform_key]
+    gh_asset["sha256"] = _sha256(gh_archive)
+    gh_asset["size_bytes"] = len(gh_archive)
+
+    policy_path = tmp_path / "windows-policy.json"
+    policy_path.write_text(json.dumps(payload), encoding="utf-8")
+    gh_url = f"https://github.com/cli/cli/releases/download/v2.97.0/{gh_asset['archive_name']}"
+    uv_url = f"https://github.com/astral-sh/uv/releases/download/0.12.1/{uv_asset['archive_name']}"
+    downloader = FixtureDownloader({gh_url: gh_archive, uv_url: uv_archive})
+    runner = FixtureRunner(_attestation_payload(uv_asset["archive_name"], _sha256(uv_archive)))
+
+    receipt = bootstrap_module.bootstrap_uv(
+        policy_path=policy_path,
+        install_dir=tmp_path / "tools",
+        receipt_path=tmp_path / "receipt.json",
+        downloader=downloader,
+        runner=runner,
+        platform_id=("win32", architecture),
+        temporary_root=tmp_path / "temporary",
+        now=lambda: datetime(2026, 8, 10, 12, tzinfo=UTC),
+    )
+
+    assert receipt["status"] == "success"
+    assert (tmp_path / "tools" / "uv.exe").read_bytes() == uv_binary
+    assert runner.commands[-1][-1] == "--version"
 
 
 def test_python_verifier_artifacts_are_mirrored_by_uv_lock() -> None:
@@ -1730,6 +1783,56 @@ def test_verify_installed_rehashes_before_running_uv(
             runner=runner,
             platform_id=("linux", "x86_64"),
         )
+    assert runner.commands == []
+
+
+@pytest.mark.parametrize(
+    ("architecture", "platform_key"),
+    [
+        ("AMD64", "windows-x86_64"),
+        ("ARM64", "windows-arm64"),
+    ],
+)
+def test_verify_installed_resolves_setup_uv_windows_output_to_executable(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    architecture: str,
+    platform_key: str,
+) -> None:
+    uv_binary = b"verified setup-uv Windows executable"
+    setup_uv_output_path = tmp_path / "uv"
+    installed_uv = tmp_path / "uv.exe"
+    installed_uv.write_bytes(uv_binary)
+    policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    policy["uv"]["assets"][platform_key]["binary_sha256"] = _sha256(uv_binary)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    runner = FixtureRunner("[]")
+
+    bootstrap_module.verify_installed_uv(
+        policy_path=policy_path,
+        uv_path=setup_uv_output_path,
+        runner=runner,
+        platform_id=("win32", architecture),
+    )
+
+    assert runner.commands == [(str(installed_uv), "--version")]
+
+
+def test_verify_installed_rejects_unexpected_windows_executable_name(
+    tmp_path: Path,
+    bootstrap_module: Any,
+) -> None:
+    runner = FixtureRunner("[]")
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="INSTALLED_UV_PATH_INVALID"):
+        bootstrap_module.verify_installed_uv(
+            policy_path=POLICY_PATH,
+            uv_path=tmp_path / "uvx.exe",
+            runner=runner,
+            platform_id=("win32", "ARM64"),
+        )
+
     assert runner.commands == []
 
 

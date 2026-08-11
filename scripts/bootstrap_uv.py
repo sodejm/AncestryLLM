@@ -80,11 +80,11 @@ UV_ASSET_SHAPE = {
     ),
     "windows-x86_64": (
         "uv-x86_64-pc-windows-msvc.zip",
-        "uv-x86_64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
     "windows-arm64": (
         "uv-aarch64-pc-windows-msvc.zip",
-        "uv-aarch64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
 }
 UV_TARGET_TRIPLES = {
@@ -1676,14 +1676,26 @@ def verify_installed_uv(
     """Re-hash a setup-uv installation before its first execution."""
 
     policy = load_policy(policy_path)
-    _, _, platform_key, uv_asset, _ = select_platform(policy, platform_id)
+    operating_system, _, platform_key, uv_asset, _ = select_platform(policy, platform_id)
+    installed_uv = uv_path
+    if operating_system == "windows":
+        if uv_path.name.casefold() == "uv":
+            # setup-uv's uv-path output omits PATHEXT even though the installed
+            # archive member is uv.exe. Resolve that exact sibling without
+            # consulting PATH or accepting an alternate executable name.
+            installed_uv = uv_path.with_name("uv.exe")
+        elif uv_path.name.casefold() != "uv.exe":
+            _fail(
+                "INSTALLED_UV_PATH_INVALID",
+                "setup-uv returned an unexpected Windows executable name",
+            )
     _assert_binary(
-        uv_path,
+        installed_uv,
         uv_asset["binary_sha256"],
         "INSTALLED_BINARY_DIGEST_MISMATCH",
     )
     _assert_uv_version(
-        uv_path,
+        installed_uv,
         runner,
         expected_target=UV_TARGET_TRIPLES[platform_key],
         error_code="INSTALLED_VERSION_MISMATCH",
