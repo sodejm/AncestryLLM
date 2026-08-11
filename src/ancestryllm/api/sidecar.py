@@ -12,7 +12,6 @@ import ctypes
 import json
 import socket
 import sys
-from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
@@ -26,7 +25,7 @@ from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from fastapi import FastAPI
 

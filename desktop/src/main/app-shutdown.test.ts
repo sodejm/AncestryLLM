@@ -1,3 +1,4 @@
+// Verifies Electron quit remains bounded and reports sidecar cleanup failures generically.
 import { describe, expect, it, vi } from 'vitest'
 import { completeAppShutdown } from './app-shutdown'
 

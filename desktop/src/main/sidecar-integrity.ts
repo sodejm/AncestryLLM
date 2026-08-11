@@ -1,3 +1,4 @@
+// Authenticates the packaged native sidecar payload before Electron may execute it.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { lstat, readFile, readdir, readlink } from 'node:fs/promises'

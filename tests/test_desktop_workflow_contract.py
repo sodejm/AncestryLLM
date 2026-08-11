@@ -91,7 +91,7 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
         "uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build"
     ) in workflow
     assert "uv pip install --python .venv --no-deps --editable ." in workflow
-    assert workflow.count("uv run --no-sync") == 4
+    assert workflow.count("uv run --no-sync") == 5
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
     assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow

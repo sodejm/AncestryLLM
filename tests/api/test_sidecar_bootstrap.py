@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.routing import APIRoute
@@ -23,6 +23,9 @@ from ancestryllm.api.sidecar import (
     parse_launch_frame,
     readiness_line,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _launch_payload(**updates: str) -> bytes:
