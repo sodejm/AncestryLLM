@@ -66,8 +66,16 @@ class FakeWebContents extends EventEmitter {
 
   isDestroyed(): boolean { return this.destroyed }
 
-  startNavigation(url = 'app://bundle/index.html', isMainFrame = true): void {
-    this.emit('did-start-navigation', {}, url, false, isMainFrame)
+  startNavigation(url = 'app://bundle/index.html', isMainFrame = true, isSameDocument = false): void {
+    this.emit(
+      'did-start-navigation',
+      Object.freeze({ url, isSameDocument, isMainFrame, frame: isMainFrame ? this.mainFrame : null }),
+      url,
+      isSameDocument,
+      isMainFrame,
+      1,
+      1,
+    )
   }
 
   commitNavigation(url = 'app://bundle/index.html', isMainFrame = true): void {
@@ -78,6 +86,12 @@ class FakeWebContents extends EventEmitter {
   navigate(url = 'app://bundle/index.html', isMainFrame = true): void {
     this.startNavigation(url, isMainFrame)
     this.commitNavigation(url, isMainFrame)
+  }
+
+  navigateInPage(url: string, isMainFrame = true): void {
+    this.startNavigation(url, isMainFrame, true)
+    if (isMainFrame) this.mainFrame = Object.freeze({ url })
+    this.emit('did-navigate-in-page', {}, url, isMainFrame, 1, 1)
   }
 
   destroy(): void {
@@ -109,7 +123,15 @@ function harness(
   const contents = new FakeWebContents()
   const unsubscribe = controller.authorizeWebContents(
     contents,
-    (url) => url === 'app://bundle/index.html',
+    (url) => {
+      try {
+        const candidate = new URL(url)
+        candidate.hash = ''
+        return candidate.href === 'app://bundle/index.html'
+      } catch {
+        return false
+      }
+    },
   )
   const event = (sender = contents, senderFrame: unknown = sender.mainFrame) => ({ sender, senderFrame })
   return { control, controller, contents, event, fileGrants, handlers, unsubscribe }
@@ -388,6 +410,43 @@ describe('desktop IPC handlers', () => {
     expect(fileGrants.revokeAll).toHaveBeenCalledTimes(1)
     await expect(nextRequest).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_CANCELLED' } })
     pending.resolve(capabilities)
+  })
+
+  it('keeps trusted same-document routes authorized without revoking grants or cancelling work', async () => {
+    const control = bridge()
+    const pending = deferred<BridgeResult<CapabilityManifest>>()
+    let signal: AbortSignal | undefined
+    vi.mocked(control.getCapabilities).mockImplementation((operationSignal?: AbortSignal) => {
+      signal = operationSignal
+      return pending.promise
+    })
+    const { contents, event, fileGrants, handlers } = harness(control)
+    const request = handlers.get(desktopChannels.getCapabilities)?.(event())
+
+    contents.navigateInPage('app://bundle/index.html#/diagnostics')
+
+    expect(signal?.aborted).toBe(false)
+    expect(fileGrants.revokeOwner).not.toHaveBeenCalled()
+    pending.resolve(capabilities)
+    await expect(request).resolves.toMatchObject({ ok: true })
+    await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({ ok: true })
+
+    contents.navigateInPage('app://bundle/index.html#/settings')
+
+    expect(fileGrants.revokeOwner).not.toHaveBeenCalled()
+    await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({ ok: true })
+  })
+
+  it('fails closed when main-frame navigation details are malformed', async () => {
+    const { contents, event, fileGrants, handlers } = harness()
+
+    contents.emit('did-start-navigation', {}, 'app://bundle/index.html', false, true)
+
+    expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
+    await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'UNAUTHORIZED_SENDER' },
+    })
   })
 
   it('revokes identity and cancels work when the renderer process exits', async () => {

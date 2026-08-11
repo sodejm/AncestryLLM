@@ -93,10 +93,30 @@ interface Authorization {
   navigating: boolean
   capabilityFlight?: CapabilityFlight
 }
+interface NavigationStartDetails {
+  readonly isMainFrame: boolean
+  readonly isSameDocument: boolean
+}
 interface CapabilityFlight {
   readonly generation: number
   readonly promise: Promise<BridgeResult<CapabilityManifest>>
   subscribers: number
+}
+
+function parseNavigationStartDetails(value: unknown): NavigationStartDetails | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  try {
+    const candidate = value as Readonly<Record<'isMainFrame' | 'isSameDocument', unknown>>
+    if (typeof candidate.isMainFrame !== 'boolean' || typeof candidate.isSameDocument !== 'boolean') {
+      return undefined
+    }
+    return Object.freeze({
+      isMainFrame: candidate.isMainFrame,
+      isSameDocument: candidate.isSameDocument,
+    })
+  } catch {
+    return undefined
+  }
 }
 interface QueueEntry {
   readonly generation: number
@@ -494,8 +514,10 @@ export function registerDesktopIpcHandlers(
       const previous = authorizations.get(contents)
       if (previous) removeAuthorization(authorizations, previous, fileGrants)
       const revoke = () => removeAuthorization(authorizations, state, fileGrants)
-      const navigate = (_event: unknown, _url: unknown, _inPlace: unknown, isMainFrame: unknown) => {
-        if (isMainFrame !== true) return
+      const navigate = (event: unknown) => {
+        const details = parseNavigationStartDetails(event)
+        if (details?.isMainFrame === false) return
+        if (details?.isSameDocument === true) return
         state.navigating = true
         invalidate(state)
         fileGrants.revokeOwner(state.contents)

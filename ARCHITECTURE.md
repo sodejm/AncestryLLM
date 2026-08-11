@@ -273,8 +273,10 @@ target-assurance gates to pass.
   validates regular files, link count, exact purpose, content signature, size,
   canonical identity, and filesystem fingerprint before issuing random 256-bit
   grant IDs. Grants are bound to one renderer, purpose, access mode, application
-  session, and one redemption; renderer loss, navigation, explicit revocation,
-  and restart invalidate them. Existing-output replacement requires explicit
+  session, and one redemption; renderer loss, cross-document navigation,
+  explicit revocation, and restart invalidate them. Trusted same-document
+  application route changes preserve the renderer identity and its grants.
+  Existing-output replacement requires explicit
   native confirmation and identity revalidation, while main-owned locks prevent
   concurrent output grants and source/output aliasing.
 - `resolveReadGrant` and `resolveWriteGrant` are main-only adapter operations.
@@ -290,11 +292,13 @@ target-assurance gates to pass.
   symbols, sparse arrays, cycles, repeated references, and non-finite values
   fail closed. Non-coalesced work is limited to four active and eight queued
   operations per renderer, while capability reads coalesce for at most 32
-  callers. Absolute deadlines, navigation, renderer loss, bridge replacement,
-  sidecar-session invalidation, and shutdown cancel work with stable redacted
-  errors. An underlying operation retains its active slot until settlement
-  even after its caller times out, preventing hidden work from escaping the
-  concurrency cap.
+  callers. Absolute deadlines, cross-document or unclassifiable navigation,
+  renderer loss, bridge replacement, sidecar-session invalidation, and shutdown
+  cancel work with stable redacted errors. Trusted same-document route changes
+  preserve work while the exact current frame and application URL are still
+  rechecked on every request. An underlying operation retains its active slot
+  until settlement even after its caller times out, preventing hidden work from
+  escaping the concurrency cap.
   Preference updates carry the renderer-visible revision; main owns the storage
   boundary and rejects stale updates. The renderer advances past onboarding
   only after a fresh valid preference snapshot reports completion; malformed,
