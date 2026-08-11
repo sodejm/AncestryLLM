@@ -424,7 +424,7 @@ is required; emulation is labeled and cannot establish native support.
 Local Desktop containers require `G0`, `G5`, and their applicable `G7` evidence.
 Connect Remote requires `G0`, its applicable client-side `G6`, and `G7` evidence.
 Host Remote requires `G0`, `G6`, and its applicable `G7` evidence.
-AB-11 through AB-21 remain fail-closed according to their owning profile; a
+AB-11 through AB-22 remain fail-closed according to their owning profile; a
 failed gate blocks the affected availability or release claim.
 
 GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
@@ -1016,6 +1016,24 @@ The Make targets are the command contract:
 | `make package` | Locked build-group construction and artifact validation. |
 | `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
+
+Version 1 security work has a separate repository-governance contract. The
+schema-v1 policy in `config/version-1-security-policy.json` binds the exact
+Project, repository, issue owners, release iterations, native GitHub dependency
+edges, iteration order, and the #131 release-evidence consumer. The shared
+GraphQL document in `config/release-project-query-v1.graphql` is used by proof,
+readiness, and release workflows. Its verifier rejects missing or contradictory
+edges, cycles, dependencies scheduled after their dependents, premature issue
+closure, pagination that cannot be verified, and unknown policy fields. A
+deterministic report is bound to the canonical policy digest before #131 may
+record the `version-1-security-dependencies` gate as passing.
+
+This contract governs hosted planning and release evidence only; it changes no
+application API, CLI command registry, service DTO, provider contract, GEDCOM
+representation, storage schema, FastAPI contract, or Electron boundary. It
+continues to trust authorized GitHub maintainers and GitHub's Project, issue,
+dependency, API, and token enforcement. Missing access, incomplete data, or a
+mutated policy/report fails closed rather than weakening that residual trust.
 
 CI may synchronize a purpose-specific PEP 735 dependency group before running
 a gate, but it invokes the same Make target and cannot vary the actual command

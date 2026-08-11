@@ -34,9 +34,13 @@ REQUIRED_GATES = {
     "secret-scan",
     "semgrep",
     "tests-and-coverage",
+    "version-1-security-dependencies",
     "workflow-security-analysis",
 }
 BOOTSTRAP_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "uv-bootstrap-policy.json"
+SECURITY_DEPENDENCY_POLICY_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "version-1-security-policy.json"
+)
 FINDING_SOURCES = {
     "dependency-audit",
     "semgrep",
@@ -279,6 +283,310 @@ def _exact_object_fields(
     return value
 
 
+def _positive_integer(value: object, field: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return value
+
+
+def _canonical_json_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _security_policy_graph_is_acyclic(dependencies: list[tuple[int, int]]) -> bool:
+    adjacency: dict[int, set[int]] = {}
+    for blocked, blocked_by in dependencies:
+        adjacency.setdefault(blocked_by, set()).add(blocked)
+        adjacency.setdefault(blocked, set())
+
+    visiting: set[int] = set()
+    visited: set[int] = set()
+
+    def visit(number: int) -> bool:
+        if number in visiting:
+            return False
+        if number in visited:
+            return True
+        visiting.add(number)
+        if any(not visit(dependent) for dependent in adjacency[number]):
+            return False
+        visiting.remove(number)
+        visited.add(number)
+        return True
+
+    return all(visit(number) for number in adjacency)
+
+
+def _validate_security_dependency_policy(
+    policy: dict[str, Any],
+) -> tuple[
+    str,
+    dict[str, Any],
+    set[int],
+    list[tuple[int, int]],
+    dict[str, Any],
+]:
+    if type(policy["schema_version"]) is not int or policy["schema_version"] != 1:
+        raise ValueError("security dependency policy.schema_version must be 1")
+
+    repository = _text(policy["repository"], "security dependency policy.repository")
+    if repository.count("/") != 1 or any(not component for component in repository.split("/")):
+        raise ValueError("security dependency policy.repository must be owner/name")
+
+    project_value = _exact_object_fields(
+        policy["project"],
+        {"owner", "number", "title"},
+        "security dependency policy.project",
+    )
+    project = {
+        "owner": _text(project_value["owner"], "security dependency policy.project.owner"),
+        "number": _positive_integer(
+            project_value["number"], "security dependency policy.project.number"
+        ),
+        "title": _text(project_value["title"], "security dependency policy.project.title"),
+    }
+
+    iteration_values = policy["iteration_order"]
+    if not isinstance(iteration_values, list) or not iteration_values:
+        raise ValueError("security dependency policy.iteration_order must be a non-empty list")
+    iterations = [
+        _text(value, f"security dependency policy.iteration_order[{index}]")
+        for index, value in enumerate(iteration_values)
+    ]
+    if len(iterations) != len(set(iterations)):
+        raise ValueError("security dependency policy.iteration_order must be unique")
+    iteration_set = set(iterations)
+
+    issue_values = policy["required_issues"]
+    if not isinstance(issue_values, list) or not issue_values:
+        raise ValueError("security dependency policy.required_issues must be a non-empty list")
+    issue_numbers: set[int] = set()
+    for index, value in enumerate(issue_values):
+        issue = _exact_object_fields(
+            value,
+            {"number", "iteration", "owner"},
+            f"security dependency policy.required_issues[{index}]",
+        )
+        number = _positive_integer(
+            issue["number"], f"security dependency policy.required_issues[{index}].number"
+        )
+        iteration = _text(
+            issue["iteration"],
+            f"security dependency policy.required_issues[{index}].iteration",
+        )
+        _text(issue["owner"], f"security dependency policy.required_issues[{index}].owner")
+        if number in issue_numbers:
+            raise ValueError("security dependency policy issue numbers must be unique")
+        if iteration not in iteration_set:
+            raise ValueError("security dependency policy issue iteration is not declared")
+        issue_numbers.add(number)
+
+    dependency_values = policy["required_dependencies"]
+    if not isinstance(dependency_values, list) or not dependency_values:
+        raise ValueError(
+            "security dependency policy.required_dependencies must be a non-empty list"
+        )
+    dependencies: list[tuple[int, int]] = []
+    for index, value in enumerate(dependency_values):
+        dependency = _exact_object_fields(
+            value,
+            {"blocked", "blocked_by"},
+            f"security dependency policy.required_dependencies[{index}]",
+        )
+        blocked = _positive_integer(
+            dependency["blocked"],
+            f"security dependency policy.required_dependencies[{index}].blocked",
+        )
+        blocked_by = _positive_integer(
+            dependency["blocked_by"],
+            f"security dependency policy.required_dependencies[{index}].blocked_by",
+        )
+        if blocked == blocked_by:
+            raise ValueError("security dependency policy dependencies cannot be self-referential")
+        dependencies.append((blocked, blocked_by))
+    if len(dependencies) != len(set(dependencies)):
+        raise ValueError("security dependency policy dependencies must be unique")
+    if not _security_policy_graph_is_acyclic(dependencies):
+        raise ValueError("security dependency policy dependencies must be acyclic")
+
+    consumer_value = _exact_object_fields(
+        policy["evidence_consumer"],
+        {"issue", "gate"},
+        "security dependency policy.evidence_consumer",
+    )
+    consumer = {
+        "issue": _positive_integer(
+            consumer_value["issue"], "security dependency policy.evidence_consumer.issue"
+        ),
+        "gate": _text(consumer_value["gate"], "security dependency policy.evidence_consumer.gate"),
+    }
+    if consumer["gate"] != "version-1-security-dependencies":
+        raise ValueError(
+            "security dependency policy.evidence_consumer.gate must be "
+            "version-1-security-dependencies"
+        )
+
+    return repository, project, issue_numbers, sorted(dependencies), consumer
+
+
+def _validate_security_dependency_report(
+    path: Path,
+    policy_path: Path = SECURITY_DEPENDENCY_POLICY_PATH,
+) -> dict[str, Any]:
+    report = _exact_object_fields(
+        _load_object(path, "security dependency report"),
+        {
+            "schema_version",
+            "status",
+            "policy_schema_version",
+            "policy_sha256",
+            "repository",
+            "project",
+            "checked_issues",
+            "required_dependencies",
+            "evidence_consumer",
+        },
+        "security dependency report",
+    )
+    if type(report["schema_version"]) is not int or report["schema_version"] != 1:
+        raise ValueError("security dependency report.schema_version must be 1")
+    if report["status"] != "verified":
+        raise ValueError("security dependency report.status must be verified")
+    if type(report["policy_schema_version"]) is not int or report["policy_schema_version"] != 1:
+        raise ValueError("security dependency report.policy_schema_version must be 1")
+
+    policy = _exact_object_fields(
+        _load_object(policy_path, "security dependency policy"),
+        {
+            "schema_version",
+            "repository",
+            "project",
+            "iteration_order",
+            "required_issues",
+            "required_dependencies",
+            "evidence_consumer",
+        },
+        "security dependency policy",
+    )
+    if type(policy["schema_version"]) is not int or policy["schema_version"] != 1:
+        raise ValueError("security dependency policy.schema_version must be 1")
+    (
+        policy_repository,
+        policy_project,
+        policy_issue_numbers,
+        expected_dependencies,
+        policy_consumer,
+    ) = _validate_security_dependency_policy(policy)
+    policy_sha256 = _receipt_sha256(
+        report["policy_sha256"], "security dependency report.policy_sha256"
+    )
+    if policy_sha256 != _canonical_json_sha256(policy):
+        raise ValueError(
+            "security dependency report.policy_sha256 does not match the reviewed policy"
+        )
+
+    repository = _text(report["repository"], "security dependency report.repository")
+    if repository.count("/") != 1 or any(not component for component in repository.split("/")):
+        raise ValueError("security dependency report.repository must be owner/name")
+    if repository != policy_repository:
+        raise ValueError("security dependency report.repository does not match the reviewed policy")
+
+    project = _exact_object_fields(
+        report["project"],
+        {"owner", "number", "title"},
+        "security dependency report.project",
+    )
+    _text(project["owner"], "security dependency report.project.owner")
+    _positive_integer(project["number"], "security dependency report.project.number")
+    _text(project["title"], "security dependency report.project.title")
+    if project != policy_project:
+        raise ValueError("security dependency report.project does not match the reviewed policy")
+
+    checked_values = report["checked_issues"]
+    if not isinstance(checked_values, list) or not checked_values:
+        raise ValueError("security dependency report.checked_issues must be a non-empty list")
+    checked_issues = [
+        _positive_integer(value, f"security dependency report.checked_issues[{index}]")
+        for index, value in enumerate(checked_values)
+    ]
+    if checked_issues != sorted(set(checked_issues)):
+        raise ValueError("security dependency report.checked_issues must be sorted and unique")
+    checked_set = set(checked_issues)
+
+    dependency_values = report["required_dependencies"]
+    if not isinstance(dependency_values, list) or not dependency_values:
+        raise ValueError(
+            "security dependency report.required_dependencies must be a non-empty list"
+        )
+    dependencies: list[tuple[int, int]] = []
+    for index, value in enumerate(dependency_values):
+        dependency = _exact_object_fields(
+            value,
+            {"blocked", "blocked_by"},
+            f"security dependency report.required_dependencies[{index}]",
+        )
+        blocked = _positive_integer(
+            dependency["blocked"],
+            f"security dependency report.required_dependencies[{index}].blocked",
+        )
+        blocked_by = _positive_integer(
+            dependency["blocked_by"],
+            f"security dependency report.required_dependencies[{index}].blocked_by",
+        )
+        if blocked == blocked_by:
+            raise ValueError("security dependency report dependencies cannot be self-referential")
+        if blocked not in checked_set or blocked_by not in checked_set:
+            raise ValueError(
+                "security dependency report dependencies must reference checked issues"
+            )
+        dependencies.append((blocked, blocked_by))
+    if dependencies != sorted(set(dependencies)):
+        raise ValueError(
+            "security dependency report.required_dependencies must be sorted and unique"
+        )
+    if dependencies != expected_dependencies:
+        raise ValueError(
+            "security dependency report.required_dependencies do not match the reviewed policy"
+        )
+
+    consumer = _exact_object_fields(
+        report["evidence_consumer"],
+        {"issue", "gate"},
+        "security dependency report.evidence_consumer",
+    )
+    consumer_issue = _positive_integer(
+        consumer["issue"], "security dependency report.evidence_consumer.issue"
+    )
+    if consumer_issue not in checked_set:
+        raise ValueError("security dependency report evidence consumer must be a checked issue")
+    if consumer["gate"] != "version-1-security-dependencies":
+        raise ValueError(
+            "security dependency report.evidence_consumer.gate must be "
+            "version-1-security-dependencies"
+        )
+    if consumer != policy_consumer:
+        raise ValueError(
+            "security dependency report.evidence_consumer does not match the reviewed policy"
+        )
+    expected_checked_issues = set(policy_issue_numbers)
+    expected_checked_issues.update(
+        number for dependency in expected_dependencies for number in dependency
+    )
+    expected_checked_issues.add(consumer_issue)
+    if checked_set != expected_checked_issues:
+        raise ValueError(
+            "security dependency report.checked_issues do not match the reviewed policy"
+        )
+    return report
+
+
 def _receipt_sha256(value: object, field: str) -> str:
     digest = _text(value, field)
     if not SHA256.fullmatch(digest):
@@ -471,6 +779,7 @@ def main() -> int:
     parser.add_argument("--findings", required=True, type=Path)
     parser.add_argument("--interoperability", required=True, type=Path)
     parser.add_argument("--bootstrap-receipt", required=True, type=Path)
+    parser.add_argument("--security-dependency-report", required=True, type=Path)
     args = parser.parse_args()
 
     if not SEMVER.fullmatch(args.version):
@@ -502,6 +811,9 @@ def main() -> int:
         vendors = _validate_interoperability(interoperability_payload, args.version)
         bootstrap_payload = _load_object(args.bootstrap_receipt, "bootstrap receipt")
         bootstrap = _validate_bootstrap_receipt(bootstrap_payload)
+        security_dependencies = _validate_security_dependency_report(
+            args.security_dependency_report
+        )
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -536,6 +848,10 @@ def main() -> int:
     )
     generated = generated_date.isoformat()
     bootstrap_receipt_sha256 = _sha256(args.bootstrap_receipt)
+    security_dependency_report_sha256 = _sha256(args.security_dependency_report)
+    checked_security_issues = ", ".join(
+        f"#{number}" for number in security_dependencies["checked_issues"]
+    )
     args.output.write_text(
         f"""# AncestryLLM {args.version} release evidence
 
@@ -568,6 +884,19 @@ def main() -> int:
 - OIDC issuer: `{bootstrap["oidc_issuer"]}`
 - Predicate: `{bootstrap["predicate_type"]}`
 - Verified at: `{bootstrap["verified_at"]}`
+
+## Version 1 security dependency verification
+
+- Report SHA-256: `{security_dependency_report_sha256}`
+- Policy schema: `{security_dependencies["policy_schema_version"]}`
+- Repository: `{security_dependencies["repository"]}`
+- Project: `{security_dependencies["project"]["title"]}`
+  (`{security_dependencies["project"]["owner"]}` project
+  `{security_dependencies["project"]["number"]}`)
+- Checked issues: {checked_security_issues}
+- Required native dependencies: `{len(security_dependencies["required_dependencies"])}`
+- Evidence consumer: issue `#{security_dependencies["evidence_consumer"]["issue"]}`
+  (`{security_dependencies["evidence_consumer"]["gate"]}`)
 
 ## Security finding dispositions
 

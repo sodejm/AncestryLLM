@@ -125,6 +125,16 @@ artifact. Missing, extra, unpinned, duplicate, unknown, or unused records fail
 closed. This completeness control supplements rather than replaces Semgrep,
 zizmor, CycloneDX, gitleaks, TruffleHog, and CodeQL.
 
+Version 1 security sequencing is enforced by a checked-in schema-v1 policy and
+one shared GitHub Project query. Proof, readiness, and release reject missing or
+contradictory native dependencies, wrong issue ownership or iterations, cycles,
+iteration inversion, premature closure, incomplete pagination, and evidence
+that is not bound to the current policy digest. The sanitized result is consumed
+by #131 as the `version-1-security-dependencies` release-evidence gate. This
+control still trusts authorized maintainers and GitHub's Project, issue,
+dependency, API, and token enforcement; missing access or unverifiable hosted
+state blocks release rather than passing.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;

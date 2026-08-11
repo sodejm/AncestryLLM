@@ -79,6 +79,35 @@ and its proof are superseded; require a successful proof from the newer tip
 instead. The exact-main run for each candidate is the hosted proof; do not
 create the secret in a pull request or place the token in repository files.
 
+### Version 1 security dependency gate
+
+`config/version-1-security-policy.json` is the reviewed source of truth for
+Version 1 security issue ownership, release iterations, native GitHub
+dependencies, their iteration order, and the #131 release-evidence consumer.
+`config/release-project-query-v1.graphql` is the only permitted Project query
+for that gate. Proof, readiness, and release workflows must use both files
+without embedding a divergent query or inferring policy from issue titles,
+bodies, labels, or comments.
+
+When the plan changes, update the issue number, owner, iteration, dependency
+edge, iteration order, and consumer in the same reviewed pull request wherever
+they are affected. Apply the corresponding owner, Project field, and native
+`blocked by` relationship in GitHub, then run the exact checked-in query through
+`scripts/verify_release_project.py`. Do not represent a required dependency
+only in prose. The verifier rejects missing or reversed edges, cycles,
+prerequisites scheduled after dependents, premature closure, incomplete
+pagination, and unknown policy fields.
+
+The generated schema-v1 report is deterministic and binds its normalized
+issues and edges to the canonical policy SHA-256. Release evidence records its
+digest and accepts the `version-1-security-dependencies` gate only when its
+Project, repository, checked issues, dependencies, policy digest, and #131
+consumer match the checked-in policy exactly. Keep the report as readiness
+evidence and pass that same artifact to the tag workflow; never reconstruct it
+from mutable issue prose. Authorized maintainer changes and GitHub's Project,
+issue-dependency, API, and token enforcement remain trusted. Missing access or
+incomplete hosted data blocks release.
+
 ## Binary-signing version boundary
 
 AncestryLLM will **not sign project-produced release artifacts or release tags

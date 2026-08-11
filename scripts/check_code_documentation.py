@@ -39,7 +39,7 @@ FIRST_PARTY_CODE_EXTENSIONS: Final = frozenset(
 )
 
 # Makefile and comment-capable config formats that require file-level purpose comments.
-EXEC_CONFIG_EXTENSIONS: Final = frozenset({".yml", ".yaml", ".toml"})
+EXEC_CONFIG_EXTENSIONS: Final = frozenset({".graphql", ".yml", ".yaml", ".toml"})
 
 # Extensions that identify generated/vendored or lock files — excluded from
 # documentation requirements but must be explicitly classified.
@@ -111,6 +111,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "config/uv-bootstrap-policy.json": "docs/security/verified-uv-bootstrap.md",
     # Dependency-audit export exclusions and their fail-closed review procedure.
     "config/dependency-audit-exclusions.json": "docs/DEPENDENCY_MAINTENANCE.md",
+    # Version 1 security dependency policy and its reviewed update procedure.
+    "config/version-1-security-policy.json": "docs/RELEASING.md",
 }
 
 # ---------------------------------------------------------------------------

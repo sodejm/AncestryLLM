@@ -129,6 +129,38 @@ def _bootstrap_receipt() -> dict[str, Any]:
     }
 
 
+def _security_dependency_report() -> dict[str, Any]:
+    policy = json.loads(evidence.SECURITY_DEPENDENCY_POLICY_PATH.read_text(encoding="utf-8"))
+    dependencies = sorted(
+        policy["required_dependencies"],
+        key=lambda item: (item["blocked"], item["blocked_by"]),
+    )
+    checked_issues = {item["number"] for item in policy["required_issues"]}
+    checked_issues.update(
+        number
+        for dependency in dependencies
+        for number in (dependency["blocked"], dependency["blocked_by"])
+    )
+    checked_issues.add(policy["evidence_consumer"]["issue"])
+    return {
+        "schema_version": 1,
+        "status": "verified",
+        "policy_schema_version": 1,
+        "policy_sha256": evidence._canonical_json_sha256(policy),
+        "repository": policy["repository"],
+        "project": policy["project"],
+        "checked_issues": sorted(checked_issues),
+        "required_dependencies": dependencies,
+        "evidence_consumer": policy["evidence_consumer"],
+    }
+
+
+def _write_security_dependency_report(tmp_path: Path, payload: dict[str, Any]) -> Path:
+    path = tmp_path / "security-dependencies.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 @pytest.mark.parametrize("version", ["0.2.0", "0.3.0", "0.4.0", "0.5.0"])
 def test_versioned_release_evidence_records_are_valid(version: str) -> None:
     root = Path(__file__).parents[1] / "docs" / "release-evidence" / version
@@ -338,6 +370,66 @@ def test_bootstrap_receipt_must_record_success_and_utc_timestamp() -> None:
         evidence._validate_bootstrap_receipt(receipt)
 
 
+def test_security_dependency_report_requires_exact_verified_schema(tmp_path: Path) -> None:
+    report = _security_dependency_report()
+
+    path = _write_security_dependency_report(tmp_path, report)
+    assert evidence._validate_security_dependency_report(path) == report
+
+    report["unexpected"] = "field"
+    _write_security_dependency_report(tmp_path, report)
+    with pytest.raises(ValueError, match="fields do not match schema v1"):
+        evidence._validate_security_dependency_report(path)
+
+
+def test_security_dependency_report_is_bound_to_reviewed_policy(tmp_path: Path) -> None:
+    report = _security_dependency_report()
+    report["policy_sha256"] = "0" * 64
+    path = _write_security_dependency_report(tmp_path, report)
+
+    with pytest.raises(ValueError, match="does not match the reviewed policy"):
+        evidence._validate_security_dependency_report(path)
+
+
+def test_security_dependency_report_rejects_malformed_reviewed_policy(tmp_path: Path) -> None:
+    policy = json.loads(evidence.SECURITY_DEPENDENCY_POLICY_PATH.read_text(encoding="utf-8"))
+    policy["required_dependencies"][0]["unexpected"] = True
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    report = _security_dependency_report()
+    report["policy_sha256"] = evidence._canonical_json_sha256(policy)
+    report_path = _write_security_dependency_report(tmp_path, report)
+
+    with pytest.raises(ValueError, match=r"required_dependencies\[0\] fields"):
+        evidence._validate_security_dependency_report(report_path, policy_path)
+
+
+@pytest.mark.parametrize("field", ("schema_version", "policy_schema_version"))
+def test_security_dependency_report_rejects_boolean_schema_versions(
+    field: str, tmp_path: Path
+) -> None:
+    report = _security_dependency_report()
+    report[field] = True
+    path = _write_security_dependency_report(tmp_path, report)
+
+    with pytest.raises(ValueError, match=f"{field} must be 1"):
+        evidence._validate_security_dependency_report(path)
+
+
+def test_security_dependency_report_rejects_unsorted_or_unchecked_edges(tmp_path: Path) -> None:
+    report = _security_dependency_report()
+    report["checked_issues"] = [363, 346, 131]
+    path = _write_security_dependency_report(tmp_path, report)
+    with pytest.raises(ValueError, match="checked_issues must be sorted and unique"):
+        evidence._validate_security_dependency_report(path)
+
+    report = _security_dependency_report()
+    report["required_dependencies"] = [{"blocked": 999, "blocked_by": 346}]
+    _write_security_dependency_report(tmp_path, report)
+    with pytest.raises(ValueError, match="must reference checked issues"):
+        evidence._validate_security_dependency_report(path)
+
+
 def test_generator_embeds_dispositions_interoperability_and_hashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -352,6 +444,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
     interoperability_path.write_text(json.dumps(_interoperability()), encoding="utf-8")
     bootstrap_receipt_path = tmp_path / "uv-bootstrap.json"
     bootstrap_receipt_path.write_text(json.dumps(_bootstrap_receipt()), encoding="utf-8")
+    security_dependency_path = tmp_path / "security-dependencies.json"
+    security_dependency_path.write_text(json.dumps(_security_dependency_report()), encoding="utf-8")
     output = tmp_path / "release-evidence.md"
     monkeypatch.setattr(
         sys,
@@ -374,6 +468,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
             str(interoperability_path),
             "--bootstrap-receipt",
             str(bootstrap_receipt_path),
+            "--security-dependency-report",
+            str(security_dependency_path),
             "--output",
             str(output),
         ],
@@ -391,3 +487,8 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
     assert "macos-arm64" in rendered
     assert hashlib.sha256(bootstrap_receipt_path.read_bytes()).hexdigest() in rendered
     assert "329541a503de8a4d9bb021814f9c0875efe033c8" in rendered
+    assert "Version 1 security dependency verification" in rendered
+    assert hashlib.sha256(security_dependency_path.read_bytes()).hexdigest() in rendered
+    assert "#131" in rendered
+    assert "#365" in rendered
+    assert "version-1-security-dependencies" in rendered

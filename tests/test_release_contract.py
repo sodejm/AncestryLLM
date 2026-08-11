@@ -406,13 +406,13 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
 def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    project_query = (ROOT / "config/release-project-query-v1.graphql").read_text(encoding="utf-8")
 
     for workflow in (readiness, release):
         assert "verify_release_configuration.py" in workflow
         assert "--config .github/release-config.json" in workflow
         assert "verify_release_project.py" in workflow
-        assert "projectV2(number: $number)" in workflow
-        assert "blockedBy(first: 100)" in workflow
+        assert 'project_query="$(< config/release-project-query-v1.graphql)"' in workflow
         assert '--project-owner "$project_owner"' in workflow
         assert "--paginate --slurp" in workflow
         assert "verify_release_milestone.py" not in workflow
@@ -420,6 +420,9 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
         assert "release-tracker" not in workflow
         assert "$version CLI" not in workflow
         assert "$EXPECTED_VERSION CLI" not in workflow
+
+    assert "projectV2(number: $number)" in project_query
+    assert "blockedBy(first: 100)" in project_query
 
 
 def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_proof() -> None:

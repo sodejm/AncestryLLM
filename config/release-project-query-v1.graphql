@@ -1,0 +1,72 @@
+# Shared schema-v1 query for fail-closed Version 1 release-project verification.
+query($owner: String!, $number: Int!, $endCursor: String) {
+  user(login: $owner) {
+    projectV2(number: $number) {
+      number
+      title
+      items(first: 100, after: $endCursor) {
+        nodes {
+          id
+          content {
+            __typename
+            ... on Issue {
+              number
+              state
+              repository {
+                nameWithOwner
+              }
+              assignees(first: 100) {
+                nodes {
+                  login
+                }
+                assigneePageInfo: pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+              blockedBy(first: 100) {
+                nodes {
+                  number
+                  state
+                  repository {
+                    nameWithOwner
+                  }
+                }
+                dependencyPageInfo: pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+          fieldValues(first: 100) {
+            nodes {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field {
+                  ... on ProjectV2SingleSelectField {
+                    name
+                  }
+                }
+              }
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                iterationId
+                field {
+                  ... on ProjectV2IterationField {
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
