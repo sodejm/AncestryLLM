@@ -103,7 +103,11 @@ ambient `GH_HOST` configuration cannot select another host. A timeout fails as
 returned statement must bind the selected asset digest to the exact source
 repository, source commit and ref, signer workflow, OIDC issuer, and SLSA
 predicate. The extracted `uv` executable receives a second digest check and
-exact-version check before an atomic repository-local installation.
+exact-version check before an atomic repository-local installation. Extraction
+selects only the exact policy-reviewed archive member; an absent or differently
+located executable fails closed before any candidate binary executes. In uv
+0.12.1, both reviewed Windows ZIP archives contain `uv.exe` at the archive root,
+independent of the architecture-specific archive filename.
 The install and receipt destinations are resolved through stable parent handles:
 POSIX uses directory descriptors and relative filesystem operations, while
 Windows holds every ancestor directory open without delete sharing and rejects
@@ -210,10 +214,12 @@ review and update all of the following where applicable:
    cache, receipt-sanitization, and policy-rejection tests.
 
 Obtain hashes and provenance from the reviewed upstream release, compare all
-supported platform assets rather than only the maintainer's host, and preserve
-the existing verified chain while preparing the update. Never use the candidate
-unverified executable to establish trust in itself. Run the focused suites and
-all applicable canonical setup, test, lint, type-check, security, package,
-workflow-audit, documentation, and release-evidence gates. Native hosted results
-for every supported platform remain required before merge or release; local or
-emulated evidence is not a substitute.
+supported platform assets rather than only the maintainer's host, inspect every
+archive member listing directly rather than deriving a member path from its
+archive filename, and preserve the existing verified chain while preparing the
+update. Never use the candidate unverified executable to establish trust in
+itself. Run the focused suites and all applicable canonical setup, test, lint,
+type-check, security, package, workflow-audit, documentation, and
+release-evidence gates. Native hosted results for every supported platform
+remain required before merge or release; local or emulated evidence is not a
+substitute.

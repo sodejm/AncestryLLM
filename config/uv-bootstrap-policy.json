@@ -44,14 +44,14 @@
         "archive_name": "uv-x86_64-pc-windows-msvc.zip",
         "sha256": "8fcb0cb46e1229065e344758980924e569bef5882ef45f46fada8fb24e06b74a",
         "size_bytes": 19073343,
-        "binary_path": "uv-x86_64-pc-windows-msvc/uv.exe",
+        "binary_path": "uv.exe",
         "binary_sha256": "f537cc65c1791d9d1a022132302b21ecd48cdf0a605a7b345809fbe8af4e807d"
       },
       "windows-arm64": {
         "archive_name": "uv-aarch64-pc-windows-msvc.zip",
         "sha256": "9bc7c18e616230fa2dc6fb24bc3afde18a95c2b5c9433de747e9502c66041568",
         "size_bytes": 18030168,
-        "binary_path": "uv-aarch64-pc-windows-msvc/uv.exe",
+        "binary_path": "uv.exe",
         "binary_sha256": "9c11339f74a3fd89e800d22cdd1bc332d3810da517d54230b47cc21fa1c29206"
       }
     }

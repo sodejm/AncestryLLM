@@ -80,11 +80,11 @@ UV_ASSET_SHAPE = {
     ),
     "windows-x86_64": (
         "uv-x86_64-pc-windows-msvc.zip",
-        "uv-x86_64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
     "windows-arm64": (
         "uv-aarch64-pc-windows-msvc.zip",
-        "uv-aarch64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
 }
 UV_TARGET_TRIPLES = {
