@@ -142,6 +142,9 @@ jobs:
         run: |
           make lint
           make typecheck
+      - name: Advisory ty evaluation
+        continue-on-error: true
+        run: make typecheck-ty
 
   security:
     name: security

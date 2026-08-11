@@ -65,6 +65,7 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         "test",
         "lint",
         "typecheck",
+        "typecheck-ty",
         "dependency-audit",
         "security-static",
         "sbom",
@@ -89,6 +90,7 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "lock-check": "$(UV_BIN) lock --check",
         "test": "$(UV_BIN) run --locked --group test pytest --verbose",
         "typecheck": "$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm",
+        "typecheck-ty": ("$(UV_BIN) run --locked --group typecheck ty check src/ancestryllm"),
         "dependency-audit": "$(UV_BIN) run --locked --group security pip-audit",
         "security-static": ("$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py ."),
         "package": (
@@ -152,7 +154,11 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
     expected_commands = {
         (".github/workflows/ci.yml", "lockfile"): ("make lock-check",),
         (".github/workflows/ci.yml", "test"): ("make test",),
-        (".github/workflows/ci.yml", "quality"): ("make lint", "make typecheck"),
+        (".github/workflows/ci.yml", "quality"): (
+            "make lint",
+            "make typecheck",
+            "make typecheck-ty",
+        ),
         (".github/workflows/ci.yml", "security"): (
             "make dependency-audit",
             "make security-static",
@@ -181,7 +187,8 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
     for (relative_path, job_name), commands in expected_commands.items():
         job = _workflow_job(relative_path, job_name)
         for command in commands:
-            assert job.count(command) == 1, (relative_path, job_name, command)
+            command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
+            assert len(command_line.findall(job)) == 1, (relative_path, job_name, command)
 
     canonical_workflows = (
         ROOT / ".github/workflows/ci.yml",

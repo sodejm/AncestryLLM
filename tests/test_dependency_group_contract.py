@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_GROUPS = {
     "lint": ["ruff>=0.15,<1", "pre-commit>=4.5,<5"],
-    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3"],
+    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.69"],
     "test": [
         "coverage[toml]>=7.12,<8",
         "pytest>=9,<10",
@@ -72,6 +72,7 @@ OLD_DEV_DEPENDENCIES = {
     "wheel>=0.45,<1",
     "zizmor==1.29.0",
 }
+NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.69"}
 
 
 def _project() -> dict[str, Any]:
@@ -118,7 +119,10 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
     deliberately_removed = {"click>=8.3.3,<9", "uv==0.12.1"}
     retained_as_extra = set(extras["desktop-build"])
 
-    assert moved | deliberately_removed | retained_as_extra == OLD_DEV_DEPENDENCIES
+    assert moved | deliberately_removed | retained_as_extra == (
+        OLD_DEV_DEPENDENCIES | NEW_ADVISORY_DEPENDENCIES
+    )
+    assert NEW_ADVISORY_DEPENDENCIES <= moved
     assert moved.isdisjoint(deliberately_removed | retained_as_extra)
     assert deliberately_removed.isdisjoint(retained_as_extra)
 
@@ -165,6 +169,7 @@ def test_make_profiles_select_only_their_declared_groups() -> None:
         "test": {"test"},
         "lint": {"lint"},
         "typecheck": {"typecheck"},
+        "typecheck-ty": {"typecheck"},
         "dependency-audit": {"security"},
         "security-static": set(),
         "sbom": {"security"},

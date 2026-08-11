@@ -59,8 +59,36 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
-    for command in ("make lint", "make typecheck"):
-        assert quality_job.count(command) == 1
+    for command in ("make lint", "make typecheck", "make typecheck-ty"):
+        command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
+        assert len(command_line.findall(quality_job)) == 1
+
+
+def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    quality_job = _job(workflow, "quality")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+    evidence_builder = (ROOT / "scripts/create_release_evidence.py").read_text(encoding="utf-8")
+
+    blocking_step = """      - name: Lint, type check, and repository contracts
+        run: |
+          make lint
+          make typecheck
+"""
+    advisory_step = """      - name: Advisory ty evaluation
+        continue-on-error: true
+        run: make typecheck-ty
+"""
+
+    assert blocking_step in quality_job
+    assert advisory_step in quality_job
+    assert quality_job.index(blocking_step) < quality_job.index(advisory_step)
+    assert "make typecheck-ty || true" not in quality_job
+    assert "make typecheck-ty" not in readiness
+    assert '"mypy",' in readiness
+    assert '"mypy",' in evidence_builder
+    assert '"type-check",' not in readiness
+    assert '"type-check",' not in evidence_builder
 
 
 def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_workflow() -> None:
