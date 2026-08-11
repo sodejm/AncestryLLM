@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.console.parser import ParsedInvocation, parse_repl_invocation, split_repl_input
 from ancestryllm.console.security import is_secret_name
@@ -15,10 +15,12 @@ from ancestryllm.core.commands import (
     ArgumentAction,
     ArgumentSpec,
 )
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.help import render_action_help, render_command_help, render_root_help
 from ancestryllm.core.modules import ModuleRegistry
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 class RouteKind(str, Enum):

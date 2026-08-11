@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from ancestryllm.application.dto import (
-    DecisionRequest,
-    DecisionResponse,
-    IdentityResolutionRequest,
-    IdentityResolutionResult,
-    QualityResolutionRequest,
-    QualityResolutionResult,
-)
-from ancestryllm.application.events import ProgressEvent
+if TYPE_CHECKING:
+    from ancestryllm.application.dto import (
+        DecisionRequest,
+        DecisionResponse,
+        IdentityResolutionRequest,
+        IdentityResolutionResult,
+        QualityResolutionRequest,
+        QualityResolutionResult,
+    )
+    from ancestryllm.application.events import ProgressEvent
 
 
 @runtime_checkable

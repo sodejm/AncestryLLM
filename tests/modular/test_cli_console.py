@@ -11,7 +11,7 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from unittest.mock import Mock
 
 import pytest
@@ -20,11 +20,13 @@ from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.console.router import RouteKind, SessionRouter
 from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def _expected_tree_ref(tree: Path) -> str:

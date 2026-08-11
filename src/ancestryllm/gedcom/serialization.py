@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ancestryllm.core.publication import StagedFileToken
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.publication import StagedFileToken
 from ancestryllm.gedcom.artifact_publication import stage_text_atomically
 from ancestryllm.gedcom.graph import (
     _ROOTED_AUXILIARY_RECORD_TAGS,

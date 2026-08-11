@@ -9,7 +9,7 @@ command or policy registry.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.application.events import ProgressEvent
 from ancestryllm.application.operations import (
@@ -25,14 +25,18 @@ from ancestryllm.application.ports import (
     ProgressPort,
 )
 from ancestryllm.core.cancellation import CancellationError
-from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileKind
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
-from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.config import AppConfig
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
+    from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
 
 SQL_RESPONSE_SCHEMA = {
     "type": "object",

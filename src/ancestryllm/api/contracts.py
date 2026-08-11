@@ -27,7 +27,7 @@ class ApiVersion(BaseModel):
     namespace: Literal["/api/v1"] = API_NAMESPACE
     contract: Literal["ancestryllm.internal-api/1"] = API_CONTRACT
     application_contract: Literal["ancestryllm.application/0.3"] = cast(
-        Literal["ancestryllm.application/0.3"], CONTRACT_VERSION
+        "Literal['ancestryllm.application/0.3']", CONTRACT_VERSION
     )
 
 

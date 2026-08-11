@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import contextlib
 import sys
 from pathlib import Path
-from typing import TextIO, cast
+from typing import TYPE_CHECKING, TextIO, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import DummyHistory
-from prompt_toolkit.input import Input
-from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from ancestryllm.application._compat import _CurrentProgressAdapter
@@ -34,6 +31,12 @@ from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager, JobReporter
 from ancestryllm.terminal.dispatch import dispatch
+
+if TYPE_CHECKING:
+    import argparse
+
+    from prompt_toolkit.input import Input
+    from prompt_toolkit.output import Output
 
 _BACKGROUND_ACTIONS = frozenset(
     {
@@ -96,8 +99,8 @@ class ReplApplication:
         self.safe_root = (safe_root or Path.cwd()).resolve()
         self.stdout = RedactingTextIO(stdout or sys.stdout, context)
         self.stderr = RedactingTextIO(stderr or sys.stderr, context)
-        self.presenter = PresentationAdapter.for_file(cast(TextIO, self.stdout))
-        self.error_presenter = PresentationAdapter.for_file(cast(TextIO, self.stderr))
+        self.presenter = PresentationAdapter.for_file(cast("TextIO", self.stdout))
+        self.error_presenter = PresentationAdapter.for_file(cast("TextIO", self.stderr))
         self.progress_display = JobProgressDisplay(self.presenter.console)
         self.jobs = jobs or JobManager(redact=context.secrets.redact)
         self._unsubscribe_progress = self.jobs.subscribe(self.progress_display.handle)
@@ -129,7 +132,7 @@ class ReplApplication:
             input=input,
             output=output,
         )
-        self.multiline_editor = MultilineEditor(cast(AsyncPrompt, self.multiline_session))
+        self.multiline_editor = MultilineEditor(cast("AsyncPrompt", self.multiline_session))
 
     async def run_async(self) -> int:
         try:

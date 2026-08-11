@@ -6,8 +6,7 @@ import base64
 import os
 import secrets
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,8 +21,12 @@ from ancestryllm.core.publication import (
     seal_staged_path,
     staging_path,
 )
-from ancestryllm.core.secrets import SecretStore
 from ancestryllm.storage.models import Base
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.secrets import SecretStore
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 DATABASE_SECRET = "database.master_key"  # noqa: S105 - keyring reference, not a credential

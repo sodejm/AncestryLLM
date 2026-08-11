@@ -10,13 +10,14 @@ import logging
 import math
 import re
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from types import ModuleType
+
     from ancestryllm.gedcom.contracts import DuplicateDecision, IdentityResolver
 
 from ancestryllm.core.cancellation import CancellationError, cancellation_checkpoint

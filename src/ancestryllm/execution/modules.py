@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.modules import ModuleRegistry
 from ancestryllm.execution.common import descriptor_payload, table_result, text
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 _MODULE_COLUMNS = (
     "module_id",

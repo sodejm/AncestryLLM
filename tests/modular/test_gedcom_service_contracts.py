@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,7 +22,11 @@ from ancestryllm.application.operations import (
 )
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom.service import GedcomService
-from ancestryllm.llm.policy import ConsentGrant
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.llm.policy import ConsentGrant
 
 GEDCOM_MEDIA_TYPE = "text/vnd.gedcom"
 

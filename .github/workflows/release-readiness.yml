@@ -109,6 +109,8 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
+    env:
+      RUFF_OUTPUT_FORMAT: github
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read

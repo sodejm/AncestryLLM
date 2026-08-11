@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ancestryllm.core.commands import (
     BUILTIN_MODULES as BUILTIN_MODULES,
@@ -49,7 +49,9 @@ from ancestryllm.core.commands import (
 from ancestryllm.core.commands import (
     ModuleDescriptor as ModuleDescriptor,
 )
-from ancestryllm.core.context import AppContext
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 __all__ = [
     "BUILTIN_MODULES",

@@ -5,12 +5,15 @@ from __future__ import annotations
 import os
 import stat
 from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.errors import StorageError
-from ancestryllm.core.secrets import SecretStore
 from ancestryllm.storage.database import DATABASE_SECRET
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.secrets import SecretStore
 
 
 @dataclass(frozen=True)

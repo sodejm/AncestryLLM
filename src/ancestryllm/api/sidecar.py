@@ -12,9 +12,8 @@ import json
 import socket
 import sys
 from dataclasses import dataclass, field
-from typing import BinaryIO, NoReturn, Sequence
+from typing import TYPE_CHECKING, BinaryIO, NoReturn, Sequence
 
-from fastapi import FastAPI
 from uvicorn import Server
 
 from ancestryllm.api.app import create_app
@@ -22,7 +21,11 @@ from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.server import LOOPBACK_HOST, create_uvicorn_config
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
-from ancestryllm.core.commands import ModuleDescriptor
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from ancestryllm.core.commands import ModuleDescriptor
 
 SIDECAR_BUILD = "0.5.0"
 MAX_LAUNCH_FRAME_BYTES = 4096

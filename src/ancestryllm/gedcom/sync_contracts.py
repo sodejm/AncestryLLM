@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.ingress import FileFingerprint
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,
 )
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.ingress import (
-    FileFingerprint,
-)
 from ancestryllm.gedcom.contracts import IdentityResolver
 
 MANIFEST_SCHEMA_VERSION = 1

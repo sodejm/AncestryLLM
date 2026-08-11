@@ -5,12 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Iterable, Iterator, Sequence
 
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion, ThreadedCompleter
-from prompt_toolkit.document import Document
 
-from ancestryllm.console.router import SessionRouter
 from ancestryllm.core.commands import (
     BUILTIN_MODULES,
     COMMAND_SPECIFICATIONS,
@@ -21,6 +19,11 @@ from ancestryllm.core.commands import (
     CompletionKind,
 )
 from ancestryllm.core.secrets import ENVIRONMENT_NAMES
+
+if TYPE_CHECKING:
+    from prompt_toolkit.document import Document
+
+    from ancestryllm.console.router import SessionRouter
 
 __all__ = ["CompletionSnapshot", "create_completer"]
 

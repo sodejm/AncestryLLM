@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import threading
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ancestryllm.core.cancellation import (
     CancellationError,
@@ -18,6 +17,9 @@ from ancestryllm.core.cancellation import (
     bind_cancellation_token,
 )
 from ancestryllm.core.errors import AncestryError
+
+if TYPE_CHECKING:
+    import contextlib
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import ProviderError
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class NoneProvider:

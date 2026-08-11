@@ -8,12 +8,13 @@ import hashlib
 import json
 import re
 from collections import defaultdict, deque
-from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping, Sequence
+
     from ancestryllm.gedcom.contracts import QualityResolver
 
 from ancestryllm.core.cancellation import cancellation_checkpoint

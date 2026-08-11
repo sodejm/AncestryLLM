@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 from scripts import characterize_core_contracts as characterization
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _report(

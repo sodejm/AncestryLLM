@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.operations import TreeRecord
-from ancestryllm.application.ports import ProgressPort
 from ancestryllm.application.results import FileArtifactResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.common import (
     consent,
@@ -24,6 +21,12 @@ from ancestryllm.execution.common import (
     table_result,
     text,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.application.ports import ProgressPort
+    from ancestryllm.core.context import AppContext
 
 _EXPORT_OPERATION = "rootsmagic.export"
 _GEDCOM_MEDIA_TYPE = "text/vnd.familysearch.gedcom"

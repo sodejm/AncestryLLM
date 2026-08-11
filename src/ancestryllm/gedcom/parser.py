@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import FileIngressError

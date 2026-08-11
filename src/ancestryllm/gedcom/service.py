@@ -5,12 +5,17 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import os
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from ancestryllm.application._artifacts import _ArtifactRegistry
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from ancestryllm.application._artifacts import _ArtifactRegistry
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
+
 from ancestryllm.application.dto import ArtifactAccess, ProviderSelection
 from ancestryllm.application.errors import domain_failure_from_exception
 from ancestryllm.application.genealogy import GenealogyAggregate
@@ -93,8 +98,6 @@ from ancestryllm.gedcom.sync import (
     execute_sync as execute_sync_arguments,
 )
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
 
 __all__ = [
     "GedcomOperationResult",

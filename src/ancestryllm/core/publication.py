@@ -12,13 +12,15 @@ import sys
 import tempfile
 import threading
 import unicodedata
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint, non_interruptible_section
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 
 @dataclass(frozen=True, slots=True)

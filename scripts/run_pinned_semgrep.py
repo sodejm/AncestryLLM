@@ -20,11 +20,14 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from types import ModuleType
 
 
 @dataclass(frozen=True)

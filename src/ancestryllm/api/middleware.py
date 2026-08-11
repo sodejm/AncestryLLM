@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import hmac
-from typing import Final, cast
-
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from typing import TYPE_CHECKING, Final, cast
 
 from ancestryllm.api.contracts import (
     API_BUILD_HEADER,
@@ -19,7 +17,11 @@ from ancestryllm.api.errors import (
     new_correlation_ref,
     request_error,
 )
-from ancestryllm.api.settings import ApiSettings
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+    from ancestryllm.api.settings import ApiSettings
 
 _ALLOWED_ROUTES: Final = frozenset({f"{API_NAMESPACE}/health", f"{API_NAMESPACE}/capabilities"})
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
@@ -57,7 +59,7 @@ _SECURITY_HEADERS: Final = (
 
 
 def _header_map(scope: Scope) -> dict[bytes, list[bytes]]:
-    raw_headers = cast(list[tuple[bytes, bytes]], scope.get("headers", []))
+    raw_headers = cast("list[tuple[bytes, bytes]]", scope.get("headers", []))
     headers: dict[bytes, list[bytes]] = {}
     for raw_name, value in raw_headers:
         headers.setdefault(raw_name.lower(), []).append(value)
@@ -129,7 +131,7 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
             409, "APP_BUILD_MISMATCH", "The desktop and sidecar build identities do not match."
         )
 
-    path = cast(str, scope.get("path", ""))
+    path = cast("str", scope.get("path", ""))
     if path not in _ALLOWED_ROUTES:
         raise request_error(
             404, "ROUTE_UNAVAILABLE", "The requested internal API route is unavailable."
@@ -138,7 +140,7 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
         raise request_error(
             405, "METHOD_NOT_ALLOWED", "The internal API route does not accept this method."
         )
-    if cast(bytes, scope.get("query_string", b"")):
+    if cast("bytes", scope.get("query_string", b"")):
         raise request_error(
             400,
             "REQUEST_QUERY_FORBIDDEN",
@@ -209,7 +211,7 @@ class InternalApiMiddleware:
             return
 
         correlation_ref = new_correlation_ref()
-        state = cast(dict[str, object], scope.setdefault("state", {}))
+        state = cast("dict[str, object]", scope.setdefault("state", {}))
         state["correlation_ref"] = correlation_ref
         secured_send = self._secured_send(send, correlation_ref)
         try:
@@ -242,7 +244,7 @@ class InternalApiMiddleware:
     def _secured_send(send: Send, correlation_ref: str) -> Send:
         async def secured(message: Message) -> None:
             if message.get("type") == "http.response.start":
-                raw_headers = cast(list[tuple[bytes, bytes]], message.get("headers", []))
+                raw_headers = cast("list[tuple[bytes, bytes]]", message.get("headers", []))
                 replaced = (
                     {name for name, _value in _SECURITY_HEADERS}
                     | _REMOVED_RESPONSE_HEADERS

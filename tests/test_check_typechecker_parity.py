@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from scripts.check_typechecker_parity import (
     TYPEPARITY_CHECKER_FAILED,
@@ -12,6 +12,9 @@ from scripts.check_typechecker_parity import (
     Fixture,
     evaluate_parity,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def test_evaluate_parity_accepts_diagnostics_on_the_expected_line() -> None:

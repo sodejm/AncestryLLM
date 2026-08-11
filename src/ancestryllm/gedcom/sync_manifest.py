@@ -7,8 +7,10 @@ import re
 import uuid
 from itertools import pairwise
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,

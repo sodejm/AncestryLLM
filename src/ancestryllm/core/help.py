@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.commands import (
     ActionSpec,
@@ -11,6 +11,9 @@ from ancestryllm.core.commands import (
     ArgumentSpec,
     CommandSpec,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "argument_help",

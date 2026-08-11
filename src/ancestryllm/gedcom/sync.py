@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ancestryllm.core.ingress import FileIngressPolicy
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.application.dto import (
     DecisionKind,
@@ -19,10 +24,8 @@ from ancestryllm.application.ports import (
     NeverCancelled,
     ProgressPort,
 )
-from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom import sync_gedcom
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.sync_cli import execute
 from ancestryllm.gedcom.sync_contracts import (
     SOURCE_ID_RE,

@@ -96,7 +96,7 @@ def _sample(annotation: object) -> object:
     if isinstance(annotation, type) and issubclass(annotation, BoundaryDTO):
         hints = get_type_hints(annotation)
         values: dict[str, object] = {}
-        for field in fields(cast(Any, annotation)):
+        for field in fields(cast("Any", annotation)):
             if field.default is not MISSING or field.default_factory is not MISSING:
                 continue
             values[field.name] = _sample(hints[field.name])
@@ -197,7 +197,7 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
             next_offset=None,
         ),
         operations_module.RootsMagicExportArtifact(
-            artifact=cast(ArtifactRef, _sample(ArtifactRef)),
+            artifact=cast("ArtifactRef", _sample(ArtifactRef)),
             source_ref="grant_rm_fixture",
             source_fingerprint="a" * 64,
             profile_code="portable",
@@ -212,8 +212,8 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
         assert "C:\\\\" not in encoded
         assert "SourceFingerprint" not in encoded
 
-    source_summary = cast(operations_module.RootsMagicSourceSummary, values[0])
-    export_artifact = cast(operations_module.RootsMagicExportArtifact, values[3])
+    source_summary = cast("operations_module.RootsMagicSourceSummary", values[0])
+    export_artifact = cast("operations_module.RootsMagicExportArtifact", values[3])
     assert type(source_summary.fingerprint) is str
     assert type(export_artifact.source_fingerprint) is str
     assert get_type_hints(operations_module.RootsMagicSourceSummary)["fingerprint"] is str
@@ -259,7 +259,7 @@ def test_every_operation_request_and_result_has_canonical_json(
 def test_boundary_types_are_frozen_slotted_and_use_only_safe_annotations(
     contract_type: type[BoundaryDTO],
 ) -> None:
-    assert cast(Any, contract_type).__dataclass_params__.frozen
+    assert cast("Any", contract_type).__dataclass_params__.frozen
     assert "__slots__" in contract_type.__dict__
 
     forbidden_types = {

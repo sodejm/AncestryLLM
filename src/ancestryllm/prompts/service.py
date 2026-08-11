@@ -6,11 +6,13 @@ import json
 import re
 from dataclasses import dataclass
 from string import Template
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.repositories import PromptRepository
+
+if TYPE_CHECKING:
+    from ancestryllm.storage.database import Database
 
 VARIABLE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 

@@ -73,6 +73,12 @@ in the [ty advisory evaluation](TY_ADVISORY_EVALUATION.md). Its authoritative
 all-extras setup resolves five optional provider imports without satisfying the
 cutover gate.
 
+Ruff remains lock-resolved at 0.16.1. Quality jobs select GitHub annotation
+output through `RUFF_OUTPUT_FORMAT=github` and still invoke the canonical
+`make lint` target without restating its flags. The enabled rule families,
+reviewed diagnostic batches, provider-import contract, and cold-start evidence
+are recorded in the [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md).
+
 ## Headless shell policy
 
 Every workflow that executes a command sets the workflow-level default shell to

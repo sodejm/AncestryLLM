@@ -12,7 +12,7 @@ import os
 import secrets
 import stat
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.application.dto import (
     MAX_ARTIFACT_BYTES,
@@ -21,7 +21,6 @@ from ancestryllm.application.dto import (
     ArtifactRef,
     ArtifactStatus,
 )
-from ancestryllm.application.ports import CancellationPort
 from ancestryllm.core.publication import (
     claim_staged_path,
     cleanup_staged_path,
@@ -30,6 +29,11 @@ from ancestryllm.core.publication import (
     write_staged_bytes,
 )
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.application.ports import CancellationPort
 
 
 @dataclass(frozen=True, slots=True)

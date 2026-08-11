@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.build_verification_sidecar import executable_path, parse_args
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_verification_sidecar_uses_a_separate_target_native_output(tmp_path: Path) -> None:

@@ -11,12 +11,11 @@ import sqlite3
 import tempfile
 import threading
 import time
-from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, TypeAlias
+from typing import TYPE_CHECKING, Any, Iterator, TypeAlias
 
 from sqlglot import exp, parse
 
@@ -33,6 +32,9 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
     cleanup_open_path,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DENIED_ACTIONS = {
     sqlite3.SQLITE_INSERT,

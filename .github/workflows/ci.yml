@@ -121,6 +121,8 @@ jobs:
     name: quality
     needs: lockfile
     runs-on: ubuntu-latest
+    env:
+      RUFF_OUTPUT_FORMAT: github
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read

@@ -6,11 +6,9 @@ import asyncio
 import hashlib
 import sys
 import threading
-from collections.abc import Iterator
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -32,6 +30,11 @@ from ancestryllm.llm.providers.none import NoneProvider
 from ancestryllm.llm.providers.ollama import OllamaProvider
 from ancestryllm.llm.providers.openai import OpenAIProvider
 from ancestryllm.llm.service import LLMService
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    import httpx
 
 
 def request(provider_id: str, *, timeout_seconds: float = 12.5) -> GenerationRequest:

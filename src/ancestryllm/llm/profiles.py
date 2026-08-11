@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -17,9 +16,13 @@ from ancestryllm.llm.contracts import (
 )
 from ancestryllm.llm.policy import ConsentGrant, validate_endpoint
 from ancestryllm.llm.registry import PROVIDER_IDS
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import ConsentProfileModel, ProviderProfileModel
 from ancestryllm.storage.repositories import ProviderRepository
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ancestryllm.storage.database import Database
 
 SECRET_REFERENCES = {
     "openai": "openai.api_key",

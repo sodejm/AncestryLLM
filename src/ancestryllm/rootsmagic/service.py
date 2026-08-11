@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.application._rootsmagic_export import (
     RootsMagicExporter,
     RootsMagicExportResult,
 )
-from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
-from ancestryllm.application.ports import CancellationPort, ProgressPort
-from ancestryllm.core.config import AppConfig
 from ancestryllm.core.ingress import FileIngressPolicy
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
 from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
 from ancestryllm.rootsmagic.query import RootsMagicQueryService
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
+    from ancestryllm.application.ports import CancellationPort, ProgressPort
+    from ancestryllm.core.config import AppConfig
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
 
 __all__ = ["RootsMagicService"]
 

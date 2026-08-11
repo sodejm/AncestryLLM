@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Iterable, Sequence
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.gedcom.identity import (

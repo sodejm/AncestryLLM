@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,6 +20,9 @@ from ancestryllm.domain.genealogy import (
     GenealogyQualityFinding,
     QualityKind,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_aggregate_owns_identity_and_deterministic_result_accounting() -> None:

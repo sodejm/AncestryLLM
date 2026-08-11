@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from pytest import MonkeyPatch
 
 from ancestryllm.api import API_NAMESPACE
 from ancestryllm.api.openapi import OPENAPI_ARTIFACT, canonical_openapi, contract_app
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+    from pytest import MonkeyPatch
 
 
 def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0(

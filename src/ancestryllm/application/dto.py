@@ -34,7 +34,7 @@ class BoundaryDTO:
     def to_serializable(self) -> JSONValue:
         """Return the strict-JSON value represented by this boundary object."""
 
-        return cast(JSONValue, _encode(self))
+        return cast("JSONValue", _encode(self))
 
     def to_json(self) -> str:
         """Serialize with stable ordering and strict JSON scalar behavior."""
@@ -142,7 +142,7 @@ def _field_names(value_type: object) -> tuple[str, ...]:
     declared = getattr(value_type, "__dataclass_fields__", None)
     if not isinstance(declared, Mapping) or not all(isinstance(name, str) for name in declared):
         raise TypeError("Boundary DTO types must be dataclasses.")
-    return tuple(cast(str, name) for name in declared)
+    return tuple(cast("str", name) for name in declared)
 
 
 def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> _BoundaryT:
@@ -158,7 +158,7 @@ def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> 
     if missing:
         raise ValueError(f"Missing {cls.__name__} fields: {', '.join(sorted(missing))}")
     decoded = {
-        name: _decode(cast(Mapping[str, object], value)[name], annotations[name])
+        name: _decode(cast("Mapping[str, object]", value)[name], annotations[name])
         for name in sorted(expected)
     }
     return cls(**decoded)

@@ -20,10 +20,12 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 try:
     import resource

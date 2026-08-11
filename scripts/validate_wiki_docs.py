@@ -14,13 +14,16 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
 from docs_linking import DocumentationLinkError, SourceIndex, split_destination
 from rewrite_wiki_links import rewrite_markdown_link_destinations
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 _WIKI_LINK = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
 _MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")

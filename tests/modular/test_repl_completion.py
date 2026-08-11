@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import socket
 from dataclasses import FrozenInstanceError
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from prompt_toolkit.completion import CompleteEvent, Completer, ThreadedCompleter
@@ -12,8 +12,12 @@ from prompt_toolkit.document import Document
 
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.router import SessionRouter
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.secrets import ENVIRONMENT_NAMES
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.context import AppContext
 
 
 def _values(completer: Completer, text: str) -> list[str]:

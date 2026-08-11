@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.domain.models import LivingStatus
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.repositories import ResearchRepository
+
+if TYPE_CHECKING:
+    from ancestryllm.storage.database import Database
 
 
 @dataclass(frozen=True, slots=True)

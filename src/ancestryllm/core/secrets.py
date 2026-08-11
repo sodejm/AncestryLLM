@@ -83,7 +83,7 @@ class KeyringSecretStore:
         else:
             keyring_error = None
         if value:
-            secret_value = cast(str, value)
+            secret_value = cast("str", value)
             self.register_sensitive(secret_value)
             return secret_value
         environment_name = ENVIRONMENT_NAMES.get(

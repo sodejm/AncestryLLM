@@ -8,10 +8,9 @@ import io
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 from ancestryllm import __version__
-from ancestryllm.application.dto import SecretGrantRef
 from ancestryllm.application.executor import CommandArgument, CommandInvocation, CommandValue
 from ancestryllm.core.commands import (
     COMMAND_SPECIFICATIONS,
@@ -30,6 +29,9 @@ from ancestryllm.core.help import (
     render_action_example,
     render_root_help,
 )
+
+if TYPE_CHECKING:
+    from ancestryllm.application.dto import SecretGrantRef
 
 _ARGUMENT_TYPES: dict[ArgumentType, type[str] | type[int] | type[float] | type[Path]] = {
     ArgumentType.STRING: str,

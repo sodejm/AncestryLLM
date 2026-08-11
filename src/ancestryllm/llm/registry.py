@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import ProviderError
-from ancestryllm.core.secrets import SecretStore
-from ancestryllm.llm.contracts import LLMProvider
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ancestryllm.core.secrets import SecretStore
+    from ancestryllm.llm.contracts import LLMProvider
 
 PROVIDER_IDS = ("none", "ollama", "openai", "anthropic", "gemini", "openrouter")
 logger = logging.getLogger(__name__)

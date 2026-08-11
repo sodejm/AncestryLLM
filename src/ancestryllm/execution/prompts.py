@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.execution.common import (
@@ -15,6 +16,9 @@ from ancestryllm.execution.common import (
     text,
     text_values,
 )
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 class PromptsExecutor:

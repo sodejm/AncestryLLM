@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import FileArtifactResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.execution.common import path, table_result
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 _BACKUP_OPERATION = "database.backup"
 _BACKUP_MEDIA_TYPE = "application/octet-stream"

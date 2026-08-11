@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ancestryllm.core.errors import AncestryError, SecurityPolicyError
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture

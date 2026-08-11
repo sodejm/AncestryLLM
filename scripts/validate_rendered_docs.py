@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _PRODUCTION_ORIGIN = "https://sodejm.github.io"
 

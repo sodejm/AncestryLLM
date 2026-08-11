@@ -6,9 +6,13 @@ import copy
 import dataclasses
 import datetime as dt
 from collections import Counter, defaultdict
-from pathlib import Path
-from types import ModuleType
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import ModuleType
+
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.cancellation import (
     CancellationError,
@@ -22,7 +26,6 @@ from ancestryllm.core.ingress import (
     FileSnapshot,
 )
 from ancestryllm.gedcom import sync_publication
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.sync_algorithms import (
     _block_key,
     _block_logical_identity,

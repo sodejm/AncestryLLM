@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(?P<marker>`+).*?(?P=marker)")

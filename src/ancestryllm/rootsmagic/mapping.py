@@ -7,10 +7,8 @@ import json
 import re
 import unicodedata
 from collections import defaultdict, deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError, FileIngressError
@@ -24,6 +22,10 @@ from ancestryllm.rootsmagic.core import (
     semantic_row_key,
     semantic_value,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 def _value(row: dict[str, Any], *names: str, default: Any = "") -> Any:

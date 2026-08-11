@@ -7,10 +7,13 @@ import argparse
 import re
 import sys
 import time
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _PRODUCTION_HOST = "sodejm.github.io"
 _MARKER = re.compile(

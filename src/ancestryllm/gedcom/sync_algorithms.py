@@ -11,14 +11,17 @@ import math
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from pathlib import Path
-from types import ModuleType
-from typing import Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import ModuleType
+
+    from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,
 )
-from ancestryllm.gedcom.contracts import IdentityResolver
 from ancestryllm.gedcom.identity import individual_from_record
 from ancestryllm.gedcom.sync_contracts import (
     ATTACHMENT_TAGS,

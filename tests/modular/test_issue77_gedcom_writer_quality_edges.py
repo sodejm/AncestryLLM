@@ -7,13 +7,16 @@ and explicitly select the offline provider mode.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 from ancestryllm.gedcom.parser import iter_gedcom_records, parse_gedcom_line
 from ancestryllm.gedcom.service import GedcomService
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _document(*records: str, version: str = "5.5.5") -> bytes:

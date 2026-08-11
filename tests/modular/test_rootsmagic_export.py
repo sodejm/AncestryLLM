@@ -7,10 +7,9 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 from unittest.mock import Mock
 
 import pytest
@@ -35,6 +34,9 @@ from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader, sha256_file
 from ancestryllm.rootsmagic.service import RootsMagicService
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _create_tree(path: Path, script: str) -> Path:

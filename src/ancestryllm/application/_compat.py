@@ -7,11 +7,13 @@ objects while those implementations remain in ``core``.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from ancestryllm.application.events import ProgressEvent
 from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
+
+if TYPE_CHECKING:
+    from ancestryllm.application.events import ProgressEvent
 
 
 class _LegacyCancellation(Protocol):

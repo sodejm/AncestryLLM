@@ -6,10 +6,9 @@ import asyncio
 import io
 import json
 import socket
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from ancestryllm.api import (
@@ -29,6 +28,9 @@ from ancestryllm.application.errors import domain_failure_from_exception, map_do
 from ancestryllm.application.errors import error_envelope as application_error_envelope
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.terminal.presentation import PresentationAdapter
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 def test_authentication_happens_before_route_or_body_processing(api_client: TestClient) -> None:

@@ -7,9 +7,9 @@ import os
 import socket
 import stat
 import threading
-from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -37,6 +37,9 @@ from ancestryllm.gedcom import (
 )
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.gedcom.sync import execute_sync, run_sync
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
 

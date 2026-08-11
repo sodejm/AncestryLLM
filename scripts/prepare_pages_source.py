@@ -10,9 +10,9 @@ import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from docs_linking import (
     DocumentationLinkError,
@@ -22,6 +22,9 @@ from docs_linking import (
 )
 from rewrite_wiki_links import rewrite_markdown_link_destinations
 from validate_wiki_docs import validate_wiki_source
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _FRONT_MATTER = re.compile(
     r"\A---[ \t]*\r?\n(?P<metadata>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\Z)", re.DOTALL

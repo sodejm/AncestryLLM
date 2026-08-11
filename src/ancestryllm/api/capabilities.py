@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Protocol, Sequence
+from typing import TYPE_CHECKING, Protocol, Sequence
 
 from ancestryllm.api.contracts import (
     API_CONTRACT,
@@ -15,9 +15,11 @@ from ancestryllm.api.contracts import (
     HealthResponse,
     PaginationPolicy,
 )
-from ancestryllm.api.settings import ApiSettings
-from ancestryllm.application.executor import CommandExecutor
-from ancestryllm.core.commands import ModuleDescriptor
+
+if TYPE_CHECKING:
+    from ancestryllm.api.settings import ApiSettings
+    from ancestryllm.application.executor import CommandExecutor
+    from ancestryllm.core.commands import ModuleDescriptor
 
 
 class ModuleDescriptorRegistry(Protocol):

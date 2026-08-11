@@ -8,7 +8,6 @@ import hmac
 import importlib
 import secrets
 import time
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import (
@@ -16,20 +15,22 @@ from ancestryllm.core.errors import (
     is_provider_cancellation,
     normalize_provider_error,
 )
-from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
 from ancestryllm.llm.execution import (
     CancellationCheck,
     ExactResultCache,
     ProviderExecutionCoordinator,
 )
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy
-from ancestryllm.llm.registry import ProviderRegistry
 from ancestryllm.llm.validation import validate_structured_output
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import LlmRunModel
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
     from ancestryllm.llm.profiles import ProviderProfileService
+    from ancestryllm.llm.registry import ProviderRegistry
+    from ancestryllm.storage.database import Database
 
 __all__ = ["LLMService"]
 
