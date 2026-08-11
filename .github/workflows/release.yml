@@ -30,6 +30,7 @@ jobs:
   validate:
     name: validate release request
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       actions: read # required to locate and download release-readiness evidence
       contents: read # required to verify the tag and release commit
@@ -291,6 +292,7 @@ jobs:
     if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read # required to compare the approved readiness distributions
       attestations: read # required by the verified uv provenance preflight
@@ -398,6 +400,7 @@ jobs:
             installer_target: deb
             package_args: --linux --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 90
     environment: ${{ needs.validate.outputs.binary_signing_mode == 'trusted' && 'desktop-signing' || 'desktop-prerelease' }}
     permissions:
       attestations: read # required by the verified uv provenance preflight
@@ -990,6 +993,7 @@ jobs:
             runtime_arch: x64
             installer_target: deb
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 60
     permissions:
       actions: read # required to download the exact installer artifact from this run
       contents: read # required to verify and exercise the exact release commit
@@ -1448,6 +1452,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: [validate, desktop-installers, desktop-installer-validation]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       actions: read # required to verify and aggregate this run's installer and validation artifacts
       contents: read # required to inspect the exact release commit
@@ -1591,6 +1596,7 @@ jobs:
     if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       actions: read # required to download the exact approved workflow artifact by ID
       contents: read # required to verify the annotated release tag and release commit
@@ -1798,6 +1804,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, build, import-desktop-release-distributions]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -1870,6 +1877,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       attestations: write # required to persist build provenance
       contents: read # required to associate attestations with the repository
@@ -1888,6 +1896,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, publish-build-provenance]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write # required to create and attach assets to the draft release
     steps:
@@ -1931,6 +1940,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, publish-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: testpypi
       url: https://test.pypi.org/p/ancestryllm
@@ -1955,6 +1965,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, publish-testpypi]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1988,6 +1999,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, draft-github-release, verify-testpypi]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: pypi
       url: https://pypi.org/p/ancestryllm
@@ -2011,6 +2023,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, publish-pypi]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -2080,6 +2093,7 @@ jobs:
         python: ["3.12", "3.13", "3.14"]
         artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2119,6 +2133,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: read # required to query workflow runs for Pages and Wiki
     steps:
@@ -2181,6 +2196,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [validate, assemble-release-distributions, draft-github-release, verify-pypi-hashes, verify-pypi-install, verify-docs-publication]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write # required to publish the prepared GitHub Release
     steps:

@@ -117,6 +117,53 @@ have the same command semantics regardless of the caller's interactive shell.
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
 
+## Job timeout governance
+
+Every job in the required CI, CodeQL, dependency-review, desktop, release-project
+proof, release-readiness, and release workflows has a reviewed literal
+`timeout-minutes` value. A closed workflow contract records the complete governed
+job set and rejects a missing job, an unreviewed job, an expression-based timeout,
+or a timeout placed after executable steps. Matrix limits apply independently to
+each matrix row.
+
+The ceilings deliberately leave substantial margin above recent successful hosted
+runtimes while bounding a stalled runner:
+
+| Work class | Reviewed ceiling | Recent successful baseline |
+|---|---:|---:|
+| Coordination, classification, evidence, and proof | 1-15 minutes | Usually seconds |
+| Python tests, audits, CodeQL, builds, and consumer installation | 20-30 minutes | Python jobs under 3 minutes; stock-`pip` platform installation about 1 minute or less |
+| Native desktop package rows | 45 minutes | Under 9 minutes |
+| Release installer validation and native release builds | 60 and 90 minutes | Intentionally wider because release signing, packaging, and platform services have greater variance |
+
+These observations are review baselines, not service-level guarantees. The wider
+limits accommodate ordinary GitHub-hosted Python, Node, cache, network, and
+platform variance. Queue delay before a runner starts and a broader GitHub Actions
+outage are outside a job timeout; missing or incomplete hosted evidence remains a
+failure to satisfy the gate rather than a pass.
+
+The deterministic proof is an explicitly requested manual CI mode:
+
+```bash
+gh workflow run ci.yml --ref main -f timeout_proof=true
+```
+
+The expected workflow conclusion is failure. The exercise job first uploads a
+schema-v1 armed record, then runs a fictional five-minute sleep under a one-minute
+job timeout. An always-run evidence job validates the exercise result, uploads a
+sanitized confirmed record, emits a stable failure code, and deliberately fails so
+the proof cannot be mistaken for a successful required check. The records contain
+only fixed fixture identifiers, durations, schema/status fields, and the job result;
+they contain no secrets, environment values, usernames, hostnames, private or
+temporary paths, response bodies, genealogy data, or application payloads.
+
+This governance changes repository workflow availability and evidence only. It
+does not change the application API, CLI registry, DTOs, provider behavior,
+GEDCOM representation, storage, FastAPI, or Electron boundaries, so
+`ARCHITECTURE.md` requires no change. The security benefit is bounded runner and
+quota retention plus timely fail-closed evidence; it does not mitigate a GitHub
+queue or platform outage.
+
 Every workflow job that uses `uv` calls the repository-local
 `setup-verified-uv` composite action. The action performs the same policy
 preflight with the ephemeral job-scoped GitHub token, passes the policy-selected

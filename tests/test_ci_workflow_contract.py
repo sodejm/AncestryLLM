@@ -8,11 +8,68 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+CODEQL_PATH = ROOT / ".github/workflows/codeql.yml"
 RELEASE_READINESS_PATH = ROOT / ".github/workflows/release-readiness.yml"
+RELEASE_PATH = ROOT / ".github/workflows/release.yml"
+DESKTOP_SIDECAR_PATH = ROOT / ".github/workflows/desktop-sidecar.yml"
+RELEASE_PROJECT_PROOF_PATH = ROOT / ".github/workflows/release-project-gate-proof.yml"
 DEPENDENCY_REVIEW_PATH = ROOT / ".github/workflows/dependency-review.yml"
 PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
 PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
 WORKFLOWS_DIR = ROOT / ".github/workflows"
+
+GOVERNED_JOB_TIMEOUTS = {
+    ".github/workflows/ci.yml": {
+        "changes": 5,
+        "lockfile": 15,
+        "test": 20,
+        "quality": 20,
+        "security": 30,
+        "package": 20,
+        "install-smoke": 20,
+        "sdist-smoke": 20,
+        "workflow-audit": 20,
+        "timeout-proof-exercise": 1,
+        "timeout-proof-evidence": 5,
+        "pr-gate": 5,
+    },
+    ".github/workflows/codeql.yml": {"analyze": 30},
+    ".github/workflows/dependency-review.yml": {"dependency-review": 15},
+    ".github/workflows/release-readiness.yml": {
+        "validate": 10,
+        "quality": 30,
+        "security": 30,
+        "codeql": 30,
+        "package": 20,
+        "install": 20,
+        "evidence": 10,
+    },
+    ".github/workflows/desktop-sidecar.yml": {
+        "changes": 5,
+        "desktop-security": 30,
+        "native-package": 45,
+        "desktop-gate": 10,
+    },
+    ".github/workflows/release-project-gate-proof.yml": {"validate": 15},
+    ".github/workflows/release.yml": {
+        "validate": 15,
+        "build": 30,
+        "desktop-installers": 90,
+        "desktop-installer-validation": 60,
+        "desktop-release-aggregate": 30,
+        "import-desktop-release-distributions": 30,
+        "assemble-release-distributions": 30,
+        "publish-build-provenance": 20,
+        "draft-github-release": 20,
+        "publish-testpypi": 20,
+        "verify-testpypi": 30,
+        "publish-pypi": 20,
+        "verify-pypi-hashes": 30,
+        "verify-pypi-install": 30,
+        "verify-docs-publication": 15,
+        "publish-github-release": 20,
+    },
+}
 
 
 def _job(workflow: str, job: str) -> str:
@@ -21,6 +78,11 @@ def _job(workflow: str, job: str) -> str:
     body = workflow.split(marker, maxsplit=1)[1]
     next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\n", body)
     return body[: next_job.start()] if next_job else body
+
+
+def _job_names(workflow: str) -> set[str]:
+    jobs = workflow.split("\njobs:\n", maxsplit=1)[1]
+    return set(re.findall(r"(?m)^  ([a-z][a-z0-9-]*):\n", jobs))
 
 
 def test_pull_request_labeler_has_the_config_file_it_loads() -> None:
@@ -180,6 +242,49 @@ def test_dependency_review_runs_on_hosted_ubuntu_with_bounded_duration() -> None
     assert "runs-on: ubuntu-24.04" in workflow
     assert "timeout-minutes: 15" in workflow
     assert "self-hosted" not in workflow
+
+
+def test_governed_ci_security_and_release_jobs_have_reviewed_timeouts() -> None:
+    for relative_path, expected_timeouts in GOVERNED_JOB_TIMEOUTS.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+
+        assert _job_names(workflow) == set(expected_timeouts), relative_path
+        for job_name, expected_minutes in expected_timeouts.items():
+            job = _job(workflow, job_name)
+            timeout_values = re.findall(r"(?m)^    timeout-minutes: ([^\n]+)$", job)
+            assert timeout_values == [str(expected_minutes)], f"{relative_path}:{job_name}"
+            assert "${{" not in timeout_values[0], f"{relative_path}:{job_name}"
+
+            steps_offset = job.find("\n    steps:\n")
+            if steps_offset >= 0:
+                timeout_offset = job.index(f"\n    timeout-minutes: {expected_minutes}\n")
+                assert timeout_offset < steps_offset, f"{relative_path}:{job_name}"
+
+
+def test_ci_timeout_proof_is_manual_deterministic_and_fail_closed() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    exercise = _job(workflow, "timeout-proof-exercise")
+    evidence = _job(workflow, "timeout-proof-evidence")
+
+    assert "timeout_proof:" in workflow
+    assert "type: boolean" in workflow
+    assert "default: false" in workflow
+    proof_condition = "if: ${{ github.event_name == 'workflow_dispatch' && inputs.timeout_proof }}"
+    assert proof_condition in exercise
+    assert "timeout-minutes: 1" in exercise
+    assert "python scripts/ci_timeout_proof.py arm" in exercise
+    assert "time.sleep(300)" in exercise
+    assert exercise.index("actions/upload-artifact@") < exercise.index("time.sleep(300)")
+
+    assert "needs: timeout-proof-exercise" in evidence
+    assert "if: ${{ always() && inputs.timeout_proof }}" in evidence
+    assert "PROOF_RESULT: ${{ needs.timeout-proof-exercise.result }}" in evidence
+    assert "python scripts/ci_timeout_proof.py confirm" in evidence
+    assert "actions/download-artifact@" in evidence
+    assert "actions/upload-artifact@" in evidence
+    assert "CI_TIMEOUT_PROOF_EXPECTED_FAILURE" in evidence
+    assert re.search(r"(?m)^\s+exit 1$", evidence)
+    assert "secrets." not in exercise + evidence
 
 
 def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:

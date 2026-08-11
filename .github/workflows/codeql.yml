@@ -18,6 +18,7 @@ jobs:
   analyze:
     name: analyze Python
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read # required by CodeQL for workflow metadata
       contents: read # required to analyze repository contents
