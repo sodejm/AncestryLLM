@@ -148,14 +148,16 @@ The deterministic proof is an explicitly requested manual CI mode:
 gh workflow run ci.yml --ref main -f timeout_proof=true
 ```
 
-The expected workflow conclusion is failure. The exercise job first uploads a
-schema-v1 armed record, then runs a fictional five-minute sleep under a one-minute
-job timeout. An always-run evidence job validates the exercise result, uploads a
-sanitized confirmed record, emits a stable failure code, and deliberately fails so
-the proof cannot be mistaken for a successful required check. The records contain
-only fixed fixture identifiers, durations, schema/status fields, and the job result;
-they contain no secrets, environment values, usernames, hostnames, private or
-temporary paths, response bodies, genealogy data, or application payloads.
+The expected workflow conclusion is failure. GitHub reports the timed-out exercise
+job itself as `cancelled`: it first uploads a schema-v1 armed record, then runs a
+fictional five-minute sleep under a one-minute job timeout. An always-run evidence
+job requires that exact `cancelled` result, uploads a sanitized confirmed record,
+emits a stable failure code, and deliberately fails so the proof cannot be mistaken
+for a successful required check. A `failure`, `success`, `skipped`, or other result
+fails verification without producing confirmed evidence. The records contain only
+fixed fixture identifiers, durations, schema/status fields, and the job result; they
+contain no secrets, environment values, usernames, hostnames, private or temporary
+paths, response bodies, genealogy data, or application payloads.
 
 This governance changes repository workflow availability and evidence only. It
 does not change the application API, CLI registry, DTOs, provider behavior,
