@@ -85,6 +85,7 @@ build = [
     "packaging>=25,<27",
     "setuptools>=83,<84",
     "twine>=6.2,<8",
+    "uv_build>=0.12.0,<0.13",
     "wheel>=0.45,<1",
 ]
 release-verifier = ["pypi-attestations==0.0.30"]
