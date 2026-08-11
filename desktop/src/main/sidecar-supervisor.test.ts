@@ -85,6 +85,33 @@ describe('SidecarSupervisor', () => {
     })
   })
 
+  it('preserves automatic retries while a repaired integrity failure uses the manual budget', async () => {
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    const launch = vi.fn(async () => sidecar)
+    const verifier = vi.fn()
+      .mockRejectedValueOnce(new SidecarIntegrityError())
+      .mockResolvedValueOnce(undefined)
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify: verifier, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 2, maxManualRetries: 1,
+    })
+
+    await expect(supervisor.start()).rejects.toBeInstanceOf(SidecarIntegrityError)
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 1,
+    })
+
+    await expect(supervisor.retry()).resolves.toBe(true)
+    expect(verifier).toHaveBeenCalledTimes(2)
+    expect(launch).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'ready', failure: null,
+      automaticRestartsRemaining: 2, manualRetriesRemaining: 0,
+    })
+  })
+
   it('reports sanitized lifecycle transitions and grants sessions only while ready', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const launch = vi.fn(async () => sidecar)

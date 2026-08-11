@@ -142,7 +142,12 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
 
     builder = VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
     assert "extends: ./electron-builder.yml" in builder
-    assert 'identity: "-"' in builder
+    assert re.search(
+        r'mac:\n  identity: "-"\n  signIgnore:\n'
+        r'    - "/Contents/Resources/sidecar/"\n?\Z',
+        builder,
+    )
+    assert builder.count("signIgnore:") == 1
 
 
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:

@@ -180,7 +180,10 @@ bounded automated controls; they are not a claim of OS-level packet capture.
 
 Each native row now makes disposable copies of the assembled package for three
 black-box fault scenarios. It temporarily withholds and restores the real
-packaged sidecar to prove degraded Diagnostics and successful manual retry;
+packaged sidecar to prove degraded Diagnostics and successful manual retry. A
+missing manifest-bound executable is an integrity failure, so it consumes no
+automatic crash-restart budget; restoring the payload and choosing the bounded
+manual retry is the recovery path. The harness separately
 kills the real sidecar child repeatedly to prove automatic restart, bounded
 exhaustion, manual recovery, and child cleanup on quit; and substitutes a
 byte-different target-native executable while retaining the original manifest

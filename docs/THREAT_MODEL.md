@@ -231,7 +231,7 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-R02` | Restrictive production CSP and `app://` protocol: fixed asset/MIME manifest; no renderer network, frames, objects, forms, raw HTML, executable model output, service workers, or CSP bypass. |
 | `TM-I01` | Least-privilege IPC: frozen static asynchronous bridge methods, runtime schemas and size limits, main-frame sender/origin checks, listener cleanup, and no generic send/listen, dynamic channels, Electron objects, or synchronous IPC. |
 | `TM-A01` | Private internal API: loopback port `0`, fresh 256-bit per-launch bearer through private stdin, exact host/version validation, no cookies/CORS/browser origins, and packaged docs disabled. |
-| `TM-A02` | Sidecar lifecycle: embedded-digest-bound exact payload-manifest verification before token creation and spawn, minimal environment, protocol/build handshake, one server worker, bounded restart, verified full-process-tree shutdown, current-resource drain, and privacy-minimal stderr. Manifest binding is not publisher signing; Issue #132 owns signing and notarization. |
+| `TM-A02` | Sidecar lifecycle: embedded-digest-bound exact payload-manifest verification before token creation and spawn, minimal environment, protocol/build handshake, one server worker, bounded restart, verified full-process-tree shutdown, current-resource drain, and privacy-minimal stderr. The macOS CI verification overlay excludes only the manifest-bound sidecar payload from Electron's second signing pass so signing cannot mutate those bytes after manifest creation; PyInstaller's nested signatures remain and the outer ad hoc application signature seals the resource tree. Manifest binding is not publisher signing; Issue #132 owns signing and notarization. |
 | `TM-A03` | Request integrity: authenticate every route before body parsing, compare credentials in constant time, reject proxy/origin/cookie headers and redirects, disable access logs, and require token-derived readiness proof. |
 | `TM-S01` | Secret boundary: Python `SecretStore` and the OS keyring are the only authority; renderer may set, delete, or check presence but can never read a value. |
 | `TM-F01` | Opaque file grants: native dialogs create high-entropy, window/operation-scoped, expiring, revocable grant IDs; renderer never supplies or receives unrestricted paths. |
@@ -323,7 +323,8 @@ owned by Issues #11 and #102:
 - Electron main verifies the embedded manifest digest, exact target/build, and
   complete regular-file/symlink inventory before creating the launch token or
   spawning. Integrity failures expose only a generic diagnostic and do not
-  consume the crash-restart budget.
+  consume the crash-restart budget; after an operator restores the exact payload,
+  recovery uses the separately bounded manual retry.
 - POSIX launch isolates a process group and verifies bounded full-group
   `SIGTERM`/`SIGKILL` cleanup. On Windows, the sidecar enters a kill-on-close Job
   Object and Electron main requests full-tree termination. The native Job Object

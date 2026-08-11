@@ -120,7 +120,7 @@ function targetFixture(row, observed = metrics) {
   const fuseInspectionBytes = encoded(inspection)
   const withholdEvidence = faultEvidence('sidecar-withhold-retry', {
     failure: 'startup_failed',
-    automaticRestartsRemaining: 0,
+    automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
     recoveredState: 'ready',
     cleanExit: true,

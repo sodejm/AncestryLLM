@@ -223,7 +223,7 @@ const FAULT_SCENARIOS = Object.freeze({
     artifact: 'withholdEvidence',
     observations: Object.freeze({
       failure: 'startup_failed',
-      automaticRestartsRemaining: 0,
+      automaticRestartsRemaining: 2,
       manualRetriesRemainingBefore: 1,
       recoveredState: 'ready',
       cleanExit: true,

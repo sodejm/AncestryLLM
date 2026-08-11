@@ -977,7 +977,7 @@ test.describe('unpublished unpacked native package', () => {
       const degraded: StartupDiagnostics = {
         state: 'degraded',
         failure: 'startup_failed',
-        automaticRestartsRemaining: 0,
+        automaticRestartsRemaining: 2,
         manualRetriesRemaining: 1,
       }
       running = await launchPackaged(
@@ -995,7 +995,7 @@ test.describe('unpublished unpacked native package', () => {
       await expectStartupDiagnostics(running.page, {
         state: 'ready',
         failure: null,
-        automaticRestartsRemaining: 0,
+        automaticRestartsRemaining: 2,
         manualRetriesRemaining: 0,
       })
       await expect(running.page.getByRole('alert')).toHaveCount(0)
@@ -1003,7 +1003,7 @@ test.describe('unpublished unpacked native package', () => {
       running = undefined
       await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
         failure: 'startup_failed',
-        automaticRestartsRemaining: 0,
+        automaticRestartsRemaining: 2,
         manualRetriesRemainingBefore: 1,
         recoveredState: 'ready',
         cleanExit: true,

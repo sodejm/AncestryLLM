@@ -272,7 +272,10 @@ target-assurance gates to pass.
   unavailable, or conflicting state remains gated.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
-  lifecycle plus a bounded single-flight manual retry. Bootstrap material,
+  lifecycle plus a bounded single-flight manual retry. Manifest-bound integrity
+  failures do not consume the automatic crash-restart budget because unchanged
+  invalid payload bytes cannot self-repair; a repaired payload can use the
+  separate manual retry. Bootstrap material,
   ports, tokens, endpoints, executable or preference-file paths, stderr, raw
   sidecar or bridge errors, and stacks never cross preload or renderer IPC.
 - Issue #102 verifies an embedded-digest-bound, target/build-specific full
@@ -280,8 +283,13 @@ target-assurance gates to pass.
   detects payload substitution relative to the built Electron main process; it
   is neither publisher signing nor whole-bundle protection. Project-produced
   0.x binaries remain unsigned, and Issue #132 owns publisher signing and
-  notarization. Verification and spawn are separate filesystem operations, so
-  a narrow local time-of-check/time-of-use replacement residual remains.
+  notarization. The macOS CI verification overlay signs the outer application
+  ad hoc but excludes only `Contents/Resources/sidecar/` from Electron's second
+  signing pass: PyInstaller's nested Mach-O signatures remain intact, the outer
+  signature seals the resource tree, and the payload manifest continues to
+  describe the exact bytes verified before spawn. Verification and spawn are
+  separate filesystem operations, so a narrow local time-of-check/time-of-use
+  replacement residual remains.
 - POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
   escalation over the complete group. The Windows sidecar joins a
   kill-on-close Job Object and Electron main requests full-tree termination.
