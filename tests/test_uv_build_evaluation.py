@@ -84,6 +84,58 @@ def test_evaluation_rejects_other_or_malformed_uv_versions(output: str) -> None:
     assert error.value.code == "UVBEVAL_UV_VERSION"
 
 
+def test_artifact_discovery_allows_only_uv_output_marker(tmp_path: Path) -> None:
+    wheel = tmp_path / "ancestryllm-0.5.0-py3-none-any.whl"
+    sdist = tmp_path / "ancestryllm-0.5.0.tar.gz"
+    wheel.touch()
+    sdist.touch()
+    (tmp_path / ".gitignore").write_text("*\n", encoding="utf-8")
+
+    assert evaluation._artifact_paths(tmp_path) == (wheel, sdist)
+
+
+@pytest.mark.parametrize("extra_kind", ("file", "directory", "symlink"))
+def test_artifact_discovery_rejects_every_other_output_entry(
+    tmp_path: Path, extra_kind: str
+) -> None:
+    wheel = tmp_path / "ancestryllm-0.5.0-py3-none-any.whl"
+    sdist = tmp_path / "ancestryllm-0.5.0.tar.gz"
+    wheel.touch()
+    sdist.touch()
+    extra = tmp_path / "unexpected"
+    if extra_kind == "file":
+        extra.touch()
+    elif extra_kind == "directory":
+        extra.mkdir()
+    else:
+        extra.symlink_to(wheel)
+
+    with pytest.raises(evaluation.EvaluationError) as error:
+        evaluation._artifact_paths(tmp_path)
+
+    assert error.value.code == "UVBEVAL_ARTIFACT_SET"
+
+
+def test_wheel_reconstruction_allows_only_uv_output_marker(tmp_path: Path) -> None:
+    wheel = tmp_path / "ancestryllm-0.5.0-py3-none-any.whl"
+    wheel.touch()
+    (tmp_path / ".gitignore").write_text("*\n", encoding="utf-8")
+
+    assert evaluation._wheel_only(tmp_path) == wheel
+
+
+def test_artifact_discovery_rejects_symlinked_artifacts(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside.whl"
+    outside.touch()
+    (tmp_path / "ancestryllm-0.5.0-py3-none-any.whl").symlink_to(outside)
+    (tmp_path / "ancestryllm-0.5.0.tar.gz").touch()
+
+    with pytest.raises(evaluation.EvaluationError) as error:
+        evaluation._artifact_paths(tmp_path)
+
+    assert error.value.code == "UVBEVAL_ARTIFACT_SET"
+
+
 def test_candidate_overlay_changes_only_the_reviewed_build_configuration() -> None:
     original = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     candidate = evaluation.candidate_pyproject(original)

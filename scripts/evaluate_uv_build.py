@@ -457,13 +457,26 @@ def _sdist_allowlist(files: dict[str, bytes]) -> dict[str, list[str]]:
     }
 
 
+UV_OUTPUT_MARKERS = frozenset({".gitignore"})
+
+
+def _unexpected_output_entries(directory: Path, artifacts: list[Path]) -> list[str]:
+    artifact_names = {path.name for path in artifacts}
+    return sorted(
+        path.name
+        for path in directory.iterdir()
+        if path.name not in artifact_names
+        and not (path.name in UV_OUTPUT_MARKERS and path.is_file() and not path.is_symlink())
+    )
+
+
 def _artifact_paths(directory: Path) -> tuple[Path, Path]:
     wheels = sorted(directory.glob("*.whl"))
     sdists = sorted(directory.glob("*.tar.gz"))
-    others = sorted(
-        path.name for path in directory.iterdir() if path.is_file() and path not in wheels + sdists
-    )
-    if len(wheels) != 1 or len(sdists) != 1 or others:
+    others = _unexpected_output_entries(directory, wheels + sdists)
+    artifacts = wheels + sdists
+    unsafe_artifact = any(not path.is_file() or path.is_symlink() for path in artifacts)
+    if len(wheels) != 1 or len(sdists) != 1 or others or unsafe_artifact:
         raise EvaluationError(
             "UVBEVAL_ARTIFACT_SET",
             "build must produce exactly one wheel and one sdist",
@@ -473,8 +486,9 @@ def _artifact_paths(directory: Path) -> tuple[Path, Path]:
 
 def _wheel_only(directory: Path) -> Path:
     wheels = sorted(directory.glob("*.whl"))
-    others = sorted(path for path in directory.iterdir() if path.is_file() and path not in wheels)
-    if len(wheels) != 1 or others:
+    others = _unexpected_output_entries(directory, wheels)
+    unsafe_artifact = any(not path.is_file() or path.is_symlink() for path in wheels)
+    if len(wheels) != 1 or others or unsafe_artifact:
         raise EvaluationError(
             "UVBEVAL_ARTIFACT_SET",
             "sdist reconstruction must produce exactly one wheel",
