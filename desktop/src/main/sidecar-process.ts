@@ -8,6 +8,7 @@ import {
   execFile,
   spawn,
   type ChildProcessWithoutNullStreams,
+  type SpawnOptionsWithoutStdio,
 } from 'node:child_process'
 import {
   API_CONTRACT,
@@ -18,8 +19,9 @@ import {
 
 const MAX_READINESS_BYTES = 1024
 const MAX_HEALTH_BYTES = 8192
-const TERMINATION_TIMEOUT_MS = 3000
+const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
+const PROCESS_GROUP_POLL_INTERVAL_MS = 50
 
 type WindowsTreeKillExecutor = (
   file: string,
@@ -29,6 +31,48 @@ type WindowsTreeKillExecutor = (
 ) => void
 
 type WindowsTreeTerminator = (pid: number) => Promise<void>
+
+export interface PosixProcessGroupController {
+  signal: (pid: number, signal: NodeJS.Signals) => void
+  exists: (pid: number) => boolean
+}
+
+type ProcessKill = (pid: number, signal?: string | number) => boolean
+
+export function createPosixProcessGroupController(
+  kill: ProcessKill = process.kill,
+): PosixProcessGroupController {
+  return {
+    signal: (pid, signal) => { kill(-pid, signal) },
+    exists: (pid) => {
+      try {
+        kill(-pid, 0)
+        return true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+        throw error
+      }
+    },
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+async function waitForProcessGroupExit(
+  pid: number,
+  controller: PosixProcessGroupController,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (controller.exists(pid)) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await delay(Math.min(PROCESS_GROUP_POLL_INTERVAL_MS, remaining))
+  }
+  return true
+}
 
 function waitForChildExit(
   child: ChildProcessWithoutNullStreams,
@@ -77,23 +121,72 @@ export async function terminateNativeSidecarProcess(
   child: ChildProcessWithoutNullStreams,
   platform: NodeJS.Platform = process.platform,
   terminateWindowsTree: WindowsTreeTerminator = terminateWindowsProcessTree,
+  posixGroup: PosixProcessGroupController = createPosixProcessGroupController(),
+  gracefulTimeoutMs: number = TERMINATION_TIMEOUT_MS,
 ): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return
-
   if (platform === 'win32' && child.pid !== undefined) {
+    // The packaged sidecar also owns a kill-on-close Job Object. If its leader
+    // already exited, Windows closes that handle and terminates its descendants.
+    if (child.exitCode !== null || child.signalCode !== null) return
     try {
       await terminateWindowsTree(child.pid)
-      if (await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS)) return
     } catch {
-      if (child.exitCode !== null || child.signalCode !== null) return
+      throw new Error('The sidecar process group could not be terminated.')
+    }
+    if (!(await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS))) {
+      throw new Error('The sidecar process group did not terminate.')
+    }
+    return
+  }
+
+  if (platform !== 'win32' && child.pid !== undefined) {
+    let groupTerminationCompleted = false
+    let groupSurvived = false
+    try {
+      if (!posixGroup.exists(child.pid)) return
+      posixGroup.signal(child.pid, 'SIGTERM')
+      if (await waitForProcessGroupExit(child.pid, posixGroup, gracefulTimeoutMs)) return
+      posixGroup.signal(child.pid, 'SIGKILL')
+      groupSurvived = !(await waitForProcessGroupExit(
+        child.pid,
+        posixGroup,
+        FORCE_TERMINATION_TIMEOUT_MS,
+      ))
+      groupTerminationCompleted = true
+    } catch {
+      throw new Error('The sidecar process group could not be terminated.')
+    }
+    if (groupTerminationCompleted) {
+      if (groupSurvived) {
+        throw new Error('The sidecar process group did not terminate.')
+      }
+      return
     }
   }
 
+  if (child.exitCode !== null || child.signalCode !== null) return
   child.kill('SIGTERM')
-  const exited = await waitForChildExit(child, TERMINATION_TIMEOUT_MS)
+  const exited = await waitForChildExit(child, gracefulTimeoutMs)
   if (!exited && child.exitCode === null && child.signalCode === null) {
     child.kill('SIGKILL')
-    await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS)
+    if (!(await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS))) {
+      throw new Error('The sidecar process group did not terminate.')
+    }
+  }
+}
+
+export function nativeSidecarSpawnOptions(
+  workingDirectory: string,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): SpawnOptionsWithoutStdio & { stdio: ['pipe', 'pipe', 'pipe'] } {
+  return {
+    cwd: workingDirectory,
+    env: environment,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    detached: platform !== 'win32',
   }
 }
 
@@ -190,13 +283,11 @@ export async function launchNativeSidecar(
   const workingDirectory = await mkdtemp(join(tmpdir(), 'ancestryllm-sidecar-'))
   let child: ChildProcessWithoutNullStreams
   try {
-    child = spawn(requestDetails.executablePath, [], {
-      cwd: workingDirectory,
-      env: requestDetails.environment,
-      shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
+    child = spawn(
+      requestDetails.executablePath,
+      [],
+      nativeSidecarSpawnOptions(workingDirectory, requestDetails.environment),
+    )
   } catch (error) {
     await rm(workingDirectory, { recursive: true, force: true })
     throw error

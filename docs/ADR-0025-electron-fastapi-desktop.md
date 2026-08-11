@@ -192,9 +192,16 @@ untrusted even when they originated locally.
 
 ### Sidecar and internal API
 
-- Package a signed, manifest-verified Python sidecar. Spawn it directly with no
-  shell, a minimal allowlisted environment, an isolated working directory, and
-  no inherited provider secrets in packaged mode.
+- Package a Python sidecar with a deterministic, target/build-specific full
+  payload manifest bound to the built Electron main by an embedded digest.
+  Verify it before token generation or process spawn. This detects payload
+  substitution relative to that main process; it is not publisher signing or
+  whole-bundle protection. Project-produced 0.x binaries remain unsigned, and
+  Issue #132 owns publisher signing and notarization.
+- Spawn the sidecar directly with no shell, a minimal allowlisted environment,
+  an isolated working directory, and no inherited provider secrets in packaged
+  mode. Verification and spawn are separate filesystem operations, leaving a
+  narrow local time-of-check/time-of-use replacement residual.
 - Bind one worker to `127.0.0.1` on an OS-selected ephemeral port. Supply a
   fresh 256-bit per-launch bearer through a private stdin frame, never through
   arguments, environment, files, logs, or the renderer.
@@ -208,6 +215,11 @@ untrusted even when they originated locally.
 - Use a token-derived readiness proof and exact app/sidecar build and protocol
   handshake. Keep the port and bearer only in Electron main memory. Disable
   access logs and use privacy-minimal structural stderr.
+- Terminate the full isolated POSIX process group or Windows process tree with
+  bounded graceful/forced escalation and fail closed when termination cannot be
+  verified. The current lifespan drains the Uvicorn listener/server, stdio,
+  process tree, and temporary launch directory. Future jobs, provider streams,
+  and database sessions must register their own drains before their routes ship.
 
 ## Internal contract principles
 
@@ -287,7 +299,7 @@ The foundation sequence is:
 | `EL-01` / #98 | This ADR, threat/control/risk ledgers, scope, overlap, and ownership. | None. |
 | `EL-02` / #99 | Reproducible desktop workspace, strict TypeScript, accessible shell, and deterministic mock bridge. | #98 merged. |
 | `EL-03` / #11 | Authenticated internal API bootstrap and deterministic OpenAPI contract. | #98 merged. |
-| `EL-04` / #102 | Signed sidecar packaging, private bootstrap, supervision, and shutdown. | #11 merged. |
+| `EL-04` / #102 | Manifest-bound sidecar packaging, private bootstrap, supervision, and full-process-tree shutdown. Publisher signing remains owned by #132. | #11 merged. |
 | `EL-05` / #100 | Electron sandbox, CSP, protocol, navigation, permissions, and fuse policy. | #98 and #99 merged. |
 | `EL-06` / #101 | Typed context bridge and main-process API proxy. | #99, #11, #102, and #100 merged. |
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |

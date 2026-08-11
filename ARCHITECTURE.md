@@ -22,7 +22,8 @@ workflows with optional LLM assistance. Isolated `0.5.0` work adds an
 authenticated FastAPI control adapter for health and capability discovery, a
 UI-only Electron shell with Home, Diagnostics, a sanitized capability summary,
 local visual Settings, and a bounded first-run Home welcome, plus native
-packaged-sidecar build and supervision.
+packaged-sidecar build, pre-spawn payload verification, full-process-tree
+supervision, and bounded shutdown drain.
 The API exposes no genealogy, provider, domain, or generic command-dispatch
 route. The exact six-method renderer bridge uses deterministic fictional data
 in development; packaged Electron main alone may call the authenticated fixed
@@ -271,14 +272,36 @@ target-assurance gates to pass.
   unavailable, or conflicting state remains gated.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
-  lifecycle plus a bounded single-flight manual retry. Bootstrap material,
+  lifecycle plus a bounded single-flight manual retry. Manifest-bound integrity
+  failures do not consume the automatic crash-restart budget because unchanged
+  invalid payload bytes cannot self-repair; a repaired payload can use the
+  separate manual retry. Bootstrap material,
   ports, tokens, endpoints, executable or preference-file paths, stderr, raw
   sidecar or bridge errors, and stacks never cross preload or renderer IPC.
+- Issue #102 verifies an embedded-digest-bound, target/build-specific full
+  sidecar payload manifest before token generation or process spawn. This
+  detects payload substitution relative to the built Electron main process; it
+  is neither publisher signing nor whole-bundle protection. Project-produced
+  0.x binaries remain unsigned, and Issue #132 owns publisher signing and
+  notarization. The macOS CI verification overlay signs the outer application
+  ad hoc but excludes only `Contents/Resources/sidecar/` from Electron's second
+  signing pass: PyInstaller's nested Mach-O signatures remain intact, the outer
+  signature seals the resource tree, and the payload manifest continues to
+  describe the exact bytes verified before spawn. Verification and spawn are
+  separate filesystem operations, so a narrow local time-of-check/time-of-use
+  replacement residual remains.
+- POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
+  escalation over the complete group. The Windows sidecar joins a
+  kill-on-close Job Object and Electron main requests full-tree termination.
+  Shutdown fails closed when termination cannot be verified. The implemented
+  drain covers the Uvicorn server and listener, stdio, process tree, and
+  temporary launch directory. Future jobs, provider streams, and database
+  sessions must register their own drains before their routes ship.
 - A loopback-only FastAPI sidecar authenticates every request before body
   parsing and adapts versioned DTOs to application services. The source-level
-  Issue #11 foundation and Issue #225 packaged runtime implement only
-  authenticated health and capability discovery; domain routers remain
-  separately owned future work. It does not
+  Issue #11 foundation, Issue #225 packaged runtime, and Issue #102 supervision
+  hardening implement only authenticated health and capability discovery;
+  domain routers remain separately owned future work. It does not
   import CLI or console presentation and is not a public API.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
@@ -1047,7 +1070,7 @@ developer has not installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap and unsigned unpacked package assembly, Issue #102's embedded-digest payload verification, bounded supervision, full-process-tree cleanup, current-resource drain, smoke testing, and exact-head process-tree evidence, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
 | Container and advanced remote deployment profiles | ADR-0026 accepts Local Desktop, Connect Remote, and single-household Host Remote as a target architecture. No container or remote profile is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 

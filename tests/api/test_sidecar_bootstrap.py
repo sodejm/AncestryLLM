@@ -5,6 +5,10 @@ from __future__ import annotations
 import io
 import json
 import socket
+import subprocess
+import sys
+import time
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.routing import APIRoute
@@ -13,11 +17,15 @@ from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import (
     SIDECAR_BUILD,
     LaunchFrame,
+    acquire_windows_process_tree_guard,
     create_listener,
     create_sidecar_app,
     parse_launch_frame,
     readiness_line,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _launch_payload(**updates: str) -> bytes:
@@ -97,3 +105,60 @@ def test_packaged_sidecar_adds_no_domain_routes() -> None:
         "/api/v1/capabilities",
         "/api/v1/health",
     }
+
+
+def test_windows_process_tree_guard_is_retained_and_other_platforms_are_noops() -> None:
+    handle = object()
+
+    def create_native() -> object:
+        return handle
+
+    assert acquire_windows_process_tree_guard("win32", create_native) is handle
+    assert acquire_windows_process_tree_guard("linux", create_native) is None
+
+
+def test_windows_process_tree_guard_fails_closed_without_native_error_details() -> None:
+    def fail() -> object:
+        raise OSError(5, "sensitive native setup detail")
+
+    with pytest.raises(RuntimeError, match="Windows process-tree guard unavailable") as error:
+        acquire_windows_process_tree_guard("win32", fail)
+
+    assert "sensitive" not in str(error.value)
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="requires the native Windows Job Object implementation",
+)
+def test_windows_process_tree_guard_kills_descendant_when_owner_exits(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "orphaned-descendant"
+    descendant = (
+        "import pathlib, sys, time; "
+        "time.sleep(2); "
+        "pathlib.Path(sys.argv[1]).write_text('orphaned', encoding='utf-8')"
+    )
+    owner = "\n".join(
+        (
+            "import subprocess, sys",
+            "from ancestryllm.api.sidecar import acquire_windows_process_tree_guard",
+            "_guard = acquire_windows_process_tree_guard()",
+            "subprocess.Popen(",
+            "    [sys.executable, '-c', sys.argv[1], sys.argv[2]],",
+            "    stdin=subprocess.DEVNULL,",
+            "    stdout=subprocess.DEVNULL,",
+            "    stderr=subprocess.DEVNULL,",
+            ")",
+        )
+    )
+
+    subprocess.run(
+        [sys.executable, "-c", owner, descendant, str(marker)],
+        check=True,
+        timeout=10,
+    )
+    time.sleep(3)
+
+    assert not marker.exists()

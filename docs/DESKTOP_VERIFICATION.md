@@ -104,9 +104,11 @@ also emits `desktop-exact-head-evidence.json`,
 desktop-only `SHA256SUMS`. The artifact is uploaded without recompression so
 its reported digest can be approved. A later tag run imports that exact
 immutable `desktop-release-distributions` artifact, verifies GitHub's artifact
-digest plus the internal manifest and checksums, and never rebuilds the signed
-installers after the tag is pushed. The tag run then combines those imported
-files with the Python distributions, regenerates the final
+digest plus the internal manifest and checksums, and, for current 0.x runs,
+never rebuilds those downloaded unsigned project-produced installers after the
+tag is pushed. This artifact-identity rule is separate from Issue #132's future
+publisher-signing assurance. The tag run then combines those imported files
+with the Python distributions, regenerates the final
 `release-evidence.md` and one release-wide `SHA256SUMS`, and records build
 provenance over the complete release asset set.
 
@@ -125,7 +127,8 @@ Each native row then:
 1. builds and smoke-tests the target-matched sidecar;
 2. builds the production Electron assets and assembles an unpublished unpacked
    native application;
-3. verifies that the packaged resources contain the expected sidecar;
+3. verifies that the packaged resources exactly match the deterministic
+   target/build-bound sidecar payload manifest;
 4. launches the actual packaged executable with isolated fictional app data;
 5. verifies first-run welcome, Home and healthy Diagnostics, Settings
    persistence across a new process, corrupt-preference fail-closed behavior,
@@ -136,8 +139,10 @@ Each native row then:
 6. records cold-launch, warm-launch, readiness, process-RSS, and renderer
    outbound-request measurements; and
 7. exercises sidecar absence/recovery, crash-loop exhaustion/retry/quit, and
-   app/sidecar build mismatch against verification-only package copies; and
-8. inspects the packaged Electron fuses and ASAR boundary.
+   pre-spawn integrity rejection against verification-only package copies;
+8. records native process-tree-guard evidence, including the Windows
+   kill-on-close Job Object behavior on the exact-head Windows ARM64 row; and
+9. inspects the packaged Electron fuses and ASAR boundary.
 
 The packaged Playwright pass attaches through an ephemeral CDP endpoint bound
 to `127.0.0.1` solely so the harness can inspect and close the unpublished
@@ -164,8 +169,9 @@ signature after electron-builder mutates the Electron executable and fuses.
 That signature only permits the unpublished application to launch on the
 hosted runner; the bundle is never distributed or imported into a release and
 is not release identity, installer-signing, or notarization evidence. The
-aggregate therefore continues to record
-`signingVerified: false` and leaves those claims to #231.
+aggregate therefore continues to record `signingVerified: false`. Issue #231
+carries the installer release gate, while #132 owns publisher-signing and
+notarization assurance.
 
 The packaged renderer canary observes attempted HTTP, HTTPS, WebSocket, window,
 and service-worker activity and requires zero outbound requests. The separate
@@ -174,12 +180,22 @@ bounded automated controls; they are not a claim of OS-level packet capture.
 
 Each native row now makes disposable copies of the assembled package for three
 black-box fault scenarios. It temporarily withholds and restores the real
-packaged sidecar to prove degraded Diagnostics and successful manual retry;
+packaged sidecar to prove degraded Diagnostics and successful manual retry. A
+missing manifest-bound executable is an integrity failure, so it consumes no
+automatic crash-restart budget; restoring the payload and choosing the bounded
+manual retry is the recovery path. The harness separately
 kills the real sidecar child repeatedly to prove automatic restart, bounded
 exhaustion, manual recovery, and child cleanup on quit; and substitutes a
-separately built target-native verification sidecar whose reported build cannot
-match the application build. macOS copies are ad hoc re-signed only after the
-verification mutation. None of these disposable copies is a release artifact.
+byte-different target-native executable while retaining the original manifest
+to prove generic `startup_failed` rejection before a child is spawned. macOS
+copies are ad hoc re-signed only after the verification mutation. None of these
+disposable copies is a release artifact.
+
+Source-level supervisor tests separately use a manifest-accepted fake process
+to prove that both protocol and build mismatches remain `incompatible_build`,
+terminate the process, and consume no automatic restart. Those compatibility
+tests and the packaged integrity-substitution scenario have independent receipt
+gates: `sidecarCompatibilityPassed` and `sidecarIntegrityPassed`.
 
 The harness changes only those verification package copies and observes the
 same packaged UI and process boundaries used by a normal launch. Production
@@ -222,13 +238,19 @@ digest-mismatched receipt.
 
 The three packaged-sidecar fault scenarios have independent receipt gates and
 write exact-schema observation documents. Target evidence binds each document
-by byte count and SHA-256 to its receipt; the mismatch receipt additionally
-binds the target-native wrong-build executable. Aggregation revalidates those
+by byte count and SHA-256 to its receipt; the integrity receipt additionally
+binds the substituted target-native executable. Aggregation revalidates those
 documents and bindings instead of accepting a workflow-provided success flag.
 The crash-loop scenario owns the graceful application-quit assertion and proves
-that the active real sidecar exits with it. The wrong-build scenario instead
-proves `incompatible_build`, consumes the one manual retry without weakening
-that result, and requires bounded termination of its verification process.
+that the active real sidecar exits with it. The integrity-substitution scenario
+instead proves generic `startup_failed` rejection before any replacement
+process is spawned and consumes no automatic restart.
+
+Every native row also binds `sidecar-process-tree-guard.json` to the
+`sidecarProcessTreeGuardPassed` receipt. On the exact-head Windows ARM64 hosted
+runner, the test proves that closing the packaged sidecar's kill-on-close Job
+Object terminates a surviving descendant. Non-Windows rows exercise and record
+the intentional no-op path; they are not Windows-native proof.
 
 A target document records the runner, sidecar target, intended and actual OS,
 architecture, `packageBoundary: "unpacked-native"`,
@@ -248,6 +270,14 @@ Evidence files are written once. A pre-existing output, malformed schema,
 failed boolean, invalid metric, nonzero renderer egress count, unexpected
 target, or SHA mismatch fails closed.
 
+The sidecar payload manifest is an embedded-digest-bound inventory, not a
+publisher signature. It detects replacement relative to the built Electron
+main process, but it cannot authenticate a wholly rewritten application bundle.
+Project-produced 0.x binaries remain unsigned by policy; #132 owns trusted
+publisher signing and notarization. Verification and spawning are separate
+filesystem operations, so replacement in that narrow interval remains a local
+verify-to-spawn time-of-check/time-of-use residual.
+
 ASAR evidence is also platform-scoped. All rows require `app.asar` and verify
 the eight expected Electron fuse states. macOS additionally compares the
 `ElectronAsarIntegrity` SHA-256 in `Info.plist` with the packaged ASAR header.
@@ -263,8 +293,8 @@ layer consumes that exact-head input and establishes an installer claim only
 when every target-matched installer is manually installed and exercised, and
 the provenance and actual supported-OS checks pass under the
 [release runbook](RELEASING.md). Trusted signature and macOS notarization checks
-join that claim at v1.0.0. A local build, a different Windows runner, or an
-incomplete pre-tag run cannot substitute for that proof.
+owned by Issue #132 join that claim at v1.0.0. A local build, a different
+Windows runner, or an incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
 #131 or the release-coordination tracker #132. CI success must not be used to

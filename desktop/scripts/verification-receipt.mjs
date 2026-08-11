@@ -13,13 +13,14 @@ const ARTIFACT_NAME = /^[A-Za-z][A-Za-z0-9]*$/
 export const RECEIPT_SCHEMA_VERSION = 2
 export const TARGET_RECEIPT_GATES = Object.freeze([
   'packageRuntimePassed',
+  'sidecarProcessTreeGuardPassed',
   'sidecarSmokePassed',
   'fusesInspectedPassed',
   'rendererZeroEgressCanaryPassed',
   'normalLaunchDebugSurfaceAbsentPassed',
   'packagedSidecarWithholdRetryPassed',
   'packagedSidecarRestartExhaustionQuitPassed',
-  'packagedSidecarVersionMismatchPassed',
+  'packagedSidecarIntegritySubstitutionPassed',
 ])
 export const SECURITY_RECEIPT_GATES = Object.freeze([
   'auditPassed',
@@ -29,6 +30,8 @@ export const SECURITY_RECEIPT_GATES = Object.freeze([
   'authBeforeParsingPassed',
   'domainRoutesAbsentPassed',
   'ipcSenderValidationPassed',
+  'sidecarCompatibilityPassed',
+  'sidecarIntegrityPassed',
   'providerNoneNetworkFreePassed',
   'redactionPassed',
   'sbomGeneratedPassed',

@@ -8,11 +8,14 @@ shared command, application-service, and genealogy-core contracts. The isolated
 strict version/error contracts, fail-closed loopback server configuration, and
 a deterministic OpenAPI artifact. Issue #225 adds private-stdin bootstrap,
 bounded Electron supervision, native sidecar smoke tests, and unsigned unpacked
-package verification. It does not implement domain API routes, a renderer
-domain bridge, signed installers, plugins, or an update channel. The diagrams,
-controls, abuse cases, and gates below define both this partial runtime and
-accepted later-roadmap requirements; implementation alone is not evidence that
-every packaged assurance control has passed. Each
+package verification. Issue #102 adds pre-spawn, embedded-digest payload
+verification, bounded crash recovery, full-process-tree termination, and drain
+of the resources the current sidecar actually owns. It does not implement
+domain API routes, a renderer domain bridge, signed installers, plugins, or an
+update channel. The diagrams, controls, abuse cases, and gates below define
+both this partial runtime and accepted later-roadmap requirements;
+implementation alone is not evidence that every packaged assurance control has
+passed. Each
 adapter must reuse the implemented service contracts and complete its named
 verification before a planned control can be treated as effective.
 
@@ -88,7 +91,7 @@ remain planned—not effective—until that evidence passes.
 |---|---|---|
 | A01:2025 Broken Access Control | Privileged operations require narrow bridge/supervisor methods, authenticated internal routes, scoped grants, default-deny remote authorization, and immutable source policy (`TM-I01`, `TM-A01`, `TM-F01`, `TM-H01`, `TM-N01`, `TM-G01`). | Sender/origin, unauthorized-route/operation, disabled-capability, expired/cross-window grant, cross-profile, workload-identity, and traversal tests. |
 | A02:2025 Security Misconfiguration | Secure Electron defaults, loopback-only local publication, explicit deployment modes, identity-verified Docker context, hardened containers, no implicit network, validated TLS/identity preflight, `provider=none`, restrictive permissions, and bounded limits (`TM-R01`, `TM-A03`, `TM-M01`, `TM-H01`, `TM-K01`, `TM-N01`, `TM-G01`). | Clean-install, production-config, context/socket substitution, Compose-policy, listener/firewall, IPv4/IPv6, forwarded-header, CSP/fuse, and native packaged-runtime assertions. |
-| A03:2025 Software Supply Chain Failures | Locked dependencies, purpose-scoped PEP 735 tool groups, pinned CI actions, audits, SBOM/provenance, verified executable bootstrap, digest-pinned OCI/runtime/bootstrap/package inputs, signed production packages, sidecar manifests, and rollback protection (`TM-U01`, `TM-U02`, `TM-U03`, `TM-P02`, `TM-B01`). | Lockfile and environment-profile contract review, clean-profile execution, dependency audits, CodeQL, Semgrep, secret scan, CycloneDX SBOM, bootstrap policy/receipt, digest/architecture/provenance, signature, rollback, and revoked-artifact tests. |
+| A03:2025 Software Supply Chain Failures | Locked dependencies, purpose-scoped PEP 735 tool groups, pinned CI actions, audits, SBOM/provenance, verified executable bootstrap, digest-pinned OCI/runtime/bootstrap/package inputs, signed production packages, embedded-digest sidecar manifests, and rollback protection (`TM-U01`, `TM-U02`, `TM-U03`, `TM-P02`, `TM-B01`). The sidecar manifest is not publisher signing. | Lockfile and environment-profile contract review, clean-profile execution, dependency audits, CodeQL, Semgrep, secret scan, CycloneDX SBOM, bootstrap policy/receipt, manifest integrity, digest/architecture/provenance, signature, rollback, and revoked-artifact tests. |
 | A04:2025 Cryptographic Failures | SQLCipher is required; high-entropy database/API/workload material is never stored in renderer, Compose, image, environment, arguments, or logs; OS keyring/broker, encrypted backups, TLS, identity, and expiring metadata are authoritative (`TM-S01`, `TM-A01`, `TM-V01`, `TM-G01`, `TM-U02`). | Plaintext header, wrong/lost/rotated key, key-unavailable, secret-delivery canaries, TLS/issuer/audience, bearer disclosure, expiry, rollback, integrity, backup, and restore tests. |
 | A05:2025 Injection | SQL AST validation and authorizer, strict schemas, static IPC/endpoint allowlists, no generated command/code execution, raw-HTML denial, and untrusted prompt/model data (`TM-I01`, `TM-L02`, `TM-P01`). | SQL/prompt/console/API/IPC/HTML/URI injection suites, schema fuzzing, and Semgrep/CodeQL. |
 | A06:2025 Insecure Design | Renderer-compromise, hostile-container, hostile-network, and compromised-remote-host cases; separated adapters/services; explicit modes/consent; immutable inputs; abuse-case review; risk expiry; and profile gates apply before code (`TM-R01`, `TM-F02`, `TM-L01`, `TM-M01`, `TM-H01`, `TM-N01`). | Architecture contract tests, threat-ledger review, source sentinels, offline tests, misuse cases, and G0-G7 exit evidence. |
@@ -228,7 +231,7 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-R02` | Restrictive production CSP and `app://` protocol: fixed asset/MIME manifest; no renderer network, frames, objects, forms, raw HTML, executable model output, service workers, or CSP bypass. |
 | `TM-I01` | Least-privilege IPC: frozen static asynchronous bridge methods, runtime schemas and size limits, main-frame sender/origin checks, listener cleanup, and no generic send/listen, dynamic channels, Electron objects, or synchronous IPC. |
 | `TM-A01` | Private internal API: loopback port `0`, fresh 256-bit per-launch bearer through private stdin, exact host/version validation, no cookies/CORS/browser origins, and packaged docs disabled. |
-| `TM-A02` | Sidecar lifecycle: signed manifest-verified bundled executable, minimal environment, protocol/build handshake, one server worker, bounded restart, clean process-tree shutdown, and privacy-minimal stderr. |
+| `TM-A02` | Sidecar lifecycle: embedded-digest-bound exact payload-manifest verification before token creation and spawn, minimal environment, protocol/build handshake, one server worker, bounded restart, verified full-process-tree shutdown, current-resource drain, and privacy-minimal stderr. The macOS CI verification overlay excludes only the manifest-bound sidecar payload from Electron's second signing pass so signing cannot mutate those bytes after manifest creation; PyInstaller's nested signatures remain and the outer ad hoc application signature seals the resource tree. Manifest binding is not publisher signing; Issue #132 owns signing and notarization. |
 | `TM-A03` | Request integrity: authenticate every route before body parsing, compare credentials in constant time, reject proxy/origin/cookie headers and redirects, disable access logs, and require token-derived readiness proof. |
 | `TM-S01` | Secret boundary: Python `SecretStore` and the OS keyring are the only authority; renderer may set, delete, or check presence but can never read a value. |
 | `TM-F01` | Opaque file grants: native dialogs create high-entropy, window/operation-scoped, expiring, revocable grant IDs; renderer never supplies or receives unrestricted paths. |
@@ -238,7 +241,7 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-D01` | Availability: bounded request/event/file sizes, queues, workers, memory/time/cost/token limits, cancellation, and deterministic overload errors. Public file boundaries use the typed limits and race checks in [bounded file ingress](FILE_INGRESS.md). |
 | `TM-P01` | Plugin isolation: signed declarative manifests/UI, deny-by-default WASI host capabilities, and no renderer/main/native/Python plugin code. |
 | `TM-P02` | Plugin provenance: signatures cover the canonical package tree; publisher trust/revocation, safe extraction, compatibility, permission-diff approval, and restricted-host identity are verified before activation. |
-| `TM-U01` | Supply chain and updates: reviewed lockfiles, purpose-scoped tool environments, SBOM/provenance, disclosed binary-signing mode, sidecar manifests, verified update metadata, ASAR integrity where supported, and tested rollback. Project-produced 0.x release binaries and annotated tags must be unsigned; signed/notarized production packages and signed annotated tags become mandatory at v1.0.0. |
+| `TM-U01` | Supply chain and updates: reviewed lockfiles, purpose-scoped tool environments, SBOM/provenance, disclosed binary-signing mode, embedded-digest sidecar payload manifests, verified update metadata, ASAR integrity where supported, and tested rollback. Sidecar manifest binding detects substitution relative to the built Electron main but is neither publisher identity nor whole-application protection. Project-produced 0.x release binaries and annotated tags must be unsigned; Issue #132 owns signed/notarized production packages and signed annotated tags, which become mandatory at v1.0.0. |
 | `TM-U02` | Update freshness: signed expiring metadata binds platform, application/sidecar versions, hashes, sizes, key identity, and monotonic release state; downgrade and freeze attempts fail closed. |
 | `TM-U03` | Repository executable bootstrap: one reviewed schema-v1 policy binds the exact `uv` version, supported platform/architecture archive sizes and executable hashes, GitHub release source and signer provenance, verified GitHub CLI bootstrap, pinned setup action, and locked Python verifiers. Unknown or mismatched input fails before execution; downloads and attestation verification are time-bounded, archives extract safely, a fresh executable's identity is checked before atomic cache publication, cached binaries are re-hashed, and installation and receipt writes remain anchored to held parent handles so symlink, reparse-point, and ancestor-swap races fail closed. Sanitized receipts gate release evidence, and a post-preflight setup or installed-binary failure atomically replaces the canonical success status with a stable failure category. Hosted callers grant least-privilege attestation access only to the attestation subprocess, the repository Actions allowlist admits only the reviewed setup-action commit, and workflow auditing covers both workflow and local-action manifests. |
 | `TM-E01` | Event integrity: bounded sequenced streams, acknowledgement/backpressure, gap handling, terminal-state idempotency, startup reconciliation, and no automatic replay of side-effecting work after output begins. |
@@ -299,10 +302,11 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 |---|---|---|
 | `TM-U01`, `TM-U03` | Exact-commit upstream Ruff and uv hooks match the locked tool versions; local system gitleaks and the canonical pre-push gates remain. The locked dependency auditor exports every extra and group, proves normalized lock/export parity against a closed-schema allowlist, and fails before pip-audit on omissions or unknown exclusions. All tracked Markdown receives deterministic GFM structural validation, and editor settings keep strict mypy authoritative while ty remains advisory. | These are repository-tooling controls only. They add no application runtime dependency, provider import, network path, credential exposure, genealogy data flow, or CLI/API/storage/FastAPI/Electron boundary. Ruff hooks cannot apply fixes, the dependency audit does not replace Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL, and the `provider=none`, RootsMagic, GEDCOM, and release fail-closed properties remain unchanged. |
 
-### Issue #11 source-level evidence
+### Issue #11 and Issue #102 source-level evidence
 
 The isolated 0.5.0 foundation implements and tests the source-level subset of
-`TM-A01`, `TM-A03`, `TM-D01`, `TM-I01`, and `TM-O02` owned by Issue #11:
+`TM-A01`, `TM-A02`, `TM-A03`, `TM-D01`, `TM-I01`, `TM-O02`, and `TM-U01`
+owned by Issues #11 and #102:
 
 - Uvicorn is configured for IPv4 loopback port `0`, with access logging, proxy
   headers, server headers, and date headers disabled.
@@ -316,13 +320,30 @@ The isolated 0.5.0 foundation implements and tests the source-level subset of
   semantics, no CORS or cookies, no runtime docs/schema route, deterministic
   OpenAPI generation, and network-free `provider=none` discovery have focused
   negative tests.
+- Electron main verifies the embedded manifest digest, exact target/build, and
+  complete regular-file/symlink inventory before creating the launch token or
+  spawning. Integrity failures expose only a generic diagnostic and do not
+  consume the crash-restart budget; after an operator restores the exact payload,
+  recovery uses the separately bounded manual retry.
+- POSIX launch isolates a process group and verifies bounded full-group
+  `SIGTERM`/`SIGKILL` cleanup. On Windows, the sidecar enters a kill-on-close Job
+  Object and Electron main requests full-tree termination. The native Job Object
+  behavior is proved only by the hosted exact-head Windows test; other rows
+  record the intentional no-op/skip rather than emulating that proof.
+- The current shutdown path drains the Uvicorn listener/server, stdio, complete
+  sidecar process tree, and temporary launch directory. Future jobs, provider
+  streams, and database sessions must register their own drains before their
+  routes ship.
 
 Private-stdin bootstrap, Electron supervision, token-derived readiness, bounded
-restart/shutdown behavior, and native packaged-resource assertions have focused
-tests. Broader connect-first/replay/timing evidence, signed-package and
-process-tree assurance, final platform execution, and every domain route are
-still pending. Because that release evidence is incomplete, the residual-risk
-ledger below is not reduced by this implementation alone.
+restart/shutdown behavior, pre-spawn integrity, and native packaged-resource
+assertions have focused tests. Verification and spawn remain separate
+filesystem operations, leaving a narrow local time-of-check/time-of-use
+replacement residual. Broader connect-first/replay/timing evidence, hosted
+exact-head platform completion, Issue #132 publisher-signing assurance, and
+every domain route are still pending. Because that release evidence is
+incomplete, the residual-risk ledger below is not reduced by this implementation
+alone.
 
 ## STRIDE boundary ledger
 
@@ -357,7 +378,7 @@ not considered effective until its named test and packaged evidence pass.
 | `STR-L-D` | Denial of service: token, retry, timeout, queue, stream, or cost exhaustion degrades the app. | `TM-D01`, `TM-E01` | #104, #110, #111 / G2 | Negative: token/cost/time/retry/event bounds, stalled provider, stalled renderer, and cancellation return deterministic terminal errors. |
 | `STR-L-E` | Elevation: model output gains tool, filesystem, SQL, Python, shell, HTML, or plugin authority. | `TM-L02`, `TM-P01`, `TM-I01` | #110, #112, #125 / G2 | Negative: generated commands, tool calls, SQL, code fences, HTML, URIs, and plugin-like payloads remain display-only data. |
 | `STR-U-S` | Spoofing: a plugin publisher, restricted host, package signer, update channel, or release identity is impersonated. | `TM-P02`, `TM-U01`, `TM-U02` | #16, #125, #132 / G3-G4 | Negative: unknown/revoked key, wrong publisher/host/platform/version, and mismatched certificate/signature are rejected. |
-| `STR-U-T` | Tampering: package tree, manifest, ASAR, sidecar, update metadata, or release artifact is modified. | `TM-P02`, `TM-U01`, `TM-U02` | #16, #102, #132 / G3-G4 | Negative: unexpected file, tree/hash/size mismatch, post-sign mutation, expired metadata, and wrong sidecar fail offline verification. |
+| `STR-U-T` | Tampering: package tree, manifest, ASAR, sidecar, update metadata, or release artifact is modified, including replacement during the verify-to-spawn interval. | `TM-P02`, `TM-U01`, `TM-U02` | #16, #102, #132 / G3-G4 | Negative: unexpected file, tree/hash/size mismatch, verify-to-spawn replacement, post-sign mutation, expired metadata, and wrong sidecar fail offline verification. |
 | `STR-U-R` | Repudiation: install, permission approval, enable, update, rollback, revoke, disable, or removal lacks evidence. | `TM-P02`, `TM-U02`, `TM-O01` | #16, #126, #132 / G3-G4 | Negative: missing signer/version/permission diff/decision/release state prevents activation or an unverifiable success. |
 | `STR-U-I` | Information disclosure: a plugin or updater receives undeclared data, secrets, paths, environment, network, or host resources. | `TM-P01`, `TM-S01`, `TM-O02` | #16, #125, #131 / G3 | Negative: raw-secret, filesystem, environment, socket, clock, process, database, and provider access are absent unless a narrow declared host call allows it. |
 | `STR-U-D` | Denial of service: archive bombs, plugin loops/event floods, updater failures, or rollback loops disable the app. | `TM-D01`, `TM-P02`, `TM-U02` | #16, #125, #132 / G3-G4 | Negative: count/size/depth/ratio, CPU/memory/event quota, interrupted update, disk-full, and repeated rollback preserve the prior version. |
@@ -400,7 +421,7 @@ or release evidence, never private payloads.
 | ID | Abuse case | Inherent risk | Controls, owner, gate, and planned negative test | Evidence-backed residual risk |
 |---|---|---|---|---|
 | `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy. The risk rating is not reduced while #101 sender/race coverage and the #131 adversarial suite remain pending. |
-| `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, and process-tree cleanup. | Not reduced: private bootstrap and bounded supervision are implemented, but replay/timing, process-tree, signed-package, and final platform evidence remain pending. |
+| `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, pre-spawn payload integrity, verify-to-spawn replacement, and full-process-tree cleanup. | Not reduced: private bootstrap, manifest-bound payload verification, bounded supervision, current-resource drain, and full-tree cleanup are implemented, but the TOCTOU interval, replay/timing, exact-head hosted Windows and final platform evidence, and Issue #132 publisher signing remain pending. |
 | `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Not reduced: implementation and packaged evidence pending. |
 | `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Not reduced: worker and packaged evidence pending. |
 | `AB-05` | Model Markdown uses HTML, SVG, handlers, schemes, images, links, or copied content to execute or exfiltrate. | High / Critical | `TM-R02`, `TM-L02`; #112, #131; G2. Negative: AST allowlist tests for script, HTML, SVG, URI, image, copy, external-link, and CSP cases. | Not reduced: renderer and packaged XSS evidence pending. |

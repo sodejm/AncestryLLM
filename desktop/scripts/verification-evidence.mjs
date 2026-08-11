@@ -223,7 +223,7 @@ const FAULT_SCENARIOS = Object.freeze({
     artifact: 'withholdEvidence',
     observations: Object.freeze({
       failure: 'startup_failed',
-      automaticRestartsRemaining: 0,
+      automaticRestartsRemaining: 2,
       manualRetriesRemainingBefore: 1,
       recoveredState: 'ready',
       cleanExit: true,
@@ -241,14 +241,14 @@ const FAULT_SCENARIOS = Object.freeze({
       cleanExit: true,
     }),
   }),
-  packagedSidecarVersionMismatchPassed: Object.freeze({
-    name: 'sidecar-version-mismatch',
-    artifact: 'mismatchEvidence',
+  packagedSidecarIntegritySubstitutionPassed: Object.freeze({
+    name: 'sidecar-integrity-substitution',
+    artifact: 'integrityEvidence',
     observations: Object.freeze({
-      failure: 'incompatible_build',
+      failure: 'startup_failed',
       automaticRestartsRemaining: 2,
       manualRetriesRemainingBefore: 1,
-      manualRetryFailure: 'incompatible_build',
+      manualRetryFailure: 'startup_failed',
       manualRetriesRemainingAfter: 0,
       verificationProcessTerminated: true,
     }),
@@ -313,8 +313,8 @@ export function createTargetEvidence(input) {
     return [scenario.artifact, artifact]
   }))
   validateDigest(
-    derived.receipts.packagedSidecarVersionMismatchPassed.artifacts?.wrongBuildSidecar,
-    'sidecar-version-mismatch receipt artifact wrongBuildSidecar',
+    derived.receipts.packagedSidecarIntegritySubstitutionPassed.artifacts?.substitutedSidecar,
+    'sidecar-integrity-substitution receipt artifact substitutedSidecar',
   )
   assertArtifactBound(derived.receipts.packageRuntimePassed, 'metrics', metricsArtifact, 'packaged runtime metrics')
   assertArtifactBound(derived.receipts.fusesInspectedPassed, 'fuseInspection', fuseInspectionArtifact, 'fuse inspection')
@@ -450,8 +450,8 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
     )
   }
   validateDigest(
-    receipts.packagedSidecarVersionMismatchPassed.artifacts?.wrongBuildSidecar,
-    `${value.runner} sidecar-version-mismatch receipt artifact wrongBuildSidecar`,
+    receipts.packagedSidecarIntegritySubstitutionPassed.artifacts?.substitutedSidecar,
+    `${value.runner} sidecar-integrity-substitution receipt artifact substitutedSidecar`,
   )
 
   const metricsFile = findArtifactFile(files, value.artifacts.metrics, `${value.runner} metrics artifact`)
@@ -565,7 +565,7 @@ export async function runCli([command, ...args]) {
   const common = new Set(['git-head', 'output'])
   let allowed
   if (command === 'target') {
-    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'mismatch-evidence', 'receipts'])
+    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'withhold-evidence', 'restart-evidence', 'integrity-evidence', 'receipts'])
   } else if (command === 'security') {
     allowed = new Set([...common, 'sbom', 'receipts'])
   } else if (command === 'aggregate') {
@@ -584,7 +584,7 @@ export async function runCli([command, ...args]) {
     const fuseInspectionBytes = await readFile(required(values, 'fuse-inspection'))
     const withholdEvidenceBytes = await readFile(required(values, 'withhold-evidence'))
     const restartEvidenceBytes = await readFile(required(values, 'restart-evidence'))
-    const mismatchEvidenceBytes = await readFile(required(values, 'mismatch-evidence'))
+    const integrityEvidenceBytes = await readFile(required(values, 'integrity-evidence'))
     evidence = createTargetEvidence({
       gitHead: requestedHead,
       runner: required(values, 'runner'),
@@ -602,8 +602,8 @@ export async function runCli([command, ...args]) {
       withholdEvidenceBytes,
       restartEvidence: JSON.parse(restartEvidenceBytes.toString('utf8')),
       restartEvidenceBytes,
-      mismatchEvidence: JSON.parse(mismatchEvidenceBytes.toString('utf8')),
-      mismatchEvidenceBytes,
+      integrityEvidence: JSON.parse(integrityEvidenceBytes.toString('utf8')),
+      integrityEvidenceBytes,
       receiptRecords: await loadVerificationReceipts(required(values, 'receipts'), requestedHead),
     })
   } else if (command === 'security') {

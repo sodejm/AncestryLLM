@@ -11,6 +11,7 @@ import {
   type WebContents,
 } from 'electron'
 import type { AncestryBridge } from '../shared-contract/desktop'
+import { completeAppShutdown } from './app-shutdown'
 import { registerDesktopIpcHandlers } from './ipc-handlers'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
@@ -144,10 +145,14 @@ if (primaryInstance) {
     if (!shutdownPromise && sidecarSupervisor) {
       const supervisor = sidecarSupervisor
       sidecarSupervisor = undefined
-      shutdownPromise = supervisor.stop().finally(() => {
-        shutdownAuthorized = true
-        app.quit()
-      })
+      shutdownPromise = completeAppShutdown(
+        () => supervisor.stop(),
+        () => console.error('Sidecar process-tree shutdown could not be verified.'),
+        () => {
+          shutdownAuthorized = true
+          app.quit()
+        },
+      )
     }
   })
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

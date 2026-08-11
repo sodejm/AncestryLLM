@@ -91,7 +91,9 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     deadline_helper = PACKAGED_SPEC.parent / "packaged-deadline.ts"
     deadline_source = deadline_helper.read_text(encoding="utf-8")
 
-    assert "const mismatchDiagnosticsPath = process.env.ANCESTRYLLM_MISMATCH_DIAGNOSTICS" in source
+    assert (
+        "const integrityDiagnosticsPath = process.env.ANCESTRYLLM_INTEGRITY_DIAGNOSTICS" in source
+    )
     assert "import { withinDeadline } from './packaged-deadline'" in source
     assert "export async function withinDeadline<T>" in deadline_source
     assert "Timed out while ${operation}" in deadline_source
@@ -109,7 +111,7 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
         in source
     )
     assert "return withinDeadline('reading packaged startup diagnostics'" in source
-    assert "async function writeMismatchDiagnostics" in source
+    assert "async function writeIntegrityDiagnostics" in source
     assert "let cleanupFailure: unknown" in source
     assert "let primaryFailurePhase: string | null = null" in source
     assert "primaryFailurePhase = phase" in source
@@ -117,7 +119,7 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "cleanupFailurePhase = phase" in source
     assert "phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase" in source
     assert "status: failure || cleanupFailure ? 'failed' : 'passed'" in source
-    assert "await writeMismatchDiagnostics" in source
+    assert "await writeIntegrityDiagnostics" in source
 
 
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:

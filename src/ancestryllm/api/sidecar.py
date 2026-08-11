@@ -8,9 +8,11 @@ environment, and the public readiness frame deliberately contains no secret.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import socket
 import sys
+from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
@@ -23,7 +25,7 @@ from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from fastapi import FastAPI
 
@@ -32,6 +34,10 @@ if TYPE_CHECKING:
 SIDECAR_BUILD = "0.5.0"
 MAX_LAUNCH_FRAME_BYTES = 4096
 STARTUP_TIMEOUT_SECONDS = 10.0
+WINDOWS_KILL_ON_JOB_CLOSE = 0x00002000
+WINDOWS_EXTENDED_LIMIT_INFORMATION = 9
+
+_process_tree_guard: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +71,104 @@ class _EmptyRegistry:
 
     def descriptors(self) -> Sequence[ModuleDescriptor]:
         return ()
+
+
+def _create_native_windows_process_tree_guard() -> object:
+    """Assign this process to a kill-on-close Windows Job Object.
+
+    The non-inheritable handle remains owned by this process. Windows closes it
+    on every process exit path, including a crash, and then terminates every
+    descendant that inherited membership in the job.
+    """
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = (
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        )
+
+    class _BasicLimitInformation(ctypes.Structure):
+        _fields_ = (
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        )
+
+    class _ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = (
+            ("BasicLimitInformation", _BasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    create_job = kernel32.CreateJobObjectW
+    create_job.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    create_job.restype = wintypes.HANDLE
+    set_job_information = kernel32.SetInformationJobObject
+    set_job_information.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    )
+    set_job_information.restype = wintypes.BOOL
+    assign_process = kernel32.AssignProcessToJobObject
+    assign_process.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    assign_process.restype = wintypes.BOOL
+    get_current_process = kernel32.GetCurrentProcess
+    get_current_process.argtypes = ()
+    get_current_process.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_job(None, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+    try:
+        limits = _ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = WINDOWS_KILL_ON_JOB_CLOSE
+        if not set_job_information(
+            handle,
+            WINDOWS_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+        if not assign_process(handle, get_current_process()):
+            raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+        return handle
+    except BaseException:
+        close_handle(handle)
+        raise
+
+
+def acquire_windows_process_tree_guard(
+    platform: str = sys.platform,
+    create_native: Callable[[], object] = _create_native_windows_process_tree_guard,
+) -> object | None:
+    """Create the Windows crash-safe tree guard, or no-op elsewhere."""
+
+    if platform != "win32":
+        return None
+    try:
+        return create_native()
+    except Exception as error:
+        raise RuntimeError("Windows process-tree guard unavailable") from error
 
 
 def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
@@ -160,7 +264,9 @@ def _fail() -> NoReturn:
 def main() -> int:
     """Start the packaged sidecar from its private standard-input frame."""
 
+    global _process_tree_guard
     try:
+        _process_tree_guard = acquire_windows_process_tree_guard()
         frame = parse_launch_frame(sys.stdin.buffer)
         return asyncio.run(_serve(frame))
     except (ValueError, OSError, RuntimeError, TimeoutError):
@@ -175,6 +281,7 @@ __all__ = [
     "MAX_LAUNCH_FRAME_BYTES",
     "SIDECAR_BUILD",
     "LaunchFrame",
+    "acquire_windows_process_tree_guard",
     "create_listener",
     "create_sidecar_app",
     "main",
