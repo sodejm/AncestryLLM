@@ -14,6 +14,7 @@ import {
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
+import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { withinDeadline } from './packaged-deadline'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
@@ -1054,6 +1055,11 @@ test.describe('unpublished unpacked native package', () => {
     if (!fileGrantOpenPath || !fileGrantSavePath || !fileGrantEvidencePath) {
       throw new Error('Packaged file-grant verification inputs and evidence output are required')
     }
+    const normalizedFileGrantOpenPath = normalizeVerificationSelection(fileGrantOpenPath)
+    const normalizedFileGrantSavePath = normalizeVerificationSelection(fileGrantSavePath)
+    if (normalizedFileGrantOpenPath === null || normalizedFileGrantSavePath === null) {
+      throw new Error('Packaged file-grant verification paths are invalid')
+    }
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-file-grants-'))
     let running: LaunchResult | undefined
     try {
@@ -1074,8 +1080,8 @@ test.describe('unpublished unpacked native package', () => {
         return { open, save, openRevocation, saveRevocation }
       })
 
-      expect(results.open.ok).toBe(true)
-      expect(results.save.ok).toBe(true)
+      expect(results.open.ok ? 'ok' : results.open.error.code).toBe('ok')
+      expect(results.save.ok ? 'ok' : results.save.error.code).toBe('ok')
       if (!results.open.ok || results.open.data === null
         || !results.save.ok || results.save.data === null) {
         throw new Error('Packaged file-grant mediation did not return both grants.')
@@ -1119,8 +1125,15 @@ test.describe('unpublished unpacked native package', () => {
       expect(results.openRevocation).toMatchObject({ ok: true, data: { revoked: true } })
       expect(results.saveRevocation).toMatchObject({ ok: true, data: { revoked: true } })
       const exposedStrings = stringsIn(results)
-      expect(exposedStrings).not.toContain(fileGrantOpenPath)
-      expect(exposedStrings).not.toContain(fileGrantSavePath)
+      const selectedPathRepresentations = new Set([
+        fileGrantOpenPath,
+        normalizedFileGrantOpenPath,
+        fileGrantSavePath,
+        normalizedFileGrantSavePath,
+      ])
+      for (const selectedPath of selectedPathRepresentations) {
+        expect(exposedStrings).not.toContain(selectedPath)
+      }
       await closePackaged(running)
       running = undefined
       await writeFileGrantEvidence(fileGrantEvidencePath)
