@@ -19,6 +19,7 @@ jobs:
   validate:
     name: prove exact-main Project gate access
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read

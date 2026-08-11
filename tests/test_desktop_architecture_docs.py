@@ -190,6 +190,7 @@ def test_every_stride_boundary_threat_has_control_owner_gate_and_test() -> None:
             "STR-X-I",
             "STR-B-S",
             "STR-B-T",
+            "STR-B-D",
         }
     )
 
