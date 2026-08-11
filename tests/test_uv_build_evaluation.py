@@ -219,6 +219,38 @@ def test_semantic_metadata_ignores_header_order_but_keeps_values_exact() -> None
     assert evaluation.semantic_message(first) != evaluation.semantic_message(changed)
 
 
+def test_semantic_metadata_report_names_the_exact_changed_field() -> None:
+    baseline = b"Metadata-Version: 2.4\nName: ancestryllm\nLicense-File: LICENSE\n\nbody\n"
+    candidate = b"Name: ancestryllm\nMetadata-Version: 2.4\nLicense-File: COPYING\n\nbody\n"
+
+    differences = evaluation.compare_file_maps(
+        evaluation._semantic_message_files(baseline),
+        evaluation._semantic_message_files(candidate),
+    )
+
+    assert differences == {
+        "added": [],
+        "changed": ["header:license-file[0]"],
+        "removed": [],
+    }
+
+
+def test_project_metadata_report_names_dependency_set_drift() -> None:
+    baseline = b"Name: ancestryllm\nVersion: 1.0\nRequires-Python: >=3.12\nRequires-Dist: alpha\n\n"
+    candidate = b"Name: ancestryllm\nVersion: 1.0\nRequires-Python: >=3.12\nRequires-Dist: beta\n\n"
+
+    differences = evaluation.compare_file_maps(
+        evaluation._metadata_contract_files(baseline),
+        evaluation._metadata_contract_files(candidate),
+    )
+
+    assert differences == {
+        "added": ["dependency:beta"],
+        "changed": [],
+        "removed": ["dependency:alpha"],
+    }
+
+
 def test_record_validation_checks_every_hash_and_size() -> None:
     record_name = "ancestryllm-0.5.0.dist-info/RECORD"
     files = {
@@ -304,6 +336,42 @@ def test_report_schema_documents_the_only_output_normalizations() -> None:
             "scope": ["sdist", "wheel"],
         },
     ]
+
+
+def test_checked_evaluation_evidence_records_fail_closed_decision() -> None:
+    path = ROOT / "docs/release-evidence/uv-build-evaluation-v1.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+
+    evaluation.validate_report(report)
+    assert report["status"] == "incompatible"
+    assert report["tools"] == {
+        "build_frontend": "uv 0.12.1",
+        "python": "3.14.6",
+        "setuptools": {
+            "requirement": "setuptools>=83",
+            "version": "83.0.0",
+        },
+        "uv_build": {
+            "requirement": "uv_build>=0.12.0,<0.13",
+            "version": "0.12.3",
+        },
+    }
+    assert report["failure_codes"] == [
+        "UVBEVAL_PROJECT_FILE_DRIFT",
+        "UVBEVAL_PROJECT_METADATA_DRIFT",
+        "UVBEVAL_RECORD_DRIFT",
+        "UVBEVAL_SDIST_PAYLOAD_DRIFT",
+        "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
+        "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
+        "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
+        "UVBEVAL_WHEEL_METADATA_DRIFT",
+    ]
+    assert report["comparisons"]["uv_build_reproducibility"]["passed"] is True
+    assert report["comparisons"]["uv_build_install_import_entrypoint"]["passed"] is True
+    assert report["comparisons"]["setuptools_install_import_entrypoint"]["passed"] is True
+    commit = report["source"]["commit"]
+    assert len(commit) == 40
+    int(commit, 16)
 
 
 def test_install_smoke_uses_verified_uv_and_the_locked_runtime(

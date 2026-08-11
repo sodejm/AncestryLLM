@@ -1,0 +1,304 @@
+{
+  "accepted_input_differences": [
+    {
+      "code": "UVBEVAL_CANDIDATE_BUILD_CONFIGURATION",
+      "paths": [
+        "pyproject.toml"
+      ]
+    }
+  ],
+  "accepted_output_normalizations": [
+    {
+      "code": "UVBEVAL_ARCHIVE_MEMBER_ORDER",
+      "scope": [
+        "sdist",
+        "wheel"
+      ]
+    },
+    {
+      "code": "UVBEVAL_ARCHIVE_METADATA_TIMESTAMPS",
+      "scope": [
+        "sdist",
+        "wheel"
+      ]
+    }
+  ],
+  "artifacts": {
+    "setuptools": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "0aa651a4061751c257b1e3ce4c936fcf57014328e17ea5aa925b496744c63f65"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1"
+      }
+    },
+    "setuptools_from_sdist": {
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "8a3db0a42ab6a51474a19ffae9afc6f448644270cdab46eec858544818b5b6b1"
+      }
+    },
+    "uv_build_first": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    },
+    "uv_build_from_sdist": {
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    },
+    "uv_build_second": {
+      "sdist": {
+        "filename": "ancestryllm-0.5.0.tar.gz",
+        "sha256": "2564530dd4006532076a2a9e996662a2ed57cf5641c4c6b522bade1dc214e7c2"
+      },
+      "wheel": {
+        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
+        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+      }
+    }
+  },
+  "comparisons": {
+    "entry_points": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_ENTRYPOINT_DRIFT",
+      "passed": true
+    },
+    "migration_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_MIGRATION_PATH_DRIFT",
+      "passed": true
+    },
+    "module_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_MODULE_PATH_DRIFT",
+      "passed": true
+    },
+    "package_data_paths": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_PACKAGE_DATA_DRIFT",
+      "passed": true
+    },
+    "project_files": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": [
+          "LICENSE"
+        ]
+      },
+      "failure_code": "UVBEVAL_PROJECT_FILE_DRIFT",
+      "passed": false
+    },
+    "project_metadata": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "semantic"
+        ],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_PROJECT_METADATA_DRIFT",
+      "passed": false
+    },
+    "record": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "ancestryllm-0.5.0.dist-info/METADATA",
+          "ancestryllm-0.5.0.dist-info/WHEEL",
+          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+        ],
+        "removed": [
+          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.5.0.dist-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_RECORD_DRIFT",
+      "passed": false
+    },
+    "sdist_payload_except_controlled_build_configuration": {
+      "differences": {
+        "added": [
+          "pyproject.toml.orig"
+        ],
+        "changed": [
+          "PKG-INFO"
+        ],
+        "removed": [
+          "LICENSE",
+          "setup.cfg",
+          "src/ancestryllm.egg-info/PKG-INFO",
+          "src/ancestryllm.egg-info/SOURCES.txt",
+          "src/ancestryllm.egg-info/dependency_links.txt",
+          "src/ancestryllm.egg-info/entry_points.txt",
+          "src/ancestryllm.egg-info/requires.txt",
+          "src/ancestryllm.egg-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_SDIST_PAYLOAD_DRIFT",
+      "passed": false
+    },
+    "setuptools_allowlists": {
+      "differences": {
+        "blocked": [],
+        "missing": [],
+        "unexpected": [],
+        "wheel_blocked": [],
+        "wheel_unexpected": []
+      },
+      "failure_code": "UVBEVAL_SETUPTOOLS_ALLOWLIST_VIOLATION",
+      "passed": true
+    },
+    "setuptools_install_import_entrypoint": {
+      "differences": [],
+      "failure_code": "UVBEVAL_SETUPTOOLS_INSTALL_SMOKE_FAILED",
+      "passed": true
+    },
+    "setuptools_sdist_reconstruction": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_SETUPTOOLS_RECONSTRUCTION_DRIFT",
+      "passed": true
+    },
+    "uv_build_allowlists": {
+      "differences": {
+        "blocked": [],
+        "missing": [
+          "LICENSE"
+        ],
+        "unexpected": [
+          "pyproject.toml.orig"
+        ],
+        "wheel_blocked": [],
+        "wheel_unexpected": []
+      },
+      "failure_code": "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
+      "passed": false
+    },
+    "uv_build_install_import_entrypoint": {
+      "differences": [],
+      "failure_code": "UVBEVAL_UV_BUILD_INSTALL_SMOKE_FAILED",
+      "passed": true
+    },
+    "uv_build_reproducibility": {
+      "differences": [],
+      "failure_code": "UVBEVAL_CANDIDATE_NOT_REPRODUCIBLE",
+      "passed": true
+    },
+    "uv_build_sdist_reconstruction": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_UV_BUILD_RECONSTRUCTION_DRIFT",
+      "passed": true
+    },
+    "wheel_archive_contents": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "ancestryllm-0.5.0.dist-info/METADATA",
+          "ancestryllm-0.5.0.dist-info/RECORD",
+          "ancestryllm-0.5.0.dist-info/WHEEL",
+          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+        ],
+        "removed": [
+          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.5.0.dist-info/top_level.txt"
+        ]
+      },
+      "failure_code": "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
+      "passed": false
+    },
+    "wheel_descriptor": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "semantic"
+        ],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
+      "passed": false
+    },
+    "wheel_metadata": {
+      "differences": {
+        "added": [],
+        "changed": [
+          "semantic"
+        ],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_WHEEL_METADATA_DRIFT",
+      "passed": false
+    },
+    "wheel_package_payload": {
+      "differences": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "failure_code": "UVBEVAL_WHEEL_PAYLOAD_DRIFT",
+      "passed": true
+    }
+  },
+  "evaluation": "setuptools-vs-uv_build",
+  "failure_codes": [
+    "UVBEVAL_PROJECT_FILE_DRIFT",
+    "UVBEVAL_PROJECT_METADATA_DRIFT",
+    "UVBEVAL_RECORD_DRIFT",
+    "UVBEVAL_SDIST_PAYLOAD_DRIFT",
+    "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
+    "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
+    "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
+    "UVBEVAL_WHEEL_METADATA_DRIFT"
+  ],
+  "schema_version": 1,
+  "source": {
+    "commit": "e5f2a1da02b13cd4b8a8fccb365245c95fb92b97",
+    "source_date_epoch": 1786424517
+  },
+  "status": "incompatible",
+  "tools": {
+    "build_frontend": "uv 0.12.1",
+    "python": "3.14.6",
+    "setuptools": {
+      "requirement": "setuptools>=83",
+      "version": "83.0.0"
+    },
+    "uv_build": {
+      "requirement": "uv_build>=0.12.0,<0.13",
+      "version": "0.12.3"
+    }
+  }
+}

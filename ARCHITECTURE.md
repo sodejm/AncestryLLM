@@ -953,6 +953,7 @@ The Make targets are the command contract:
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
 | `make sbom` | CycloneDX environment SBOM. |
 | `make package` | Locked build-group construction and artifact validation. |
+| `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
 
 CI may synchronize a purpose-specific PEP 735 dependency group before running
@@ -983,6 +984,15 @@ optional provider SDK resolves five import diagnostics but leaves 53; neither
 profile passes. The conditional 0.7 cutover is a separate architecture decision
 and cannot proceed without full-tree parity and the existing supported Python
 range.
+
+Setuptools remains the production build backend. The locked uv_build 0.12
+candidate is confined to the maintainer-only `make evaluate-uv-build` harness,
+which compares clean-source wheel and sdist contents, semantic metadata,
+installation behavior, reconstruction, and reproducibility under one epoch.
+The 0.6 comparison is incompatible, so package and release paths retain the
+existing setuptools normalization and checks. This tooling-only evaluation
+does not change application packages, command registries, DTOs, providers,
+GEDCOM or RootsMagic handling, storage, FastAPI, or Electron boundaries.
 
 This environment ownership changes repository tooling only and adds no
 python-build-standalone executable trust chain. It does not add an application

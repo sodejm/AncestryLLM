@@ -47,3 +47,19 @@ GitHub CLI assets and hashes, source repository and commit/ref, signer workflow,
 OIDC issuer, SLSA predicate, UTC timestamp, and success status. The manifest
 records that identity and the receipt digest. Unknown fields, omitted fields,
 non-success receipts, local paths, or identity drift fail evidence generation.
+
+## Tooling evaluation records
+
+Checked tooling evaluations such as
+[`uv-build-evaluation-v1.json`](uv-build-evaluation-v1.json) are reproducible
+engineering decision records, not release-gate results. The uv_build report
+binds exact backend versions, source commit and epoch, artifact hashes,
+comparison results, accepted archive-only normalizations, stable failure codes,
+and a compatible or incompatible status. Its closed schema rejects unknown or
+missing fields and its sanitization contract rejects local paths.
+
+The report documents why the evaluated candidate may or may not proceed to a
+separate adoption change. It does not prove a later commit or release candidate,
+cannot replace exact-candidate readiness evidence, and cannot turn an
+incompatible comparison into an authorized release backend. See the human
+[uv_build evaluation](../UV_BUILD_EVALUATION.md) for the disposition.

@@ -28,6 +28,7 @@
 - [Dependency maintenance](DEPENDENCY_MAINTENANCE.md)
 - [ty advisory evaluation](TY_ADVISORY_EVALUATION.md)
 - [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md)
+- [uv_build evaluation](UV_BUILD_EVALUATION.md)
 - [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
 - [Command executor](COMMAND_EXECUTOR.md)
 - [Built-in module authoring](MODULE_AUTHORING.md)

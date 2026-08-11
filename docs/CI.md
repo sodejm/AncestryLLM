@@ -79,6 +79,15 @@ output through `RUFF_OUTPUT_FORMAT=github` and still invoke the canonical
 reviewed diagnostic batches, provider-import contract, and cold-start evidence
 are recorded in the [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md).
 
+Production package and release jobs continue to call `make package` with
+setuptools as the authoritative backend. `make evaluate-uv-build` is a
+maintainer-only, locked-`build`-group comparison: it builds the same clean
+commit with setuptools and `uv_build`, records schema-v1 artifact and semantic
+evidence, and exits nonzero when the candidate differs. It is deliberately not
+a CI or release gate because the 0.6 evaluation is incompatible; see the
+[uv_build evaluation](UV_BUILD_EVALUATION.md). A future adoption change must
+first satisfy that complete artifact contract in a separate 0.7 decision.
+
 ## Headless shell policy
 
 Every workflow that executes a command sets the workflow-level default shell to

@@ -445,8 +445,24 @@ def _single_suffix(files: dict[str, bytes], suffix: str) -> bytes:
     return files[names[0]]
 
 
-def _semantic_as_files(value: dict[str, Any]) -> dict[str, bytes]:
-    return {"semantic": json.dumps(value, sort_keys=True).encode()}
+def _semantic_message_files(data: bytes) -> dict[str, bytes]:
+    """Expose semantic message fields as reportable paths without values."""
+    message = semantic_message(data)
+    files = {"body": str(message["body"]).encode()}
+    occurrences: dict[str, int] = {}
+    for name, value in message["headers"]:
+        occurrence = occurrences.get(name, 0)
+        occurrences[name] = occurrence + 1
+        files[f"header:{name}[{occurrence}]"] = str(value).encode()
+    return files
+
+
+def _semantic_entry_point_files(data: bytes) -> dict[str, bytes]:
+    return {
+        f"section:{section}/entry:{name}": value.encode()
+        for section, entries in semantic_entry_points(data).items()
+        for name, value in entries.items()
+    }
 
 
 def _metadata_contract(data: bytes) -> dict[str, Any]:
@@ -458,6 +474,19 @@ def _metadata_contract(data: bytes) -> dict[str, Any]:
         "dependencies": sorted(str(value) for value in message.get_all("Requires-Dist", [])),
         "extras": sorted(str(value) for value in message.get_all("Provides-Extra", [])),
     }
+
+
+def _metadata_contract_files(data: bytes) -> dict[str, bytes]:
+    """Expose project metadata fields and set members as reportable paths."""
+    metadata = _metadata_contract(data)
+    files = {
+        "name": str(metadata["name"]).encode(),
+        "version": str(metadata["version"]).encode(),
+        "requires-python": str(metadata["requires_python"]).encode(),
+    }
+    files.update({f"dependency:{value}": b"" for value in metadata["dependencies"]})
+    files.update({f"extra:{value}": b"" for value in metadata["extras"]})
+    return files
 
 
 def _wheel_allowlist(files: dict[str, bytes], version: str) -> dict[str, list[str]]:
@@ -1056,33 +1085,29 @@ def evaluate(uv: Path) -> dict[str, Any]:
         _add_file_comparison(
             comparisons,
             "project_metadata",
-            _semantic_as_files(_metadata_contract(setuptools_metadata)),
-            _semantic_as_files(_metadata_contract(uv_build_metadata)),
+            _metadata_contract_files(setuptools_metadata),
+            _metadata_contract_files(uv_build_metadata),
             "UVBEVAL_PROJECT_METADATA_DRIFT",
         )
         _add_file_comparison(
             comparisons,
             "wheel_metadata",
-            _semantic_as_files(semantic_message(setuptools_metadata)),
-            _semantic_as_files(semantic_message(uv_build_metadata)),
+            _semantic_message_files(setuptools_metadata),
+            _semantic_message_files(uv_build_metadata),
             "UVBEVAL_WHEEL_METADATA_DRIFT",
         )
         _add_file_comparison(
             comparisons,
             "wheel_descriptor",
-            _semantic_as_files(semantic_message(_single_suffix(setuptools_wheel_files, "WHEEL"))),
-            _semantic_as_files(semantic_message(_single_suffix(uv_build_wheel_files, "WHEEL"))),
+            _semantic_message_files(_single_suffix(setuptools_wheel_files, "WHEEL")),
+            _semantic_message_files(_single_suffix(uv_build_wheel_files, "WHEEL")),
             "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
         )
         _add_file_comparison(
             comparisons,
             "entry_points",
-            _semantic_as_files(
-                semantic_entry_points(_single_suffix(setuptools_wheel_files, "entry_points.txt"))
-            ),
-            _semantic_as_files(
-                semantic_entry_points(_single_suffix(uv_build_wheel_files, "entry_points.txt"))
-            ),
+            _semantic_entry_point_files(_single_suffix(setuptools_wheel_files, "entry_points.txt")),
+            _semantic_entry_point_files(_single_suffix(uv_build_wheel_files, "entry_points.txt")),
             "UVBEVAL_ENTRYPOINT_DRIFT",
         )
         _add_file_comparison(
