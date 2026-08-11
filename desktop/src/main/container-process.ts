@@ -330,6 +330,8 @@ function mergeInventory(
     const labelsMatch = Object.entries(existing.labels).every(([name, value]) => (
       resource.labels[name] === value
     )) && Object.keys(existing.labels).length === Object.keys(resource.labels).length
+    // Preserve conflicting duplicates so the supervisor emits its stable
+    // RESOURCE_CONFLICT error instead of letting this adapter hide ambiguity.
     if (!labelsMatch) merged.push(resource)
   }
   return merged
