@@ -69,6 +69,40 @@ stderr, raw sidecar or bridge errors, or stack traces. See the
 [desktop ADR](ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
+## Unreleased opaque file-mediation foundation
+
+Issue #103 adds a security boundary for later genealogy workflows without
+expanding the supported 0.5.0 domain surface. The bridge gains only three
+strict, asynchronous methods:
+
+- `requestOpenFileGrant`
+- `requestSaveFileGrant`
+- `revokeFileGrant`
+
+The renderer requests an exact purpose and receives either a cancelled result
+or a path-free grant containing a random opaque identifier and safe display
+metadata: basename, kind, byte size, and replacement status. It cannot provide,
+receive, reconstruct, persist, or redeem a pathname, and it has no direct
+filesystem method. The reusable selected-file card does not initiate a domain
+operation.
+
+Electron main owns the native open/save dialogs and the grant-to-path map. It
+checks the selected object's regular-file and link state, purpose-specific
+extension and content signature, bounded size, canonical identity, and
+filesystem fingerprint. Grants are bound to the requesting renderer, exact
+purpose and access mode, current application session, and one redemption.
+Explicit revocation, renderer close or navigation, and application restart
+invalidate them. Existing-output replacement requires a native confirmation
+and identity revalidation; source/output aliases and concurrent output grants
+fail closed under main-owned locks.
+
+Only a trusted main-process adapter may redeem a grant through
+`resolveReadGrant` or `resolveWriteGrant`. A future genealogy integration must
+then pass the internal path to the shared Python file-ingress adapter, which
+reopens and revalidates the source under its own bounded policy before parsing
+or publication. Until that adapter ships, the grant broker provides no GEDCOM,
+RootsMagic, import, export, or report workflow.
+
 The separately accepted
 [deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md)
 defines future container and advanced remote targets. It does not expand the

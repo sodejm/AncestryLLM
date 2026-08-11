@@ -12,7 +12,10 @@ const bridgeMethods = [
   'getCapabilities',
   'getPreferences',
   'getStartupDiagnostics',
+  'requestOpenFileGrant',
+  'requestSaveFileGrant',
   'retrySidecar',
+  'revokeFileGrant',
   'updatePreferences',
 ]
 

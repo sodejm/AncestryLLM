@@ -142,7 +142,12 @@ Each native row then:
    pre-spawn integrity rejection against verification-only package copies;
 8. records native process-tree-guard evidence, including the Windows
    kill-on-close Job Object behavior on the exact-head Windows ARM64 row; and
-9. inspects the packaged Electron fuses and ASAR boundary.
+9. inspects the packaged Electron fuses and ASAR boundary; and
+10. builds a separate verification-only package and exercises opaque native
+    open/save file grants, path-free DTOs, explicit replacement confirmation,
+    and revocation without adding the fixture adapter to production builds.
+    Focused broker and dialog tests separately cover cancellation, replacement
+    races, sentinel preservation, alias rejection, and output locking.
 
 The packaged Playwright pass attaches through an ephemeral CDP endpoint bound
 to `127.0.0.1` solely so the harness can inspect and close the unpublished
@@ -236,15 +241,18 @@ Only declared generated-output paths may change. Evidence generation rejects a
 missing, duplicate, failed, wrong-head, legacy unbound, workspace-mutating, or
 digest-mismatched receipt.
 
-The three packaged-sidecar fault scenarios have independent receipt gates and
-write exact-schema observation documents. Target evidence binds each document
-by byte count and SHA-256 to its receipt; the integrity receipt additionally
-binds the substituted target-native executable. Aggregation revalidates those
-documents and bindings instead of accepting a workflow-provided success flag.
-The crash-loop scenario owns the graceful application-quit assertion and proves
-that the active real sidecar exits with it. The integrity-substitution scenario
-instead proves generic `startup_failed` rejection before any replacement
-process is spawned and consumes no automatic restart.
+The three packaged-sidecar fault scenarios and the separate packaged file-grant
+scenario have independent receipt gates and write exact-schema observation
+documents. Target evidence binds each document by byte count and SHA-256 to its
+receipt; the integrity receipt additionally binds the substituted target-native
+executable. Aggregation revalidates those documents and bindings instead of
+accepting a workflow-provided success flag. The crash-loop scenario owns the
+graceful application-quit assertion and proves that the active real sidecar
+exits with it. The integrity-substitution scenario instead proves generic
+`startup_failed` rejection before any replacement process is spawned and
+consumes no automatic restart. The file-grant scenario proves path-free public
+DTOs and the grant lifecycle against native open/save behavior in a package
+whose verification adapter is excluded from production output.
 
 Every native row also binds `sidecar-process-tree-guard.json` to the
 `sidecarProcessTreeGuardPassed` receipt. On the exact-head Windows ARM64 hosted

@@ -14,6 +14,9 @@ _PRIVACY = _ROOT / "docs" / "PRIVACY_AND_CONSENT.md"
 _RELEASING = _ROOT / "docs" / "RELEASING.md"
 _CONTRIBUTING = _ROOT / "CONTRIBUTING.md"
 _SIDEBAR = _ROOT / "docs" / "_Sidebar.md"
+_FILE_INGRESS = _ROOT / "docs" / "FILE_INGRESS.md"
+_DESKTOP_README = _ROOT / "desktop" / "README.md"
+_DESKTOP_SHELL = _ROOT / "docs" / "DESKTOP_SHELL.md"
 
 
 def _read(path: Path) -> str:
@@ -284,3 +287,41 @@ def test_desktop_policy_is_aligned_across_normative_guidance() -> None:
         assert "provider=none" in text
 
     assert "ADR-0025-electron-fastapi-desktop.md" in sidebar
+
+
+def test_issue_103_opaque_file_grant_boundary_is_documented() -> None:
+    architecture = _read(_ARCHITECTURE)
+    desktop_readme = _read(_DESKTOP_README)
+    desktop_shell = _read(_DESKTOP_SHELL)
+    file_ingress = _read(_FILE_INGRESS)
+    threat_model = _read(_THREAT_MODEL)
+    contributing = _read(_CONTRIBUTING)
+    documents = (
+        architecture,
+        desktop_readme,
+        desktop_shell,
+        file_ingress,
+        threat_model,
+        contributing,
+    )
+    combined = "\n".join(documents)
+
+    for interface in (
+        "requestOpenFileGrant",
+        "requestSaveFileGrant",
+        "revokeFileGrant",
+        "resolveReadGrant",
+        "resolveWriteGrant",
+    ):
+        assert f"`{interface}`" in combined
+
+    for text in documents:
+        assert "Issue #103" in text
+
+    for phrase in ("path-free", "single-use", "native", "revocation"):
+        assert phrase in combined
+
+    normalized_file_ingress = " ".join(file_ingress.casefold().split())
+    assert "renderer cannot invoke either resolver" in normalized_file_ingress
+    assert "raw host path" in normalized_file_ingress
+    assert "#114/#118/#131" in threat_model

@@ -1,8 +1,13 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import type { AncestryBridge, BridgeResult, CapabilityManifest } from '../shared-contract/desktop'
+import type { BridgeResult, CapabilityManifest, FileGrant, FileGrantId } from '../shared-contract/desktop'
 import { desktopChannels } from '../shared-contract/desktop'
-import { registerDesktopIpcHandlers } from './ipc-handlers'
+import { FileGrantBrokerError } from './file-grant-broker'
+import {
+  registerDesktopIpcHandlers,
+  type MainDesktopBridge,
+  type MainFileGrantBroker,
+} from './ipc-handlers'
 
 const result = <T>(data: T) => ({ ok: true as const, protocolVersion: '1' as const, data })
 const capabilities = result({
@@ -12,13 +17,40 @@ const capabilities = result({
   pagination: { default_limit: 1, maximum_limit: 1, maximum_cursor_characters: 32 },
 }) satisfies BridgeResult<CapabilityManifest>
 
-const bridge = (): AncestryBridge => ({
+const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
   getStartupDiagnostics: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 1 })),
   getCapabilities: vi.fn().mockResolvedValue(capabilities),
   retrySidecar: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 0 })),
   getPreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 })),
   updatePreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'dark', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 1 })),
+})
+
+const grantId = `grt_${'a'.repeat(64)}` as FileGrantId
+const grantedGedcom = Object.freeze({
+  grantId,
+  purpose: 'gedcom-read',
+  access: 'read',
+  scope: Object.freeze({
+    originatingWindow: 'requesting-window',
+    lifetime: 'app-session',
+    redemption: 'single-use',
+  }),
+  metadata: Object.freeze({
+    displayName: 'fictional.ged',
+    format: 'gedcom',
+    sizeBytes: 26,
+    validation: 'validated-input',
+  }),
+}) satisfies FileGrant
+
+const fileGrantBroker = (): MainFileGrantBroker => ({
+  requestOpenGrant: vi.fn().mockResolvedValue(null),
+  requestSaveGrant: vi.fn().mockResolvedValue(null),
+  revokeGrant: vi.fn().mockReturnValue(Object.freeze({ revoked: true })),
+  revokeOwner: vi.fn(),
+  revokeAll: vi.fn(),
+  dispose: vi.fn(),
 })
 
 class FakeWebContents extends EventEmitter {
@@ -62,11 +94,16 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function harness(control = bridge(), options: Readonly<{ operationTimeoutMs?: number }> = {}) {
+function harness(
+  control = bridge(),
+  options: Readonly<{ operationTimeoutMs?: number; fileDialogTimeoutMs?: number }> = {},
+  fileGrants = fileGrantBroker(),
+) {
   const handlers = new Map<string, Handler>()
   const controller = registerDesktopIpcHandlers(
     { handle: (channel, handler) => { handlers.set(channel, handler) } },
     control,
+    fileGrants,
     options,
   )
   const contents = new FakeWebContents()
@@ -75,28 +112,30 @@ function harness(control = bridge(), options: Readonly<{ operationTimeoutMs?: nu
     (url) => url === 'app://bundle/index.html',
   )
   const event = (sender = contents, senderFrame: unknown = sender.mainFrame) => ({ sender, senderFrame })
-  return { control, controller, contents, event, handlers, unsubscribe }
+  return { control, controller, contents, event, fileGrants, handlers, unsubscribe }
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the six declared static channels', () => {
+  it('registers exactly the nine declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
       bridge(),
+      fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(6)
+    expect(handlers.size).toBe(9)
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {
-    const { control, contents, event, handlers } = harness()
+    const { control, contents, event, fileGrants, handlers } = harness()
     const getCapabilities = handlers.get(desktopChannels.getCapabilities)
     const otherContents = new FakeWebContents(contents.id)
 
     await expect(getCapabilities?.(event(otherContents))).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED_SENDER' } })
     await expect(getCapabilities?.(event(contents, { url: contents.mainFrame.url }))).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED_SENDER' } })
     contents.startNavigation('https://attacker.invalid/')
+    expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
     await expect(getCapabilities?.(event())).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED_SENDER' } })
     contents.commitNavigation('https://attacker.invalid/')
     await expect(getCapabilities?.(event())).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED_SENDER' } })
@@ -108,9 +147,11 @@ describe('desktop IPC handlers', () => {
   })
 
   it('returns an idempotent unsubscribe that revokes the WebContents identity', async () => {
-    const { event, handlers, unsubscribe } = harness()
+    const { contents, event, fileGrants, handlers, unsubscribe } = harness()
     unsubscribe()
     expect(() => unsubscribe()).not.toThrow()
+    expect(fileGrants.revokeOwner).toHaveBeenCalledTimes(1)
+    expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({
       ok: false,
       error: { code: 'UNAUTHORIZED_SENDER' },
@@ -118,15 +159,17 @@ describe('desktop IPC handlers', () => {
   })
 
   it('does not let a stale authorization revoke a replacement for the same WebContents', async () => {
-    const { controller, contents, event, handlers, unsubscribe } = harness()
+    const { controller, contents, event, fileGrants, handlers, unsubscribe } = harness()
     const replacement = controller.authorizeWebContents(
       contents,
       (url) => url === 'app://bundle/index.html',
     )
 
     unsubscribe()
+    expect(fileGrants.revokeOwner).toHaveBeenCalledTimes(1)
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({ ok: true })
     replacement()
+    expect(fileGrants.revokeOwner).toHaveBeenCalledTimes(2)
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({
       ok: false,
       error: { code: 'UNAUTHORIZED_SENDER' },
@@ -175,6 +218,75 @@ describe('desktop IPC handlers', () => {
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event(), 'surplus')).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
     expect(control.updatePreferences).not.toHaveBeenCalled()
     expect(control.getAppInfo).not.toHaveBeenCalled()
+  })
+
+  it('binds strict open, save, and revoke requests to the exact WebContents owner', async () => {
+    const grants = fileGrantBroker()
+    vi.mocked(grants.requestOpenGrant).mockResolvedValueOnce(grantedGedcom)
+    const { contents, event, handlers } = harness(bridge(), {}, grants)
+
+    await expect(handlers.get(desktopChannels.requestOpenFileGrant)?.(
+      event(),
+      { purpose: 'gedcom-read' },
+    )).resolves.toEqual(result(grantedGedcom))
+    expect(grants.requestOpenGrant).toHaveBeenCalledWith(
+      contents,
+      { purpose: 'gedcom-read' },
+      expect.any(AbortSignal),
+    )
+    expect(JSON.stringify(await handlers.get(desktopChannels.requestSaveFileGrant)?.(
+      event(),
+      { purpose: 'json-write', suggestedName: 'report.json' },
+    ))).not.toContain('path')
+    expect(grants.requestSaveGrant).toHaveBeenCalledWith(
+      contents,
+      { purpose: 'json-write', suggestedName: 'report.json' },
+      expect.any(AbortSignal),
+    )
+    await expect(handlers.get(desktopChannels.revokeFileGrant)?.(event(), grantId)).resolves.toEqual(
+      result({ revoked: true }),
+    )
+    expect(grants.revokeGrant).toHaveBeenCalledWith(contents, grantId)
+  })
+
+  it('rejects ambient paths, purpose escalation, traversal names, and malformed grant identifiers', async () => {
+    const { event, fileGrants, handlers } = harness()
+    for (const [channel, payload] of [
+      [desktopChannels.requestOpenFileGrant, { purpose: 'gedcom-read', path: '/private/tree.ged' }],
+      [desktopChannels.requestOpenFileGrant, { purpose: 'gedcom-write' }],
+      [desktopChannels.requestSaveFileGrant, { purpose: 'gedcom-write', suggestedName: '../tree.ged' }],
+      [desktopChannels.revokeFileGrant, 'grt_too-short'],
+    ] as const) {
+      await expect(handlers.get(channel)?.(event(), payload)).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_REQUEST' },
+      })
+    }
+    expect(fileGrants.requestOpenGrant).not.toHaveBeenCalled()
+    expect(fileGrants.requestSaveGrant).not.toHaveBeenCalled()
+    expect(fileGrants.revokeGrant).not.toHaveBeenCalled()
+  })
+
+  it('returns stable redacted file-grant failures and rejects unsafe broker responses', async () => {
+    const grants = fileGrantBroker()
+    vi.mocked(grants.requestOpenGrant)
+      .mockRejectedValueOnce(new FileGrantBrokerError('FILE_GRANT_STALE'))
+      .mockResolvedValueOnce({ ...grantedGedcom, path: '/private/fictional.ged' } as never)
+    const { event, handlers } = harness(bridge(), {}, grants)
+    const open = handlers.get(desktopChannels.requestOpenFileGrant)
+
+    await expect(open?.(event(), { purpose: 'gedcom-read' })).resolves.toEqual({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'FILE_GRANT_STALE',
+        message: 'The selected file changed after it was approved.',
+        remediation: 'Review and select the file again.',
+      },
+    })
+    const invalidResponse = await open?.(event(), { purpose: 'gedcom-read' })
+    expect(invalidResponse).toMatchObject({ ok: false, error: { code: 'INVALID_RESPONSE' } })
+    expect(JSON.stringify(invalidResponse)).not.toContain('/private/fictional.ged')
   })
 
   it('validates structured-clone bounds and the runtime response before returning it', async () => {
@@ -234,7 +346,7 @@ describe('desktop IPC handlers', () => {
 
   it('uses a bounded non-coalesced queue and returns a stable redacted overload error', async () => {
     const control = bridge()
-    const pending = deferred<Awaited<ReturnType<AncestryBridge['getAppInfo']>>>()
+    const pending = deferred<Awaited<ReturnType<MainDesktopBridge['getAppInfo']>>>()
     vi.mocked(control.getAppInfo).mockReturnValue(pending.promise)
     const { controller, event, handlers } = harness(control)
     const getAppInfo = handlers.get(desktopChannels.getAppInfo)
@@ -264,7 +376,7 @@ describe('desktop IPC handlers', () => {
       signal = operationSignal
       return pending.promise
     })
-    const { controller, contents, event, handlers } = harness(control)
+    const { controller, contents, event, fileGrants, handlers } = harness(control)
     const request = handlers.get(desktopChannels.getCapabilities)?.(event())
 
     contents.navigate('app://bundle/subframe.html', false)
@@ -273,6 +385,7 @@ describe('desktop IPC handlers', () => {
     await expect(request).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_CANCELLED' } })
     const nextRequest = handlers.get(desktopChannels.getCapabilities)?.(event())
     controller.invalidateSidecarSession()
+    expect(fileGrants.revokeAll).toHaveBeenCalledTimes(1)
     await expect(nextRequest).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_CANCELLED' } })
     pending.resolve(capabilities)
   })
@@ -280,10 +393,11 @@ describe('desktop IPC handlers', () => {
   it('revokes identity and cancels work when the renderer process exits', async () => {
     const control = bridge()
     vi.mocked(control.getAppInfo).mockReturnValue(new Promise(() => undefined))
-    const { contents, event, handlers } = harness(control)
+    const { contents, event, fileGrants, handlers } = harness(control)
     const request = handlers.get(desktopChannels.getAppInfo)?.(event())
 
     contents.emit('render-process-gone')
+    expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
     await expect(request).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_CANCELLED' } })
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event())).resolves.toMatchObject({
       ok: false,
@@ -321,5 +435,16 @@ describe('desktop IPC handlers', () => {
       ),
     )
     expect(control.getAppInfo).toHaveBeenCalledTimes(4)
+  })
+
+  it('disposes all owner grants and the broker idempotently', () => {
+    const { contents, controller, fileGrants } = harness()
+
+    controller.dispose()
+    controller.dispose()
+
+    expect(fileGrants.revokeOwner).toHaveBeenCalledTimes(1)
+    expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
+    expect(fileGrants.dispose).toHaveBeenCalledTimes(1)
   })
 })

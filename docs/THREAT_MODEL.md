@@ -13,9 +13,13 @@ verification, bounded crash recovery, full-process-tree termination, and drain
 of the resources the current sidecar actually owns. Issue #101 implements the
 exact six-method typed bridge with per-call sender/frame/origin authorization,
 strict clone/schema limits, bounded concurrency and queues, single-flight
-capability reads, deadlines, cancellation, and lifecycle cleanup. It does not
-implement domain API routes, file grants, signed installers, plugins, or an
-update channel. The diagrams, controls, abuse cases, and gates below define
+capability reads, deadlines, cancellation, and lifecycle cleanup. Unreleased
+Issue #103 adds three path-free renderer methods over a main-owned opaque
+file-grant broker with native dialogs, purpose and format checks, bounded
+single-use grants, lifecycle revocation, fingerprint revalidation, replacement
+confirmation, alias denial, and output locks. It does not implement domain API
+routes, parser workers, signed installers, plugins, or an update channel. The
+diagrams, controls, abuse cases, and gates below define
 both this partial runtime and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
 passed. Each
@@ -34,10 +38,10 @@ and independent-review evidence at its named gate.
 ## Assets and trust boundaries
 
 Sensitive assets are genealogy records, living-person status, notes, provider
-credentials, SQLCipher keys, prompts/responses, consent grants, and RootsMagic
-source files. Later desktop assets additionally include opaque file grants,
-internal API bootstrap material, event streams, plugin packages, update
-metadata, release signatures, support evidence, OCI images and digests,
+credentials, SQLCipher keys, prompts/responses, consent grants, RootsMagic
+source files, and Unreleased opaque desktop file grants. Later desktop assets
+additionally include internal API bootstrap material, event streams, plugin
+packages, update metadata, release signatures, support evidence, OCI images and digests,
 generated Compose configuration, Docker contexts and sockets, workload
 credentials, remote-enrollment material, encrypted application volumes, and
 backups. Data crosses boundaries at
@@ -278,6 +282,14 @@ STRIDE and abuse-case ledgers have produced the required evidence.
 | `TM-A01` | The bridge backend exposes only declared operations. The main-owned capability client uses the fixed authenticated route and accepts an abort signal; the renderer cannot select a route, endpoint, header, credential, or transport. | The packaged burst reaches the private sidecar through the declared method only. Local package runs cannot replace native exact-head hosted rows. |
 | `TM-O01` | Queue saturation, timeout, cancellation, validation failure, and internal failure map to allowlisted stable bridge codes without backend stacks, response bodies, bootstrap material, endpoints, ports, tokens, host details, or absolute paths. Tests assert overload remains redacted. | Release evidence must still pass the project-wide canary and support-artifact checks owned by #131/#132. |
 
+### Issue #103 opaque file-grant evidence
+
+| Control | Source and runtime evidence | Packaged evidence and residual ownership |
+|---|---|---|
+| `TM-I01`, `TM-F01` | Strict request and response schemas expose only `requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`; DTOs contain random opaque IDs and safe metadata but no paths, URIs, descriptors, resolver, or generic filesystem operation. Main binds each grant to the authorized renderer, exact purpose and access mode, application session, and one redemption; close, navigation, explicit revocation, and restart invalidate it. | The dedicated packaged scenario verifies the path-free public surface and explicit revocation without adding its fixture adapter to production builds. Domain consumption remains #114/#118. |
+| `TM-F02`, `TM-D01`, `TM-C01` | Main-owned native selection checks absolute normalized spelling, regular-file and one-link state, exact purpose-specific extension and content signature, byte limit, canonical identity, and filesystem fingerprint. Redemption reopens and revalidates inputs. Save replacement requires native confirmation followed by target revalidation; source/output aliases and concurrent output grants fail closed under canonical output locks. Tests cover corrupted/replaced/growing files, traversal and noncanonical spellings, symlinks, hard links, directories, devices/FIFOs where supported, size boundaries, wrong formats, stale/revoked/cross-renderer/cross-purpose grants, confirmation races, aliases, cancellation, and lock release. | Cross-platform exact-head packaged evidence covers native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation. Bounded parser workers, complete ingress budgets, and atomic publication remain #114/#118/#131. |
+| `TM-O01` | Stable grant failures and receipt fields omit paths, usernames, hostnames, environment values, temporary roots, and response bodies. Safe renderer metadata is limited to basename, kind, byte size, and replacement status. | The verification-only adapter is rejected by the production build scan; its sanitized schema-v1 evidence is bound into the hosted receipt. Broader support-artifact canary coverage remains #131/#132. |
+
 ### Issue #306 verified uv bootstrap evidence
 
 | Control | Source and workflow evidence | Hosted evidence and residual ownership |
@@ -435,7 +447,7 @@ or release evidence, never private payloads.
 | `AB-01` | A compromised renderer forges frames, invokes privileged IPC, or obtains Node/Electron objects. | Medium likelihood / Critical impact | `TM-R01`, `TM-R02`, `TM-I01`; #100, #101, #131; G1/G2. Negative: sender/origin fuzz, absent-Node assertions, CSP/XSS suite, window inheritance, and packaged fuse inspection. | Partially evidenced: #100 proves isolation, CSP, global session/window denial, and fuse/ASAR policy; #101 proves exact sender/frame/origin authorization, strict bridge bounds, cancellation, and lifecycle cleanup at source level. The risk rating is not reduced until exact-head packaged rows and #131's broader adversarial suite pass. |
 | `AB-02` | Another local process races startup, probes loopback, replays credentials, or abuses health/shutdown. | Medium / Critical | `TM-A01`, `TM-A02`, `TM-A03`; #11, #102, #131; G1/G2. Negative: private-stdin bootstrap, connect-first/replay/timing, token-derived readiness, pre-parse auth, exact-host, pre-spawn payload integrity, verify-to-spawn replacement, and full-process-tree cleanup. | Not reduced: private bootstrap, manifest-bound payload verification, bounded supervision, current-resource drain, and full-tree cleanup are implemented, but the TOCTOU interval, replay/timing, exact-head hosted Windows and final platform evidence, and Issue #132 publisher signing remain pending. |
 | `AB-03` | UI, generated contracts, logs, crash reports, backups, or support evidence disclose provider or SQLCipher material. | Medium / Critical | `TM-S01`, `TM-O01`, `TM-O02`; #105, #123, #131; G1/G2. Negative: canary-secret scans across responses, storage, logs, crash/support artifacts, fixtures, and release evidence. | Not reduced: implementation and packaged evidence pending. |
-| `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Not reduced: worker and packaged evidence pending. |
+| `AB-04` | A malicious or replaced GEDCOM exploits parser complexity, symlinks, aliasing, races, or partial publication. | High / High | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`; #103, #114, #118, #131; G1/G2. Negative: boundary/one-over, replacement races, worker failure, output locks, cancellation, and sentinel preservation. | Partially evidenced: #103 proves path-free native selection, purpose and format checks, single-use lifecycle revocation, fingerprint and replacement-race rejection, source/output alias denial, output locking, cancellation, and sentinel preservation at source level. Its dedicated cross-platform packaged scenario proves native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation. Parser-worker isolation, complete ingress budgets, atomic publication, and the broader adversarial release surface remain #114/#118/#131. |
 | `AB-05` | Model Markdown uses HTML, SVG, handlers, schemes, images, links, or copied content to execute or exfiltrate. | High / Critical | `TM-R02`, `TM-L02`; #112, #131; G2. Negative: AST allowlist tests for script, HTML, SVG, URI, image, copy, external-link, and CSP cases. | Not reduced: renderer and packaged XSS evidence pending. |
 | `AB-06` | Provider/profile confusion, redirects, DNS changes, proxies, or ambient keys send living-person data to an unapproved endpoint. | Medium / Critical | `TM-L01`, `TM-S01`, `TM-O01`; #108, #110, #131; G1/G2. Negative: explicit-profile/consent, redirect, TLS/host/DNS revalidation, proxy denial, and network instrumentation proving `provider=none` is offline. | Not reduced: desktop contract and network evidence pending. |
 | `AB-07` | A provider or stalled renderer floods tokens, creates event gaps, prevents cancellation, or duplicates audit completion. | High / High | `TM-D01`, `TM-E01`; #104, #111, #131; G1/G2. Negative: bounded queue/ACK, gap/duplicate/reload races, idempotent terminal transitions, startup reconciliation, and no post-output retry. | Not reduced: streaming evidence pending. |

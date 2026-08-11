@@ -124,10 +124,12 @@ must be synthetic and source files must remain hash-identical after tests.
 
 ## Secure desktop development
 
-The current 0.3.0 runtime has no FastAPI routes, Electron application, renderer,
-preload bridge, or desktop package. Those components are later-roadmap adapters
-that must consume the existing application-service surface without redefining
-command or genealogy behavior.
+The current 0.5.0 foundation includes authenticated FastAPI health and
+capability routes plus a bounded Electron shell, renderer, preload bridge, and
+unpublished package-verification path. Unreleased Issue #103 adds opaque native
+file-grant mediation, but it does not yet add domain API routes, parser workers,
+or end-user file workflows. Later adapters must consume the existing
+application-service surface without redefining command or genealogy behavior.
 
 Desktop work is governed by
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
@@ -152,6 +154,13 @@ provider/database access, generic IPC, raw HTML, remote assets, or secrets in
 Vite environment values. Privileged IPC, sidecar routes, file grants, secrets,
 events, plugins, and update paths must use strict versioned DTOs, size limits,
 deny-by-default behavior, and the negative tests named by the threat ledger.
+
+Renderer file selection must use the opaque grant broker, never user-supplied
+or returned paths. Grant DTOs remain path-free; Electron main owns native
+dialogs, the path map, lifecycle revocation, and trusted internal resolution. A
+future Python adapter must reopen and revalidate an internally resolved path
+through the shared bounded file-ingress policy. No renderer may redeem a grant
+or call a direct filesystem API.
 
 Desktop pull requests run all applicable Python and desktop format, lint,
 strict type, unit, contract, integration, and packaged tests plus Semgrep,

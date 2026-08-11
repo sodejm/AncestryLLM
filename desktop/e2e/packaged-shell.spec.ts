@@ -12,6 +12,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
+import type { AncestryBridge } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { withinDeadline } from './packaged-deadline'
 
@@ -25,6 +26,10 @@ const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
 const integrityEvidencePath = process.env.ANCESTRYLLM_INTEGRITY_EVIDENCE
 const integrityDiagnosticsPath = process.env.ANCESTRYLLM_INTEGRITY_DIAGNOSTICS
 const substitutedSidecarPath = process.env.ANCESTRYLLM_SUBSTITUTED_SIDECAR
+const fileGrantVerificationMarker = process.env.ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION
+const fileGrantOpenPath = process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH
+const fileGrantSavePath = process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH
+const fileGrantEvidencePath = process.env.ANCESTRYLLM_FILE_GRANT_EVIDENCE
 const execFileAsync = promisify(execFile)
 
 const bridgeMethods = [
@@ -32,7 +37,10 @@ const bridgeMethods = [
   'getCapabilities',
   'getPreferences',
   'getStartupDiagnostics',
+  'requestOpenFileGrant',
+  'requestSaveFileGrant',
   'retrySidecar',
+  'revokeFileGrant',
   'updatePreferences',
 ]
 
@@ -115,8 +123,13 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     : process.platform === 'darwin'
       ? ['HOME', 'LOGNAME', 'SECURITYSESSIONID', 'SHELL', 'USER', '__CF_USER_TEXT_ENCODING']
       : ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'LOGNAME', 'SHELL', 'USER', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR']
+  const verificationNames = [
+    'ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION',
+    'ANCESTRYLLM_FILE_GRANT_OPEN_PATH',
+    'ANCESTRYLLM_FILE_GRANT_SAVE_PATH',
+  ] as const
   const environment: Record<string, string> = {
-    ...inheritedEnvironment([...baseNames, ...platformNames]),
+    ...inheritedEnvironment([...baseNames, ...platformNames, ...verificationNames]),
     USERPROFILE: isolatedHome,
     APPDATA: join(isolatedHome, 'AppData', 'Roaming'),
     LOCALAPPDATA: join(isolatedHome, 'AppData', 'Local'),
@@ -481,6 +494,32 @@ async function writeFaultEvidence(
     productionFaultHookUsed: false,
     observations,
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+}
+
+async function writeFileGrantEvidence(path: string): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-file-grant-evidence',
+    status: 'passed',
+    verificationOnlyDialogAdapter: true,
+    observations: {
+      openGrantOpaque: true,
+      openMetadataValidated: true,
+      saveGrantOpaque: true,
+      replacementConfirmed: true,
+      revocationPassed: true,
+      selectedPathsAbsent: true,
+    },
+  }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+}
+
+function stringsIn(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(stringsIn)
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).flatMap(stringsIn)
+  }
+  return []
 }
 
 async function writeIntegrityDiagnostics(
@@ -998,6 +1037,93 @@ test.describe('unpublished unpacked native package', () => {
         rssBytes,
         rendererOutboundRequests: 0,
       }, null, 2)}\n`, { flag: 'wx' })
+    } finally {
+      if (running) await forceClosePackaged(running)
+      await removeTemporaryPackage(root)
+    }
+  })
+
+  test('mediates opaque packaged open and save file grants', async () => {
+    test.skip(
+      fileGrantVerificationMarker !== '1'
+      || !fileGrantOpenPath
+      || !fileGrantSavePath
+      || !fileGrantEvidencePath,
+      'Packaged file-grant verification inputs and evidence output are required',
+    )
+    if (!fileGrantOpenPath || !fileGrantSavePath || !fileGrantEvidencePath) {
+      throw new Error('Packaged file-grant verification inputs and evidence output are required')
+    }
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-file-grants-'))
+    let running: LaunchResult | undefined
+    try {
+      running = await launchPackaged(root, /Welcome to AncestryLLM/, 'file-grant-mediation')
+      const results = await running.page.evaluate(async () => {
+        const ancestry = (window as unknown as { ancestry: AncestryBridge }).ancestry
+        const open = await ancestry.requestOpenFileGrant({ purpose: 'gedcom-read' })
+        const save = await ancestry.requestSaveFileGrant({
+          purpose: 'gedcom-write',
+          suggestedName: 'safe-output.ged',
+        })
+        const openRevocation = open.ok && open.data !== null
+          ? await ancestry.revokeFileGrant(open.data.grantId)
+          : null
+        const saveRevocation = save.ok && save.data !== null
+          ? await ancestry.revokeFileGrant(save.data.grantId)
+          : null
+        return { open, save, openRevocation, saveRevocation }
+      })
+
+      expect(results.open.ok).toBe(true)
+      expect(results.save.ok).toBe(true)
+      if (!results.open.ok || results.open.data === null
+        || !results.save.ok || results.save.data === null) {
+        throw new Error('Packaged file-grant mediation did not return both grants.')
+      }
+      const openGrant = results.open.data
+      const saveGrant = results.save.data
+      expect(openGrant.grantId).toMatch(/^grt_[a-f0-9]{64}$/)
+      expect(saveGrant.grantId).toMatch(/^grt_[a-f0-9]{64}$/)
+      expect(saveGrant.grantId).not.toBe(openGrant.grantId)
+      expect(Object.keys(openGrant).sort()).toEqual(['access', 'grantId', 'metadata', 'purpose', 'scope'])
+      expect(Object.keys(saveGrant).sort()).toEqual(['access', 'grantId', 'metadata', 'purpose', 'scope'])
+      expect(openGrant).toMatchObject({
+        purpose: 'gedcom-read',
+        access: 'read',
+        scope: {
+          originatingWindow: 'requesting-window',
+          lifetime: 'app-session',
+          redemption: 'single-use',
+        },
+        metadata: {
+          displayName: basename(fileGrantOpenPath),
+          format: 'gedcom',
+          validation: 'validated-input',
+        },
+      })
+      expect(openGrant.metadata.sizeBytes).toBeGreaterThan(0)
+      expect(saveGrant).toMatchObject({
+        purpose: 'gedcom-write',
+        access: 'write',
+        scope: {
+          originatingWindow: 'requesting-window',
+          lifetime: 'app-session',
+          redemption: 'single-use',
+        },
+        metadata: {
+          displayName: basename(fileGrantSavePath),
+          format: 'gedcom',
+          validation: 'replacement-confirmed',
+        },
+      })
+      expect(results.openRevocation).toMatchObject({ ok: true, data: { revoked: true } })
+      expect(results.saveRevocation).toMatchObject({ ok: true, data: { revoked: true } })
+      const exposedStrings = stringsIn(results)
+      expect(exposedStrings).not.toContain(fileGrantOpenPath)
+      expect(exposedStrings).not.toContain(fileGrantSavePath)
+      await closePackaged(running)
+      running = undefined
+      await writeFileGrantEvidence(fileGrantEvidencePath)
     } finally {
       if (running) await forceClosePackaged(running)
       await removeTemporaryPackage(root)

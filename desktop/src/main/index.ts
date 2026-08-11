@@ -10,12 +10,14 @@ import {
   type WebContents,
 } from 'electron'
 import { completeAppShutdown } from './app-shutdown'
+import { FileGrantBroker } from './file-grant-broker'
 import {
   registerDesktopIpcHandlers,
   type BridgeWebContents,
   type DesktopIpcController,
   type MainDesktopBridge,
 } from './ipc-handlers'
+import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
   APP_ENTRY_URL,
@@ -43,6 +45,7 @@ if (primaryInstance) {
 }
 
 let bridge: MainDesktopBridge | undefined
+let fileGrantBroker: FileGrantBroker | undefined
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -96,15 +99,19 @@ if (primaryInstance) {
 
 function registerIpcHandlers(): void {
   if (!bridge) throw new Error('Runtime bridge is unavailable.')
+  if (!fileGrantBroker) throw new Error('File-grant broker is unavailable.')
   if (ipcController) throw new Error('Desktop IPC handlers are already registered.')
-  ipcController = registerDesktopIpcHandlers(ipcMain, bridge)
+  ipcController = registerDesktopIpcHandlers(ipcMain, bridge, fileGrantBroker)
 }
 
 function disposeIpcBoundary(): void {
   removeSidecarSessionListener?.()
   removeSidecarSessionListener = undefined
-  ipcController?.dispose()
+  const controller = ipcController
   ipcController = undefined
+  controller?.dispose()
+  if (!controller) fileGrantBroker?.dispose()
+  fileGrantBroker = undefined
 }
 
 function createWindow(): void {
@@ -144,6 +151,7 @@ if (primaryInstance) {
     sidecarSupervisor = runtime.supervisor
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
+    fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
     registerIpcHandlers()
     removeSidecarSessionListener = sidecarSupervisor?.onSessionInvalidated(() => {
       ipcController?.invalidateSidecarSession()

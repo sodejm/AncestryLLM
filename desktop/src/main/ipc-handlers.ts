@@ -6,16 +6,27 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
+  type FileGrant,
+  type FileGrantId,
+  type FileGrantRevocation,
   type LocalPreferences,
+  type OpenFileGrantRequest,
   type PreferenceUpdate,
+  type SaveFileGrantRequest,
 } from '../shared-contract/desktop'
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseFileGrantId,
+  parseFileGrantResult,
+  parseFileGrantRevocationResult,
+  parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
+  parseSaveFileGrantRequest,
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
+import { FileGrantBrokerError } from './file-grant-broker'
 import { validateStructuredClone } from './structured-clone-policy'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
@@ -29,13 +40,33 @@ export interface BridgeWebContents {
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown
 }
 
-export interface MainDesktopBridge extends AncestryBridge {
+export interface MainDesktopBridge extends Omit<
+  AncestryBridge,
+  'requestOpenFileGrant' | 'requestSaveFileGrant' | 'revokeFileGrant'
+> {
   getAppInfo(signal?: AbortSignal): ReturnType<AncestryBridge['getAppInfo']>
   getStartupDiagnostics(signal?: AbortSignal): ReturnType<AncestryBridge['getStartupDiagnostics']>
   getCapabilities(signal?: AbortSignal): ReturnType<AncestryBridge['getCapabilities']>
   retrySidecar(signal?: AbortSignal): ReturnType<AncestryBridge['retrySidecar']>
   getPreferences(signal?: AbortSignal): ReturnType<AncestryBridge['getPreferences']>
   updatePreferences(update: PreferenceUpdate, signal?: AbortSignal): ReturnType<AncestryBridge['updatePreferences']>
+}
+
+export interface MainFileGrantBroker {
+  requestOpenGrant(
+    owner: object,
+    request: OpenFileGrantRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<FileGrant> | null>
+  requestSaveGrant(
+    owner: object,
+    request: SaveFileGrantRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<FileGrant> | null>
+  revokeGrant(owner: object, grantId: string): Readonly<FileGrantRevocation>
+  revokeOwner(owner: object): void
+  revokeAll(): void
+  dispose(): void
 }
 
 export interface DesktopIpcController {
@@ -47,7 +78,10 @@ export interface DesktopIpcController {
   dispose(): void
 }
 
-interface RegistrationOptions { readonly operationTimeoutMs?: number }
+interface RegistrationOptions {
+  readonly operationTimeoutMs?: number
+  readonly fileDialogTimeoutMs?: number
+}
 interface Authorization {
   readonly contents: BridgeWebContents
   readonly trustedUrl: (url: string) => boolean
@@ -78,6 +112,7 @@ const MAX_ACTIVE_REQUESTS = 4
 const MAX_QUEUED_REQUESTS = 8
 const MAX_CAPABILITY_SUBSCRIBERS = 32
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
+const DEFAULT_FILE_DIALOG_TIMEOUT_MS = 300_000
 const CANCELLED = Symbol('bridge-request-cancelled')
 const TIMED_OUT = Symbol('bridge-request-timed-out')
 
@@ -120,6 +155,38 @@ const cancelled = <T>(): BridgeResult<T> =>
   error('REQUEST_CANCELLED', 'The desktop request was cancelled.', 'Retry from the current AncestryLLM window.')
 const timedOut = <T>(): BridgeResult<T> =>
   error('REQUEST_TIMEOUT', 'The desktop request timed out.', 'Try again or restart AncestryLLM.')
+
+function success<T>(data: T): BridgeResult<T> {
+  return Object.freeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data })
+}
+
+function fileGrantFailure<T>(cause: unknown): BridgeResult<T> {
+  if (!(cause instanceof FileGrantBrokerError)) return internalError<T>()
+  switch (cause.code) {
+    case 'FILE_SELECTION_INVALID':
+      return error(cause.code, 'The selected file is not valid for this operation.', 'Choose a supported regular file and try again.')
+    case 'FILE_TOO_LARGE':
+      return error(cause.code, 'The selected file exceeds the supported size limit.', 'Choose a smaller file and try again.')
+    case 'FILE_GRANT_FORBIDDEN':
+      return error(cause.code, 'This file permission cannot be used for that operation.', 'Select the file again for the requested operation.')
+    case 'FILE_GRANT_REVOKED':
+      return error(cause.code, 'This file permission is no longer available.', 'Select the file again and retry the operation.')
+    case 'FILE_GRANT_STALE':
+      return error(cause.code, 'The selected file changed after it was approved.', 'Review and select the file again.')
+    case 'FILE_GRANT_CONFLICT':
+      return error(cause.code, 'The selected file is already in use by another operation.', 'Finish or cancel the other operation and try again.')
+    case 'FILE_DIALOG_FAILED':
+      return error(cause.code, 'The system file dialog could not complete the request.', 'Try again or restart AncestryLLM.')
+  }
+}
+
+async function fileGrantOperation<T>(operation: () => Promise<T> | T): Promise<BridgeResult<T>> {
+  try {
+    return success(await operation())
+  } catch (cause) {
+    return fileGrantFailure<T>(cause)
+  }
+}
 
 function eventParts(event: unknown): Readonly<{ sender: unknown; senderFrame: unknown }> | undefined {
   if (typeof event !== 'object' || event === null) return undefined
@@ -278,11 +345,13 @@ function capabilityRequest(
 function removeAuthorization(
   authorizations: Map<BridgeWebContents, Authorization>,
   state: Authorization,
+  fileGrants: MainFileGrantBroker,
 ): void {
   if (authorizations.get(state.contents) !== state) return
   authorizations.delete(state.contents)
   state.removeLifecycleListeners()
   invalidate(state)
+  fileGrants.revokeOwner(state.contents)
 }
 
 function registerNoArgumentHandler<T>(
@@ -304,11 +373,16 @@ function registerNoArgumentHandler<T>(
 export function registerDesktopIpcHandlers(
   ipc: IpcRegistrar,
   bridge: MainDesktopBridge,
+  fileGrants: MainFileGrantBroker,
   options: Readonly<RegistrationOptions> = {},
 ): DesktopIpcController {
   const timeoutMs = options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS
+  const fileDialogTimeoutMs = options.fileDialogTimeoutMs ?? DEFAULT_FILE_DIALOG_TIMEOUT_MS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error('Desktop IPC operation timeout must be positive.')
+  }
+  if (!Number.isFinite(fileDialogTimeoutMs) || fileDialogTimeoutMs <= 0) {
+    throw new Error('Desktop IPC file dialog timeout must be positive.')
   }
   const authorizations = new Map<BridgeWebContents, Authorization>()
   let disposed = false
@@ -356,6 +430,60 @@ export function registerDesktopIpcHandlers(
       parsePreferencesResult,
     )
   })
+  ipc.handle(desktopChannels.requestOpenFileGrant, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<FileGrant | null>()
+    if (args.length !== 1) return invalidRequest<FileGrant | null>()
+    let request: OpenFileGrantRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseOpenFileGrantRequest(args[0])
+    } catch {
+      return invalidRequest<FileGrant | null>()
+    }
+    return schedule(
+      state,
+      fileDialogTimeoutMs,
+      (signal) => fileGrantOperation(() => fileGrants.requestOpenGrant(state.contents, request, signal)),
+      parseFileGrantResult,
+    )
+  })
+  ipc.handle(desktopChannels.requestSaveFileGrant, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<FileGrant | null>()
+    if (args.length !== 1) return invalidRequest<FileGrant | null>()
+    let request: SaveFileGrantRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseSaveFileGrantRequest(args[0])
+    } catch {
+      return invalidRequest<FileGrant | null>()
+    }
+    return schedule(
+      state,
+      fileDialogTimeoutMs,
+      (signal) => fileGrantOperation(() => fileGrants.requestSaveGrant(state.contents, request, signal)),
+      parseFileGrantResult,
+    )
+  })
+  ipc.handle(desktopChannels.revokeFileGrant, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<FileGrantRevocation>()
+    if (args.length !== 1) return invalidRequest<FileGrantRevocation>()
+    let grantId: FileGrantId
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      grantId = parseFileGrantId(args[0])
+    } catch {
+      return invalidRequest<FileGrantRevocation>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      () => fileGrantOperation(() => fileGrants.revokeGrant(state.contents, grantId)),
+      parseFileGrantRevocationResult,
+    )
+  })
 
   return Object.freeze({
     authorizeWebContents(
@@ -364,12 +492,13 @@ export function registerDesktopIpcHandlers(
     ): () => void {
       if (disposed || contents.isDestroyed()) throw new Error('Cannot authorize unavailable WebContents.')
       const previous = authorizations.get(contents)
-      if (previous) removeAuthorization(authorizations, previous)
-      const revoke = () => removeAuthorization(authorizations, state)
+      if (previous) removeAuthorization(authorizations, previous, fileGrants)
+      const revoke = () => removeAuthorization(authorizations, state, fileGrants)
       const navigate = (_event: unknown, _url: unknown, _inPlace: unknown, isMainFrame: unknown) => {
         if (isMainFrame !== true) return
         state.navigating = true
         invalidate(state)
+        fileGrants.revokeOwner(state.contents)
       }
       const commitNavigation = (
         _event: unknown,
@@ -407,16 +536,18 @@ export function registerDesktopIpcHandlers(
       return () => {
         if (unsubscribed) return
         unsubscribed = true
-        removeAuthorization(authorizations, state)
+        removeAuthorization(authorizations, state, fileGrants)
       }
     },
     invalidateSidecarSession(): void {
+      fileGrants.revokeAll()
       for (const state of authorizations.values()) invalidate(state)
     },
     dispose(): void {
       if (disposed) return
       disposed = true
-      for (const state of [...authorizations.values()]) removeAuthorization(authorizations, state)
+      for (const state of [...authorizations.values()]) removeAuthorization(authorizations, state, fileGrants)
+      fileGrants.dispose()
     },
   })
 }

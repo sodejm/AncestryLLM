@@ -66,6 +66,57 @@ export type PreferenceUpdate = Readonly<{
   onboardingCompleted?: boolean
 }>
 
+export const fileGrantPurposes = Object.freeze([
+  'gedcom-read',
+  'rootsmagic-read',
+  'gedcom-write',
+  'json-write',
+  'markdown-write',
+] as const)
+
+export type FileGrantPurpose = typeof fileGrantPurposes[number]
+export type FileReadPurpose = Extract<FileGrantPurpose, 'gedcom-read' | 'rootsmagic-read'>
+export type FileWritePurpose = Exclude<FileGrantPurpose, FileReadPurpose>
+export type FileGrantAccess = 'read' | 'write'
+export type FileFormat = 'gedcom' | 'rootsmagic' | 'json' | 'markdown'
+export type FileValidation = 'validated-input' | 'new-output' | 'replacement-confirmed'
+export type FileGrantId = `grt_${string}`
+
+export interface FileMetadata {
+  displayName: string
+  format: FileFormat
+  sizeBytes: number
+  validation: FileValidation
+}
+
+export interface FileGrantScope {
+  originatingWindow: 'requesting-window'
+  lifetime: 'app-session'
+  redemption: 'single-use'
+}
+
+export interface FileGrant {
+  grantId: FileGrantId
+  purpose: FileGrantPurpose
+  access: FileGrantAccess
+  scope: Readonly<FileGrantScope>
+  metadata: Readonly<FileMetadata>
+}
+
+export interface OpenFileGrantRequest { purpose: FileReadPurpose }
+export interface SaveFileGrantRequest { purpose: FileWritePurpose; suggestedName: string }
+export interface FileGrantRevocation { revoked: true }
+
+/** Mirrors the transport-neutral Python application artifact contract. */
+export interface ArtifactRef {
+  artifact_id: string
+  artifact_type: string
+  media_type: string
+  sha256: string
+  size_bytes: number
+  status: 'staged' | 'published'
+}
+
 export type BridgeErrorCode =
   | 'INVALID_REQUEST'
   | 'UNAUTHORIZED_SENDER'
@@ -77,6 +128,13 @@ export type BridgeErrorCode =
   | 'SIDECAR_REQUEST_FAILED'
   | 'PREFERENCES_UNAVAILABLE'
   | 'PREFERENCES_CONFLICT'
+  | 'FILE_SELECTION_INVALID'
+  | 'FILE_TOO_LARGE'
+  | 'FILE_GRANT_FORBIDDEN'
+  | 'FILE_GRANT_REVOKED'
+  | 'FILE_GRANT_STALE'
+  | 'FILE_GRANT_CONFLICT'
+  | 'FILE_DIALOG_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface BridgeError {
@@ -96,6 +154,9 @@ export interface AncestryBridge {
   retrySidecar(): Promise<BridgeResult<StartupDiagnostics>>
   getPreferences(): Promise<BridgeResult<LocalPreferences>>
   updatePreferences(update: PreferenceUpdate): Promise<BridgeResult<LocalPreferences>>
+  requestOpenFileGrant(request: OpenFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
+  requestSaveFileGrant(request: SaveFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
+  revokeFileGrant(grantId: FileGrantId): Promise<BridgeResult<FileGrantRevocation>>
 }
 
 export const desktopChannels = Object.freeze({
@@ -105,4 +166,7 @@ export const desktopChannels = Object.freeze({
   retrySidecar: 'ancestry:desktop:retry-sidecar',
   getPreferences: 'ancestry:desktop:get-preferences',
   updatePreferences: 'ancestry:desktop:update-preferences',
+  requestOpenFileGrant: 'ancestry:desktop:request-open-file-grant',
+  requestSaveFileGrant: 'ancestry:desktop:request-save-file-grant',
+  revokeFileGrant: 'ancestry:desktop:revoke-file-grant',
 } as const)

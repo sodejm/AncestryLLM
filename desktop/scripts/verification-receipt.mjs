@@ -18,6 +18,7 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
   'fusesInspectedPassed',
   'rendererZeroEgressCanaryPassed',
   'normalLaunchDebugSurfaceAbsentPassed',
+  'packagedFileGrantSmokePassed',
   'packagedSidecarWithholdRetryPassed',
   'packagedSidecarRestartExhaustionQuitPassed',
   'packagedSidecarIntegritySubstitutionPassed',

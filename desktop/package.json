@@ -22,6 +22,7 @@
     "test": "vitest run && node --test scripts/*.test.mjs",
     "build": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs",
     "build:e2e": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --fixture",
+    "build:packaged-file-grants": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-file-grants",
     "test:e2e": "pnpm build:e2e && playwright test e2e/shell.spec.ts",
     "test:e2e:packaged": "playwright test e2e/packaged-shell.spec.ts",
     "audit": "pnpm audit --audit-level high",
