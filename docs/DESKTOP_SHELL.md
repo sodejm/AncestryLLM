@@ -151,13 +151,22 @@ bridge therefore contains fourteen fixed methods: the six released control
 methods, three opaque file-grant methods, and five settings/credential methods.
 There is still no generic send, listen, route-selection, or command operation.
 
-The separately accepted
-[deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md)
-defines future container and advanced remote targets. It does not expand the
-released 0.5 shell: there is no supported container, remote, LAN, browser, or
-public-service surface. Any future profile keeps the renderer sandbox and
-fixed typed bridge, leaves authority in Electron Main and the shared service
-contracts, and must pass its own release and threat-model gates.
+The unreleased source implements the non-secret, versioned deployment-profile
+control plane accepted by the
+[deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md).
+Local Desktop is preselected and recommended. The shared Python service owns
+profile validation, exact preview and confirmation, atomic persistence,
+diagnostics, redacted evidence, and recovery to Local Desktop. Issues #107 and
+#108 own the later first-run and settings presentation. Connect Remote and Host
+Remote remain visible advanced intents, but neither can be activated until its
+enrollment or host-runtime dependency is implemented and independently gated.
+
+Selecting or inspecting a profile does not open a listener, start a container,
+discover a service, move genealogy data, select a provider, or grant cloud
+consent. The released 0.5 shell still has no supported container, remote, LAN,
+browser, or public-service surface. Future presentation keeps the renderer
+sandbox and fixed typed bridge, while authority remains in the shared service
+contracts and Electron Main's narrow adapter.
 
 ## Installation and updates
 

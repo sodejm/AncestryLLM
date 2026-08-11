@@ -16,12 +16,29 @@ restoring the key into an OS credential store, opening a copy, checking the
 schema revision, and running integrity checks. Plain SQLite files and wrong keys
 are rejected. Never commit a database or backup to Git.
 
-## Accepted future container and remote profiles
+## Deployment-profile metadata and future runtimes
 
-[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts future
-Local Desktop and advanced remote profiles. Their backup commands and runbooks
-are not implemented or supported yet; the current commands above remain the
-only documented product workflow.
+Backup manifests and support bundles may include the redacted structural
+profile evidence produced by:
+
+```console
+ancestry --json deployment metadata --purpose backup
+```
+
+The evidence contains the profile schema and revision, mode, topology, and an
+optional endpoint-identity digest. It excludes the raw endpoint origin,
+filesystem paths, providers, credentials, environment values, host details,
+and genealogy data. Use `--purpose support` for an equivalently redacted
+support record.
+
+Profile switching never migrates, copies, uploads, restores, or deletes a tree.
+Those data operations remain separately reviewed and confirmed. The current
+encrypted local backup commands above remain the only implemented product
+backup workflow.
+
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts later
+container and advanced remote runtimes. Their backup commands and runbooks are
+not implemented or supported yet.
 
 Before either profile can ship, its release evidence must demonstrate all of
 the following:

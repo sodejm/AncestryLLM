@@ -155,7 +155,7 @@
   },
   "ADR-0026-local-first-container-remote-deployment.md": {
     "title": "ADR-0026: Local-first container and advanced remote deployment — AncestryLLM",
-    "description": "Accepted future local-container and advanced remote profiles, including trust boundaries, ownership, resource budgets, non-goals, and release gates."
+    "description": "Implemented deployment-profile control boundary and accepted future runtimes, including trust boundaries, ownership, resource budgets, non-goals, and release gates."
   },
   "DOCS_AUTHORING.md": {
     "title": "Documentation architecture and authoring guide — AncestryLLM",

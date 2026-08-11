@@ -80,20 +80,31 @@ data classes, retention, and current consent before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
 renderer privileges.
 
-## Accepted future deployment privacy boundary
+## Deployment-profile privacy boundary
 
-[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts future
-Local Desktop, Connect Remote, and Host Remote profiles, but none is currently
-implemented or supported. Local Desktop remains the default and may not open a
-non-loopback listener. Choosing or discovering a container runtime does not
-grant remote consent, and an upgrade may not infer a remote profile.
+The unreleased source implements the versioned, non-secret deployment-profile
+control plane accepted by
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md). Local Desktop
+is the safe default and recommended choice. Connect Remote and Host Remote are
+advanced intents whose enrollment and hosting runtimes are not implemented or
+supported. An absent profile migrates to Local Desktop; malformed, stale,
+downgraded, or mismatched state fails closed.
+
+A profile may never be inferred from an environment variable, listener,
+hostname, Docker context, installer omission, or discovered service. Reading,
+previewing, switching, diagnosing, or exporting structural profile evidence
+does not open a listener, start a runtime, copy or upload a tree, select a
+provider, or grant cloud consent. Migration, export, import, and synchronization
+remain separate reviewed operations with their own confirmation boundaries.
 
 The renderer boundary does not change between profiles. It receives no raw
 network access, endpoint, session or enrollment bearer, Docker credential,
-filesystem path, keyring value, provider secret, or SQLCipher key. Electron
-Main owns the fixed typed bridge and authenticated session state. Switching
-profiles clears renderer state, revokes scoped grants, and establishes a fresh
-authenticated session rather than carrying authority across the boundary.
+filesystem path, keyring value, provider secret, or SQLCipher key. The shared
+Python service owns profile policy and redacted evidence; a future Electron
+presentation must keep its bridge fixed and typed. When a non-local runtime is
+implemented, switching profiles must clear renderer state, revoke scoped
+grants, and establish a fresh authenticated session rather than carrying
+authority across the boundary.
 
 Local containers do not read the OS keyring directly. A narrow host broker may
 provide a required secret to one authorized process after policy and consent

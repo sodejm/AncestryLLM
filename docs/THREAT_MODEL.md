@@ -23,7 +23,12 @@ write-only OS-keyring credential status/set/delete through fixed authenticated
 routes and five fixed bridge methods. Credential values are never returned,
 persisted in renderer state, or represented in status DTOs, generated clients,
 logs, or fixtures. It does not implement provider execution, parser workers,
-signed installers, plugins, or an update channel. The
+signed installers, plugins, or an update channel. Unreleased Issue #347 adds a
+strict schema-v1, non-secret deployment profile with a safe Local Desktop
+default, reviewed mode descriptions, revision-bound previews, explicit
+confirmation, atomic local recovery, fail-closed runtime diagnostics, and
+redacted backup/support metadata. It does not start containers, enroll a
+remote client, host a server, widen a listener, or move genealogy data. The
 diagrams, controls, abuse cases, and gates below define
 both this partial runtime and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
@@ -33,12 +38,14 @@ verification before a planned control can be treated as effective.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 local-first multi-container backend, an advanced remote-client profile, and a
-separately operated remote-server profile as the target architecture. None is
-implemented or supported. The deployment diagrams, `TM-M01` through `TM-B01`,
-`STR-H-*` through `STR-M-*` and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below are
-therefore requirements for planned work, not current protections. No deployment
-risk is reduced until the owning issue provides native-runtime, negative-test,
-and independent-review evidence at its named gate.
+separately operated remote-server profile as the target architecture. Issue
+#347 implements only the profile-selection portion of `TM-M01`; no container or
+remote runtime is implemented or supported. The deployment diagrams, the
+remaining portions of `TM-M01` through `TM-B01`, `STR-H-*` through `STR-M-*`
+and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below remain requirements
+for planned work. No deployment risk rating is reduced until the owning issue
+provides native-runtime, negative-test, and independent-review evidence at its
+named gate.
 
 ## Assets and trust boundaries
 
@@ -49,18 +56,21 @@ material. Later desktop assets additionally include event streams and plugin
 packages, update metadata, release signatures, support evidence, OCI images and digests,
 generated Compose configuration, Docker contexts and sockets, workload
 credentials, remote-enrollment material, encrypted application volumes, and
-backups. Data crosses boundaries at
+backups. The non-secret deployment profile and its redacted endpoint-identity
+and support/backup evidence are current control-plane assets. Data crosses boundaries at
 prompt-toolkit/Rich REPL input, one-shot CLI input, GEDCOM/RootsMagic parsing,
 the OS keyring, encrypted database, configured provider endpoints, and exported
 files. The desktop runtime adds crossings through a sandboxed Electron renderer,
 the fixed preload bridge, Electron main, and an authenticated FastAPI sidecar;
 the credential value lifetime ends in the uncontrolled input and request path,
-while the renderer retains presence status only. The proposed
-deployment profiles additionally cross Electron Main to a host deployment
-supervisor, the supervisor to a selected Docker control plane, the host keyring
-to a secret broker, containers to private application networks and encrypted
-volumes, and a remote client through TLS ingress and an identity provider to an
-authenticated gateway.
+while the renderer retains presence status only. The current deployment-profile
+control plane crosses the versioned config, application service, and canonical
+command executor without crossing a network boundary. Proposed deployment
+runtimes additionally cross Electron Main to a host deployment supervisor, the
+supervisor to a selected Docker control plane, the host keyring to a secret
+broker, containers to private application networks and encrypted volumes, and a
+remote client through TLS ingress and an identity provider to an authenticated
+gateway.
 
 The local operator is trusted to choose data and consent. The renderer, other
 local processes, imported genealogy content, file paths, plugins, packages,
@@ -235,9 +245,12 @@ environment variable.
 
 ### Named desktop and accepted deployment controls
 
-Controls `TM-M01` through `TM-B01` are accepted requirements, not implemented
-controls. They carry no security credit until the owning issue and gate in the
-STRIDE and abuse-case ledgers have produced the required evidence.
+Controls `TM-M01` through `TM-B01` are accepted deployment requirements. Issue
+#347 supplies source-level evidence for the profile-selection portion of
+`TM-M01`; its listener, packaged UI, installer, upgrade, and native-runtime
+claims remain unevidenced. The other deployment controls carry no security
+credit until the owning issue and gate in the STRIDE and abuse-case ledgers have
+produced the required evidence.
 
 | ID | Required control |
 |---|---|
@@ -491,7 +504,7 @@ or release evidence, never private payloads.
 | `AB-08` | A plugin impersonates a publisher, traverses extraction, expands permissions, or escapes into native/renderer execution. | Medium / Critical | `TM-P01`, `TM-P02`; #16, #125, #131; G3. Negative: canonical signature, revocation, archive bomb/traversal/collision, permission diff, WASI escape, and restricted-host identity. | Not reduced: Post-MVP feature disabled pending renewed review. |
 | `AB-09` | A compromised update channel serves a valid old release, wrong-platform sidecar, mutable artifact, or expired metadata. | Low / Critical | `TM-U01`, `TM-U02`; #102, #131, #132; G4. Negative: offline signature, expiry, anti-rollback, hash/size/platform/version, revoked key, interruption, and recovery. | Not reduced: distribution remains disabled pending evidence. |
 | `AB-10` | Two app instances or jobs publish the same output or repeat a mutation after a crash. | Medium / High | `TM-C01`, `TM-E01`, `TM-F02`; #104, #117, #129, #131; G2/G3. Negative: single instance, idempotency, optimistic revision, artifact lock, crash recovery, and duplicate terminal state. | Not reduced: concurrency and packaged evidence pending. |
-| `AB-11` | Profile confusion or an installer/runtime default silently changes Local Desktop into Connect Remote or Host Remote. | Medium / Critical | `TM-M01`, `TM-O01`; #346, #347, #358; G5-G7. Negative: missing/unknown settings, ambient environment, discovery, repair, upgrade, downgrade, cancellation, and stale profile state retain local-only behavior. | Not reduced: accepted architecture only; implementation and native evidence pending. |
+| `AB-11` | Profile confusion or an installer/runtime default silently changes Local Desktop into Connect Remote or Host Remote. | Medium / Critical | `TM-M01`, `TM-O01`; #346, #347, #358; G5-G7. Negative: missing/unknown settings, ambient environment, discovery, repair, upgrade, downgrade, cancellation, and stale profile state retain local-only behavior. | Partially evidenced at source level: #347 proves the Local Desktop default, strict schema/topology validation, environment-smuggling resistance, revision- and target-bound confirmation, atomic recovery, exact endpoint/identity diagnostics, non-loopback rejection, and non-local runtime denial. The risk rating is not reduced until native first-run/settings presentation, installer/upgrade behavior, and G5-G7 runtime evidence pass. |
 | `AB-12` | A malicious Docker context, socket, daemon, or Compose response tricks the supervisor into host-administrative operations. | Medium / Critical | `TM-H01`, `TM-B01`; #363; G5. Negative: ambient contexts, socket replacement, remote endpoint, unsafe Compose fields, resource collisions, and unallowlisted Engine methods fail closed. | Not reduced: supervisor and daemon-identity evidence pending. |
 | `AB-13` | A daemon, VM, container runtime, or kernel compromise escapes isolation and reaches host or genealogy data. | Medium / Critical | `TM-H01`, `TM-K01`; #348, #349, #364, #365; G5/G7. Negative: privileged/root execution, host namespaces, devices, broad mounts/capabilities, socket access, and unsupported runtime modes are rejected. | Inherent platform risk remains; no residual reduction without native hardening evidence and a current risk review. |
 | `AB-14` | Containers exhaust CPU, memory, PIDs, storage, inodes, connections, or logs and make data or recovery unavailable. | High / High | `TM-K01`, `TM-D01`; #349, #364, #365; G5/G7. Negative: quota one-over, fork/connection storm, disk/inode full, log growth, restart loop, and shutdown tests preserve bounded host control. | Not reduced: resource-budget and recovery evidence pending. |

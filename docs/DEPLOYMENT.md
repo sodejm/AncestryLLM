@@ -8,9 +8,41 @@ hosted application deployment.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 future Local Desktop container profile plus explicit Connect Remote and Host
-Remote profiles. None is implemented, shipped, or supported today. This guide
-does not authorize using the current private sidecar as a network service or
-provide a current Host Remote runbook.
+Remote profiles. Unreleased 0.6 source now implements the shared profile
+control plane, not those future runtimes. Local Desktop is the preselected,
+recommended mode. An omitted profile migrates to that safe local default; an
+unknown schema, malformed topology, stale revision, or substituted endpoint
+fails closed.
+
+Headless tooling can list the reviewed choices, inspect the stored profile,
+preview an exact transition, diagnose a profile/runtime mismatch, recover to
+Local Desktop, and emit redacted backup or support metadata:
+
+```sh
+ancestry --json deployment modes
+ancestry --json deployment status
+ancestry --json deployment diagnose
+ancestry --json deployment metadata --purpose support
+```
+
+Every unattended transition requires the current schema and configuration
+revision, the exact confirmation returned by a separate preview, and the
+literal `--unattended` flag. Only Local Desktop can currently be activated.
+Connect Remote activation is reserved for authenticated enrollment in #357;
+Host Remote activation is reserved for the reviewed bootstrap in #348/#363.
+Profile selection never starts a listener, container, supervisor, or remote
+session, and never copies, exports, imports, or uploads a family tree.
+
+The stored endpoint origin and endpoint-identity digest are non-secret
+configuration, while enrollment credentials remain in the secret store. No
+mode is inferred from environment variables, Docker context, port state,
+hostname, or service discovery. `provider=none` continues to require the local,
+network-free path. A valid non-local profile without its separately authorized
+runtime blocks ordinary commands but leaves `deployment status`, `diagnose`,
+and Local Desktop recovery available.
+
+This guide does not authorize using the current private sidecar as a network
+service or provide a current Host Remote runbook.
 
 Before any profile release, a separate operator runbook must cover every
 claimed native host and architecture, Docker Engine API and Compose
