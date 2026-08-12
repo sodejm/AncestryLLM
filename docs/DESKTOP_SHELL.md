@@ -21,6 +21,44 @@ These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
 zoomed layouts.
 
+## Accessible design-system shell
+
+Unreleased Issue #106 implements the reusable presentation shell for the 0.6
+desktop work. It preserves a persistent primary navigation region, workspace
+header, context-and-help panel, and explicit **Local and offline** status across
+Home, Diagnostics, and Settings. The compact layout keeps the current route and
+local status visible when the window narrows; at the 720-by-560 minimum size
+and 200% zoom, primary actions reflow without horizontal clipping.
+
+The shell exposes one typed route and navigation contract rather than another
+command registry. <kbd>Ctrl</kbd>+<kbd>K</kbd> or
+<kbd>Command</kbd>+<kbd>K</kbd> opens a keyboard destination palette. Its
+filter receives initial focus, <kbd>Escape</kbd> dismisses it and restores the
+trigger, and choosing a destination focuses that route's heading. A
+**Skip to workspace** link is the first backward-reachable control when route
+focus starts on a heading. Focus indicators, reduced-motion preferences, and
+forced-color behavior are explicit rather than dependent on browser defaults.
+
+Shared presentation contracts live under
+`desktop/src/renderer/src/design-system/`:
+
+- `AppRoute` and `NavigationItem` define the bounded destinations and labels.
+- `CapabilityGate` presents an already-authorized branch; it cannot create or
+  infer authority.
+- `AsyncState` provides plain-language loading, empty, offline, degraded,
+  error, success, and permission-denied patterns. Meaning is always conveyed by
+  text and semantics, not color alone.
+- `CodedErrorView` accepts only stable coded errors, normalizes an unexpected
+  code to `UNEXPECTED_ERROR`, and keeps recovery instructions beside the code.
+- The dialog-focus contract records initial, dismiss, restoration, and
+  route-selection behavior for keyboard regression tests.
+
+These components import no bridge, Electron, Node.js, filesystem, or network
+API. They consume data only when a route-level hook passes a validated bridge
+response. The development gallery imports deterministic fictional fixtures,
+while the production build verifier rejects the gallery and its copy from the
+shipping renderer.
+
 ## First run and revisit
 
 The first supported launch opens a bounded welcome on **Home**. It explains
@@ -230,9 +268,38 @@ details.
 
 `make desktop-e2e` builds the production renderer and launches it in Electron
 with a deterministic fictional mock bridge. The flow proves welcome completion,
-renderer reload, revisit, degraded startup, retry, and destination access. A
+renderer reload, revisit, degraded startup, retry, destination access,
+deterministic route/dialog focus, and minimum-window behavior at 200% zoom. The
+real Chromium run also scans every route in light, dark, and high-contrast
+modes against WCAG 2.2 A/AA rules from the exact locked `axe-core` version. A
 separate `FilePreferencesStore` unit test proves that completion survives a
 fresh store instance, which models a new application process.
+
+Use the focused checks during shell review:
+
+```sh
+pnpm --dir desktop test:accessibility
+pnpm --dir desktop test:visual
+pnpm --dir desktop dev:gallery
+```
+
+Automated checks do not replace a screen reader. Before release credit, review
+the production shell and fictional gallery with VoiceOver, NVDA, or Narrator
+and record the operating system, reader and version, commit, and result in the
+release evidence. The smoke review must confirm:
+
+1. Landmarks, the heading hierarchy, **Primary** navigation, the current-page
+   announcement, and **Local and offline** status are understandable without
+   visual position or color.
+2. Route entry focuses the workspace heading; the skip link reaches the
+   workspace; and focus never becomes lost behind navigation or context panels.
+3. The destination palette announces its dialog and label, focuses its filter,
+   reports an empty search, restores its trigger on dismissal, and focuses the
+   selected route heading.
+4. Every gallery state announces its state label, title, description, and code
+   where present without exposing a path or private runtime detail.
+5. The minimum window at 200% zoom, light/dark/high-contrast themes, and reduced
+   motion retain all primary actions and understandable focus order.
 
 The exact-head [desktop verification gate](DESKTOP_VERIFICATION.md) separately
 assembles and launches the literal unpublished unpacked executable on six

@@ -310,6 +310,7 @@ The foundation sequence is:
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |
 | `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Internal API and bridge prerequisites merged. |
 | `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
+| `EL-10` / #106 | Responsive accessible design-system shell and presentation-only interaction contracts. | Renderer foundation and fixed bridge prerequisites merged. |
 | `EL-36` / #131 | Desktop contract, security, accessibility, E2E, and performance evidence. | Begins with #99/#11; gates the MVP. |
 
 ## Exclusive ownership and coordination
@@ -317,6 +318,7 @@ The foundation sequence is:
 | Path or shared surface | Exclusive owner |
 |---|---|
 | `desktop/` package manifest, lockfile, build/test configuration, initial root Make targets | #99 (`EL-02`) until scaffolding merges; later renderer, preload, main, and contract subtrees follow their published issue ownership. |
+| `desktop/src/renderer/src/design-system/`, shell integration, and fictional development gallery | #106 (`EL-10`). |
 | `src/ancestryllm/api/`, FastAPI dependencies, deterministic OpenAPI artifact | #11 (`EL-03`) for foundation; later domain routers stay with their published issues. |
 | `pyproject.toml` and `uv.lock` | The issue introducing the Python dependency, coordinated serially; #11 owns initial FastAPI/Uvicorn additions. |
 | Root JavaScript dependency and lock files | Not permitted. `desktop/pnpm-lock.yaml` is the sole JavaScript lockfile and #99 owns it initially. |

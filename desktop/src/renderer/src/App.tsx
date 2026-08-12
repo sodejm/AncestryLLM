@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Heart, Home as HomeIcon, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type {
   AncestryBridge,
@@ -15,15 +15,11 @@ import type {
 } from '../../shared-contract/desktop'
 import { secretReferences } from '../../shared-contract/desktop'
 import { Button } from './components/Button'
+import { AppShell } from './design-system/AppShell'
+import { CodedErrorView } from './design-system/CodedErrorView'
+import { routeFromHash, type AppRoute, type NavigationItem } from './design-system/contracts'
 
-type Route = 'home' | 'diagnostics' | 'settings'
 type PreferencePatch = Omit<PreferenceUpdate, 'expectedRevision'>
-
-const routeFromHash = (): Route => window.location.hash === '#/diagnostics'
-  ? 'diagnostics'
-  : window.location.hash === '#/settings'
-    ? 'settings'
-    : 'home'
 
 const ancestryBridge = (): AncestryBridge => (window as unknown as { ancestry: AncestryBridge }).ancestry
 
@@ -277,7 +273,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 }
 
 function Shell() {
-  const [route, setRoute] = useState<Route>(routeFromHash)
+  const [route, setRoute] = useState<AppRoute>(() => routeFromHash(window.location.hash))
   const [reviewingWelcome, setReviewingWelcome] = useState(false)
   const [onboardingFailure, setOnboardingFailure] = useState<BridgeErrorCode | null>(null)
   const [preferenceUpdatePending, setPreferenceUpdatePending] = useState(false)
@@ -285,6 +281,7 @@ function Shell() {
   const [retryPending, setRetryPending] = useState(false)
   const [retryFailure, setRetryFailure] = useState<BridgeErrorCode | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const lastFocusedHeadingKey = useRef<string | null>(null)
   const startupAlert = useRef<HTMLDivElement>(null)
   const onboardingAlert = useRef<HTMLDivElement>(null)
   const preferenceAlert = useRef<HTMLDivElement>(null)
@@ -296,7 +293,7 @@ function Shell() {
   const refetchStartup = startup.refetch
 
   useEffect(() => {
-    const update = () => setRoute(routeFromHash())
+    const update = () => setRoute(routeFromHash(window.location.hash))
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
@@ -321,11 +318,14 @@ function Shell() {
   const showWelcome = route === 'home'
     && !preferences.isPending
     && (!preferenceData?.onboardingCompleted || reviewingWelcome)
+  const headingFocusKey = `${route}:${showWelcome ? 'welcome' : 'workspace'}`
 
   useEffect(() => {
     if (startup.isError || (startup.data && !startup.data.ok)) return
+    if (lastFocusedHeadingKey.current === headingFocusKey) return
+    lastFocusedHeadingKey.current = headingFocusKey
     heading.current?.focus()
-  }, [preferences.isPending, route, showWelcome, startup.data, startup.isError])
+  }, [headingFocusKey, startup.data, startup.isError])
 
   useEffect(() => {
     if (onboardingFailure) onboardingAlert.current?.focus()
@@ -412,31 +412,45 @@ function Shell() {
       ? 'INTERNAL_ERROR'
       : null
 
-  return <div className="app-shell">
-    <header>
-      <div className="brand"><Heart aria-hidden="true" /> <span>AncestryLLM</span></div>
-      <span className="privacy">Private by design</span>
-    </header>
-    <nav aria-label="Primary">
-      <a href="#/" aria-current={route === 'home' ? 'page' : undefined}><HomeIcon aria-hidden="true" />Home</a>
-      <a href="#/diagnostics" aria-current={route === 'diagnostics' ? 'page' : undefined}><Stethoscope aria-hidden="true" />Diagnostics</a>
-      <a href="#/settings" aria-current={route === 'settings' ? 'page' : undefined}><SettingsIcon aria-hidden="true" />Settings</a>
-    </nav>
-    <main>
-      {startupFailed && <div ref={startupAlert} tabIndex={-1} role="alert" className="error">
-        <AlertTriangle aria-hidden="true" />
-        <div>
-          <strong>Desktop diagnostics are temporarily unavailable.</strong>
-          {startupFailureCode && <p className="error-code">Code: {startupFailureCode}</p>}
-          <p>Restart AncestryLLM.</p>
-        </div>
-      </div>}
+  const workspaceCopy: Readonly<Record<AppRoute, { title: string, description: string }>> = {
+    home: {
+      title: showWelcome ? 'Welcome to AncestryLLM' : 'Home',
+      description: showWelcome
+        ? 'Your desktop control shell stays local to this device.'
+        : 'A calm overview of this desktop shell.',
+    },
+    diagnostics: {
+      title: 'Diagnostics',
+      description: 'Review local startup state and bounded recovery guidance.',
+    },
+    settings: {
+      title: 'Settings',
+      description: 'Choose local preferences, application behavior, and write-only credentials.',
+    },
+  }
+
+  const navigate = (item: NavigationItem) => {
+    window.location.hash = item.href
+    setRoute(item.route)
+  }
+
+  return <AppShell
+    route={route}
+    title={workspaceCopy[route].title}
+    description={workspaceCopy[route].description}
+    headingRef={heading}
+    onNavigate={navigate}
+  >
+      {startupFailed && startupFailureCode && <CodedErrorView
+        focusRef={startupAlert}
+        code={startupFailureCode}
+        title="Desktop diagnostics are temporarily unavailable."
+        recovery="Restart AncestryLLM."
+      />}
 
       {route === 'home' && preferences.isPending && <p role="status">Loading welcome…</p>}
 
-      {showWelcome && <section className="welcome" aria-labelledby="welcome-title">
-        <h1 id="welcome-title" ref={heading} tabIndex={-1}>Welcome to AncestryLLM</h1>
-        <p className="lead">Your desktop control shell stays local to this device.</p>
+      {showWelcome && <section className="welcome" aria-labelledby="workspace-title">
         <div className="welcome-grid">
           <section className="summary-card" aria-labelledby="welcome-private">
             <h2 id="welcome-private">Private and offline</h2>
@@ -478,8 +492,6 @@ function Shell() {
       </section>}
 
       {route === 'home' && !preferences.isPending && !showWelcome && <>
-        <h1 ref={heading} tabIndex={-1}>Home</h1>
-        <p className="lead">A calm overview of this desktop shell.</p>
         <div className="summary-grid">
           <section className="summary-card" aria-labelledby="application-summary">
             <h2 id="application-summary">Application</h2>
@@ -515,7 +527,6 @@ function Shell() {
       </>}
 
       {route === 'diagnostics' && <>
-        <h1 ref={heading} tabIndex={-1}>Diagnostics</h1>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">
           <h2 id="service-status">Desktop service</h2>
           {startup.isPending ? <p role="status">Checking startup state…</p> : <p>Status: <span className="badge">{startupStatus}</span></p>}
@@ -546,8 +557,6 @@ function Shell() {
       </>}
 
       {route === 'settings' && <>
-        <h1 ref={heading} tabIndex={-1}>Settings</h1>
-        <p className="lead">Choose local preferences, application behavior, and write-only credentials.</p>
         {preferences.isPending && <p role="status">Loading preferences…</p>}
         {(preferenceFailure || preferenceQueryCode) && <div ref={preferenceAlert} tabIndex={-1} role="alert" className="error">
           <AlertTriangle aria-hidden="true" />
@@ -585,8 +594,7 @@ function Shell() {
           <CredentialSettingsPanel />
         </div>
       </>}
-    </main>
-  </div>
+  </AppShell>
 }
 
 export function App() {

@@ -211,9 +211,46 @@ describe('accessible desktop shell', () => {
     const diagnostics = screen.getByRole('link', { name: 'Diagnostics' })
     diagnostics.focus()
     await userEvent.keyboard('{Enter}')
-    expect(await screen.findByRole('heading', { name: 'Diagnostics' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Diagnostics' })).toHaveFocus()
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
-    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toHaveFocus()
+  })
+
+  it('skips directly to the workspace without changing the current route', async () => {
+    const bridge = await createCompletedBridge()
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Home' })
+
+    const skip = screen.getByRole('link', { name: 'Skip to workspace' })
+    skip.focus()
+    await userEvent.keyboard('{Enter}')
+
+    expect(screen.getByRole('main')).toHaveFocus()
+    expect(window.location.hash).toBe('#/')
+  })
+
+  it('opens, filters, dismisses, and selects from keyboard navigation with deterministic focus', async () => {
+    const bridge = await createCompletedBridge()
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Home' })
+
+    await userEvent.keyboard('{Control>}k{/Control}')
+    const palette = screen.getByRole('dialog', { name: 'Go to a workspace' })
+    const filter = within(palette).getByRole('searchbox', { name: 'Filter destinations' })
+    expect(filter).toHaveFocus()
+    await userEvent.type(filter, 'settings')
+    expect(within(palette).getByRole('link', { name: /Settings/ })).toBeVisible()
+    expect(within(palette).queryByRole('link', { name: /Diagnostics/ })).not.toBeInTheDocument()
+
+    await userEvent.click(within(palette).getByRole('button', { name: 'Close command palette' }))
+    expect(screen.getByRole('button', { name: /Navigate/ })).toHaveFocus()
+
+    await userEvent.keyboard('{Control>}k{/Control}')
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('link', { name: /Diagnostics/ }))
+    expect(await screen.findByRole('heading', { name: 'Diagnostics' })).toHaveFocus()
+    expect(window.location.hash).toBe('#/diagnostics')
   })
 
   it('renders the bounded production Home summary without development or domain surfaces', async () => {
