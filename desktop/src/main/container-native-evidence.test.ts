@@ -49,6 +49,8 @@ interface NativeContainerInspection {
     readonly Binds: readonly string[] | null
     readonly CapAdd: readonly string[] | null
     readonly CapDrop: readonly string[] | null
+    readonly DeviceCgroupRules: readonly string[] | null
+    readonly DeviceRequests: readonly unknown[] | null
     readonly Devices: readonly unknown[] | null
     readonly NetworkMode: string
     readonly PortBindings: Readonly<Record<string, unknown>> | null
@@ -213,6 +215,8 @@ describe.skipIf(!nativeEvidenceEnabled)('native macOS arm64 host-container evide
         Binds: [`${volumeName}:/var/lib/ancestryllm:rw`],
         CapAdd: null,
         CapDrop: ['ALL'],
+        DeviceCgroupRules: null,
+        DeviceRequests: null,
         Devices: null,
         NetworkMode: networkName,
         PortBindings: {},

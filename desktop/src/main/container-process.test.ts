@@ -172,12 +172,13 @@ describe('Docker CLI process boundary', () => {
       const standardInputIndex = request.arguments.indexOf('-')
       return request.arguments.slice(standardInputIndex + 1)
     })).toEqual([
-      ['up', '--detach', '--wait', '--remove-orphans'],
+      ['up', '--detach', '--wait'],
       ['stop', '--timeout', '20'],
-      ['up', '--detach', '--wait', '--remove-orphans', '--force-recreate'],
-      ['down', '--remove-orphans', '--timeout', '20'],
-      ['down', '--remove-orphans', '--volumes', '--timeout', '20'],
+      ['up', '--detach', '--wait', '--force-recreate'],
+      ['down', '--timeout', '20'],
+      ['down', '--volumes', '--timeout', '20'],
     ])
+    expect(lifecycle.every((request) => !request.arguments.includes('--remove-orphans'))).toBe(true)
     expect(lifecycle.every((request) => request.standardInput?.includes(`@sha256:${digest}`))).toBe(true)
     for (const request of lifecycle) {
       const compose = JSON.parse(request.standardInput ?? '{}') as {
@@ -187,6 +188,7 @@ describe('Docker CLI process boundary', () => {
         cpus: '1.0',
         mem_limit: '256m',
         pids_limit: 128,
+        pull_policy: 'never',
         logging: {
           driver: 'local',
           options: { 'max-file': '3', 'max-size': '10m' },
@@ -220,6 +222,12 @@ describe('Docker CLI process boundary', () => {
       { kind: 'volume', name: 'ancestryllm-local-data', labels: expect.any(Object) },
     ])
     expect(requests).toHaveLength(6)
+    expect(requests[0]?.arguments).toContain('name=^/ancestryllm-local-gateway$')
+    expect(requests[2]?.arguments).toContain('name=^ancestryllm-local-private$')
+    expect(requests[4]?.arguments).toContain('name=^ancestryllm-local-data$')
+    expect(requests.every((request) => !request.arguments.includes(
+      'name=ancestryllm-local',
+    ))).toBe(true)
     expect(requests.filter((request) => request.arguments.includes(
       'label=com.ancestryllm.owner=ancestryllm',
     ))).toHaveLength(3)
@@ -233,6 +241,123 @@ describe('Docker CLI process boundary', () => {
     await expect(control.inventory(runtimePolicy)).rejects.toMatchObject({
       code: 'PROCESS_RESPONSE_INVALID',
     })
+  })
+
+  it('inspects exact realized container hardening and private-network state', async () => {
+    const containerInspection = {
+      containerName: '/ancestryllm-local-gateway',
+      image: `ghcr.io/sodejm/ancestryllm-gateway@sha256:${digest}`,
+      user: '65532:65532',
+      readOnly: true,
+      capDrop: ['ALL'],
+      capAdd: null,
+      securityOptions: ['no-new-privileges:true'],
+      init: true,
+      privileged: false,
+      deviceCount: 0,
+      deviceRequestCount: 0,
+      deviceCgroupRuleCount: 0,
+      nanoCpus: 1_000_000_000,
+      memoryBytes: 256 * 1024 * 1024,
+      pidsLimit: 128,
+      logging: {
+        Type: 'local',
+        Config: { 'max-size': '10m', 'max-file': '3' },
+      },
+      mounts: [{
+        Type: 'volume',
+        Name: 'ancestryllm-local-data',
+        Source: '/var/lib/docker/volumes/ancestryllm-local-data/_data',
+        Destination: '/var/lib/ancestryllm',
+        RW: true,
+      }],
+      networks: { 'ancestryllm-local-private': {} },
+      ports: {
+        '8000/tcp': [{ HostIp: '127.0.0.1', HostPort: '49152' }],
+      },
+    }
+    const requests: HostProcessRequest[] = []
+    const outputs = [
+      `${JSON.stringify(containerInspection)}\n`,
+      `${JSON.stringify({ name: 'ancestryllm-local-private', internal: true })}\n`,
+    ]
+    const run: RunHostProcess = vi.fn(async (request) => {
+      requests.push(request)
+      return { stdout: outputs.shift() ?? '' }
+    })
+    const runtimePolicy = policy()
+    const control = new DockerCliHostControl({ run })
+    const resources = [
+      { kind: 'volume' as const, name: 'ancestryllm-local-data', labels: {} },
+      { kind: 'network' as const, name: 'ancestryllm-local-private', labels: {} },
+      { kind: 'container' as const, name: 'ancestryllm-local-gateway', labels: {} },
+    ]
+
+    await expect(control.inspectResources(runtimePolicy, resources)).resolves.toEqual({
+      containers: [{
+        containerName: 'ancestryllm-local-gateway',
+        image: `ghcr.io/sodejm/ancestryllm-gateway@sha256:${digest}`,
+        user: '65532:65532',
+        readOnly: true,
+        capDrop: ['ALL'],
+        capAdd: [],
+        securityOptions: ['no-new-privileges:true'],
+        init: true,
+        privileged: false,
+        deviceCount: 0,
+        deviceRequestCount: 0,
+        deviceCgroupRuleCount: 0,
+        nanoCpus: 1_000_000_000,
+        memoryBytes: 256 * 1024 * 1024,
+        pidsLimit: 128,
+        logging: {
+          driver: 'local',
+          options: { 'max-size': '10m', 'max-file': '3' },
+        },
+        mounts: [{
+          kind: 'volume', source: 'ancestryllm-local-data',
+          target: '/var/lib/ancestryllm', readOnly: false,
+        }],
+        networks: ['ancestryllm-local-private'],
+        ports: [{
+          hostIp: '127.0.0.1', published: 49152,
+          target: 8000, protocol: 'tcp',
+        }],
+      }],
+      networks: [{ name: 'ancestryllm-local-private', internal: true }],
+    })
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.arguments).toEqual([
+      '--config', runtimePolicy.dockerConfigDirectory,
+      '--context', runtimePolicy.dockerContext,
+      'inspect', '--type', 'container', '--format',
+      expect.stringContaining('"readOnly":{{json .HostConfig.ReadonlyRootfs}}'),
+      'ancestryllm-local-gateway',
+    ])
+    expect(requests[0]?.arguments.join(' ')).toContain(
+      '"deviceRequestCount":{{len .HostConfig.DeviceRequests}}',
+    )
+    expect(requests[0]?.arguments.join(' ')).toContain(
+      '"deviceCgroupRuleCount":{{len .HostConfig.DeviceCgroupRules}}',
+    )
+    expect(requests[1]?.arguments).toEqual([
+      '--config', runtimePolicy.dockerConfigDirectory,
+      '--context', runtimePolicy.dockerContext,
+      'network', 'inspect', '--format',
+      '{"name":{{json .Name}},"internal":{{json .Internal}}}',
+      'ancestryllm-local-private',
+    ])
+  })
+
+  it('fails closed on malformed realized resource inspection output', async () => {
+    const runtimePolicy = policy()
+    const control = new DockerCliHostControl({
+      run: vi.fn(async () => ({ stdout: '{"containerName":"canary"}\n' })),
+    })
+
+    await expect(control.inspectResources(runtimePolicy, [{
+      kind: 'container', name: 'ancestryllm-local-gateway', labels: {},
+    }])).rejects.toMatchObject({ code: 'PROCESS_RESPONSE_INVALID' })
   })
 
   it('rejects an unknown daemon architecture instead of weakening identity checks', async () => {
@@ -268,6 +393,30 @@ function processRequest(overrides: Partial<HostProcessRequest> = {}): HostProces
 describe('bounded host process execution', () => {
   it('returns bounded stdout for a successful no-shell child', async () => {
     await expect(runBoundedHostProcess(processRequest())).resolves.toEqual({ stdout: 'ok' })
+  })
+
+  it.skipIf(process.platform === 'win32')('waits for inherited stdout to close before succeeding', async () => {
+    const script = [
+      'const { spawn } = require("node:child_process")',
+      'const child = spawn(process.execPath, ["-e", "setTimeout(() => process.stdout.write(\'late\'), 100)"], { stdio: ["ignore", 1, "ignore"] })',
+      'child.unref()',
+    ].join(';')
+
+    await expect(runBoundedHostProcess(processRequest({
+      arguments: ['-e', script],
+    }))).resolves.toEqual({ stdout: 'late' })
+  })
+
+  it.skipIf(process.platform === 'win32')('settles a timeout only after its process group terminates', async () => {
+    const startedAt = Date.now()
+    await expect(runBoundedHostProcess(processRequest({
+      arguments: ['-e', [
+        'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 120))',
+        'setInterval(() => {}, 1000)',
+      ].join(';')],
+      timeoutMs: 250,
+    }))).rejects.toMatchObject({ code: 'PROCESS_TIMEOUT' })
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(330)
   })
 
   it('fails closed on input overflow, output overflow, timeout, and nonzero exit', async () => {

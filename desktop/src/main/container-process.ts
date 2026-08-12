@@ -13,6 +13,9 @@ import type {
   HostContainerOperation,
   HostContainerPolicy,
   HostOwnedResource,
+  HostRealizedContainer,
+  HostRealizedNetwork,
+  HostRealizedState,
   HostRuntimeObservation,
 } from './container-supervisor'
 
@@ -24,6 +27,28 @@ const MAX_LIFECYCLE_OUTPUT_BYTES = 256 * 1024
 const ENVIRONMENT_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/
 const MAX_ENVIRONMENT_ENTRIES = 16
 const OBSERVATION_FIELD_SEPARATOR = '|ancestryllm-field|'
+const CONTAINER_INSPECTION_FORMAT = [
+  '{"containerName":{{json .Name}}',
+  ',"image":{{json .Config.Image}}',
+  ',"user":{{json .Config.User}}',
+  ',"readOnly":{{json .HostConfig.ReadonlyRootfs}}',
+  ',"capDrop":{{json .HostConfig.CapDrop}}',
+  ',"capAdd":{{json .HostConfig.CapAdd}}',
+  ',"securityOptions":{{json .HostConfig.SecurityOpt}}',
+  ',"init":{{json .HostConfig.Init}}',
+  ',"privileged":{{json .HostConfig.Privileged}}',
+  ',"deviceCount":{{len .HostConfig.Devices}}',
+  ',"deviceRequestCount":{{len .HostConfig.DeviceRequests}}',
+  ',"deviceCgroupRuleCount":{{len .HostConfig.DeviceCgroupRules}}',
+  ',"nanoCpus":{{json .HostConfig.NanoCpus}}',
+  ',"memoryBytes":{{json .HostConfig.Memory}}',
+  ',"pidsLimit":{{json .HostConfig.PidsLimit}}',
+  ',"logging":{{json .HostConfig.LogConfig}}',
+  ',"mounts":{{json .Mounts}}',
+  ',"networks":{{json .NetworkSettings.Networks}}',
+  ',"ports":{{json .HostConfig.PortBindings}}}',
+].join('')
+const NETWORK_INSPECTION_FORMAT = '{"name":{{json .Name}},"internal":{{json .Internal}}}'
 
 export type HostContainerProcessErrorCode =
   | 'PROCESS_REQUEST_INVALID'
@@ -181,35 +206,46 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
       return
     }
 
+    let settling = false
     let settled = false
     let outputBytes = 0
     const stdout: Buffer[] = []
 
     const timer = setTimeout(() => {
-      fail('PROCESS_TIMEOUT', true)
+      failAfterTermination('PROCESS_TIMEOUT')
     }, request.timeoutMs)
 
     const finish = (callback: () => void): void => {
-      if (settled) return
+      if (settled || settling) return
       settled = true
       clearTimeout(timer)
       callback()
     }
 
-    const fail = (code: HostContainerProcessErrorCode, terminate = false): void => {
+    const fail = (code: HostContainerProcessErrorCode): void => {
       finish(() => {
-        if (terminate) {
-          void terminateNativeSidecarProcess(child).catch(() => undefined)
-        }
         reject(new HostContainerProcessError(code))
       })
     }
 
+    const failAfterTermination = (code: HostContainerProcessErrorCode): void => {
+      if (settled || settling) return
+      settling = true
+      clearTimeout(timer)
+      void terminateNativeSidecarProcess(child)
+        .catch(() => undefined)
+        .finally(() => {
+          settled = true
+          settling = false
+          reject(new HostContainerProcessError(code))
+        })
+    }
+
     const account = (chunk: Buffer, retain: boolean): void => {
-      if (settled) return
+      if (settled || settling) return
       outputBytes += chunk.length
       if (outputBytes > request.maxOutputBytes) {
-        fail('PROCESS_OUTPUT_LIMIT', true)
+        failAfterTermination('PROCESS_OUTPUT_LIMIT')
         return
       }
       if (retain) stdout.push(chunk)
@@ -218,14 +254,14 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
     child.stdout.on('data', (chunk: Buffer) => account(chunk, true))
     child.stderr.on('data', (chunk: Buffer) => account(chunk, false))
     child.once('error', () => fail('PROCESS_EXIT'))
-    child.once('exit', (code, signal) => {
+    child.once('close', (code, signal) => {
       if (code !== 0 || signal !== null) {
         fail('PROCESS_EXIT')
         return
       }
       finish(() => resolve({ stdout: Buffer.concat(stdout).toString('utf8') }))
     })
-    child.stdin.once('error', () => fail('PROCESS_EXIT', true))
+    child.stdin.once('error', () => failAfterTermination('PROCESS_EXIT'))
     child.stdin.end(input)
   })
 }
@@ -273,6 +309,156 @@ function parseSecurityOptions(value: string): readonly string[] {
 function parseDockerArchitecture(value: string): 'arm64' {
   if (value === 'arm64' || value === 'aarch64') return 'arm64'
   return responseFail()
+}
+
+function inspectionRecord(
+  value: string,
+  fields: readonly string[],
+): Record<string, unknown> {
+  if (
+    Buffer.byteLength(value, 'utf8') > MAX_INSPECTION_OUTPUT_BYTES
+    || value.includes('\0')
+    || value.includes('\r')
+    || !value.endsWith('\n')
+    || value.slice(0, -1).includes('\n')
+  ) return responseFail()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value.slice(0, -1))
+  } catch {
+    return responseFail()
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return responseFail()
+  }
+  const record = parsed as Record<string, unknown>
+  const actual = Object.keys(record).sort()
+  const expected = [...fields].sort()
+  if (actual.length !== expected.length || actual.some((field, index) => field !== expected[index])) {
+    return responseFail()
+  }
+  return record
+}
+
+function inspectionString(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > 4096
+    || value.includes('\0')
+    || value.includes('\n')
+    || value.includes('\r')
+  ) return responseFail()
+  return value
+}
+
+function inspectionBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') return responseFail()
+  return value
+}
+
+function inspectionInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) return responseFail()
+  return value as number
+}
+
+function inspectionArray(value: unknown, maximum = 128): unknown[] {
+  if (!Array.isArray(value) || value.length > maximum) return responseFail()
+  return value
+}
+
+function inspectionObject(value: unknown, maximum = 128): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return responseFail()
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).length > maximum) return responseFail()
+  return record
+}
+
+function inspectionStrings(value: unknown): string[] {
+  if (value === null) return []
+  return inspectionArray(value, 64).map(inspectionString)
+}
+
+function parseRealizedContainer(value: string): HostRealizedContainer {
+  const record = inspectionRecord(value, [
+    'containerName', 'image', 'user', 'readOnly', 'capDrop', 'capAdd',
+    'securityOptions', 'init', 'privileged', 'deviceCount', 'deviceRequestCount',
+    'deviceCgroupRuleCount', 'nanoCpus', 'memoryBytes', 'pidsLimit', 'logging',
+    'mounts', 'networks', 'ports',
+  ])
+  const rawName = inspectionString(record.containerName)
+  const containerName = rawName.startsWith('/') ? rawName.slice(1) : rawName
+  if (containerName.length === 0) return responseFail()
+  const logging = inspectionObject(record.logging, 2)
+  const loggingOptions = inspectionObject(logging.Config, 32)
+  const options = Object.fromEntries(Object.entries(loggingOptions).map(([key, candidate]) => [
+    inspectionString(key), inspectionString(candidate),
+  ]))
+  const mounts = inspectionArray(record.mounts, 32).map((candidate) => {
+    const mount = inspectionObject(candidate, 32)
+    const kind = inspectionString(mount.Type)
+    return {
+      kind,
+      source: inspectionString(kind === 'volume' ? mount.Name : mount.Source),
+      target: inspectionString(mount.Destination),
+      readOnly: !inspectionBoolean(mount.RW),
+    }
+  })
+  const networks = Object.keys(inspectionObject(record.networks, 32)).map(inspectionString)
+  const ports = Object.entries(inspectionObject(record.ports, 32)).flatMap(([key, candidate]) => {
+    const match = /^([1-9][0-9]{0,4})\/([a-z0-9]{1,16})$/.exec(key)
+    if (!match) return responseFail()
+    const target = Number(match[1])
+    if (!Number.isInteger(target) || target > 65535) return responseFail()
+    return inspectionArray(candidate, 16).map((binding) => {
+      const port = inspectionObject(binding, 8)
+      const publishedText = inspectionString(port.HostPort)
+      if (!/^[1-9][0-9]{0,4}$/.test(publishedText)) return responseFail()
+      const published = Number(publishedText)
+      if (published > 65535) return responseFail()
+      return {
+        hostIp: inspectionString(port.HostIp),
+        published,
+        target,
+        protocol: match[2]!,
+      }
+    })
+  })
+  return {
+    containerName,
+    image: inspectionString(record.image),
+    user: inspectionString(record.user),
+    readOnly: inspectionBoolean(record.readOnly),
+    capDrop: inspectionStrings(record.capDrop),
+    capAdd: inspectionStrings(record.capAdd),
+    securityOptions: inspectionStrings(record.securityOptions),
+    init: inspectionBoolean(record.init),
+    privileged: inspectionBoolean(record.privileged),
+    deviceCount: inspectionInteger(record.deviceCount),
+    deviceRequestCount: inspectionInteger(record.deviceRequestCount),
+    deviceCgroupRuleCount: inspectionInteger(record.deviceCgroupRuleCount),
+    nanoCpus: inspectionInteger(record.nanoCpus),
+    memoryBytes: inspectionInteger(record.memoryBytes),
+    pidsLimit: inspectionInteger(record.pidsLimit),
+    logging: { driver: inspectionString(logging.Type), options },
+    mounts,
+    networks,
+    ports,
+  }
+}
+
+function parseRealizedNetwork(value: string): HostRealizedNetwork {
+  const record = inspectionRecord(value, ['name', 'internal'])
+  return {
+    name: inspectionString(record.name),
+    internal: inspectionBoolean(record.internal),
+  }
+}
+
+function escapeDockerFilterRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function labelsFromColumns(columns: readonly string[]): Readonly<Record<string, string>> {
@@ -370,6 +556,7 @@ export function serializeHostComposePlan(plan: HostComposePlan): string {
       mem_limit: service.memory,
       networks: [...service.networks],
       pids_limit: service.pidsLimit,
+      pull_policy: 'never',
       ports: service.ports.map((port) => ({
         host_ip: port.hostIp,
         protocol: port.protocol,
@@ -449,7 +636,6 @@ export class DockerCliHostControl implements HostContainerControlPort {
   }
 
   async inventory(policy: HostContainerPolicy): Promise<readonly HostOwnedResource[]> {
-    const nameFilter = ['--filter', `name=${policy.compose.projectName}`]
     const labelFilters = Object.entries(policy.compose.labels).flatMap(([name, value]) => [
       '--filter', `label=${name}=${value}`,
     ])
@@ -461,38 +647,78 @@ export class DockerCliHostControl implements HostContainerControlPort {
     const containerFormat = `{{.ID}}\t{{.Names}}\t${labelColumns}`
     const networkFormat = `{{.ID}}\t{{.Name}}\t${labelColumns}`
     const volumeFormat = `{{.Name}}\t${labelColumns}`
-    const containersByName = await this.executeDocker(policy, [
-      '--context', policy.dockerContext,
-      'ps', '--all', ...nameFilter, '--format', containerFormat,
-    ])
+    const containerNames = Object.values(policy.compose.services)
+      .map((service) => service.containerName).sort()
+    const networkNames = Object.keys(policy.compose.networks).sort()
+    const volumeNames = Object.keys(policy.compose.volumes).sort()
+    const containersByName = await Promise.all(containerNames.map((name) => (
+      this.executeDocker(policy, [
+        '--context', policy.dockerContext,
+        'ps', '--all', '--filter',
+        `name=^/${escapeDockerFilterRegex(name)}$`, '--format', containerFormat,
+      ])
+    )))
     const containersByLabel = await this.executeDocker(policy, [
       '--context', policy.dockerContext,
       'ps', '--all', ...labelFilters, '--format', containerFormat,
     ])
-    const networksByName = await this.executeDocker(policy, [
-      '--context', policy.dockerContext,
-      'network', 'ls', ...nameFilter, '--format', networkFormat,
-    ])
+    const networksByName = await Promise.all(networkNames.map((name) => (
+      this.executeDocker(policy, [
+        '--context', policy.dockerContext,
+        'network', 'ls', '--filter',
+        `name=^${escapeDockerFilterRegex(name)}$`, '--format', networkFormat,
+      ])
+    )))
     const networksByLabel = await this.executeDocker(policy, [
       '--context', policy.dockerContext,
       'network', 'ls', ...labelFilters, '--format', networkFormat,
     ])
-    const volumesByName = await this.executeDocker(policy, [
-      '--context', policy.dockerContext,
-      'volume', 'ls', ...nameFilter, '--format', volumeFormat,
-    ])
+    const volumesByName = await Promise.all(volumeNames.map((name) => (
+      this.executeDocker(policy, [
+        '--context', policy.dockerContext,
+        'volume', 'ls', '--filter',
+        `name=^${escapeDockerFilterRegex(name)}$`, '--format', volumeFormat,
+      ])
+    )))
     const volumesByLabel = await this.executeDocker(policy, [
       '--context', policy.dockerContext,
       'volume', 'ls', ...labelFilters, '--format', volumeFormat,
     ])
     return mergeInventory(
-      parseInventory(containersByName.stdout, 'container'),
+      ...containersByName.map((result) => parseInventory(result.stdout, 'container')),
       parseInventory(containersByLabel.stdout, 'container'),
-      parseInventory(networksByName.stdout, 'network'),
+      ...networksByName.map((result) => parseInventory(result.stdout, 'network')),
       parseInventory(networksByLabel.stdout, 'network'),
-      parseInventory(volumesByName.stdout, 'volume'),
+      ...volumesByName.map((result) => parseInventory(result.stdout, 'volume')),
       parseInventory(volumesByLabel.stdout, 'volume'),
     )
+  }
+
+  async inspectResources(
+    policy: HostContainerPolicy,
+    resources: readonly HostOwnedResource[],
+  ): Promise<HostRealizedState> {
+    const containers: HostRealizedContainer[] = []
+    const networks: HostRealizedNetwork[] = []
+    for (const resource of [...resources].sort((left, right) => (
+      `${left.kind}:${left.name}`.localeCompare(`${right.kind}:${right.name}`)
+    ))) {
+      if (resource.kind === 'container') {
+        const result = await this.executeDocker(policy, [
+          '--context', policy.dockerContext,
+          'inspect', '--type', 'container', '--format',
+          CONTAINER_INSPECTION_FORMAT, resource.name,
+        ])
+        containers.push(parseRealizedContainer(result.stdout))
+      } else if (resource.kind === 'network') {
+        const result = await this.executeDocker(policy, [
+          '--context', policy.dockerContext,
+          'network', 'inspect', '--format', NETWORK_INSPECTION_FORMAT, resource.name,
+        ])
+        networks.push(parseRealizedNetwork(result.stdout))
+      }
+    }
+    return { containers, networks }
   }
 
   async apply(
@@ -501,11 +727,11 @@ export class DockerCliHostControl implements HostContainerControlPort {
     operation: HostContainerOperation,
   ): Promise<void> {
     const lifecycleArguments: Readonly<Record<HostContainerOperation, readonly string[]>> = {
-      start: ['up', '--detach', '--wait', '--remove-orphans'],
+      start: ['up', '--detach', '--wait'],
       stop: ['stop', '--timeout', '20'],
-      repair: ['up', '--detach', '--wait', '--remove-orphans', '--force-recreate'],
-      'uninstall-preserve': ['down', '--remove-orphans', '--timeout', '20'],
-      'uninstall-delete': ['down', '--remove-orphans', '--volumes', '--timeout', '20'],
+      repair: ['up', '--detach', '--wait', '--force-recreate'],
+      'uninstall-preserve': ['down', '--timeout', '20'],
+      'uninstall-delete': ['down', '--volumes', '--timeout', '20'],
     }
     const input = serializeHostComposePlan(plan)
     await this.executeCompose(policy, [

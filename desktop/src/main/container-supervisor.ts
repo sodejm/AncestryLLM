@@ -170,6 +170,57 @@ export interface HostOwnedResource {
   readonly labels: Readonly<Record<string, string>>
 }
 
+export interface HostRealizedContainerMount {
+  readonly kind: string
+  readonly source: string
+  readonly target: string
+  readonly readOnly: boolean
+}
+
+export interface HostRealizedContainerPort {
+  readonly hostIp: string
+  readonly published: number
+  readonly target: number
+  readonly protocol: string
+}
+
+export interface HostRealizedContainerLogging {
+  readonly driver: string
+  readonly options: Readonly<Record<string, string>>
+}
+
+export interface HostRealizedContainer {
+  readonly containerName: string
+  readonly image: string
+  readonly user: string
+  readonly readOnly: boolean
+  readonly capDrop: readonly string[]
+  readonly capAdd: readonly string[]
+  readonly securityOptions: readonly string[]
+  readonly init: boolean
+  readonly privileged: boolean
+  readonly deviceCount: number
+  readonly deviceRequestCount: number
+  readonly deviceCgroupRuleCount: number
+  readonly nanoCpus: number
+  readonly memoryBytes: number
+  readonly pidsLimit: number
+  readonly logging: HostRealizedContainerLogging
+  readonly mounts: readonly HostRealizedContainerMount[]
+  readonly networks: readonly string[]
+  readonly ports: readonly HostRealizedContainerPort[]
+}
+
+export interface HostRealizedNetwork {
+  readonly name: string
+  readonly internal: boolean
+}
+
+export interface HostRealizedState {
+  readonly containers: readonly HostRealizedContainer[]
+  readonly networks: readonly HostRealizedNetwork[]
+}
+
 export type HostContainerOperation =
   | 'start'
   | 'stop'
@@ -180,6 +231,10 @@ export type HostContainerOperation =
 export interface HostContainerControlPort {
   observe: (policy: HostContainerPolicy) => Promise<HostRuntimeObservation>
   inventory: (policy: HostContainerPolicy) => Promise<readonly HostOwnedResource[]>
+  inspectResources: (
+    policy: HostContainerPolicy,
+    resources: readonly HostOwnedResource[],
+  ) => Promise<HostRealizedState>
   apply: (
     policy: HostContainerPolicy,
     plan: HostComposePlan,
@@ -344,6 +399,7 @@ function parseCompose(value: unknown, runtimeProfile: string): HostComposeModel 
   if (serviceEntries.length === 0 || serviceEntries.length > 16) throw new Error('services')
   const services: Record<string, HostContainerService> = {}
   const containerNames = new Set<string>()
+  const publishedEndpoints = new Set<string>()
   for (const [serviceName, candidate] of serviceEntries) {
     if (!IDENTIFIER.test(serviceName)) throw new Error('service')
     const service = exactRecord(candidate, [
@@ -381,7 +437,7 @@ function parseCompose(value: unknown, runtimeProfile: string): HostComposeModel 
       const parsed = exactRecord(mount, ['kind', 'source', 'target', 'readOnly'])
       if (parsed.kind !== 'volume') throw new Error('mount')
       const source = requiredString(parsed.source, IDENTIFIER)
-      if (!(source in volumes)) throw new Error('mount')
+      if (!Object.hasOwn(volumes, source)) throw new Error('mount')
       const target = safeAbsolutePath(parsed.target)
       if (target === '/' || target.includes('docker.sock')) throw new Error('mount')
       return {
@@ -398,7 +454,7 @@ function parseCompose(value: unknown, runtimeProfile: string): HostComposeModel 
     ) throw new Error('mounts')
     const serviceNetworks = requiredArray(service.networks, 16).map((network) => {
       const name = requiredString(network, IDENTIFIER)
-      if (!(name in networks)) throw new Error('network')
+      if (!Object.hasOwn(networks, name)) throw new Error('network')
       return name
     })
     if (serviceNetworks.length === 0 || new Set(serviceNetworks).size !== serviceNetworks.length) {
@@ -420,6 +476,10 @@ function parseCompose(value: unknown, runtimeProfile: string): HostComposeModel 
     const targetPorts = new Set(ports.map((port) => `${port.target}/${port.protocol}`))
     if (publishedPorts.size !== ports.length || targetPorts.size !== ports.length) {
       throw new Error('ports')
+    }
+    for (const endpoint of publishedPorts) {
+      if (publishedEndpoints.has(endpoint)) throw new Error('ports')
+      publishedEndpoints.add(endpoint)
     }
     services[serviceName] = {
       containerName,
@@ -681,12 +741,12 @@ function validateInventory(
   try {
     validateClone(value)
     const resources = requiredArray(value, 256)
-    const expected = new Map<string, HostOwnedResource['kind']>()
+    const expected = new Set<string>()
     for (const service of Object.values(policy.compose.services)) {
-      expected.set(service.containerName, 'container')
+      expected.add(`container:${service.containerName}`)
     }
-    for (const name of Object.keys(policy.compose.networks)) expected.set(name, 'network')
-    for (const name of Object.keys(policy.compose.volumes)) expected.set(name, 'volume')
+    for (const name of Object.keys(policy.compose.networks)) expected.add(`network:${name}`)
+    for (const name of Object.keys(policy.compose.volumes)) expected.add(`volume:${name}`)
     const seen = new Set<string>()
     return resources.map((candidate): HostOwnedResource => {
       const record = exactRecord(candidate, ['kind', 'name', 'labels'])
@@ -694,8 +754,8 @@ function validateInventory(
         throw new Error('kind')
       }
       const name = requiredString(record.name, IDENTIFIER)
-      if (expected.get(name) !== record.kind) throw new Error('resource')
       const key = `${record.kind}:${name}`
+      if (!expected.has(key)) throw new Error('resource')
       if (seen.has(key)) throw new Error('duplicate')
       seen.add(key)
       const labels = parseLabels(record.labels, policy.runtimeProfile, policy.compose.projectName)
@@ -704,6 +764,184 @@ function validateInventory(
   } catch {
     return fail('RESOURCE_CONFLICT')
   }
+}
+
+function observationString(value: unknown): string {
+  const result = requiredString(value)
+  if (result.includes('\0') || result.includes('\n') || result.includes('\r')) {
+    throw new Error('observation string')
+  }
+  return result
+}
+
+function observationStrings(value: unknown, maximum = 128): string[] {
+  const strings = requiredArray(value, maximum).map(observationString)
+  if (new Set(strings).size !== strings.length) throw new Error('duplicate')
+  return strings.sort()
+}
+
+function observationStringRecord(value: unknown): Readonly<Record<string, string>> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype
+  ) throw new Error('record')
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 32) throw new Error('record')
+  return Object.fromEntries(entries.map(([key, candidate]): [string, string] => [
+    observationString(key), observationString(candidate),
+  ]).sort((left, right) => left[0].localeCompare(right[0])))
+}
+
+function validateRealizedResources(
+  value: unknown,
+  policy: HostContainerPolicy,
+  resources: readonly HostOwnedResource[],
+): HostRealizedState {
+  try {
+    validateClone(value)
+    const state = exactRecord(value, ['containers', 'networks'])
+    const expectedContainers = new Set(resources
+      .filter((resource) => resource.kind === 'container')
+      .map((resource) => resource.name))
+    const services = new Map(Object.values(policy.compose.services).map((service) => [
+      service.containerName, service,
+    ]))
+    const seen = new Set<string>()
+    const containers = requiredArray(state.containers, 16)
+      .map((candidate): HostRealizedContainer => {
+      const record = exactRecord(candidate, [
+        'containerName', 'image', 'user', 'readOnly', 'capDrop', 'capAdd',
+        'securityOptions', 'init', 'privileged', 'deviceCount', 'deviceRequestCount',
+        'deviceCgroupRuleCount', 'nanoCpus', 'memoryBytes', 'pidsLimit', 'logging',
+        'mounts', 'networks', 'ports',
+      ])
+      const containerName = observationString(record.containerName)
+      if (!expectedContainers.has(containerName) || seen.has(containerName)) {
+        throw new Error('container')
+      }
+      seen.add(containerName)
+      const loggingRecord = exactRecord(record.logging, ['driver', 'options'])
+      const realization: HostRealizedContainer = {
+        containerName,
+        image: observationString(record.image),
+        user: observationString(record.user),
+        readOnly: requiredBoolean(record.readOnly),
+        capDrop: observationStrings(record.capDrop, 64),
+        capAdd: observationStrings(record.capAdd, 64),
+        securityOptions: observationStrings(record.securityOptions, 64),
+        init: requiredBoolean(record.init),
+        privileged: requiredBoolean(record.privileged),
+        deviceCount: requiredInteger(record.deviceCount, 0, 128),
+        deviceRequestCount: requiredInteger(record.deviceRequestCount, 0, 128),
+        deviceCgroupRuleCount: requiredInteger(record.deviceCgroupRuleCount, 0, 128),
+        nanoCpus: requiredInteger(record.nanoCpus, 0, Number.MAX_SAFE_INTEGER),
+        memoryBytes: requiredInteger(record.memoryBytes, 0, Number.MAX_SAFE_INTEGER),
+        pidsLimit: requiredInteger(record.pidsLimit, 0, Number.MAX_SAFE_INTEGER),
+        logging: {
+          driver: observationString(loggingRecord.driver),
+          options: observationStringRecord(loggingRecord.options),
+        },
+        mounts: requiredArray(record.mounts, 32).map((mount) => {
+          const parsed = exactRecord(mount, ['kind', 'source', 'target', 'readOnly'])
+          return {
+            kind: observationString(parsed.kind),
+            source: observationString(parsed.source),
+            target: observationString(parsed.target),
+            readOnly: requiredBoolean(parsed.readOnly),
+          }
+        }).sort((left, right) => canonical(left).localeCompare(canonical(right))),
+        networks: observationStrings(record.networks, 32),
+        ports: requiredArray(record.ports, 32).map((port) => {
+          const parsed = exactRecord(port, ['hostIp', 'published', 'target', 'protocol'])
+          return {
+            hostIp: observationString(parsed.hostIp),
+            published: requiredInteger(parsed.published, 1, 65535),
+            target: requiredInteger(parsed.target, 1, 65535),
+            protocol: observationString(parsed.protocol),
+          }
+        }).sort((left, right) => canonical(left).localeCompare(canonical(right))),
+      }
+      const service = services.get(containerName)
+      if (!service) throw new Error('service')
+      const expected: HostRealizedContainer = {
+        containerName: service.containerName,
+        image: service.image,
+        user: service.user,
+        readOnly: service.readOnly,
+        capDrop: [...service.capDrop].sort(),
+        capAdd: [],
+        securityOptions: [...service.securityOptions].sort(),
+        init: service.init,
+        privileged: false,
+        deviceCount: 0,
+        deviceRequestCount: 0,
+        deviceCgroupRuleCount: 0,
+        nanoCpus: Math.round(Number(service.cpus) * 1_000_000_000),
+        memoryBytes: Number.parseInt(service.memory, 10) * 1024 * 1024,
+        pidsLimit: service.pidsLimit,
+        logging: {
+          driver: service.logging.driver,
+          options: {
+            'max-file': String(service.logging.maxFiles),
+            'max-size': service.logging.maxSize,
+          },
+        },
+        mounts: [...service.mounts]
+          .sort((left, right) => canonical(left).localeCompare(canonical(right))),
+        networks: [...service.networks].sort(),
+        ports: [...service.ports]
+          .sort((left, right) => canonical(left).localeCompare(canonical(right))),
+      }
+      if (canonical(realization) !== canonical(expected)) throw new Error('hardening')
+      return realization
+      })
+    if (seen.size !== expectedContainers.size) throw new Error('missing container')
+
+    const expectedNetworks = new Set(resources
+      .filter((resource) => resource.kind === 'network')
+      .map((resource) => resource.name))
+    const seenNetworks = new Set<string>()
+    const networks = requiredArray(state.networks, 32).map((candidate): HostRealizedNetwork => {
+      const record = exactRecord(candidate, ['name', 'internal'])
+      const name = observationString(record.name)
+      if (!expectedNetworks.has(name) || seenNetworks.has(name)) throw new Error('network')
+      seenNetworks.add(name)
+      const network: HostRealizedNetwork = {
+        name,
+        internal: requiredBoolean(record.internal),
+      }
+      const expected = policy.compose.networks[name]
+      if (expected === undefined || network.internal !== expected.internal) {
+        throw new Error('network hardening')
+      }
+      return network
+    })
+    if (seenNetworks.size !== expectedNetworks.size) throw new Error('missing network')
+    return { containers, networks }
+  } catch {
+    return fail('RESOURCE_CONFLICT')
+  }
+}
+
+function assertExpectedPostOperationResources(
+  resources: readonly HostOwnedResource[],
+  policy: HostContainerPolicy,
+  operation: HostContainerOperation,
+): void {
+  const expected = operation === 'uninstall-delete'
+    ? []
+    : operation === 'uninstall-preserve'
+      ? Object.keys(policy.compose.volumes).map((name) => `volume:${name}`)
+      : [
+          ...Object.values(policy.compose.services)
+            .map((service) => `container:${service.containerName}`),
+          ...Object.keys(policy.compose.networks).map((name) => `network:${name}`),
+          ...Object.keys(policy.compose.volumes).map((name) => `volume:${name}`),
+        ]
+  const actual = resources.map((resource) => `${resource.kind}:${resource.name}`)
+  if (canonical(actual.sort()) !== canonical(expected.sort())) fail('RESOURCE_CONFLICT')
 }
 
 type AuthorizationOperation = Exclude<HostContainerOperation, 'stop'>
@@ -819,6 +1057,7 @@ export class HostContainerSupervisor {
       }
       const state = await this.preflight()
       assertSameEndpoint(before.endpoint, state.endpoint)
+      assertExpectedPostOperationResources(state.resources, this.policy, operation)
       return this.diagnostics(operation, state)
     } finally {
       this.busy = false
@@ -837,6 +1076,13 @@ export class HostContainerSupervisor {
     }
     const runtime = validateRuntimeObservation(runtimeValue, this.policy)
     const resources = validateInventory(inventoryValue, this.policy)
+    let realizedValue: HostRealizedState
+    try {
+      realizedValue = await this.options.control.inspectResources(this.policy, resources)
+    } catch {
+      return fail('CONTROL_FAILED')
+    }
+    validateRealizedResources(realizedValue, this.policy, resources)
     const second = await this.inspectTrustedEndpoint()
     assertSameEndpoint(first, second)
     return { endpoint: second, runtime, resources }
