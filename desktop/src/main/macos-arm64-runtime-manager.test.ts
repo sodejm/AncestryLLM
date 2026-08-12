@@ -128,14 +128,35 @@ function downloader(): DownloadRuntimeFile {
   })
 }
 
-function runner(): RunHostProcess {
-  return vi.fn(async ({ arguments: args }) => ({
-    stdout: args[0] === 'status'
-      ? '{"status":"Running","arch":"aarch64","runtime":"docker"}'
-      : args[0] === '--config' && args.includes('info')
-        ? '{"OSType":"linux","Architecture":"aarch64"}'
-        : '',
-  }))
+function runner(overrides: {
+  dockerEndpoint?: string
+  engineId?: string
+} = {}): RunHostProcess {
+  return vi.fn(async ({ arguments: args, environment }) => {
+    if (args[0] === 'status') {
+      return { stdout: '{"status":"Running","arch":"aarch64","runtime":"docker"}' }
+    }
+    if (args[0] === '--config' && args.includes('context')) {
+      const endpoint = overrides.dockerEndpoint
+        ?? `unix://${join(environment.COLIMA_HOME ?? '', 'ancestryllm-local-arm64', 'docker.sock')}`
+      return {
+        stdout: JSON.stringify({
+          Name: 'colima-ancestryllm-local-arm64',
+          Endpoints: { docker: { Host: endpoint } },
+        }),
+      }
+    }
+    if (args[0] === '--config' && args.includes('info')) {
+      return {
+        stdout: JSON.stringify({
+          ID: overrides.engineId ?? '4cee4408-1234-4567-89ab-cdef01234567',
+          OSType: 'linux',
+          Architecture: 'aarch64',
+        }),
+      }
+    }
+    return { stdout: '' }
+  })
 }
 
 async function managerFixture(overrides: {
@@ -147,18 +168,21 @@ async function managerFixture(overrides: {
   temporaryRoots.push(parent)
   const rootDirectory = join(parent, 'macos-arm64-runtime')
   const runtimePolicy = policy()
+  const runtimeHost = overrides.runtimeHost ?? host()
   const runProcess = overrides.runProcess ?? runner()
   const download = overrides.download ?? downloader()
   const now = vi.fn(() => new Date('2026-08-12T12:00:00.000Z'))
   return {
     rootDirectory,
+    runtimePolicy,
+    runtimeHost,
     runProcess,
     download,
     now,
     manager: new MacosArm64RuntimeManager({
       rootDirectory,
       policy: runtimePolicy,
-      host: overrides.runtimeHost ?? host(),
+      host: runtimeHost,
       download,
       runProcess,
       now,
@@ -189,6 +213,27 @@ describe('macOS arm64 runtime manager', () => {
     expect(download).not.toHaveBeenCalled()
     expect(runProcess).not.toHaveBeenCalled()
     expect(runtimeHost.inspect).not.toHaveBeenCalled()
+  })
+
+  it('reserves the reviewed installation footprint before setup starts', async () => {
+    const download = downloader()
+    const runProcess = runner()
+    const runtimeHost = host({
+      inspect: vi.fn(async () => ({
+        macosMajor: 15,
+        virtualizationAvailable: true,
+        logicalCpus: 10,
+        totalMemoryBytes: 32 * 1024 ** 3,
+        freeBytes: 24 * 1024 ** 3 + 1,
+        existingDockerContexts: 0,
+      })),
+    })
+    const { manager } = await managerFixture({ runtimeHost, download, runProcess })
+
+    await expect(manager.preview({ schema_version: 1, operation: 'setup', offline: false }))
+      .rejects.toEqual(new MacosRuntimeError('RUNTIME_HOST_UNSUPPORTED'))
+    expect(download).not.toHaveBeenCalled()
+    expect(runProcess).not.toHaveBeenCalled()
   })
 
   it('returns a sanitized measured plan without mutating existing Docker contexts', async () => {
@@ -251,7 +296,7 @@ describe('macOS arm64 runtime manager', () => {
     const download: DownloadRuntimeFile = vi.fn(async ({ targetPath }) => {
       await writeFile(targetPath, 'corrupted')
     })
-    const { manager } = await managerFixture({ download, runProcess })
+    const { manager, rootDirectory } = await managerFixture({ download, runProcess })
     const preview = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
 
     await expect(manager.apply({
@@ -262,6 +307,51 @@ describe('macOS arm64 runtime manager', () => {
       confirmation: preview.confirmation_phrase,
     })).rejects.toEqual(new MacosRuntimeError('RUNTIME_ARTIFACT_INTEGRITY'))
     expect(runProcess).not.toHaveBeenCalled()
+    const first = policy().components[0]!
+    await expect(readFile(join(rootDirectory, 'downloads', `${first.name}.artifact.part`)))
+      .rejects.toThrow()
+  })
+
+  it('replaces a complete corrupt component partial with a fresh verified download', async () => {
+    const { manager, rootDirectory, download } = await managerFixture()
+    const first = policy().components[0]!
+    const partialPath = join(rootDirectory, 'downloads', `${first.name}.artifact.part`)
+    await mkdir(join(partialPath, '..'), { recursive: true })
+    await writeFile(partialPath, Buffer.alloc(first.artifact.sizeBytes, 0x78))
+    const preview = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: preview.plan_revision,
+      confirmation: preview.confirmation_phrase,
+    })).resolves.toMatchObject({ code: 'RUNTIME_READY' })
+    expect(download).toHaveBeenCalledWith(expect.objectContaining({
+      sourceUrl: first.artifact.url,
+      offsetBytes: 0,
+    }))
+  })
+
+  it('replaces a complete corrupt VM image partial with a fresh verified download', async () => {
+    const { manager, rootDirectory, download } = await managerFixture()
+    const image = policy().vmImage
+    const partialPath = join(rootDirectory, 'downloads', 'vm-image.artifact.part')
+    await mkdir(join(partialPath, '..'), { recursive: true })
+    await writeFile(partialPath, Buffer.alloc(image.sizeBytes, 0x78))
+    const preview = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: preview.plan_revision,
+      confirmation: preview.confirmation_phrase,
+    })).resolves.toMatchObject({ code: 'RUNTIME_READY' })
+    expect(download).toHaveBeenCalledWith(expect.objectContaining({
+      sourceUrl: image.url,
+      offsetBytes: 0,
+    }))
   })
 
   it.runIf(process.platform !== 'win32')('rejects a symlinked partial download before invoking the downloader', async () => {
@@ -386,6 +476,189 @@ describe('macOS arm64 runtime manager', () => {
     expect(download).toHaveBeenCalledWith(expect.objectContaining({ offsetBytes: 2 }))
   })
 
+  it('reports a corrupt installed VM image as component-integrity failure', async () => {
+    const { manager, rootDirectory } = await managerFixture()
+    const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+    await manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: setup.plan_revision,
+      confirmation: setup.confirmation_phrase,
+    })
+    const image = policy().vmImage
+    await writeFile(
+      join(rootDirectory, 'downloads', 'vm-image.artifact'),
+      Buffer.alloc(image.sizeBytes, 0x78),
+    )
+
+    await expect(manager.status()).resolves.toMatchObject({
+      state: 'unhealthy',
+      code: 'RUNTIME_COMPONENT_INTEGRITY',
+      vm_image: { installed: false },
+    })
+  })
+
+  it('rejects a Docker context that points outside the app-owned runtime', async () => {
+    const { manager } = await managerFixture({
+      runProcess: runner({ dockerEndpoint: 'unix:///tmp/foreign/docker.sock' }),
+    })
+    const preview = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: preview.plan_revision,
+      confirmation: preview.confirmation_phrase,
+    })).rejects.toEqual(new MacosRuntimeError('RUNTIME_HEALTH_FAILED'))
+  })
+
+  it('binds the app-owned endpoint to one Docker Engine identity', async () => {
+    const {
+      manager,
+      rootDirectory,
+      runtimePolicy,
+      runtimeHost,
+      download,
+    } = await managerFixture()
+    const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: setup.plan_revision,
+      confirmation: setup.confirmation_phrase,
+    })).resolves.toMatchObject({ code: 'RUNTIME_READY' })
+    await expect(readFile(join(rootDirectory, 'engine-identity.json'), 'utf8'))
+      .resolves.toContain('4cee4408-1234-4567-89ab-cdef01234567')
+
+    const changedManager = new MacosArm64RuntimeManager({
+      rootDirectory,
+      policy: runtimePolicy,
+      host: runtimeHost,
+      download,
+      runProcess: runner({ engineId: '8d7de275-aaaa-bbbb-cccc-0123456789ab' }),
+    })
+    await expect(changedManager.status()).resolves.toMatchObject({
+      state: 'stopped',
+      code: 'RUNTIME_STOPPED',
+    })
+    const start = await changedManager.preview({
+      schema_version: 1,
+      operation: 'start',
+      offline: true,
+    })
+    await expect(changedManager.apply({
+      schema_version: 1,
+      operation: 'start',
+      offline: true,
+      plan_revision: start.plan_revision,
+      confirmation: start.confirmation_phrase,
+    })).rejects.toEqual(new MacosRuntimeError('RUNTIME_HEALTH_FAILED'))
+  })
+
+  it('stops when an unrelated installed artifact and VM image are corrupt', async () => {
+    const { manager, rootDirectory, runProcess } = await managerFixture()
+    const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+    await manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: setup.plan_revision,
+      confirmation: setup.confirmation_phrase,
+    })
+    await writeFile(join(rootDirectory, 'tools', 'bin', 'docker'), 'corrupt')
+    await writeFile(join(rootDirectory, 'downloads', 'vm-image.artifact'), 'corrupt')
+    const stop = await manager.preview({ schema_version: 1, operation: 'stop', offline: true })
+    vi.mocked(runProcess).mockClear()
+
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'stop',
+      offline: true,
+      plan_revision: stop.plan_revision,
+      confirmation: stop.confirmation_phrase,
+    })).resolves.toMatchObject({ state: 'stopped', code: 'RUNTIME_STOPPED' })
+    expect(runProcess).toHaveBeenCalledWith(expect.objectContaining({
+      arguments: ['stop', '--profile', 'ancestryllm-local-arm64'],
+    }))
+  })
+
+  it('allows lifecycle cleanup after a policy digest changes', async () => {
+    const { manager, rootDirectory, runProcess } = await managerFixture()
+    const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+    await manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: setup.plan_revision,
+      confirmation: setup.confirmation_phrase,
+    })
+    const markerPath = join(rootDirectory, 'ownership.json')
+    const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
+    await writeFile(markerPath, JSON.stringify({ ...marker, policy_sha256: '0'.repeat(64) }))
+    const stop = await manager.preview({ schema_version: 1, operation: 'stop', offline: true })
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'stop',
+      offline: true,
+      plan_revision: stop.plan_revision,
+      confirmation: stop.confirmation_phrase,
+    })).resolves.toMatchObject({ code: 'RUNTIME_STOPPED' })
+
+    const remove = await manager.preview({
+      schema_version: 1,
+      operation: 'uninstall-preserve',
+      offline: true,
+    })
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'uninstall-preserve',
+      offline: true,
+      plan_revision: remove.plan_revision,
+      confirmation: remove.confirmation_phrase,
+    })).resolves.toMatchObject({ code: 'RUNTIME_REMOVED' })
+    expect(runProcess).toHaveBeenCalledWith(expect.objectContaining({
+      arguments: ['delete', '--profile', 'ancestryllm-local-arm64', '--force'],
+    }))
+  })
+
+  it('preserves ownership and VM state when verified Colima is unavailable for uninstall', async () => {
+    const { manager, rootDirectory, runProcess } = await managerFixture()
+    const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
+    await manager.apply({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: setup.plan_revision,
+      confirmation: setup.confirmation_phrase,
+    })
+    const colimaPath = join(rootDirectory, 'tools', 'bin', 'colima')
+    await writeFile(colimaPath, 'corrupt')
+    const remove = await manager.preview({
+      schema_version: 1,
+      operation: 'uninstall-preserve',
+      offline: true,
+    })
+    vi.mocked(runProcess).mockClear()
+
+    await expect(manager.apply({
+      schema_version: 1,
+      operation: 'uninstall-preserve',
+      offline: true,
+      plan_revision: remove.plan_revision,
+      confirmation: remove.confirmation_phrase,
+    })).rejects.toEqual(new MacosRuntimeError('RUNTIME_COMPONENT_INTEGRITY'))
+    await expect(readFile(join(rootDirectory, 'ownership.json'), 'utf8')).resolves.toContain(
+      'ancestryllm-local-arm64',
+    )
+    await expect(readFile(colimaPath, 'utf8')).resolves.toBe('corrupt')
+    expect(runProcess).not.toHaveBeenCalledWith(expect.objectContaining({
+      arguments: ['delete', '--profile', 'ancestryllm-local-arm64', '--force'],
+    }))
+  })
+
   it('uninstalls the app-owned runtime while preserving app data and the offline cache', async () => {
     const { manager, rootDirectory, runProcess } = await managerFixture()
     const setup = await manager.preview({ schema_version: 1, operation: 'setup', offline: false })
@@ -419,6 +692,7 @@ describe('macOS arm64 runtime manager', () => {
     await expect(readFile(cachePath)).resolves.toEqual(cacheBytes)
     await expect(readFile(join(rootDirectory, 'tools', 'bin', 'colima'))).rejects.toThrow()
     await expect(readFile(join(rootDirectory, 'ownership.json'))).rejects.toThrow()
+    await expect(readFile(join(rootDirectory, 'engine-identity.json'))).rejects.toThrow()
     expect(runProcess).toHaveBeenCalledWith(expect.objectContaining({
       arguments: ['delete', '--profile', 'ancestryllm-local-arm64', '--force'],
     }))

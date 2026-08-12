@@ -756,6 +756,8 @@ describe('accessible desktop shell', () => {
     const base = createMockAncestryBridge('success')
     const getCapabilities = vi.fn(base.getCapabilities)
     const updatePreferences = vi.fn(base.updatePreferences)
+    const previewLocalRuntime = vi.fn(base.previewLocalRuntime)
+    const applyLocalRuntime = vi.fn(base.applyLocalRuntime)
     const degraded = {
       ok: true,
       protocolVersion: '1',
@@ -787,6 +789,8 @@ describe('accessible desktop shell', () => {
       getCapabilities,
       getStartupDiagnostics: vi.fn().mockResolvedValue(degraded),
       updatePreferences,
+      previewLocalRuntime,
+      applyLocalRuntime,
     }
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
 
@@ -802,7 +806,15 @@ describe('accessible desktop shell', () => {
 
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByText('Settings are read-only while startup diagnostics are degraded.')).toBeVisible()
-    expect(screen.getByRole('region', { name: 'Local container runtime' })).toBeVisible()
+    const runtime = screen.getByRole('region', { name: 'Local container runtime' })
+    expect(runtime).toBeVisible()
+    expect(within(runtime).getByRole('combobox', { name: 'Operation' })).toBeDisabled()
+    expect(within(runtime).getByRole('checkbox', { name: 'Use downloaded files only' })).toBeDisabled()
+    const review = within(runtime).getByRole('button', { name: 'Review setup' })
+    expect(review).toBeDisabled()
+    await userEvent.click(review)
+    expect(previewLocalRuntime).not.toHaveBeenCalled()
+    expect(applyLocalRuntime).not.toHaveBeenCalled()
     expect(screen.queryByRole('heading', { name: 'Application settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Credentials' })).not.toBeInTheDocument()
   })

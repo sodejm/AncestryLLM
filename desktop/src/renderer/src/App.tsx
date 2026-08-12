@@ -645,7 +645,7 @@ const localRuntimeStateLabel = (state: string): string => state
   .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
   .join(' ')
 
-function LocalRuntimeSettingsPanel() {
+function LocalRuntimeSettingsPanel({ mutationsAllowed }: Readonly<{ mutationsAllowed: boolean }>) {
   const status = useQuery({
     queryKey: ['local-runtime-status'],
     queryFn: () => ancestryBridge().getLocalRuntimeStatus(),
@@ -670,7 +670,7 @@ function LocalRuntimeSettingsPanel() {
   }
 
   const review = async () => {
-    if (pending) return
+    if (!mutationsAllowed || pending) return
     setPending('preview')
     setFailure(null)
     setPreview(null)
@@ -691,7 +691,12 @@ function LocalRuntimeSettingsPanel() {
   }
 
   const apply = async () => {
-    if (!preview || pending || confirmation !== preview.confirmation_phrase) return
+    if (
+      !mutationsAllowed
+      || !preview
+      || pending
+      || confirmation !== preview.confirmation_phrase
+    ) return
     setPending('apply')
     setFailure(null)
     try {
@@ -741,7 +746,7 @@ function LocalRuntimeSettingsPanel() {
       <select
         id="local-runtime-operation"
         value={operation}
-        disabled={pending !== null}
+        disabled={!mutationsAllowed || pending !== null}
         onChange={(event) => {
           setOperation(event.currentTarget.value as LocalRuntimeOperation)
           resetReview()
@@ -753,7 +758,7 @@ function LocalRuntimeSettingsPanel() {
         <input
           type="checkbox"
           checked={offline}
-          disabled={pending !== null}
+          disabled={!mutationsAllowed || pending !== null}
           onChange={(event) => {
             setOffline(event.currentTarget.checked)
             resetReview()
@@ -762,7 +767,12 @@ function LocalRuntimeSettingsPanel() {
         <span>Use downloaded files only</span>
       </label>
       <p className="setting-help">Offline mode fails closed unless every reviewed artifact is already cached and still matches its digest.</p>
-      <Button type="button" variant="quiet" disabled={pending !== null} onClick={() => { void review() }}>
+      <Button
+        type="button"
+        variant="quiet"
+        disabled={!mutationsAllowed || pending !== null}
+        onClick={() => { void review() }}
+      >
         {pending === 'preview' ? 'Reviewing…' : `Review ${operation}`}
       </Button>
     </div>
@@ -805,12 +815,16 @@ function LocalRuntimeSettingsPanel() {
         value={confirmation}
         autoComplete="off"
         spellCheck={false}
-        disabled={pending !== null}
+        disabled={!mutationsAllowed || pending !== null}
         onChange={(event) => { setConfirmation(event.currentTarget.value) }}
       />
       <Button
         type="button"
-        disabled={pending !== null || confirmation !== preview.confirmation_phrase}
+        disabled={
+          !mutationsAllowed
+          || pending !== null
+          || confirmation !== preview.confirmation_phrase
+        }
         onClick={() => { void apply() }}
       >
         {pending === 'apply' ? 'Applying…' : `Apply ${preview.operation}`}
@@ -1285,7 +1299,7 @@ function Shell() {
           </div>
         </div>}
         {!startupAllowsMutations && !startup.isPending && <p className="context-note">Settings are read-only while startup diagnostics are degraded.</p>}
-        <LocalRuntimeSettingsPanel />
+        <LocalRuntimeSettingsPanel mutationsAllowed={startupAllowsMutations} />
         {startupAllowsMutations && <div className="settings-stack">
           <section className="settings-panel" aria-labelledby="general-settings-title">
             <h2 id="general-settings-title">General</h2>

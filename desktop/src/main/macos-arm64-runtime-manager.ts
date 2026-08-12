@@ -45,7 +45,9 @@ const GIB = 1024 ** 3
 const PROCESS_TIMEOUT_MS = 5 * 60 * 1000
 const PROCESS_OUTPUT_BYTES = 256 * 1024
 const MARKER_FILE = 'ownership.json'
+const ENGINE_IDENTITY_FILE = 'engine-identity.json'
 const RECEIPT_FILE = 'verification-receipt.json'
+const INSTALLATION_OVERHEAD_BYTES = 64 * 1024 ** 2
 
 export type MacosRuntimeOperation = LocalRuntimeOperation
 
@@ -139,7 +141,41 @@ interface OwnershipMarker {
 type OwnershipState =
   | Readonly<{ readonly kind: 'missing' }>
   | Readonly<{ readonly kind: 'invalid' }>
-  | Readonly<{ readonly kind: 'valid'; readonly marker: OwnershipMarker }>
+  | Readonly<{
+    readonly kind: 'valid'
+    readonly marker: OwnershipMarker
+    readonly currentPolicy: boolean
+  }>
+
+interface EngineIdentity {
+  readonly schema_version: 1
+  readonly policy_sha256: string
+  readonly profile: string
+  readonly context: string
+  readonly endpoint: string
+  readonly engine_id: string
+}
+
+type EngineIdentityState =
+  | Readonly<{ readonly kind: 'missing' }>
+  | Readonly<{ readonly kind: 'invalid' }>
+  | Readonly<{ readonly kind: 'valid'; readonly identity: EngineIdentity }>
+
+interface RuntimeIntegrity {
+  readonly components: MacosRuntimeStatus['components']
+  readonly vmImageInstalled: boolean
+}
+
+interface RuntimeStatusSnapshot {
+  readonly status: MacosRuntimeStatus
+  readonly inspection: MacosRuntimeHostInspection
+  readonly integrity: RuntimeIntegrity
+  readonly ownership: OwnershipState
+}
+
+interface RuntimePreviewSnapshot extends RuntimeStatusSnapshot {
+  readonly preview: MacosRuntimePreview
+}
 
 const ACTIONS: Readonly<Record<MacosRuntimeOperation, readonly string[]>> = {
   setup: [
@@ -423,13 +459,31 @@ function supported(
   hostPort: MacosRuntimeHost,
   inspection: MacosRuntimeHostInspection,
 ): boolean {
+  return hostCapable(policy, hostPort, inspection)
+    && inspection.freeBytes >= policy.target.minimumFreeGib * GIB
+}
+
+function hostCapable(
+  policy: MacosArm64RuntimePolicy,
+  hostPort: MacosRuntimeHost,
+  inspection: MacosRuntimeHostInspection,
+): boolean {
   return hostPort.platform === policy.target.platform
     && hostPort.architecture === policy.target.architecture
     && inspection.macosMajor >= policy.target.minimumMacosMajor
     && inspection.virtualizationAvailable
     && inspection.logicalCpus >= policy.resources.minimumCpus
     && inspection.totalMemoryBytes >= policy.resources.minimumMemoryGib * GIB
-    && inspection.freeBytes >= policy.target.minimumFreeGib * GIB
+}
+
+function installationFootprint(policy: MacosArm64RuntimePolicy): number {
+  return INSTALLATION_OVERHEAD_BYTES
+    + policy.vmImage.sizeBytes
+    + policy.components.reduce((total, component) => total
+      + component.artifact.sizeBytes
+      + component.license.sizeBytes
+      + component.license.sizeBytes
+      + component.artifact.install.reduce((installed, entry) => installed + entry.sizeBytes, 0), 0)
 }
 
 function statusHost(
@@ -457,13 +511,52 @@ function parseOwnership(value: unknown, policy: MacosArm64RuntimePolicy): Owners
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return undefined
   if (
     input.schema_version !== 1
-    || input.policy_sha256 !== runtimePolicyDigest(policy)
+    || typeof input.policy_sha256 !== 'string'
+    || !/^[0-9a-f]{64}$/.test(input.policy_sha256)
     || input.profile !== policy.ownership.profile
     || input.context !== policy.ownership.context
     || typeof input.installed_at !== 'string'
     || Number.isNaN(Date.parse(input.installed_at))
   ) return undefined
   return input as unknown as OwnershipMarker
+}
+
+function validEngineId(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 256) return false
+  return [...value].every((character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint !== undefined && codePoint >= 0x20 && codePoint !== 0x7f
+  })
+}
+
+function parseEngineIdentity(
+  value: unknown,
+  policy: MacosArm64RuntimePolicy,
+  endpoint: string,
+): EngineIdentity | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const keys = Object.keys(input).sort()
+  const expected = [
+    'context',
+    'endpoint',
+    'engine_id',
+    'policy_sha256',
+    'profile',
+    'schema_version',
+  ].sort()
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    return undefined
+  }
+  if (
+    input.schema_version !== 1
+    || input.policy_sha256 !== runtimePolicyDigest(policy)
+    || input.profile !== policy.ownership.profile
+    || input.context !== policy.ownership.context
+    || input.endpoint !== endpoint
+    || !validEngineId(input.engine_id)
+  ) return undefined
+  return input as unknown as EngineIdentity
 }
 
 function allowedRedirect(source: URL, destination: URL): boolean {
@@ -686,7 +779,8 @@ export class MacosArm64RuntimeManager {
     const request = parseApplyRequest(value)
     return this.serialized(async () => {
       requireActive(signal)
-      const preview = await this.createPreview(request, signal)
+      const previewSnapshot = await this.createPreviewSnapshot(request, signal)
+      const { preview } = previewSnapshot
       if (preview.plan_revision !== request.plan_revision) runtimeFail('RUNTIME_PLAN_STALE')
       if (preview.confirmation_phrase !== request.confirmation) {
         runtimeFail('RUNTIME_CONFIRMATION_REQUIRED')
@@ -695,22 +789,40 @@ export class MacosArm64RuntimeManager {
         case 'setup':
         case 'repair':
           await this.install(request.offline, signal)
-          await this.startRuntime(signal)
-          await this.verifyHealth(signal)
+          {
+            const integrity = await this.inspectIntegrity(signal)
+            const ownership = await this.readOwnership(signal)
+            await this.startRuntime(integrity, ownership, signal)
+            await this.verifyHealth(integrity, ownership, true, signal)
+          }
           await this.writeReceipt(request.operation, signal)
           return { schema_version: 1, operation: request.operation, state: 'ready', code: 'RUNTIME_READY' }
         case 'start':
-          await this.requireInstalled(signal)
-          await this.startRuntime(signal)
-          await this.verifyHealth(signal)
+          this.requireInstalled(previewSnapshot.integrity, previewSnapshot.ownership)
+          await this.startRuntime(
+            previewSnapshot.integrity,
+            previewSnapshot.ownership,
+            signal,
+          )
+          await this.verifyHealth(
+            previewSnapshot.integrity,
+            previewSnapshot.ownership,
+            false,
+            signal,
+          )
           return { schema_version: 1, operation: request.operation, state: 'ready', code: 'RUNTIME_READY' }
         case 'stop':
-          await this.requireInstalled(signal)
+          this.requireLifecycleInstalled(previewSnapshot.integrity, previewSnapshot.ownership)
           await this.runColima(['stop', '--profile', this.policy.ownership.profile], signal)
           return { schema_version: 1, operation: request.operation, state: 'stopped', code: 'RUNTIME_STOPPED' }
         case 'uninstall-preserve':
         case 'uninstall-delete':
-          await this.uninstall(request.operation === 'uninstall-delete', signal)
+          await this.uninstall(
+            request.operation === 'uninstall-delete',
+            previewSnapshot.integrity,
+            previewSnapshot.ownership,
+            signal,
+          )
           return { schema_version: 1, operation: request.operation, state: 'not-installed', code: 'RUNTIME_REMOVED' }
       }
     }, signal)
@@ -727,6 +839,22 @@ export class MacosArm64RuntimeManager {
   }
 
   private async inspectStatus(signal?: AbortSignal): Promise<MacosRuntimeStatus> {
+    return (await this.inspectStatusSnapshot(signal)).status
+  }
+
+  private async inspectIntegrity(signal?: AbortSignal): Promise<RuntimeIntegrity> {
+    const components = await Promise.all(this.policy.components.map(async (component) => ({
+      name: component.name,
+      version: component.version,
+      installed: await this.componentInstalled(component, signal),
+    })))
+    return {
+      components,
+      vmImageInstalled: await this.vmImageInstalled(signal),
+    }
+  }
+
+  private async inspectStatusSnapshot(signal?: AbortSignal): Promise<RuntimeStatusSnapshot> {
     requireActive(signal)
     const inspection = this.host.platform === this.policy.target.platform
       && this.host.architecture === this.policy.target.architecture
@@ -740,11 +868,7 @@ export class MacosArm64RuntimeManager {
           existingDockerContexts: 0,
         }
     const isSupported = supported(this.policy, this.host, inspection)
-    const installed = await Promise.all(this.policy.components.map(async (component) => ({
-      name: component.name,
-      version: component.version,
-      installed: await this.componentInstalled(component, signal),
-    })))
+    const integrity = await this.inspectIntegrity(signal)
     const ownership = await this.readOwnership(signal)
     let state: MacosRuntimeStatus['state'] = 'not-installed'
     let code = 'RUNTIME_NOT_INSTALLED'
@@ -752,47 +876,72 @@ export class MacosArm64RuntimeManager {
       state = 'unhealthy'
       code = 'RUNTIME_OWNERSHIP_INVALID'
     } else if (ownership.kind === 'valid') {
-      if (installed.every((component) => component.installed)) {
+      if (
+        ownership.currentPolicy
+        && integrity.components.every((component) => component.installed)
+        && integrity.vmImageInstalled
+      ) {
         try {
-          await this.verifyHealth(signal)
+          await this.verifyHealth(integrity, ownership, false, signal)
           state = 'ready'
           code = 'RUNTIME_READY'
-        } catch {
+        } catch (error) {
           requireActive(signal)
-          state = 'stopped'
-          code = 'RUNTIME_STOPPED'
+          if (
+            error instanceof MacosRuntimeError
+            && error.code === 'RUNTIME_COMPONENT_INTEGRITY'
+          ) {
+            state = 'unhealthy'
+            code = 'RUNTIME_COMPONENT_INTEGRITY'
+          } else {
+            state = 'stopped'
+            code = 'RUNTIME_STOPPED'
+          }
         }
       } else {
         state = 'unhealthy'
         code = 'RUNTIME_COMPONENT_INTEGRITY'
       }
     }
-    return {
+    const status: MacosRuntimeStatus = {
       schema_version: 1,
       state,
       code,
       supported: isSupported,
       host: statusHost(this.policy, this.host, inspection),
       allocation: allocation(this.policy, inspection),
-      components: installed,
+      components: integrity.components,
       vm_image: {
         version: this.policy.vmImage.version,
-        installed: await this.vmImageInstalled(signal),
+        installed: integrity.vmImageInstalled,
       },
     }
+    return { status, inspection, integrity, ownership }
   }
 
   private async createPreview(
     request: RuntimeRequest,
     signal?: AbortSignal,
   ): Promise<MacosRuntimePreview> {
-    const status = await this.inspectStatus(signal)
-    if (
-      !status.supported
-      && (request.operation === 'setup'
-        || request.operation === 'start'
-        || request.operation === 'repair')
-    ) runtimeFail('RUNTIME_HOST_UNSUPPORTED')
+    return (await this.createPreviewSnapshot(request, signal)).preview
+  }
+
+  private async createPreviewSnapshot(
+    request: RuntimeRequest,
+    signal?: AbortSignal,
+  ): Promise<RuntimePreviewSnapshot> {
+    const snapshot = await this.inspectStatusSnapshot(signal)
+    const { status, inspection } = snapshot
+    if (request.operation === 'setup' || request.operation === 'repair') {
+      const requiredFreeBytes = this.policy.target.minimumFreeGib * GIB
+        + installationFootprint(this.policy)
+      if (
+        !hostCapable(this.policy, this.host, inspection)
+        || inspection.freeBytes < requiredFreeBytes
+      ) runtimeFail('RUNTIME_HOST_UNSUPPORTED')
+    } else if (request.operation === 'start' && !status.supported) {
+      runtimeFail('RUNTIME_HOST_UNSUPPORTED')
+    }
     const review: MacosRuntimePreview['review'] = {
       artifacts: this.policy.components.map((component) => ({
         name: component.name,
@@ -836,7 +985,7 @@ export class MacosArm64RuntimeManager {
       status,
       review,
     }
-    return {
+    const preview: MacosRuntimePreview = {
       schema_version: 1,
       operation: request.operation,
       offline: request.offline,
@@ -848,6 +997,7 @@ export class MacosArm64RuntimeManager {
       status,
       review,
     }
+    return { ...snapshot, preview }
   }
 
   private async ensureRoot(signal?: AbortSignal): Promise<void> {
@@ -873,12 +1023,17 @@ export class MacosArm64RuntimeManager {
     const cached = await verifiedBytes(finalPath, item.sizeBytes, item.sha256)
     if (cached !== undefined) return cached
 
-    const offset = await partialDownloadOffset(partPath, item.sizeBytes)
+    let offset = await partialDownloadOffset(partPath, item.sizeBytes)
     if (offset === item.sizeBytes) {
       const complete = await verifiedBytes(partPath, item.sizeBytes, item.sha256)
-      if (complete === undefined) runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
-      await rename(partPath, finalPath)
-      return complete
+      if (complete !== undefined) {
+        await rename(partPath, finalPath)
+        return complete
+      }
+      if (offline) runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
+      requireActive(signal)
+      await rm(partPath, { force: true })
+      offset = 0
     }
     if (offline) runtimeFail('RUNTIME_OFFLINE_UNAVAILABLE')
     await this.download({
@@ -890,7 +1045,10 @@ export class MacosArm64RuntimeManager {
     })
     requireActive(signal)
     const complete = await verifiedBytes(partPath, item.sizeBytes, item.sha256)
-    if (complete === undefined) runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
+    if (complete === undefined) {
+      await rm(partPath, { force: true })
+      runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
+    }
     await rename(partPath, finalPath)
     return complete
   }
@@ -952,6 +1110,7 @@ export class MacosArm64RuntimeManager {
       installed_at: this.now().toISOString(),
     }
     await atomicJson(join(this.root, MARKER_FILE), marker)
+    await rm(join(this.root, ENGINE_IDENTITY_FILE), { force: true })
   }
 
   private async installBinary(
@@ -1010,21 +1169,39 @@ export class MacosArm64RuntimeManager {
     try {
       requireActive(signal)
       const marker = parseOwnership(JSON.parse(await readFile(markerPath, 'utf8')), this.policy)
-      return marker === undefined ? { kind: 'invalid' } : { kind: 'valid', marker }
+      return marker === undefined
+        ? { kind: 'invalid' }
+        : {
+            kind: 'valid',
+            marker,
+            currentPolicy: marker.policy_sha256 === runtimePolicyDigest(this.policy),
+          }
     } catch {
       requireActive(signal)
       return { kind: 'invalid' }
     }
   }
 
-  private async requireInstalled(signal?: AbortSignal): Promise<void> {
-    const ownership = await this.readOwnership(signal)
+  private requireInstalled(integrity: RuntimeIntegrity, ownership: OwnershipState): void {
     if (ownership.kind === 'missing') runtimeFail('RUNTIME_NOT_INSTALLED')
     if (ownership.kind === 'invalid') runtimeFail('RUNTIME_OWNERSHIP_INVALID')
-    for (const component of this.policy.components) {
-      if (!await this.componentInstalled(component, signal)) runtimeFail('RUNTIME_COMPONENT_INTEGRITY')
+    if (!ownership.currentPolicy) runtimeFail('RUNTIME_COMPONENT_INTEGRITY')
+    if (
+      !integrity.components.every((component) => component.installed)
+      || !integrity.vmImageInstalled
+    ) runtimeFail('RUNTIME_COMPONENT_INTEGRITY')
+  }
+
+  private requireLifecycleInstalled(
+    integrity: RuntimeIntegrity,
+    ownership: OwnershipState,
+  ): void {
+    if (ownership.kind === 'missing') runtimeFail('RUNTIME_NOT_INSTALLED')
+    if (ownership.kind === 'invalid') runtimeFail('RUNTIME_OWNERSHIP_INVALID')
+    for (const name of ['colima', 'lima']) {
+      const component = integrity.components.find((candidate) => candidate.name === name)
+      if (component?.installed !== true) runtimeFail('RUNTIME_COMPONENT_INTEGRITY')
     }
-    if (!await this.vmImageInstalled(signal)) runtimeFail('RUNTIME_COMPONENT_INTEGRITY')
   }
 
   private async acquireVmImage(
@@ -1037,13 +1214,16 @@ export class MacosArm64RuntimeManager {
     const partPath = `${finalPath}.part`
     if (await verifiedFile(finalPath, image.sizeBytes, image.sha256, image.sha512)) return
 
-    const offset = await partialDownloadOffset(partPath, image.sizeBytes)
+    let offset = await partialDownloadOffset(partPath, image.sizeBytes)
     if (offset === image.sizeBytes) {
-      if (!await verifiedFile(partPath, image.sizeBytes, image.sha256, image.sha512)) {
-        runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
+      if (await verifiedFile(partPath, image.sizeBytes, image.sha256, image.sha512)) {
+        await rename(partPath, finalPath)
+        return
       }
-      await rename(partPath, finalPath)
-      return
+      if (offline) runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
+      requireActive(signal)
+      await rm(partPath, { force: true })
+      offset = 0
     }
     if (offline) runtimeFail('RUNTIME_OFFLINE_UNAVAILABLE')
     await this.download({
@@ -1055,6 +1235,7 @@ export class MacosArm64RuntimeManager {
     })
     requireActive(signal)
     if (!await verifiedFile(partPath, image.sizeBytes, image.sha256, image.sha512)) {
+      await rm(partPath, { force: true })
       runtimeFail('RUNTIME_ARTIFACT_INTEGRITY')
     }
     await rename(partPath, finalPath)
@@ -1107,8 +1288,12 @@ export class MacosArm64RuntimeManager {
     return this.process(join(this.root, 'tools', 'bin', 'colima'), arguments_, signal)
   }
 
-  private async startRuntime(signal?: AbortSignal): Promise<void> {
-    await this.requireInstalled(signal)
+  private async startRuntime(
+    integrity: RuntimeIntegrity,
+    ownership: OwnershipState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    this.requireInstalled(integrity, ownership)
     const inspection = await this.host.inspect(signal)
     if (!supported(this.policy, this.host, inspection)) runtimeFail('RUNTIME_HOST_UNSUPPORTED')
     const selected = allocation(this.policy, inspection)
@@ -1134,8 +1319,45 @@ export class MacosArm64RuntimeManager {
     ], signal)
   }
 
-  private async verifyHealth(signal?: AbortSignal): Promise<void> {
-    await this.requireInstalled(signal)
+  private expectedEngineEndpoint(): string {
+    return `unix://${join(
+      this.root,
+      'colima',
+      this.policy.ownership.profile,
+      'docker.sock',
+    )}`
+  }
+
+  private async readEngineIdentity(signal?: AbortSignal): Promise<EngineIdentityState> {
+    requireActive(signal)
+    const identityPath = join(this.root, ENGINE_IDENTITY_FILE)
+    const identityStatus = await lstat(identityPath).catch((error: unknown) => {
+      if (missing(error)) return undefined
+      throw error
+    })
+    if (identityStatus === undefined) return { kind: 'missing' }
+    if (!identityStatus.isFile() || identityStatus.isSymbolicLink()) return { kind: 'invalid' }
+    try {
+      requireActive(signal)
+      const identity = parseEngineIdentity(
+        JSON.parse(await readFile(identityPath, 'utf8')),
+        this.policy,
+        this.expectedEngineEndpoint(),
+      )
+      return identity === undefined ? { kind: 'invalid' } : { kind: 'valid', identity }
+    } catch {
+      requireActive(signal)
+      return { kind: 'invalid' }
+    }
+  }
+
+  private async verifyHealth(
+    integrity: RuntimeIntegrity,
+    ownership: OwnershipState,
+    bindEngineIdentity: boolean,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    this.requireInstalled(integrity, ownership)
     try {
       const colima = await this.runColima([
         'status',
@@ -1149,17 +1371,59 @@ export class MacosArm64RuntimeManager {
         || colimaStatus.runtime !== 'docker'
       ) runtimeFail('RUNTIME_HEALTH_FAILED')
 
-      const docker = await this.process(join(this.root, 'tools', 'bin', 'docker'), [
-        '--config', join(this.root, 'tools', 'docker-config'),
+      const dockerPath = join(this.root, 'tools', 'bin', 'docker')
+      const dockerConfig = join(this.root, 'tools', 'docker-config')
+      const dockerContext = await this.process(dockerPath, [
+        '--config', dockerConfig,
+        'context',
+        'inspect',
+        this.policy.ownership.context,
+        '--format', '{{json .}}',
+      ], signal)
+      const context = JSON.parse(dockerContext.stdout) as Record<string, unknown>
+      const endpoints = context.Endpoints
+      const dockerEndpoint = typeof endpoints === 'object' && endpoints !== null
+        ? (endpoints as Record<string, unknown>).docker
+        : undefined
+      const endpoint = typeof dockerEndpoint === 'object' && dockerEndpoint !== null
+        ? (dockerEndpoint as Record<string, unknown>).Host
+        : undefined
+      const expectedEndpoint = this.expectedEngineEndpoint()
+      if (
+        context.Name !== this.policy.ownership.context
+        || endpoint !== expectedEndpoint
+      ) runtimeFail('RUNTIME_HEALTH_FAILED')
+
+      const docker = await this.process(dockerPath, [
+        '--config', dockerConfig,
         '--context', this.policy.ownership.context,
         'info',
         '--format', '{{json .}}',
       ], signal)
       const engine = JSON.parse(docker.stdout) as Record<string, unknown>
       if (
-        engine.OSType !== 'linux'
+        !validEngineId(engine.ID)
+        || engine.OSType !== 'linux'
         || (engine.Architecture !== 'aarch64' && engine.Architecture !== 'arm64')
       ) runtimeFail('RUNTIME_HEALTH_FAILED')
+      const engineIdentity = await this.readEngineIdentity(signal)
+      if (engineIdentity.kind === 'invalid') runtimeFail('RUNTIME_HEALTH_FAILED')
+      if (engineIdentity.kind === 'missing') {
+        if (!bindEngineIdentity) runtimeFail('RUNTIME_HEALTH_FAILED')
+        await atomicJson(join(this.root, ENGINE_IDENTITY_FILE), {
+          schema_version: 1,
+          policy_sha256: runtimePolicyDigest(this.policy),
+          profile: this.policy.ownership.profile,
+          context: this.policy.ownership.context,
+          endpoint: expectedEndpoint,
+          engine_id: engine.ID,
+        } satisfies EngineIdentity)
+      } else if (
+        engineIdentity.identity.engine_id !== engine.ID
+        || engineIdentity.identity.endpoint !== endpoint
+      ) {
+        runtimeFail('RUNTIME_HEALTH_FAILED')
+      }
     } catch (error) {
       requireActive(signal)
       if (error instanceof MacosRuntimeError && error.code === 'RUNTIME_COMPONENT_INTEGRITY') throw error
@@ -1167,16 +1431,18 @@ export class MacosArm64RuntimeManager {
     }
   }
 
-  private async uninstall(deleteData: boolean, signal?: AbortSignal): Promise<void> {
-    if ((await this.readOwnership(signal)).kind !== 'valid') runtimeFail('RUNTIME_OWNERSHIP_INVALID')
-    const colima = this.policy.components.find((component) => component.name === 'colima')
-    if (colima !== undefined && await this.componentInstalled(colima, signal)) {
-      await this.runColima([
-        'delete',
-        '--profile', this.policy.ownership.profile,
-        '--force',
-      ], signal)
-    }
+  private async uninstall(
+    deleteData: boolean,
+    integrity: RuntimeIntegrity,
+    ownership: OwnershipState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    this.requireLifecycleInstalled(integrity, ownership)
+    await this.runColima([
+      'delete',
+      '--profile', this.policy.ownership.profile,
+      '--force',
+    ], signal)
     for (const child of [
       'tools',
       'home',
@@ -1184,6 +1450,7 @@ export class MacosArm64RuntimeManager {
       'lima',
       'receipts',
       RECEIPT_FILE,
+      ENGINE_IDENTITY_FILE,
     ]) {
       requireActive(signal)
       await rm(join(this.root, child), { recursive: true, force: true })
