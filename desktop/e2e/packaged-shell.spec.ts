@@ -14,6 +14,7 @@ import {
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
+import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { withinDeadline } from './packaged-deadline'
 
@@ -32,18 +33,6 @@ const fileGrantOpenPath = process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH
 const fileGrantSavePath = process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH
 const fileGrantEvidencePath = process.env.ANCESTRYLLM_FILE_GRANT_EVIDENCE
 const execFileAsync = promisify(execFile)
-
-const bridgeMethods = [
-  'getAppInfo',
-  'getCapabilities',
-  'getPreferences',
-  'getStartupDiagnostics',
-  'requestOpenFileGrant',
-  'requestSaveFileGrant',
-  'retrySidecar',
-  'revokeFileGrant',
-  'updatePreferences',
-]
 
 type LaunchResult = Readonly<{
   browser: Browser
@@ -881,7 +870,7 @@ async function expectAccessibleShell(page: Page): Promise<void> {
   ])
 
   await page.getByRole('link', { name: 'Settings' }).press('Enter')
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeFocused()
   const theme = page.getByRole('group', { name: 'Theme' })
   await expect(theme.getByRole('radio')).toHaveCount(3)
   await theme.getByRole('radio', { name: 'dark' }).click()
@@ -948,7 +937,7 @@ async function expectAccessibleShell(page: Page): Promise<void> {
   })
   try {
     await expect.poll(() => page.evaluate(() => ({
-      viewport: document.documentElement.clientWidth,
+      viewport: window.innerWidth,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }))).toEqual({ viewport: 360, overflow: 0 })
     await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible()

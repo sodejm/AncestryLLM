@@ -6,23 +6,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
-
-const bridgeMethods = [
-  'deleteSecret',
-  'getAppInfo',
-  'getCapabilities',
-  'getPreferences',
-  'getSecretStatus',
-  'getSettings',
-  'getStartupDiagnostics',
-  'requestOpenFileGrant',
-  'requestSaveFileGrant',
-  'retrySidecar',
-  'revokeFileGrant',
-  'setSecret',
-  'updatePreferences',
-  'updateSettings',
-]
+import { bridgeMethods } from './bridge-contract'
 
 async function launchShell(fixture: 'success' | 'degraded' = 'success') {
   return electron.launch({
