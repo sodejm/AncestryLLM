@@ -9,7 +9,11 @@ import {
   type LocalRuntimeStatus,
 } from '../shared-contract/desktop'
 import type { LocalRuntimeControlPort } from './local-runtime-control'
-import { isLocalRuntimeCliRequest, runLocalRuntimeCli } from './local-runtime-cli'
+import {
+  isLocalRuntimeCliRequest,
+  runLocalRuntimeCli,
+  writeConcurrentLocalRuntimeCliFailure,
+} from './local-runtime-cli'
 
 const statusResult = Object.freeze({
   ok: true,
@@ -43,6 +47,22 @@ function control(): LocalRuntimeControlPort {
 }
 
 describe('local runtime command interface', () => {
+  it('writes one stable sanitized failure when another app process owns the runtime', () => {
+    const write = vi.fn()
+
+    expect(writeConcurrentLocalRuntimeCliFailure(write)).toBe(1)
+    expect(write).toHaveBeenCalledOnce()
+    expect(JSON.parse(write.mock.calls[0]?.[0] as string)).toEqual({
+      ok: false,
+      protocolVersion: DESKTOP_PROTOCOL_VERSION,
+      error: {
+        code: 'BRIDGE_OVERLOADED',
+        message: 'Another AncestryLLM process currently owns local runtime access.',
+        remediation: 'Wait for that process to finish, then try the command again.',
+      },
+    })
+  })
+
   it('detects the explicit command marker without treating ordinary app arguments as commands', () => {
     expect(isLocalRuntimeCliRequest(['/path/to/app', '--local-runtime', 'status'])).toBe(true)
     expect(isLocalRuntimeCliRequest(['--inspect', 'status'])).toBe(false)

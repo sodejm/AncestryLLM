@@ -1,5 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
-import { installSingleInstanceGuard } from './single-instance'
+import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
+
+describe('acquireSingleInstanceLock', () => {
+  it('lets a non-GUI caller handle a rejected lock without quitting Electron', () => {
+    const onSecondInstance = vi.fn()
+
+    expect(acquireSingleInstanceLock({
+      requestLock: () => false,
+      onSecondInstance,
+      primaryWindow: () => undefined,
+    })).toBe(false)
+    expect(onSecondInstance).not.toHaveBeenCalled()
+  })
+})
 
 describe('installSingleInstanceGuard', () => {
   it('quits a secondary process without registering second-instance handling', () => {

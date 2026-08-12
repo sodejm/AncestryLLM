@@ -312,6 +312,12 @@ AncestryLLM --local-runtime apply setup --offline --plan-revision \
   <64-lowercase-hex-plan-revision> --confirm 'SET UP LOCAL RUNTIME'
 ```
 
+The desktop UI and noninteractive commands share one process lock so separate
+processes cannot race over the same application-owned runtime. A command started
+while another AncestryLLM process holds that lock exits with code 1 and the stable
+sanitized code `BRIDGE_OVERLOADED`; wait for the active process to finish and
+retry.
+
 Replace `setup` and its phrase with any operation from the table. `--offline`
 forbids network access and succeeds only when every required artifact is
 already complete and reverified. Without that flag, interrupted transfers use

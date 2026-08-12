@@ -468,7 +468,7 @@ function parseTar(archive: Buffer): readonly TarMember[] {
     validateTarChecksum(header)
     const baseName = tarString(header, 0, 100)
     const prefix = tarString(header, 345, 155)
-    const name = tarMemberPath(prefix === '' ? baseName : `${prefix}/${baseName}`)
+    const archiveName = prefix === '' ? baseName : `${prefix}/${baseName}`
     const size = tarOctal(header, 124, 12)
     const typeByte = header[156]
     if (typeByte === undefined) fail('RUNTIME_ARCHIVE_INVALID')
@@ -479,8 +479,12 @@ function parseTar(archive: Buffer): readonly TarMember[] {
     if (type !== '2' && linkTarget !== '') fail('RUNTIME_ARCHIVE_INVALID')
     if (offset + size > tar.length) fail('RUNTIME_ARCHIVE_INVALID')
     const bytes = Buffer.from(tar.subarray(offset, offset + size))
-    members.push({ name, type, linkTarget, bytes })
     offset += Math.ceil(size / 512) * 512
+    if (archiveName === '.' || archiveName === './') {
+      if (type !== '5') fail('RUNTIME_ARCHIVE_UNSAFE_MEMBER')
+      continue
+    }
+    members.push({ name: tarMemberPath(archiveName), type, linkTarget, bytes })
   }
   if (zeroBlocks !== 2 || offset > tar.length) fail('RUNTIME_ARCHIVE_INVALID')
   if (tar.subarray(offset).some((byte) => byte !== 0)) fail('RUNTIME_ARCHIVE_INVALID')

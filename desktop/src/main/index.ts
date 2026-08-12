@@ -17,7 +17,11 @@ import {
   type DesktopIpcController,
   type MainDesktopBridge,
 } from './ipc-handlers'
-import { isLocalRuntimeCliRequest, runLocalRuntimeCli } from './local-runtime-cli'
+import {
+  isLocalRuntimeCliRequest,
+  runLocalRuntimeCli,
+  writeConcurrentLocalRuntimeCliFailure,
+} from './local-runtime-cli'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
@@ -31,19 +35,21 @@ import {
 import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
-import { installSingleInstanceGuard } from './single-instance'
+import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
 import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
 
 app.enableSandbox()
 const localRuntimeCliArguments = process.argv.slice(1)
 const localRuntimeCliRequested = isLocalRuntimeCliRequest(localRuntimeCliArguments)
-const primaryInstance = localRuntimeCliRequested || installSingleInstanceGuard({
+const singleInstanceDependencies = {
   requestLock: () => app.requestSingleInstanceLock(),
-  quit: () => app.quit(),
-  onSecondInstance: (listener) => { app.on('second-instance', listener) },
+  onSecondInstance: (listener: () => void) => { app.on('second-instance', listener) },
   primaryWindow: () => BrowserWindow.getAllWindows()[0],
-})
+}
+const primaryInstance = localRuntimeCliRequested
+  ? acquireSingleInstanceLock(singleInstanceDependencies)
+  : installSingleInstanceGuard({ ...singleInstanceDependencies, quit: () => app.quit() })
 if (primaryInstance && !localRuntimeCliRequested) {
   protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
 }
@@ -148,7 +154,9 @@ function createWindow(): void {
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 
-if (localRuntimeCliRequested) {
+if (localRuntimeCliRequested && !primaryInstance) {
+  app.exit(writeConcurrentLocalRuntimeCliFailure((line) => process.stdout.write(line)))
+} else if (localRuntimeCliRequested) {
   void app.whenReady().then(async () => {
     const code = await runLocalRuntimeCli(
       localRuntimeCliArguments,

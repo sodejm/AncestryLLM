@@ -42,6 +42,16 @@ const internalError = (): BridgeResult<never> => Object.freeze({
   }),
 })
 
+const concurrentProcessError = (): BridgeResult<never> => Object.freeze({
+  ok: false,
+  protocolVersion: DESKTOP_PROTOCOL_VERSION,
+  error: Object.freeze({
+    code: 'BRIDGE_OVERLOADED',
+    message: 'Another AncestryLLM process currently owns local runtime access.',
+    remediation: 'Wait for that process to finish, then try the command again.',
+  }),
+})
+
 function commandArguments(arguments_: readonly string[]): readonly string[] {
   const markerIndexes = arguments_.flatMap((value, index) => value === commandMarker ? [index] : [])
   if (markerIndexes.length !== 1) throw new Error('Invalid command marker')
@@ -112,6 +122,11 @@ function parseCommand(arguments_: readonly string[]): LocalRuntimeCliRequest {
 
 export function isLocalRuntimeCliRequest(arguments_: readonly string[]): boolean {
   return arguments_.includes(commandMarker)
+}
+
+export function writeConcurrentLocalRuntimeCliFailure(write: (line: string) => void): number {
+  write(`${JSON.stringify(concurrentProcessError())}\n`)
+  return 1
 }
 
 export async function runLocalRuntimeCli(

@@ -219,6 +219,52 @@ describe('macOS arm64 runtime policy', () => {
 })
 
 describe('reviewed runtime archives', () => {
+  it.each(['.', './'])('accepts the harmless %j root directory entry emitted by tar', async (archiveName) => {
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-runtime-archive-'))
+    temporaryRoots.push(root)
+    const output = join(root, 'output')
+    await mkdir(output)
+    const payload = Buffer.from('verified limactl')
+
+    await extractReviewedTarGzip(
+      tarGzip([
+        { name: archiveName, body: Buffer.alloc(0), type: '5' },
+        { name: './bin/limactl', body: payload },
+      ]),
+      [{
+        sourcePath: 'bin/limactl',
+        installPath: 'bin/limactl',
+        sha256: digest(payload),
+        sizeBytes: payload.length,
+        executable: true,
+      }],
+      [],
+      output,
+    )
+
+    expect(await readFile(join(output, 'bin/limactl'))).toEqual(payload)
+  })
+
+  it('rejects a root archive entry unless it is an empty directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-runtime-archive-'))
+    temporaryRoots.push(root)
+    const output = join(root, 'output')
+    await mkdir(output)
+
+    await expect(extractReviewedTarGzip(
+      tarGzip([{ name: '.', body: Buffer.from('unsafe'), type: '0' }]),
+      [{
+        sourcePath: 'bin/limactl',
+        installPath: 'bin/limactl',
+        sha256: digest('unsafe'),
+        sizeBytes: 6,
+        executable: true,
+      }],
+      [],
+      output,
+    )).rejects.toMatchObject({ code: 'RUNTIME_ARCHIVE_UNSAFE_MEMBER' })
+  })
+
   it('extracts only reviewed regular files with matching payload hashes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-runtime-archive-'))
     temporaryRoots.push(root)
