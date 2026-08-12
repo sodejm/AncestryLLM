@@ -92,6 +92,16 @@ scope, privacy impact, threat-model changes, migration impact, and exact test
 evidence. Do not commit real GEDCOM, RootsMagic, database, backup, report, log,
 prompt/response, secrets, or person details; use clearly fictional fixtures.
 
+Changes to the OCI or Compose topology also run `make container-policy` and
+the focused container contract tests. Native lifecycle evidence must be
+produced on a matching Linux architecture: CI builds and runs both gateway and
+worker images independently on hosted Linux amd64 and arm64 runners without
+QEMU. An emulated build is useful for development but is not native-platform
+release evidence. The checked-in topology is validation-only until its
+separate authentication and encrypted-persistence dependencies ship; do not
+add application routes, provider access, writable genealogy data, published
+ports, host paths, secrets, or schema migrations while that boundary remains.
+
 Releases follow [the release runbook](docs/RELEASING.md). Never publish from a
 workstation, use a long-lived package-index token, move a published tag, or
 bypass required checks.

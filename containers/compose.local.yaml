@@ -1,0 +1,16 @@
+{
+  "services": {
+    "gateway": {
+      "cpus": 2.0,
+      "mem_limit": "4g",
+      "pids_limit": 256,
+      "labels": {"org.ancestryllm.deployment-profile": "local-desktop"}
+    },
+    "worker": {
+      "cpus": 2.0,
+      "mem_limit": "4g",
+      "pids_limit": 256,
+      "labels": {"org.ancestryllm.deployment-profile": "local-desktop"}
+    }
+  }
+}

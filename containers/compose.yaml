@@ -1,0 +1,95 @@
+{
+  "name": "ancestryllm",
+  "x-ancestryllm-schema-version": 1,
+  "services": {
+    "gateway": {
+      "image": "${ANCESTRYLLM_GATEWAY_IMAGE:?Set a digest-qualified gateway image}",
+      "platform": "${ANCESTRYLLM_PLATFORM:?Set linux/amd64 or linux/arm64}",
+      "pull_policy": "never",
+      "user": "65532:65532",
+      "read_only": true,
+      "init": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=65532,gid=65532",
+        "/run/ancestryllm:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65532,gid=65532"
+      ],
+      "volumes": ["ancestryllm-data:/var/lib/ancestryllm:ro"],
+      "networks": ["control"],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ancestryllm/bin/python", "-m", "ancestryllm.container_healthcheck"],
+        "interval": "10s",
+        "timeout": "3s",
+        "start_period": "10s",
+        "retries": 6
+      },
+      "restart": "no",
+      "stop_signal": "SIGTERM",
+      "stop_grace_period": "20s",
+      "cpus": 2.0,
+      "mem_limit": "4g",
+      "pids_limit": 256,
+      "logging": {
+        "driver": "local",
+        "options": {"max-size": "20m", "max-file": "5"}
+      },
+      "labels": {
+        "org.ancestryllm.component": "gateway",
+        "org.ancestryllm.managed": "true"
+      }
+    },
+    "worker": {
+      "image": "${ANCESTRYLLM_WORKER_IMAGE:?Set a digest-qualified worker image}",
+      "platform": "${ANCESTRYLLM_PLATFORM:?Set linux/amd64 or linux/arm64}",
+      "pull_policy": "never",
+      "profiles": ["worker"],
+      "user": "65532:65532",
+      "read_only": true,
+      "init": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=65532,gid=65532",
+        "/run/ancestryllm:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65532,gid=65532"
+      ],
+      "volumes": ["ancestryllm-data:/var/lib/ancestryllm:ro"],
+      "networks": ["control"],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ancestryllm/bin/python", "-m", "ancestryllm.container_healthcheck", "--worker"],
+        "interval": "10s",
+        "timeout": "3s",
+        "start_period": "5s",
+        "retries": 6
+      },
+      "restart": "no",
+      "stop_signal": "SIGTERM",
+      "stop_grace_period": "20s",
+      "cpus": 2.0,
+      "mem_limit": "4g",
+      "pids_limit": 256,
+      "logging": {
+        "driver": "local",
+        "options": {"max-size": "20m", "max-file": "5"}
+      },
+      "labels": {
+        "org.ancestryllm.component": "worker",
+        "org.ancestryllm.managed": "true"
+      }
+    }
+  },
+  "networks": {
+    "control": {
+      "name": "ancestryllm-control",
+      "internal": true,
+      "attachable": false,
+      "labels": {"org.ancestryllm.managed": "true"}
+    }
+  },
+  "volumes": {
+    "ancestryllm-data": {
+      "name": "ancestryllm-data",
+      "labels": {"org.ancestryllm.managed": "true"}
+    }
+  }
+}

@@ -39,6 +39,13 @@ through their secret manager. The bootstrap uses that credential only with the
 policy-pinned, hash-verified GitHub CLI and never delegates verification to an
 executable found on `PATH`.
 
+`make container-policy` validates the production Dockerfile, base Compose
+topology, and both overlays without starting Docker. It rejects mutable image
+references, unsupported architectures, extra services, unsafe mounts,
+published ports, privilege, missing resource/log limits, and any topology that
+would activate schema migrations before Issue #351. Use it for fast local
+feedback alongside the focused container contract tests.
+
 ## Locked environment profiles
 
 The complete `uv.lock` covers every application extra and repository tool
@@ -111,11 +118,22 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
+
+The container matrix uses `ubuntu-24.04` for amd64 and
+`ubuntu-24.04-arm` for arm64. Each row builds the gateway and optional worker
+for the runner's native architecture, resolves their exact local image
+digests, and runs the lifecycle harness against those digests. The harness
+checks hardened realized state, readiness, crash visibility, graceful stop,
+version/build skew rejection, read-only and disk-full behavior, the explicit
+schema-migration block, and a complete Python and Debian package/license
+inventory. Sanitized schema-v1 lifecycle and inventory JSON are retained as
+normal CI artifacts. Both native rows must complete; a missing architecture,
+interrupted run, or emulated substitute is incomplete rather than passing.
 
 ## Version 1 security dependency governance
 

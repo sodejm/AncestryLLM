@@ -38,7 +38,12 @@ backup workflow.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts later
 container and advanced remote runtimes. Their backup commands and runbooks are
-not implemented or supported yet.
+not implemented or supported yet. Issue #349's Compose topology includes an
+application-owned named volume only as a read-only persistence placeholder. It
+does not initialize a database, run a migration, broker a key, back up, restore,
+or write genealogy data. Those operations remain fail-closed until Issue #351
+provides the separately reviewed encrypted-volume and recovery contract; the
+local CLI workflow above remains authoritative in the meantime.
 
 Before either profile can ship, its release evidence must demonstrate all of
 the following:

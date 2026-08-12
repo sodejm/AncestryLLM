@@ -1,0 +1,16 @@
+{
+  "services": {
+    "gateway": {
+      "cpus": 4.0,
+      "mem_limit": "8g",
+      "pids_limit": 512,
+      "labels": {"org.ancestryllm.deployment-profile": "host-remote"}
+    },
+    "worker": {
+      "cpus": 4.0,
+      "mem_limit": "8g",
+      "pids_limit": 512,
+      "labels": {"org.ancestryllm.deployment-profile": "host-remote"}
+    }
+  }
+}

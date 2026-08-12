@@ -1,6 +1,6 @@
 # ADR-0026: Local-first container and advanced remote deployment profiles
 
-- Status: Accepted architecture; profile control, host control, and macOS arm64 runtime-tool management implemented; application-runtime gates remain open
+- Status: Accepted architecture; profile control, host control, macOS arm64 runtime-tool management, and probe-only OCI topology implemented; application-runtime gates remain open
 - Date: 2026-08-09
 - Decision owner: AncestryLLM maintainer
 - Supersedes: no prior ADR
@@ -25,10 +25,14 @@ and owned-resource reconciliation. Issue #348 adds a narrow status, review, and
 apply surface for policy-bound acquisition and lifecycle of an app-owned macOS
 arm64 Colima/Lima and Docker tool substrate. No Docker socket, executable,
 arbitrary command, or ambient context crosses into the renderer or a container,
-and the manager remains disconnected from application images, profile
-activation, secret brokering, and genealogy services. The current release still
-has no supported application container, LAN, public, browser, or remote
-application runtime. Each non-local profile remains
+and the manager remains disconnected from profile activation, secret brokering,
+and genealogy services. Issue #349 adds production-shaped gateway and worker
+images plus a two-service Compose model strictly for probe and lifecycle
+validation. That topology exposes only authenticated health and capability
+probes, publishes no host port, loads no provider or genealogy workload, keeps
+the placeholder data volume read-only, and disables schema migration. The
+current release still has no supported workload-capable application container,
+LAN, public, browser, or remote application runtime. Each non-local profile remains
 unavailable until its linked issues, threat-model gates, native-platform
 evidence, operator documentation, and release decision pass. In particular,
 accepting Host Remote does not make the current internal API public and does
@@ -79,6 +83,24 @@ or a supervisor bridge. Issue #348 uses this boundary to select, verify,
 install, and manage only the app-owned macOS arm64 runtime-tool substrate. It
 does not render an application image, broker secrets, grant family-tree
 sources, migrate storage, activate a profile, or expose an application route.
+
+Issue #349 establishes the first production-shaped OCI and Compose validation
+surface without activating a deployment profile. The gateway and optional
+worker images share a minimal locked application environment, run as UID 65532,
+use read-only roots, drop all capabilities, forbid privilege escalation, and
+apply explicit CPU, memory, PID, log, startup, and shutdown bounds. The Compose
+model permits exactly one internal network, one read-only named data volume,
+and memory-backed runtime state. It publishes no host port and admits no host
+path, Docker socket, provider credential, genealogy record, database
+initialization, or migration command. The gateway's only routes are
+authenticated health and capability probes; the worker is dormant unless its
+validation profile is explicitly selected. Native Linux amd64 and arm64 builds
+exercise exact image digests without QEMU and produce a closed schema-v1
+inventory of every Python and Debian runtime package, version, architecture,
+license identity, and copyright digest. This is evidence for the image and
+topology shell only. Issues #350 and #351 still own workload authentication,
+secret delivery, writable encrypted storage, migrations, and application
+activation; #353 owns publication provenance.
 
 The native macOS arm64 evidence record exercises the #363 subset against an
 isolated Colima profile and app-owned context, including start, stop, repair,
@@ -377,7 +399,8 @@ risk blocks the affected gate.
 | #101 | Electron Main is the only renderer-host authority; use the existing typed bridge and application contracts. | Open implementation dependency. |
 | #102 | Reusable supervision, one active backend, bounded readiness/recovery, no renderer/container Docker socket. | Open lifecycle dependency. |
 | #363 | Electron Main is the sole Docker authority; endpoint, Engine, plan, and owned-resource identity fail closed around bounded lifecycle operations. | Host-control foundation and one native macOS arm64 evidence row implemented. |
-| #348 | Verified macOS arm64 Colima/Lima and Docker-tool acquisition, app-owned lifecycle, consent, recovery, and removal remain inside fixed Main-owned contracts. | Runtime-tool substrate implemented; application images, profile activation, and target-matched packaged release evidence remain open. |
+| #348 | Verified macOS arm64 Colima/Lima and Docker-tool acquisition, app-owned lifecycle, consent, recovery, and removal remain inside fixed Main-owned contracts. | Runtime-tool substrate implemented; workload activation and target-matched packaged release evidence remain open. |
+| #349 | Minimal multi-architecture OCI services and a closed Compose topology preserve least privilege, private networking, bounded resources, native execution, and complete package/license inventory. | Probe-only native Linux amd64/arm64 image and lifecycle evidence implemented; workload activation, secrets, writable data, migrations, and complete G5/G7 evidence remain open. |
 | #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Closed source-level secret foundation; runtime broker evidence remains open. |
 | #107 | Local convenience still authenticates traffic; Host Remote needs explicit TLS, identity, authorization, enrollment, and recovery. | Open authentication dependency. |
 | #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Source and packaged settings flow implemented; provider execution and target-matched network evidence remain #110/#131. |
@@ -416,5 +439,5 @@ domain behavior.
 The cost is a larger native-platform test matrix, a privileged host supervisor,
 operator-facing lifecycle and recovery work, runtime/license maintenance, and
 substantial remote identity and ingress assurance. Until those costs are paid
-and independently reviewed, no container or remote application runtime
+and independently reviewed, no workload-capable container or remote application runtime
 described here is supported or shipped.

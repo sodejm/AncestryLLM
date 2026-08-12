@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from ancestryllm.api.contracts import (
     API_BUILD_HEADER,
@@ -71,12 +71,15 @@ class _RoutePolicy:
     accepts_json: bool = False
 
 
-def _route_policy(path: str) -> _RoutePolicy | None:
+def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePolicy | None:
     if path in {
         f"{API_NAMESPACE}/health",
         f"{API_NAMESPACE}/capabilities",
-        f"{API_NAMESPACE}/startup-diagnostics",
     }:
+        return _RoutePolicy("GET")
+    if surface == "probe":
+        return None
+    if path == f"{API_NAMESPACE}/startup-diagnostics":
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/settings":
         return _RoutePolicy("PATCH", accepts_json=True)
@@ -147,7 +150,11 @@ def _authenticate(headers: dict[bytes, list[bytes]], settings: ApiSettings) -> N
         )
 
 
-def _validate_request(scope: Scope, settings: ApiSettings) -> _RoutePolicy:
+def _validate_request(
+    scope: Scope,
+    settings: ApiSettings,
+    surface: Literal["control", "probe"],
+) -> _RoutePolicy:
     headers = _header_map(scope)
     _authenticate(headers, settings)
 
@@ -176,7 +183,7 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> _RoutePolicy:
         )
 
     path = cast("str", scope.get("path", ""))
-    policy = _route_policy(path)
+    policy = _route_policy(path, surface)
     if policy is None:
         raise request_error(
             404, "ROUTE_UNAVAILABLE", "The requested internal API route is unavailable."
@@ -292,9 +299,16 @@ async def _buffer_bounded_body(receive: Receive, *, maximum_bytes: int) -> Recei
 
 
 class InternalApiMiddleware:
-    def __init__(self, app: ASGIApp, *, settings: ApiSettings) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        settings: ApiSettings,
+        surface: Literal["control", "probe"] = "control",
+    ) -> None:
         self._app = app
         self._settings = settings
+        self._surface = surface
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -306,7 +320,7 @@ class InternalApiMiddleware:
         state["correlation_ref"] = correlation_ref
         secured_send = self._secured_send(send, correlation_ref)
         try:
-            policy = _validate_request(scope, self._settings)
+            policy = _validate_request(scope, self._settings, self._surface)
             if policy.accepts_json:
                 receive = await _buffer_bounded_body(
                     receive,

@@ -213,3 +213,32 @@ ownership, confirmation, or host check.
 The full implementation boundary and the native macOS arm64 evidence limits
 are documented in the
 [published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-control-and-macos-arm64-runtime-tools).
+
+## Probe-only OCI validation failures
+
+Issue #349 adds a validation-only gateway and optional worker topology; it is
+not a supported deployment or an application-data recovery path. Run the
+offline structural gate first:
+
+```console
+make container-policy
+```
+
+`CONTAINER_DOCKERFILE_INVALID`, `CONTAINER_IMAGE_REFERENCE_INVALID`, and
+`CONTAINER_PLATFORM_UNSUPPORTED` indicate a closed policy or build-platform
+violation. `CONTAINER_RUNTIME_*`, `CONTAINER_HEALTHCHECK_*`, and
+`CONTAINER_INVENTORY_*` codes identify a malformed probe configuration,
+readiness failure, unsafe peer identity, or incomplete package/license
+inventory. Lifecycle evidence may also report a stable Docker, architecture,
+hardening, startup, shutdown, crash, log-redaction, read-only, or disk-full
+failure code. The reports contain structural facts only and omit container
+output, environment values, credentials, host details, and local paths.
+
+Do not recover by publishing a port, weakening the non-root/read-only policy,
+mounting a host path or Docker socket, accepting a mutable tag, enabling a
+restart loop, or bypassing image/platform identity. Rebuild on the matching
+native Linux amd64 or arm64 runner and resolve the first stable failure. The
+gateway intentionally exposes only authenticated health and capability probes
+inside the private Compose network. Application routes, secret delivery,
+writable persistence, database initialization, and schema migrations remain
+blocked until Issues #350 and #351 provide their reviewed contracts.

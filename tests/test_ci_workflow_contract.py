@@ -28,6 +28,7 @@ GOVERNED_JOB_TIMEOUTS = {
         "package": 20,
         "install-smoke": 20,
         "sdist-smoke": 20,
+        "container": 40,
         "workflow-audit": 20,
         "timeout-proof-exercise": 1,
         "timeout-proof-evidence": 5,
@@ -182,7 +183,7 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
 
     assert "name: lockfile consistency" in lockfile_job
     assert "make lock-check" in lockfile_job
-    for job in ("test", "quality", "security", "package", "workflow-audit"):
+    for job in ("test", "quality", "security", "package", "container", "workflow-audit"):
         assert "lockfile" in _job(workflow, job).split("runs-on:", maxsplit=1)[0]
 
 
@@ -200,6 +201,7 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
         "package",
         "install-smoke",
         "sdist-smoke",
+        "container",
         "workflow-audit",
     ):
         assert f"      - {dependency}\n" in gate

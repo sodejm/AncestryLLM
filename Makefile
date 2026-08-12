@@ -18,10 +18,10 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
 export UV_PYTHON := $(PYTHON)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
 
 desktop-install:
 	@pnpm --dir desktop install --frozen-lockfile
@@ -102,6 +102,11 @@ package: verified-uv
 
 evaluate-uv-build: verified-uv
 	@$(UV_BIN) run --locked --group build python scripts/evaluate_uv_build.py --uv $(UV_BIN) --report $(UV_BUILD_REPORT)
+
+container-policy: system-python
+	@mkdir -p build/container-policy
+	@$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.local.yaml --dockerfile containers/Dockerfile --output build/container-policy/local.json
+	@$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.remote.yaml --dockerfile containers/Dockerfile --output build/container-policy/remote.json
 
 workflow-audit: verified-uv
 	@$(UV_BIN) run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions

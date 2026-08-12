@@ -37,10 +37,15 @@ GEDCOM and RootsMagic files, the SQLCipher workspace and OS credential store,
 generated local artifacts, configuration, and explicitly selected local or
 remote LLM providers.
 
-FastAPI and Electron development foundations exist in Unreleased source, but
-no browser, public/LAN, container, remote, or multi-user application runtime is
-supported. Issue #363's Electron-Main-only Docker-control foundation is
-deliberately unwired and starts no genealogy workload. Plugins, automatic
+FastAPI and Electron development foundations exist in Unreleased source.
+Issue #349 also supplies production-shaped gateway and worker images plus a
+two-service Compose topology, but that topology is validation-only: it exposes
+only authenticated health and capability probes, publishes no host port,
+loads no provider or genealogy workload, mounts no host path, and keeps its
+placeholder data volume read-only. It is not a supported browser, public/LAN,
+remote, multi-user, or workload-capable application runtime. Secret delivery,
+writable persistence, schema migration, profile activation, and authenticated
+application routes remain blocked on their owning issues. Plugins, automatic
 updating, and vector retrieval also remain unimplemented. Roadmap controls in
 [the threat model](docs/THREAT_MODEL.md) are design requirements unless their
 owning issue has produced the named evidence; partial foundation evidence is
@@ -158,6 +163,22 @@ remaining risk for workload identity, secrets, genealogy data, migration,
 backup/recovery, resource exhaustion, other native platforms, packaged
 integration, or independent G5/G7 review.
 
+Issue #349's probe-only OCI topology adds a stricter validation boundary around
+the future workload. The gateway and optional worker run as UID 65532 with
+read-only roots, all capabilities dropped, `no-new-privileges`, bounded CPU,
+memory, PIDs, logs, and graceful shutdown. Compose admits only an internal
+network, one read-only named data volume, and memory-backed runtime state; it
+publishes no host port and mounts neither a host path nor the Docker socket.
+Native Linux amd64 and arm64 CI builds exercise the exact built digests without
+emulation. Lifecycle evidence covers crash visibility, version and build skew,
+read-only and disk-full failures, bounded shutdown, and stable privacy-safe
+errors. A schema-v1 runtime inventory records every installed Python and Debian
+package with version, architecture, reviewed license identity, and copyright
+digest. These controls do not authenticate a real workload, deliver secrets,
+enable data writes or migrations, prove registry provenance, or make the
+topology supported for application use; those residual controls remain owned
+by #350, #351, #353, #364, and #365.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;
@@ -166,6 +187,9 @@ Current limitations that must not be credited as controls include:
 - RootsMagic schema and live-file coverage are intentionally incomplete;
 - GEDCOM interoperability still needs importer smoke evidence for supported
   Ancestry, Geni, and MyHeritage workflows; and
+- the Issue #349 container topology remains a probe-only validation shell with
+  no application workload, secret delivery, writable persistence, or schema
+  migration; and
 - several GEDCOM synchronization and recovery paths need broader end-to-end
   evidence.
 
