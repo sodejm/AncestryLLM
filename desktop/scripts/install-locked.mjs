@@ -1,3 +1,8 @@
+/**
+ * Installs the frozen desktop dependency graph, rebuilds Electron, and verifies
+ * that the locked runtime is executable. Any install, rebuild, or verification
+ * failure is propagated without invoking an unverified fallback executable.
+ */
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 

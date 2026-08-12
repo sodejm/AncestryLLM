@@ -1,3 +1,8 @@
+/**
+ * Verifies that the locked Electron package resolves to an installed runtime
+ * executable after the repository-controlled rebuild step. The script performs
+ * no download and exits with a stable failure message when validation fails.
+ */
 import { statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 

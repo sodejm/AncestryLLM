@@ -46,6 +46,12 @@ EXEC_CONFIG_EXTENSIONS: Final = frozenset({".graphql", ".yml", ".yaml", ".toml"}
 GENERATED_VENDOR_NAMES: Final = frozenset({"uv.lock", "pnpm-lock.yaml"})
 GENERATED_VENDOR_EXTENSIONS: Final = frozenset({".lock"})
 
+# Exact reviewed vendor patch inputs. Patch syntax has no portable file-header
+# comment form, so each artifact is allowlisted by path instead of admitting all
+# ``.patch`` files. Its behavior and integrity pin are documented beside the
+# desktop dependency-install contract.
+GENERATED_VENDOR_PATHS: Final = frozenset({"desktop/patches/electron@39.8.10.patch"})
+
 # Extensions that identify test-data fixtures — excluded from documentation
 # requirements but must be classified.
 TEST_DATA_FIXTURE_EXTENSIONS: Final = frozenset({".ged", ".gedcom", ".gitkeep"})
@@ -156,6 +162,8 @@ GENERATED_VENDOR_PATH_PREFIXES: Final = (
 
 def _is_generated_vendor(rel: str) -> bool:
     """Return True when *rel* identifies a generated or vendored file."""
+    if rel in GENERATED_VENDOR_PATHS:
+        return True
     if any(rel.startswith(p) for p in GENERATED_VENDOR_PATH_PREFIXES):
         return True
     basename = Path(rel).name
