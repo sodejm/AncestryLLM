@@ -4,6 +4,16 @@ This directory contains the UI-only Electron adapter and the packaged control-si
 
 The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
+Unreleased Issue #106 adds the reusable, responsive presentation shell for the
+0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
+`AsyncState`, `CodedErrorView`, and dialog-focus contracts provide persistent
+navigation, a workspace header, context help, deterministic keyboard focus,
+and plain-language loading, empty, offline, degraded, error, success, and
+permission-denied states. These components do not call the bridge, network,
+filesystem, sidecar, or Electron APIs and do not grant capabilities or decide
+service policy. Development and review use only the versioned bridge plus
+fictional fixtures.
+
 Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
 The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
@@ -19,13 +29,63 @@ pnpm --dir desktop install --frozen-lockfile
 make desktop-check
 make desktop-e2e
 make desktop-security
+pnpm --dir desktop test:accessibility
+pnpm --dir desktop test:visual
 ```
 
-`desktop-check` runs lint, separated main/preload/renderer type checks, unit tests, and a source-map-free build inspection. `desktop-e2e` builds the production renderer and launches it in Electron with a deterministic fictional mock bridge; it is not an installer or literal packaged-executable test. `desktop-security` runs the high-severity dependency audit, source secret scan, produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory package after verifying the native sidecar resource, and inspects the resulting `app.asar`, eight packaged Electron fuses, and supported ASAR-integrity metadata. Local and ordinary CI builds remain unsigned verification inputs. Full production/trusted signing is deferred until v1.0.0: project-produced `0.x` release installers and annotated release tags must be unsigned. The tag release uses `electron-builder.release.yml` only after exact-head gates pass; it builds the four manual-installer rows documented in the [release runbook](../docs/RELEASING.md), then binds their declared signing mode, checksums, SBOMs, evidence, and provenance before publication. No updater feed, background update, staged rollout, or automatic rollback is configured.
+`desktop-check` runs lint, separated main/preload/renderer type checks, unit
+tests, the presentation-boundary contract, and a source-map-free build
+inspection. `desktop-e2e` builds the production renderer and launches it in
+Electron with a deterministic fictional mock bridge; it is not an installer
+or literal packaged-executable test. `test:accessibility` scans every shell
+route in light, dark, and high-contrast modes with the exact locked `axe-core`
+version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
+200% zoom for horizontal clipping. Neither command replaces the manual
+screen-reader review in the [desktop shell guide](../docs/DESKTOP_SHELL.md).
+`desktop-security` runs the high-severity dependency audit, source secret scan,
+produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
+package after verifying the native sidecar resource, and inspects the resulting
+`app.asar`, eight packaged Electron fuses, and supported ASAR-integrity
+metadata. Local and ordinary CI builds remain unsigned verification inputs.
+Full production/trusted signing is deferred until v1.0.0: project-produced
+`0.x` release installers and annotated release tags must be unsigned. The tag
+release uses `electron-builder.release.yml` only after exact-head gates pass;
+it builds the four manual-installer rows documented in the
+[release runbook](../docs/RELEASING.md), then binds their declared signing mode,
+checksums, SBOMs, evidence, and provenance before publication. No updater feed,
+background update, staged rollout, or automatic rollback is configured.
+
+For a fictional development-only component review, run:
+
+```sh
+pnpm --dir desktop dev:gallery
+```
+
+The production build verifier rejects gallery copy and fixtures, embedded
+remote assets, and remote network endpoints.
 
 ## Architecture
 
-The renderer has browser-only TypeScript types and imports. The sandboxed preload exposes the frozen, bounded, async `window.ancestry` API after request and response runtime validation. Main validates IPC senders, serves a fixed `app://bundle` asset/MIME manifest under a restrictive CSP, and globally denies permissions, downloads, child windows, webviews, unexpected navigation, and packaged developer tools. File-grant responses are strict, path-free DTOs bound to the requesting renderer, exact purpose and access mode, one application session, and one redemption. Closing or cross-document navigation of the renderer, explicit revocation, or application restart invalidates them; trusted same-document application routes retain the existing renderer identity. In packaged builds, main privately starts and verifies the control-only native sidecar. Startup failure crosses the bridge only as sanitized diagnostics; retry is bounded by the main-owned supervisor, and authenticated session details never enter IPC or the preload bridge. See [the lifecycle and diagnostics guide](../docs/DESKTOP_SIDECAR.md). A later domain transport adapter must consume the application-service contract and shared file-ingress policy; do not place domain logic in Electron.
+The renderer has browser-only TypeScript types and imports. Its design-system
+directory is presentation-only: capability gates select already-authorized
+content but never create authority, and stable coded-error views render only
+reviewed text and React nodes. The sandboxed preload exposes the frozen,
+bounded, async `window.ancestry` API after request and response runtime
+validation. Main validates IPC senders, serves a fixed `app://bundle`
+asset/MIME manifest under a restrictive CSP, and globally denies permissions,
+downloads, child windows, webviews, unexpected navigation, and packaged
+developer tools. File-grant responses are strict, path-free DTOs bound to the
+requesting renderer, exact purpose and access mode, one application session,
+and one redemption. Closing or cross-document navigation of the renderer,
+explicit revocation, or application restart invalidates them; trusted
+same-document application routes retain the existing renderer identity. In
+packaged builds, main privately starts and verifies the control-only native
+sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
+retry is bounded by the main-owned supervisor, and authenticated session
+details never enter IPC or the preload bridge. See
+[the lifecycle and diagnostics guide](../docs/DESKTOP_SIDECAR.md). A later
+domain transport adapter must consume the application-service contract and
+shared file-ingress policy; do not place domain logic in Electron.
 
 Unreleased Issue #363 also adds an intentionally unwired, Electron-Main-only
 container-control foundation for later deployment work. It validates one
@@ -58,8 +118,8 @@ The allowlisted external-link helper is main-process-internal and testable: it a
 
 | Control | Evidence | Gate |
 |---|---|---|
-| `TM-R01` | Secure window defaults and weakened-future-window regression cases in `src/main/security-policy.test.ts`; global web-content and session denials in `src/main/index.ts` and `src/main/session-policy.test.ts`; production runtime isolation assertions in `e2e/shell.spec.ts`; actual fuse and ASAR inspection in `scripts/inspect-package-fuses.mjs`. | `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
-| `TM-R02` | Exact route/MIME/CSP and traversal-denial tests in `src/main/security-policy.test.ts`; production runtime fetch, WebSocket, service-worker, and child-window denials in `e2e/shell.spec.ts`. | `make desktop-check`, `make desktop-e2e` |
-| `TM-I01` | The bridge retains the six 0.5 control methods and adds only three strict path-free Issue #103 grant methods. Main validates sender, request, response, renderer ownership, purpose, access, session, and revocation; E2E asserts that no path, resolver, direct filesystem, security-reporting, external-link, or domain method leaks into the renderer bridge. | `make desktop-check`, `make desktop-e2e` |
+| `TM-R01` | Secure window defaults and weakened-future-window regression cases in `src/main/security-policy.test.ts`; global web-content and session denials in `src/main/index.ts` and `src/main/session-policy.test.ts`; deterministic skip-link, route-heading, and command-dialog focus tests; reduced-motion and forced-color styles; route/theme Chromium accessibility scans; minimum-window 200% zoom assertions; actual fuse and ASAR inspection in `scripts/inspect-package-fuses.mjs`. | `make desktop-check`, `make desktop-e2e`, `pnpm --dir desktop test:accessibility`, `pnpm --dir desktop test:visual`, `make desktop-security` |
+| `TM-R02`, `TM-L02` | Exact route/MIME/CSP and traversal-denial tests in `src/main/security-policy.test.ts`; production runtime fetch, WebSocket, service-worker, and child-window denials in `e2e/shell.spec.ts`; the design-system boundary rejects network primitives, raw HTML rendering, direct bridge use, and production fixture imports; the production verifier separately rejects remote assets and endpoints, the development gallery, and fictional copy. | `make desktop-check`, `make desktop-e2e` |
+| `TM-I01` | The bridge retains its fixed reviewed methods. Main validates sender, request, response, renderer ownership, purpose, access, session, and revocation. The Issue #106 shell consumes versioned responses only through existing hooks; its routes and `CapabilityGate` neither add bridge methods nor grant authority. E2E asserts that no path, resolver, direct filesystem, security-reporting, external-link, or domain method leaks into the renderer bridge. | `make desktop-check`, `make desktop-e2e` |
 | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`, `TM-O01` | Native-dialog selection validates regular-file/link state, bounded size, purpose-specific format, canonical identity, and fingerprints before issuing a random one-use grant. Redemption revalidates identity, replacement confirmation is native and race-checked, aliases and concurrent output grants fail closed, and stable responses omit paths. Focused broker and dialog tests exercise cancellation, replacement races, revocation, alias rejection, and output locks. A dedicated verification-only packaged adapter exercises native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation across the hosted platform matrix without entering production builds. Full worker and publication evidence remains #114/#118/#131. | `make desktop-check`, exact-head packaged workflow |
 | `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.5.0. | `make desktop-security` |

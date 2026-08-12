@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 const lifecycle = process.env.npm_lifecycle_event ?? ''
-const fixtureBuild = ['dev', 'build:e2e'].includes(lifecycle)
+const fixtureBuild = ['dev', 'dev:gallery', 'build:e2e'].includes(lifecycle)
 const packagedFileGrantBuild = lifecycle === 'build:packaged-file-grants'
 const mainAliases = {
   ...(fixtureBuild

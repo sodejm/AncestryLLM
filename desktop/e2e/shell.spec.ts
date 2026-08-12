@@ -5,6 +5,7 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test'
+import axe from 'axe-core'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import { bridgeMethods } from './bridge-contract'
 
@@ -40,6 +41,77 @@ async function expectNoUnsupportedSurfaces(page: Page, allowProviderSettings = f
   for (const pattern of prohibited) {
     await expect(main).not.toContainText(pattern)
   }
+}
+
+async function expectNoAccessibilityViolations(page: Page) {
+  // Playwright evaluates the reviewed, lock-pinned axe source in Chromium's
+  // automation world. It does not weaken the production CSP or ship axe in the
+  // renderer bundle.
+  await page.evaluate(axe.source)
+  const violations = await page.evaluate(async () => {
+    const axeRunner = (globalThis as unknown as {
+      axe: {
+        run(
+          context: Document,
+          options: { runOnly: { type: 'tag'; values: string[] } },
+        ): Promise<{
+          violations: Array<{
+            id: string
+            impact: string | null
+            nodes: Array<{ target: string[]; failureSummary?: string }>
+          }>
+        }>
+      }
+    }).axe
+    const result = await axeRunner.run(document, {
+      runOnly: {
+        type: 'tag',
+        values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'],
+      },
+    })
+    return result.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      nodes: violation.nodes.map((node) => ({
+        target: node.target,
+        failureSummary: node.failureSummary,
+      })),
+    }))
+  })
+  expect(violations).toEqual([])
+}
+
+async function expectNoHorizontalClipping(page: Page) {
+  const layout = await page.evaluate(() => {
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex="0"]',
+    ))
+    const clippedControls = controls.flatMap((control) => {
+      const style = getComputedStyle(control)
+      const bounds = control.getBoundingClientRect()
+      if (
+        style.display === 'none'
+        || style.visibility === 'hidden'
+        || bounds.width === 0
+        || bounds.height === 0
+      ) return []
+      if (bounds.left >= -0.5 && bounds.right <= window.innerWidth + 0.5) return []
+      return [{
+        name: control.getAttribute('aria-label') ?? control.textContent?.trim() ?? control.tagName,
+        left: bounds.left,
+        right: bounds.right,
+      }]
+    })
+    return {
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      clippedControls,
+    }
+  })
+  expect(layout.viewportWidth).toBeGreaterThanOrEqual(340)
+  expect(layout.viewportWidth).toBeLessThanOrEqual(365)
+  expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth)
+  expect(layout.clippedControls).toEqual([])
 }
 
 async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Page) {
@@ -225,6 +297,91 @@ test('built degraded shell offers one bounded recovery and renders the ready res
     await expect(page.getByRole('heading', { name: 'Home' })).toBeFocused()
     await expect(main.getByText('Ready', { exact: true })).toBeVisible()
     await expectNoUnsupportedSurfaces(page)
+  } finally {
+    await app.close()
+  }
+})
+
+test('built shell has deterministic skip-link and command-palette focus', async () => {
+  const app = await launchShell()
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeFocused()
+
+    const skipLink = page.getByRole('link', { name: 'Skip to workspace' })
+    // Route entry deliberately lands on the workspace heading so keyboard and
+    // assistive-technology users have already skipped repeated navigation. The
+    // explicit skip control must remain reachable when traversing backward.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (await skipLink.evaluate((element) => document.activeElement === element)) break
+      await page.keyboard.press('Shift+Tab')
+    }
+    await expect(skipLink).toBeFocused()
+    const initialHash = await page.evaluate(() => window.location.hash)
+    await skipLink.press('Enter')
+    await expect(page.getByRole('main')).toBeFocused()
+    expect(await page.evaluate(() => window.location.hash)).toBe(initialHash)
+
+    await page.keyboard.press('Control+K')
+    const filter = page.getByRole('searchbox', { name: 'Filter destinations' })
+    await expect(filter).toBeFocused()
+    await page.keyboard.press('Escape')
+    const trigger = page.getByRole('button', { name: /Navigate/ })
+    await expect(trigger).toBeFocused()
+
+    await trigger.press('Enter')
+    await filter.fill('diagnostics')
+    await page.getByRole('dialog').getByRole('link', { name: /Diagnostics/ }).click()
+    await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
+    expect(await page.evaluate(() => window.location.hash)).toBe('#/diagnostics')
+  } finally {
+    await app.close()
+  }
+})
+
+test('built shell passes automated WCAG checks across routes and explicit themes', async () => {
+  const app = await launchShell()
+  try {
+    const page = await app.firstWindow()
+    const main = page.getByRole('main')
+
+    await expect(page.getByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeFocused()
+    await expectNoAccessibilityViolations(page)
+    await main.getByRole('button', { name: 'Continue to Home' }).click()
+    await expectNoAccessibilityViolations(page)
+
+    await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
+    await expectNoAccessibilityViolations(page)
+
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
+    const theme = main.getByRole('group', { name: 'Theme' })
+    await theme.getByRole('radio', { name: 'light' }).click()
+    await expectNoAccessibilityViolations(page)
+    await theme.getByRole('radio', { name: 'dark' }).click()
+    await expectNoAccessibilityViolations(page)
+  } finally {
+    await app.close()
+  }
+})
+
+test('minimum desktop window at 200 percent zoom keeps every action horizontally reachable', async () => {
+  const app = await launchShell()
+  try {
+    const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      if (!window) throw new Error('No BrowserWindow')
+      window.setSize(720, 560)
+      window.webContents.setZoomFactor(2)
+    })
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(365)
+
+    await expectNoHorizontalClipping(page)
+    await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
+    await expectNoHorizontalClipping(page)
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
+    await expectNoHorizontalClipping(page)
   } finally {
     await app.close()
   }
