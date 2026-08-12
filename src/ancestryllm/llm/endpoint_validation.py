@@ -77,7 +77,9 @@ def _direct_probe(request: EndpointProbeRequest) -> EndpointProbeResponse:
     transport: socket.socket | ssl.SSLSocket = connection
     try:
         if request.scheme == "https":
-            transport = ssl.create_default_context().wrap_socket(
+            tls_context = ssl.create_default_context()
+            tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+            transport = tls_context.wrap_socket(
                 connection,
                 server_hostname=request.hostname,
             )

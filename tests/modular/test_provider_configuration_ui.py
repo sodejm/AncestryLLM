@@ -330,6 +330,8 @@ def test_direct_endpoint_probe_ignores_proxy_environment(
             self.closed = True
 
     class FakeContext:
+        minimum_version: ssl.TLSVersion | None = None
+
         def wrap_socket(
             self,
             connection: FakeSocket,
@@ -340,6 +342,7 @@ def test_direct_endpoint_probe_ignores_proxy_environment(
             return connection
 
     transport = FakeSocket()
+    tls_context = FakeContext()
 
     def connect(address: tuple[str, int], timeout: float) -> FakeSocket:
         connections.append((address, timeout))
@@ -350,7 +353,7 @@ def test_direct_endpoint_probe_ignores_proxy_environment(
     monkeypatch.setattr(
         endpoint_validation.ssl,
         "create_default_context",
-        lambda: FakeContext(),
+        lambda: tls_context,
     )
 
     result = endpoint_validation._direct_probe(
@@ -365,6 +368,7 @@ def test_direct_endpoint_probe_ignores_proxy_environment(
 
     assert result == EndpointProbeResponse(status_code=401, peer_address="8.8.8.8")
     assert connections == [(("8.8.8.8", 443), 5.0)]
+    assert tls_context.minimum_version is ssl.TLSVersion.TLSv1_2
     assert tls_hosts == ["api.openai.com"]
     assert b"HEAD /v1 HTTP/1.1\r\nHost: api.openai.com\r\n" in transport.request
     assert transport.closed is True
