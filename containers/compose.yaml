@@ -1,5 +1,3 @@
-# Probe-only container Compose topology — base service and volume definitions.
-# See docs/DEPLOYMENT.md for hardening, constraints, and usage instructions.
 {
   "name": "ancestryllm",
   "x-ancestryllm-schema-version": 1,

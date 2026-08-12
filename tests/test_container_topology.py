@@ -25,9 +25,7 @@ DOCKERFILE = ROOT / "containers" / "Dockerfile"
 
 
 def _base() -> dict[str, object]:
-    text = BASE.read_text(encoding="utf-8")
-    stripped = "\n".join(line for line in text.splitlines() if not line.startswith("#"))
-    return json.loads(stripped)
+    return json.loads(BASE.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("overlay", [LOCAL, REMOTE])

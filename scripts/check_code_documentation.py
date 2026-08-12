@@ -84,7 +84,6 @@ EXTENSIONLESS_BASENAMES: Final = {
     ".gitattributes": "non-code-doc",
     ".pre-commit-config.yaml": "first-party-config-exec",
     ".node-version": "generated-vendor",
-    "Dockerfile": "first-party-config-exec",
 }
 
 # Pseudo-extensions for files with compound names or known special cases.

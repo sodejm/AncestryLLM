@@ -1,5 +1,3 @@
-# Remote-host resource-limit overrides; merged on top of compose.yaml.
-# See docs/DEPLOYMENT.md for profile usage and constraint explanations.
 {
   "services": {
     "gateway": {
