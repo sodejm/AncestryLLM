@@ -27,6 +27,31 @@ make desktop-security
 
 The renderer has browser-only TypeScript types and imports. The sandboxed preload exposes the frozen, bounded, async `window.ancestry` API after request and response runtime validation. Main validates IPC senders, serves a fixed `app://bundle` asset/MIME manifest under a restrictive CSP, and globally denies permissions, downloads, child windows, webviews, unexpected navigation, and packaged developer tools. File-grant responses are strict, path-free DTOs bound to the requesting renderer, exact purpose and access mode, one application session, and one redemption. Closing or cross-document navigation of the renderer, explicit revocation, or application restart invalidates them; trusted same-document application routes retain the existing renderer identity. In packaged builds, main privately starts and verifies the control-only native sidecar. Startup failure crosses the bridge only as sanitized diagnostics; retry is bounded by the main-owned supervisor, and authenticated session details never enter IPC or the preload bridge. See [the lifecycle and diagnostics guide](../docs/DESKTOP_SIDECAR.md). A later domain transport adapter must consume the application-service contract and shared file-ingress policy; do not place domain logic in Electron.
 
+Unreleased Issue #363 also adds an intentionally unwired, Electron-Main-only
+container-control foundation for later deployment work. It validates one
+app-owned Unix Docker endpoint and exact hardened Compose plans, ignores ambient
+Docker selection, and exposes only typed inspection and bounded lifecycle
+operations inside main. The Docker socket, executable, context, generic process
+authority, and lifecycle methods are absent from preload, the renderer, and
+shared DTOs. This foundation does not provide an application image, listener,
+secret broker, genealogy workload, profile activation, or user-facing
+container runtime; those remain blocked on their separately reviewed issues and
+G5/G7 assurance gates.
+
+The opt-in native evidence test is destructive only inside its explicitly
+isolated, app-owned test profile and project:
+
+```sh
+ANCESTRYLLM_NATIVE_CONTAINER_EVIDENCE=1 pnpm --dir desktop test:native-container
+```
+
+It is not an ordinary developer or CI gate. Run it only on a disposable
+supported Docker/Colima profile after reviewing the selected identity. The
+checked sanitized macOS arm64 result is recorded in
+[`docs/release-evidence/issue-363-macos-arm64-container-supervisor.json`](../docs/release-evidence/issue-363-macos-arm64-container-supervisor.json);
+it proves only the narrow #363 lifecycle and isolation subset, not container
+runtime availability.
+
 The allowlisted external-link helper is main-process-internal and testable: it accepts only exact `https://github.com` destinations without credentials or a custom port, displays the normalized destination, defaults to cancel, and opens only after explicit confirmation. It is deliberately not part of `window.ancestry`; a renderer-facing external-link workflow requires its own separately reviewed contract.
 
 ## Security evidence

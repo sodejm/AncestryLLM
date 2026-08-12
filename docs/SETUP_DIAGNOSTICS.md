@@ -131,4 +131,24 @@ moves genealogy data.
 | `DEPLOYMENT_RUNTIME_MISMATCH` | Stored intent has no active reviewed runtime. | Diagnose the mismatch or explicitly recover to Local Desktop. |
 | `DEPLOYMENT_PROVIDER_CONFLICT` | `provider=none` is paired with a non-local profile. | Recover to Local Desktop; provider and consent changes remain separate. |
 | `DEPLOYMENT_ENROLLMENT_REQUIRED` | Connect Remote lacks its reviewed authenticated enrollment. | Keep Local Desktop until Issue #357 ships. |
-| `DEPLOYMENT_HOST_SETUP_REQUIRED` | Host Remote lacks its reviewed headless setup authority. | Keep Local Desktop until Issues #348 and #363 ship. |
+| `DEPLOYMENT_HOST_SETUP_REQUIRED` | Host Remote lacks its reviewed headless setup authority. | Keep or recover Local Desktop until #348 runtime integration passes; the #363 host-control source does not activate hosting. |
+
+## Development-only container-control failures
+
+The unwired #363 host-control foundation reports the following stable,
+redacted developer codes. They are not a Host Remote runbook or an end-user
+troubleshooting surface, and no code permits a PATH, ambient-context, remote,
+or unverified fallback.
+
+| Codes | Meaning |
+|---|---|
+| `INVALID_POLICY`, `INVALID_PLAN` | A closed schema-v1 policy or generated plan is not exact or safe. |
+| `ENDPOINT_UNTRUSTED`, `ENDPOINT_CHANGED` | The app-owned Unix socket is untrusted or changed across verification. |
+| `ENGINE_UNTRUSTED`, `RESOURCE_CONFLICT` | Engine identity/compatibility or exact owned-resource identity failed. |
+| `AUTHORIZATION_REQUIRED`, `CONTROL_FAILED` | Exact operation authorization is absent or the verified lifecycle action failed. |
+| `PROCESS_REQUEST_INVALID`, `PROCESS_INPUT_LIMIT`, `PROCESS_OUTPUT_LIMIT` | A fixed subprocess request or one of its byte bounds failed. |
+| `PROCESS_TIMEOUT`, `PROCESS_EXIT`, `PROCESS_RESPONSE_INVALID` | A bounded process timed out, failed, or returned nonconforming output. |
+
+The full implementation boundary and the native macOS arm64 evidence limits
+are documented in the
+[published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-container-control-foundation).

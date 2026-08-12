@@ -28,6 +28,13 @@ test('keeps sidecar capabilities and diagnostics out of renderer and preload cod
   assert.doesNotMatch(exposedSource, /127\.0\.0\.1|Authorization:\s*Bearer/)
 })
 
+test('keeps host container authority out of renderer, preload, and shared contracts', async () => {
+  const exposedSource = await readSources(exposedRoots)
+
+  assert.doesNotMatch(exposedSource, /container-(?:supervisor|process)/)
+  assert.doesNotMatch(exposedSource, /DockerCliHostControl|DOCKER_(?:HOST|CONTEXT)|docker\.sock/)
+})
+
 test('keeps credentials out of alternate Electron and browser stores', async () => {
   const productionSource = await readSources([new URL('../src/', import.meta.url)], {
     includeTests: false,

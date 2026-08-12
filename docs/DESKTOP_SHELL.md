@@ -168,6 +168,20 @@ browser, or public-service surface. Future presentation keeps the renderer
 sandbox and fixed typed bridge, while authority remains in the shared service
 contracts and Electron Main's narrow adapter.
 
+Unreleased Issue #363 adds a separate, deliberately unwired host-only control
+foundation inside Electron Main. Its closed schema-v1 policy and plan bind an
+app-owned Docker context, Unix socket, runtime profile, Engine identity, exact
+resource labels, immutable images, and hardened Compose settings to bounded
+start, stop, repair, and uninstall operations. The preload, renderer, and
+shared renderer types expose no supervisor, socket, context, executable, or
+generic process method, and ordinary shell startup never invokes this source.
+The native macOS arm64
+[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
+record proves only that control subset in an isolated Colima profile. Runtime
+acquisition, application images, secret delivery, family-tree grants, storage,
+profile activation, budgets, cross-platform evidence, and the remaining `G5`
+and `G7` gates still block any container-runtime availability claim.
+
 ## Installation and updates
 
 The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11

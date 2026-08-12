@@ -20,6 +20,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.shared.json --pretty false && tsc -p tsconfig.main.json --pretty false && tsc -p tsconfig.preload.json --pretty false && tsc -p tsconfig.renderer.json --pretty false && tsc -p tsconfig.test.json --pretty false",
     "test": "vitest run && node --test scripts/*.test.mjs",
+    "test:native-container": "vitest run src/main/container-native-evidence.test.ts",
     "build": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs",
     "build:e2e": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --fixture",
     "build:packaged-file-grants": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-file-grants",

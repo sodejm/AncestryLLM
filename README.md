@@ -39,6 +39,16 @@ Connect to Remote and Host Remote Server remain advanced, unavailable runtime
 choices until their separate enrollment, host-bootstrap, and release gates
 pass; selecting a profile never starts a listener or moves genealogy data.
 
+That unreleased source also contains a host-only macOS arm64 container-control
+foundation for later deployment work. It accepts only an app-owned Unix Docker
+endpoint and exact generated, digest-pinned, resource-bounded plans; Docker
+authority never enters the renderer, preload bridge, sidecar, or managed
+containers. This is not a user-facing container runtime, does not activate a
+deployment profile, and does not weaken the network-free `provider=none`
+contract. See the
+[published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-container-control-foundation)
+for the trust boundary, recovery procedure, and residual risk.
+
 ## Start here
 
 Choose the path that matches how you want to use AncestryLLM.

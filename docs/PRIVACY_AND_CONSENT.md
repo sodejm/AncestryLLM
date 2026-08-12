@@ -106,6 +106,15 @@ implemented, switching profiles must clear renderer state, revoke scoped
 grants, and establish a fresh authenticated session rather than carrying
 authority across the boundary.
 
+Issue #363's host container-control foundation remains Main-process-only and
+unreachable from profile selection, preload, renderer, shared renderer types,
+and application containers. It transports no genealogy data, secret value,
+provider payload, raw process output, local path, socket, Docker credential, or
+generic Docker authority across those boundaries. Its checked native receipt
+contains only normalized control facts and counts. Runtime integration must
+retain these exclusions and pass its own consent, secret-delivery, mount, and
+data-flow review before any application workload is started.
+
 Local containers do not read the OS keyring directly. A narrow host broker may
 provide a required secret to one authorized process after policy and consent
 checks through non-pageable or locked no-swap memory, or a no-swap

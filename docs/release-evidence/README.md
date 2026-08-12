@@ -48,6 +48,21 @@ OIDC issuer, SLSA predicate, UTC timestamp, and success status. The manifest
 records that identity and the receipt digest. Unknown fields, omitted fields,
 non-success receipts, local paths, or identity drift fail evidence generation.
 
+## Native control-foundation records
+
+[`issue-363-macos-arm64-container-supervisor.json`](issue-363-macos-arm64-container-supervisor.json)
+is a sanitized, schema-v1 engineering record for the isolated native macOS
+arm64 Docker-control exercise. It binds the tested platform, engine and Compose
+identities, image digest, lifecycle operations, ambient-context preservation,
+and final owned-resource cleanup without recording a local path, socket,
+username, hostname, environment value, token, or response body.
+
+This record is partial source-feature evidence, not a release-gate result. It
+does not prove an application container runtime, workload authentication,
+secret or genealogy-data custody, migration, backup and recovery, all-platform
+support, packaged integration, or independent G5/G7 review. Future readiness
+evidence must not interpret this file as satisfying those remaining gates.
+
 ## Tooling evaluation records
 
 Checked tooling evaluations such as
