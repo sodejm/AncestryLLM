@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 _SECRET_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/secrets/[a-z0-9_.-]{{1,96}}/(status|set|delete)$"
 )
+_CONSENT_REVOKE_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/consents/[A-Za-z0-9][A-Za-z0-9._~-]{{0,199}}/revoke$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -77,6 +80,17 @@ def _route_policy(path: str) -> _RoutePolicy | None:
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/settings":
         return _RoutePolicy("PATCH", accepts_json=True)
+    if path == f"{API_NAMESPACE}/provider-configuration":
+        return _RoutePolicy("GET")
+    if path in {
+        f"{API_NAMESPACE}/provider-profiles",
+        f"{API_NAMESPACE}/provider-endpoints/validate",
+        f"{API_NAMESPACE}/consents/preview",
+        f"{API_NAMESPACE}/consents",
+    }:
+        return _RoutePolicy("POST", accepts_json=True)
+    if _CONSENT_REVOKE_ROUTE.fullmatch(path) is not None:
+        return _RoutePolicy("POST", accepts_json=True)
     match = _SECRET_ROUTE.fullmatch(path)
     if match is None:
         return None

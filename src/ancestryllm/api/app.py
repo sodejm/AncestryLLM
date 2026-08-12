@@ -20,10 +20,20 @@ from ancestryllm.api.contracts import (
     API_NAMESPACE,
     API_VERSION_HEADER,
     CapabilityManifest,
+    ConsentCreateRequest,
+    ConsentGrantResponse,
+    ConsentPreviewRequest,
+    ConsentPreviewResponse,
+    EndpointValidationRequest,
+    EndpointValidationResponse,
     ErrorEnvelope,
     HealthResponse,
     PageMetadata,
     PaginationRequest,
+    ProviderConfigurationMutationRequest,
+    ProviderConfigurationResponse,
+    ProviderProfileCreateRequest,
+    ProviderProfileResponse,
     SecretSetRequest,
     SecretStatusResponse,
     SettingFieldResponse,
@@ -37,6 +47,8 @@ from ancestryllm.api.contracts import (
 from ancestryllm.api.errors import error_response, request_error
 from ancestryllm.api.middleware import InternalApiMiddleware
 from ancestryllm.core.errors import AncestryError, StorageError
+from ancestryllm.llm.contracts import DataClass
+from ancestryllm.llm.provider_configuration import ConsentPreview
 from ancestryllm.storage.diagnostics import (
     StartupDiagnosticComponent,
     StartupDiagnosticReport,
@@ -52,6 +64,16 @@ if TYPE_CHECKING:
     from ancestryllm.application.executor import CommandExecutor
     from ancestryllm.application.secret_management import SecretManagementService, SecretStatus
     from ancestryllm.application.settings import SettingField, SettingsService, SettingsSnapshot
+    from ancestryllm.llm.endpoint_validation import (
+        EndpointValidationResult,
+        EndpointValidationService,
+    )
+    from ancestryllm.llm.provider_configuration import (
+        ConsentGrantSummary,
+        ProviderConfigurationService,
+        ProviderConfigurationSnapshot,
+        ProviderProfileSummary,
+    )
 
 
 class ApiLifecycle(Protocol):
@@ -124,6 +146,71 @@ def _settings_response(snapshot: SettingsSnapshot) -> SettingsResponse:
 
 def _secret_status_response(status: SecretStatus) -> SecretStatusResponse:
     return SecretStatusResponse(reference=status.reference, status=status.status)
+
+
+def _provider_profile_response(profile: ProviderProfileSummary) -> ProviderProfileResponse:
+    return ProviderProfileResponse(
+        name=profile.name,
+        provider_id=cast("Any", profile.provider_id),
+        model=profile.model,
+        endpoint=profile.endpoint,
+        endpoint_kind=cast("Any", profile.endpoint_kind),
+        secret_reference=profile.secret_reference,
+        enabled=profile.enabled,
+    )
+
+
+def _consent_grant_response(consent: ConsentGrantSummary) -> ConsentGrantResponse:
+    return ConsentGrantResponse(
+        name=consent.name,
+        provider_profile_name=consent.provider_profile_name,
+        provider_id=cast("Any", consent.provider_id),
+        modules=consent.modules,
+        purposes=consent.purposes,
+        data_classes=cast("Any", consent.data_classes),
+        models=consent.models,
+        max_cost_usd=consent.max_cost_usd,
+        retain_payloads=consent.retain_payloads,
+        active=consent.active,
+    )
+
+
+def _provider_configuration_response(
+    snapshot: ProviderConfigurationSnapshot,
+) -> ProviderConfigurationResponse:
+    return ProviderConfigurationResponse(
+        schema_version=1,
+        revision=snapshot.revision,
+        profiles=tuple(_provider_profile_response(item) for item in snapshot.profiles),
+        consents=tuple(_consent_grant_response(item) for item in snapshot.consents),
+    )
+
+
+def _consent_preview_response(preview: ConsentPreview) -> ConsentPreviewResponse:
+    return ConsentPreviewResponse(
+        schema_version=1,
+        provider_profile_name=preview.provider_profile_name,
+        provider_id=cast("Any", preview.provider_id),
+        modules=preview.modules,
+        purposes=preview.purposes,
+        data_classes=cast("Any", preview.data_classes),
+        models=preview.models,
+        max_cost_usd=preview.max_cost_usd,
+        retain_payloads=preview.retain_payloads,
+        warning_codes=preview.warning_codes,
+    )
+
+
+def _endpoint_validation_response(
+    result: EndpointValidationResult,
+) -> EndpointValidationResponse:
+    return EndpointValidationResponse(
+        schema_version=1,
+        status=cast("Any", result.status),
+        endpoint_kind=cast("Any", result.endpoint_kind),
+        http_status=result.http_status,
+        destination_digest=result.destination_digest,
+    )
 
 
 def _default_startup_diagnostics() -> StartupDiagnosticReport:
@@ -215,6 +302,8 @@ def create_app(
     executor: CommandExecutor,
     settings_service: SettingsService,
     secret_service: SecretManagementService,
+    provider_configuration_service: ProviderConfigurationService | None = None,
+    endpoint_validation_service: EndpointValidationService | None = None,
     lifecycle: ApiLifecycle | None = None,
     startup_diagnostics: Callable[[], StartupDiagnosticReport] | None = None,
     mutations_allowed: Callable[[], bool] | None = None,
@@ -254,6 +343,24 @@ def create_app(
                 "Changes are disabled while startup diagnostics are degraded.",
                 "Resolve the blocked startup checks and retry diagnostics before making changes.",
             )
+
+    def provider_configuration() -> ProviderConfigurationService:
+        if provider_configuration_service is None:
+            raise StorageError(
+                "PROVIDER_CONFIGURATION_UNAVAILABLE",
+                "Provider configuration is unavailable.",
+                "Restart the desktop application and retry.",
+            )
+        return provider_configuration_service
+
+    def endpoint_validation() -> EndpointValidationService:
+        if endpoint_validation_service is None:
+            raise StorageError(
+                "ENDPOINT_VALIDATION_UNAVAILABLE",
+                "Endpoint validation is unavailable.",
+                "Restart the desktop application and retry.",
+            )
+        return endpoint_validation_service
 
     @app.exception_handler(AncestryError)
     async def handle_ancestry_error(request: Request, error: AncestryError) -> JSONResponse:
@@ -368,6 +475,123 @@ def create_app(
     def delete_secret(reference: str) -> SecretStatusResponse:
         assert_mutations_allowed()
         return _secret_status_response(secret_service.delete(reference))
+
+    @app.get(
+        f"{API_NAMESPACE}/provider-configuration",
+        response_model=ProviderConfigurationResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalProviderConfiguration",
+        tags=["provider-configuration"],
+    )
+    def get_provider_configuration() -> ProviderConfigurationResponse:
+        return _provider_configuration_response(provider_configuration().snapshot())
+
+    @app.post(
+        f"{API_NAMESPACE}/provider-profiles",
+        response_model=ProviderConfigurationResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="createInternalProviderProfile",
+        tags=["provider-configuration"],
+    )
+    def create_provider_profile(
+        request: ProviderProfileCreateRequest,
+    ) -> ProviderConfigurationResponse:
+        assert_mutations_allowed()
+        snapshot = provider_configuration().create_profile(
+            expected_revision=request.expected_revision,
+            name=request.name,
+            provider_id=request.provider_id,
+            model=request.model,
+            endpoint=request.endpoint,
+            endpoint_identity_sha256=request.endpoint_identity_sha256,
+        )
+        return _provider_configuration_response(snapshot)
+
+    @app.post(
+        f"{API_NAMESPACE}/provider-endpoints/validate",
+        response_model=EndpointValidationResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="validateInternalProviderEndpoint",
+        tags=["provider-configuration"],
+    )
+    def validate_provider_endpoint(
+        request: EndpointValidationRequest,
+    ) -> EndpointValidationResponse:
+        assert_mutations_allowed()
+        result = endpoint_validation().validate(request.provider_id, request.endpoint)
+        return _endpoint_validation_response(result)
+
+    @app.post(
+        f"{API_NAMESPACE}/consents/preview",
+        response_model=ConsentPreviewResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="previewInternalConsent",
+        tags=["provider-configuration"],
+    )
+    def preview_consent(request: ConsentPreviewRequest) -> ConsentPreviewResponse:
+        preview = provider_configuration().preview_consent(
+            provider_profile_name=request.provider_profile_name,
+            modules=request.modules,
+            purposes=request.purposes,
+            data_classes=(DataClass(item) for item in request.data_classes),
+            models=request.models,
+            max_cost_usd=request.max_cost_usd,
+            retain_payloads=request.retain_payloads,
+        )
+        return _consent_preview_response(preview)
+
+    @app.post(
+        f"{API_NAMESPACE}/consents",
+        response_model=ProviderConfigurationResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="createInternalConsent",
+        tags=["provider-configuration"],
+    )
+    def create_consent(request: ConsentCreateRequest) -> ProviderConfigurationResponse:
+        assert_mutations_allowed()
+        supplied = request.preview
+        preview = ConsentPreview(
+            schema_version=1,
+            provider_profile_name=supplied.provider_profile_name,
+            provider_id=supplied.provider_id,
+            modules=tuple(supplied.modules),
+            purposes=tuple(supplied.purposes),
+            data_classes=tuple(supplied.data_classes),
+            models=tuple(supplied.models),
+            max_cost_usd=supplied.max_cost_usd,
+            retain_payloads=supplied.retain_payloads,
+            warning_codes=tuple(supplied.warning_codes),
+        )
+        snapshot = provider_configuration().create_consent(
+            expected_revision=request.expected_revision,
+            name=request.name,
+            preview=preview,
+        )
+        return _provider_configuration_response(snapshot)
+
+    @app.post(
+        f"{API_NAMESPACE}/consents/{{name}}/revoke",
+        response_model=ProviderConfigurationResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="revokeInternalConsent",
+        tags=["provider-configuration"],
+    )
+    def revoke_consent(
+        name: str,
+        request: ProviderConfigurationMutationRequest,
+    ) -> ProviderConfigurationResponse:
+        assert_mutations_allowed()
+        snapshot = provider_configuration().revoke_consent(
+            expected_revision=request.expected_revision,
+            name=name,
+        )
+        return _provider_configuration_response(snapshot)
 
     return app
 

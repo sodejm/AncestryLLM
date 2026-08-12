@@ -17,6 +17,14 @@ REMOTE_ENDPOINTS = {
     "openrouter": frozenset({"openrouter.ai"}),
 }
 
+DEFAULT_PROVIDER_ENDPOINTS = {
+    "ollama": "http://127.0.0.1:11434",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com",
+    "gemini": "https://generativelanguage.googleapis.com",
+    "openrouter": "https://openrouter.ai/api/v1",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class ConsentGrant:

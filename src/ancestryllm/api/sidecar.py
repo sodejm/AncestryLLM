@@ -29,6 +29,10 @@ from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.config import APP_NAME, AppConfig
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
+from ancestryllm.llm.endpoint_validation import EndpointValidationService
+from ancestryllm.llm.profiles import ProviderProfileService
+from ancestryllm.llm.provider_configuration import ProviderConfigurationService
+from ancestryllm.storage.database import Database
 from ancestryllm.storage.diagnostics import StartupConfigurationFailure, diagnose_startup
 
 if TYPE_CHECKING:
@@ -80,6 +84,19 @@ class _EmptyRegistry:
 
     def descriptors(self) -> Sequence[ModuleDescriptor]:
         return ()
+
+
+@dataclass(slots=True)
+class _SidecarLifecycle:
+    """Close the lazily opened encrypted workspace when the sidecar stops."""
+
+    database: Database
+
+    async def startup(self) -> None:
+        """Keep startup non-writing; diagnostics remain the readiness authority."""
+
+    async def shutdown(self) -> None:
+        self.database.close()
 
 
 def _create_native_windows_process_tree_guard() -> object:
@@ -237,7 +254,7 @@ def create_sidecar_app(
     config: AppConfig | None = None,
     secret_store: SecretStore | None = None,
 ) -> FastAPI:
-    """Compose the packaged control sidecar without any domain modules or routes."""
+    """Compose the packaged sidecar with only bounded control-plane routes."""
 
     configuration_failure: StartupConfigurationFailure | None = None
     if config is not None:
@@ -272,12 +289,25 @@ def create_sidecar_app(
             configuration_failure=configuration_failure,
         )
 
+    database = Database(resolved_config.database_path, resolved_secret_store)
+    endpoint_validator = EndpointValidationService()
+    provider_profiles = ProviderProfileService(
+        database,
+        endpoint_validator=endpoint_validator,
+    )
+
     return create_app(
         settings=frame.settings(),
         registry=_EmptyRegistry(),
         executor=CommandExecutor(()),
         settings_service=SettingsService(resolved_config),
         secret_service=SecretManagementService(resolved_secret_store),
+        provider_configuration_service=ProviderConfigurationService(
+            provider_profiles,
+            endpoint_validator,
+        ),
+        endpoint_validation_service=endpoint_validator,
+        lifecycle=_SidecarLifecycle(database),
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,
     )

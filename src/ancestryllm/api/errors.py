@@ -22,10 +22,28 @@ class ApiRequestError(Exception):
 
 
 _SAFE_ANCESTRY_ERROR_STATUS = {
+    "CONSENT_EXISTS": 409,
+    "CONSENT_INVALID": 400,
+    "CONSENT_NOT_FOUND": 404,
+    "CONSENT_PREVIEW_STALE": 409,
+    "ENDPOINT_DESTINATION_CHANGED": 400,
+    "ENDPOINT_REDIRECT_REJECTED": 400,
+    "ENDPOINT_REJECTED": 400,
+    "ENDPOINT_RESOLUTION_REJECTED": 400,
+    "ENDPOINT_TEST_FAILED": 503,
+    "ENDPOINT_VALIDATION_UNAVAILABLE": 503,
     "KEYRING_DELETE_UNVERIFIED": 503,
     "KEYRING_READ_FAILED": 503,
     "KEYRING_UNAVAILABLE": 503,
     "KEYRING_WRITE_UNVERIFIED": 503,
+    "PROVIDER_CONFIGURATION_CONFLICT": 409,
+    "PROVIDER_CONFIGURATION_UNAVAILABLE": 503,
+    "PROVIDER_PROFILE_EXISTS": 409,
+    "PROVIDER_PROFILE_INVALID": 400,
+    "PROVIDER_PROFILE_NOT_FOUND": 404,
+    "PROVIDER_PROFILE_RESERVED": 400,
+    "PROVIDER_PROFILE_SETTING_UNKNOWN": 400,
+    "PROVIDER_UNKNOWN": 400,
     "SECRET_EMPTY": 400,
     "SECRET_ENVIRONMENT_MANAGED": 409,
     "SECRET_REFERENCE_UNKNOWN": 400,
@@ -35,6 +53,19 @@ _SAFE_ANCESTRY_ERROR_STATUS = {
     "SETTINGS_SCHEMA_UNSUPPORTED": 400,
     "SETTINGS_VALUE_INVALID": 400,
     "STARTUP_MUTATION_BLOCKED": 503,
+}
+
+_SAFE_PROVIDER_ERROR_TEXT = {
+    "CONSENT_EXISTS": (
+        "A consent with that name already exists.",
+        "Choose a different consent name or revoke the existing consent.",
+    ),
+    "CONSENT_NOT_FOUND": ("The selected consent does not exist.", None),
+    "PROVIDER_PROFILE_EXISTS": (
+        "A provider profile with that name already exists.",
+        "Choose a different provider profile name.",
+    ),
+    "PROVIDER_PROFILE_NOT_FOUND": ("The selected provider profile does not exist.", None),
 }
 
 
@@ -72,10 +103,13 @@ def error_envelope(error: Exception, *, correlation_ref: str) -> tuple[int, Erro
             correlation_ref=correlation_ref,
         )
     if isinstance(error, AncestryError) and error.code in _SAFE_ANCESTRY_ERROR_STATUS:
+        message, remediation = _SAFE_PROVIDER_ERROR_TEXT.get(
+            error.code, (error.message, error.remediation)
+        )
         return _SAFE_ANCESTRY_ERROR_STATUS[error.code], ErrorEnvelope(
             code=error.code,
-            message=error.message,
-            remediation=error.remediation,
+            message=message,
+            remediation=remediation,
             correlation_ref=correlation_ref,
         )
     sanitized = map_domain_failure(domain_failure_from_exception(error))

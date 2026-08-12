@@ -97,7 +97,7 @@ def test_readiness_line_contains_only_public_handshake_metadata() -> None:
     assert frame.bearer_token not in rendered
 
 
-def test_packaged_sidecar_adds_no_domain_routes() -> None:
+def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
     app = create_sidecar_app(
         LaunchFrame(
             contract=API_CONTRACT,
@@ -108,12 +108,47 @@ def test_packaged_sidecar_adds_no_domain_routes() -> None:
 
     assert {route.path for route in app.routes if isinstance(route, APIRoute)} == {
         "/api/v1/capabilities",
+        "/api/v1/consents",
+        "/api/v1/consents/preview",
+        "/api/v1/consents/{name}/revoke",
         "/api/v1/health",
+        "/api/v1/provider-configuration",
+        "/api/v1/provider-endpoints/validate",
+        "/api/v1/provider-profiles",
         "/api/v1/secrets/{reference}/delete",
         "/api/v1/secrets/{reference}/set",
         "/api/v1/secrets/{reference}/status",
         "/api/v1/startup-diagnostics",
         "/api/v1/settings",
+    }
+
+
+def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Path) -> None:
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+    )
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+    )
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8421") as client:
+        response = client.get("/api/v1/provider-configuration", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema_version": 1,
+        "revision": "22d8b1f4f428f4f4b395f0d5079d85ecdc8219a66ac7ce2f9b3b3d1a20bdfdcf",
+        "profiles": [],
+        "consents": [],
     }
 
 
