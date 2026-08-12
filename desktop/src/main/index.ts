@@ -4,12 +4,13 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   protocol,
   session,
   type WebContents,
 } from 'electron'
-import { completeAppShutdown } from './app-shutdown'
+import { completeAppShutdown, type UnsafeShutdownChoice } from './app-shutdown'
 import { FileGrantBroker } from './file-grant-broker'
 import {
   registerDesktopIpcHandlers,
@@ -35,6 +36,7 @@ import {
 import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
+import type { JobShutdownAction } from './sidecar-client'
 import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
 import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
@@ -60,8 +62,9 @@ const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
 let sidecarSupervisor: SidecarSupervisor | undefined
+let prepareJobShutdown: ((action: JobShutdownAction) => Promise<void>) | undefined
 let shutdownAuthorized = false
-let shutdownPromise: Promise<void> | undefined
+let shutdownPromise: Promise<boolean> | undefined
 let ipcController: DesktopIpcController | undefined
 let removeSidecarSessionListener: (() => void) | undefined
 
@@ -154,6 +157,22 @@ function createWindow(): void {
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 
+async function chooseUnsafeShutdownAction(): Promise<UnsafeShutdownChoice> {
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'Background work is still active',
+    message: 'AncestryLLM cannot yet verify a safe exit.',
+    detail: 'Choose Wait to allow protected work to finish, Request cancellation to stop at a safe point, or Stay open. Atomic publication is never abandoned mid-operation.',
+    buttons: ['Wait', 'Request cancellation', 'Stay open'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  })
+  if (result.response === 0) return 'wait'
+  if (result.response === 1) return 'cancel'
+  return 'stay'
+}
+
 if (localRuntimeCliRequested && !primaryInstance) {
   app.exit(writeConcurrentLocalRuntimeCliFailure((line) => process.stdout.write(line)))
 } else if (localRuntimeCliRequested) {
@@ -181,6 +200,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
     const runtime = await startRuntimeBridge()
     bridge = runtime.bridge
     sidecarSupervisor = runtime.supervisor
+    prepareJobShutdown = runtime.prepareJobShutdown
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
@@ -199,17 +219,26 @@ if (localRuntimeCliRequested && !primaryInstance) {
     }
     event.preventDefault()
     if (!shutdownPromise && sidecarSupervisor) {
-      disposeIpcBoundary()
       const supervisor = sidecarSupervisor
-      sidecarSupervisor = undefined
+      const prepareJobs = prepareJobShutdown
       shutdownPromise = completeAppShutdown(
-        () => supervisor.stop(),
-        () => console.error('Sidecar process-tree shutdown could not be verified.'),
+        async (action) => {
+          if (!prepareJobs) throw new Error('Job shutdown preparation is unavailable.')
+          await prepareJobs(action)
+        },
+        chooseUnsafeShutdownAction,
+        async () => {
+          await supervisor.stop()
+        },
+        () => console.error('Background jobs or sidecar shutdown could not be verified.'),
         () => {
+          disposeIpcBoundary()
+          sidecarSupervisor = undefined
+          prepareJobShutdown = undefined
           shutdownAuthorized = true
           app.quit()
         },
-      )
+      ).finally(() => { shutdownPromise = undefined })
     }
   })
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

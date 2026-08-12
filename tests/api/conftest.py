@@ -15,11 +15,13 @@ from ancestryllm.api import (
     create_app,
 )
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
+from ancestryllm.application.jobs import JobLifecycleService, MemoryJobEventRepository
 from ancestryllm.application.results import StructuredResult
 from ancestryllm.application.secret_management import SecretManagementService
 from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescriptor
 from ancestryllm.core.config import AppConfig
+from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import MemorySecretStore
 from ancestryllm.llm.endpoint_validation import (
     EndpointProbeRequest,
@@ -70,10 +72,21 @@ def secret_store() -> MemorySecretStore:
 
 
 @pytest.fixture
+def job_service() -> Iterator[JobLifecycleService]:
+    service = JobLifecycleService(JobManager(), MemoryJobEventRepository())
+    service.startup()
+    try:
+        yield service
+    finally:
+        service.close()
+
+
+@pytest.fixture
 def api_client(
     api_settings: ApiSettings,
     registered_keys: tuple[DispatchKey, ...],
     secret_store: MemorySecretStore,
+    job_service: JobLifecycleService,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[TestClient]:
     registry = FixtureRegistry(
@@ -108,6 +121,7 @@ def api_client(
             endpoint_validator,
         ),
         endpoint_validation_service=endpoint_validator,
+        job_service=lambda: job_service,
     )
     with TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False) as client:
         yield client

@@ -7,9 +7,10 @@ read sanitized control state without becoming a sidecar client. Issue #105 adds
 an unreleased 0.6 source boundary for atomic non-secret settings and write-only
 credential management. Issue #107 adds a sanitized schema-v1 startup report,
 keyring-only packaged secret resolution, and fail-closed mutation gating for
-local first run. None of these changes exposes genealogy, job, chat, provider
-execution, cloud-account, updater, or generic command routes; the sidecar is
-not a domain-data transport.
+local first run. Issue #104 adds an unreleased UI-neutral job-lifecycle and
+safe-shutdown boundary. It exposes no genealogy operation, job submission,
+chat, provider execution, cloud-account, updater, or generic command route;
+the sidecar is not a domain-data transport.
 The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -71,8 +72,9 @@ channel, or staged rollout.
    `/api/v1/health` and `/api/v1/capabilities`; the unreleased #105 source adds
    `/api/v1/settings` plus fixed status, set, and delete operations beneath
    `/api/v1/secrets/{reference}`. Issue #107 adds the read-only
-   `/api/v1/startup-diagnostics` route. It still has no generic route
-   dispatcher.
+   `/api/v1/startup-diagnostics` route. Issue #104 adds fixed job list, status,
+   cancel, SSE-event, and safe-shutdown routes. Those routes expose lifecycle
+   metadata only and admit no work. It still has no generic route dispatcher.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -89,14 +91,22 @@ Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
 leader. No sidecar is started by the development mock shell.
 
-The current shutdown drains only resources that the implemented control
-sidecar actually owns: the Uvicorn server task and loopback listener, child
-stdio, the supervised process tree, Electron's private temporary working
-directory, and the encrypted provider-profile database session. FastAPI's
-application-lifespan shutdown hook closes that database session. The current
-composition registers no domain jobs or provider streams. Every future
-resource of those types must register an orderly drain through that lifecycle
-before its route is enabled.
+The sidecar creates its SQLCipher-backed job repository only when startup
+diagnostics permit database access. It reconciles any persisted nonterminal
+snapshot to exactly one failed `JOB_INTERRUPTED` terminal state at startup; it
+never automatically replays side-effecting work. Shutdown drains the Uvicorn
+server task and loopback listener, child stdio, the supervised process tree,
+Electron's private temporary working directory, and the encrypted provider and
+job database sessions.
+
+Before quitting, Electron main waits for a bounded safe-shutdown assessment. If
+work remains active, a native dialog offers **Wait**, **Request cancellation**,
+or **Stay open**. Cancellation is cooperative: protected publication can remain
+`pending-safe-point`, and Electron never silently abandons it. Process shutdown
+continues only after a safe assessment and verified sidecar stop. A degraded
+startup admits no process-local jobs, so its main-only shutdown assessment is
+the explicit safe empty case. Future provider streams and other database
+sessions must register an orderly drain before their routes are enabled.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not
@@ -110,9 +120,10 @@ lifetime manual retry. Concurrent retry requests share a single launch attempt,
 and an exhausted retry is a deterministic no-op. Electron main uses the session
 only for authenticated requests to its fixed startup-diagnostic, capability,
 settings, credential-management, provider-configuration, endpoint-test, and
-consent-administration routes. The bridge exposes the typed result, sanitized
-diagnostics, and retry outcome, but never the session, bearer, port, resolved
-address, response body, raw HTTP data, or a credential value.
+consent-administration routes, plus the main-only job shutdown preflight. The
+bridge exposes the typed result, sanitized diagnostics, and retry outcome, but
+never the session, bearer, port, resolved address, response body, raw HTTP
+data, or a credential value.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
@@ -122,7 +133,9 @@ file-grant methods, exactly five settings/credential methods (`getSettings`,
 exactly six provider/consent methods (`getProviderConfiguration`,
 `createProviderProfile`, `validateProviderEndpoint`, `previewConsent`,
 `createConsent`, and `revokeConsent`). There is no generic send, listen, route,
-or channel selection operation. Main accepts a call only from the registered
+or channel selection operation. Issue #104 adds no renderer method, event
+listener, or supported job UI; its shutdown client remains Electron-Main-only.
+Main accepts a call only from the registered
 `WebContents`, its exact current main frame, and the exact trusted
 `app://bundle/index.html` URL. It rechecks those facts on every request.
 Arguments and responses must also pass strict runtime schemas and a structured-

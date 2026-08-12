@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           uv sync --locked --no-default-groups --group test
-          pnpm --dir desktop install --frozen-lockfile
+          node desktop/scripts/install-locked.mjs
       - name: Verify API and workflow contracts
         shell: bash
         env:
@@ -345,8 +345,7 @@ jobs:
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop dependencies
         shell: bash
-        run: |
-          pnpm --dir desktop install --frozen-lockfile
+        run: node desktop/scripts/install-locked.mjs
       - name: Build and smoke-test native sidecar
         shell: bash
         env:

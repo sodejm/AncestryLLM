@@ -5,9 +5,10 @@ first Electron shell in `0.5.0`. Issue #105 adds the unreleased 0.6 contract for
 atomic non-secret settings and write-only credential management. Issue #107
 adds the read-only startup-diagnostics contract and fail-closed mutation gate.
 Issue #108 adds the provider-profile, endpoint-test, and consent-administration
-contract. This remains a private, authenticated, IPv4-loopback FastAPI adapter
-over transport-neutral application contracts. It is not a public, LAN,
-browser, or multi-user API.
+contract. Issue #104 adds the unreleased, UI-neutral job-lifecycle contract.
+This remains a private, authenticated, IPv4-loopback FastAPI adapter over
+transport-neutral application contracts. It is not a public, LAN, browser, or
+multi-user API.
 
 The released foundation exposes two read-only routes:
 
@@ -48,12 +49,23 @@ The unreleased #108 source adds six fixed path shapes and operations:
   current consent revision.
 - `POST /api/v1/consents/{name}/revoke` explicitly revokes a named grant.
 
-Together, the API has thirteen exact path templates. There is no generic
+The unreleased #104 source adds five fixed job-lifecycle path templates:
+
+- `GET /api/v1/jobs` returns bounded schema-v1 snapshots.
+- `GET /api/v1/jobs/{job_id}` returns one current snapshot.
+- `POST /api/v1/jobs/{job_id}/cancel` idempotently requests cooperative
+  cancellation and distinguishes a pending safe point from terminal state.
+- `GET /api/v1/jobs/{job_id}/events` streams bounded schema-v1 events over SSE
+  and supports `Last-Event-ID` replay.
+- `POST /api/v1/jobs/shutdown` performs the main-process safe-quit preflight.
+
+Together, the API has eighteen exact path templates. There is no generic
 command or route dispatcher and no genealogy, GEDCOM, RootsMagic, provider
-execution, storage, file, job, or other domain route. The credential and
-provider-configuration routes cannot read a secret value. Separately owned
-follow-on work must adapt the same
-transport-neutral application services.
+execution, storage, file, job-submission, or other domain-operation route. The
+credential and provider-configuration routes cannot read a secret value. Job
+routes expose lifecycle metadata only; they do not admit or execute work.
+Separately owned follow-on work must adapt the same transport-neutral
+application services.
 
 ## Security boundary
 
@@ -103,6 +115,24 @@ warnings, and optional budget. Creation accepts only the complete current
 preview; revocation is explicit. Neither a stored key nor a saved profile
 selects a provider, grants consent, or executes a request.
 
+Job snapshots and events use strict schema version 1 and expose only bounded,
+sanitized status, progress, artifact-reference, and error fields. Sequence
+numbers increase monotonically per job. Each job retains at most 256 events;
+the service admits at most 32 subscribers per job, gives each subscriber a
+64-event queue, and returns at most 1,000 snapshots. Payload and string bounds
+are validated at each boundary. `Last-Event-ID` resumes from retained history;
+an expired gap returns `JOB_EVENT_REPLAY_EXPIRED` with HTTP 410 so the client
+can fetch a fresh snapshot rather than silently miss state. Slow subscribers
+overflow independently and cannot block workers or manager locks. Cancellation
+is cooperative, and persistence plus startup reconciliation guarantee exactly
+one terminal outcome without replaying side effects.
+
+The shutdown preflight is process control, not a configuration mutation. It
+waits for active work within a bounded interval and fails closed while work is
+still active, including work pending a cancellation-safe point. It remains
+available during degraded startup because that composition admits no
+process-local jobs; all other degraded-state mutation gates remain unchanged.
+
 The bearer and paired build identities are immutable constructor inputs for a
 private supervisor channel. Issue #225 implements that packaged channel: the
 Electron main process generates a fresh URL-safe 256-bit bearer for every
@@ -137,9 +167,10 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 
 The health and capability contract shipped with the bounded `0.5.0` control
 shell. The settings, credential-management, startup-diagnostic,
-provider-profile, endpoint-test, and consent-administration operations are
-source-level work for `0.6.0`; they are not a released user surface until the
-applicable desktop packaging, security, and exact-head verification gates pass.
-Their presence in the committed OpenAPI artifact does not enable a public API,
-provider call, or genealogy workflow. Consent administration never replaces
-the execution-time policy check.
+provider-profile, endpoint-test, consent-administration, and job-lifecycle
+operations are source-level work for `0.6.0`; they are not a released user
+surface until the applicable desktop packaging, security, and exact-head
+verification gates pass. The job contract has no producer, submission route,
+or renderer job UI in this change. Its presence in the committed OpenAPI
+artifact does not enable a public API, provider call, or genealogy workflow.
+Consent administration never replaces the execution-time policy check.

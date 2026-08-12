@@ -37,6 +37,7 @@ const PROVIDER_PROFILES_PATH = '/api/v1/provider-profiles' as const
 const PROVIDER_ENDPOINT_VALIDATION_PATH = '/api/v1/provider-endpoints/validate' as const
 const CONSENT_PREVIEW_PATH = '/api/v1/consents/preview' as const
 const CONSENTS_PATH = '/api/v1/consents' as const
+const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -51,6 +52,7 @@ type SidecarPath =
   | typeof PROVIDER_ENDPOINT_VALIDATION_PATH
   | typeof CONSENT_PREVIEW_PATH
   | typeof CONSENTS_PATH
+  | typeof JOB_SHUTDOWN_PATH
   | `/api/v1/consents/${string}/revoke`
   | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
@@ -115,6 +117,18 @@ export interface SidecarClient {
   previewConsent(request: ConsentPreviewRequest, signal?: AbortSignal): Promise<ConsentPreview>
   createConsent(request: ConsentCreateRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
   revokeConsent(request: ConsentRevokeRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
+  prepareJobShutdown(
+    action: JobShutdownAction,
+    signal?: AbortSignal,
+  ): Promise<JobShutdownAssessment>
+}
+
+export type JobShutdownAction = 'wait' | 'cancel'
+
+export interface JobShutdownAssessment {
+  readonly schema_version: 1
+  readonly safe_to_quit: true
+  readonly active_jobs: readonly []
 }
 
 function requestFixedRoute(
@@ -304,6 +318,38 @@ function consentFailure(response: Readonly<SidecarHttpResponse>): SidecarClientE
   return new SidecarClientError('request_failed')
 }
 
+function parseJobShutdownAssessment(
+  response: Readonly<SidecarHttpResponse>,
+): Readonly<JobShutdownAssessment> {
+  if (!validJsonResponse(response)) throw new SidecarClientError('invalid_response')
+  try {
+    const payload = JSON.parse(response.body) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      throw new SidecarClientError('invalid_response')
+    }
+    const record = payload as Readonly<Record<string, unknown>>
+    const keys = Object.keys(record).sort()
+    if (keys.length !== 3
+      || keys[0] !== 'active_jobs'
+      || keys[1] !== 'safe_to_quit'
+      || keys[2] !== 'schema_version'
+      || record.schema_version !== 1
+      || record.safe_to_quit !== true
+      || !Array.isArray(record.active_jobs)
+      || record.active_jobs.length !== 0) {
+      throw new SidecarClientError('invalid_response')
+    }
+    return Object.freeze({
+      schema_version: 1,
+      safe_to_quit: true,
+      active_jobs: Object.freeze([] as const),
+    })
+  } catch (error) {
+    if (error instanceof SidecarClientError) throw error
+    throw new SidecarClientError('invalid_response')
+  }
+}
+
 export function createSidecarClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
@@ -429,6 +475,14 @@ export function createSidecarClient(dependencies: Readonly<{
       })
       if (response.statusCode !== 200) throw consentFailure(response)
       return parseJson(response, parseProviderConfigurationResult)
+    },
+    async prepareJobShutdown(action: JobShutdownAction, signal?: AbortSignal) {
+      const response = await perform(JOB_SHUTDOWN_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify({ schema_version: 1, action, timeout_seconds: 2 }),
+      })
+      if (response.statusCode !== 200) throw new SidecarClientError('request_failed')
+      return parseJobShutdownAssessment(response)
     },
   })
 }

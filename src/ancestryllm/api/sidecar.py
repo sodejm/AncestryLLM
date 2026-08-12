@@ -24,16 +24,19 @@ from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.server import LOOPBACK_HOST, create_uvicorn_config
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
+from ancestryllm.application.jobs import JOB_SCHEMA_VERSION, JobLifecycleService, ShutdownAssessment
 from ancestryllm.application.secret_management import SecretManagementService
 from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.config import APP_NAME, AppConfig
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
 from ancestryllm.llm.endpoint_validation import EndpointValidationService
 from ancestryllm.llm.profiles import ProviderProfileService
 from ancestryllm.llm.provider_configuration import ProviderConfigurationService
 from ancestryllm.storage.database import Database
 from ancestryllm.storage.diagnostics import StartupConfigurationFailure, diagnose_startup
+from ancestryllm.storage.job_events import SqlJobEventRepository
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -88,14 +91,62 @@ class _EmptyRegistry:
 
 @dataclass(slots=True)
 class _SidecarLifecycle:
-    """Close the lazily opened encrypted workspace when the sidecar stops."""
+    """Own restart reconciliation and encrypted job persistence."""
 
     database: Database
+    startup_diagnostics: Callable[[], StartupDiagnosticReport]
+    job_lifecycle: JobLifecycleService | None = field(init=False, default=None, repr=False)
 
     async def startup(self) -> None:
-        """Keep startup non-writing; diagnostics remain the readiness authority."""
+        """Open writable storage only after startup diagnostics authorize it."""
+
+        if not self.startup_diagnostics().mutations_allowed:
+            return
+        service: JobLifecycleService | None = None
+        try:
+            self.database.initialize()
+            repository = SqlJobEventRepository(self.database)
+            service = JobLifecycleService(
+                JobManager(start_id=repository.next_job_number()),
+                repository,
+            )
+            service.startup()
+        except BaseException:
+            if service is not None:
+                service.close()
+            self.database.close()
+            raise
+        assert service is not None
+        self.job_lifecycle = service
+
+    def jobs(self) -> JobLifecycleService:
+        """Return the ready job boundary or a stable degraded-mode failure."""
+
+        if self.job_lifecycle is None:
+            raise AncestryError(
+                "JOB_SERVICE_UNAVAILABLE",
+                "Background jobs are unavailable while startup safety checks are blocked.",
+                "Resolve startup diagnostics, then restart the desktop application.",
+            )
+        return self.job_lifecycle
+
+    def prepare_job_shutdown(self, action: str, timeout_seconds: float) -> ShutdownAssessment:
+        """Authorize degraded shutdown or delegate to the live job boundary."""
+
+        if self.job_lifecycle is None:
+            return ShutdownAssessment(
+                schema_version=JOB_SCHEMA_VERSION,
+                safe_to_quit=True,
+                active_jobs=(),
+            )
+        return self.job_lifecycle.prepare_shutdown(
+            action=action,
+            timeout_seconds=timeout_seconds,
+        )
 
     async def shutdown(self) -> None:
+        if self.job_lifecycle is not None:
+            self.job_lifecycle.close()
         self.database.close()
 
 
@@ -296,6 +347,7 @@ def create_sidecar_app(
         endpoint_validator=endpoint_validator,
     )
 
+    lifecycle = _SidecarLifecycle(database, startup_report)
     return create_app(
         settings=frame.settings(),
         registry=_EmptyRegistry(),
@@ -307,9 +359,11 @@ def create_sidecar_app(
             endpoint_validator,
         ),
         endpoint_validation_service=endpoint_validator,
-        lifecycle=_SidecarLifecycle(database),
+        lifecycle=lifecycle,
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,
+        job_service=lifecycle.jobs,
+        job_shutdown=lifecycle.prepare_job_shutdown,
     )
 
 
@@ -359,7 +413,7 @@ def main() -> int:
         _process_tree_guard = acquire_windows_process_tree_guard()
         frame = parse_launch_frame(sys.stdin.buffer)
         return asyncio.run(_serve(frame))
-    except (ValueError, OSError, RuntimeError, TimeoutError):
+    except (AncestryError, ValueError, OSError, RuntimeError, TimeoutError):
         _fail()
 
 

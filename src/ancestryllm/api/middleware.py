@@ -31,6 +31,10 @@ _SECRET_ROUTE = re.compile(
 _CONSENT_REVOKE_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/consents/[A-Za-z0-9][A-Za-z0-9._~-]{{0,199}}/revoke$"
 )
+_JOB_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/jobs/[A-Za-z0-9][A-Za-z0-9._~-]{{0,31}}"
+    r"(?P<operation>/cancel|/events)?$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -81,6 +85,14 @@ def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePoli
         return None
     if path == f"{API_NAMESPACE}/startup-diagnostics":
         return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/jobs":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/jobs/shutdown":
+        return _RoutePolicy("POST", accepts_json=True)
+    job_match = _JOB_ROUTE.fullmatch(path)
+    if job_match is not None:
+        operation = job_match.group("operation")
+        return _RoutePolicy("POST" if operation == "/cancel" else "GET")
     if path == f"{API_NAMESPACE}/settings":
         return _RoutePolicy("PATCH", accepts_json=True)
     if path == f"{API_NAMESPACE}/provider-configuration":

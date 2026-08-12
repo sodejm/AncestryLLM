@@ -112,6 +112,11 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
         "/api/v1/consents/preview",
         "/api/v1/consents/{name}/revoke",
         "/api/v1/health",
+        "/api/v1/jobs",
+        "/api/v1/jobs/shutdown",
+        "/api/v1/jobs/{job_id}",
+        "/api/v1/jobs/{job_id}/cancel",
+        "/api/v1/jobs/{job_id}/events",
         "/api/v1/provider-configuration",
         "/api/v1/provider-endpoints/validate",
         "/api/v1/provider-profiles",
@@ -142,6 +147,7 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
 
     with TestClient(app, base_url="http://127.0.0.1:8421") as client:
         response = client.get("/api/v1/provider-configuration", headers=headers)
+        jobs = client.get("/api/v1/jobs", headers=headers)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -150,6 +156,8 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
         "profiles": [],
         "consents": [],
     }
+    assert jobs.status_code == 200
+    assert jobs.json() == {"schema_version": 1, "jobs": []}
 
 
 def test_packaged_sidecar_uses_keyring_only_secret_resolution(
@@ -223,6 +231,12 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
                 "changes": {"limits.max_query_rows": 250},
             },
         )
+        jobs = client.get("/api/v1/jobs", headers=headers)
+        shutdown = client.post(
+            "/api/v1/jobs/shutdown",
+            headers=headers,
+            json={"schema_version": 1, "action": "wait", "timeout_seconds": 0},
+        )
 
     assert diagnostics.status_code == 200
     payload = diagnostics.json()
@@ -244,6 +258,16 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
     assert str(tmp_path) not in diagnostics.text
     assert blocked.status_code == 503
     assert blocked.json()["code"] == "STARTUP_MUTATION_BLOCKED"
+    assert jobs.status_code == 503
+    assert jobs.json()["code"] == "JOB_SERVICE_UNAVAILABLE"
+    assert shutdown.status_code == 200
+    assert shutdown.json() == {
+        "schema_version": 1,
+        "safe_to_quit": True,
+        "active_jobs": [],
+    }
+    assert private_marker not in jobs.text
+    assert str(tmp_path) not in jobs.text
     assert private_marker not in blocked.text
     assert config_path.read_text(encoding="utf-8") == private_marker
     assert not fallback.data_dir.exists()

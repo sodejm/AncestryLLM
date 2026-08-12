@@ -456,8 +456,7 @@ jobs:
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop release dependencies
         shell: bash
-        run: |
-          pnpm --dir desktop install --frozen-lockfile
+        run: node desktop/scripts/install-locked.mjs
       - name: Build and smoke-test the native sidecar
         shell: bash
         env:
@@ -1038,7 +1037,7 @@ jobs:
           version: "11.9.0"
       - name: Install locked desktop test dependencies
         shell: bash
-        run: pnpm --dir desktop install --frozen-lockfile
+        run: node desktop/scripts/install-locked.mjs
       - id: source
         name: Download and verify the exact installer artifact
         shell: bash

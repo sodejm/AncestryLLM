@@ -144,6 +144,7 @@ PURE_CORE_MODULES: Final[frozenset[str]] = frozenset(
         "ancestryllm.core.commands",
         "ancestryllm.core.deployment",
         "ancestryllm.core.errors",
+        "ancestryllm.core.jobs",
     }
 )
 

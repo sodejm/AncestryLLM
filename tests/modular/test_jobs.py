@@ -9,7 +9,21 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.core.jobs import JobManager, JobReporter, JobSnapshot, JobState
+from ancestryllm.core.jobs import (
+    MAX_JOB_ID_NUMBER,
+    MAX_JOB_NAME_CHARACTERS,
+    MAX_JOB_OUTCOME_CHARACTERS,
+    MAX_JOB_PENDING,
+    MAX_JOB_PROGRESS_CHARACTERS,
+    MAX_JOB_PROGRESS_TOTAL,
+    MAX_JOB_RESOURCE_KEY_BYTES,
+    MAX_JOB_RESOURCE_KEYS,
+    MAX_JOB_WORKERS,
+    JobManager,
+    JobReporter,
+    JobSnapshot,
+    JobState,
+)
 from ancestryllm.terminal.presentation import to_plain
 
 if TYPE_CHECKING:
@@ -181,6 +195,87 @@ def test_job_manager_rejects_work_beyond_bounded_capacity() -> None:
         manager.wait(job.job_id, timeout=2)
     finally:
         release.set()
+        manager.shutdown()
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    (
+        {"max_workers": True},
+        {"max_workers": MAX_JOB_WORKERS + 1, "max_pending": MAX_JOB_WORKERS + 1},
+        {"max_pending": True},
+        {"max_pending": MAX_JOB_PENDING + 1},
+        {"start_id": True},
+        {"start_id": MAX_JOB_ID_NUMBER + 1},
+    ),
+)
+def test_job_manager_rejects_unbounded_or_ambiguous_configuration(
+    configuration: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        JobManager(**configuration)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("name", "resource_keys"),
+    (
+        ("", ()),
+        ("job\x00name", ()),
+        ("x" * (MAX_JOB_NAME_CHARACTERS + 1), ()),
+        ("job", tuple(f"resource-{index}" for index in range(MAX_JOB_RESOURCE_KEYS + 1))),
+        ("job", ("",)),
+        ("job", ("resource\x00key",)),
+        ("job", ("x" * (MAX_JOB_RESOURCE_KEY_BYTES + 1),)),
+    ),
+)
+def test_job_manager_rejects_unbounded_submission_metadata(
+    name: str,
+    resource_keys: tuple[str, ...],
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        with pytest.raises(ValueError):
+            manager.submit(name, lambda: None, resource_keys=resource_keys)
+
+        accepted = manager.submit("bounded job", lambda: None)
+        assert manager.wait(accepted.job_id, timeout=2).state is JobState.COMPLETED
+    finally:
+        manager.shutdown()
+
+
+def test_job_manager_rejects_non_callable_work_without_consuming_capacity() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        with pytest.raises(ValueError):
+            manager.submit("invalid callable", None)  # type: ignore[arg-type]
+
+        accepted = manager.submit("bounded job", lambda: None)
+        assert manager.wait(accepted.job_id, timeout=2).state is JobState.COMPLETED
+    finally:
+        manager.shutdown()
+
+
+def test_job_manager_fails_closed_when_job_identifiers_are_exhausted() -> None:
+    manager = JobManager(max_workers=1, max_pending=1, start_id=MAX_JOB_ID_NUMBER)
+    try:
+        final = manager.submit("final identifier", lambda: None)
+        assert final.job_id == "j999999999999"
+        assert manager.wait(final.job_id, timeout=2).state is JobState.COMPLETED
+
+        with pytest.raises(AncestryError) as raised:
+            manager.submit("identifier overflow", lambda: None)
+        assert raised.value.code == "JOB_IDENTIFIER_EXHAUSTED"
+    finally:
+        manager.shutdown()
+
+
+def test_job_manager_releases_resource_lock_cache_after_work_finishes() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit("bounded resource", lambda: None, resource_keys=("fictional.ged",))
+        assert manager.wait(job.job_id, timeout=2).state is JobState.COMPLETED
+        assert manager._resource_locks == {}
+    finally:
         manager.shutdown()
 
 
@@ -427,6 +522,18 @@ def test_job_lookup_uses_stable_error() -> None:
     assert raised.value.code == "JOB_NOT_FOUND"
 
 
+def test_job_manager_resumes_monotonic_identifiers_after_persisted_jobs() -> None:
+    manager = JobManager(max_workers=1, max_pending=1, start_id=42)
+    try:
+        submitted = manager.submit("resumed identifier", lambda: None)
+        completed = manager.wait(submitted.job_id, timeout=2)
+    finally:
+        manager.shutdown()
+
+    assert submitted.job_id == "j000042"
+    assert completed.state is JobState.COMPLETED
+
+
 def test_jobs_publish_indeterminate_and_determinate_progress_events() -> None:
     secret = "fictional-progress-secret"
     manager = JobManager(
@@ -488,6 +595,57 @@ def test_job_reporter_rejects_invalid_progress(
     try:
         with pytest.raises(ValueError):
             reporter.update(operation, completed=completed, total=total)
+    finally:
+        manager.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("operation", "completed", "total"),
+    (
+        ("progress\x00operation", None, None),
+        ("x" * (MAX_JOB_PROGRESS_CHARACTERS + 1), None, None),
+        ("Working", True, 1),
+        ("Working", 1, True),
+        ("Working", 1.5, 2),
+        ("Working", 1, 2.5),
+        ("Working", MAX_JOB_PROGRESS_TOTAL, MAX_JOB_PROGRESS_TOTAL + 1),
+    ),
+)
+def test_job_reporter_rejects_unbounded_or_ambiguous_progress(
+    operation: str,
+    completed: object,
+    total: object,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    reporter = JobReporter(manager, "j999999")
+    try:
+        with pytest.raises(ValueError):
+            reporter.update(  # type: ignore[arg-type]
+                operation,
+                completed=completed,
+                total=total,
+            )
+    finally:
+        manager.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("summary", "next_action"),
+    (
+        ("", "Inspect the result."),
+        ("Completed.", ""),
+        ("summary\x00value", "Inspect the result."),
+        ("Completed.", "next\x00action"),
+        ("x" * (MAX_JOB_OUTCOME_CHARACTERS + 1), "Inspect the result."),
+        ("Completed.", "x" * (MAX_JOB_OUTCOME_CHARACTERS + 1)),
+    ),
+)
+def test_job_reporter_rejects_unbounded_outcomes(summary: str, next_action: str) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    reporter = JobReporter(manager, "j999999")
+    try:
+        with pytest.raises(ValueError):
+            reporter.set_outcome(summary, next_action=next_action)
     finally:
         manager.shutdown()
 

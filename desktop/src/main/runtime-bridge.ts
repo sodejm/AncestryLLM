@@ -3,7 +3,7 @@ import { createDesktopControlBridge } from './desktop-control'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
-import { createSidecarClient } from './sidecar-client'
+import { createSidecarClient, type JobShutdownAction } from './sidecar-client'
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
 import {
@@ -15,6 +15,7 @@ import {
 export interface RuntimeBridge {
   bridge: MainDesktopBridge
   supervisor?: SidecarSupervisor
+  prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
 }
 
 export async function startRuntimeBridge(): Promise<RuntimeBridge> {
@@ -48,6 +49,7 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
     maxRestarts: 2,
     maxManualRetries: 1,
   })
+  const sidecarClient = createSidecarClient({ session: () => supervisor.session() })
   const desktopControl = createDesktopControlBridge({
     appInfo: {
       applicationName: 'AncestryLLM',
@@ -55,7 +57,7 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
       buildChannel: 'packaged',
     },
     supervisor,
-    sidecarClient: createSidecarClient({ session: () => supervisor.session() }),
+    sidecarClient,
     preferences,
   })
   const localRuntimeControl = createPackagedLocalRuntimeControl(
@@ -68,5 +70,9 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
   })
 
   await supervisor.start().catch(() => undefined)
-  return { bridge, supervisor }
+  return {
+    bridge,
+    supervisor,
+    prepareJobShutdown: async (action) => { await sidecarClient.prepareJobShutdown(action) },
+  }
 }

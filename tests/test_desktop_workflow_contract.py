@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
+MAKEFILE = ROOT / "Makefile"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
@@ -12,6 +13,15 @@ RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 
 def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_desktop_install_is_one_locked_verified_contract() -> None:
+    workflow = _workflow()
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+
+    assert workflow.count("node desktop/scripts/install-locked.mjs") == 2
+    assert "pnpm --dir desktop install --frozen-lockfile" not in workflow
+    assert ("desktop-install:\n\t@node desktop/scripts/install-locked.mjs\n") in makefile
 
 
 def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
