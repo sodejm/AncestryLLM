@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import http.client
 import importlib.util
@@ -124,7 +125,10 @@ def _corrupt_same_size(payload: bytes) -> bytes:
 
 def _tar_archive(member: str, payload: bytes, *, mode: int = 0o755) -> bytes:
     stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+    with (
+        gzip.GzipFile(fileobj=stream, mode="wb", mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as archive,
+    ):
         info = tarfile.TarInfo(member)
         info.size = len(payload)
         info.mode = mode
