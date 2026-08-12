@@ -37,43 +37,26 @@ def _rewrite_destination(destination: str) -> str:
     return f"{wiki_target}{match.group('title')}"
 
 
-def _rewrite_links(
-    fragment: str,
-    rewrite_destination: Callable[[str], str],
-    *,
-    include_images: bool,
-) -> str:
-    def replace(match: re.Match[str]) -> str:
-        if match.group("prefix").startswith("!") and not include_images:
-            return match.group(0)
-        destination = rewrite_destination(match.group("destination"))
-        return f"{match.group('prefix')}{destination}{match.group('suffix')}"
-
-    return _MARKDOWN_LINK.sub(replace, fragment)
-
-
 def _rewrite_fragment(
     fragment: str,
     rewrite_destination: Callable[[str], str],
     *,
     include_images: bool,
 ) -> str:
-    rewritten: list[str] = []
-    cursor = 0
-    for match in _INLINE_CODE.finditer(fragment):
-        rewritten.append(
-            _rewrite_links(
-                fragment[cursor : match.start()],
-                rewrite_destination,
-                include_images=include_images,
-            )
-        )
-        rewritten.append(match.group(0))
-        cursor = match.end()
-    rewritten.append(
-        _rewrite_links(fragment[cursor:], rewrite_destination, include_images=include_images)
-    )
-    return "".join(rewritten)
+    inline_code = tuple((match.start(), match.end()) for match in _INLINE_CODE.finditer(fragment))
+
+    def rewrite_link(match: re.Match[str]) -> str:
+        # A complete Markdown link inside a code span is an example and must be
+        # left untouched. Inline code inside the link label does not protect the
+        # destination, however; links such as [`path`](target) are still live.
+        if any(start <= match.start() < end for start, end in inline_code):
+            return match.group(0)
+        if match.group("prefix").startswith("!") and not include_images:
+            return match.group(0)
+        destination = rewrite_destination(match.group("destination"))
+        return f"{match.group('prefix')}{destination}{match.group('suffix')}"
+
+    return _MARKDOWN_LINK.sub(rewrite_link, fragment)
 
 
 def rewrite_markdown_link_destinations(

@@ -117,6 +117,17 @@ def test_all_local_links_and_metadata_are_validated(tmp_path: Path, capsys) -> N
     assert "missing page metadata: nested/Child.md" in output
 
 
+def test_links_with_inline_code_labels_are_validated(tmp_path: Path, capsys) -> None:
+    _write_wiki(tmp_path)
+    (tmp_path / "Home.md").write_text(
+        "# Home\n\n[`repository file`](../outside/Dockerfile)\n",
+        encoding="utf-8",
+    )
+
+    assert wiki_validation.main(["--source", str(tmp_path)]) == 1
+    assert "unsafe local target: Home.md -> ../outside/Dockerfile" in capsys.readouterr().err
+
+
 def test_local_source_anchors_are_validated_after_percent_decoding(tmp_path: Path, capsys) -> None:
     (tmp_path / "Home.md").write_text(
         "[Valid](Guide.md#caf%C3%A9)\n[Missing](Guide.md#not-there)\n",
