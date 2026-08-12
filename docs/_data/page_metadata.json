@@ -3,7 +3,7 @@
   "_schema_version": 1,
   "Home.md": {
     "title": "AncestryLLM documentation",
-    "description": "Local-first genealogy research with optional LLM providers. Start with the current CLI and REPL or released bounded desktop control shell; desktop-domain capabilities remain planned."
+    "description": "Local-first genealogy research with optional LLM providers. Start with the current CLI and REPL, or the released bounded desktop control shell and its reviewed macOS arm64 runtime-tool controls; broader desktop-domain capabilities remain planned."
   },
   "CLI.md": {
     "title": "CLI reference — AncestryLLM",
@@ -47,7 +47,7 @@
   },
   "SETUP_DIAGNOSTICS.md": {
     "title": "First-run storage diagnostics — AncestryLLM",
-    "description": "Troubleshoot storage, permissions, and configuration issues on first run with AncestryLLM's built-in diagnostics."
+    "description": "Troubleshoot storage, permissions, configuration, and macOS arm64 runtime-tool failures with AncestryLLM's built-in diagnostics."
   },
   "FILE_INGRESS.md": {
     "title": "Bounded file ingress — AncestryLLM",
@@ -131,7 +131,7 @@
   },
   "DEPLOYMENT.md": {
     "title": "Deployment — AncestryLLM",
-    "description": "Released bounded desktop installer publication controls, signing configuration, and environment requirements; not a hosted application or domain-capability rollout."
+    "description": "Released bounded desktop publication controls and app-owned macOS arm64 runtime-tool management; not a hosted application or domain-capability rollout."
   },
   "REPL_ARCHITECTURE.md": {
     "title": "REPL architecture — AncestryLLM",
@@ -155,11 +155,11 @@
   },
   "ADR-0026-local-first-container-remote-deployment.md": {
     "title": "ADR-0026: Local-first container and advanced remote deployment — AncestryLLM",
-    "description": "Implemented deployment-profile control boundary and accepted future runtimes, including trust boundaries, ownership, resource budgets, non-goals, and release gates."
+    "description": "Implemented deployment-profile and macOS arm64 runtime-tool boundaries plus future application runtimes, trust boundaries, ownership, budgets, non-goals, and release gates."
   },
   "DOCS_AUTHORING.md": {
     "title": "Documentation architecture and authoring guide — AncestryLLM",
-    "description": "Canonical Diátaxis architecture, authoring rules, editorial baseline, and migration inventory for AncestryLLM documentation."
+    "description": "Canonical Diátaxis architecture, authoring rules, macOS arm64 runtime boundary, editorial baseline, and documentation migration inventory."
   },
   "CODE_DOCUMENTATION.md": {
     "title": "In-code documentation policy — AncestryLLM",

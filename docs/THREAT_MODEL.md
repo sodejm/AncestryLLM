@@ -49,13 +49,15 @@ default, reviewed mode descriptions, revision-bound previews, explicit
 confirmation, atomic local recovery, fail-closed runtime diagnostics, and
 redacted backup/support metadata. It does not start containers, enroll a
 remote client, host a server, widen a listener, or move genealogy data. The
-Unreleased Issue #363 adds an unwired, Electron-Main-only host container-control
-foundation. It validates an app-owned local Docker endpoint and exact hardened
-plans, ignores ambient daemon selection, and performs only bounded inspection
-and lifecycle operations over exactly owned resources. It starts no application
-workload and exposes no Docker authority to preload, renderer, shared DTOs, or
-containers. The diagrams, controls, abuse cases, and gates below define
-both this partial runtime and accepted later-roadmap requirements;
+Unreleased Issue #363 adds the Electron-Main-only host container-control
+foundation. Issue #348 wires only macOS arm64 runtime acquisition and lifecycle
+through a policy-bound status/review/apply interface. It validates an app-owned
+local Docker endpoint and exact hardened plans, ignores ambient daemon
+selection, and performs only bounded inspection and lifecycle operations over
+exactly owned resources. It starts no AncestryLLM application workload and
+exposes no Docker authority to preload, renderer, shared DTOs, or containers.
+The diagrams, controls, abuse cases, and gates below define this runtime-tool
+substrate and accepted later-roadmap requirements;
 implementation alone is not evidence that every packaged assurance control has
 passed. Each
 adapter must reuse the implemented service contracts and complete its named
@@ -65,9 +67,10 @@ verification before a planned control can be treated as effective.
 local-first multi-container backend, an advanced remote-client profile, and a
 separately operated remote-server profile as the target architecture. Issue
 #347 implements only the profile-selection portion of `TM-M01`; Issue #363
-implements only the host-control subset of `TM-H01`, `TM-B01`, `TM-O01`, and
-`TM-C01`. No application container or remote runtime is implemented or
-supported. The deployment diagrams, remaining controls, `STR-H-*` through
+implements the host-control subset of `TM-H01`, `TM-B01`, `TM-O01`, and
+`TM-C01`; Issue #348 implements the local acquisition portions of `TM-H01`,
+`TM-K01`, `TM-N01`, and `TM-V01`. No AncestryLLM application container or
+remote runtime is implemented or supported. The deployment diagrams, remaining controls, `STR-H-*` through
 `STR-M-*` and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below remain
 requirements for planned work. The #363 native macOS arm64 receipt supports its
 narrow evidence disposition below, but no deployment risk rating is reduced
@@ -196,11 +199,12 @@ flowchart LR
 
 ## Proposed container and remote deployment data flow
 
-These flows are design targets owned by #346 and its dependent work. Issue #363
-implements only the unwired Main-to-supervisor-to-selected-engine control
-segment; it does not instantiate any depicted application container, network,
-secret, volume, listener, or data flow. The complete runtimes must remain
-unavailable until their respective assurance gates pass.
+These flows are design targets owned by #346 and its dependent work. Issues
+#363 and #348 implement only the Main-to-supervisor-to-app-owned-engine control
+and runtime-acquisition segment; they do not instantiate any depicted
+AncestryLLM application container, application network, secret, genealogy
+volume, listener, or data flow. The complete runtimes must remain unavailable
+until their respective assurance gates pass.
 
 ```mermaid
 flowchart LR
@@ -377,10 +381,18 @@ produced the required evidence.
 
 | Control | Source and native evidence | Residual ownership |
 |---|---|---|
-| `TM-H01`, `TM-B01` | Closed schema-v1 policy and plan validation admits only the application-owned Unix socket, context, CLI configuration, Compose project, working directory, exact labels, digest-pinned native-architecture image, and fixed lifecycle operation selected by policy. It rejects ambient Docker selectors, TCP/SSH/named-pipe endpoints, symlinked or replaced sockets, wrong owner/mode/engine identity, architecture or project drift, unknown fields, unsafe Compose features, and conflicting resources. Endpoint and engine identity are revalidated around each preflight and lifecycle action; realized container and network security state must exactly match the plan. Every Docker and Compose subprocess uses fixed argument vectors, a minimal environment, output/input/time limits, process-group termination, and stable redacted failures, while generated Compose disables implicit image pulls. | The implemented Main-only interface is deliberately unwired and cannot start an application runtime. OCI provenance, image SBOM/license evidence, rollback policy, runtime acquisition, and additional native platforms remain #353 and #358-#362. Independent G5 release evidence remains required. |
+| `TM-H01`, `TM-B01` | Closed schema-v1 policy and plan validation admits only the application-owned Unix socket, context, CLI configuration, Compose project, working directory, exact labels, digest-pinned native-architecture image, and fixed lifecycle operation selected by policy. It rejects ambient Docker selectors, TCP/SSH/named-pipe endpoints, symlinked or replaced sockets, wrong owner/mode/engine identity, architecture or project drift, unknown fields, unsafe Compose features, and conflicting resources. Endpoint and engine identity are revalidated around each preflight and lifecycle action; realized container and network security state must exactly match the plan. Every Docker and Compose subprocess uses fixed argument vectors, a minimal environment, output/input/time limits, process-group termination, and stable redacted failures, while generated Compose disables implicit image pulls. | Issue #348 now wires only verified runtime-tool acquisition and lifecycle; it still cannot start an AncestryLLM application runtime. OCI image provenance, image SBOM/license evidence, application rollback policy, and additional native platforms remain #353 and #358-#362. Independent G5 release evidence remains required. |
 | `TM-K01`, `TM-C01` | Accepted plans require a non-root user, read-only root filesystem, all capabilities dropped, `no-new-privileges`, explicit CPU/memory/PID/log limits, named volumes only, internal networks, and loopback-only published ports. Inventory reconciles only exact project/name/label matches, deduplicates identical records, preserves collisions, and never broad-scans or removes unrelated resources. Start, repair, and uninstall require exact operation-bound authorization; stop is non-destructive. Preserve and delete uninstall plans are separate validated operations. | The isolated macOS ARM64 lifecycle exercise proves start, stop, repair, preserve, restart, and explicit delete behavior for a harmless fixture. It does not prove application images, genealogy volumes, secret delivery, migration, upgrade, rollback, interruption recovery, filesystem isolation, daemon escape resistance, or production resource budgets; those remain #348, #349, #351, #358, #364, and #365. |
-| `TM-I01`, `TM-O01` | The typed host-control port and process runner live only in Electron Main; boundary tests reject them from preload, renderer, and shared contracts, and neither the renderer nor any container receives Docker authority. Errors and the schema-v1 native receipt are limited to stable codes and reviewed structural identity, excluding arguments, output, environment, credentials, hostnames, usernames, paths, sockets, ports, and temporary state. | Future #348 wiring requires a separately reviewed narrow Main integration and must not widen the frozen renderer bridge or make the control plane reachable from application containers. Packaged canary and support-artifact evidence remains #131/#132. |
+| `TM-I01`, `TM-O01` | The typed host-control port and process runner live only in Electron Main; boundary tests reject them from preload and renderer implementation, and neither the renderer nor any container receives Docker authority. Issue #348 adds only fixed status, preview, and apply DTOs; no socket, executable path, environment, arbitrary arguments, or general process capability crosses the bridge. Errors and receipts are limited to stable codes and reviewed structural identity, excluding arguments, output, environment, credentials, hostnames, usernames, paths, sockets, ports, and temporary state. | Packaged canary and support-artifact evidence remains #131/#132. |
 | Native macOS ARM64 proof | An isolated Colima profile and application-owned Docker context completed the exact source-level start, stop, repair, preserve, restart, and delete sequence against the pinned fixture digest. The run verified daemon identity across operations, left no owned container/network/volume, removed the isolated profile, and proved the user's default Docker context and engine were unchanged. The sanitized receipt is `docs/release-evidence/issue-363-macos-arm64-container-supervisor.json`. | This is narrow host-control evidence only. It is not application-runtime, data, secret, network, persistence, install, upgrade, rollback, cross-platform, packaged, or complete G5/G7 evidence, and it does not reduce the inherent platform-risk rating by itself. |
+
+### Issue #348 macOS arm64 runtime-bootstrap evidence
+
+| Control | Source and contract evidence | Residual ownership |
+|---|---|---|
+| `TM-H01`, `TM-V01` | The packaged schema-v1 policy admits only Apple silicon on macOS 13 or later with hardware virtualization and 24 GiB available. Each Colima, Lima, Docker CLI, Compose, Buildx, and VM-image record binds one repository, version, release asset, source URL, exact byte length, SHA-256, license identity, and license digest. Unknown fields, platforms, architectures, archive names, URLs, missing trust fields, alternate indexes, implicit latest versions, mirror fallback, ambient `PATH`, requests for administrator privileges, and administrator installers fail closed. The downloaded bytes cannot execute before both size and digest verification; extraction rejects links, devices, traversal, absolute paths, duplicate members, and unexpected executables before atomic publication. | Target-matched packaged execution, upstream provenance attestations where available, and continuing upstream license review remain release evidence. The tool policy is not an application-image or updater trust policy. |
+| `TM-K01`, `TM-N01` | Setup, start, and repair use one app-owned Colima profile, Docker context, configuration root, and Unix socket. Every process receives a minimal explicit environment; the ambient Docker context is ignored. Kubernetes and routable address publication are disabled, the resource envelope is policy-bounded, and Docker Desktop is optional and untouched. The renderer receives no Docker socket or process authority. | Colima and Lima retain their inherent host virtualization authority. Application networks, container budgets, data mounts, workload identity, and service readiness remain separately gated. |
+| `TM-O01`, `TM-C01` | Status is read-only. Mutations require a current review revision and exact operation-specific confirmation. Bounded `.part` files allow retry after cancellation, network loss, reboot, or partial setup; offline mode accepts only complete reverified cache entries. Repair and uninstall revalidate ownership, while preserve-data and delete-data removal are distinct plans. sanitized local-runtime diagnostics omit environment values, usernames, hostnames, absolute and temporary paths, subprocess output, response bodies, and tokens. | A power loss at an external virtualization boundary can still require an explicit repair. Delete-data confirmation is intentionally destructive only inside the validated application root. |
 
 ### Issue #306 verified uv bootstrap evidence
 

@@ -12,6 +12,13 @@ import {
   type FileGrant,
   type FileGrantRevocation,
   type LocalPreferences,
+  type LocalRuntimeApplyRequest,
+  type LocalRuntimeOperation,
+  type LocalRuntimePreview,
+  type LocalRuntimeRequest,
+  type LocalRuntimeResult,
+  type LocalRuntimeState,
+  type LocalRuntimeStatus,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderEndpointValidation,
@@ -26,6 +33,8 @@ import {
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentRevokeRequest,
+  parseLocalRuntimeApplyRequest,
+  parseLocalRuntimeRequest,
   parsePreferenceUpdate,
   parseProviderEndpointValidationRequest,
   parseProviderProfileCreateRequest,
@@ -58,6 +67,15 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     consents: [],
   })
   const presentSecrets = new Set<SecretReference>()
+  let localRuntimeState: LocalRuntimeState = 'not-installed'
+  const localRuntimeConfirmations: Readonly<Record<LocalRuntimeOperation, string>> = {
+    setup: 'SET UP LOCAL RUNTIME',
+    start: 'START LOCAL RUNTIME',
+    stop: 'STOP LOCAL RUNTIME',
+    repair: 'REPAIR LOCAL RUNTIME',
+    'uninstall-preserve': 'REMOVE LOCAL RUNTIME',
+    'uninstall-delete': 'DELETE LOCAL RUNTIME DATA',
+  }
   const success = <T extends object>(data: Readonly<T>): BridgeResult<T> => deepFreeze({
     ok: true,
     protocolVersion: DESKTOP_PROTOCOL_VERSION,
@@ -109,6 +127,134 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     })
     return providerConfiguration
   }
+  const localRuntimeStatus = (): LocalRuntimeStatus => {
+    const installed = localRuntimeState !== 'not-installed'
+    const code = localRuntimeState === 'not-installed'
+      ? 'RUNTIME_NOT_INSTALLED'
+      : localRuntimeState === 'stopped'
+        ? 'RUNTIME_STOPPED'
+        : localRuntimeState === 'ready'
+          ? 'RUNTIME_READY'
+          : 'RUNTIME_UNHEALTHY'
+    return deepFreeze({
+      schema_version: 1,
+      state: localRuntimeState,
+      code,
+      supported: true,
+      host: {
+        operating_system: 'macos',
+        architecture: 'arm64',
+        macos_major: 15,
+        virtualization: 'available',
+        free_space: 'sufficient',
+        existing_docker_contexts: 0,
+      },
+      allocation: { cpus: 4, memory_gib: 8, disk_gib: 60 },
+      components: [
+        { name: 'colima', version: '0.10.3', installed },
+        { name: 'lima', version: '2.2.0', installed },
+        { name: 'docker-cli', version: '29.7.2', installed },
+        { name: 'docker-buildx', version: '0.36.1', installed },
+        { name: 'docker-compose', version: '5.4.0', installed },
+      ],
+      vm_image: { version: '0.10.4', installed },
+    })
+  }
+  const localRuntimePreview = (request: LocalRuntimeRequest): LocalRuntimePreview => deepFreeze({
+    schema_version: 1,
+    operation: request.operation,
+    offline: request.offline,
+    actions: [{ code: `RUNTIME_${request.operation.toUpperCase().replaceAll('-', '_')}` }],
+    confirmation_phrase: localRuntimeConfirmations[request.operation],
+    preserves_data: request.operation !== 'uninstall-delete',
+    deletes_data: request.operation === 'uninstall-delete',
+    plan_revision: 'a'.repeat(64),
+    status: localRuntimeStatus(),
+    review: {
+      artifacts: [
+        {
+          name: 'colima',
+          version: '0.10.3',
+          repository: 'abiosoft/colima',
+          asset_name: 'colima-Darwin-arm64',
+          source_url: 'https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64',
+          sha256: '1'.repeat(64),
+          size_bytes: 15_656_320,
+          license: 'MIT',
+          license_url: 'https://raw.githubusercontent.com/abiosoft/colima/v0.10.3/LICENSE',
+          license_sha256: '2'.repeat(64),
+        },
+        {
+          name: 'lima',
+          version: '2.2.0',
+          repository: 'lima-vm/lima',
+          asset_name: 'lima-2.2.0-Darwin-arm64.tar.gz',
+          source_url: 'https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz',
+          sha256: '3'.repeat(64),
+          size_bytes: 37_586_365,
+          license: 'Apache-2.0',
+          license_url: 'https://raw.githubusercontent.com/lima-vm/lima/v2.2.0/LICENSE',
+          license_sha256: '4'.repeat(64),
+        },
+        {
+          name: 'docker-cli',
+          version: '29.7.2',
+          repository: 'docker/cli',
+          asset_name: 'docker-29.7.2.tgz',
+          source_url: 'https://download.docker.com/mac/static/stable/aarch64/docker-29.7.2.tgz',
+          sha256: '5'.repeat(64),
+          size_bytes: 18_920_558,
+          license: 'Apache-2.0',
+          license_url: 'https://raw.githubusercontent.com/docker/cli/v29.7.2/LICENSE',
+          license_sha256: '6'.repeat(64),
+        },
+        {
+          name: 'docker-buildx',
+          version: '0.36.1',
+          repository: 'docker/buildx',
+          asset_name: 'buildx-v0.36.1.darwin-arm64',
+          source_url: 'https://github.com/docker/buildx/releases/download/v0.36.1/buildx-v0.36.1.darwin-arm64',
+          sha256: '7'.repeat(64),
+          size_bytes: 62_541_920,
+          license: 'Apache-2.0',
+          license_url: 'https://raw.githubusercontent.com/docker/buildx/v0.36.1/LICENSE',
+          license_sha256: '8'.repeat(64),
+        },
+        {
+          name: 'docker-compose',
+          version: '5.4.0',
+          repository: 'docker/compose',
+          asset_name: 'docker-compose-darwin-aarch64',
+          source_url: 'https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-darwin-aarch64',
+          sha256: '9'.repeat(64),
+          size_bytes: 46_852_962,
+          license: 'Apache-2.0',
+          license_url: 'https://raw.githubusercontent.com/docker/compose/v5.4.0/LICENSE',
+          license_sha256: 'a'.repeat(64),
+        },
+      ],
+      vm_image: {
+        version: '0.10.4',
+        repository: 'abiosoft/colima-core',
+        asset_name: 'ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+        source_url: 'https://github.com/abiosoft/colima-core/releases/download/v0.10.4/ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+        sha256: 'b'.repeat(64),
+        size_bytes: 332_354_401,
+      },
+      ownership: {
+        profile: 'ancestryllm-local-arm64',
+        context: 'colima-ancestryllm-local-arm64',
+      },
+      isolation: {
+        loopback_only: true,
+        kubernetes: false,
+        privileged_containers: false,
+        renderer_socket_access: false,
+        container_socket_access: false,
+        cross_profile_socket_access: false,
+      },
+    },
+  })
   return Object.freeze({
     async getAppInfo() { return appInfoFixture },
     async getStartupDiagnostics() {
@@ -263,6 +409,32 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         protocolVersion: DESKTOP_PROTOCOL_VERSION,
         data: { revoked: true as const },
       }) as BridgeResult<FileGrantRevocation>
+    },
+    async getLocalRuntimeStatus() {
+      return success(localRuntimeStatus())
+    },
+    async previewLocalRuntime(input: LocalRuntimeRequest) {
+      return success(localRuntimePreview(parseLocalRuntimeRequest(input)))
+    },
+    async applyLocalRuntime(input: LocalRuntimeApplyRequest) {
+      const request = parseLocalRuntimeApplyRequest(input)
+      const preview = localRuntimePreview(request)
+      if (
+        request.plan_revision !== preview.plan_revision
+        || request.confirmation !== preview.confirmation_phrase
+      ) throw new Error('Mock local runtime operation requires the current confirmed plan')
+      localRuntimeState = request.operation === 'stop'
+        ? 'stopped'
+        : request.operation.startsWith('uninstall-')
+          ? 'not-installed'
+          : 'ready'
+      const result: LocalRuntimeResult = {
+        schema_version: 1,
+        operation: request.operation,
+        state: localRuntimeState,
+        code: localRuntimeStatus().code,
+      }
+      return success(result)
     },
   })
 }

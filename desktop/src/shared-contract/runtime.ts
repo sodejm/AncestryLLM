@@ -4,6 +4,7 @@ import {
   providerDataClasses,
   providerIds,
   secretReferences,
+  localRuntimeOperations,
   type AppInfo,
   type ApplicationSetting,
   type ApplicationSettingKey,
@@ -27,6 +28,13 @@ import {
   type FileGrantRevocation,
   type FileValidation,
   type LocalPreferences,
+  type LocalRuntimeApplyRequest,
+  type LocalRuntimeOperation,
+  type LocalRuntimePreview,
+  type LocalRuntimeRequest,
+  type LocalRuntimeReview,
+  type LocalRuntimeResult,
+  type LocalRuntimeStatus,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderConfiguration,
@@ -82,6 +90,21 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'FILE_GRANT_STALE',
   'FILE_GRANT_CONFLICT',
   'FILE_DIALOG_FAILED',
+  'RUNTIME_POLICY_INVALID',
+  'RUNTIME_POLICY_SCHEMA_UNSUPPORTED',
+  'RUNTIME_REQUEST_INVALID',
+  'RUNTIME_HOST_UNSUPPORTED',
+  'RUNTIME_PLAN_STALE',
+  'RUNTIME_CONFIRMATION_REQUIRED',
+  'RUNTIME_OFFLINE_UNAVAILABLE',
+  'RUNTIME_DOWNLOAD_FAILED',
+  'RUNTIME_ARTIFACT_INTEGRITY',
+  'RUNTIME_COMPONENT_INTEGRITY',
+  'RUNTIME_STORAGE_UNSAFE',
+  'RUNTIME_NOT_INSTALLED',
+  'RUNTIME_OWNERSHIP_INVALID',
+  'RUNTIME_PROCESS_FAILED',
+  'RUNTIME_HEALTH_FAILED',
   'INTERNAL_ERROR',
 ]
 const startupStates = ['starting', 'ready', 'degraded', 'stopped'] as const
@@ -106,6 +129,33 @@ const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'mar
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
 const secretStatuses = ['present', 'missing', 'unavailable'] as const
 const providerValues = ['none', 'ollama', 'openai', 'anthropic', 'gemini', 'openrouter'] as const
+const localRuntimeStates = ['not-installed', 'stopped', 'ready', 'unhealthy'] as const
+const localRuntimeComponentNames = [
+  'colima',
+  'lima',
+  'docker-cli',
+  'docker-buildx',
+  'docker-compose',
+] as const
+const localRuntimeComponentRepositories: Readonly<Record<
+  typeof localRuntimeComponentNames[number],
+  string
+>> = {
+  colima: 'abiosoft/colima',
+  lima: 'lima-vm/lima',
+  'docker-cli': 'docker/cli',
+  'docker-buildx': 'docker/buildx',
+  'docker-compose': 'docker/compose',
+}
+const localRuntimeAssetPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,159}$/
+const localRuntimeConfirmations: Readonly<Record<LocalRuntimeOperation, string>> = {
+  setup: 'SET UP LOCAL RUNTIME',
+  start: 'START LOCAL RUNTIME',
+  stop: 'STOP LOCAL RUNTIME',
+  repair: 'REPAIR LOCAL RUNTIME',
+  'uninstall-preserve': 'REMOVE LOCAL RUNTIME',
+  'uninstall-delete': 'DELETE LOCAL RUNTIME DATA',
+}
 const consentWarningCodes: readonly ConsentWarningCode[] = [
   'LIVING_PERSON_DATA_INCLUDED',
   'REMOTE_PROVIDER_SELECTED',
@@ -397,6 +447,53 @@ export function parseSaveFileGrantRequest(value: unknown): SaveFileGrantRequest 
     throw new Error('Invalid save-file grant request')
   }
   return deepFreeze({ purpose: value.purpose, suggestedName: value.suggestedName })
+}
+
+function parseLocalRuntimeOperation(value: unknown): LocalRuntimeOperation {
+  if (
+    typeof value !== 'string'
+    || !localRuntimeOperations.includes(value as LocalRuntimeOperation)
+  ) throw new Error('Invalid local runtime request')
+  return value as LocalRuntimeOperation
+}
+
+export function parseLocalRuntimeRequest(value: unknown): LocalRuntimeRequest {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'operation', 'offline'])
+    || value.schema_version !== 1
+    || typeof value.offline !== 'boolean'
+  ) throw new Error('Invalid local runtime request')
+  return deepFreeze({
+    schema_version: 1,
+    operation: parseLocalRuntimeOperation(value.operation),
+    offline: value.offline,
+  })
+}
+
+export function parseLocalRuntimeApplyRequest(value: unknown): LocalRuntimeApplyRequest {
+  if (
+    !record(value)
+    || !exactKeys(value, [
+      'schema_version',
+      'operation',
+      'offline',
+      'plan_revision',
+      'confirmation',
+    ])
+    || value.schema_version !== 1
+    || typeof value.offline !== 'boolean'
+    || typeof value.plan_revision !== 'string'
+    || !digestPattern.test(value.plan_revision)
+    || !bounded(value.confirmation, 0, 64)
+  ) throw new Error('Invalid local runtime apply request')
+  return deepFreeze({
+    schema_version: 1,
+    operation: parseLocalRuntimeOperation(value.operation),
+    offline: value.offline,
+    plan_revision: value.plan_revision,
+    confirmation: value.confirmation,
+  })
 }
 
 export function parseFileGrantId(value: unknown): FileGrantId {
@@ -759,6 +856,249 @@ function parseFileGrantRevocation(value: unknown): FileGrantRevocation {
   return value as unknown as FileGrantRevocation
 }
 
+function parseLocalRuntimeStatus(value: unknown): LocalRuntimeStatus {
+  if (
+    !record(value)
+    || !exactKeys(value, [
+      'schema_version',
+      'state',
+      'code',
+      'supported',
+      'host',
+      'allocation',
+      'components',
+      'vm_image',
+    ])
+    || value.schema_version !== 1
+    || !localRuntimeStates.includes(value.state as typeof localRuntimeStates[number])
+    || !bounded(value.code, 1, 64)
+    || !identifierPattern.test(value.code)
+    || typeof value.supported !== 'boolean'
+    || !record(value.host)
+    || !exactKeys(value.host, [
+      'operating_system',
+      'architecture',
+      'macos_major',
+      'virtualization',
+      'free_space',
+      'existing_docker_contexts',
+    ])
+    || (value.host.operating_system !== 'macos' && value.host.operating_system !== 'unsupported')
+    || !bounded(value.host.architecture, 1, 24)
+    || !identifierPattern.test(value.host.architecture)
+    || !integer(value.host.macos_major, 0, 99)
+    || (value.host.virtualization !== 'available' && value.host.virtualization !== 'unavailable')
+    || (value.host.free_space !== 'sufficient' && value.host.free_space !== 'insufficient')
+    || !integer(value.host.existing_docker_contexts, 0, 10_000)
+    || !record(value.allocation)
+    || !exactKeys(value.allocation, ['cpus', 'memory_gib', 'disk_gib'])
+    || !integer(value.allocation.cpus, 1, 64)
+    || !integer(value.allocation.memory_gib, 1, 512)
+    || !integer(value.allocation.disk_gib, 1, 4096)
+    || !Array.isArray(value.components)
+    || value.components.length !== localRuntimeComponentNames.length
+    || !record(value.vm_image)
+    || !exactKeys(value.vm_image, ['version', 'installed'])
+    || !bounded(value.vm_image.version, 1, 32)
+    || !identifierPattern.test(value.vm_image.version)
+    || typeof value.vm_image.installed !== 'boolean'
+  ) invalidResponse()
+  const seen = new Set<string>()
+  for (const component of value.components) {
+    if (
+      !record(component)
+      || !exactKeys(component, ['name', 'version', 'installed'])
+      || !localRuntimeComponentNames.includes(
+        component.name as typeof localRuntimeComponentNames[number],
+      )
+      || seen.has(String(component.name))
+      || !bounded(component.version, 1, 32)
+      || !identifierPattern.test(component.version)
+      || typeof component.installed !== 'boolean'
+    ) invalidResponse()
+    seen.add(String(component.name))
+  }
+  return deepFreeze(value as unknown as LocalRuntimeStatus)
+}
+
+function parseLocalRuntimeReview(
+  value: unknown,
+  status: LocalRuntimeStatus,
+): LocalRuntimeReview {
+  if (
+    !record(value)
+    || !exactKeys(value, ['artifacts', 'vm_image', 'ownership', 'isolation'])
+    || !Array.isArray(value.artifacts)
+    || value.artifacts.length !== localRuntimeComponentNames.length
+  ) invalidResponse()
+
+  const statusVersions = new Map(status.components.map((component) => [component.name, component.version]))
+  const seen = new Set<string>()
+  for (const artifact of value.artifacts) {
+    if (
+      !record(artifact)
+      || !exactKeys(artifact, [
+        'name',
+        'version',
+        'repository',
+        'asset_name',
+        'source_url',
+        'sha256',
+        'size_bytes',
+        'license',
+        'license_url',
+        'license_sha256',
+      ])
+      || !localRuntimeComponentNames.includes(
+        artifact.name as typeof localRuntimeComponentNames[number],
+      )
+      || seen.has(String(artifact.name))
+      || !bounded(artifact.version, 1, 32)
+      || !identifierPattern.test(artifact.version)
+      || statusVersions.get(String(artifact.name)) !== artifact.version
+      || artifact.repository !== localRuntimeComponentRepositories[
+        artifact.name as typeof localRuntimeComponentNames[number]
+      ]
+      || !bounded(artifact.asset_name, 1, 160)
+      || !localRuntimeAssetPattern.test(artifact.asset_name)
+      || typeof artifact.source_url !== 'string'
+      || typeof artifact.sha256 !== 'string'
+      || !digestPattern.test(artifact.sha256)
+      || !integer(artifact.size_bytes, 1, 1024 * 1024 * 1024)
+      || (artifact.license !== 'Apache-2.0' && artifact.license !== 'MIT')
+      || typeof artifact.license_url !== 'string'
+      || typeof artifact.license_sha256 !== 'string'
+      || !digestPattern.test(artifact.license_sha256)
+    ) invalidResponse()
+
+    const name = artifact.name as typeof localRuntimeComponentNames[number]
+    const repository = localRuntimeComponentRepositories[name]
+    const releaseUrl = `https://github.com/${repository}/releases/download/v${artifact.version}/${artifact.asset_name}`
+    const dockerUrl = `https://download.docker.com/mac/static/stable/aarch64/${artifact.asset_name}`
+    if (
+      artifact.source_url !== releaseUrl
+      && !(name === 'docker-cli' && artifact.source_url === dockerUrl)
+    ) invalidResponse()
+    const permittedLicenseUrls = [
+      `https://raw.githubusercontent.com/${repository}/v${artifact.version}/LICENSE`,
+      `https://raw.githubusercontent.com/${repository}/v${artifact.version}/LICENSE.md`,
+      `https://raw.githubusercontent.com/${repository}/v${artifact.version}/LICENSE.txt`,
+    ]
+    if (!permittedLicenseUrls.includes(artifact.license_url)) invalidResponse()
+    seen.add(name)
+  }
+
+  const vmImage = value.vm_image
+  if (
+    !record(vmImage)
+    || !exactKeys(vmImage, [
+      'version',
+      'repository',
+      'asset_name',
+      'source_url',
+      'sha256',
+      'size_bytes',
+    ])
+    || !bounded(vmImage.version, 1, 32)
+    || !identifierPattern.test(vmImage.version)
+    || vmImage.version !== status.vm_image.version
+    || vmImage.repository !== 'abiosoft/colima-core'
+    || vmImage.asset_name !== 'ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz'
+    || vmImage.source_url !== `https://github.com/abiosoft/colima-core/releases/download/v${vmImage.version}/${vmImage.asset_name}`
+    || typeof vmImage.sha256 !== 'string'
+    || !digestPattern.test(vmImage.sha256)
+    || !integer(vmImage.size_bytes, 1, 1024 * 1024 * 1024)
+  ) invalidResponse()
+
+  const ownership = value.ownership
+  if (
+    !record(ownership)
+    || !exactKeys(ownership, ['profile', 'context'])
+    || ownership.profile !== 'ancestryllm-local-arm64'
+    || ownership.context !== 'colima-ancestryllm-local-arm64'
+  ) invalidResponse()
+
+  const isolation = value.isolation
+  if (
+    !record(isolation)
+    || !exactKeys(isolation, [
+      'loopback_only',
+      'kubernetes',
+      'privileged_containers',
+      'renderer_socket_access',
+      'container_socket_access',
+      'cross_profile_socket_access',
+    ])
+    || isolation.loopback_only !== true
+    || isolation.kubernetes !== false
+    || isolation.privileged_containers !== false
+    || isolation.renderer_socket_access !== false
+    || isolation.container_socket_access !== false
+    || isolation.cross_profile_socket_access !== false
+  ) invalidResponse()
+
+  return deepFreeze(value as unknown as LocalRuntimeReview)
+}
+
+function parseLocalRuntimePreview(value: unknown): LocalRuntimePreview {
+  if (
+    !record(value)
+    || !exactKeys(value, [
+      'schema_version',
+      'operation',
+      'offline',
+      'actions',
+      'confirmation_phrase',
+      'preserves_data',
+      'deletes_data',
+      'plan_revision',
+      'status',
+      'review',
+    ])
+    || value.schema_version !== 1
+    || typeof value.offline !== 'boolean'
+    || !Array.isArray(value.actions)
+    || value.actions.length < 1
+    || value.actions.length > 8
+    || typeof value.preserves_data !== 'boolean'
+    || typeof value.deletes_data !== 'boolean'
+    || typeof value.plan_revision !== 'string'
+    || !digestPattern.test(value.plan_revision)
+  ) invalidResponse()
+  const operation = (() => {
+    try { return parseLocalRuntimeOperation(value.operation) } catch { return invalidResponse() }
+  })()
+  if (
+    value.confirmation_phrase !== localRuntimeConfirmations[operation]
+    || value.deletes_data !== (operation === 'uninstall-delete')
+    || value.preserves_data === value.deletes_data
+  ) invalidResponse()
+  for (const action of value.actions) {
+    if (
+      !record(action)
+      || !exactKeys(action, ['code'])
+      || !bounded(action.code, 1, 64)
+      || !identifierPattern.test(action.code)
+    ) invalidResponse()
+  }
+  const status = parseLocalRuntimeStatus(value.status)
+  parseLocalRuntimeReview(value.review, status)
+  return deepFreeze(value as unknown as LocalRuntimePreview)
+}
+
+function parseLocalRuntimeOutcome(value: unknown): LocalRuntimeResult {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'operation', 'state', 'code'])
+    || value.schema_version !== 1
+    || !localRuntimeStates.includes(value.state as typeof localRuntimeStates[number])
+    || !bounded(value.code, 1, 64)
+    || !identifierPattern.test(value.code)
+  ) invalidResponse()
+  try { parseLocalRuntimeOperation(value.operation) } catch { invalidResponse() }
+  return deepFreeze(value as unknown as LocalRuntimeResult)
+}
+
 function parseBridgeResult<T>(value: unknown, parseData: Parser<T>): BridgeResult<T> {
   if (!record(value) || value.protocolVersion !== DESKTOP_PROTOCOL_VERSION || typeof value.ok !== 'boolean') invalidResponse()
   if (value.ok) {
@@ -784,3 +1124,6 @@ export const parseProviderEndpointValidationResult = (value: unknown): BridgeRes
 export const parseConsentPreviewResult = (value: unknown): BridgeResult<ConsentPreview> => parseBridgeResult(value, parseConsentPreview)
 export const parseFileGrantResult = (value: unknown): BridgeResult<FileGrant | null> => parseBridgeResult(value, parseNullableFileGrant)
 export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<FileGrantRevocation> => parseBridgeResult(value, parseFileGrantRevocation)
+export const parseLocalRuntimeStatusResult = (value: unknown): BridgeResult<LocalRuntimeStatus> => parseBridgeResult(value, parseLocalRuntimeStatus)
+export const parseLocalRuntimePreviewResult = (value: unknown): BridgeResult<LocalRuntimePreview> => parseBridgeResult(value, parseLocalRuntimePreview)
+export const parseLocalRuntimeResult = (value: unknown): BridgeResult<LocalRuntimeResult> => parseBridgeResult(value, parseLocalRuntimeOutcome)

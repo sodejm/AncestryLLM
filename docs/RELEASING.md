@@ -24,10 +24,11 @@ release readiness.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
 runtime target, not a current availability claim. The source-level profile
-control plane and the unwired #363 host-control foundation do not make a
-container or remote runtime available. Each runtime remains unavailable until
-its row below and the common conditions pass. A gate or subset assigned to one
-profile does not block an independent profile whose own row is complete.
+control plane, #363 host-control foundation, and #348 macOS arm64 runtime-tool
+manager do not make an AncestryLLM application container or remote runtime
+available. Each runtime remains unavailable until its row below and the common
+conditions pass. A gate or subset assigned to one profile does not block an
+independent profile whose own row is complete.
 
 | Profile | Required threat-model evidence |
 |---|---|
@@ -62,10 +63,13 @@ isolated Colima profile, app-owned context and Unix socket to the expected
 Engine identity; exercises hardened start, stop, repair, preserving uninstall,
 deleting uninstall, and exact owned-resource cleanup; and confirms that the
 default Docker context and engine remain unchanged. It does not prove an
-application image, runtime acquisition, secret broker, family-tree grant,
-authenticated workload, storage migration or recovery, quantitative budget,
-interruption path, release-candidate integration, or any additional native OS,
-architecture, Engine, or Compose row. It cannot independently satisfy a
+application image, secret broker, family-tree grant, authenticated workload,
+storage migration or recovery, quantitative budget, release-candidate
+integration, or any additional native OS, architecture, Engine, or Compose
+row. Issue #348 adds source-level, policy-bound acquisition and interruption-
+resumable lifecycle management for that macOS arm64 tool substrate; it does not
+upgrade this earlier receipt into application-runtime or packaged-release
+evidence. The receipt cannot independently satisfy a
 profile gate.
 
 Failure of any condition blocks the affected profile without blocking the

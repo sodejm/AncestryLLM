@@ -8,11 +8,13 @@ hosted application deployment.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 future Local Desktop container profile plus explicit Connect Remote and Host
-Remote profiles. Unreleased 0.6 source now implements the shared profile
-control plane, not those future runtimes. Local Desktop is the preselected,
-recommended mode. An omitted profile migrates to that safe local default; an
-unknown schema, malformed topology, stale revision, or substituted endpoint
-fails closed.
+Remote profiles. Unreleased 0.6 source implements the shared profile control
+plane and a separate macOS arm64 manager for app-owned Colima/Lima, Docker
+Engine, and Compose tools. The manager does not supply an AncestryLLM
+application container or activate a deployment profile. Local Desktop is the
+preselected, recommended mode. An omitted profile migrates to that safe local
+default; an unknown schema, malformed topology, stale revision, or substituted
+endpoint fails closed.
 
 Headless tooling can list the reviewed choices, inspect the stored profile,
 preview an exact transition, diagnose a profile/runtime mismatch, recover to
@@ -29,9 +31,9 @@ Every unattended transition requires the current schema and configuration
 revision, the exact confirmation returned by a separate preview, and the
 literal `--unattended` flag. Only Local Desktop can currently be activated.
 Connect Remote activation is reserved for authenticated enrollment in #357;
-Host Remote activation is reserved for the reviewed runtime integration in
-#348. The host-only container-control foundation in #363 does not activate a
-profile.
+Host Remote activation remains separate reviewed hosting work. Neither the
+#363 host-only container-control foundation nor the #348 runtime-tool manager
+activates a profile.
 Profile selection never starts a listener, container, supervisor, or remote
 session, and never copies, exports, imports, or uploads a family tree.
 
@@ -46,13 +48,15 @@ and Local Desktop recovery available.
 This guide does not authorize using the current private sidecar as a network
 service or provide a current Host Remote runbook.
 
-## Host container-control foundation
+## Host control and macOS arm64 runtime tools
 
-Unreleased 0.6 source contains a deliberately unwired, Electron-Main-only
-control foundation for #348 and #349. It is not reachable from the renderer,
-preload bridge, shared renderer types, deployment-profile executor, CLI, or
-application containers, and it does not start a container during ordinary
-application execution. No public or supported container runtime is introduced.
+Unreleased 0.6 source contains the #363 Electron-Main-only container-control
+foundation and the #348 macOS arm64 runtime-tool manager. Packaged Settings and
+the packaged executable expose only fixed status, review, and apply operations.
+The renderer receives no Docker socket, executable path, Docker context,
+environment, arbitrary arguments, process output, or unredacted diagnostics.
+Neither component connects the deployment-profile executor, starts an
+AncestryLLM application image, or introduces a public or remote runtime.
 
 The closed schema-v1 policy and plan currently accept only native Darwin arm64
 with an app-owned runtime profile, Docker context, Unix socket, Docker
@@ -82,8 +86,10 @@ Stable control failures are `INVALID_POLICY`, `INVALID_PLAN`,
 `RESOURCE_CONFLICT`, `AUTHORIZATION_REQUIRED`, and `CONTROL_FAILED`. Stable
 process failures are `PROCESS_REQUEST_INVALID`, `PROCESS_INPUT_LIMIT`,
 `PROCESS_OUTPUT_LIMIT`, `PROCESS_TIMEOUT`, `PROCESS_EXIT`, and
-`PROCESS_RESPONSE_INVALID`. These codes are developer evidence, not an
-end-user Host Remote troubleshooting interface.
+`PROCESS_RESPONSE_INVALID`. Local-runtime management uses the `RUNTIME_*`
+codes in [Setup diagnostics](SETUP_DIAGNOSTICS.md#local-runtime-management-failures).
+These codes are bounded diagnostic evidence, not an end-user Host Remote
+troubleshooting interface.
 
 The sanitized
 [`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
@@ -93,10 +99,23 @@ inventory, hardening inspection, ambient-selection rejection, and complete
 owned-resource cleanup while leaving the default Docker context and engine
 unchanged. It proves neither an application image nor a supported runtime.
 
-Remaining work includes runtime acquisition and selection, application images,
-the host secret broker, profile activation, grant-authorized read-only family
-tree mounts, authenticated workloads, storage migration and backup, upgrade
-and rollback, interruption recovery, resource/readiness/listener budgets, the
+The #348 manager downloads exact upstream assets into bounded app-owned cache
+files, verifies each archive and license by reviewed size and SHA-256, safely
+extracts and re-verifies expected components, and then performs resumable
+setup, start, stop, repair, and preserve/delete removal. Offline mode never
+uses the network and succeeds only from a complete reverified cache. It is
+limited to Apple silicon on macOS 13 or later, requires hardware virtualization
+and at least 24 GiB free, and uses exact pinned versions, resource limits,
+archive names, URLs, licenses, sizes, and digests. It does not use a package
+manager, request administrator privileges, install system services, select
+ambient tools, or fall back to another mirror. Docker Desktop remains optional
+and untouched. See [Desktop shell](DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
+for the Settings and noninteractive operator procedures.
+
+Remaining work includes application images, the host secret broker, profile
+activation, grant-authorized read-only family tree mounts, authenticated
+workloads, storage migration and backup, runtime upgrade and rollback policy,
+application resource/readiness/listener budgets, packaged native evidence, the
 full `G5`/`G7` evidence set, and every additional OS, architecture, Engine, and
 Compose row claimed by a future release.
 

@@ -31,6 +31,11 @@ export interface SidecarControlPort {
   retry(): Promise<boolean>
 }
 
+export type SidecarDesktopBridge = Omit<
+  MainDesktopBridge,
+  'getLocalRuntimeStatus' | 'previewLocalRuntime' | 'applyLocalRuntime'
+>
+
 function requireActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw signal.reason
 }
@@ -82,7 +87,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
   supervisor: SidecarControlPort
   sidecarClient: SidecarClient
   preferences: PreferencesStore
-}>): MainDesktopBridge {
+}>): SidecarDesktopBridge {
   const appInfo = frozen({ ...dependencies.appInfo })
 
   const collectStartupDiagnostics = async (signal?: AbortSignal): Promise<Readonly<StartupDiagnostics>> => {

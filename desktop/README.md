@@ -8,8 +8,9 @@ network, or operating-system services from the renderer. The versioned
 information, startup diagnostics, capabilities, bounded sidecar retry,
 preference reads, and optimistic-concurrency preference updates. Unreleased
 Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
-settings and credential methods, and Issue #108 adds six fixed provider-profile,
-endpoint-test, and consent methods. Development uses deterministic fictional
+settings and credential methods, Issue #108 adds six fixed provider-profile,
+endpoint-test, and consent methods, and Issue #348 adds three fixed
+local-runtime status/preview/apply methods. Development uses deterministic fictional
 fixtures; packaged main is the sole authenticated client for the fixed sidecar
 routes. Packaged main stores the bounded local-preference schema in
 `preferences.json` beneath Electron's OS app-data directory. The renderer never
@@ -117,16 +118,26 @@ details never enter IPC or the preload bridge. See
 domain transport adapter must consume the application-service contract and
 shared file-ingress policy; do not place domain logic in Electron.
 
-Unreleased Issue #363 also adds an intentionally unwired, Electron-Main-only
-container-control foundation for later deployment work. It validates one
-app-owned Unix Docker endpoint and exact hardened Compose plans, ignores ambient
-Docker selection, and exposes only typed inspection and bounded lifecycle
-operations inside main. The Docker socket, executable, context, generic process
-authority, and lifecycle methods are absent from preload, the renderer, and
-shared DTOs. This foundation does not provide an application image, listener,
-secret broker, genealogy workload, profile activation, or user-facing
-container runtime; those remain blocked on their separately reviewed issues and
-G5/G7 assurance gates.
+Unreleased Issue #363 adds the Electron-Main-only container-control foundation,
+and Issue #348 wires only its macOS arm64 runtime-acquisition and lifecycle
+surface through three fixed methods. Settings can inspect a sanitized status,
+review an exact policy-bound plan, and explicitly install, start, stop, repair,
+or remove the app-owned Colima/Lima and Docker tool substrate. The Docker
+socket, executable path, context, environment, arbitrary arguments, and generic
+process authority remain absent from preload and the renderer. This surface
+does not provide an application image, listener, secret broker, genealogy
+workload, or profile activation; those remain blocked on their separately
+reviewed issues and G5/G7 assurance gates.
+
+The packaged `resources/macos-arm64-runtime-policy-v1.json` binds every tool to
+one repository, version, asset, source URL, byte length, SHA-256, license
+identity, and license digest. The manager accepts only Apple silicon on macOS
+13 or later with hardware virtualization and 24 GiB free, never requests
+administrator privileges, and ignores ambient Docker selection. Docker Desktop
+is optional and is neither installed nor modified. See the
+[desktop shell guide](../docs/DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
+for review/apply commands, interruption recovery, offline behavior, and the
+separate preserve-data and delete-data removal choices.
 
 The opt-in native evidence test is destructive only inside its explicitly
 isolated, app-owned test profile and project:

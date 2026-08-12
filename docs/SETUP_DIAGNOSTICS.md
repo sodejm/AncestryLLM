@@ -174,14 +174,13 @@ moves genealogy data.
 | `DEPLOYMENT_RUNTIME_MISMATCH` | Stored intent has no active reviewed runtime. | Diagnose the mismatch or explicitly recover to Local Desktop. |
 | `DEPLOYMENT_PROVIDER_CONFLICT` | `provider=none` is paired with a non-local profile. | Recover to Local Desktop; provider and consent changes remain separate. |
 | `DEPLOYMENT_ENROLLMENT_REQUIRED` | Connect Remote lacks its reviewed authenticated enrollment. | Keep Local Desktop until Issue #357 ships. |
-| `DEPLOYMENT_HOST_SETUP_REQUIRED` | Host Remote lacks its reviewed headless setup authority. | Keep or recover Local Desktop until #348 runtime integration passes; the #363 host-control source does not activate hosting. |
+| `DEPLOYMENT_HOST_SETUP_REQUIRED` | Host Remote lacks its reviewed headless setup authority. | Keep or recover Local Desktop; neither the #363 host-control foundation nor the #348 runtime-tool manager activates hosting. |
 
-## Development-only container-control failures
+## Container-control failures
 
-The unwired #363 host-control foundation reports the following stable,
-redacted developer codes. They are not a Host Remote runbook or an end-user
-troubleshooting surface, and no code permits a PATH, ambient-context, remote,
-or unverified fallback.
+The #363 host-control foundation reports the following stable, redacted codes.
+They are not a Host Remote runbook or an end-user troubleshooting surface, and
+no code permits a PATH, ambient-context, remote, or unverified fallback.
 
 | Codes | Meaning |
 |---|---|
@@ -192,6 +191,25 @@ or unverified fallback.
 | `PROCESS_REQUEST_INVALID`, `PROCESS_INPUT_LIMIT`, `PROCESS_OUTPUT_LIMIT` | A fixed subprocess request or one of its byte bounds failed. |
 | `PROCESS_TIMEOUT`, `PROCESS_EXIT`, `PROCESS_RESPONSE_INVALID` | A bounded process timed out, failed, or returned nonconforming output. |
 
+## Local-runtime management failures
+
+The #348 manager supports only native macOS arm64 and returns sanitized stable
+codes through packaged Settings and the noninteractive executable. Retry from
+status and obtain a fresh review after any repair; never bypass a digest,
+ownership, confirmation, or host check.
+
+| Codes | Meaning and required action |
+|---|---|
+| `RUNTIME_POLICY_INVALID`, `RUNTIME_POLICY_SCHEMA_UNSUPPORTED` | The closed policy is missing, malformed, or unsupported. Reinstall the exact reviewed application package; do not edit or substitute policy fields. |
+| `RUNTIME_REQUEST_INVALID`, `RUNTIME_PLAN_STALE`, `RUNTIME_CONFIRMATION_REQUIRED` | The operation, revision, or exact confirmation is invalid. Reload status, review the operation again, and apply that exact fresh plan. |
+| `RUNTIME_HOST_UNSUPPORTED` | The host is not Apple silicon on macOS 13 or later, hardware virtualization is unavailable, or less than 24 GiB is free. Use a supported host or restore the required host capacity. |
+| `RUNTIME_OFFLINE_UNAVAILABLE` | Offline mode lacks a complete verified cache. Retry online when approved, or restore the exact reviewed cached artifacts. |
+| `RUNTIME_DOWNLOAD_FAILED` | A bounded upstream transfer failed. Retry; the manager resumes a valid partial transfer and re-verifies the completed artifact before use. |
+| `RUNTIME_ARTIFACT_INTEGRITY`, `RUNTIME_COMPONENT_INTEGRITY` | An archive, license, VM image, or extracted component differs from reviewed size or digest. Leave it unexecuted and reinstall from the exact policy source. |
+| `RUNTIME_STORAGE_UNSAFE`, `RUNTIME_OWNERSHIP_INVALID` | App-owned storage or runtime ownership cannot be proven. Repair owner-only storage or use the explicit reviewed removal path; never adopt another profile or context. |
+| `RUNTIME_NOT_INSTALLED` | The requested lifecycle action needs the app-owned runtime tools. Review and apply setup first. |
+| `RUNTIME_PROCESS_FAILED`, `RUNTIME_HEALTH_FAILED` | A bounded lifecycle process or the isolated runtime health check failed. Review repair, retain the sanitized code for support, and do not substitute an ambient Docker endpoint. |
+
 The full implementation boundary and the native macOS arm64 evidence limits
 are documented in the
-[published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-container-control-foundation).
+[published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-control-and-macos-arm64-runtime-tools).

@@ -9,6 +9,8 @@ import type {
   BridgeResult,
   ConsentPreview,
   DesktopColorScheme,
+  LocalRuntimeOperation,
+  LocalRuntimePreview,
   PreferenceUpdate,
   ProviderDataClass,
   ProviderId,
@@ -17,7 +19,12 @@ import type {
   StartupDiagnosticComponentName,
   StartupFailure,
 } from '../../shared-contract/desktop'
-import { providerDataClasses, providerIds, secretReferences } from '../../shared-contract/desktop'
+import {
+  localRuntimeOperations,
+  providerDataClasses,
+  providerIds,
+  secretReferences,
+} from '../../shared-contract/desktop'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
 import { CodedErrorView } from './design-system/CodedErrorView'
@@ -624,6 +631,194 @@ function DeploymentSettingsPanel() {
   </section>
 }
 
+const localRuntimeOperationLabels: Readonly<Record<LocalRuntimeOperation, string>> = {
+  setup: 'Set up',
+  start: 'Start',
+  stop: 'Stop',
+  repair: 'Repair',
+  'uninstall-preserve': 'Uninstall and preserve data',
+  'uninstall-delete': 'Uninstall and delete data',
+}
+
+const localRuntimeStateLabel = (state: string): string => state
+  .split('-')
+  .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+  .join(' ')
+
+function LocalRuntimeSettingsPanel() {
+  const status = useQuery({
+    queryKey: ['local-runtime-status'],
+    queryFn: () => ancestryBridge().getLocalRuntimeStatus(),
+  })
+  const [operation, setOperation] = useState<LocalRuntimeOperation>('setup')
+  const [offline, setOffline] = useState(false)
+  const [preview, setPreview] = useState<LocalRuntimePreview | null>(null)
+  const [confirmation, setConfirmation] = useState('')
+  const [pending, setPending] = useState<'preview' | 'apply' | null>(null)
+  const [failure, setFailure] = useState<BridgeErrorCode | null>(null)
+  const data = status.data?.ok ? status.data.data : undefined
+  const queryFailure = status.data && !status.data.ok
+    ? status.data.error.code
+    : status.isError
+      ? 'INTERNAL_ERROR'
+      : null
+
+  const resetReview = () => {
+    setPreview(null)
+    setConfirmation('')
+    setFailure(null)
+  }
+
+  const review = async () => {
+    if (pending) return
+    setPending('preview')
+    setFailure(null)
+    setPreview(null)
+    setConfirmation('')
+    try {
+      const result = await ancestryBridge().previewLocalRuntime({
+        schema_version: 1,
+        operation,
+        offline,
+      })
+      if (result.ok) setPreview(result.data)
+      else setFailure(result.error.code)
+    } catch {
+      setFailure('INTERNAL_ERROR')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const apply = async () => {
+    if (!preview || pending || confirmation !== preview.confirmation_phrase) return
+    setPending('apply')
+    setFailure(null)
+    try {
+      const result = await ancestryBridge().applyLocalRuntime({
+        schema_version: 1,
+        operation: preview.operation,
+        offline: preview.offline,
+        plan_revision: preview.plan_revision,
+        confirmation,
+      })
+      if (result.ok) {
+        setPreview(null)
+        setConfirmation('')
+        await status.refetch()
+      } else {
+        setFailure(result.error.code)
+      }
+    } catch {
+      setFailure('INTERNAL_ERROR')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  return <section className="settings-panel" aria-labelledby="local-runtime-title">
+    <h2 id="local-runtime-title">Local container runtime</h2>
+    <p>AncestryLLM can manage an app-owned Colima runtime on supported Apple silicon Macs. Docker Desktop remains compatible but is not required.</p>
+    {status.isPending && <p role="status">Inspecting the local runtime…</p>}
+    {(failure || queryFailure) && <p role="alert" className="error-code">Code: {failure ?? queryFailure}</p>}
+    {data && <>
+      <p>{`State: ${localRuntimeStateLabel(data.state)}`} <span className="error-code">({data.code})</span></p>
+      <p><strong>Host:</strong> {data.host.operating_system} {data.host.architecture}, macOS {data.host.macos_major}</p>
+      <p><strong>Virtualization:</strong> {localRuntimeStateLabel(data.host.virtualization)} · <strong>Free space:</strong> {localRuntimeStateLabel(data.host.free_space)} · <strong>Existing Docker contexts:</strong> {data.host.existing_docker_contexts}</p>
+      <p><strong>Measured allocation:</strong> {data.allocation.cpus} CPUs, {data.allocation.memory_gib} GiB memory, {data.allocation.disk_gib} GiB disk</p>
+      <details>
+        <summary>Detected components</summary>
+        <ul>
+          {data.components.map((component) => <li key={component.name}>
+            {component.name} {component.version}: {component.installed ? 'Installed' : 'Not installed'}
+          </li>)}
+          <li>VM image {data.vm_image.version}: {data.vm_image.installed ? 'Installed' : 'Not installed'}</li>
+        </ul>
+      </details>
+    </>}
+    <div className="application-setting">
+      <label htmlFor="local-runtime-operation">Operation</label>
+      <select
+        id="local-runtime-operation"
+        value={operation}
+        disabled={pending !== null}
+        onChange={(event) => {
+          setOperation(event.currentTarget.value as LocalRuntimeOperation)
+          resetReview()
+        }}
+      >
+        {localRuntimeOperations.map((item) => <option key={item} value={item}>{localRuntimeOperationLabels[item]}</option>)}
+      </select>
+      <label>
+        <input
+          type="checkbox"
+          checked={offline}
+          disabled={pending !== null}
+          onChange={(event) => {
+            setOffline(event.currentTarget.checked)
+            resetReview()
+          }}
+        />
+        <span>Use downloaded files only</span>
+      </label>
+      <p className="setting-help">Offline mode fails closed unless every reviewed artifact is already cached and still matches its digest.</p>
+      <Button type="button" variant="quiet" disabled={pending !== null} onClick={() => { void review() }}>
+        {pending === 'preview' ? 'Reviewing…' : `Review ${operation}`}
+      </Button>
+    </div>
+    {preview && <section className="consent-review" aria-labelledby="local-runtime-review-title">
+      <h3 id="local-runtime-review-title">Reviewed runtime plan</h3>
+      <p><strong>Operation:</strong> {localRuntimeOperationLabels[preview.operation]}</p>
+      <p><strong>Data:</strong> {preview.deletes_data ? 'Will delete app-owned runtime data' : preview.preserves_data ? 'Will preserve app-owned runtime data' : 'No data disposition change'}</p>
+      <p><strong>Actions:</strong> {preview.actions.map((action) => action.code).join(', ')}</p>
+      <h4>Reviewed downloads and licenses</h4>
+      {preview.review.artifacts.map((artifact) => <article key={artifact.name}>
+        <p><strong>{artifact.name} {artifact.version}</strong> ({artifact.repository})</p>
+        <p>Asset: <code>{artifact.asset_name}</code></p>
+        <p>SHA-256: <code>{artifact.sha256}</code></p>
+        <p>Source: <code>{artifact.source_url}</code></p>
+        <p>License: {artifact.license} · SHA-256: <code>{artifact.license_sha256}</code></p>
+        <p>License source: <code>{artifact.license_url}</code></p>
+      </article>)}
+      <article>
+        <p><strong>VM image {preview.review.vm_image.version}</strong> ({preview.review.vm_image.repository})</p>
+        <p>Asset: <code>{preview.review.vm_image.asset_name}</code></p>
+        <p>SHA-256: <code>{preview.review.vm_image.sha256}</code></p>
+        <p>Source: <code>{preview.review.vm_image.source_url}</code></p>
+      </article>
+      <h4>Ownership and isolation</h4>
+      <p><strong>Profile:</strong> {preview.review.ownership.profile}</p>
+      <p><strong>Docker context:</strong> {preview.review.ownership.context}</p>
+      <ul>
+        <li>Loopback only: {preview.review.isolation.loopback_only ? 'Yes' : 'No'}</li>
+        <li>Kubernetes enabled: {preview.review.isolation.kubernetes ? 'Yes' : 'No'}</li>
+        <li>Privileged containers allowed: {preview.review.isolation.privileged_containers ? 'Yes' : 'No'}</li>
+        <li>Renderer socket access: {preview.review.isolation.renderer_socket_access ? 'Yes' : 'No'}</li>
+        <li>Container socket access: {preview.review.isolation.container_socket_access ? 'Yes' : 'No'}</li>
+        <li>Cross-profile socket access: {preview.review.isolation.cross_profile_socket_access ? 'Yes' : 'No'}</li>
+      </ul>
+      <p>To authorize this exact plan, type <strong>{preview.confirmation_phrase}</strong>.</p>
+      <label htmlFor="local-runtime-confirmation">Type the exact confirmation phrase</label>
+      <input
+        id="local-runtime-confirmation"
+        type="text"
+        value={confirmation}
+        autoComplete="off"
+        spellCheck={false}
+        disabled={pending !== null}
+        onChange={(event) => { setConfirmation(event.currentTarget.value) }}
+      />
+      <Button
+        type="button"
+        disabled={pending !== null || confirmation !== preview.confirmation_phrase}
+        onClick={() => { void apply() }}
+      >
+        {pending === 'apply' ? 'Applying…' : `Apply ${preview.operation}`}
+      </Button>
+    </section>}
+  </section>
+}
+
 function SecretControl({ reference }: Readonly<{ reference: SecretReference }>) {
   const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -1090,6 +1285,7 @@ function Shell() {
           </div>
         </div>}
         {!startupAllowsMutations && !startup.isPending && <p className="context-note">Settings are read-only while startup diagnostics are degraded.</p>}
+        <LocalRuntimeSettingsPanel />
         {startupAllowsMutations && <div className="settings-stack">
           <section className="settings-panel" aria-labelledby="general-settings-title">
             <h2 id="general-settings-title">General</h2>
