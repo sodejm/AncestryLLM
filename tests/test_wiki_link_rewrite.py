@@ -79,6 +79,12 @@ def test_code_examples_are_preserved() -> None:
     )
 
 
+def test_unmatched_label_cannot_capture_link_example_in_inline_code() -> None:
+    markdown = "See [this literal `[Guide](Guide.md)` as an example.\n"
+
+    assert wiki_links.rewrite_wiki_links(markdown) == markdown
+
+
 def test_directory_rewrite_updates_only_regular_markdown_pages(tmp_path: Path) -> None:
     page = tmp_path / "_Sidebar.md"
     page.write_text("[Threat model](THREAT_MODEL.md)\n", encoding="utf-8")

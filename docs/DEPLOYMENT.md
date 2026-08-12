@@ -114,7 +114,9 @@ for the Settings and noninteractive operator procedures.
 
 ## Probe-only OCI and Compose topology
 
-Issue #349 adds [`containers/Dockerfile`](../containers/Dockerfile), a closed
+Issue #349 adds
+[`containers/Dockerfile`](https://github.com/sodejm/AncestryLLM/blob/main/containers/Dockerfile),
+a closed
 base Compose model, and Local Desktop and Host Remote validation overlays. This
 is production-shaped build and lifecycle evidence, not authorization to run
 `docker compose up` as a supported application deployment. The deployment
