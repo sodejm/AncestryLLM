@@ -870,7 +870,7 @@ async function expectAccessibleShell(page: Page): Promise<void> {
   ])
 
   await page.getByRole('link', { name: 'Settings' }).press('Enter')
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeFocused()
   const theme = page.getByRole('group', { name: 'Theme' })
   await expect(theme.getByRole('radio')).toHaveCount(3)
   await theme.getByRole('radio', { name: 'dark' }).click()
