@@ -1,3 +1,5 @@
+/** Verifies the non-interactive local-runtime command parser and redacted result handling. */
+
 import { describe, expect, it, vi } from 'vitest'
 import {
   DESKTOP_PROTOCOL_VERSION,

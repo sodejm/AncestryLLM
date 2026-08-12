@@ -1,3 +1,5 @@
+/** Exercises macOS ARM64 runtime acquisition, recovery, lifecycle, and storage boundaries. */
+
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -1,3 +1,5 @@
+/** Owns verified, resumable installation and lifecycle state for the macOS ARM64 runtime. */
+
 import { availableParallelism, homedir, totalmem } from 'node:os'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'

@@ -1,3 +1,5 @@
+/** Parses the bounded non-interactive local-runtime commands owned by Electron Main. */
+
 import {
   DESKTOP_PROTOCOL_VERSION,
   type BridgeResult,

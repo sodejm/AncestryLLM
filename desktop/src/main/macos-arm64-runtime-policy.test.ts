@@ -1,3 +1,5 @@
+/** Verifies the closed runtime policy schema, archive safety, and executable allowlists. */
+
 import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'

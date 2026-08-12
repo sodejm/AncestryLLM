@@ -1,3 +1,5 @@
+/** Validates the macOS ARM64 runtime trust policy and safely extracts verified tools. */
+
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { chmod, lstat, mkdir, open } from 'node:fs/promises'
 import { isAbsolute, join, posix, resolve, sep } from 'node:path'

@@ -91,6 +91,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     ".env.example": "README.md",
     # desktop/package.json — Node package manifest; semantics in desktop/README.md
     "desktop/package.json": "desktop/README.md",
+    # macOS ARM64 executable trust policy and reviewed lifecycle contract.
+    "desktop/resources/macos-arm64-runtime-policy-v1.json": "docs/DEPLOYMENT.md",
     # TypeScript project references — semantics in desktop/README.md
     "desktop/tsconfig.json": "desktop/README.md",
     "desktop/tsconfig.base.json": "desktop/README.md",

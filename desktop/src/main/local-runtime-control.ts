@@ -1,3 +1,5 @@
+/** Adapts policy-bound macOS runtime lifecycle operations to the desktop bridge contract. */
+
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
