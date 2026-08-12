@@ -254,9 +254,9 @@ describe('Docker CLI process boundary', () => {
       securityOptions: ['no-new-privileges:true'],
       init: true,
       privileged: false,
-      deviceCount: 0,
-      deviceRequestCount: 0,
-      deviceCgroupRuleCount: 0,
+      devices: null,
+      deviceRequests: null,
+      deviceCgroupRules: null,
       nanoCpus: 1_000_000_000,
       memoryBytes: 256 * 1024 * 1024,
       pidsLimit: 128,
@@ -335,10 +335,10 @@ describe('Docker CLI process boundary', () => {
       'ancestryllm-local-gateway',
     ])
     expect(requests[0]?.arguments.join(' ')).toContain(
-      '"deviceRequestCount":{{len .HostConfig.DeviceRequests}}',
+      '"deviceRequests":{{json .HostConfig.DeviceRequests}}',
     )
     expect(requests[0]?.arguments.join(' ')).toContain(
-      '"deviceCgroupRuleCount":{{len .HostConfig.DeviceCgroupRules}}',
+      '"deviceCgroupRules":{{json .HostConfig.DeviceCgroupRules}}',
     )
     expect(requests[1]?.arguments).toEqual([
       '--config', runtimePolicy.dockerConfigDirectory,

@@ -37,9 +37,9 @@ const CONTAINER_INSPECTION_FORMAT = [
   ',"securityOptions":{{json .HostConfig.SecurityOpt}}',
   ',"init":{{json .HostConfig.Init}}',
   ',"privileged":{{json .HostConfig.Privileged}}',
-  ',"deviceCount":{{len .HostConfig.Devices}}',
-  ',"deviceRequestCount":{{len .HostConfig.DeviceRequests}}',
-  ',"deviceCgroupRuleCount":{{len .HostConfig.DeviceCgroupRules}}',
+  ',"devices":{{json .HostConfig.Devices}}',
+  ',"deviceRequests":{{json .HostConfig.DeviceRequests}}',
+  ',"deviceCgroupRules":{{json .HostConfig.DeviceCgroupRules}}',
   ',"nanoCpus":{{json .HostConfig.NanoCpus}}',
   ',"memoryBytes":{{json .HostConfig.Memory}}',
   ',"pidsLimit":{{json .HostConfig.PidsLimit}}',
@@ -367,6 +367,11 @@ function inspectionArray(value: unknown, maximum = 128): unknown[] {
   return value
 }
 
+function inspectionOptionalArrayCount(value: unknown, maximum = 128): number {
+  if (value === null) return 0
+  return inspectionArray(value, maximum).length
+}
+
 function inspectionObject(value: unknown, maximum = 128): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return responseFail()
@@ -384,8 +389,8 @@ function inspectionStrings(value: unknown): string[] {
 function parseRealizedContainer(value: string): HostRealizedContainer {
   const record = inspectionRecord(value, [
     'containerName', 'image', 'user', 'readOnly', 'capDrop', 'capAdd',
-    'securityOptions', 'init', 'privileged', 'deviceCount', 'deviceRequestCount',
-    'deviceCgroupRuleCount', 'nanoCpus', 'memoryBytes', 'pidsLimit', 'logging',
+    'securityOptions', 'init', 'privileged', 'devices', 'deviceRequests',
+    'deviceCgroupRules', 'nanoCpus', 'memoryBytes', 'pidsLimit', 'logging',
     'mounts', 'networks', 'ports',
   ])
   const rawName = inspectionString(record.containerName)
@@ -436,9 +441,9 @@ function parseRealizedContainer(value: string): HostRealizedContainer {
     securityOptions: inspectionStrings(record.securityOptions),
     init: inspectionBoolean(record.init),
     privileged: inspectionBoolean(record.privileged),
-    deviceCount: inspectionInteger(record.deviceCount),
-    deviceRequestCount: inspectionInteger(record.deviceRequestCount),
-    deviceCgroupRuleCount: inspectionInteger(record.deviceCgroupRuleCount),
+    deviceCount: inspectionOptionalArrayCount(record.devices),
+    deviceRequestCount: inspectionOptionalArrayCount(record.deviceRequests),
+    deviceCgroupRuleCount: inspectionOptionalArrayCount(record.deviceCgroupRules),
     nanoCpus: inspectionInteger(record.nanoCpus),
     memoryBytes: inspectionInteger(record.memoryBytes),
     pidsLimit: inspectionInteger(record.pidsLimit),
