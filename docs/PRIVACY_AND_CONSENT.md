@@ -66,6 +66,15 @@ configuration, and any parallel Node-side credential store are not permitted.
 Editing a default-provider setting does not activate a provider or grant cloud
 consent; the normal explicit provider and consent checks still apply.
 
+Unreleased Issue #108 adds the explicit desktop administration path for those
+checks. Provider endpoints must be tested before profile save, and the test
+returns only a redacted destination digest. A consent preview lists the exact
+provider, profile, model, allowed modules, purposes, data classes, retention,
+warnings, and optional budget before a grant can be created. Living-person data
+and remote retention receive explicit warnings. Creation requires the current
+optimistic revision and the exact preview; revocation is a separate explicit
+action. The surface does not execute a provider request or genealogy workflow.
+
 Desktop capability discovery uses non-sensitive metadata. It must not probe
 private files, databases, keyrings, people, providers, or networks. Local,
 remote, sensitive, destructive, and Post-MVP states use text and icons as well
@@ -74,9 +83,10 @@ recovery steps, never genealogy values, prompts/responses, secrets, paths, or
 bootstrap material.
 
 `provider=none` remains network-free even when environment credentials or SDKs
-exist. Remote UI state cannot grant consent or select a provider by itself;
-Python policy verifies the exact profile/endpoint, provider, model, purpose,
-data classes, retention, and current consent before any disclosure. Model
+exist. Renderer state alone cannot grant consent or select a provider; the
+fixed desktop consent route accepts only a current, exact preview, and Python
+policy verifies the endpoint identity, profile, provider, model, purpose, data
+classes, retention, and active consent again before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
 renderer privileges.
 

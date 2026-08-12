@@ -91,11 +91,12 @@ leader. No sidecar is started by the development mock shell.
 
 The current shutdown drains only resources that the implemented control
 sidecar actually owns: the Uvicorn server task and loopback listener, child
-stdio, the supervised process tree, and Electron's private temporary working
-directory. FastAPI exposes an application-lifespan shutdown hook, but the
-current health/capability-only composition registers no domain jobs, provider
-streams, or database sessions. Every future resource of those types must
-register an orderly drain through that lifecycle before its route is enabled.
+stdio, the supervised process tree, Electron's private temporary working
+directory, and the encrypted provider-profile database session. FastAPI's
+application-lifespan shutdown hook closes that database session. The current
+composition registers no domain jobs or provider streams. Every future
+resource of those types must register an orderly drain through that lifecycle
+before its route is enabled.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not
@@ -108,17 +109,20 @@ interface also exposes sanitized lifecycle diagnostics and one application-
 lifetime manual retry. Concurrent retry requests share a single launch attempt,
 and an exhausted retry is a deterministic no-op. Electron main uses the session
 only for authenticated requests to its fixed startup-diagnostic, capability,
-settings, and credential-management routes. The bridge exposes the typed
-result, sanitized diagnostics, and retry outcome, but never the session,
-bearer, port, raw HTTP data, or a credential value.
+settings, credential-management, provider-configuration, endpoint-test, and
+consent-administration routes. The bridge exposes the typed result, sanitized
+diagnostics, and retry outcome, but never the session, bearer, port, resolved
+address, response body, raw HTTP data, or a credential value.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
 and `updatePreferences`. The current unreleased source adds three opaque
-file-grant methods and exactly five settings/credential methods:
-`getSettings`, `updateSettings`, `getSecretStatus`, `setSecret`, and
-`deleteSecret`. There is no generic send, listen, route, or channel selection
-operation. Main accepts a call only from the registered
+file-grant methods, exactly five settings/credential methods (`getSettings`,
+`updateSettings`, `getSecretStatus`, `setSecret`, and `deleteSecret`), and
+exactly six provider/consent methods (`getProviderConfiguration`,
+`createProviderProfile`, `validateProviderEndpoint`, `previewConsent`,
+`createConsent`, and `revokeConsent`). There is no generic send, listen, route,
+or channel selection operation. Main accepts a call only from the registered
 `WebContents`, its exact current main frame, and the exact trusted
 `app://bundle/index.html` URL. It rechecks those facts on every request.
 Arguments and responses must also pass strict runtime schemas and a structured-

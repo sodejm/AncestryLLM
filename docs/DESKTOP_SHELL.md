@@ -206,9 +206,10 @@ values are never retained in React state, query caches, bridge fixtures,
 responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
 configuration. The renderer still has no direct keyring or network access.
 Together with the three unreleased file-grant methods, the current development
-bridge therefore contains fourteen fixed methods: the six released control
-methods, three opaque file-grant methods, and five settings/credential methods.
-There is still no generic send, listen, route-selection, or command operation.
+bridge therefore contains twenty fixed methods: the six released control
+methods, three opaque file-grant methods, five settings/credential methods, and
+six provider-configuration methods. There is still no generic send, listen,
+route-selection, or command operation.
 
 The unreleased source implements the non-secret, versioned deployment-profile
 control plane accepted by the
@@ -217,8 +218,9 @@ Local Desktop is preselected and recommended. The shared Python service owns
 profile validation, exact preview and confirmation, atomic persistence,
 diagnostics, redacted evidence, and recovery to Local Desktop. Issue #107 now
 presents that local-only choice during first run and gates mutations on the
-sanitized startup report; Issue #108 owns the remaining profile-settings
-presentation. Connect Remote and Host Remote remain visible advanced intents,
+sanitized startup report. Issue #108 presents provider configuration and
+consent separately from that deployment choice. Connect Remote and Host Remote
+remain visible advanced intents,
 but neither can be activated until its enrollment or host-runtime dependency is
 implemented and independently gated.
 
@@ -228,6 +230,36 @@ consent. The released 0.5 shell still has no supported container, remote, LAN,
 browser, or public-service surface. Future presentation keeps the renderer
 sandbox and fixed typed bridge, while authority remains in the shared service
 contracts and Electron Main's narrow adapter.
+
+## Unreleased provider configuration and consent
+
+Issue #108 adds separate **Local Providers**, **Cloud Providers**, and
+**Consent & Privacy** sections. It remains an administrative surface: it does
+not run a provider request, a genealogy workflow, or a deployment profile. Six
+fixed bridge methods reach six exact authenticated sidecar routes:
+
+- `getProviderConfiguration`
+- `validateProviderEndpoint`
+- `createProviderProfile`
+- `previewConsent`
+- `createConsent`
+- `revokeConsent`
+
+Local Ollama profiles accept only an explicitly tested loopback endpoint. Cloud
+profiles use the exact reviewed built-in HTTPS endpoint. Endpoint tests deny
+redirects and proxy inheritance, connect directly to the resolved numeric
+address while retaining TLS hostname verification, repeat DNS resolution, and
+return only a redacted destination digest. Profile save, consent creation, and
+provider execution recheck that identity; a missing, stale, or changed test
+fails closed. Profile writes also require the current optimistic revision.
+
+Consent preview discloses the exact provider, profile, model, allowed modules,
+purposes, data classes, retention choice, warnings, and optional budget before
+creation. Living-person data and remote retention receive explicit warnings.
+Creation accepts only the current revision and exact preview, and revocation is
+explicit. Secret values remain in the Issue #105 write-only keyring boundary:
+provider configuration returns presence only, and a stored key alone cannot
+select a provider or grant consent.
 
 Unreleased Issue #363 adds a separate, deliberately unwired host-only control
 foundation inside Electron Main. Its closed schema-v1 policy and plan bind an

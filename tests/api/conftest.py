@@ -21,9 +21,17 @@ from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescriptor
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.secrets import MemorySecretStore
+from ancestryllm.llm.endpoint_validation import (
+    EndpointProbeRequest,
+    EndpointProbeResponse,
+    EndpointValidationService,
+)
+from ancestryllm.llm.profiles import ProviderProfileService
+from ancestryllm.llm.provider_configuration import ProviderConfigurationService
+from ancestryllm.storage.database import Database
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 
 class FixtureRegistry:
@@ -67,12 +75,23 @@ def api_client(
     registered_keys: tuple[DispatchKey, ...],
     secret_store: MemorySecretStore,
     tmp_path_factory: pytest.TempPathFactory,
-) -> TestClient:
+) -> Iterator[TestClient]:
     registry = FixtureRegistry(
         tuple(BUILTIN_MODULES[module_id] for module_id in ("gedcom", "providers", "secrets"))
     )
     executor = CommandExecutor((key, _complete) for key in registered_keys)
     config_root = tmp_path_factory.mktemp("api-config")
+    database = Database(config_root / "workspace.db", secret_store)
+    endpoint_validator = EndpointValidationService(
+        resolver=lambda hostname, _port: (
+            ("127.0.0.1",) if hostname in {"127.0.0.1", "localhost"} else ("8.8.8.8",)
+        ),
+        probe=lambda request: _successful_probe(request),
+    )
+    provider_profiles = ProviderProfileService(
+        database,
+        endpoint_validator=endpoint_validator,
+    )
     app = create_app(
         settings=api_settings,
         registry=registry,
@@ -84,8 +103,19 @@ def api_client(
             )
         ),
         secret_service=SecretManagementService(secret_store),
+        provider_configuration_service=ProviderConfigurationService(
+            provider_profiles,
+            endpoint_validator,
+        ),
+        endpoint_validation_service=endpoint_validator,
     )
-    return TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False)
+    with TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False) as client:
+        yield client
+    database.close()
+
+
+def _successful_probe(request: EndpointProbeRequest) -> EndpointProbeResponse:
+    return EndpointProbeResponse(status_code=200, peer_address=request.pinned_address)
 
 
 @pytest.fixture

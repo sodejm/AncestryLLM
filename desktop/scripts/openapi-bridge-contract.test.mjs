@@ -9,7 +9,13 @@ test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract'
   const schemas = document.components.schemas
   assert.deepEqual(Object.keys(document.paths).sort(), [
     '/api/v1/capabilities',
+    '/api/v1/consents',
+    '/api/v1/consents/preview',
+    '/api/v1/consents/{name}/revoke',
     '/api/v1/health',
+    '/api/v1/provider-configuration',
+    '/api/v1/provider-endpoints/validate',
+    '/api/v1/provider-profiles',
     '/api/v1/secrets/{reference}/delete',
     '/api/v1/secrets/{reference}/set',
     '/api/v1/secrets/{reference}/status',
@@ -18,6 +24,19 @@ test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract'
   ])
   assert.equal(document.paths['/api/v1/capabilities'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/CapabilityManifest')
   assert.equal(document.paths['/api/v1/startup-diagnostics'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/StartupDiagnosticReportResponse')
+
+  const providerConfigurationRef = '#/components/schemas/ProviderConfigurationResponse'
+  assert.equal(document.paths['/api/v1/provider-configuration'].get.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/provider-endpoints/validate'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/EndpointValidationRequest')
+  assert.equal(document.paths['/api/v1/provider-endpoints/validate'].post.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/EndpointValidationResponse')
+  assert.equal(document.paths['/api/v1/provider-profiles'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ProviderProfileCreateRequest')
+  assert.equal(document.paths['/api/v1/provider-profiles'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/consents/preview'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ConsentPreviewRequest')
+  assert.equal(document.paths['/api/v1/consents/preview'].post.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/ConsentPreviewResponse')
+  assert.equal(document.paths['/api/v1/consents'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ConsentCreateRequest')
+  assert.equal(document.paths['/api/v1/consents'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/consents/{name}/revoke'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ProviderConfigurationMutationRequest')
+  assert.equal(document.paths['/api/v1/consents/{name}/revoke'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
 
   const settingsPath = document.paths['/api/v1/settings']
   assert.equal(settingsPath.get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/SettingsResponse')

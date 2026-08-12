@@ -37,7 +37,13 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
     assert committed.endswith("\n")
     assert json.loads(committed)["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/consents",
+        f"{API_NAMESPACE}/consents/preview",
+        f"{API_NAMESPACE}/consents/{{name}}/revoke",
         f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/provider-configuration",
+        f"{API_NAMESPACE}/provider-endpoints/validate",
+        f"{API_NAMESPACE}/provider-profiles",
         f"{API_NAMESPACE}/settings",
         f"{API_NAMESPACE}/secrets/{{reference}}/delete",
         f"{API_NAMESPACE}/secrets/{{reference}}/set",

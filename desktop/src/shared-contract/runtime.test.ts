@@ -10,6 +10,7 @@ import {
   parseFileGrantResult,
   parseFileGrantRevocationResult,
   parseOpenFileGrantRequest,
+  parseProviderProfileCreateRequest,
   parseSecretReferenceRequest,
   parseSecretSetRequest,
   parseSecretStatusResult,
@@ -218,6 +219,35 @@ describe('runtime bridge validation', () => {
         ],
       },
     })).toThrow('Invalid bridge response')
+  })
+
+  it('requires an exact tested endpoint identity for provider profile creation', () => {
+    const request = {
+      schema_version: 1,
+      expected_revision: '0'.repeat(64),
+      name: 'local-default',
+      provider_id: 'ollama',
+      model: 'llama3.2',
+      endpoint: 'http://127.0.0.1:11434',
+      endpoint_identity_sha256: 'a'.repeat(64),
+    }
+
+    expect(parseProviderProfileCreateRequest(request)).toEqual(request)
+    expect(() => parseProviderProfileCreateRequest({
+      ...request,
+      endpoint_identity_sha256: 'not-a-digest',
+    })).toThrow('Invalid provider profile request')
+    const withoutIdentity = {
+      schema_version: request.schema_version,
+      expected_revision: request.expected_revision,
+      name: request.name,
+      provider_id: request.provider_id,
+      model: request.model,
+      endpoint: request.endpoint,
+    }
+    expect(() => parseProviderProfileCreateRequest(withoutIdentity)).toThrow('Invalid provider profile request')
+    expect(() => parseProviderProfileCreateRequest({ ...request, destination_address: '127.0.0.1' }))
+      .toThrow('Invalid provider profile request')
   })
 
   it('accepts exact versioned results for each renderer-safe response', () => {

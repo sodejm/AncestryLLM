@@ -2,23 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly fourteen deterministic, deeply frozen methods', async () => {
+  it('exposes exactly twenty deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
+      'createConsent',
+      'createProviderProfile',
       'deleteSecret',
       'getAppInfo',
       'getCapabilities',
       'getPreferences',
+      'getProviderConfiguration',
       'getSecretStatus',
       'getSettings',
       'getStartupDiagnostics',
+      'previewConsent',
       'requestOpenFileGrant',
       'requestSaveFileGrant',
       'retrySidecar',
+      'revokeConsent',
       'revokeFileGrant',
       'setSecret',
       'updatePreferences',
       'updateSettings',
+      'validateProviderEndpoint',
     ])
     expect(await bridge.getStartupDiagnostics()).toEqual(await bridge.getStartupDiagnostics())
     expect(Object.isFrozen(await bridge.getCapabilities())).toBe(true)

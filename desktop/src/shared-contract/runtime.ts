@@ -1,6 +1,8 @@
 import {
   DESKTOP_PROTOCOL_VERSION,
   applicationSettingKeys,
+  providerDataClasses,
+  providerIds,
   secretReferences,
   type AppInfo,
   type ApplicationSetting,
@@ -10,6 +12,12 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
+  type ConsentCreateRequest,
+  type ConsentGrantSummary,
+  type ConsentPreview,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
+  type ConsentWarningCode,
   type DesktopColorScheme,
   type ArtifactRef,
   type FileFormat,
@@ -21,6 +29,13 @@ import {
   type LocalPreferences,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
+  type ProviderConfiguration,
+  type ProviderDataClass,
+  type ProviderEndpointValidation,
+  type ProviderEndpointValidationRequest,
+  type ProviderId,
+  type ProviderProfileCreateRequest,
+  type ProviderProfileSummary,
   type SaveFileGrantRequest,
   type SecretReference,
   type SecretReferenceRequest,
@@ -54,6 +69,12 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'SECRET_STORE_UNAVAILABLE',
   'SECRET_ENVIRONMENT_MANAGED',
   'SECRET_INVALID',
+  'PROVIDER_CONFIGURATION_UNAVAILABLE',
+  'PROVIDER_CONFIGURATION_CONFLICT',
+  'PROVIDER_CONFIGURATION_INVALID',
+  'ENDPOINT_REJECTED',
+  'CONSENT_INVALID',
+  'CONSENT_PREVIEW_STALE',
   'FILE_SELECTION_INVALID',
   'FILE_TOO_LARGE',
   'FILE_GRANT_FORBIDDEN',
@@ -85,6 +106,15 @@ const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'mar
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
 const secretStatuses = ['present', 'missing', 'unavailable'] as const
 const providerValues = ['none', 'ollama', 'openai', 'anthropic', 'gemini', 'openrouter'] as const
+const consentWarningCodes: readonly ConsentWarningCode[] = [
+  'LIVING_PERSON_DATA_INCLUDED',
+  'REMOTE_PROVIDER_SELECTED',
+  'REMOTE_RETENTION_ENABLED',
+]
+const profileNamePattern = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$/
+// Endpoint paths must not contain ASCII control characters or spaces.
+// eslint-disable-next-line no-control-regex
+const endpointPattern = /^(https?):\/\/(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::([0-9]{1,5}))?(\/[^?#\u0000-\u0020\u007f]*)?$/
 
 const record = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -184,6 +214,171 @@ export function parseSecretSetRequest(value: unknown): SecretSetRequest {
   try { reference = parseSecretReference(value.reference) } catch { throw new Error('Invalid secret set request') }
   if (!bounded(value.value, 1, 65_536)) throw new Error('Invalid secret set request')
   return deepFreeze({ reference, value: value.value })
+}
+
+function parseProviderId(value: unknown, message: string): ProviderId {
+  if (typeof value !== 'string' || !providerIds.includes(value as ProviderId)) throw new Error(message)
+  return value as ProviderId
+}
+
+function parseRevision(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !digestPattern.test(value)) throw new Error(message)
+  return value
+}
+
+function parseProfileName(value: unknown, message: string): string {
+  if (!bounded(value, 1, 200) || value.trim() !== value || !profileNamePattern.test(value)) {
+    throw new Error(message)
+  }
+  return value
+}
+
+function parseModel(value: unknown, message: string): string {
+  if (!bounded(value, 1, 200) || value.trim() !== value || hasControlCharacter(value)) {
+    throw new Error(message)
+  }
+  return value
+}
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint !== undefined && (codePoint < 32 || codePoint === 127)
+  })
+}
+
+function parseEndpoint(value: unknown, message: string): string {
+  if (!bounded(value, 1, 2_048) || value.trim() !== value) throw new Error(message)
+  const match = endpointPattern.exec(value)
+  if (!match || match[2]?.includes('..')) throw new Error(message)
+  if (match[3] !== undefined && !integer(Number(match[3]), 1, 65_535)) throw new Error(message)
+  return value
+}
+
+function endpointHostname(value: string): string | undefined {
+  const match = endpointPattern.exec(value)
+  return match?.[2]?.toLowerCase().replace(/^\[|\]$/g, '')
+}
+
+function parseSafeCodes(value: unknown, message: string): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 128
+    || value.some((item) => !bounded(item, 1, 96) || !identifierPattern.test(item))) {
+    throw new Error(message)
+  }
+  return value.slice() as string[]
+}
+
+function parseModels(value: unknown, message: string): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 128
+    || value.some((item) => !bounded(item, 1, 200)
+      || item.trim() !== item || hasControlCharacter(item))) {
+    throw new Error(message)
+  }
+  return value.slice() as string[]
+}
+
+function parseDataClasses(value: unknown, message: string): readonly ProviderDataClass[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > providerDataClasses.length
+    || value.some((item) => typeof item !== 'string'
+      || !providerDataClasses.includes(item as ProviderDataClass))) throw new Error(message)
+  return value.slice() as ProviderDataClass[]
+}
+
+function parseCost(value: unknown, message: string): number | null {
+  if (value === null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error(message)
+  return value
+}
+
+export function parseProviderProfileCreateRequest(value: unknown): ProviderProfileCreateRequest {
+  const message = 'Invalid provider profile request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'expected_revision', 'name', 'provider_id', 'model', 'endpoint',
+    'endpoint_identity_sha256',
+  ]) || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    expected_revision: parseRevision(value.expected_revision, message),
+    name: parseProfileName(value.name, message),
+    provider_id: parseProviderId(value.provider_id, message),
+    model: parseModel(value.model, message),
+    endpoint: parseEndpoint(value.endpoint, message),
+    endpoint_identity_sha256: parseRevision(value.endpoint_identity_sha256, message),
+  })
+}
+
+export function parseProviderEndpointValidationRequest(value: unknown): ProviderEndpointValidationRequest {
+  const message = 'Invalid provider endpoint request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'provider_id', 'endpoint'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    provider_id: parseProviderId(value.provider_id, message),
+    endpoint: parseEndpoint(value.endpoint, message),
+  })
+}
+
+export function parseConsentPreviewRequest(value: unknown): ConsentPreviewRequest {
+  const message = 'Invalid consent preview request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'provider_profile_name', 'modules', 'purposes', 'data_classes',
+    'models', 'max_cost_usd', 'retain_payloads',
+  ]) || value.schema_version !== 1 || typeof value.retain_payloads !== 'boolean') throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    provider_profile_name: parseProfileName(value.provider_profile_name, message),
+    modules: parseSafeCodes(value.modules, message),
+    purposes: parseSafeCodes(value.purposes, message),
+    data_classes: parseDataClasses(value.data_classes, message),
+    models: parseModels(value.models, message),
+    max_cost_usd: parseCost(value.max_cost_usd, message),
+    retain_payloads: value.retain_payloads,
+  })
+}
+
+function parseConsentPreviewPayload(value: unknown, message: string): Readonly<ConsentPreview> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'provider_profile_name', 'provider_id', 'modules', 'purposes',
+    'data_classes', 'models', 'max_cost_usd', 'retain_payloads', 'warning_codes',
+  ]) || value.schema_version !== 1 || typeof value.retain_payloads !== 'boolean'
+    || !Array.isArray(value.warning_codes) || value.warning_codes.length > consentWarningCodes.length
+    || value.warning_codes.some((item) => typeof item !== 'string'
+      || !consentWarningCodes.includes(item as ConsentWarningCode))) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    provider_profile_name: parseProfileName(value.provider_profile_name, message),
+    provider_id: parseProviderId(value.provider_id, message),
+    modules: parseSafeCodes(value.modules, message),
+    purposes: parseSafeCodes(value.purposes, message),
+    data_classes: parseDataClasses(value.data_classes, message),
+    models: parseModels(value.models, message),
+    max_cost_usd: parseCost(value.max_cost_usd, message),
+    retain_payloads: value.retain_payloads,
+    warning_codes: value.warning_codes.slice() as ConsentWarningCode[],
+  })
+}
+
+export function parseConsentCreateRequest(value: unknown): ConsentCreateRequest {
+  const message = 'Invalid consent creation request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'name', 'preview'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    expected_revision: parseRevision(value.expected_revision, message),
+    name: parseProfileName(value.name, message),
+    preview: parseConsentPreviewPayload(value.preview, message),
+  })
+}
+
+export function parseConsentRevokeRequest(value: unknown): ConsentRevokeRequest {
+  const message = 'Invalid consent revocation request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'name'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    expected_revision: parseRevision(value.expected_revision, message),
+    name: parseProfileName(value.name, message),
+  })
 }
 
 export function parseOpenFileGrantRequest(value: unknown): OpenFileGrantRequest {
@@ -378,6 +573,139 @@ function parseSecretStatus(value: unknown): SecretStatus {
   return value as unknown as SecretStatus
 }
 
+const expectedProviderEndpoint: Readonly<Record<Exclude<ProviderId, 'ollama'>, string>> = Object.freeze({
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  gemini: 'https://generativelanguage.googleapis.com',
+  openrouter: 'https://openrouter.ai/api/v1',
+})
+
+const expectedProviderSecret: Readonly<Record<ProviderId, SecretReference | null>> = Object.freeze({
+  ollama: null,
+  openai: 'openai.api_key',
+  anthropic: 'anthropic.api_key',
+  gemini: 'gemini.api_key',
+  openrouter: 'openrouter.api_key',
+})
+
+function endpointUsesExplicitLoopback(endpoint: string): boolean {
+  const hostname = endpointHostname(endpoint)
+  if (hostname === undefined) return false
+  if (hostname === 'localhost' || hostname === '::1') return true
+  const octets = hostname.split('.')
+  return octets.length === 4
+    && octets[0] === '127'
+    && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+}
+
+function parseProviderProfile(value: unknown): ProviderProfileSummary {
+  const message = 'Invalid provider profile response'
+  if (!record(value) || !exactKeys(value, [
+    'name', 'provider_id', 'model', 'endpoint', 'endpoint_kind', 'secret_reference', 'enabled',
+  ]) || typeof value.enabled !== 'boolean'
+    || (value.endpoint_kind !== 'loopback' && value.endpoint_kind !== 'remote')) invalidResponse()
+  try {
+    const providerId = parseProviderId(value.provider_id, message)
+    const endpoint = parseEndpoint(value.endpoint, message)
+    const secretReference = value.secret_reference === null
+      ? null
+      : parseSecretReference(value.secret_reference)
+    if (secretReference !== expectedProviderSecret[providerId]) invalidResponse()
+    if (providerId === 'ollama') {
+      if (value.endpoint_kind !== 'loopback' || !endpointUsesExplicitLoopback(endpoint)) invalidResponse()
+    } else if (value.endpoint_kind !== 'remote' || endpoint !== expectedProviderEndpoint[providerId]) {
+      invalidResponse()
+    }
+    return {
+      name: parseProfileName(value.name, message),
+      provider_id: providerId,
+      model: parseModel(value.model, message),
+      endpoint,
+      endpoint_kind: value.endpoint_kind,
+      secret_reference: secretReference,
+      enabled: value.enabled,
+    }
+  } catch {
+    invalidResponse()
+  }
+}
+
+function uniqueValues(values: readonly string[]): boolean {
+  return new Set(values).size === values.length
+}
+
+function parseConsentGrant(value: unknown): ConsentGrantSummary {
+  const message = 'Invalid consent response'
+  if (!record(value) || !exactKeys(value, [
+    'name', 'provider_profile_name', 'provider_id', 'modules', 'purposes', 'data_classes',
+    'models', 'max_cost_usd', 'retain_payloads', 'active',
+  ]) || typeof value.retain_payloads !== 'boolean' || typeof value.active !== 'boolean') invalidResponse()
+  try {
+    const modules = parseSafeCodes(value.modules, message)
+    const purposes = parseSafeCodes(value.purposes, message)
+    const dataClasses = parseDataClasses(value.data_classes, message)
+    const models = parseModels(value.models, message)
+    if (!uniqueValues(modules) || !uniqueValues(purposes)
+      || !uniqueValues(dataClasses) || !uniqueValues(models)) invalidResponse()
+    return {
+      name: parseProfileName(value.name, message),
+      provider_profile_name: parseProfileName(value.provider_profile_name, message),
+      provider_id: parseProviderId(value.provider_id, message),
+      modules,
+      purposes,
+      data_classes: dataClasses,
+      models,
+      max_cost_usd: parseCost(value.max_cost_usd, message),
+      retain_payloads: value.retain_payloads,
+      active: value.active,
+    }
+  } catch {
+    invalidResponse()
+  }
+}
+
+function parseProviderConfiguration(value: unknown): ProviderConfiguration {
+  if (!record(value) || !exactKeys(value, ['schema_version', 'revision', 'profiles', 'consents'])
+    || value.schema_version !== 1 || !Array.isArray(value.profiles) || value.profiles.length > 256
+    || !Array.isArray(value.consents) || value.consents.length > 256) invalidResponse()
+  const profiles = value.profiles.map(parseProviderProfile)
+  const consents = value.consents.map(parseConsentGrant)
+  const profilesByName = new Map(profiles.map((profile) => [profile.name, profile]))
+  if (profilesByName.size !== profiles.length || new Set(consents.map((consent) => consent.name)).size !== consents.length) {
+    invalidResponse()
+  }
+  if (consents.some((consent) => {
+    const profile = profilesByName.get(consent.provider_profile_name)
+    return profile === undefined || profile.provider_id !== consent.provider_id
+  })) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    revision: parseRevision(value.revision, 'Invalid provider configuration response'),
+    profiles,
+    consents,
+  })
+}
+
+function parseProviderEndpointValidation(value: unknown): ProviderEndpointValidation {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'status', 'endpoint_kind', 'http_status', 'destination_digest',
+  ]) || value.schema_version !== 1 || value.status !== 'reachable'
+    || (value.endpoint_kind !== 'loopback' && value.endpoint_kind !== 'remote')
+    || !integer(value.http_status, 100, 599)
+    || typeof value.destination_digest !== 'string' || !digestPattern.test(value.destination_digest)) {
+    invalidResponse()
+  }
+  return deepFreeze(value as unknown as ProviderEndpointValidation)
+}
+
+function parseConsentPreview(value: unknown): ConsentPreview {
+  try {
+    return parseConsentPreviewPayload(value, 'Invalid consent preview response')
+  } catch {
+    invalidResponse()
+  }
+}
+
 function expectedGrantShape(purpose: FileGrantPurpose): Readonly<{ access: 'read' | 'write'; format: FileFormat }> {
   switch (purpose) {
     case 'gedcom-read': return { access: 'read', format: 'gedcom' }
@@ -451,5 +779,8 @@ export const parseCapabilitiesResult = (value: unknown): BridgeResult<Capability
 export const parsePreferencesResult = (value: unknown): BridgeResult<LocalPreferences> => parseBridgeResult(value, parsePreferences)
 export const parseSettingsResult = (value: unknown): BridgeResult<ApplicationSettings> => parseBridgeResult(value, parseSettings)
 export const parseSecretStatusResult = (value: unknown): BridgeResult<SecretStatus> => parseBridgeResult(value, parseSecretStatus)
+export const parseProviderConfigurationResult = (value: unknown): BridgeResult<ProviderConfiguration> => parseBridgeResult(value, parseProviderConfiguration)
+export const parseProviderEndpointValidationResult = (value: unknown): BridgeResult<ProviderEndpointValidation> => parseBridgeResult(value, parseProviderEndpointValidation)
+export const parseConsentPreviewResult = (value: unknown): BridgeResult<ConsentPreview> => parseBridgeResult(value, parseConsentPreview)
 export const parseFileGrantResult = (value: unknown): BridgeResult<FileGrant | null> => parseBridgeResult(value, parseNullableFileGrant)
 export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<FileGrantRevocation> => parseBridgeResult(value, parseFileGrantRevocation)

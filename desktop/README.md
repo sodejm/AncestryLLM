@@ -1,6 +1,19 @@
 # AncestryLLM desktop shell
 
-This directory contains the UI-only Electron adapter and the packaged control-sidecar supervisor. It intentionally implements no genealogy domain behavior and does not access files, databases, provider credentials, the network, or operating-system services from the renderer. The versioned `window.ancestry` bridge retains the six 0.5 control methods for application information, startup diagnostics, capabilities, bounded sidecar retry, preference reads, and optimistic-concurrency preference updates. Unreleased Issue #103 adds three path-free methods—`requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`—that delegate native selection and all pathname authority to Electron main. Development uses deterministic fictional fixtures; packaged main is the sole authenticated client for the fixed capabilities route. Packaged main stores the bounded local-preference schema in `preferences.json` beneath Electron's OS app-data directory. The renderer never receives that path and has no storage access.
+This directory contains the UI-only Electron adapter and the packaged
+control-sidecar supervisor. It intentionally implements no genealogy domain
+behavior and does not access files, databases, provider credentials, the
+network, or operating-system services from the renderer. The versioned
+`window.ancestry` bridge retains the six 0.5 control methods for application
+information, startup diagnostics, capabilities, bounded sidecar retry,
+preference reads, and optimistic-concurrency preference updates. Unreleased
+Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
+settings and credential methods, and Issue #108 adds six fixed provider-profile,
+endpoint-test, and consent methods. Development uses deterministic fictional
+fixtures; packaged main is the sole authenticated client for the fixed sidecar
+routes. Packaged main stores the bounded local-preference schema in
+`preferences.json` beneath Electron's OS app-data directory. The renderer never
+receives that path and has no storage access.
 
 The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
@@ -22,6 +35,14 @@ readiness using stable codes and sanitized remediation. Any blocking component
 keeps settings, credentials, and capabilities read-only. The one manual retry
 rechecks existing state without initializing a database, overwriting a key,
 falling back to plaintext, or widening a listener.
+
+Unreleased Issue #108 adds separate **Local Providers**, **Cloud Providers**,
+and **Consent & Privacy** sections without adding provider execution. The
+renderer may request an explicit endpoint test, save a profile only against the
+tested endpoint identity and current revision, preview the complete consent
+scope, create that exact preview, and revoke consent. Secrets remain blank,
+write-only fields managed through Issue #105's credential boundary; presence of
+a stored key cannot select a provider or grant consent.
 
 Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 

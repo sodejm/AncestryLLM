@@ -4,9 +4,10 @@ Issue #11 established the source-level control-plane contract released with the
 first Electron shell in `0.5.0`. Issue #105 adds the unreleased 0.6 contract for
 atomic non-secret settings and write-only credential management. Issue #107
 adds the read-only startup-diagnostics contract and fail-closed mutation gate.
-This remains a private, authenticated, IPv4-loopback FastAPI adapter over
-transport-neutral application contracts. It is not a public, LAN, browser, or
-multi-user API.
+Issue #108 adds the provider-profile, endpoint-test, and consent-administration
+contract. This remains a private, authenticated, IPv4-loopback FastAPI adapter
+over transport-neutral application contracts. It is not a public, LAN,
+browser, or multi-user API.
 
 The released foundation exposes two read-only routes:
 
@@ -32,10 +33,26 @@ The unreleased #105 source adds four fixed path shapes and five operations:
 - `POST /api/v1/secrets/{reference}/set` accepts one write-only value.
 - `POST /api/v1/secrets/{reference}/delete` deletes and verifies absence.
 
-Together, the API has seven exact path templates. There is no generic command or
-route dispatcher and no genealogy, GEDCOM, RootsMagic, provider execution,
-storage, file, job, or other domain route. The credential routes cannot read a
-secret value. Separately owned follow-on work must adapt the same
+The unreleased #108 source adds six fixed path shapes and operations:
+
+- `GET /api/v1/provider-configuration` returns provider metadata, safe endpoint
+  defaults, profile summaries, consent summaries, secret presence, and both
+  optimistic revisions.
+- `POST /api/v1/provider-endpoints/validate` explicitly tests one policy-bound
+  endpoint and returns a redacted destination identity.
+- `POST /api/v1/provider-profiles` creates one profile against the current
+  profile revision and a matching endpoint-test identity.
+- `POST /api/v1/consents/preview` returns the complete requested consent scope,
+  warnings, and budget without mutating state.
+- `POST /api/v1/consents` creates only the exact current preview against the
+  current consent revision.
+- `POST /api/v1/consents/{name}/revoke` explicitly revokes a named grant.
+
+Together, the API has thirteen exact path templates. There is no generic
+command or route dispatcher and no genealogy, GEDCOM, RootsMagic, provider
+execution, storage, file, job, or other domain route. The credential and
+provider-configuration routes cannot read a secret value. Separately owned
+follow-on work must adapt the same
 transport-neutral application services.
 
 ## Security boundary
@@ -70,6 +87,22 @@ The report excludes tokens, environment values, usernames, hostnames, absolute
 or temporary paths, records, prompts, payloads, response bodies, raw
 exceptions, and stacks.
 
+Provider metadata and profile summaries contain no key value. Local endpoint
+tests permit only explicit loopback addresses; cloud endpoints are fixed to the
+reviewed provider URL. The validator rejects credentials in URLs, fragments,
+parameters, query strings, redirects, proxy inheritance, private or link-local
+remote destinations, resolution changes, and TLS hostname or certificate
+failures. It connects directly to the resolved numeric address, repeats DNS
+resolution, and returns only a SHA-256 destination identity. Profile save,
+consent creation, and execution recheck that identity. Missing bindings,
+revision conflicts, or stale previews fail with stable sanitized codes.
+
+Consent preview and creation expose the exact provider, profile, model,
+modules, purposes, data classes, retention, living-person and remote-retention
+warnings, and optional budget. Creation accepts only the complete current
+preview; revocation is explicit. Neither a stored key nor a saved profile
+selects a provider, grants consent, or executes a request.
+
 The bearer and paired build identities are immutable constructor inputs for a
 private supervisor channel. Issue #225 implements that packaged channel: the
 Electron main process generates a fresh URL-safe 256-bit bearer for every
@@ -103,8 +136,10 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 ## Release boundary
 
 The health and capability contract shipped with the bounded `0.5.0` control
-shell. The settings, credential-management, and startup-diagnostic operations
-are source-level work for `0.6.0`; they are not a released user surface until
-the applicable desktop packaging, security, and exact-head verification gates
-pass. Their presence in the committed OpenAPI artifact does not enable a public
-API, provider call, cloud consent, or genealogy workflow.
+shell. The settings, credential-management, startup-diagnostic,
+provider-profile, endpoint-test, and consent-administration operations are
+source-level work for `0.6.0`; they are not a released user surface until the
+applicable desktop packaging, security, and exact-head verification gates pass.
+Their presence in the committed OpenAPI artifact does not enable a public API,
+provider call, or genealogy workflow. Consent administration never replaces
+the execution-time policy check.

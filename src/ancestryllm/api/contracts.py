@@ -18,6 +18,17 @@ _STRICT_MODEL = ConfigDict(extra="forbid", frozen=True, strict=True)
 _SafeCode = Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._:-]+$")]
 _SafeText = Annotated[str, Field(min_length=1, max_length=512)]
 _BuildIdentity = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:+-]+$")]
+_ConfigurationRevision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+_ProviderId = Literal["ollama", "openai", "anthropic", "gemini", "openrouter"]
+_DataClass = Literal[
+    "public_genealogy",
+    "deceased_person",
+    "living_person",
+    "possibly_living_person",
+    "free_text_note",
+    "source_transcription",
+    "government_identifier",
+]
 ErrorScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - Pydantic schema
 
 
@@ -211,6 +222,155 @@ class SecretStatusResponse(BaseModel):
     status: Literal["present", "missing", "unavailable"]
 
 
+class ProviderProfileResponse(BaseModel):
+    """Provider configuration safe for an untrusted renderer."""
+
+    model_config = _STRICT_MODEL
+
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_id: _ProviderId
+    model: Annotated[str, Field(min_length=1, max_length=200)]
+    endpoint: Annotated[str, Field(min_length=1, max_length=2_048)]
+    endpoint_kind: Literal["loopback", "remote"]
+    secret_reference: (
+        Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[a-z0-9_.-]+$")] | None
+    )
+    enabled: bool
+
+
+class ConsentGrantResponse(BaseModel):
+    """Persisted consent metadata without payloads or credentials."""
+
+    model_config = _STRICT_MODEL
+
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_profile_name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_id: _ProviderId
+    modules: Annotated[tuple[_SafeCode, ...], Field(min_length=1, max_length=128)]
+    purposes: Annotated[tuple[_SafeCode, ...], Field(min_length=1, max_length=128)]
+    data_classes: Annotated[tuple[_DataClass, ...], Field(min_length=1, max_length=7)]
+    models: Annotated[tuple[str, ...], Field(min_length=1, max_length=128)]
+    max_cost_usd: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None
+    retain_payloads: bool
+    active: bool
+
+
+class ProviderConfigurationResponse(BaseModel):
+    """Revisioned provider and consent snapshot."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    revision: _ConfigurationRevision
+    profiles: Annotated[tuple[ProviderProfileResponse, ...], Field(max_length=256)] = ()
+    consents: Annotated[tuple[ConsentGrantResponse, ...], Field(max_length=256)] = ()
+
+
+class ProviderProfileCreateRequest(BaseModel):
+    """Atomic profile creation based on the last reviewed snapshot."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    expected_revision: _ConfigurationRevision
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_id: _ProviderId
+    model: Annotated[str, Field(min_length=1, max_length=200)]
+    endpoint: Annotated[str, Field(min_length=1, max_length=2_048)]
+    endpoint_identity_sha256: _ConfigurationRevision
+
+
+class EndpointValidationRequest(BaseModel):
+    """One user-initiated, policy-constrained endpoint test."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    provider_id: _ProviderId
+    endpoint: Annotated[str, Field(min_length=1, max_length=2_048)]
+
+
+class EndpointValidationResponse(BaseModel):
+    """Sanitized endpoint-test result with no destination address."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    status: Literal["reachable"]
+    endpoint_kind: Literal["loopback", "remote"]
+    http_status: Annotated[int, Field(ge=100, le=599)]
+    destination_digest: _ConfigurationRevision
+
+
+class ConsentPreviewRequest(BaseModel):
+    """Requested disclosure scope rendered before consent creation."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    provider_profile_name: Annotated[str, Field(min_length=1, max_length=200)]
+    modules: Annotated[list[_SafeCode], Field(min_length=1, max_length=128)]
+    purposes: Annotated[list[_SafeCode], Field(min_length=1, max_length=128)]
+    data_classes: Annotated[list[_DataClass], Field(min_length=1, max_length=7)]
+    models: Annotated[list[str], Field(min_length=1, max_length=128)]
+    max_cost_usd: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None = None
+    retain_payloads: bool = False
+
+
+class ConsentPreviewResponse(BaseModel):
+    """Authoritative consent disclosure preview and warning set."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    provider_profile_name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_id: _ProviderId
+    modules: Annotated[tuple[_SafeCode, ...], Field(min_length=1, max_length=128)]
+    purposes: Annotated[tuple[_SafeCode, ...], Field(min_length=1, max_length=128)]
+    data_classes: Annotated[tuple[_DataClass, ...], Field(min_length=1, max_length=7)]
+    models: Annotated[tuple[str, ...], Field(min_length=1, max_length=128)]
+    max_cost_usd: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None = None
+    retain_payloads: bool = False
+    warning_codes: Annotated[tuple[_SafeCode, ...], Field(max_length=8)] = ()
+
+
+class ConsentPreviewPayloadRequest(BaseModel):
+    """Exact previously rendered preview submitted for atomic creation."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    provider_profile_name: Annotated[str, Field(min_length=1, max_length=200)]
+    provider_id: _ProviderId
+    modules: Annotated[list[_SafeCode], Field(min_length=1, max_length=128)]
+    purposes: Annotated[list[_SafeCode], Field(min_length=1, max_length=128)]
+    data_classes: Annotated[list[_DataClass], Field(min_length=1, max_length=7)]
+    models: Annotated[list[str], Field(min_length=1, max_length=128)]
+    max_cost_usd: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None = None
+    retain_payloads: bool = False
+    warning_codes: Annotated[list[_SafeCode], Field(max_length=8)] = Field(default_factory=list)
+
+
+class ConsentCreateRequest(BaseModel):
+    """Create a consent only from a current revision and exact preview."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    expected_revision: _ConfigurationRevision
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    preview: ConsentPreviewPayloadRequest
+
+
+class ProviderConfigurationMutationRequest(BaseModel):
+    """Revision precondition for a provider configuration mutation."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    expected_revision: _ConfigurationRevision
+
+
 class FailureDetail(BaseModel):
     model_config = _STRICT_MODEL
 
@@ -255,6 +415,13 @@ __all__ = [
     "CapabilityAction",
     "CapabilityManifest",
     "CapabilityModule",
+    "ConsentCreateRequest",
+    "ConsentGrantResponse",
+    "ConsentPreviewPayloadRequest",
+    "ConsentPreviewRequest",
+    "ConsentPreviewResponse",
+    "EndpointValidationRequest",
+    "EndpointValidationResponse",
     "ErrorEnvelope",
     "ErrorScalar",
     "FailureDetail",
@@ -262,6 +429,10 @@ __all__ = [
     "PageMetadata",
     "PaginationPolicy",
     "PaginationRequest",
+    "ProviderConfigurationMutationRequest",
+    "ProviderConfigurationResponse",
+    "ProviderProfileCreateRequest",
+    "ProviderProfileResponse",
     "RequestSizePolicy",
     "SecretSetRequest",
     "SecretStatusResponse",

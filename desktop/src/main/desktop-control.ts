@@ -5,7 +5,12 @@ import {
   type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
+  type ConsentCreateRequest,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
   type PreferenceUpdate,
+  type ProviderEndpointValidationRequest,
+  type ProviderProfileCreateRequest,
   type SecretReferenceRequest,
   type SecretSetRequest,
   type StartupDiagnosticReport,
@@ -244,6 +249,109 @@ export function createDesktopControlBridge(dependencies: Readonly<{
           return failure('SECRET_INVALID', 'The secret reference was invalid.', 'Reload settings and try again.')
         }
         return failure('SECRET_STORE_UNAVAILABLE', 'The secret could not be removed.', 'Unlock the operating-system credential store and try again.')
+      }
+    },
+    async getProviderConfiguration(signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const configuration = await dependencies.sidecarClient.getProviderConfiguration(signal)
+        requireActive(signal)
+        return success(configuration)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'provider_configuration_invalid') {
+          return failure('PROVIDER_CONFIGURATION_INVALID', 'Provider configuration is invalid.', 'Review the provider settings and try again.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'Provider configuration is unavailable.', 'Retry the private service or restart AncestryLLM.')
+      }
+    },
+    async createProviderProfile(request: ProviderProfileCreateRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const configuration = await dependencies.sidecarClient.createProviderProfile(request, signal)
+        requireActive(signal)
+        return success(configuration)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'provider_configuration_conflict') {
+          return failure('PROVIDER_CONFIGURATION_CONFLICT', 'Provider configuration changed before this profile was saved.', 'Reload provider settings, review them, and try again.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'endpoint_rejected') {
+          return failure('ENDPOINT_REJECTED', 'The provider endpoint is not permitted.', 'Use the reviewed provider endpoint and test it again.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'provider_configuration_invalid') {
+          return failure('PROVIDER_CONFIGURATION_INVALID', 'The provider profile is invalid.', 'Review the profile name, provider, model, and endpoint.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The provider profile could not be saved.', 'Retry the private service or restart AncestryLLM.')
+      }
+    },
+    async validateProviderEndpoint(request: ProviderEndpointValidationRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const validation = await dependencies.sidecarClient.validateProviderEndpoint(request, signal)
+        requireActive(signal)
+        return success(validation)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'endpoint_rejected') {
+          return failure('ENDPOINT_REJECTED', 'The provider endpoint test was rejected.', 'Use an explicit loopback local endpoint or the reviewed cloud endpoint.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The provider endpoint could not be tested.', 'Retry the private service and test the endpoint again.')
+      }
+    },
+    async previewConsent(request: ConsentPreviewRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const preview = await dependencies.sidecarClient.previewConsent(request, signal)
+        requireActive(signal)
+        return success(preview)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'consent_invalid') {
+          return failure('CONSENT_INVALID', 'The consent preview is invalid.', 'Review the selected profile, purpose, data classes, models, and limits.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent preview is unavailable.', 'Reload provider settings and try again.')
+      }
+    },
+    async createConsent(request: ConsentCreateRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const configuration = await dependencies.sidecarClient.createConsent(request, signal)
+        requireActive(signal)
+        return success(configuration)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'provider_configuration_conflict') {
+          return failure('PROVIDER_CONFIGURATION_CONFLICT', 'Provider configuration changed before this consent was saved.', 'Reload provider settings, preview the consent again, and retry.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'consent_preview_stale') {
+          return failure('CONSENT_PREVIEW_STALE', 'The consent preview is no longer current.', 'Preview the consent again before saving it.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'consent_invalid') {
+          return failure('CONSENT_INVALID', 'The consent grant is invalid.', 'Review every consent field and create a fresh preview.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent could not be saved.', 'Reload provider settings and try again.')
+      }
+    },
+    async revokeConsent(request: ConsentRevokeRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const configuration = await dependencies.sidecarClient.revokeConsent(request, signal)
+        requireActive(signal)
+        return success(configuration)
+      } catch (cause) {
+        requireActive(signal)
+        if (cause instanceof SidecarClientError && cause.reason === 'provider_configuration_conflict') {
+          return failure('PROVIDER_CONFIGURATION_CONFLICT', 'Provider configuration changed before this consent was revoked.', 'Reload provider settings and try again.')
+        }
+        if (cause instanceof SidecarClientError && cause.reason === 'consent_invalid') {
+          return failure('CONSENT_INVALID', 'The consent could not be revoked.', 'Reload provider settings and select an active consent.')
+        }
+        return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent could not be revoked.', 'Retry the private service or restart AncestryLLM.')
       }
     },
   })

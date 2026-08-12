@@ -1,6 +1,13 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import type { BridgeResult, CapabilityManifest, FileGrant, FileGrantId } from '../shared-contract/desktop'
+import type {
+  BridgeResult,
+  CapabilityManifest,
+  ConsentPreview,
+  FileGrant,
+  FileGrantId,
+  ProviderConfiguration,
+} from '../shared-contract/desktop'
 import { desktopChannels } from '../shared-contract/desktop'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
@@ -17,6 +24,24 @@ const capabilities = result({
   request_policy: { max_body_bytes: 1, max_json_depth: 1, max_collection_items: 1, max_string_characters: 1 },
   pagination: { default_limit: 1, maximum_limit: 1, maximum_cursor_characters: 32 },
 }) satisfies BridgeResult<CapabilityManifest>
+const providerConfiguration = result({
+  schema_version: 1,
+  revision: '0'.repeat(64),
+  profiles: [],
+  consents: [],
+}) satisfies BridgeResult<ProviderConfiguration>
+const consentPreview = result({
+  schema_version: 1,
+  provider_profile_name: 'local',
+  provider_id: 'ollama',
+  modules: ['search'],
+  purposes: ['genealogy'],
+  data_classes: ['deceased_person'],
+  models: ['llama3.2'],
+  max_cost_usd: null,
+  retain_payloads: false,
+  warning_codes: [],
+}) satisfies BridgeResult<ConsentPreview>
 
 const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
@@ -27,6 +52,18 @@ const bridge = (): MainDesktopBridge => ({
   updatePreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'dark', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 1 })),
   getSettings: vi.fn().mockResolvedValue(result({ schema_version: 1, revision: 0, fields: [] })),
   updateSettings: vi.fn().mockResolvedValue(result({ schema_version: 1, revision: 1, fields: [] })),
+  getProviderConfiguration: vi.fn().mockResolvedValue(providerConfiguration),
+  createProviderProfile: vi.fn().mockResolvedValue(providerConfiguration),
+  validateProviderEndpoint: vi.fn().mockResolvedValue(result({
+    schema_version: 1,
+    status: 'reachable',
+    endpoint_kind: 'loopback',
+    http_status: 200,
+    destination_digest: 'a'.repeat(64),
+  })),
+  previewConsent: vi.fn().mockResolvedValue(consentPreview),
+  createConsent: vi.fn().mockResolvedValue(providerConfiguration),
+  revokeConsent: vi.fn().mockResolvedValue(providerConfiguration),
   getSecretStatus: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
   setSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'present' })),
   deleteSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
@@ -144,7 +181,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the fourteen declared static channels', () => {
+  it('registers exactly the twenty declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -152,7 +189,7 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(14)
+    expect(handlers.size).toBe(20)
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {

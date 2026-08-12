@@ -372,7 +372,7 @@ risk blocks the affected gate.
 | #363 | Electron Main is the sole Docker authority; endpoint, Engine, plan, and owned-resource identity fail closed around bounded lifecycle operations. | Host-control foundation and one native macOS arm64 evidence row implemented; runtime integration and remaining platform/release evidence stay open. |
 | #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Closed source-level secret foundation; runtime broker evidence remains open. |
 | #107 | Local convenience still authenticates traffic; Host Remote needs explicit TLS, identity, authorization, enrollment, and recovery. | Open authentication dependency. |
-| #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Open settings/consent dependency. |
+| #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Source and packaged settings flow implemented; provider execution and target-matched network evidence remain #110/#131. |
 | #123 | SQLCipher data and key remain separate; migrations and cross-container backup/restore fail safely. | Open persistence dependency. |
 | #131 | Native engine/lifecycle, multi-architecture, auth, network, offline, secret, recovery, adversarial, and budget tests are release evidence. | Open quality dependency. |
 | #132 | Pre-1.0 artifacts need checksums, SBOM, provenance, immutable OCI digests, and no embedded credentials/daemon authority. | Open distribution dependency. |
