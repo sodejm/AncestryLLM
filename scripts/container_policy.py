@@ -92,9 +92,15 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return document
 
 
+def _strip_yaml_comments(text: str) -> str:
+    """Strip YAML-only comment lines so the remainder parses as strict JSON."""
+    return "\n".join(line for line in text.splitlines() if not re.match(r"^\s*#", line))
+
+
 def _load(path: Path) -> dict[str, object]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+        raw = path.read_text(encoding="utf-8")
+        value = json.loads(_strip_yaml_comments(raw), object_pairs_hook=_unique_object)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ContainerPolicyError(
             "COMPOSE_DOCUMENT_INVALID",
