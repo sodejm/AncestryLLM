@@ -18,10 +18,10 @@ family-tree files, reports, or credentials in this repository.
 - Install the released desktop control shell, which provides Home, Diagnostics,
   Settings, and capability onboarding.
 
-The desktop shell is not a desktop genealogy application. It does not include
-desktop genealogy or domain routes, files, jobs, providers, cloud accounts, or
-updater flows. Desktop genealogy workflows are not available yet; use the CLI
-or interactive prompt for supported genealogy work.
+The released 0.5 desktop shell is not a desktop genealogy application. It does
+not include desktop genealogy or domain routes, files, jobs, providers, cloud
+accounts, or updater flows. Desktop genealogy workflows are not available yet;
+use the CLI or interactive prompt for supported genealogy work.
 
 The current unreleased 0.6 source adds a narrow desktop settings and credential
 management foundation. It can update five reviewed non-secret settings and can
@@ -30,6 +30,14 @@ OS keyring. It cannot read credential values, select consent on your behalf,
 make a provider call, or run a genealogy workflow. This development surface is
 not part of the released 0.5.0 installer until its packaged verification gates
 pass.
+
+Unreleased 0.6 source also adds separate Local Providers, Cloud Providers, and
+Consent & Privacy settings. Saving a provider profile requires an explicit
+endpoint test and an optimistic-revision match. Creating consent requires a
+complete preview of the provider, profile, model, purpose, data classes,
+retention, warnings, and optional budget; living-person and remote-retention
+choices receive explicit warnings. A stored key alone cannot enable a provider,
+and this configuration surface does not execute provider requests.
 
 The unreleased desktop first run now recommends **Local Desktop** and keeps
 **Connect Remote** and **Host Remote** visible but unavailable. Before it

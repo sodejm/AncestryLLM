@@ -14,6 +14,30 @@ Environment variables listed in `.env.example` are a headless CI fallback. The
 application does not load `.env`. Merely setting a provider key cannot select a
 provider or initiate a request.
 
+## Desktop provider settings
+
+Unreleased Issue #108 adds a provider-configuration and consent administration
+surface to the desktop shell. It does not expose provider execution. Local
+Ollama profiles accept only an explicitly tested loopback endpoint. Cloud
+profiles use the exact built-in HTTPS endpoint for the selected provider; the
+desktop surface cannot supply an alternate cloud URL.
+
+Endpoint testing does not inherit a proxy or follow redirects. It resolves the
+exact hostname, connects directly to the resolved numeric address while
+retaining TLS hostname and certificate verification, repeats resolution after
+the probe, and returns only a SHA-256 destination identity. Profile save,
+consent creation, and execution recheck the same endpoint identity. A failed,
+missing, stale, privately routed, link-local, or changed destination fails
+closed without returning an address or response body.
+
+Saving a profile requires both the current optimistic revision and the digest
+from its explicit endpoint test. Consent creation first requires a complete
+preview of the provider, profile, model, modules, purposes, data classes,
+retention, warnings, and optional budget, then accepts only that exact preview
+against the current consent revision. Secret fields remain blank and
+write-only; configuration reports key presence only. A stored key alone cannot
+enable a provider, choose a profile, or grant consent.
+
 ## Application boundary
 
 Only modules under `ancestryllm.llm.providers` initiate LLM network requests.
