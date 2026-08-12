@@ -151,7 +151,7 @@ def test_dockerfile_pins_multiarch_inputs_and_minimal_runtime() -> None:
 def test_runtime_inputs_require_digest_qualified_images_and_native_platform() -> None:
     digest = "a" * 64
     inputs = validate_runtime_inputs(
-        f"ghcr.io/example/ancestryllm-gateway:v1@sha256:{digest}",
+        f"ghcr.io/example/team/ancestryllm-gateway:v1@sha256:{digest}",
         f"ghcr.io/example/ancestryllm-worker:v1@sha256:{digest}",
         "linux/arm64",
     )
@@ -179,6 +179,18 @@ def test_runtime_inputs_require_digest_qualified_images_and_native_platform() ->
 def test_runtime_inputs_fail_closed(gateway: str, worker: str, platform: str, code: str) -> None:
     with pytest.raises(ContainerPolicyError, match=code):
         validate_runtime_inputs(gateway, worker, platform)
+
+
+def test_runtime_inputs_reject_adversarial_repeated_separators() -> None:
+    digest = "a" * 64
+    repeated_separators = "!/" * 100_000 + "!"
+
+    with pytest.raises(ContainerPolicyError, match="CONTAINER_IMAGE_REFERENCE_INVALID"):
+        validate_runtime_inputs(
+            repeated_separators,
+            f"registry.example/worker:v1@sha256:{digest}",
+            "linux/amd64",
+        )
 
 
 def test_ci_builds_on_native_amd64_and_arm64_runners() -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -43,7 +42,7 @@ _BASE_SERVICE_KEYS = {
     "labels",
 }
 _OVERLAY_SERVICE_KEYS = {"cpus", "mem_limit", "pids_limit", "labels"}
-_DIGEST_IMAGE = re.compile(r"^[^\s:@]+(?:/[^\s:@]+)+:[^\s@]+@sha256:[0-9a-f]{64}$")
+_LOWER_HEX_DIGITS = frozenset("0123456789abcdef")
 _SUPPORTED_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
 
@@ -59,6 +58,32 @@ def _fail(code: str, message: str) -> None:
     raise ContainerPolicyError(code, message)
 
 
+def _is_digest_image_reference(value: str) -> bool:
+    """Validate the reviewed image-reference shape in deterministic linear time."""
+
+    repository_and_tag, digest_separator, digest = value.rpartition("@sha256:")
+    if (
+        digest_separator != "@sha256:"
+        or len(digest) != 64
+        or any(character not in _LOWER_HEX_DIGITS for character in digest)
+    ):
+        return False
+
+    repository, tag_separator, tag = repository_and_tag.partition(":")
+    components = repository.split("/")
+    return (
+        tag_separator == ":"
+        and bool(tag)
+        and len(components) >= 2
+        and all(components)
+        and all(
+            not any(character.isspace() or character in ":@" for character in component)
+            for component in components
+        )
+        and not any(character.isspace() or character in "/:@" for character in tag)
+    )
+
+
 def validate_runtime_inputs(
     gateway_image: str,
     worker_image: str,
@@ -66,7 +91,9 @@ def validate_runtime_inputs(
 ) -> dict[str, str]:
     """Reject ambiguous image and platform inputs before a lifecycle command executes."""
 
-    if not _DIGEST_IMAGE.fullmatch(gateway_image) or not _DIGEST_IMAGE.fullmatch(worker_image):
+    if not _is_digest_image_reference(gateway_image) or not _is_digest_image_reference(
+        worker_image
+    ):
         _fail(
             "CONTAINER_IMAGE_REFERENCE_INVALID",
             "Both runtime images must be exact registry paths with tags and SHA-256 digests.",
