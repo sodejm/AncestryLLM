@@ -130,6 +130,8 @@ PUBLIC_FACADE_INTERNAL_GATEWAYS: Final[dict[str, frozenset[str]]] = {
 ADAPTER_OWNERS: Final[dict[str, str]] = {
     "ancestryllm.cli": "terminal",
     "ancestryllm.console": "terminal",
+    "ancestryllm.container_gateway": "future-fastapi",
+    "ancestryllm.container_healthcheck": "future-fastapi",
     "ancestryllm.terminal": "terminal",
     "ancestryllm.api": "future-fastapi",
     "ancestryllm.desktop": "future-electron",

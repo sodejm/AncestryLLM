@@ -14,13 +14,23 @@ EPHEMERAL_PORT = 0
 GRACEFUL_SHUTDOWN_SECONDS = 10
 
 
-def create_uvicorn_config(app: ASGIApp) -> Config:
+def create_uvicorn_config(
+    app: ASGIApp,
+    *,
+    port: int = EPHEMERAL_PORT,
+    graceful_shutdown_seconds: int = GRACEFUL_SHUTDOWN_SECONDS,
+) -> Config:
     """Create a listener config that cannot be redirected to a public interface."""
+
+    if not 0 <= port <= 65_535:
+        raise ValueError("API_PORT_INVALID: the listener port must be between 0 and 65535")
+    if graceful_shutdown_seconds <= 0:
+        raise ValueError("API_SHUTDOWN_BUDGET_INVALID: the shutdown budget must be positive")
 
     return Config(
         app=app,
         host=LOOPBACK_HOST,
-        port=EPHEMERAL_PORT,
+        port=port,
         access_log=False,
         date_header=False,
         forwarded_allow_ips="",
@@ -29,7 +39,7 @@ def create_uvicorn_config(app: ASGIApp) -> Config:
         log_config=None,
         proxy_headers=False,
         server_header=False,
-        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        timeout_graceful_shutdown=graceful_shutdown_seconds,
     )
 
 

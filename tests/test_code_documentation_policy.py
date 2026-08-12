@@ -78,6 +78,9 @@ class TestClassify:
     def test_makefile(self) -> None:
         assert classify("Makefile") == "first-party-config-exec"
 
+    def test_dockerfile(self) -> None:
+        assert classify("containers/Dockerfile") == "first-party-config-exec"
+
     def test_markdown_doc(self) -> None:
         assert classify("README.md") == "non-code-doc"
 
@@ -89,6 +92,17 @@ class TestClassify:
 
     def test_json_file(self) -> None:
         assert classify(".github/release-config.json") == "non-comment-format"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "containers/compose.yaml",
+            "containers/compose.local.yaml",
+            "containers/compose.remote.yaml",
+        ],
+    )
+    def test_strict_json_compose_file(self, path: str) -> None:
+        assert classify(path) == "non-comment-format"
 
     def test_plist_file(self) -> None:
         assert classify("desktop/resources/entitlements.mac.plist") == "non-comment-format"
@@ -176,6 +190,17 @@ class TestCheckInventory:
             NON_COMMENT_FORMAT_MAP["config/dependency-audit-exclusions.json"]
             == "docs/DEPENDENCY_MAINTENANCE.md"
         )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "containers/compose.yaml",
+            "containers/compose.local.yaml",
+            "containers/compose.remote.yaml",
+        ],
+    )
+    def test_strict_json_compose_maps_to_deployment_contract(self, path: str) -> None:
+        assert NON_COMMENT_FORMAT_MAP[path] == "docs/DEPLOYMENT.md"
 
     def test_security_dependency_policy_maps_to_release_procedure(self) -> None:
         assert (
@@ -309,6 +334,12 @@ class TestCheckFileDocumentation:
         f.write_text("name: CI\n")
         diags = check_file_documentation(".github/workflows/noheader.yml", tmp_path)
         assert any("missing-file-header-comment" in d for d in diags)
+
+    def test_dockerfile_with_header_passes(self, tmp_path: Path) -> None:
+        f = tmp_path / "containers" / "Dockerfile"
+        f.parent.mkdir(parents=True)
+        f.write_text("# Builds the OCI runtime image.\nFROM scratch\n")
+        assert check_file_documentation("containers/Dockerfile", tmp_path) == []
 
     # --- Non-code classifications are skipped ---
 

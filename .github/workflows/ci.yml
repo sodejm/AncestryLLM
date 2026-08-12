@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      containers: ${{ steps.classify.outputs.containers }}
       dependencies: ${{ steps.classify.outputs.dependencies }}
       workflows: ${{ steps.classify.outputs.workflows }}
     steps:
@@ -48,14 +49,27 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "containers=true" >> "$GITHUB_OUTPUT"
             echo "dependencies=true" >> "$GITHUB_OUTPUT"
             echo "workflows=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          containers=false
           dependencies=false
           workflows=false
           while IFS= read -r changed_path; do
+            case "$changed_path" in
+              containers/*|scripts/container_*.py|src/*|tests/test_container_*.py)
+                containers=true
+                ;;
+              Makefile|pyproject.toml|uv.lock|README.md|LICENSE)
+                containers=true
+                ;;
+              .dockerignore|.github/workflows/ci.yml)
+                containers=true
+                ;;
+            esac
             case "$changed_path" in
               pyproject.toml|uv.lock)
                 dependencies=true
@@ -71,6 +85,7 @@ jobs:
             esac
           done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
+          echo "containers=$containers" >> "$GITHUB_OUTPUT"
           echo "dependencies=$dependencies" >> "$GITHUB_OUTPUT"
           echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
 
@@ -285,6 +300,73 @@ jobs:
           ancestry --json modules list > modules.json
           python -c 'import json; assert json.load(open("modules.json", encoding="utf-8"))'
 
+  container:
+    name: container (${{ matrix.arch }})
+    needs: [changes, lockfile]
+    if: needs.changes.outputs.containers == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate production topology
+        env:
+          ANCESTRYLLM_GATEWAY_IMAGE: ghcr.io/sodejm/ancestryllm-gateway:ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          ANCESTRYLLM_PLATFORM: ${{ matrix.platform }}
+          ANCESTRYLLM_WORKER_IMAGE: ghcr.io/sodejm/ancestryllm-worker:ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
+        run: |
+          make container-compose-config
+      - name: Build exact native images
+        id: build
+        env:
+          ARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          docker build --platform "$PLATFORM" \
+            --file containers/Dockerfile \
+            --target gateway \
+            --tag "ancestryllm-gateway:ci-$ARCH" .
+          docker build --platform "$PLATFORM" \
+            --file containers/Dockerfile \
+            --target worker \
+            --tag "ancestryllm-worker:ci-$ARCH" .
+          gateway_image="$(docker image inspect --format '{{.Id}}' "ancestryllm-gateway:ci-$ARCH")"
+          worker_image="$(docker image inspect --format '{{.Id}}' "ancestryllm-worker:ci-$ARCH")"
+          echo "gateway_image=$gateway_image" >> "$GITHUB_OUTPUT"
+          echo "worker_image=$worker_image" >> "$GITHUB_OUTPUT"
+      - name: Exercise native container lifecycle
+        env:
+          ARCH: ${{ matrix.arch }}
+          GATEWAY_IMAGE: ${{ steps.build.outputs.gateway_image }}
+          PLATFORM: ${{ matrix.platform }}
+          WORKER_IMAGE: ${{ steps.build.outputs.worker_image }}
+        run: |
+          python3 scripts/container_ci_smoke.py \
+            --gateway-image "$GATEWAY_IMAGE" \
+            --worker-image "$WORKER_IMAGE" \
+            --platform "$PLATFORM" \
+            --architecture "$ARCH" \
+            --output "build/container-policy/lifecycle-$ARCH.json" \
+            --inventory-output "build/container-policy/inventory-$ARCH.json"
+      - name: Retain container policy evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-policy-evidence-${{ matrix.arch }}
+          path: build/container-policy/
+          if-no-files-found: error
+          retention-days: 14
+
   workflow-audit:
     name: workflow audit
     needs: [changes, lockfile]
@@ -374,6 +456,7 @@ jobs:
     name: PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
+      - changes
       - lockfile
       - test
       - quality
@@ -381,6 +464,7 @@ jobs:
       - package
       - install-smoke
       - sdist-smoke
+      - container
       - workflow-audit
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -388,6 +472,7 @@ jobs:
       - name: Require all pull request gates
         shell: bash
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           LOCKFILE_RESULT: ${{ needs.lockfile.result }}
           TEST_RESULT: ${{ needs.test.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
@@ -395,6 +480,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           INSTALL_RESULT: ${{ needs.install-smoke.result }}
           SDIST_RESULT: ${{ needs.sdist-smoke.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
           WORKFLOW_AUDIT_RESULT: ${{ needs.workflow-audit.result }}
         run: |
           require_success() {
@@ -406,6 +492,7 @@ jobs:
             fi
           }
 
+          require_success changes "$CHANGES_RESULT"
           require_success lockfile "$LOCKFILE_RESULT"
           require_success test "$TEST_RESULT"
           require_success quality "$QUALITY_RESULT"
@@ -413,6 +500,10 @@ jobs:
           require_success package "$PACKAGE_RESULT"
           require_success install-smoke "$INSTALL_RESULT"
           require_success sdist-smoke "$SDIST_RESULT"
+          if [[ "$CONTAINER_RESULT" != "success" && "$CONTAINER_RESULT" != "skipped" ]]; then
+            echo "::error title=container gate::Expected success or skipped, got ${CONTAINER_RESULT}"
+            exit 1
+          fi
 
           if [[ "$WORKFLOW_AUDIT_RESULT" != "success" && "$WORKFLOW_AUDIT_RESULT" != "skipped" ]]; then
             echo "::error title=workflow audit gate::Expected success or skipped, got ${WORKFLOW_AUDIT_RESULT}"

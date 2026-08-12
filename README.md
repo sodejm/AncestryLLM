@@ -70,6 +70,16 @@ activate a deployment profile, mount genealogy data, or weaken the network-free
 [published deployment operations guide](https://sodejm.github.io/AncestryLLM/DEPLOYMENT.html#host-container-control-foundation)
 for the trust boundary, recovery procedure, and residual risk.
 
+Issue #349 adds a minimal, production-shaped OCI and Compose verification
+topology for one probe-only gateway and an optional dormant worker. The images
+are built and exercised natively on Linux amd64 and arm64 in CI, expose no host
+ports, run non-root with read-only roots and bounded resources, and contain no
+genealogy or provider route. A read-only named-volume attachment is a policy
+placeholder only: storage initialization, schema migration, secret delivery,
+and profile activation remain blocked until their separate #350 and #351
+controls pass. The topology is release evidence, not a supported deployment
+runbook or application-container availability claim.
+
 ## Start here
 
 Choose the path that matches how you want to use AncestryLLM.

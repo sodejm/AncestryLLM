@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -307,8 +307,12 @@ def create_app(
     lifecycle: ApiLifecycle | None = None,
     startup_diagnostics: Callable[[], StartupDiagnosticReport] | None = None,
     mutations_allowed: Callable[[], bool] | None = None,
+    surface: Literal["control", "probe"] = "control",
 ) -> FastAPI:
     """Create the internal control surface over existing application contracts."""
+
+    if surface not in {"control", "probe"}:
+        raise ValueError("API_SURFACE_INVALID: the API surface must be control or probe")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -332,7 +336,7 @@ def create_app(
         redirect_slashes=False,
         lifespan=lifespan,
     )
-    app.add_middleware(InternalApiMiddleware, settings=settings)
+    app.add_middleware(InternalApiMiddleware, settings=settings, surface=surface)
     diagnostics_provider = startup_diagnostics or _default_startup_diagnostics
 
     def assert_mutations_allowed() -> None:
@@ -400,6 +404,9 @@ def create_app(
     )
     def get_capabilities() -> CapabilityManifest:
         return capability_manifest(registry, executor, settings)
+
+    if surface == "probe":
+        return app
 
     @app.get(
         f"{API_NAMESPACE}/startup-diagnostics",

@@ -10,11 +10,11 @@ hosted application deployment.
 future Local Desktop container profile plus explicit Connect Remote and Host
 Remote profiles. Unreleased 0.6 source implements the shared profile control
 plane and a separate macOS arm64 manager for app-owned Colima/Lima, Docker
-Engine, and Compose tools. The manager does not supply an AncestryLLM
-application container or activate a deployment profile. Local Desktop is the
-preselected, recommended mode. An omitted profile migrates to that safe local
-default; an unknown schema, malformed topology, stale revision, or substituted
-endpoint fails closed.
+Engine, and Compose tools. Issue #349 also supplies a probe-only OCI and Compose
+verification topology, but neither component activates a deployment profile or
+supported application container. Local Desktop is the preselected, recommended
+mode. An omitted profile migrates to that safe local default; an unknown schema,
+malformed topology, stale revision, or substituted endpoint fails closed.
 
 Headless tooling can list the reviewed choices, inspect the stored profile,
 preview an exact transition, diagnose a profile/runtime mismatch, recover to
@@ -112,12 +112,65 @@ ambient tools, or fall back to another mirror. Docker Desktop remains optional
 and untouched. See [Desktop shell](DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
 for the Settings and noninteractive operator procedures.
 
-Remaining work includes application images, the host secret broker, profile
-activation, grant-authorized read-only family tree mounts, authenticated
-workloads, storage migration and backup, runtime upgrade and rollback policy,
-application resource/readiness/listener budgets, packaged native evidence, the
-full `G5`/`G7` evidence set, and every additional OS, architecture, Engine, and
-Compose row claimed by a future release.
+## Probe-only OCI and Compose topology
+
+Issue #349 adds [`containers/Dockerfile`](../containers/Dockerfile), a closed
+base Compose model, and Local Desktop and Host Remote validation overlays. This
+is production-shaped build and lifecycle evidence, not authorization to run
+`docker compose up` as a supported application deployment. The deployment
+profile executor and #348 host manager do not start it.
+
+The topology contains exactly two defined services:
+
+- `gateway` is mandatory and serves only authenticated health and capability
+  probes on loopback inside its container;
+- `worker` is optional behind an explicit Compose profile and otherwise remains
+  absent. When selected for lifecycle evidence it performs no genealogy work
+  and exits cleanly on the platform termination signal.
+
+Neither service publishes or exposes a host port. Both attach only one internal
+network, run as numeric UID/GID 65532, use a read-only root filesystem, drop all
+capabilities, set `no-new-privileges`, enable init, and have explicit CPU,
+memory, PID, log, health, and shutdown bounds. Host paths, devices, privileged
+or host namespaces, extra services, mutable image references, unsupported
+platforms, and unknown fields fail policy validation. The named data volume is
+attached read-only as a placeholder. No service initializes a database, runs a
+schema migration, receives a genealogy path, or receives a provider secret.
+The random probe credential exists only in a private `/run` tmpfs and is not
+written to Compose, environment evidence, logs, receipts, or inventory.
+
+Maintainers can validate the static source contract without starting Docker:
+
+```sh
+make container-policy
+```
+
+Hosted CI then builds both image targets by exact digest on native Linux amd64
+and native Linux arm64 runners; emulation is not accepted as architecture
+evidence. It checks the realized image architecture and hardening, authenticated
+probe readiness, optional-worker readiness, crash visibility, graceful gateway
+and worker shutdown, build/version skew rejection, read-only and disk-full
+handling, and log redaction. Source policy separately proves that the probe-only
+images have no database initializer or migration entrypoint; this is not an
+executed migration-path assertion. The
+retained schema-v1 evidence includes every installed Python distribution and
+every installed Debian package, with normalized license identities and the
+SHA-256 of each retained Debian copyright file. Missing packages, licenses,
+fields, or lifecycle assertions fail the job rather than producing partial
+evidence.
+
+#350 must add reviewed workload identity and any permitted network publication;
+#351 must add the secret broker, SQLCipher data lifecycle, migrations, backup,
+restore, and recovery. Until both boundaries and the remaining `G5`/`G7` gates
+pass, the images remain verification artifacts, schema migrations remain
+disabled, and no Local Desktop or Host Remote activation path is supported.
+
+Remaining work includes workload-capable application surfaces, the host secret
+broker, profile activation, grant-authorized read-only family tree mounts,
+authenticated workloads, storage migration and backup, runtime upgrade and
+rollback policy, final application resource/readiness/listener budgets,
+packaged native evidence, the full `G5`/`G7` evidence set, and every additional
+OS, architecture, Engine, and Compose row claimed by a future release.
 
 Before any profile release, a separate operator runbook must cover every
 claimed native host and architecture, Docker Engine API and Compose

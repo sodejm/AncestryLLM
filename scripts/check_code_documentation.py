@@ -57,6 +57,17 @@ NON_CODE_DOC_EXTENSIONS: Final = frozenset({".md", ".rst", ".txt"})
 # explained in NON_COMMENT_FORMAT_MAP below.
 NON_COMMENT_FORMAT_EXTENSIONS: Final = frozenset({".json", ".plist", ".xml"})
 
+# Files whose suffix ordinarily permits comments but whose stricter parser contract
+# intentionally does not. These Compose manifests remain strict JSON so duplicate
+# keys and non-JSON YAML constructs fail closed.
+NON_COMMENT_FORMAT_PATHS: Final = frozenset(
+    {
+        "containers/compose.yaml",
+        "containers/compose.local.yaml",
+        "containers/compose.remote.yaml",
+    }
+)
+
 # Editor/IDE configuration that does not need documentation.
 IDE_CONFIG_DIRS: Final = frozenset({".vscode", ".idea"})
 
@@ -65,6 +76,7 @@ GENERATED_VENDOR_BASENAMES: Final = frozenset({"uv.lock", "pnpm-lock.yaml", "com
 
 # Special basenames that have no extension but are classified.
 EXTENSIONLESS_BASENAMES: Final = {
+    "Dockerfile": "first-party-config-exec",
     "Makefile": "first-party-config-exec",
     "LICENSE": "non-code-doc",
     "MANIFEST.in": "first-party-config-exec",
@@ -79,6 +91,10 @@ KNOWN_SPECIAL_EXTENSIONS: Final = frozenset({".example", ".in"})
 
 # Non-comment JSON/plist files mapped to their adjacent authoritative document.
 NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
+    # Strict-JSON Compose topology and reviewed deployment profiles.
+    "containers/compose.yaml": "docs/DEPLOYMENT.md",
+    "containers/compose.local.yaml": "docs/DEPLOYMENT.md",
+    "containers/compose.remote.yaml": "docs/DEPLOYMENT.md",
     # GitHub release config — semantics described in docs/RELEASING.md
     ".github/release-config.json": "docs/RELEASING.md",
     # Issue/PR template form schemas — self-describing YAML siblings in same dir
@@ -180,7 +196,7 @@ def classify(rel: str) -> str:
         return "test-data-fixture"
 
     # Non-comment formats.
-    if suffix in NON_COMMENT_FORMAT_EXTENSIONS:
+    if rel in NON_COMMENT_FORMAT_PATHS or suffix in NON_COMMENT_FORMAT_EXTENSIONS:
         return "non-comment-format"
 
     # Non-code documentation.

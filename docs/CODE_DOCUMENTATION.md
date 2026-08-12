@@ -31,15 +31,17 @@ script enforces this at every CI run.
 | `generated-vendor` | Generated or vendored output | `uv.lock`, `pnpm-lock.yaml`, `*.d.ts` stubs |
 | `test-data-fixture` | Fictional test data | `tests/fixtures/**/*.ged` |
 | `non-code-doc` | Human-readable documentation/content | `docs/**/*.md`, `README.md`, `LICENSE` |
-| `non-comment-format` | Formats that do not safely permit comments | `*.json`, `*.plist` |
+| `non-comment-format` | Formats or strict parser contracts that do not safely permit comments | `*.json`, `*.plist`, strict-JSON Compose manifests |
 | `ide-config` | Editor/IDE configuration | `.vscode/**` |
 
 ### Non-comment formats
 
 Files whose formats do not safely permit comments (JSON, plist/XML property lists) are
 classified as `non-comment-format` and excluded from file-level documentation requirements.
-Their semantics must be explained in an adjacent authoritative document mapped in
-`NON_COMMENT_FORMAT_MAP` inside `scripts/check_code_documentation.py`.
+This also applies to the three `containers/compose*.yaml` manifests: despite their suffix,
+they intentionally remain strict JSON-compatible YAML so duplicate keys and non-JSON YAML
+constructs fail closed. Their semantics must be explained in an adjacent authoritative
+document mapped in `NON_COMMENT_FORMAT_MAP` inside `scripts/check_code_documentation.py`.
 
 ## Language standards
 
