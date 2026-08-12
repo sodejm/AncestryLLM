@@ -937,7 +937,7 @@ async function expectAccessibleShell(page: Page): Promise<void> {
   })
   try {
     await expect.poll(() => page.evaluate(() => ({
-      viewport: document.documentElement.clientWidth,
+      viewport: window.innerWidth,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }))).toEqual({ viewport: 360, overflow: 0 })
     await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible()
