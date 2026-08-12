@@ -622,6 +622,7 @@ def test_missing_prompt_body_uses_multiline_editor_in_module_context(
 @pytest.mark.parametrize(
     ("value", "error_code"),
     (("", "MULTILINE_INPUT_EMPTY"), ("x" * 100_001, "MULTILINE_INPUT_TOO_LARGE")),
+    ids=("empty", "oversized"),
 )
 def test_multiline_editor_rejects_empty_and_oversized_input(
     shell_module,
