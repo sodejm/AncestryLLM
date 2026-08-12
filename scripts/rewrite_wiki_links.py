@@ -13,11 +13,6 @@ if TYPE_CHECKING:
 
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(?P<marker>`+).*?(?P=marker)", flags=re.DOTALL)
-_MARKDOWN_LINK = re.compile(
-    r"(?P<prefix>!?\[[^\]]*\]\()"
-    r"(?P<destination>[^)\n]+)"
-    r"(?P<suffix>\))"
-)
 _DESTINATION = re.compile(r"(?P<target>\S+)(?P<title>.*)", re.DOTALL)
 
 
@@ -43,20 +38,75 @@ def _rewrite_fragment(
     *,
     include_images: bool,
 ) -> str:
-    inline_code = tuple((match.start(), match.end()) for match in _INLINE_CODE.finditer(fragment))
+    inline_code = {match.start(): match.end() for match in _INLINE_CODE.finditer(fragment)}
+    rewritten: list[str] = []
+    cursor = 0
 
-    def rewrite_link(match: re.Match[str]) -> str:
-        # A complete Markdown link inside a code span is an example and must be
-        # left untouched. Inline code inside the link label does not protect the
-        # destination, however; links such as [`path`](target) are still live.
-        if any(start <= match.start() < end for start, end in inline_code):
-            return match.group(0)
-        if match.group("prefix").startswith("!") and not include_images:
-            return match.group(0)
-        destination = rewrite_destination(match.group("destination"))
-        return f"{match.group('prefix')}{destination}{match.group('suffix')}"
+    while cursor < len(fragment):
+        code_end = inline_code.get(cursor)
+        if code_end is not None:
+            rewritten.append(fragment[cursor:code_end])
+            cursor = code_end
+            continue
 
-    return _MARKDOWN_LINK.sub(rewrite_link, fragment)
+        is_image = fragment.startswith("![", cursor)
+        is_link = fragment[cursor] == "[" and (cursor == 0 or fragment[cursor - 1] != "!")
+        if not is_image and not is_link:
+            rewritten.append(fragment[cursor])
+            cursor += 1
+            continue
+
+        label_start = cursor + (2 if is_image else 1)
+        label_end = _find_label_end(fragment, label_start, inline_code)
+        if label_end is None or not fragment.startswith("](", label_end):
+            rewritten.append(fragment[cursor])
+            cursor += 1
+            continue
+
+        destination_start = label_end + 2
+        destination_end = fragment.find(")", destination_start)
+        if destination_end == -1 or destination_end == destination_start:
+            rewritten.append(fragment[cursor])
+            cursor += 1
+            continue
+        destination = fragment[destination_start:destination_end]
+        if "\n" in destination:
+            rewritten.append(fragment[cursor])
+            cursor += 1
+            continue
+
+        rewritten.append(fragment[cursor:destination_start])
+        if is_image and not include_images:
+            rewritten.append(destination)
+        else:
+            rewritten.append(rewrite_destination(destination))
+        rewritten.append(")")
+        cursor = destination_end + 1
+
+    return "".join(rewritten)
+
+
+def _find_label_end(
+    fragment: str,
+    label_start: int,
+    inline_code: dict[int, int],
+) -> int | None:
+    """Find a link-label terminator without interpreting code-span contents."""
+    cursor = label_start
+    bracket_depth = 0
+    while cursor < len(fragment):
+        code_end = inline_code.get(cursor)
+        if code_end is not None:
+            cursor = code_end
+            continue
+        if fragment[cursor] == "[":
+            bracket_depth += 1
+        elif fragment[cursor] == "]":
+            if bracket_depth == 0:
+                return cursor
+            bracket_depth -= 1
+        cursor += 1
+    return None
 
 
 def rewrite_markdown_link_destinations(
