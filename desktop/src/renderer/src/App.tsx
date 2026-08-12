@@ -11,13 +11,14 @@ import type {
   PreferenceUpdate,
   SecretReference,
   StartupDiagnostics,
+  StartupDiagnosticComponentName,
   StartupFailure,
 } from '../../shared-contract/desktop'
 import { secretReferences } from '../../shared-contract/desktop'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
 import { CodedErrorView } from './design-system/CodedErrorView'
-import { routeFromHash, type AppRoute, type NavigationItem } from './design-system/contracts'
+import { navigationItems, routeFromHash, type AppRoute, type NavigationItem } from './design-system/contracts'
 
 type PreferencePatch = Omit<PreferenceUpdate, 'expectedRevision'>
 
@@ -41,6 +42,13 @@ const failureLabel = (failure: StartupFailure): string => failure
   ? failureLabels[failure]
   : 'The desktop service needs attention.'
 
+const diagnosticComponentLabels: Readonly<Record<StartupDiagnosticComponentName, string>> = {
+  configuration: 'Configuration',
+  sqlcipher: 'Encrypted database support',
+  keyring: 'Credential storage',
+  workspace: 'Local workspace',
+}
+
 const secretLabels: Readonly<Record<SecretReference, string>> = {
   'openai.api_key': 'OpenAI API key',
   'anthropic.api_key': 'Anthropic API key',
@@ -50,7 +58,7 @@ const secretLabels: Readonly<Record<SecretReference, string>> = {
   'database.master_key': 'Database master key',
 }
 
-const statusLabel = (status: 'missing' | 'present' | 'unavailable'): string =>
+const statusLabel = (status: 'missing' | 'present' | 'unavailable' | 'ready' | 'warning' | 'blocked'): string =>
   `${status.charAt(0).toUpperCase()}${status.slice(1)}`
 
 function valueFromSettingInput(field: ApplicationSetting, input: HTMLInputElement | HTMLSelectElement): ApplicationSettingValue {
@@ -288,7 +296,16 @@ function Shell() {
   const queryClient = useQueryClient()
   const appInfo = useQuery({ queryKey: ['app-info'], queryFn: () => ancestryBridge().getAppInfo() })
   const startup = useQuery({ queryKey: ['startup-diagnostics'], queryFn: () => ancestryBridge().getStartupDiagnostics() })
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => ancestryBridge().getCapabilities() })
+  const startupResult: BridgeResult<StartupDiagnostics> | undefined = startup.data
+  const startupData = startupResult?.ok ? startupResult.data : undefined
+  const startupAllowsMutations = startupData?.state === 'ready'
+    && startupData.report?.status === 'ready'
+    && startupData.report.components.every((component) => !component.blocks_mutations)
+  const capabilities = useQuery({
+    queryKey: ['capabilities'],
+    queryFn: () => ancestryBridge().getCapabilities(),
+    enabled: startupAllowsMutations,
+  })
   const preferences = useQuery({ queryKey: ['preferences'], queryFn: () => ancestryBridge().getPreferences() })
   const refetchStartup = startup.refetch
 
@@ -310,8 +327,6 @@ function Shell() {
     if (route === 'diagnostics') void refetchStartup()
   }, [refetchStartup, route])
 
-  const startupResult: BridgeResult<StartupDiagnostics> | undefined = startup.data
-  const startupData = startupResult?.ok ? startupResult.data : undefined
   const appData = appInfo.data?.ok ? appInfo.data.data : undefined
   const capabilityData = capabilities.data?.ok ? capabilities.data.data : undefined
   const preferenceData = preferences.data?.ok ? preferences.data.data : undefined
@@ -340,7 +355,7 @@ function Shell() {
   const startupStatus = startupData ? startupLabels[startupData.state] : 'Unavailable'
 
   const updatePreferences = async (patch: PreferencePatch) => {
-    if (!preferenceData || preferenceUpdatePending) return
+    if (!preferenceData || preferenceUpdatePending || !startupAllowsMutations) return
     setPreferenceUpdatePending(true)
     setPreferenceFailure(null)
     try {
@@ -363,7 +378,7 @@ function Shell() {
   }
 
   const completeOnboarding = async () => {
-    if (!preferenceData || preferenceUpdatePending) return
+    if (!preferenceData || preferenceUpdatePending || !startupAllowsMutations) return
     setPreferenceUpdatePending(true)
     setOnboardingFailure(null)
     try {
@@ -452,6 +467,21 @@ function Shell() {
 
       {showWelcome && <section className="welcome" aria-labelledby="workspace-title">
         <div className="welcome-grid">
+          <section className="summary-card" aria-labelledby="welcome-local-desktop">
+            <h2 id="welcome-local-desktop">Local Desktop</h2>
+            <p><span className="badge">Recommended</span></p>
+            <p>Work on this device with a private loopback service and offline-first defaults.</p>
+          </section>
+          <section className="summary-card" aria-labelledby="welcome-connect-remote">
+            <h2 id="welcome-connect-remote">Connect Remote</h2>
+            <p><span className="badge">Not available in this release</span></p>
+            <p>Connecting to another host will always require explicit setup and consent.</p>
+          </section>
+          <section className="summary-card" aria-labelledby="welcome-host-remote">
+            <h2 id="welcome-host-remote">Host Remote</h2>
+            <p><span className="badge">Not available in this release</span></p>
+            <p>Advanced hosting remains disabled; this release does not bind publicly or alter firewall rules.</p>
+          </section>
           <section className="summary-card" aria-labelledby="welcome-private">
             <h2 id="welcome-private">Private and offline</h2>
             <p>No account, provider, API key, genealogy data, or cloud consent is requested here.</p>
@@ -482,12 +512,18 @@ function Shell() {
         <div className="welcome-actions">
           {reviewingWelcome
             ? <Button variant="quiet" onClick={() => setReviewingWelcome(false)}>Back to Home</Button>
-            : <Button
+            : startupAllowsMutations ? <Button
                 disabled={!preferenceData || preferenceUpdatePending}
                 onClick={() => { void completeOnboarding() }}
               >
                 {preferenceUpdatePending ? 'Saving…' : onboardingFailure ? 'Try again' : 'Continue to Home'}
-              </Button>}
+              </Button>
+              : <Button
+                  variant="quiet"
+                  onClick={() => navigate(navigationItems[1]!)}
+                >
+                  Open read-only diagnostics
+                </Button>}
         </div>
       </section>}
 
@@ -514,7 +550,8 @@ function Shell() {
           </section>
           <section className="summary-card" aria-labelledby="capabilities-summary">
             <h2 id="capabilities-summary">Capabilities</h2>
-            {capabilities.isPending && <p role="status">Checking capabilities…</p>}
+            {!startupAllowsMutations && <p>Capabilities stay unavailable until startup diagnostics pass.</p>}
+            {startupAllowsMutations && capabilities.isPending && <p role="status">Checking capabilities…</p>}
             {capabilityData && <p>{capabilityData.modules.length === 0
               ? 'No control capabilities are currently available.'
               : `${capabilityData.modules.length} local control ${capabilityData.modules.length === 1 ? 'module is' : 'modules are'} available.`}</p>}
@@ -532,6 +569,24 @@ function Shell() {
           {startup.isPending ? <p role="status">Checking startup state…</p> : <p>Status: <span className="badge">{startupStatus}</span></p>}
           <p>Diagnostic details stay within this shell.</p>
         </section>
+        {startupData?.report && <section className="settings-panel" aria-labelledby="startup-checks-title">
+          <h2 id="startup-checks-title">Startup checks</h2>
+          <p>{`Platform: ${startupData.report.platform.operating_system} ${startupData.report.platform.architecture}`}</p>
+          <div className="diagnostic-list">
+            {startupData.report.components.map((component) => <section
+              className="diagnostic-item"
+              key={component.component}
+              aria-labelledby={`diagnostic-${component.component}`}
+            >
+              <h3 id={`diagnostic-${component.component}`}>{diagnosticComponentLabels[component.component]}</h3>
+              <p><span className="badge">{statusLabel(component.status)}</span></p>
+              <p className="error-code">{component.code}</p>
+              <p>{component.message}</p>
+              {component.remediation && <p>{component.remediation}</p>}
+              {component.restart_required && <p>Restart required after remediation.</p>}
+            </section>)}
+          </div>
+        </section>}
         {startupData && (startupData.state === 'degraded' || startupData.state === 'stopped') && <div role="alert" className="error">
           <AlertTriangle aria-hidden="true" />
           <div>
@@ -566,7 +621,8 @@ function Shell() {
             <p>{preferenceFailure ? 'Review the current settings and try again.' : 'Restart AncestryLLM.'}</p>
           </div>
         </div>}
-        <div className="settings-stack">
+        {!startupAllowsMutations && !startup.isPending && <p className="context-note">Settings are read-only while startup diagnostics are degraded.</p>}
+        {startupAllowsMutations && <div className="settings-stack">
           <fieldset disabled={!preferenceData || preferenceUpdatePending}>
             <legend>Theme</legend>
             {(['system', 'light', 'dark'] as DesktopColorScheme[]).map((colorScheme) => <label key={colorScheme}>
@@ -592,7 +648,7 @@ function Shell() {
           </fieldset>
           <ApplicationSettingsPanel />
           <CredentialSettingsPanel />
-        </div>
+        </div>}
       </>}
   </AppShell>
 }

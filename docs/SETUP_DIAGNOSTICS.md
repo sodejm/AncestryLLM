@@ -26,6 +26,49 @@ Successful setup verifies the repository-local executable, then runs
 `uv sync --locked --all-extras --all-groups`. A wrong `uv` version or failed
 bootstrap never reaches an environment command.
 
+## Packaged desktop first-run diagnostics
+
+The packaged desktop opens with a local-only startup review before it exposes
+the rest of the shell. **Local Desktop (Recommended)** is the only available
+choice in 0.6. **Connect Remote** and **Host Remote** remain visible as advanced
+future choices, but they cannot be selected. First run never discovers a
+service, binds a public or LAN listener, starts a container, requests an
+account, or enables a cloud provider.
+
+The startup report is a closed schema-v1 response with exactly four
+components: configuration, SQLCipher, OS keyring, and workspace. Each component
+has a stable code, reviewed remediation text, restart guidance, and an explicit
+mutation-blocking flag. The report includes only a normalized operating-system
+and architecture label. It excludes credential values, environment contents,
+usernames, hostnames, absolute or temporary paths, genealogy records, prompts,
+provider payloads, raw exceptions, response bodies, and process output.
+
+When any component blocks startup, the desktop offers read-only diagnostics
+instead of silently continuing. Capabilities are not queried and preference,
+settings, and credential mutations fail with `STARTUP_MUTATION_BLOCKED` until a
+fresh report is healthy. The diagnostics view permits one bounded retry; if the
+problem persists, follow the remediation and relaunch. Retry never initializes
+a database, generates or replaces an existing workspace key, rewrites a
+damaged configuration, changes permissions, or falls back to plaintext SQLite.
+
+Packaged desktop startup uses the OS keyring exclusively. It deliberately
+ignores environment-injected application secrets, even when they are present.
+The documented read-only environment fallback remains available only to the
+CLI and headless/CI operation described below.
+
+| Code | Required recovery |
+|---|---|
+| `CONFIG_INVALID`, `CONFIGURATION_UNAVAILABLE` | Restore a reviewed configuration or repair access; the desktop does not overwrite it. |
+| `SQLCIPHER_UNAVAILABLE` | Install or repair the supported SQLCipher runtime; never substitute plaintext SQLite. |
+| `KEYRING_READ_FAILED` | Unlock or repair the OS credential store and grant the application access; never copy a key into configuration or an environment variable for packaged use. |
+| `DATABASE_DIRECTORY_UNWRITABLE`, `DATABASE_PERMISSIONS_WEAK` | Repair ownership and owner-only permissions without replacing the workspace. |
+| `DATABASE_DIRECTORY_MISSING` | Create an owner-only local data directory, then retry. This warning does not itself authorize a database write. |
+
+`CONFIGURATION_READY`, `SQLCIPHER_READY`, `KEYRING_READY`, and
+`DATABASE_DIRECTORY_READY` identify a healthy component. A sidecar protocol,
+version, or build mismatch is reported by the same fail-closed lifecycle and
+must be repaired by reinstalling the exact supported application package.
+
 ## First-run storage diagnostics
 
 Run a read-only local health check before creating or opening a workspace:

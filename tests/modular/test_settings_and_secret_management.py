@@ -15,7 +15,12 @@ from ancestryllm.application.secret_management import (
 from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import ConfigurationError, StorageError
-from ancestryllm.core.secrets import ENVIRONMENT_NAMES, KeyringSecretStore, MemorySecretStore
+from ancestryllm.core.secrets import (
+    ENVIRONMENT_NAMES,
+    KeyringSecretStore,
+    MemorySecretStore,
+    SecretSourceMode,
+)
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -194,6 +199,37 @@ def test_keyring_store_does_not_load_dotenv(
 
     assert _keyring_store(monkeypatch, FakeKeyring()).get("openai.api_key") is None
     assert dotenv.read_text(encoding="utf-8") == "OPENAI_API_KEY=fictional-dotenv-secret\n"
+
+
+def test_packaged_keyring_only_mode_never_reads_or_protects_environment_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeKeyring()
+    monkeypatch.setattr(KeyringSecretStore, "_keyring", staticmethod(lambda: fake))
+    monkeypatch.setenv("OPENAI_API_KEY", "fictional-environment-secret")
+    store = KeyringSecretStore(source_mode=SecretSourceMode.KEYRING_ONLY)
+
+    assert store.get("openai.api_key") is None
+
+    store.set("openai.api_key", "fictional-keyring-secret")
+    assert fake.value == "fictional-keyring-secret"
+
+
+def test_packaged_keyring_only_mode_fails_closed_when_keyring_read_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeKeyring()
+    fake.read_error = RuntimeError("PRIVATE-BACKEND-DETAIL")
+    monkeypatch.setattr(KeyringSecretStore, "_keyring", staticmethod(lambda: fake))
+    monkeypatch.setenv("OPENAI_API_KEY", "fictional-environment-secret")
+    store = KeyringSecretStore(source_mode=SecretSourceMode.KEYRING_ONLY)
+
+    with pytest.raises(StorageError) as raised:
+        store.get("openai.api_key")
+
+    assert raised.value.code == "KEYRING_READ_FAILED"
+    assert "PRIVATE-BACKEND-DETAIL" not in raised.value.render()
+    assert "fictional-environment-secret" not in raised.value.render()
 
 
 def test_keyring_delete_reports_success_only_after_verified_absence(

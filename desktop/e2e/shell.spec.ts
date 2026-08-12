@@ -248,7 +248,7 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
 
     await page.getByRole('link', { name: 'Diagnostics' }).press('Enter')
     await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
-    await expect(main.getByText('Ready', { exact: true })).toBeVisible()
+    await expect(main.getByLabel('Desktop service').getByText('Ready', { exact: true })).toBeVisible()
     await expect(main.getByRole('alert')).toHaveCount(0)
     await expectNoUnsupportedSurfaces(page)
 
@@ -286,7 +286,7 @@ test('built degraded shell offers one bounded recovery and renders the ready res
 
     const retry = recovery.getByRole('button', { name: 'Retry desktop service' })
     await retry.click()
-    await expect(main.getByText('Ready', { exact: true })).toBeVisible()
+    await expect(main.getByLabel('Desktop service').getByText('Ready', { exact: true })).toBeVisible()
     await expect(main.getByRole('alert')).toHaveCount(0)
     await expect(main.getByRole('button', { name: 'Retry desktop service' })).toHaveCount(0)
     await expectNoUnsupportedSurfaces(page)

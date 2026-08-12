@@ -5,9 +5,11 @@ main process. Issue #102 hardens its payload verification and process-tree
 supervision. Issue #226 adds the narrow typed bridge that lets the renderer
 read sanitized control state without becoming a sidecar client. Issue #105 adds
 an unreleased 0.6 source boundary for atomic non-secret settings and write-only
-credential management. None of these changes exposes genealogy, job, chat,
-provider execution, cloud-account, updater, or generic command routes; the
-sidecar is not a domain-data transport.
+credential management. Issue #107 adds a sanitized schema-v1 startup report,
+keyring-only packaged secret resolution, and fail-closed mutation gating for
+local first run. None of these changes exposes genealogy, job, chat, provider
+execution, cloud-account, updater, or generic command routes; the sidecar is
+not a domain-data transport.
 The [desktop shell guide](DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -68,7 +70,9 @@ channel, or staged rollout.
    exposes authenticated fixed routes only. The released 0.5.0 composition has
    `/api/v1/health` and `/api/v1/capabilities`; the unreleased #105 source adds
    `/api/v1/settings` plus fixed status, set, and delete operations beneath
-   `/api/v1/secrets/{reference}`. It still has no generic route dispatcher.
+   `/api/v1/secrets/{reference}`. Issue #107 adds the read-only
+   `/api/v1/startup-diagnostics` route. It still has no generic route
+   dispatcher.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -103,10 +107,10 @@ is `ready`; the session is cleared before restart, failure, or shutdown. The
 interface also exposes sanitized lifecycle diagnostics and one application-
 lifetime manual retry. Concurrent retry requests share a single launch attempt,
 and an exhausted retry is a deterministic no-op. Electron main uses the session
-only for authenticated requests to its fixed capability, settings, and
-credential-management routes. The bridge exposes the typed result, sanitized
-diagnostics, and retry outcome, but never the session, bearer, port, raw HTTP
-data, or a credential value.
+only for authenticated requests to its fixed startup-diagnostic, capability,
+settings, and credential-management routes. The bridge exposes the typed
+result, sanitized diagnostics, and retry outcome, but never the session,
+bearer, port, raw HTTP data, or a credential value.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
@@ -160,8 +164,10 @@ allowlist and exposes only `present`, `missing`, or `unavailable` status plus
 explicit set and delete operations. The set request contains one write-only
 value and no read route or response can return it. The OS keyring remains the
 sole writable authority. Credentials sourced from the environment are
-read-only, and unavailable or locked keyring behavior fails closed with stable
-redacted codes instead of using Electron `safeStorage`, renderer storage, or a
+read-only for explicit CLI/headless operation. The packaged sidecar selects
+keyring-only mode and never consults those environment variables. Unavailable
+or locked keyring behavior fails closed with stable redacted codes instead of
+using Electron `safeStorage`, renderer storage, an environment fallback, or a
 plaintext file. A successful delete is returned only after an immediate
 presence check proves absence. Main, preload, mock fixtures, and renderer
 caches retain only status metadata; the renderer clears its password input
@@ -172,22 +178,44 @@ before awaiting the bridge and again after every attempt.
 User-facing failures are deliberately generic. Stderr is drained but not
 forwarded into Electron logs; structural sidecar diagnostics contain no bearer,
 port, URL, request, response, genealogy, provider, filesystem payload, raw
-exception, or stack. Diagnostics contain only lifecycle state, a generic
-failure class, and remaining automatic/manual retry counts. Do not add the raw
-launch frame, environment, executable path, temporary directory, or stderr to
-support reports.
+exception, or stack. Lifecycle diagnostics contain only state, a generic
+failure class, and remaining automatic/manual retry counts.
+
+Once the private sidecar session is ready, Issue #107's fixed read-only route
+returns a schema-v1 startup report. It contains an overall `ready` or
+`degraded` status, normalized platform/architecture labels, and exactly four
+ordered components: configuration, SQLCipher, keyring, and workspace. Each
+component has only a reviewed status, stable code, message, remediation,
+restart requirement, and `blocks_mutations` value. Unknown schemas, component
+names, fields, statuses, or codes fail response validation. Any blocking
+component rejects settings and credential mutations with
+`STARTUP_MUTATION_BLOCKED`; the renderer also keeps preference changes and
+capability loading disabled while still allowing Diagnostics and the one
+bounded main-owned retry.
+
+Startup inspection is side-effect-free: it does not write configuration,
+initialize a database, create a key, alter keyring contents, or weaken
+permissions. Do not add usernames, hostnames, absolute or temporary paths,
+environment values, records, prompts, payloads, raw launch frames, response
+bodies, executable paths, stderr, exceptions, or stacks to the report or
+support evidence.
 
 For a startup or compatibility failure:
 
-1. observe the degraded `unavailable` state; the window remains open for safe
-   diagnostics even though no private session is granted;
-2. use the bounded main-process retry at most once, or quit the application so
+1. observe the degraded lifecycle or startup-component state; the window
+   remains open for read-only Diagnostics;
+2. follow only the reviewed component remediation, such as unlocking the OS
+   keyring, restoring valid configuration, installing supported SQLCipher, or
+   repairing the app-owned workspace directory and owner-only permissions;
+3. use the bounded main-process retry at most once, or quit the application so
    any supervised process is terminated;
-3. reinstall the same complete application build to restore a matched
-   Electron/sidecar pair;
-4. run the native smoke and packaged-resource checks for that target;
-5. if the problem persists, record only the application version, target, gate
-   name, and generic failure class.
+4. never initialize a replacement encrypted database, replace an existing key,
+   or select plaintext SQLite as a recovery shortcut;
+5. reinstall the same complete application build to restore a matched
+   Electron/sidecar pair when the failure is structural;
+6. run the native smoke and packaged-resource checks for that target;
+7. if the problem persists, record only the application version, normalized
+   platform labels, gate name, and stable generic failure code.
 
 Local native verification uses:
 

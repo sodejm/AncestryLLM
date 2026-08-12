@@ -30,13 +30,21 @@ from ancestryllm.api.contracts import (
     SettingsPatchRequest,
     SettingsResponse,
     SettingValidationResponse,
+    StartupDiagnosticComponentResponse,
+    StartupDiagnosticReportResponse,
+    StartupPlatformResponse,
 )
 from ancestryllm.api.errors import error_response, request_error
 from ancestryllm.api.middleware import InternalApiMiddleware
-from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.errors import AncestryError, StorageError
+from ancestryllm.storage.diagnostics import (
+    StartupDiagnosticComponent,
+    StartupDiagnosticReport,
+    StartupPlatformDetails,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from fastapi.responses import JSONResponse
 
@@ -118,6 +126,57 @@ def _secret_status_response(status: SecretStatus) -> SecretStatusResponse:
     return SecretStatusResponse(reference=status.reference, status=status.status)
 
 
+def _default_startup_diagnostics() -> StartupDiagnosticReport:
+    components = tuple(
+        StartupDiagnosticComponent(
+            component=component,
+            status="ready",
+            code=code,
+            message=message,
+            remediation=None,
+            restart_required=False,
+            blocks_mutations=False,
+        )
+        for component, code, message in (
+            ("configuration", "CONFIGURATION_READY", "The desktop configuration is ready."),
+            ("sqlcipher", "SQLCIPHER_READY", "SQLCipher encryption support is available."),
+            ("keyring", "KEYRING_READY", "The credential store is ready."),
+            ("workspace", "DATABASE_DIRECTORY_READY", "The local workspace is ready."),
+        )
+    )
+    return StartupDiagnosticReport(
+        schema_version=1,
+        status="ready",
+        platform=StartupPlatformDetails("unsupported", "unsupported"),
+        components=components,
+    )
+
+
+def _startup_diagnostics_response(
+    report: StartupDiagnosticReport,
+) -> StartupDiagnosticReportResponse:
+    return StartupDiagnosticReportResponse(
+        schema_version=1,
+        status=cast("Any", report.status),
+        platform=StartupPlatformResponse(
+            operating_system=cast("Any", report.platform.operating_system),
+            architecture=cast("Any", report.platform.architecture),
+        ),
+        components=tuple(
+            StartupDiagnosticComponentResponse(
+                component=cast("Any", component.component),
+                status=cast("Any", component.status),
+                code=component.code,
+                message=component.message,
+                remediation=component.remediation,
+                restart_required=component.restart_required,
+                blocks_mutations=component.blocks_mutations,
+            )
+            for component in report.components
+        ),
+    )
+
+
 class InternalApiApplication(FastAPI):
     def openapi(self) -> dict[str, Any]:
         if self.openapi_schema is None:
@@ -157,6 +216,8 @@ def create_app(
     settings_service: SettingsService,
     secret_service: SecretManagementService,
     lifecycle: ApiLifecycle | None = None,
+    startup_diagnostics: Callable[[], StartupDiagnosticReport] | None = None,
+    mutations_allowed: Callable[[], bool] | None = None,
 ) -> FastAPI:
     """Create the internal control surface over existing application contracts."""
 
@@ -183,6 +244,16 @@ def create_app(
         lifespan=lifespan,
     )
     app.add_middleware(InternalApiMiddleware, settings=settings)
+    diagnostics_provider = startup_diagnostics or _default_startup_diagnostics
+
+    def assert_mutations_allowed() -> None:
+        allowed = mutations_allowed() if mutations_allowed is not None else True
+        if not allowed:
+            raise StorageError(
+                "STARTUP_MUTATION_BLOCKED",
+                "Changes are disabled while startup diagnostics are degraded.",
+                "Resolve the blocked startup checks and retry diagnostics before making changes.",
+            )
 
     @app.exception_handler(AncestryError)
     async def handle_ancestry_error(request: Request, error: AncestryError) -> JSONResponse:
@@ -224,6 +295,17 @@ def create_app(
         return capability_manifest(registry, executor, settings)
 
     @app.get(
+        f"{API_NAMESPACE}/startup-diagnostics",
+        response_model=StartupDiagnosticReportResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalStartupDiagnostics",
+        tags=["control"],
+    )
+    def get_startup_diagnostics() -> StartupDiagnosticReportResponse:
+        return _startup_diagnostics_response(diagnostics_provider())
+
+    @app.get(
         f"{API_NAMESPACE}/settings",
         response_model=SettingsResponse,
         responses=_ERROR_RESPONSES,
@@ -243,6 +325,7 @@ def create_app(
         tags=["settings"],
     )
     def patch_settings(request: SettingsPatchRequest) -> SettingsResponse:
+        assert_mutations_allowed()
         return _settings_response(
             settings_service.patch(
                 schema_version=request.schema_version,
@@ -271,6 +354,7 @@ def create_app(
         tags=["secrets"],
     )
     def set_secret(reference: str, request: SecretSetRequest) -> SecretStatusResponse:
+        assert_mutations_allowed()
         return _secret_status_response(secret_service.set(reference, request.value))
 
     @app.post(
@@ -282,6 +366,7 @@ def create_app(
         tags=["secrets"],
     )
     def delete_secret(reference: str) -> SecretStatusResponse:
+        assert_mutations_allowed()
         return _secret_status_response(secret_service.delete(reference))
 
     return app

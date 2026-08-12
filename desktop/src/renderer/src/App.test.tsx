@@ -29,6 +29,11 @@ describe('accessible desktop shell', () => {
     expect(screen.getByText('Your desktop control shell stays local to this device.')).toBeVisible()
     expect(screen.getByText(/No account, provider, API key, genealogy data, or cloud consent is requested here/i)).toBeVisible()
     expect(screen.getByText(/Updates are installed manually/i)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Local Desktop' })).toBeVisible()
+    expect(screen.getByText('Recommended')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Connect Remote' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Host Remote' })).toBeVisible()
+    expect(screen.getAllByText('Not available in this release')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Open Diagnostics' })).toHaveAttribute('href', '#/diagnostics')
     expect(screen.getByRole('button', { name: 'Continue to Home' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: 'Application' })).not.toBeInTheDocument()
@@ -269,7 +274,7 @@ describe('accessible desktop shell', () => {
     expect(screen.getByRole('heading', { name: 'Startup state' })).toBeVisible()
     expect(screen.getByText('Ready')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Capabilities' })).toBeVisible()
-    expect(screen.getByText('No control capabilities are currently available.')).toBeVisible()
+    expect(await screen.findByText('No control capabilities are currently available.')).toBeVisible()
     expect(screen.queryByText('Component gallery')).not.toBeInTheDocument()
     expect(screen.queryByText(/genealogy|provider|cloud|account|job|chat|updater/i)).not.toBeInTheDocument()
     expect(getAppInfo).toHaveBeenCalledTimes(1)
@@ -551,7 +556,62 @@ describe('accessible desktop shell', () => {
     expect(retrySidecar).toHaveBeenCalledTimes(1)
 
     resolveRetry?.(await base.retrySidecar())
-    expect(await screen.findByText('Ready')).toBeVisible()
+    const serviceStatus = screen.getByRole('heading', { name: 'Desktop service' }).closest('section') as HTMLElement
+    expect(await within(serviceStatus).findByText('Ready')).toBeVisible()
+  })
+
+  it('keeps a degraded first run read-only and renders only sanitized component remediation', async () => {
+    const base = createMockAncestryBridge('success')
+    const getCapabilities = vi.fn(base.getCapabilities)
+    const updatePreferences = vi.fn(base.updatePreferences)
+    const degraded = {
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        state: 'degraded',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+        report: {
+          schema_version: 1,
+          status: 'degraded',
+          platform: { operating_system: 'macos', architecture: 'arm64' },
+          components: [
+            {
+              component: 'configuration', status: 'blocked', code: 'CONFIG_INVALID',
+              message: 'The desktop configuration could not be validated.',
+              remediation: 'Repair or restore config.toml, then retry startup diagnostics.',
+              restart_required: false, blocks_mutations: true,
+            },
+            { component: 'sqlcipher', status: 'ready', code: 'SQLCIPHER_READY', message: 'SQLCipher is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+            { component: 'keyring', status: 'ready', code: 'KEYRING_READY', message: 'Credential storage is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+            { component: 'workspace', status: 'ready', code: 'DATABASE_DIRECTORY_READY', message: 'Workspace is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+          ],
+        },
+      },
+    } as Awaited<ReturnType<AncestryBridge['getStartupDiagnostics']>>
+    const bridge: AncestryBridge = {
+      ...base,
+      getCapabilities,
+      getStartupDiagnostics: vi.fn().mockResolvedValue(degraded),
+      updatePreferences,
+    }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Welcome to AncestryLLM' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Continue to Home' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Open read-only diagnostics' }))
+    expect(await screen.findByText('CONFIG_INVALID')).toBeVisible()
+    expect(screen.getByText('Repair or restore config.toml, then retry startup diagnostics.')).toBeVisible()
+    expect(updatePreferences).not.toHaveBeenCalled()
+    expect(getCapabilities).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
+    expect(await screen.findByText('Settings are read-only while startup diagnostics are degraded.')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Application settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Credentials' })).not.toBeInTheDocument()
   })
 
   it('gives restart guidance instead of another retry when recovery is exhausted', async () => {

@@ -61,11 +61,32 @@ shipping renderer.
 
 ## First run and revisit
 
-The first supported launch opens a bounded welcome on **Home**. It explains
-that AncestryLLM runs locally, that this release is the offline control shell,
-that updates are installed manually, and that **Diagnostics** contains the
-sanitized runtime status. It asks for no account, provider, API key, genealogy
-data, or cloud consent.
+The current unreleased 0.6 first launch opens a bounded welcome on **Home** and
+presents three explicit deployment intents:
+
+- **Local Desktop (Recommended)** is the only available choice. It uses the
+  private loopback sidecar and offline-first defaults on this device.
+- **Connect Remote** is visible but unavailable in this release. First run does
+  not discover or contact a remote service.
+- **Host Remote** is an advanced intent that is visible but unavailable. First
+  run never opens a listener or starts a container.
+
+The welcome explains that updates are installed manually and asks for no
+account, provider, API key, genealogy data, or cloud consent. Before it enables
+**Continue**, the renderer validates a schema-v1 startup report containing
+exactly four components: configuration, SQLCipher, keyring, and workspace.
+Each component contains only a stable status, code, reviewed message,
+remediation, restart requirement, and mutation-blocking flag. The report also
+contains only normalized operating-system and architecture labels.
+
+When a required component blocks startup, the application remains navigable
+but read-only. **Open read-only diagnostics** replaces **Continue**;
+capabilities are not queried, and preference, settings, and credential
+mutations are rejected with `STARTUP_MUTATION_BLOCKED`. Inspection does not
+repair configuration, create a workspace or database, replace a database key,
+or select a plaintext fallback. One bounded retry is available, concurrent
+requests share that launch attempt, and relaunch remains the final local
+recovery step.
 
 **Continue** records only the main-process-owned `onboardingCompleted`
 preference. A new application process skips the welcome after a valid refreshed
@@ -173,11 +194,11 @@ Secret references are selected from a fixed Python-owned allowlist. Reads
 return only `present`, `missing`, or `unavailable`; no response can return a
 credential value. Save and delete require separate explicit actions, and a
 successful delete is reported only after the OS-keyring-backed store proves
-the credential is absent. Credentials supplied through the process
-environment remain usable by headless workflows but are read-only through this
-interface. An unavailable or locked keyring, an environment-managed
-credential, or any attempted plaintext fallback produces a stable redacted
-failure.
+the credential is absent. The packaged sidecar uses keyring-only secret
+resolution and never consults process-environment credentials. The documented
+read-only environment fallback remains available only to explicit CLI and
+headless workflows. An unavailable or locked keyring, or any attempted
+plaintext fallback, produces a stable redacted failure.
 
 The renderer's password field is uncontrolled and is cleared before the
 asynchronous request begins and again after every success or failure. Secret
@@ -194,10 +215,12 @@ control plane accepted by the
 [deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md).
 Local Desktop is preselected and recommended. The shared Python service owns
 profile validation, exact preview and confirmation, atomic persistence,
-diagnostics, redacted evidence, and recovery to Local Desktop. Issues #107 and
-#108 own the later first-run and settings presentation. Connect Remote and Host
-Remote remain visible advanced intents, but neither can be activated until its
-enrollment or host-runtime dependency is implemented and independently gated.
+diagnostics, redacted evidence, and recovery to Local Desktop. Issue #107 now
+presents that local-only choice during first run and gates mutations on the
+sanitized startup report; Issue #108 owns the remaining profile-settings
+presentation. Connect Remote and Host Remote remain visible advanced intents,
+but neither can be activated until its enrollment or host-runtime dependency is
+implemented and independently gated.
 
 Selecting or inspecting a profile does not open a listener, start a container,
 discover a service, move genealogy data, select a provider, or grant cloud
@@ -249,16 +272,24 @@ checksum and version-required platform signature still verify.
 
 ## Sanitized diagnostics and recovery
 
-When the bundled runtime is unavailable, keep recovery bounded and generic:
+When startup is degraded, use the reviewed remediation beside the affected
+configuration, SQLCipher, keyring, or workspace code. The report never includes
+a username, hostname, full path, environment value, record, prompt, payload,
+response body, raw exception, or stack. Keep recovery bounded and generic:
 
-1. Open **Diagnostics** and request one bounded retry.
-2. If the failure remains, close and reopen the application.
-3. Reinstall the same supported, target-matched build when local files
-   may be incomplete.
-4. When reporting a problem, include only the application version,
-   operating-system target, and stable diagnostic code shown by the shell. Do
-   not include local paths, environment values, process details, genealogy
-   data, or raw error output.
+1. Open read-only **Diagnostics** and review the stable component code.
+2. Correct only the named local prerequisite. Unlock or repair the OS keyring;
+   install the supported SQLCipher build; restore valid configuration; or
+   repair the app-owned workspace directory and owner-only permissions.
+3. Request the one bounded retry. Do not initialize a replacement database,
+   replace an existing key, or use plaintext SQLite as recovery.
+4. If the failure remains, close and reopen the application.
+5. Reinstall the same supported, target-matched build when the sidecar version
+   or local application files may be incomplete.
+6. When reporting a problem, include only the application version,
+   normalized operating-system and architecture labels, and stable diagnostic
+   code shown by the shell. Do not include local paths, environment values,
+   process details, genealogy data, or raw error output.
 
 Generic recovery text is part of the security boundary: the capability summary
 and diagnostics must not turn private runtime state into renderer-visible

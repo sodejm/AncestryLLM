@@ -23,6 +23,9 @@ from ancestryllm.api.contracts import (
     SettingsPatchRequest,
     SettingsResponse,
     SettingValidationResponse,
+    StartupDiagnosticComponentResponse,
+    StartupDiagnosticReportResponse,
+    StartupPlatformResponse,
 )
 from ancestryllm.api.errors import error_response
 from ancestryllm.api.server import create_uvicorn_config
@@ -53,6 +56,9 @@ __all__ = [
     "SettingValidationResponse",
     "SettingsPatchRequest",
     "SettingsResponse",
+    "StartupDiagnosticComponentResponse",
+    "StartupDiagnosticReportResponse",
+    "StartupPlatformResponse",
     "create_app",
     "create_uvicorn_config",
     "error_response",

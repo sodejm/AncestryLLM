@@ -102,6 +102,49 @@ class HealthResponse(BaseModel):
     readiness_proof: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
+class StartupPlatformResponse(BaseModel):
+    """Non-sensitive platform details for relevant local remediation."""
+
+    model_config = _STRICT_MODEL
+
+    operating_system: Literal["linux", "macos", "windows", "unsupported"]
+    architecture: Literal["arm64", "x64", "unsupported"]
+
+
+class StartupDiagnosticComponentResponse(BaseModel):
+    """One renderer-safe startup component result."""
+
+    model_config = _STRICT_MODEL
+
+    component: Literal["configuration", "sqlcipher", "keyring", "workspace"]
+    status: Literal["ready", "warning", "blocked"]
+    code: _SafeCode
+    message: _SafeText
+    remediation: Annotated[str, Field(min_length=1, max_length=512)] | None
+    restart_required: bool
+    blocks_mutations: bool
+
+    @field_validator("message", "remediation")
+    @classmethod
+    def reject_private_or_control_text(cls, value: str | None) -> str | None:
+        if value is not None and any(marker in value for marker in ("/", "\\", "\n", "\r", "\x00")):
+            raise ValueError("startup diagnostic text must be path-free")
+        return value
+
+
+class StartupDiagnosticReportResponse(BaseModel):
+    """Schema-v1 startup report consumed by Electron main and the renderer."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    status: Literal["ready", "degraded"]
+    platform: StartupPlatformResponse
+    components: Annotated[
+        tuple[StartupDiagnosticComponentResponse, ...], Field(min_length=4, max_length=4)
+    ]
+
+
 class SettingValidationResponse(BaseModel):
     """Reviewed renderer constraints for one non-secret setting."""
 
@@ -226,4 +269,7 @@ __all__ = [
     "SettingValidationResponse",
     "SettingsPatchRequest",
     "SettingsResponse",
+    "StartupDiagnosticComponentResponse",
+    "StartupDiagnosticReportResponse",
+    "StartupPlatformResponse",
 ]

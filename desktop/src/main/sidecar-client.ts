@@ -8,15 +8,18 @@ import {
   type SecretReferenceRequest,
   type SecretSetRequest,
   type SecretStatus,
+  type StartupDiagnosticReport,
 } from '../shared-contract/desktop'
 import {
   parseCapabilitiesResult,
   parseSecretStatusResult,
   parseSettingsResult,
+  parseStartupDiagnosticReport,
 } from '../shared-contract/runtime'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 
 const CAPABILITIES_PATH = '/api/v1/capabilities' as const
+const STARTUP_DIAGNOSTICS_PATH = '/api/v1/startup-diagnostics' as const
 const SETTINGS_PATH = '/api/v1/settings' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
@@ -25,6 +28,7 @@ const REQUEST_TIMEOUT_MS = 3_000
 type SecretOperation = 'status' | 'set' | 'delete'
 type SidecarPath =
   | typeof CAPABILITIES_PATH
+  | typeof STARTUP_DIAGNOSTICS_PATH
   | typeof SETTINGS_PATH
   | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
@@ -65,6 +69,7 @@ export type SidecarRequest = (
 ) => Promise<SidecarHttpResponse>
 
 export interface SidecarClient {
+  getStartupDiagnostics(signal?: AbortSignal): Promise<Readonly<StartupDiagnosticReport>>
   getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest>
   getSettings(signal?: AbortSignal): Promise<ApplicationSettings>
   updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal): Promise<ApplicationSettings>
@@ -235,6 +240,16 @@ export function createSidecarClient(dependencies: Readonly<{
   }
 
   return Object.freeze({
+    async getStartupDiagnostics(signal?: AbortSignal) {
+      const response = await perform(STARTUP_DIAGNOSTICS_PATH, signal)
+      if (response.statusCode !== 200) throw new SidecarClientError('invalid_response')
+      if (!validJsonResponse(response)) throw new SidecarClientError('invalid_response')
+      try {
+        return parseStartupDiagnosticReport(JSON.parse(response.body) as unknown)
+      } catch {
+        throw new SidecarClientError('invalid_response')
+      }
+    },
     async getCapabilities(signal?: AbortSignal) {
       const response = await perform(CAPABILITIES_PATH, signal)
       if (response.statusCode !== 200) throw new SidecarClientError('invalid_response')

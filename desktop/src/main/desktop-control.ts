@@ -8,6 +8,7 @@ import {
   type PreferenceUpdate,
   type SecretReferenceRequest,
   type SecretSetRequest,
+  type StartupDiagnosticReport,
   type StartupDiagnostics,
   type StartupFailure,
   type StartupState,
@@ -52,14 +53,24 @@ function rendererState(state: SidecarLifecycleState): StartupState {
   return 'starting'
 }
 
-function safeDiagnostics(value: Readonly<SidecarDiagnostics>): Readonly<StartupDiagnostics> {
+function safeDiagnostics(
+  value: Readonly<SidecarDiagnostics>,
+  report: Readonly<StartupDiagnosticReport> | null,
+): Readonly<StartupDiagnostics> {
   return frozen({
-    state: rendererState(value.state),
+    state: report?.status === 'degraded' ? 'degraded' : rendererState(value.state),
     failure: value.failure as StartupFailure,
     automaticRestartsRemaining: value.automaticRestartsRemaining,
     manualRetriesRemaining: value.manualRetriesRemaining,
+    report,
   })
 }
+
+const startupMutationBlocked = <T>(): BridgeResult<T> => failure(
+  'STARTUP_MUTATION_BLOCKED',
+  'Changes are disabled until startup diagnostics pass.',
+  'Open Diagnostics, resolve each blocking item, and retry.',
+)
 
 export function createDesktopControlBridge(dependencies: Readonly<{
   appInfo: Readonly<AppInfo>
@@ -68,14 +79,39 @@ export function createDesktopControlBridge(dependencies: Readonly<{
   preferences: PreferencesStore
 }>): MainDesktopBridge {
   const appInfo = frozen({ ...dependencies.appInfo })
+
+  const collectStartupDiagnostics = async (signal?: AbortSignal): Promise<Readonly<StartupDiagnostics>> => {
+    requireActive(signal)
+    const lifecycle = dependencies.supervisor.diagnostics()
+    if (lifecycle.state !== 'ready') return safeDiagnostics(lifecycle, null)
+    try {
+      const report = await dependencies.sidecarClient.getStartupDiagnostics(signal)
+      requireActive(signal)
+      return safeDiagnostics(lifecycle, report)
+    } catch {
+      requireActive(signal)
+      return frozen({
+        ...safeDiagnostics(lifecycle, null),
+        state: 'degraded',
+        failure: 'startup_failed',
+      })
+    }
+  }
+
+  const mutationsAllowed = async (signal?: AbortSignal): Promise<boolean> => {
+    const diagnostics = await collectStartupDiagnostics(signal)
+    return diagnostics.state === 'ready'
+      && diagnostics.report?.status === 'ready'
+      && diagnostics.report.components.every((component) => !component.blocks_mutations)
+  }
+
   return frozen({
     async getAppInfo(signal?: AbortSignal) {
       requireActive(signal)
       return success(appInfo)
     },
     async getStartupDiagnostics(signal?: AbortSignal) {
-      requireActive(signal)
-      return success(safeDiagnostics(dependencies.supervisor.diagnostics()))
+      return success(await collectStartupDiagnostics(signal))
     },
     async getCapabilities(signal?: AbortSignal) {
       try {
@@ -96,7 +132,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
         requireActive(signal)
         await dependencies.supervisor.retry()
         requireActive(signal)
-        return success(safeDiagnostics(dependencies.supervisor.diagnostics()))
+        return success(await collectStartupDiagnostics(signal))
       } catch {
         requireActive(signal)
         return failure('SIDECAR_UNAVAILABLE', 'The private service could not be restarted.', 'Restart AncestryLLM.')
@@ -116,6 +152,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
     async updatePreferences(update: PreferenceUpdate, signal?: AbortSignal) {
       try {
         requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
         const preferences = await dependencies.preferences.update(update)
         requireActive(signal)
         return success(preferences)
@@ -144,6 +181,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
     async updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal) {
       try {
         requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
         const settings = await dependencies.sidecarClient.updateSettings(update, signal)
         requireActive(signal)
         return success(settings)
@@ -175,6 +213,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
     async setSecret(request: SecretSetRequest, signal?: AbortSignal) {
       try {
         requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
         const status = await dependencies.sidecarClient.setSecret(request, signal)
         requireActive(signal)
         return success(status)
@@ -192,6 +231,7 @@ export function createDesktopControlBridge(dependencies: Readonly<{
     async deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal) {
       try {
         requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
         const status = await dependencies.sidecarClient.deleteSecret(request, signal)
         requireActive(signal)
         return success(status)

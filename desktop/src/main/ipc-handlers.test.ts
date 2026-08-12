@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BridgeResult, CapabilityManifest, FileGrant, FileGrantId } from '../shared-contract/desktop'
 import { desktopChannels } from '../shared-contract/desktop'
 import { FileGrantBrokerError } from './file-grant-broker'
+import { readyStartupReportFixture } from '../mock-bridge/fixtures'
 import {
   registerDesktopIpcHandlers,
   type MainDesktopBridge,
@@ -19,9 +20,9 @@ const capabilities = result({
 
 const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
-  getStartupDiagnostics: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 1 })),
+  getStartupDiagnostics: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 1, report: readyStartupReportFixture })),
   getCapabilities: vi.fn().mockResolvedValue(capabilities),
-  retrySidecar: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 0 })),
+  retrySidecar: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 0, report: readyStartupReportFixture })),
   getPreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 })),
   updatePreferences: vi.fn().mockResolvedValue(result({ colorScheme: 'dark', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 1 })),
   getSettings: vi.fn().mockResolvedValue(result({ schema_version: 1, revision: 0, fields: [] })),

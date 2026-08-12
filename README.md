@@ -31,6 +31,16 @@ make a provider call, or run a genealogy workflow. This development surface is
 not part of the released 0.5.0 installer until its packaged verification gates
 pass.
 
+The unreleased desktop first run now recommends **Local Desktop** and keeps
+**Connect Remote** and **Host Remote** visible but unavailable. Before it
+enables settings or credential changes, the shell checks a sanitized schema-v1
+startup report for configuration, SQLCipher, keyring, and workspace readiness.
+If a required component is blocked, the application stays open in read-only
+Diagnostics and gives stable recovery guidance; it does not repair
+configuration, initialize a database, replace a key, or fall back to plaintext.
+The packaged sidecar reads credentials only from the OS keyring. The documented
+environment fallback remains limited to explicit CLI and headless use.
+
 Unreleased 0.6 source also introduces the deployment-profile control plane.
 Local Desktop is the preselected, recommended mode. The CLI can inspect,
 preview, diagnose, and explicitly recover the versioned profile without
@@ -112,7 +122,9 @@ Desktop installation does not require Python or pipx. Download the
 target-matched full installer and `SHA256SUMS` from the same immutable
    [official release](https://github.com/sodejm/AncestryLLM/releases). Verify
    the checksum and declared `binarySigningMode`, then install, relaunch, and
-   confirm healthy Diagnostics. Read the
+   confirm healthy Diagnostics. If startup is degraded, keep the shell in its
+   read-only state and follow the component-specific recovery shown in
+   **Diagnostics** before retrying once or relaunching. Read the
    [desktop installation and verification procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md#installation-and-updates)
    before downloading.
 

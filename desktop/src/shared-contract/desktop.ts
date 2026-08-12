@@ -5,6 +5,39 @@ export type DesktopBuildChannel = 'development' | 'packaged'
 export type StartupState = 'starting' | 'ready' | 'degraded' | 'stopped'
 export type StartupFailure = 'startup_failed' | 'startup_timeout' | 'incompatible_build' | 'crash_loop' | null
 
+export const startupDiagnosticComponents = Object.freeze([
+  'configuration',
+  'sqlcipher',
+  'keyring',
+  'workspace',
+] as const)
+
+export type StartupDiagnosticComponentName = typeof startupDiagnosticComponents[number]
+export type StartupDiagnosticComponentStatus = 'ready' | 'warning' | 'blocked'
+export type StartupDiagnosticReportStatus = 'ready' | 'degraded'
+export type StartupOperatingSystem = 'linux' | 'macos' | 'windows' | 'unsupported'
+export type StartupArchitecture = 'x64' | 'arm64' | 'unsupported'
+
+export interface StartupDiagnosticComponent {
+  component: StartupDiagnosticComponentName
+  status: StartupDiagnosticComponentStatus
+  code: string
+  message: string
+  remediation: string | null
+  restart_required: boolean
+  blocks_mutations: boolean
+}
+
+export interface StartupDiagnosticReport {
+  schema_version: 1
+  status: StartupDiagnosticReportStatus
+  platform: Readonly<{
+    operating_system: StartupOperatingSystem
+    architecture: StartupArchitecture
+  }>
+  components: readonly StartupDiagnosticComponent[]
+}
+
 export interface AppInfo {
   applicationName: 'AncestryLLM'
   appVersion: string
@@ -16,6 +49,7 @@ export interface StartupDiagnostics {
   failure: StartupFailure
   automaticRestartsRemaining: number
   manualRetriesRemaining: number
+  report: Readonly<StartupDiagnosticReport> | null
 }
 
 export interface CapabilityAction {
@@ -185,6 +219,7 @@ export type BridgeErrorCode =
   | 'REQUEST_TIMEOUT'
   | 'SIDECAR_UNAVAILABLE'
   | 'SIDECAR_REQUEST_FAILED'
+  | 'STARTUP_MUTATION_BLOCKED'
   | 'PREFERENCES_UNAVAILABLE'
   | 'PREFERENCES_CONFLICT'
   | 'SETTINGS_UNAVAILABLE'

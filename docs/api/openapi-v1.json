@@ -628,6 +628,146 @@
         "title": "SettingsResponse",
         "type": "object"
       },
+      "StartupDiagnosticComponentResponse": {
+        "additionalProperties": false,
+        "description": "One renderer-safe startup component result.",
+        "properties": {
+          "blocks_mutations": {
+            "title": "Blocks Mutations",
+            "type": "boolean"
+          },
+          "code": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Code",
+            "type": "string"
+          },
+          "component": {
+            "enum": [
+              "configuration",
+              "sqlcipher",
+              "keyring",
+              "workspace"
+            ],
+            "title": "Component",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          },
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "warning",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "status",
+          "code",
+          "message",
+          "remediation",
+          "restart_required",
+          "blocks_mutations"
+        ],
+        "title": "StartupDiagnosticComponentResponse",
+        "type": "object"
+      },
+      "StartupDiagnosticReportResponse": {
+        "additionalProperties": false,
+        "description": "Schema-v1 startup report consumed by Electron main and the renderer.",
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/StartupDiagnosticComponentResponse"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Components",
+            "type": "array"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/StartupPlatformResponse"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "degraded"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "platform",
+          "components"
+        ],
+        "title": "StartupDiagnosticReportResponse",
+        "type": "object"
+      },
+      "StartupPlatformResponse": {
+        "additionalProperties": false,
+        "description": "Non-sensitive platform details for relevant local remediation.",
+        "properties": {
+          "architecture": {
+            "enum": [
+              "arm64",
+              "x64",
+              "unsupported"
+            ],
+            "title": "Architecture",
+            "type": "string"
+          },
+          "operating_system": {
+            "enum": [
+              "linux",
+              "macos",
+              "windows",
+              "unsupported"
+            ],
+            "title": "Operating System",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operating_system",
+          "architecture"
+        ],
+        "title": "StartupPlatformResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1726,6 +1866,143 @@
         "summary": "Patch Settings",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/startup-diagnostics": {
+      "get": {
+        "operationId": "getInternalStartupDiagnostics",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartupDiagnosticReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The route is not exposed."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Secure credential storage is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Get Startup Diagnostics",
+        "tags": [
+          "control"
         ]
       }
     }

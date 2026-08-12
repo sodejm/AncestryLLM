@@ -2,9 +2,11 @@
 
 Issue #11 established the source-level control-plane contract released with the
 first Electron shell in `0.5.0`. Issue #105 adds the unreleased 0.6 contract for
-atomic non-secret settings and write-only credential management. This remains a
-private, authenticated, IPv4-loopback FastAPI adapter over transport-neutral
-application contracts. It is not a public, LAN, browser, or multi-user API.
+atomic non-secret settings and write-only credential management. Issue #107
+adds the read-only startup-diagnostics contract and fail-closed mutation gate.
+This remains a private, authenticated, IPv4-loopback FastAPI adapter over
+transport-neutral application contracts. It is not a public, LAN, browser, or
+multi-user API.
 
 The released foundation exposes two read-only routes:
 
@@ -12,6 +14,13 @@ The released foundation exposes two read-only routes:
   build, and token-derived readiness proof.
 - `GET /api/v1/capabilities` projects only enabled `ModuleDescriptor` actions
   that also have a registered `CommandExecutor` handler.
+
+The unreleased #107 source adds one read-only path:
+
+- `GET /api/v1/startup-diagnostics` returns schema-v1 configuration,
+  SQLCipher, keyring, and workspace status with stable codes, reviewed
+  remediation, restart and mutation-blocking flags, and normalized platform
+  labels.
 
 The unreleased #105 source adds four fixed path shapes and five operations:
 
@@ -23,7 +32,7 @@ The unreleased #105 source adds four fixed path shapes and five operations:
 - `POST /api/v1/secrets/{reference}/set` accepts one write-only value.
 - `POST /api/v1/secrets/{reference}/delete` deletes and verifies absence.
 
-Together, the API has six exact path templates. There is no generic command or
+Together, the API has seven exact path templates. There is no generic command or
 route dispatcher and no genealogy, GEDCOM, RootsMagic, provider execution,
 storage, file, job, or other domain route. The credential routes cannot read a
 secret value. Separately owned follow-on work must adapt the same
@@ -48,7 +57,18 @@ responses and examples, and never placed in error details, correlation data,
 logs, or generated fixtures. The OS keyring is the only writable credential
 authority. Environment-managed credentials are read-only; an unavailable or
 locked keyring fails closed with a stable sanitized code and no plaintext
-fallback.
+fallback. The packaged sidecar selects keyring-only mode and cannot resolve an
+environment-managed credential; the read-only environment fallback remains an
+explicit CLI/headless facility.
+
+The startup report is side-effect-free and path-free. Unknown schemas,
+components, fields, statuses, or codes fail response validation. A component
+with `blocks_mutations: true` prevents settings and credential changes with
+`STARTUP_MUTATION_BLOCKED`; it never triggers configuration repair, database
+initialization, key creation or replacement, or a plaintext storage fallback.
+The report excludes tokens, environment values, usernames, hostnames, absolute
+or temporary paths, records, prompts, payloads, response bodies, raw
+exceptions, and stacks.
 
 The bearer and paired build identities are immutable constructor inputs for a
 private supervisor channel. Issue #225 implements that packaged channel: the
@@ -83,8 +103,8 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 ## Release boundary
 
 The health and capability contract shipped with the bounded `0.5.0` control
-shell. The settings and credential-management operations are source-level work
-for `0.6.0`; they are not a released user surface until the applicable desktop
-packaging, security, and exact-head verification gates pass. Their presence in
-the committed OpenAPI artifact does not enable a public API, provider call,
-cloud consent, or genealogy workflow.
+shell. The settings, credential-management, and startup-diagnostic operations
+are source-level work for `0.6.0`; they are not a released user surface until
+the applicable desktop packaging, security, and exact-head verification gates
+pass. Their presence in the committed OpenAPI artifact does not enable a public
+API, provider call, cloud consent, or genealogy workflow.

@@ -16,6 +16,7 @@ from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
+from platformdirs import user_config_path, user_data_path
 from uvicorn import Server
 
 from ancestryllm.api.app import create_app
@@ -25,8 +26,10 @@ from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application.executor import CommandExecutor
 from ancestryllm.application.secret_management import SecretManagementService
 from ancestryllm.application.settings import SettingsService
-from ancestryllm.core.config import AppConfig
-from ancestryllm.core.secrets import KeyringSecretStore
+from ancestryllm.core.config import APP_NAME, AppConfig
+from ancestryllm.core.errors import AncestryError
+from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
+from ancestryllm.storage.diagnostics import StartupConfigurationFailure, diagnose_startup
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
 
     from ancestryllm.core.commands import ModuleDescriptor
     from ancestryllm.core.secrets import SecretStore
+    from ancestryllm.storage.diagnostics import StartupDiagnosticReport
 
 SIDECAR_BUILD = "0.5.0"
 MAX_LAUNCH_FRAME_BYTES = 4096
@@ -235,14 +239,56 @@ def create_sidecar_app(
 ) -> FastAPI:
     """Compose the packaged control sidecar without any domain modules or routes."""
 
-    resolved_config = config if config is not None else AppConfig.load()
-    resolved_secret_store = secret_store if secret_store is not None else KeyringSecretStore()
+    configuration_failure: StartupConfigurationFailure | None = None
+    if config is not None:
+        resolved_config = config
+    else:
+        try:
+            resolved_config = AppConfig.load()
+        except AncestryError as error:
+            resolved_config = _packaged_fallback_config()
+            configuration_failure = StartupConfigurationFailure(
+                code=(
+                    "CONFIG_INVALID"
+                    if error.code == "CONFIG_INVALID"
+                    else "CONFIGURATION_UNAVAILABLE"
+                ),
+            )
+        except OSError:
+            resolved_config = _packaged_fallback_config()
+            configuration_failure = StartupConfigurationFailure(
+                code="CONFIGURATION_UNAVAILABLE",
+            )
+    resolved_secret_store = (
+        secret_store
+        if secret_store is not None
+        else KeyringSecretStore(source_mode=SecretSourceMode.KEYRING_ONLY)
+    )
+
+    def startup_report() -> StartupDiagnosticReport:
+        return diagnose_startup(
+            resolved_config.database_path,
+            resolved_secret_store,
+            configuration_failure=configuration_failure,
+        )
+
     return create_app(
         settings=frame.settings(),
         registry=_EmptyRegistry(),
         executor=CommandExecutor(()),
         settings_service=SettingsService(resolved_config),
         secret_service=SecretManagementService(resolved_secret_store),
+        startup_diagnostics=startup_report,
+        mutations_allowed=lambda: startup_report().mutations_allowed,
+    )
+
+
+def _packaged_fallback_config() -> AppConfig:
+    """Return non-writing platform defaults for the degraded desktop shell."""
+
+    return AppConfig(
+        config_path=user_config_path(APP_NAME) / "config.toml",
+        data_dir=user_data_path(APP_NAME),
     )
 
 

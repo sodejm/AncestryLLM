@@ -42,6 +42,7 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
         f"{API_NAMESPACE}/secrets/{{reference}}/delete",
         f"{API_NAMESPACE}/secrets/{{reference}}/set",
         f"{API_NAMESPACE}/secrets/{{reference}}/status",
+        f"{API_NAMESPACE}/startup-diagnostics",
     }
     schemas = json.loads(committed)["components"]["schemas"]
     assert {"PaginationRequest", "PageMetadata"} <= schemas.keys()

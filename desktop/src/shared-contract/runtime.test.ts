@@ -116,6 +116,50 @@ const fileGrantResult = {
   },
 } as const
 
+const startupReport = {
+  schema_version: 1,
+  status: 'ready',
+  platform: { operating_system: 'macos', architecture: 'arm64' },
+  components: [
+    {
+      component: 'configuration',
+      status: 'ready',
+      code: 'CONFIGURATION_READY',
+      message: 'The desktop configuration is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'sqlcipher',
+      status: 'ready',
+      code: 'SQLCIPHER_READY',
+      message: 'SQLCipher encryption support is available.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'keyring',
+      status: 'ready',
+      code: 'KEYRING_READY',
+      message: 'The configured credential-store backend can be queried without writing a secret.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'workspace',
+      status: 'ready',
+      code: 'DATABASE_DIRECTORY_READY',
+      message: 'Workspace directory is writable.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+  ],
+} as const
+
 describe('runtime bridge validation', () => {
   it('accepts exact settings and write-only secret contracts', () => {
     expect(parseSettingsPatch({
@@ -178,9 +222,29 @@ describe('runtime bridge validation', () => {
 
   it('accepts exact versioned results for each renderer-safe response', () => {
     expect(parseAppInfoResult({ ok: true, protocolVersion: '1', data: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' } }).ok).toBe(true)
-    expect(parseStartupDiagnosticsResult({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'startup_failed', automaticRestartsRemaining: 0, manualRetriesRemaining: 1 } }).ok).toBe(true)
+    expect(parseStartupDiagnosticsResult({ ok: true, protocolVersion: '1', data: { state: 'ready', failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 1, report: startupReport } }).ok).toBe(true)
     expect(parseCapabilitiesResult({ ok: true, protocolVersion: '1', data: capabilityManifest }).ok).toBe(true)
     expect(parsePreferencesResult({ ok: true, protocolVersion: '1', data: { colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 } }).ok).toBe(true)
+  })
+
+  it('rejects startup diagnostic fields that could disclose local paths', () => {
+    const unsafe = {
+      ...startupReport,
+      components: startupReport.components.map((component, index) => index === 0
+        ? { ...component, message: '/Users/example/config.toml could not be read' }
+        : component),
+    }
+    expect(() => parseStartupDiagnosticsResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        state: 'degraded',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+        report: unsafe,
+      },
+    })).toThrow('Invalid bridge response')
   })
 
   it('rejects invalid requests, unknown fields, and unbounded errors', () => {
