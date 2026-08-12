@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# Builds minimal, non-root gateway and optional worker OCI runtime images.
 
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded
 ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
