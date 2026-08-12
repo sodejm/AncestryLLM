@@ -39,7 +39,7 @@ Success creates both of these nonempty files:
 
 Review both locally before relying on them. The merge is loss-minimal for the
 supported GEDCOM 5.5.5 workflow; consult [GEDCOM compatibility and release
-checks](../GEDCOM_COMPATIBILITY.md) for the precise format boundaries rather
+checks](../reference/GEDCOM_COMPATIBILITY.md) for the precise format boundaries rather
 than assuming vendor-specific data has no limitations.
 
 ## Recover safely from an error
@@ -53,7 +53,7 @@ not publish a partial result bundle.
 If you intentionally need a remote provider for a different workflow, select
 that provider explicitly and record the required consent first; do not turn
 this offline command into a cloud request by adding a credential. See
-[privacy and consent](../PRIVACY_AND_CONSENT.md) and the [provider guide](../PROVIDERS.md).
+[privacy and consent](../explanation/PRIVACY_AND_CONSENT.md) and the [provider guide](../reference/PROVIDERS.md).
 
 For actual family data, preserve the original files and make a tested encrypted
 workspace backup before the related workflow. Treat RootsMagic files as

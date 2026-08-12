@@ -78,7 +78,7 @@ The artifact-equivalence gate nevertheless fails closed:
   unexpected private `pyproject.toml.orig` file.
 
 The complete machine-readable result is
-[`release-evidence/uv-build-evaluation-v1.json`](release-evidence/uv-build-evaluation-v1.json).
+[`release-evidence/uv-build-evaluation-v1.json`](../release-evidence/uv-build-evaluation-v1.json).
 The report uses a closed schema, stable `UVBEVAL_*` failure codes, sorted
 deterministic fields, and sanitized relative artifact paths. It is a checked
 tooling evaluation record; it is not a release gate result or a substitute for

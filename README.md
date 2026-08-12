@@ -146,11 +146,11 @@ target-matched full installer and `SHA256SUMS` from the same immutable
    confirm healthy Diagnostics. If startup is degraded, keep the shell in its
    read-only state and follow the component-specific recovery shown in
    **Diagnostics** before retrying once or relaunching. Read the
-   [desktop installation and verification procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md#installation-and-updates)
+   [desktop installation and verification procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/explanation/DESKTOP_SHELL.md#installation-and-updates)
    before downloading.
 
 For examples and a complete command reference, read the
-[CLI guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CLI.md). For
+[CLI guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/CLI.md). For
 help using the interactive prompt, read the
 [REPL guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/CONSOLE.md).
 
@@ -163,18 +163,18 @@ keys never choose a remote provider for you.
 
 Credentials belong in your OS keyring. Keep real genealogy records, exports,
 backups, logs, prompts, and secrets out of the repository. Learn the details in
-the [privacy and consent guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/PRIVACY_AND_CONSENT.md)
-and the [provider guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/PROVIDERS.md).
+the [privacy and consent guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/explanation/PRIVACY_AND_CONSENT.md)
+and the [provider guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/PROVIDERS.md).
 
 ## Learn more
 
-- [Understand the released desktop shell and its limits](https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md).
-- [Check GEDCOM compatibility and interoperability limits](https://github.com/sodejm/AncestryLLM/blob/main/docs/GEDCOM_COMPATIBILITY.md).
-- [Learn how AncestryLLM protects file imports](https://github.com/sodejm/AncestryLLM/blob/main/docs/FILE_INGRESS.md).
+- [Understand the released desktop shell and its limits](https://github.com/sodejm/AncestryLLM/blob/main/docs/explanation/DESKTOP_SHELL.md).
+- [Check GEDCOM compatibility and interoperability limits](https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/GEDCOM_COMPATIBILITY.md).
+- [Learn how AncestryLLM protects file imports](https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/FILE_INGRESS.md).
 - [Read the documentation site](https://sodejm.github.io/AncestryLLM/) for
   guides and reference material.
 - [Contribute to AncestryLLM](https://github.com/sodejm/AncestryLLM/blob/main/CONTRIBUTING.md)
   if you are working on the project itself.
-- [Maintain locked dependency environments](https://github.com/sodejm/AncestryLLM/blob/main/docs/DEPENDENCY_MAINTENANCE.md)
+- [Maintain locked dependency environments](https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/DEPENDENCY_MAINTENANCE.md)
   when changing application extras or repository tool groups. Source checkouts
   use `make setup`; the former `dev` extra is no longer an installation path.

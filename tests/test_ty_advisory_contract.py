@@ -24,7 +24,7 @@ def test_parity_harness_covers_language_and_pydantic_diagnostics() -> None:
 
 
 def test_evaluation_record_names_every_required_decision_input() -> None:
-    report = (ROOT / "docs/TY_ADVISORY_EVALUATION.md").read_text(encoding="utf-8")
+    report = (ROOT / "docs/reference/TY_ADVISORY_EVALUATION.md").read_text(encoding="utf-8")
 
     for required_text in (
         "ty 0.0.69",

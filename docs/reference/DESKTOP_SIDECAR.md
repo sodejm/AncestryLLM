@@ -10,7 +10,7 @@ keyring-only packaged secret resolution, and fail-closed mutation gating for
 local first run. None of these changes exposes genealogy, job, chat, provider
 execution, cloud-account, updater, or generic command routes; the sidecar is
 not a domain-data transport.
-The [desktop shell guide](DESKTOP_SHELL.md) defines the supported 0.5.0 user
+The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
 ## Native targets and release evidence

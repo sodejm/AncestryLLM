@@ -52,7 +52,7 @@ output, and `provider=none` explicitly.
 - Provider selection and cloud consent are explicit. `provider=none` is
   network-free even when provider keys exist, while any remote-provider
   workflow requires the appropriate provider selection and recorded consent.
-  Read [privacy and consent](../PRIVACY_AND_CONSENT.md) before using one.
+  Read [privacy and consent](../explanation/PRIVACY_AND_CONSENT.md) before using one.
 
 ## Cleanup
 

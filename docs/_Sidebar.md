@@ -19,29 +19,29 @@
 
 ### Reference
 
-- [CLI reference](CLI.md)
-- [Provider guide](PROVIDERS.md)
-- [GEDCOM compatibility and release checks](GEDCOM_COMPATIBILITY.md)
-- [Versioning and compatibility](VERSIONING.md)
-- [Bounded file ingress](FILE_INGRESS.md)
-- [Continuous integration](CI.md)
-- [Dependency maintenance](DEPENDENCY_MAINTENANCE.md)
-- [ty advisory evaluation](TY_ADVISORY_EVALUATION.md)
-- [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md)
-- [uv_build evaluation](UV_BUILD_EVALUATION.md)
-- [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
-- [Command executor](COMMAND_EXECUTOR.md)
-- [Built-in module authoring](MODULE_AUTHORING.md)
-- [Application contracts](APPLICATION_CONTRACTS.md)
-- [API reference](api/API_REFERENCE.md)
-- [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
-- [Local-first retrieval evaluation](LOCAL_RETRIEVAL_EVALUATION.md)
+- [CLI reference](reference/CLI.md)
+- [Provider guide](reference/PROVIDERS.md)
+- [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)
+- [Versioning and compatibility](reference/VERSIONING.md)
+- [Bounded file ingress](reference/FILE_INGRESS.md)
+- [Continuous integration](reference/CI.md)
+- [Dependency maintenance](reference/DEPENDENCY_MAINTENANCE.md)
+- [ty advisory evaluation](reference/TY_ADVISORY_EVALUATION.md)
+- [Ruff rule-expansion evaluation](reference/RUFF_EXPANSION_EVALUATION.md)
+- [uv_build evaluation](reference/UV_BUILD_EVALUATION.md)
+- [Architecture ownership and dependency contracts](reference/ARCHITECTURE_CONTRACTS.md)
+- [Command executor](reference/COMMAND_EXECUTOR.md)
+- [Built-in module authoring](reference/MODULE_AUTHORING.md)
+- [Application contracts](reference/APPLICATION_CONTRACTS.md)
+- [API reference](reference/api/API_REFERENCE.md)
+- [Local LLM benchmarks](reference/LOCAL_LLM_BENCHMARKS.md)
+- [Local-first retrieval evaluation](reference/LOCAL_RETRIEVAL_EVALUATION.md)
 
 ### Explanation
 
-- [Privacy and consent](PRIVACY_AND_CONSENT.md)
-- [REPL architecture](REPL_ARCHITECTURE.md)
-- [Desktop shell (released bounded v0.5.0 control surface)](DESKTOP_SHELL.md)
+- [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md)
+- [REPL architecture](explanation/REPL_ARCHITECTURE.md)
+- [Desktop shell (released bounded v0.5.0 control surface)](explanation/DESKTOP_SHELL.md)
 
 ### Supporting records and publishing
 

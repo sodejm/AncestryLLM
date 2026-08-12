@@ -124,8 +124,8 @@ The renderer receives no Node.js, Electron, network, filesystem, keyring,
 provider, database, shell, or arbitrary-path access. It must never receive the
 sidecar port, bearer token, endpoint, executable path, preference-file path,
 stderr, raw sidecar or bridge errors, or stack traces. See the
-[packaged sidecar contract](DESKTOP_SIDECAR.md) and
-[desktop ADR](ADR-0025-electron-fastapi-desktop.md) for the underlying process
+[packaged sidecar contract](../reference/DESKTOP_SIDECAR.md) and
+[desktop ADR](../ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
 ## Unreleased opaque file-mediation foundation
@@ -213,7 +213,7 @@ route-selection, or command operation.
 
 The unreleased source implements the non-secret, versioned deployment-profile
 control plane accepted by the
-[deployment-profile ADR](ADR-0026-local-first-container-remote-deployment.md).
+[deployment-profile ADR](../ADR-0026-local-first-container-remote-deployment.md).
 Local Desktop is preselected and recommended. The shared Python service owns
 profile validation, exact preview and confirmation, atomic persistence,
 diagnostics, redacted evidence, and recovery to Local Desktop. Issue #107 now
@@ -270,7 +270,7 @@ substrate to Settings and three fixed bridge methods; it does not start an
 AncestryLLM application image or activate a deployment profile. The preload and
 renderer expose no supervisor, socket, context, executable path, environment,
 arbitrary argument, or generic process method. The native macOS arm64
-[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
+[`issue-363-macos-arm64-container-supervisor.json`](../release-evidence/issue-363-macos-arm64-container-supervisor.json)
 record proves only that control subset in an isolated Colima profile. Runtime
 application images, secret delivery, family-tree grants, storage, profile
 activation, budgets, cross-platform evidence, and the remaining `G5` and `G7`
@@ -357,7 +357,7 @@ pass.
 The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
 on arm64, and Ubuntu 24.04 on x64. A supported release is a manually installed
 installer that has passed the target-specific release and packaged assurance
-gates in the [release runbook](RELEASING.md). Full production/trusted binary
+gates in the [release runbook](../RELEASING.md). Full production/trusted binary
 signing is explicitly deferred until the first full version release, v1.0.0.
 Project-produced `0.x` release installers and annotated release tags must be
 unsigned.
@@ -441,7 +441,7 @@ release evidence. The smoke review must confirm:
 5. The minimum window at 200% zoom, light/dark/high-contrast themes, and reduced
    motion retain all primary actions and understandable focus order.
 
-The exact-head [desktop verification gate](DESKTOP_VERIFICATION.md) separately
+The exact-head [desktop verification gate](../DESKTOP_VERIFICATION.md) separately
 assembles and launches the literal unpublished unpacked executable on six
 hosted runner rows, exercises healthy first run, durable settings, corrupt
 preferences, accessibility and hardening controls, and inspects the packaged

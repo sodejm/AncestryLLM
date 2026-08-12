@@ -35,10 +35,21 @@ The research workspace is curated supporting data, not the authoritative family
 tree. Store provenance and RootsMagic/GEDCOM identifiers so claims can be traced
 without copying an entire tree into the workspace.
 
+RootsMagic inputs remain immutable sources, and GEDCOM import and export retain
+the project's loss-minimal behavior. Encrypted backups provide the recovery
+boundary without turning a copied tree into a new authority. For the exact
+operational and format contracts, see the
+[provider reference](../reference/PROVIDERS.md),
+[GEDCOM compatibility reference](../reference/GEDCOM_COMPATIBILITY.md),
+[encrypted-backup guide](../ENCRYPTED_BACKUPS.md), and
+[data-flow threat model](../THREAT_MODEL.md). Those pages own lookup details,
+procedures, compatibility guarantees, and security controls; this page explains
+why the boundaries exist.
+
 ## Desktop privacy boundary
 
 The accepted desktop design is
-[ADR-0025](ADR-0025-electron-fastapi-desktop.md). It applies OWASP Top 10:2025,
+[ADR-0025](../ADR-0025-electron-fastapi-desktop.md). It applies OWASP Top 10:2025,
 applicable OWASP ASVS 5.0.0 requirements, and NIST SP 800-218 secure-development
 practices. The desktop is not a browser service: it launches with no in-app
 authentication for the signed-in OS user, and its internal API binds only to
@@ -94,7 +105,7 @@ renderer privileges.
 
 The unreleased source implements the versioned, non-secret deployment-profile
 control plane accepted by
-[ADR-0026](ADR-0026-local-first-container-remote-deployment.md). Local Desktop
+[ADR-0026](../ADR-0026-local-first-container-remote-deployment.md). Local Desktop
 is the safe default and recommended choice. Connect Remote and Host Remote are
 advanced intents whose enrollment and hosting runtimes are not implemented or
 supported. An absent profile migrates to Local Desktop; malformed, stale,

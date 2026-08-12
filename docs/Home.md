@@ -18,12 +18,12 @@ Settings, and capability onboarding.
 The CLI and REPL use the same command specification, transport-neutral
 executor, application DTOs, and genealogy services.
 
-- Start with the [CLI reference](CLI.md) for one-shot commands.
+- Start with the [CLI reference](reference/CLI.md) for one-shot commands.
 - Start with the [interactive console guide](CONSOLE.md) for the prompt-toolkit
   and Rich REPL.
 
 All user-selected files are governed by the shared
-[bounded file-ingress policy](FILE_INGRESS.md), including byte and record
+[bounded file-ingress policy](reference/FILE_INGRESS.md), including byte and record
 budgets, race detection, output alias rejection, and transactional publication.
 
 The released bounded Electron desktop control shell uses the authenticated
@@ -70,30 +70,30 @@ later `git mv` cutover that will update those consumers together.
 
 Factual, accurate information to look up:
 
-- [CLI reference](CLI.md) — commands, options, and exit codes
-- [Provider guide](PROVIDERS.md) — provider policy, profiles, and capabilities
-- [GEDCOM compatibility and release checks](GEDCOM_COMPATIBILITY.md)
-- [Versioning and compatibility](VERSIONING.md)
-- [Bounded file ingress](FILE_INGRESS.md)
-- [Continuous integration](CI.md)
-- [ty advisory evaluation](TY_ADVISORY_EVALUATION.md) — 0.6 checker evidence and cutover disposition
-- [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md) — reviewed 0.6 static-analysis batches and regression evidence
-- [uv_build evaluation](UV_BUILD_EVALUATION.md) — reproducible backend comparison and fail-closed adoption disposition
-- [Architecture ownership and dependency contracts](ARCHITECTURE_CONTRACTS.md)
-- [Command executor](COMMAND_EXECUTOR.md)
-- [Built-in module authoring](MODULE_AUTHORING.md) — constraints, registration, and tests
-- [Application contracts](APPLICATION_CONTRACTS.md) — service DTOs and ports
-- [API reference](api/API_REFERENCE.md) — authenticated health and capability control API
-- [Local LLM benchmarks](LOCAL_LLM_BENCHMARKS.md)
-- [Local-first retrieval evaluation](LOCAL_RETRIEVAL_EVALUATION.md)
+- [CLI reference](reference/CLI.md) — commands, options, and exit codes
+- [Provider guide](reference/PROVIDERS.md) — provider policy, profiles, and capabilities
+- [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)
+- [Versioning and compatibility](reference/VERSIONING.md)
+- [Bounded file ingress](reference/FILE_INGRESS.md)
+- [Continuous integration](reference/CI.md)
+- [ty advisory evaluation](reference/TY_ADVISORY_EVALUATION.md) — 0.6 checker evidence and cutover disposition
+- [Ruff rule-expansion evaluation](reference/RUFF_EXPANSION_EVALUATION.md) — reviewed 0.6 static-analysis batches and regression evidence
+- [uv_build evaluation](reference/UV_BUILD_EVALUATION.md) — reproducible backend comparison and fail-closed adoption disposition
+- [Architecture ownership and dependency contracts](reference/ARCHITECTURE_CONTRACTS.md)
+- [Command executor](reference/COMMAND_EXECUTOR.md)
+- [Built-in module authoring](reference/MODULE_AUTHORING.md) — constraints, registration, and tests
+- [Application contracts](reference/APPLICATION_CONTRACTS.md) — service DTOs and ports
+- [API reference](reference/api/API_REFERENCE.md) — authenticated health and capability control API
+- [Local LLM benchmarks](reference/LOCAL_LLM_BENCHMARKS.md)
+- [Local-first retrieval evaluation](reference/LOCAL_RETRIEVAL_EVALUATION.md)
 
 ## Explanation
 
 Concepts, rationale, and design context:
 
-- [Privacy and consent](PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
-- [REPL architecture](REPL_ARCHITECTURE.md) — internal session and dispatch design
-- [Desktop shell (released bounded v0.5.0 control surface)](DESKTOP_SHELL.md) — Home, Diagnostics, Settings, and capability onboarding only
+- [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
+- [REPL architecture](explanation/REPL_ARCHITECTURE.md) — internal session and dispatch design
+- [Desktop shell (released bounded v0.5.0 control surface)](explanation/DESKTOP_SHELL.md) — Home, Diagnostics, Settings, and capability onboarding only
 
 ## Supporting records and publishing
 

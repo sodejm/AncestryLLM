@@ -109,7 +109,7 @@ and at least 24 GiB free, and uses exact pinned versions, resource limits,
 archive names, URLs, licenses, sizes, and digests. It does not use a package
 manager, request administrator privileges, install system services, select
 ambient tools, or fall back to another mirror. Docker Desktop remains optional
-and untouched. See [Desktop shell](DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
+and untouched. See [Desktop shell](explanation/DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
 for the Settings and noninteractive operator procedures.
 
 ## Probe-only OCI and Compose topology

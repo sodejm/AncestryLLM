@@ -426,7 +426,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert f"files: {workflow_filter}" in hooks
     assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
     assert re.match(workflow_filter, ".github/workflows/ci.yml")
-    assert not re.match(workflow_filter, "docs/CI.md")
+    assert not re.match(workflow_filter, "docs/reference/CI.md")
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
@@ -437,7 +437,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
 
 
 def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
-    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/reference/CI.md").read_text(encoding="utf-8")
 
     assert "### Phase A: establish the aggregate gate" in guide
     assert "### Phase B: reduce the pull-request matrix" in guide
@@ -481,7 +481,7 @@ def test_secret_scans_use_commit_ranges_or_exact_candidate_trees() -> None:
 
 
 def test_secret_scan_contract_is_documented_with_native_repository_controls() -> None:
-    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/reference/CI.md").read_text(encoding="utf-8")
     normalized_guide = " ".join(guide.split())
 
     assert "current `main` candidate tree" in normalized_guide

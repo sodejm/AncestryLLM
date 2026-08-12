@@ -57,8 +57,8 @@ provider SDK happens to be installed.
 
 Do not add a cloud provider flag to this command. A cloud workflow requires an
 explicit provider selection and the corresponding recorded consent before it
-can send any genealogy-derived content. See [privacy and consent](../PRIVACY_AND_CONSENT.md)
-and the [provider guide](../PROVIDERS.md) before choosing one.
+can send any genealogy-derived content. See [privacy and consent](../explanation/PRIVACY_AND_CONSENT.md)
+and the [provider guide](../reference/PROVIDERS.md) before choosing one.
 
 ## 3. Verify the result
 
@@ -78,7 +78,7 @@ quality report should appear for rejected input.
 
 Open the two reported paths with a local text editor. Their fixtures exercise
 the supported GEDCOM 5.5.5 workflow; see [GEDCOM compatibility and release
-checks](../GEDCOM_COMPATIBILITY.md) for compatibility limits and release
+checks](../reference/GEDCOM_COMPATIBILITY.md) for compatibility limits and release
 evidence.
 
 ## Recovery and cleanup

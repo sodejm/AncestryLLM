@@ -4,11 +4,11 @@ This document is the architectural source of truth for the repository. It
 distinguishes the last published behavior, implemented Unreleased changes, and
 later-roadmap boundaries that are intentionally not implemented.
 Executable ownership and import rules are specified in
-[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
+[`docs/reference/ARCHITECTURE_CONTRACTS.md`](docs/reference/ARCHITECTURE_CONTRACTS.md). The focused
 REPL layers and migration compatibility contract are specified in
-[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
+[`docs/explanation/REPL_ARCHITECTURE.md`](docs/explanation/REPL_ARCHITECTURE.md). It should be read
 with the implemented shared execution contract in
-[`docs/COMMAND_EXECUTOR.md`](docs/COMMAND_EXECUTOR.md),
+[`docs/reference/COMMAND_EXECUTOR.md`](docs/reference/COMMAND_EXECUTOR.md),
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
 and the accepted deployment direction and implemented profile control plane in
@@ -265,7 +265,7 @@ The intended dependency rules are:
 
 These rules are executable in `scripts/check_architecture_contracts.py` and
 documented with the public-façade and temporary-exception lifecycle in
-[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The #42
+[`docs/reference/ARCHITECTURE_CONTRACTS.md`](docs/reference/ARCHITECTURE_CONTRACTS.md). The #42
 migration removed every CLI/REPL compatibility exception; the gate now rejects
 any sibling-adapter import without an explicit, reviewed exception record.
 
@@ -274,7 +274,7 @@ any sibling-adapter import without an explicit, reviewed exception record.
 The desktop target is governed by
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md),
 and the bounded 0.5.0 user contract is documented in
-[`docs/DESKTOP_SHELL.md`](docs/DESKTOP_SHELL.md). The source implementation
+[`docs/explanation/DESKTOP_SHELL.md`](docs/explanation/DESKTOP_SHELL.md). The source implementation
 includes Home, Diagnostics, a sanitized capability summary, and local visual
 Settings, plus a bounded first-run Home welcome and temporary Home-based
 welcome review. Unreleased Issue #106 adds a reusable responsive application
@@ -699,7 +699,7 @@ prompt-toolkit/Rich REPL implemented in `console/shell.py`. Its UI-independent
 `SessionRouter` parses commands from the shared `CommandSpec` metadata, and the
 shell executes parser namespaces through the shared terminal dispatch path
 described in
-[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md):
+[`docs/explanation/REPL_ARCHITECTURE.md`](docs/explanation/REPL_ARCHITECTURE.md):
 
 - command sets are explicit built-ins loaded only when enabled;
 - `use`, `info`, `show`, `set`, `unset`, `run`, and `back` maintain local
@@ -735,7 +735,7 @@ results, opaque artifact/secret references, and interaction ports for every
 database-session, or host-filesystem objects. `application/errors.py` maps the
 complete pure domain failure set to sanitized stable envelopes. The boundary
 and operation inventory are documented in
-[`docs/APPLICATION_CONTRACTS.md`](docs/APPLICATION_CONTRACTS.md).
+[`docs/reference/APPLICATION_CONTRACTS.md`](docs/reference/APPLICATION_CONTRACTS.md).
 
 `core/errors.py` defines sanitized, coded exceptions with a message,
 remediation, exit code, and serializable details for shipped compatibility.

@@ -57,7 +57,7 @@ implemented 0.5.0 profile is intentionally narrower: Home, Diagnostics, a
 sanitized capability summary, and local visual Settings only. It has no
 genealogy, file or folder, GEDCOM or RootsMagic, job, chat, provider or
 credential, cloud or account, domain-dispatch, updater, or background-channel
-surface. See the [desktop shell guide](DESKTOP_SHELL.md) for the supported
+surface. See the [desktop shell guide](explanation/DESKTOP_SHELL.md) for the supported
 surface and recovery contract.
 
 The 0.5.0 preload bridge exposes exactly `getAppInfo`,
