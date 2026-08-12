@@ -14,6 +14,7 @@ import {
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
+import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { withinDeadline } from './packaged-deadline'
 
@@ -32,18 +33,6 @@ const fileGrantOpenPath = process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH
 const fileGrantSavePath = process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH
 const fileGrantEvidencePath = process.env.ANCESTRYLLM_FILE_GRANT_EVIDENCE
 const execFileAsync = promisify(execFile)
-
-const bridgeMethods = [
-  'getAppInfo',
-  'getCapabilities',
-  'getPreferences',
-  'getStartupDiagnostics',
-  'requestOpenFileGrant',
-  'requestSaveFileGrant',
-  'retrySidecar',
-  'revokeFileGrant',
-  'updatePreferences',
-]
 
 type LaunchResult = Readonly<{
   browser: Browser
