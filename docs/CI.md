@@ -129,11 +129,16 @@ The container matrix uses `ubuntu-24.04` for amd64 and
 for the runner's native architecture, resolves their exact local image
 digests, and runs the lifecycle harness against those digests. The harness
 checks hardened realized state, readiness, crash visibility, graceful stop,
-version/build skew rejection, read-only and disk-full behavior, the explicit
-schema-migration block, and a complete Python and Debian package/license
-inventory. Sanitized schema-v1 lifecycle and inventory JSON are retained as
-normal CI artifacts. Both native rows must complete; a missing architecture,
-interrupted run, or emulated substitute is incomplete rather than passing.
+version/build skew rejection, read-only and disk-full behavior, log redaction,
+and a complete Python and Debian package/license inventory. Source policy proves
+that the probe-only images have no database initializer or migration entrypoint;
+it does not claim an executed migration-path test. Sanitized schema-v1 lifecycle
+and inventory JSON are retained as normal CI artifacts. On pull requests, these
+native rows run only when container-owned source, tests, policy, configuration,
+dependency metadata, or CI changes; the aggregate PR gate accepts the deliberate
+skip for unrelated paths. Both native rows must complete when selected. A missing
+architecture, interrupted run, or emulated substitute is incomplete rather than
+passing.
 
 ## Version 1 security dependency governance
 

@@ -44,6 +44,93 @@ _BASE_SERVICE_KEYS = {
 _OVERLAY_SERVICE_KEYS = {"cpus", "mem_limit", "pids_limit", "labels"}
 _LOWER_HEX_DIGITS = frozenset("0123456789abcdef")
 _SUPPORTED_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
+_BASE_RESOURCES = {
+    "gateway": (1.5, "3g", 192),
+    "worker": (0.5, "1g", 64),
+}
+_PROFILE_RESOURCES = {
+    "compose.local.yaml": _BASE_RESOURCES,
+    "compose.remote.yaml": {
+        "gateway": (3.0, "6g", 384),
+        "worker": (1.0, "2g", 128),
+    },
+}
+_PROFILE_TOTALS = {
+    "compose.local.yaml": (2.0, 4, 256),
+    "compose.remote.yaml": (4.0, 8, 512),
+}
+_LOGGING_OPTIONS = {
+    "gateway": {"max-size": "20m", "max-file": "3"},
+    "worker": {"max-size": "20m", "max-file": "2"},
+}
+_DOCKERFILE_INSTRUCTIONS = (
+    (
+        "ARG",
+        "UV_IMAGE=ghcr.io/astral-sh/uv:0.12.1@sha256:"
+        "cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded",
+    ),
+    (
+        "ARG",
+        "PYTHON_IMAGE=python:3.12.11-slim-bookworm@sha256:"
+        "519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+    ),
+    ("FROM", "${UV_IMAGE} AS uv"),
+    ("FROM", "${PYTHON_IMAGE} AS builder"),
+    (
+        "ENV",
+        "PYTHONDONTWRITEBYTECODE=1 UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy "
+        "UV_PROJECT_ENVIRONMENT=/opt/ancestryllm",
+    ),
+    ("COPY", "--from=uv /uv /usr/local/bin/uv"),
+    ("WORKDIR", "/source"),
+    ("COPY", "pyproject.toml uv.lock README.md LICENSE ./"),
+    ("RUN", "uv sync --locked --no-default-groups --no-editable --no-install-project"),
+    ("COPY", "src ./src"),
+    (
+        "RUN",
+        "uv sync --locked --no-default-groups --no-editable && "
+        "/opt/ancestryllm/bin/python -m ancestryllm.container_inventory "
+        "--output /opt/ancestryllm/package-inventory.json",
+    ),
+    ("FROM", "${PYTHON_IMAGE} AS runtime"),
+    ("ARG", "APP_VERSION=0.5.0"),
+    (
+        "LABEL",
+        'org.opencontainers.image.source="https://github.com/sodejm/AncestryLLM" '
+        'org.opencontainers.image.version="${APP_VERSION}" '
+        'org.opencontainers.image.licenses="MIT"',
+    ),
+    (
+        "ENV",
+        "PATH=/opt/ancestryllm/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1",
+    ),
+    ("COPY", "--from=builder /opt/ancestryllm /opt/ancestryllm"),
+    ("COPY", "LICENSE /usr/share/licenses/ancestryllm/LICENSE"),
+    ("USER", "65532:65532"),
+    ("WORKDIR", "/var/lib/ancestryllm"),
+    ("FROM", "runtime AS gateway"),
+    (
+        "ENTRYPOINT",
+        '["/opt/ancestryllm/bin/python", "-m", "ancestryllm.container_gateway"]',
+    ),
+    (
+        "HEALTHCHECK",
+        "--interval=10s --timeout=3s --start-period=10s --retries=6 "
+        'CMD ["/opt/ancestryllm/bin/python", "-m", '
+        '"ancestryllm.container_healthcheck"]',
+    ),
+    ("FROM", "runtime AS worker"),
+    (
+        "ENTRYPOINT",
+        '["/opt/ancestryllm/bin/python", "-m", "ancestryllm.container_worker"]',
+    ),
+    (
+        "HEALTHCHECK",
+        "--interval=10s --timeout=3s --start-period=5s --retries=6 "
+        'CMD ["/opt/ancestryllm/bin/python", "-m", '
+        '"ancestryllm.container_healthcheck", "--worker"]',
+    ),
+)
 
 
 class ContainerPolicyError(RuntimeError):
@@ -233,16 +320,19 @@ def _validate_service(name: str, raw_service: object) -> None:
             "COMPOSE_SHUTDOWN_INVALID",
             "The service shutdown contract must be SIGTERM within 20 seconds.",
         )
-    if (service["cpus"], service["mem_limit"], service["pids_limit"]) != (2.0, "4g", 256):
+    if (service["cpus"], service["mem_limit"], service["pids_limit"]) != _BASE_RESOURCES[name]:
         _fail(
             "COMPOSE_RESOURCE_LIMIT_INVALID",
             "The base service limits differ from the reviewed budget.",
         )
     if service["logging"] != {
         "driver": "local",
-        "options": {"max-size": "20m", "max-file": "5"},
+        "options": _LOGGING_OPTIONS[name],
     }:
-        _fail("COMPOSE_LOGGING_INVALID", "The bounded local logging policy is required.")
+        _fail(
+            "COMPOSE_LOGGING_INVALID",
+            "The service logging allocation differs from the aggregate reviewed budget.",
+        )
     labels = _object(service["labels"], code="COMPOSE_LABEL_INVALID")
     if labels != {
         "org.ancestryllm.component": name,
@@ -303,18 +393,68 @@ def _validate_overlay(document: dict[str, object], overlay_path: Path) -> None:
     services = _object(document["services"], code="COMPOSE_OVERLAY_INVALID")
     if set(services) != {"gateway", "worker"}:
         _fail("COMPOSE_OVERLAY_INVALID", "The overlay must constrain both reviewed services.")
-    remote = overlay_path.name == "compose.remote.yaml"
-    if not remote and overlay_path.name != "compose.local.yaml":
+    filename = overlay_path.name
+    if filename not in _PROFILE_RESOURCES:
         _fail("COMPOSE_OVERLAY_INVALID", "The overlay filename is not reviewed.")
+    remote = filename == "compose.remote.yaml"
     profile = "host-remote" if remote else "local-desktop"
-    resources = (4.0, "8g", 512) if remote else (2.0, "4g", 256)
-    for raw_service in services.values():
-        service = _object(raw_service, code="COMPOSE_OVERLAY_INVALID")
+    resources = _PROFILE_RESOURCES[filename]
+    cpu_total = 0.0
+    memory_total = 0
+    pids_total = 0
+    for name in ("gateway", "worker"):
+        service = _object(services[name], code="COMPOSE_OVERLAY_INVALID")
         _exact_keys(service, _OVERLAY_SERVICE_KEYS, code="COMPOSE_OVERLAY_INVALID")
-        if (service["cpus"], service["mem_limit"], service["pids_limit"]) != resources:
+        expected = resources[name]
+        if (service["cpus"], service["mem_limit"], service["pids_limit"]) != expected:
             _fail("COMPOSE_OVERLAY_INVALID", "The profile resource budget is not exact.")
         if service["labels"] != {"org.ancestryllm.deployment-profile": profile}:
             _fail("COMPOSE_OVERLAY_INVALID", "The profile label is not exact.")
+        cpu_total += cast("float", service["cpus"])
+        memory_total += int(cast("str", service["mem_limit"]).removesuffix("g"))
+        pids_total += cast("int", service["pids_limit"])
+    if (cpu_total, memory_total, pids_total) != _PROFILE_TOTALS[filename]:
+        _fail(
+            "COMPOSE_OVERLAY_INVALID",
+            "The enabled service set exceeds the aggregate profile resource budget.",
+        )
+
+
+def _parse_dockerfile_instructions(text: str) -> tuple[tuple[str, str], ...]:
+    instructions: list[tuple[str, str]] = []
+    continuation: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            if continuation:
+                _fail(
+                    "CONTAINER_DOCKERFILE_INVALID",
+                    "The Dockerfile contains an interrupted continued instruction.",
+                )
+            continue
+
+        continues = stripped.endswith("\\")
+        fragment = stripped[:-1].rstrip() if continues else stripped
+        continuation.append(fragment)
+        if continues:
+            continue
+
+        logical_line = " ".join(" ".join(continuation).split())
+        continuation = []
+        parts = logical_line.split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].isalpha():
+            _fail(
+                "CONTAINER_DOCKERFILE_INVALID",
+                "The Dockerfile contains a malformed executable instruction.",
+            )
+        instructions.append((parts[0].upper(), parts[1]))
+
+    if continuation:
+        _fail(
+            "CONTAINER_DOCKERFILE_INVALID",
+            "The Dockerfile ends with an incomplete continued instruction.",
+        )
+    return tuple(instructions)
 
 
 def _validate_dockerfile(path: Path) -> None:
@@ -324,23 +464,20 @@ def _validate_dockerfile(path: Path) -> None:
         raise ContainerPolicyError(
             "CONTAINER_DOCKERFILE_INVALID", "The production Dockerfile could not be read."
         ) from exc
-    required = (
-        "ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded",
-        "python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
-        "USER 65532:65532",
-        "FROM runtime AS gateway",
-        "FROM runtime AS worker",
-    )
-    if not all(value in text for value in required):
-        _fail(
-            "CONTAINER_DOCKERFILE_INVALID",
-            "The Dockerfile is missing a reviewed pinned input or stage.",
-        )
+    instructions = _parse_dockerfile_instructions(text)
+    executable_text = "\n".join(
+        f"{instruction} {arguments}" for instruction, arguments in instructions
+    ).casefold()
     forbidden = ("apt-get", "curl ", "wget ", "sudo ", "pip install")
-    if any(value in text for value in forbidden):
+    if any(value in executable_text for value in forbidden):
         _fail(
             "CONTAINER_DOCKERFILE_INVALID",
             "The Dockerfile contains an unreviewed installer or downloader.",
+        )
+    if instructions != _DOCKERFILE_INSTRUCTIONS:
+        _fail(
+            "CONTAINER_DOCKERFILE_INVALID",
+            "The executable Dockerfile instructions differ from the reviewed closed grammar.",
         )
 
 
@@ -373,12 +510,27 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--overlay", type=Path, required=True)
     parser.add_argument("--dockerfile", type=Path, required=True)
+    parser.add_argument("--gateway-image")
+    parser.add_argument("--worker-image")
+    parser.add_argument("--platform")
     parser.add_argument("--output", type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    runtime_inputs = (args.gateway_image, args.worker_image, args.platform)
+    if any(value is not None for value in runtime_inputs):
+        if not all(isinstance(value, str) for value in runtime_inputs):
+            _fail(
+                "CONTAINER_RUNTIME_INPUTS_INCOMPLETE",
+                "Gateway image, worker image, and platform must be validated together.",
+            )
+        validate_runtime_inputs(
+            cast("str", args.gateway_image),
+            cast("str", args.worker_image),
+            cast("str", args.platform),
+        )
     report = validate_repository_topology(args.base, args.overlay, args.dockerfile)
     serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output is None:

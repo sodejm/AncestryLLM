@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      containers: ${{ steps.classify.outputs.containers }}
       dependencies: ${{ steps.classify.outputs.dependencies }}
       workflows: ${{ steps.classify.outputs.workflows }}
     steps:
@@ -48,14 +49,27 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "containers=true" >> "$GITHUB_OUTPUT"
             echo "dependencies=true" >> "$GITHUB_OUTPUT"
             echo "workflows=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          containers=false
           dependencies=false
           workflows=false
           while IFS= read -r changed_path; do
+            case "$changed_path" in
+              containers/*|scripts/container_*.py|src/*|tests/test_container_*.py)
+                containers=true
+                ;;
+              Makefile|pyproject.toml|uv.lock|README.md|LICENSE)
+                containers=true
+                ;;
+              .dockerignore|.github/workflows/ci.yml)
+                containers=true
+                ;;
+            esac
             case "$changed_path" in
               pyproject.toml|uv.lock)
                 dependencies=true
@@ -71,6 +85,7 @@ jobs:
             esac
           done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
+          echo "containers=$containers" >> "$GITHUB_OUTPUT"
           echo "dependencies=$dependencies" >> "$GITHUB_OUTPUT"
           echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
 
@@ -287,7 +302,8 @@ jobs:
 
   container:
     name: container (${{ matrix.arch }})
-    needs: lockfile
+    needs: [changes, lockfile]
+    if: needs.changes.outputs.containers == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -310,15 +326,7 @@ jobs:
           ANCESTRYLLM_PLATFORM: ${{ matrix.platform }}
           ANCESTRYLLM_WORKER_IMAGE: ghcr.io/sodejm/ancestryllm-worker:ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
         run: |
-          make container-policy
-          docker compose \
-            --file containers/compose.yaml \
-            --file containers/compose.local.yaml \
-            config >/dev/null
-          docker compose \
-            --file containers/compose.yaml \
-            --file containers/compose.remote.yaml \
-            config >/dev/null
+          make container-compose-config
       - name: Build exact native images
         id: build
         env:
@@ -448,6 +456,7 @@ jobs:
     name: PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
+      - changes
       - lockfile
       - test
       - quality
@@ -463,6 +472,7 @@ jobs:
       - name: Require all pull request gates
         shell: bash
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           LOCKFILE_RESULT: ${{ needs.lockfile.result }}
           TEST_RESULT: ${{ needs.test.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
@@ -482,6 +492,7 @@ jobs:
             fi
           }
 
+          require_success changes "$CHANGES_RESULT"
           require_success lockfile "$LOCKFILE_RESULT"
           require_success test "$TEST_RESULT"
           require_success quality "$QUALITY_RESULT"
@@ -489,7 +500,10 @@ jobs:
           require_success package "$PACKAGE_RESULT"
           require_success install-smoke "$INSTALL_RESULT"
           require_success sdist-smoke "$SDIST_RESULT"
-          require_success container "$CONTAINER_RESULT"
+          if [[ "$CONTAINER_RESULT" != "success" && "$CONTAINER_RESULT" != "skipped" ]]; then
+            echo "::error title=container gate::Expected success or skipped, got ${CONTAINER_RESULT}"
+            exit 1
+          fi
 
           if [[ "$WORKFLOW_AUDIT_RESULT" != "success" && "$WORKFLOW_AUDIT_RESULT" != "skipped" ]]; then
             echo "::error title=workflow audit gate::Expected success or skipped, got ${WORKFLOW_AUDIT_RESULT}"

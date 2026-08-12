@@ -541,7 +541,9 @@ CI builds gateway and worker images separately on native Linux amd64 and arm64
 runners, addresses the resulting images by exact digest, rejects architecture
 or build/version skew, and exercises health, optional-worker readiness, crash
 visibility, graceful termination, read-only and disk-full behavior, log
-redaction, and the explicit schema-migration write block. The generated
+redaction, and the absence of a database initializer or migration entrypoint.
+That last control is source-policy evidence, not an executed migration-path
+test. The generated
 schema-v1 inventory accounts for every installed Python distribution and every
 installed Debian package, including normalized license identities and a digest
 of the retained package copyright file. Unknown inventory fields, missing

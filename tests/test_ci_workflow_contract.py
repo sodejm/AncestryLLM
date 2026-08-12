@@ -194,6 +194,7 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
     assert "name: PR gate" in gate
     assert "if: ${{ always() && github.event_name == 'pull_request' }}" in gate
     for dependency in (
+        "changes",
         "lockfile",
         "test",
         "quality",
@@ -205,6 +206,8 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
         "workflow-audit",
     ):
         assert f"      - {dependency}\n" in gate
+    assert "CHANGES_RESULT: ${{ needs.changes.result }}" in gate
+    assert 'require_success changes "$CHANGES_RESULT"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "success"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "skipped"' in gate
 

@@ -147,13 +147,19 @@ def build_inventory(
             for value in package_metadata.get_all("Classifier", [])
             if value.startswith("License :: ")
         )
+        license_identity = _bounded_license(
+            package_metadata.get("License-Expression") or package_metadata.get("License")
+        )
+        if license_identity == "UNKNOWN" and not license_classifiers:
+            raise ContainerRuntimeError(
+                "CONTAINER_INVENTORY_LICENSE_MISSING",
+                "An installed Python distribution omitted its reviewed license evidence.",
+            )
         packages.append(
             {
                 "name": name,
                 "version": version,
-                "license": _bounded_license(
-                    package_metadata.get("License-Expression") or package_metadata.get("License")
-                ),
+                "license": license_identity,
                 "license_classifiers": license_classifiers,
             }
         )

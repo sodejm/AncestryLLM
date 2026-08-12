@@ -27,12 +27,12 @@
       "restart": "no",
       "stop_signal": "SIGTERM",
       "stop_grace_period": "20s",
-      "cpus": 2.0,
-      "mem_limit": "4g",
-      "pids_limit": 256,
+      "cpus": 1.5,
+      "mem_limit": "3g",
+      "pids_limit": 192,
       "logging": {
         "driver": "local",
-        "options": {"max-size": "20m", "max-file": "5"}
+        "options": {"max-size": "20m", "max-file": "3"}
       },
       "labels": {
         "org.ancestryllm.component": "gateway",
@@ -65,12 +65,12 @@
       "restart": "no",
       "stop_signal": "SIGTERM",
       "stop_grace_period": "20s",
-      "cpus": 2.0,
-      "mem_limit": "4g",
-      "pids_limit": 256,
+      "cpus": 0.5,
+      "mem_limit": "1g",
+      "pids_limit": 64,
       "logging": {
         "driver": "local",
-        "options": {"max-size": "20m", "max-file": "5"}
+        "options": {"max-size": "20m", "max-file": "2"}
       },
       "labels": {
         "org.ancestryllm.component": "worker",

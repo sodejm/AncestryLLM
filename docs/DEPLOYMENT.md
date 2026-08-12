@@ -150,7 +150,9 @@ and native Linux arm64 runners; emulation is not accepted as architecture
 evidence. It checks the realized image architecture and hardening, authenticated
 probe readiness, optional-worker readiness, crash visibility, graceful gateway
 and worker shutdown, build/version skew rejection, read-only and disk-full
-handling, log redaction, and the fail-closed schema-migration marker. The
+handling, and log redaction. Source policy separately proves that the probe-only
+images have no database initializer or migration entrypoint; this is not an
+executed migration-path assertion. The
 retained schema-v1 evidence includes every installed Python distribution and
 every installed Debian package, with normalized license identities and the
 SHA-256 of each retained Debian copyright file. Missing packages, licenses,

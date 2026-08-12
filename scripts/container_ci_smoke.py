@@ -34,6 +34,10 @@ _FORBIDDEN_PACKAGES = frozenset(
     }
 )
 _MANAGED_LABEL = "org.ancestryllm.ci-owner=container-lifecycle"
+_SERVICE_LIMITS = {
+    "gateway": ("1.5", 1_500_000_000, "3g", 3_221_225_472, 192, "3"),
+    "worker": ("0.5", 500_000_000, "1g", 1_073_741_824, 64, "2"),
+}
 
 
 class ContainerLifecycleError(RuntimeError):
@@ -127,12 +131,18 @@ def _image_architecture(docker: Docker, image: str) -> str:
     return architecture
 
 
-def _assert_hardening(inspect: dict[str, object], *, network: str, volume: str) -> None:
+def _assert_hardening(
+    inspect: dict[str, object], *, component: str, network: str, volume: str
+) -> None:
     config = inspect.get("Config")
     host = inspect.get("HostConfig")
     mounts = inspect.get("Mounts")
     if not isinstance(config, dict) or not isinstance(host, dict) or not isinstance(mounts, list):
         _fail("CONTAINER_HARDENING_INVALID", "Container hardening inspection was incomplete.")
+    limits = _SERVICE_LIMITS.get(component)
+    if limits is None:
+        _fail("CONTAINER_COMPONENT_INVALID", "The lifecycle component was not reviewed.")
+    _, nano_cpus, _, memory_bytes, pids_limit, max_files = limits
     expected_host = {
         "ReadonlyRootfs": True,
         "Privileged": False,
@@ -140,13 +150,13 @@ def _assert_hardening(inspect: dict[str, object], *, network: str, volume: str) 
         "CapDrop": ["ALL"],
         "SecurityOpt": ["no-new-privileges"],
         "NetworkMode": network,
-        "NanoCpus": 2_000_000_000,
-        "Memory": 4_294_967_296,
-        "PidsLimit": 256,
+        "NanoCpus": nano_cpus,
+        "Memory": memory_bytes,
+        "PidsLimit": pids_limit,
         "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
         "LogConfig": {
             "Type": "local",
-            "Config": {"max-file": "5", "max-size": "20m"},
+            "Config": {"max-file": max_files, "max-size": "20m"},
         },
     }
     for key, expected in expected_host.items():
@@ -206,12 +216,17 @@ def _wait_for_health(docker: Docker, name: str, *, timeout: int = 90) -> None:
 def _run_service(
     docker: Docker,
     *,
+    component: str,
     name: str,
     image: str,
     platform: str,
     network: str,
     volume: str,
 ) -> None:
+    limits = _SERVICE_LIMITS.get(component)
+    if limits is None:
+        _fail("CONTAINER_COMPONENT_INVALID", "The lifecycle component was not reviewed.")
+    cpu_argument, _, memory_argument, _, pids_limit, max_files = limits
     docker.run(
         "run",
         "--detach",
@@ -234,11 +249,11 @@ def _run_service(
         "--user",
         "65532:65532",
         "--cpus",
-        "2",
+        cpu_argument,
         "--memory",
-        "4g",
+        memory_argument,
         "--pids-limit",
-        "256",
+        str(pids_limit),
         "--restart",
         "no",
         "--stop-signal",
@@ -250,7 +265,7 @@ def _run_service(
         "--log-opt",
         "max-size=20m",
         "--log-opt",
-        "max-file=5",
+        f"max-file={max_files}",
         "--label",
         _MANAGED_LABEL,
         image,
@@ -292,6 +307,10 @@ def _read_inventory(docker: Docker, gateway: str) -> dict[str, object]:
         or not isinstance(item.get("version"), str)
         or not isinstance(item.get("license"), str)
         or not isinstance(item.get("license_classifiers"), list)
+        or not all(
+            isinstance(value, str) and value for value in item.get("license_classifiers", [])
+        )
+        or (item.get("license") == "UNKNOWN" and not item.get("license_classifiers"))
         for item in packages
     ):
         _fail("CONTAINER_INVENTORY_INVALID", "A package omitted version or license evidence.")
@@ -372,7 +391,8 @@ def _prove_logs_exclude_probe_token(docker: Docker, gateway: str) -> None:
         "-c",
         "from pathlib import Path; print(Path('/run/ancestryllm/probe-token').read_text())",
     ).stdout.strip()
-    logs = docker.run("logs", gateway).stdout
+    completed = docker.run("logs", gateway)
+    logs = f"{completed.stdout}\n{completed.stderr}"
     if (
         not token
         or token in logs
@@ -444,6 +464,7 @@ def run_lifecycle(
         docker.run("volume", "create", "--label", _MANAGED_LABEL, volume)
         _run_service(
             docker,
+            component="gateway",
             name=gateway,
             image=gateway_image,
             platform=platform,
@@ -451,7 +472,12 @@ def run_lifecycle(
             volume=volume,
         )
         _wait_for_health(docker, gateway)
-        _assert_hardening(_container_inspect(docker, gateway), network=network, volume=volume)
+        _assert_hardening(
+            _container_inspect(docker, gateway),
+            component="gateway",
+            network=network,
+            volume=volume,
+        )
         assertions.extend(("gateway-health", "runtime-hardening"))
 
         inventory = _read_inventory(docker, gateway)
@@ -463,7 +489,6 @@ def run_lifecycle(
                 "peer-build-skew-rejection",
                 "peer-version-skew-rejection",
                 "read-only-and-disk-full",
-                "schema-migration-write-blocked",
             )
         )
         _prove_logs_exclude_probe_token(docker, gateway)
@@ -475,6 +500,7 @@ def run_lifecycle(
 
         _run_service(
             docker,
+            component="worker",
             name=worker,
             image=worker_image,
             platform=platform,
@@ -482,7 +508,12 @@ def run_lifecycle(
             volume=volume,
         )
         _wait_for_health(docker, worker)
-        _assert_hardening(_container_inspect(docker, worker), network=network, volume=volume)
+        _assert_hardening(
+            _container_inspect(docker, worker),
+            component="worker",
+            network=network,
+            volume=volume,
+        )
         _stop_and_require_clean_exit(docker, worker)
         assertions.extend(("optional-worker-health", "graceful-worker-shutdown"))
 

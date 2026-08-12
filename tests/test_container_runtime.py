@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import errno
 import json
+import subprocess
 from email.message import Message
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from scripts.container_ci_smoke import ContainerLifecycleError, _prove_logs_exclude_probe_token
 
 from ancestryllm.container_inventory import build_inventory, build_operating_system_inventory
 from ancestryllm.container_runtime import ContainerRuntimeError, publish_private_runtime_file
 
 if TYPE_CHECKING:
     from importlib import metadata
+
+    from scripts.container_ci_smoke import Docker
 
 
 class _Distribution:
@@ -190,12 +194,53 @@ def test_inventory_rejects_missing_package_identity() -> None:
         build_inventory((_distribution(None, "1.0"),), operating_system_packages=())
 
 
+def test_inventory_rejects_missing_python_license_evidence() -> None:
+    with pytest.raises(ContainerRuntimeError, match="CONTAINER_INVENTORY_LICENSE_MISSING"):
+        build_inventory(
+            (_distribution("fictional-package", "1.0"),),
+            operating_system_packages=(),
+        )
+
+
 def test_inventory_rejects_duplicate_normalized_package_identity() -> None:
     with pytest.raises(ContainerRuntimeError, match="CONTAINER_INVENTORY_DUPLICATE"):
         build_inventory(
             (
-                _distribution("fictional_package", "1.0"),
-                _distribution("fictional-package", "1.0"),
+                _distribution("fictional_package", "1.0", license_expression="MIT"),
+                _distribution("fictional-package", "1.0", license_expression="MIT"),
             ),
             operating_system_packages=(),
         )
+
+
+class _SplitStreamLogDocker:
+    def run(
+        self,
+        *arguments: str,
+        check: bool = True,
+        timeout: int = 120,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, timeout
+        if arguments[0] == "exec":
+            return subprocess.CompletedProcess(arguments, 0, "fictional-token\n", "")
+        return subprocess.CompletedProcess(
+            arguments,
+            0,
+            "",
+            "Authorization: Bearer fictional-token\n",
+        )
+
+
+def test_log_redaction_proof_scans_docker_stderr() -> None:
+    with pytest.raises(ContainerLifecycleError, match="CONTAINER_LOG_SECRET_EXPOSURE"):
+        _prove_logs_exclude_probe_token(
+            cast("Docker", _SplitStreamLogDocker()), "fictional-gateway"
+        )
+
+
+def test_lifecycle_evidence_does_not_claim_an_unexercised_migration_path() -> None:
+    lifecycle_source = (Path(__file__).parents[1] / "scripts" / "container_ci_smoke.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"schema-migration-write-blocked"' not in lifecycle_source
