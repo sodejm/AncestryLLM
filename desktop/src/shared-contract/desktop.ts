@@ -327,6 +327,115 @@ export interface ArtifactRef {
   status: 'staged' | 'published'
 }
 
+export const localRuntimeOperations = Object.freeze([
+  'setup',
+  'start',
+  'stop',
+  'repair',
+  'uninstall-preserve',
+  'uninstall-delete',
+] as const)
+
+export type LocalRuntimeOperation = typeof localRuntimeOperations[number]
+export type LocalRuntimeState = 'not-installed' | 'stopped' | 'ready' | 'unhealthy'
+
+export interface LocalRuntimeRequest {
+  schema_version: 1
+  operation: LocalRuntimeOperation
+  offline: boolean
+}
+
+export interface LocalRuntimeApplyRequest extends LocalRuntimeRequest {
+  plan_revision: string
+  confirmation: string
+}
+
+export interface LocalRuntimeStatus {
+  schema_version: 1
+  state: LocalRuntimeState
+  code: string
+  supported: boolean
+  host: Readonly<{
+    operating_system: 'macos' | 'unsupported'
+    architecture: string
+    macos_major: number
+    virtualization: 'available' | 'unavailable'
+    free_space: 'sufficient' | 'insufficient'
+    existing_docker_contexts: number
+  }>
+  allocation: Readonly<{
+    cpus: number
+    memory_gib: number
+    disk_gib: number
+  }>
+  components: readonly Readonly<{
+    name: string
+    version: string
+    installed: boolean
+  }>[]
+  vm_image: Readonly<{
+    version: string
+    installed: boolean
+  }>
+}
+
+export interface LocalRuntimeArtifactReview {
+  name: string
+  version: string
+  repository: string
+  asset_name: string
+  source_url: string
+  sha256: string
+  size_bytes: number
+  license: 'Apache-2.0' | 'MIT'
+  license_url: string
+  license_sha256: string
+}
+
+export interface LocalRuntimeReview {
+  artifacts: readonly Readonly<LocalRuntimeArtifactReview>[]
+  vm_image: Readonly<{
+    version: string
+    repository: 'abiosoft/colima-core'
+    asset_name: 'ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz'
+    source_url: string
+    sha256: string
+    size_bytes: number
+  }>
+  ownership: Readonly<{
+    profile: 'ancestryllm-local-arm64'
+    context: 'colima-ancestryllm-local-arm64'
+  }>
+  isolation: Readonly<{
+    loopback_only: true
+    kubernetes: false
+    privileged_containers: false
+    renderer_socket_access: false
+    container_socket_access: false
+    cross_profile_socket_access: false
+  }>
+}
+
+export interface LocalRuntimePreview {
+  schema_version: 1
+  operation: LocalRuntimeOperation
+  offline: boolean
+  actions: readonly Readonly<{ code: string }>[]
+  confirmation_phrase: string
+  preserves_data: boolean
+  deletes_data: boolean
+  plan_revision: string
+  status: Readonly<LocalRuntimeStatus>
+  review: Readonly<LocalRuntimeReview>
+}
+
+export interface LocalRuntimeResult {
+  schema_version: 1
+  operation: LocalRuntimeOperation
+  state: LocalRuntimeState
+  code: string
+}
+
 export type BridgeErrorCode =
   | 'INVALID_REQUEST'
   | 'UNAUTHORIZED_SENDER'
@@ -358,6 +467,21 @@ export type BridgeErrorCode =
   | 'FILE_GRANT_STALE'
   | 'FILE_GRANT_CONFLICT'
   | 'FILE_DIALOG_FAILED'
+  | 'RUNTIME_POLICY_INVALID'
+  | 'RUNTIME_POLICY_SCHEMA_UNSUPPORTED'
+  | 'RUNTIME_REQUEST_INVALID'
+  | 'RUNTIME_HOST_UNSUPPORTED'
+  | 'RUNTIME_PLAN_STALE'
+  | 'RUNTIME_CONFIRMATION_REQUIRED'
+  | 'RUNTIME_OFFLINE_UNAVAILABLE'
+  | 'RUNTIME_DOWNLOAD_FAILED'
+  | 'RUNTIME_ARTIFACT_INTEGRITY'
+  | 'RUNTIME_COMPONENT_INTEGRITY'
+  | 'RUNTIME_STORAGE_UNSAFE'
+  | 'RUNTIME_NOT_INSTALLED'
+  | 'RUNTIME_OWNERSHIP_INVALID'
+  | 'RUNTIME_PROCESS_FAILED'
+  | 'RUNTIME_HEALTH_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface BridgeError {
@@ -391,6 +515,9 @@ export interface AncestryBridge {
   requestOpenFileGrant(request: OpenFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   requestSaveFileGrant(request: SaveFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   revokeFileGrant(grantId: FileGrantId): Promise<BridgeResult<FileGrantRevocation>>
+  getLocalRuntimeStatus(): Promise<BridgeResult<LocalRuntimeStatus>>
+  previewLocalRuntime(request: LocalRuntimeRequest): Promise<BridgeResult<LocalRuntimePreview>>
+  applyLocalRuntime(request: LocalRuntimeApplyRequest): Promise<BridgeResult<LocalRuntimeResult>>
 }
 
 export const desktopChannels = Object.freeze({
@@ -414,4 +541,7 @@ export const desktopChannels = Object.freeze({
   requestOpenFileGrant: 'ancestry:desktop:request-open-file-grant',
   requestSaveFileGrant: 'ancestry:desktop:request-save-file-grant',
   revokeFileGrant: 'ancestry:desktop:revoke-file-grant',
+  getLocalRuntimeStatus: 'ancestry:desktop:get-local-runtime-status',
+  previewLocalRuntime: 'ancestry:desktop:preview-local-runtime',
+  applyLocalRuntime: 'ancestry:desktop:apply-local-runtime',
 } as const)

@@ -7,12 +7,14 @@ const bridgeMethodSet = {
   deleteSecret: true,
   getAppInfo: true,
   getCapabilities: true,
+  getLocalRuntimeStatus: true,
   getPreferences: true,
   getProviderConfiguration: true,
   getSecretStatus: true,
   getSettings: true,
   getStartupDiagnostics: true,
   previewConsent: true,
+  previewLocalRuntime: true,
   requestOpenFileGrant: true,
   requestSaveFileGrant: true,
   retrySidecar: true,
@@ -22,6 +24,7 @@ const bridgeMethodSet = {
   updatePreferences: true,
   updateSettings: true,
   validateProviderEndpoint: true,
+  applyLocalRuntime: true,
 } as const satisfies Readonly<Record<keyof AncestryBridge, true>>
 
 export const bridgeMethods = Object.freeze(Object.keys(bridgeMethodSet).sort())

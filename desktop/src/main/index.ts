@@ -17,6 +17,12 @@ import {
   type DesktopIpcController,
   type MainDesktopBridge,
 } from './ipc-handlers'
+import {
+  isLocalRuntimeCliRequest,
+  runLocalRuntimeCli,
+  writeConcurrentLocalRuntimeCliFailure,
+} from './local-runtime-cli'
+import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
@@ -29,18 +35,22 @@ import {
 import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
-import { installSingleInstanceGuard } from './single-instance'
+import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
 import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
 
 app.enableSandbox()
-const primaryInstance = installSingleInstanceGuard({
+const localRuntimeCliArguments = process.argv.slice(1)
+const localRuntimeCliRequested = isLocalRuntimeCliRequest(localRuntimeCliArguments)
+const singleInstanceDependencies = {
   requestLock: () => app.requestSingleInstanceLock(),
-  quit: () => app.quit(),
-  onSecondInstance: (listener) => { app.on('second-instance', listener) },
+  onSecondInstance: (listener: () => void) => { app.on('second-instance', listener) },
   primaryWindow: () => BrowserWindow.getAllWindows()[0],
-})
-if (primaryInstance) {
+}
+const primaryInstance = localRuntimeCliRequested
+  ? acquireSingleInstanceLock(singleInstanceDependencies)
+  : installSingleInstanceGuard({ ...singleInstanceDependencies, quit: () => app.quit() })
+if (primaryInstance && !localRuntimeCliRequested) {
   protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: APP_SCHEME_PRIVILEGES }])
 }
 
@@ -80,7 +90,7 @@ function denyWebContentsCapabilities(contents: WebContents): void {
 
 let pendingWindowPreferences: ReturnType<typeof secureWebPreferences> | null = null
 
-if (primaryInstance) {
+if (primaryInstance && !localRuntimeCliRequested) {
   app.on('web-contents-created', (_event, contents) => {
     const preferences = pendingWindowPreferences
     if (contents.getType() === 'window' && !preferences) {
@@ -144,7 +154,29 @@ function createWindow(): void {
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
 
-if (primaryInstance) {
+if (localRuntimeCliRequested && !primaryInstance) {
+  app.exit(writeConcurrentLocalRuntimeCliFailure((line) => process.stdout.write(line)))
+} else if (localRuntimeCliRequested) {
+  void app.whenReady().then(async () => {
+    const code = await runLocalRuntimeCli(
+      localRuntimeCliArguments,
+      createPackagedLocalRuntimeControl(process.resourcesPath, app.getPath('userData')),
+      (line) => process.stdout.write(line),
+    )
+    app.exit(code)
+  }).catch(() => {
+    process.stdout.write(`${JSON.stringify({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'The local runtime command could not be started.',
+        remediation: 'Try again or collect sanitized local runtime diagnostics.',
+      },
+    })}\n`)
+    app.exit(1)
+  })
+} else if (primaryInstance) {
   app.whenReady().then(async () => {
     const runtime = await startRuntimeBridge()
     bridge = runtime.bridge

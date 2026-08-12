@@ -74,6 +74,20 @@ def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -
     assert "expect(output).not.toContain('DevTools listening on ')" in source
 
 
+def test_local_runtime_cli_shares_the_desktop_single_instance_lock() -> None:
+    main_source = MAIN_INDEX.read_text(encoding="utf-8")
+
+    assert "localRuntimeCliRequested || installSingleInstanceGuard" not in main_source
+    assert re.search(
+        r"const primaryInstance = localRuntimeCliRequested\s*"
+        r"\? acquireSingleInstanceLock\(singleInstanceDependencies\)\s*"
+        r": installSingleInstanceGuard\(",
+        main_source,
+    )
+    assert "if (localRuntimeCliRequested && !primaryInstance)" in main_source
+    assert "writeConcurrentLocalRuntimeCliFailure" in main_source
+
+
 def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 

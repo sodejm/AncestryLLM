@@ -182,6 +182,12 @@ class TestCheckInventory:
             NON_COMMENT_FORMAT_MAP["config/version-1-security-policy.json"] == "docs/RELEASING.md"
         )
 
+    def test_macos_runtime_policy_maps_to_deployment_contract(self) -> None:
+        assert (
+            NON_COMMENT_FORMAT_MAP["desktop/resources/macos-arm64-runtime-policy-v1.json"]
+            == "docs/DEPLOYMENT.md"
+        )
+
     def test_non_comment_format_with_missing_map_target_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

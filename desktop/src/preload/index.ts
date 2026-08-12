@@ -7,6 +7,8 @@ import {
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
   type FileGrantId,
+  type LocalRuntimeApplyRequest,
+  type LocalRuntimeRequest,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderEndpointValidationRequest,
@@ -25,6 +27,11 @@ import {
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
+  parseLocalRuntimeApplyRequest,
+  parseLocalRuntimePreviewResult,
+  parseLocalRuntimeRequest,
+  parseLocalRuntimeResult,
+  parseLocalRuntimeStatusResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
@@ -92,6 +99,15 @@ const ancestry: AncestryBridge = Object.freeze({
   ),
   revokeFileGrant: async (grantId: FileGrantId) => parseFileGrantRevocationResult(
     await ipcRenderer.invoke(desktopChannels.revokeFileGrant, parseFileGrantId(grantId)),
+  ),
+  getLocalRuntimeStatus: async () => parseLocalRuntimeStatusResult(
+    await ipcRenderer.invoke(desktopChannels.getLocalRuntimeStatus),
+  ),
+  previewLocalRuntime: async (request: LocalRuntimeRequest) => parseLocalRuntimePreviewResult(
+    await ipcRenderer.invoke(desktopChannels.previewLocalRuntime, parseLocalRuntimeRequest(request)),
+  ),
+  applyLocalRuntime: async (request: LocalRuntimeApplyRequest) => parseLocalRuntimeResult(
+    await ipcRenderer.invoke(desktopChannels.applyLocalRuntime, parseLocalRuntimeApplyRequest(request)),
   ),
 })
 

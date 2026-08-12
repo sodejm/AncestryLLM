@@ -419,6 +419,21 @@ describe('bounded host process execution', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(330)
   })
 
+  it.skipIf(process.platform === 'win32')('terminates an in-flight process when its caller aborts', async () => {
+    const controller = new AbortController()
+    const operation = runBoundedHostProcess(processRequest({
+      arguments: ['-e', [
+        'process.on("SIGTERM", () => process.exit(0))',
+        'setInterval(() => {}, 1000)',
+      ].join(';')],
+      signal: controller.signal,
+    }))
+
+    controller.abort(new Error('caller cancelled'))
+
+    await expect(operation).rejects.toMatchObject({ code: 'PROCESS_CANCELLED' })
+  })
+
   it('fails closed on input overflow, output overflow, timeout, and nonzero exit', async () => {
     const cases: Array<[HostProcessRequest, HostContainerProcessError['code']]> = [
       [processRequest({ standardInput: 'x'.repeat(1025) }), 'PROCESS_INPUT_LIMIT'],

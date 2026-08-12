@@ -52,6 +52,10 @@
       {
         "from": "build/sidecar",
         "to": "sidecar"
+      },
+      {
+        "from": "resources/macos-arm64-runtime-policy-v1.json",
+        "to": "runtime-policy/macos-arm64-runtime-policy-v1.json"
       }
     ],
     "electronFuses": {

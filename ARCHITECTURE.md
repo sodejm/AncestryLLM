@@ -46,15 +46,16 @@ must verify published checksums and release evidence before installation.
 Unsigned CI artifacts and unpacked development builds are verification inputs
 only. Version 0.5.0 has no updater or background update channel.
 
-There is no current supported production browser, public/LAN, container, or
-remote application runtime. Unreleased source implements ADR-0026's versioned,
-local-default deployment-profile control plane and Issue #363's host-only
-container-control foundation. The latter verifies one app-owned Docker
-endpoint and exact hardened Compose plans, then exposes only bounded lifecycle
-operations inside Electron Main; it is not connected to a profile, renderer,
-application image, secret broker, or genealogy workload. Remote enrollment,
-host bootstrap, and remote runtime remain unimplemented. The application does
-not accept a browser client, general public API, multi-user
+There is no current supported production browser, public/LAN, application
+container, or remote application runtime. Unreleased source implements
+ADR-0026's versioned, local-default deployment-profile control plane, Issue
+#363's host-only container-control foundation, and Issue #348's macOS arm64
+runtime acquisition and lifecycle surface. Issue #348 installs and manages
+only the app-owned Colima/Lima, Docker CLI, Compose, and Buildx substrate; it
+does not start an AncestryLLM application container, activate a deployment
+profile, broker secrets, mount genealogy data, or expose Docker authority to
+the renderer or containers. Remote enrollment and remote runtime remain
+unimplemented. The application does not accept a browser client, general public API, multi-user
 server, or multi-tenant service. The one-shot CLI and interactive console
 remain the implemented genealogy-capable user-facing adapters. Every adapter
 must consume the same application contracts and services without depending on
@@ -182,7 +183,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
 | `src/ancestryllm/api/` | Internal FastAPI control adapter: authenticated health/capability discovery in 0.5.0 plus Unreleased fixed startup-diagnostics, settings read/patch, credential status/set/delete, provider-configuration, endpoint-validation, and consent routes, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. Startup diagnostics are side-effect-free, sanitized, and gate mutations when required components are degraded. Provider routes administer profiles and consent only; they expose no credential value, provider execution, domain, or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface now use Issue #106's reusable responsive presentation shell and fixed accessibility-state contracts; Issue #107 adds explicit local-only onboarding, a typed four-component startup report, read-only degraded recovery, and bounded retry; Issue #108 adds separate provider, endpoint-test, consent, privacy, limits, storage, and secret presentation; sandboxed renderer; six 0.5 control methods plus three scoped opaque file-grant, five fixed settings/credential, and six fixed provider-configuration/consent methods in Unreleased source; main-owned native dialogs, path mediation, revocation, and output locks; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route clients; bounded main-owned durable preferences; Issue #363's unwired Main-only container-control foundation; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Settings and provider DTOs contain only reviewed non-secret fields, presence-only credential status, and redacted endpoint identity. The #106 shell and #107 onboarding add no bridge, transport, service, or domain authority, and the fictional review gallery is excluded from production. The host container authority validates an app-owned endpoint and exact hardened plans, but it is not exported to preload/renderer/shared code or connected to an application runtime. Genealogy integration, provider execution, domain routes, remote enrollment/hosting, and updating are excluded. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface now use Issue #106's reusable responsive presentation shell and fixed accessibility-state contracts; Issue #107 adds explicit local-only onboarding, a typed four-component startup report, read-only degraded recovery, and bounded retry; Issue #108 adds separate provider, endpoint-test, consent, privacy, limits, storage, and secret presentation; sandboxed renderer; six 0.5 control methods plus three scoped opaque file-grant, five fixed settings/credential, six fixed provider-configuration/consent, and three fixed local-runtime methods in Unreleased source; main-owned native dialogs, path mediation, revocation, and output locks; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route clients; bounded main-owned durable preferences; Issue #363's Main-only container-control foundation; Issue #348's policy-bound macOS arm64 runtime manager; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Settings, provider, and runtime DTOs contain only reviewed non-secret fields, presence-only credential status, redacted endpoint identity, and sanitized lifecycle state. The #106 shell and #107 onboarding add no bridge, transport, service, or domain authority, and the fictional review gallery is excluded from production. The host container authority validates an app-owned endpoint and exact hardened plans; the local-runtime bridge can manage only the verified app-owned tool substrate, and it exports no socket, path, arbitrary arguments, or general process capability to the renderer or containers. No AncestryLLM application container is started. Genealogy integration, provider execution, domain routes, remote enrollment/hosting, and updating are excluded. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -474,18 +475,48 @@ most loopback publications. Start, repair, and uninstall require a short-lived,
 one-use confirmation bound to the exact operation; stop is bounded but
 non-destructive. The renderer, preload, shared DTO layer, and containers receive
 no Docker socket, executable, context, client, or generic process authority.
-This source foundation is intentionally unwired: it supplies no application
-image, service readiness, secret broker, migration, profile activation, or
-user-visible lifecycle workflow.
+Issue #348 connects that foundation to exactly three typed desktop bridge
+methods: `getLocalRuntimeStatus`, `previewLocalRuntime`, and
+`applyLocalRuntime`. The Settings surface and equivalent noninteractive
+commands can inspect, review, install, start, stop, repair, or uninstall the
+local substrate; the renderer receives no Docker socket, executable path,
+process authority, environment, or general command channel, and this wiring
+still supplies no application image, service readiness, secret broker,
+migration, genealogy mount, or deployment-profile activation.
+
+The packaged `macos-arm64-runtime-policy-v1.json` is the single executable
+trust policy. It admits only Apple silicon on macOS 13 or later with hardware
+virtualization and at least 24 GiB free, then selects exact repository, release,
+asset, source URL, byte length, SHA-256, license identity, and license digest
+for every component. Downloaded bytes remain inert until length and digest
+verification passes. Archive extraction rejects links, devices, traversal,
+absolute paths, duplicate members, and unexpected executables before an atomic
+install. No implicit latest version, mirror, package manager, ambient `PATH`,
+alternate architecture, administrator installer, or privilege escalation is
+accepted.
+
+The manager owns Colima profile `ancestryllm-local-arm64`, Docker context
+`colima-ancestryllm-local-arm64`, a configuration root, and a Unix socket
+beneath the application data directory. Every subprocess receives
+an explicit minimal environment; ambient Docker context and configuration are
+ignored. Kubernetes and address publication are disabled, and Docker Desktop
+remains optional as a compatible installation that the manager neither selects
+nor changes. Destructive operations require a revision-bound preview plus an
+exact operation-specific confirmation. Partial `.part` downloads are safe to
+resume, offline mode uses only a complete reverified cache, and uninstall
+offers distinct preserve-children and delete-children plans. This management
+surface does not start an application container.
 
 Native macOS arm64 evidence exercises isolated start, stop, repair,
 preserve-data uninstall, restart, and delete-data uninstall against an
 app-owned Colima profile, then proves exact cleanup and that the ambient
 default context and engine were unchanged. The sanitized receipt is
 [`docs/release-evidence/issue-363-macos-arm64-container-supervisor.json`](docs/release-evidence/issue-363-macos-arm64-container-supervisor.json).
-That evidence establishes only the Issue #363 control subset; the remaining G5
-and G7 runtime, image, workload-authentication, data, recovery, budget, and
-independent-review gates still block a container availability claim.
+That evidence establishes the Issue #363 control subset. Issue #348 adds the
+runtime acquisition and lifecycle implementation, but the remaining G5 and G7
+application-image, workload-authentication, data, recovery, and
+independent-review gates still block an application-container availability
+claim.
 
 `provider=none` is incompatible with Connect Remote and Host Remote. It forces
 Local Desktop/local execution and opens no network socket; endpoint state,
@@ -1268,7 +1299,7 @@ developer has not installed local hooks.
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
 | Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated control bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap and unsigned unpacked package assembly, Issue #102's embedded-digest payload verification, bounded supervision, full-process-tree cleanup, current-resource drain, smoke testing, and exact-head process-tree evidence, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. Unreleased Issue #103 adds three path-free renderer methods over a main-owned opaque file-grant broker. Unreleased Issue #105 adds exact-revision atomic settings read/patch plus write-only OS-keyring credential status/set/delete through five fixed bridge methods and fixed authenticated routes; DTOs, errors, OpenAPI responses, renderer state, and mock fixtures never expose credential values. Unreleased Issue #106 adds a reusable responsive renderer shell with persistent local/offline navigation, deterministic keyboard focus, seven semantic async states, and presentation-only capability/error contracts; it adds no bridge, transport, service, or domain authority and its fictional gallery is excluded from production. Unreleased Issue #107 adds explicit local-only onboarding, a typed four-component startup-diagnostic route, packaged keyring-only secret selection, fail-closed mutation and capability gating, and one bounded non-repairing retry; it adds no genealogy or remote authority. Unreleased Issue #108 adds explicit endpoint tests, exact-revision profiles, full consent previews/grants/revocation, and separate Settings sections through six fixed bridge methods and routes. Endpoint identity is redacted and revalidated, credentials stay write-only, and no provider call occurs. No genealogy integration, provider execution, domain or generic command route, updater, update feed, or background update channel exists. | A support or release claim for the Unreleased additions requires target-matched packaged verification and Issue #131's adversarial secret-leak evidence. The Issue #103 dedicated packaged verification fixture is excluded from production and checked across the platform matrix; provider execution and native endpoint-network instrumentation remain #110/#131, while worker isolation, full parser budgets, atomic publication, target-matched screen-reader evidence, and packaged accessibility evidence remain owned by #114, #118, and #131. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
-| Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. Issue #363 adds an unwired Electron-Main-only container-control foundation with exact policy/plan validation and isolated native macOS arm64 lifecycle evidence. No application container or remote runtime is activated or supported. | #348/#349 and the remaining G5-G7 controls, native-platform budgets, workload identity, secret/data lifecycle, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before runtime availability. |
+| Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. Issue #363 adds an Electron-Main-only container-control foundation with exact policy/plan validation and isolated native macOS arm64 lifecycle evidence. Issue #348 adds policy-bound acquisition and user-visible lifecycle management for an app-owned macOS arm64 Colima/Lima and Docker tool substrate. It does not activate a deployment profile or application container, and no remote runtime is supported. | #349 and the remaining G5-G7 controls, application images, workload identity, secret/data lifecycle, operator runbooks, native packaged evidence, and independent review must pass before application-runtime availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
 ## Non-goals and prohibited shortcuts

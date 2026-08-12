@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { createDesktopControlBridge } from './desktop-control'
+import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
 import { createSidecarClient } from './sidecar-client'
@@ -47,7 +48,7 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
     maxRestarts: 2,
     maxManualRetries: 1,
   })
-  const bridge = createDesktopControlBridge({
+  const desktopControl = createDesktopControlBridge({
     appInfo: {
       applicationName: 'AncestryLLM',
       appVersion: app.getVersion(),
@@ -56,6 +57,14 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
     supervisor,
     sidecarClient: createSidecarClient({ session: () => supervisor.session() }),
     preferences,
+  })
+  const localRuntimeControl = createPackagedLocalRuntimeControl(
+    process.resourcesPath,
+    app.getPath('userData'),
+  )
+  const bridge: MainDesktopBridge = Object.freeze({
+    ...desktopControl,
+    ...localRuntimeControl,
   })
 
   await supervisor.start().catch(() => undefined)

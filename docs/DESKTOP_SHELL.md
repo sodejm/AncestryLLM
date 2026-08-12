@@ -261,19 +261,96 @@ explicit. Secret values remain in the Issue #105 write-only keyring boundary:
 provider configuration returns presence only, and a stored key alone cannot
 select a provider or grant consent.
 
-Unreleased Issue #363 adds a separate, deliberately unwired host-only control
-foundation inside Electron Main. Its closed schema-v1 policy and plan bind an
-app-owned Docker context, Unix socket, runtime profile, Engine identity, exact
-resource labels, immutable images, and hardened Compose settings to bounded
-start, stop, repair, and uninstall operations. The preload, renderer, and
-shared renderer types expose no supervisor, socket, context, executable, or
-generic process method, and ordinary shell startup never invokes this source.
-The native macOS arm64
+Unreleased Issue #363 adds the host-only control foundation inside Electron
+Main. Its closed schema-v1 policy and plan bind an app-owned Docker context,
+Unix socket, runtime profile, Engine identity, exact resource labels, immutable
+images, and hardened Compose settings to bounded lifecycle operations. Issue
+#348 wires only acquisition and lifecycle of the local macOS arm64 tool
+substrate to Settings and three fixed bridge methods; it does not start an
+AncestryLLM application image or activate a deployment profile. The preload and
+renderer expose no supervisor, socket, context, executable path, environment,
+arbitrary argument, or generic process method. The native macOS arm64
 [`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
 record proves only that control subset in an isolated Colima profile. Runtime
-acquisition, application images, secret delivery, family-tree grants, storage,
-profile activation, budgets, cross-platform evidence, and the remaining `G5`
-and `G7` gates still block any container-runtime availability claim.
+application images, secret delivery, family-tree grants, storage, profile
+activation, budgets, cross-platform evidence, and the remaining `G5` and `G7`
+gates still block any application-container availability claim.
+
+## macOS arm64 local-runtime management
+
+Issue #348 supports only Apple silicon hosts running macOS 13 or later. Setup,
+start, and repair first prove hardware virtualization is available and at least
+24 GiB is free. The manager does not request administrator privileges, invoke a
+package manager, use an ambient executable, or install a system service. Docker
+Desktop is optional: an existing installation may coexist, but AncestryLLM
+neither selects nor modifies its context, configuration, socket, or files.
+
+Open **Settings > Local container runtime** to inspect status. Every mutation
+has two separate actions: **Review** produces an exact revision-bound plan, and
+**Apply** remains disabled until the operation-specific confirmation is typed.
+The supported operations and phrases are:
+
+| Operation | Effect | Exact confirmation |
+|---|---|---|
+| `setup` | Verify and install the app-owned tools and create the isolated profile. | `SET UP LOCAL RUNTIME` |
+| `start` | Start only the verified app-owned profile. | `START LOCAL RUNTIME` |
+| `stop` | Stop only that profile without deleting it. | `STOP LOCAL RUNTIME` |
+| `repair` | Reverify tools and recreate only owned runtime state. | `REPAIR LOCAL RUNTIME` |
+| `uninstall-preserve` | Remove tools and runtime infrastructure but preserve app data and downloaded cache. | `REMOVE LOCAL RUNTIME` |
+| `uninstall-delete` | Remove owned tools, infrastructure, cache, and delete app data. | `DELETE LOCAL RUNTIME DATA` |
+
+The packaged application also exposes an equivalent noninteractive interface.
+The executable writes exactly one JSON line: exit code 0 means the requested
+operation succeeded, exit code 1 is a sanitized runtime or control failure, and
+exit code 2 means the command arguments were invalid. Obtain a fresh preview
+before applying and copy its `planRevision` exactly:
+
+```sh
+AncestryLLM --local-runtime status
+AncestryLLM --local-runtime preview setup --offline
+AncestryLLM --local-runtime apply setup --offline --plan-revision \
+  <64-lowercase-hex-plan-revision> --confirm 'SET UP LOCAL RUNTIME'
+```
+
+The desktop UI and noninteractive commands share one process lock so separate
+processes cannot race over the same application-owned runtime. A command started
+while another AncestryLLM process holds that lock exits with code 1 and the stable
+sanitized code `BRIDGE_OVERLOADED`; wait for the active process to finish and
+retry.
+
+Replace `setup` and its phrase with any operation from the table. `--offline`
+forbids network access and succeeds only when every required artifact is
+already complete and reverified. Without that flag, interrupted transfers use
+bounded `.part` files and resume on retry; network loss, cancellation, reboot,
+or a partial setup can therefore be retried through a new review without
+executing incomplete bytes. A changed policy, status, cache, or plan invalidates
+the old revision and requires another review. Diagnostics contain only stable
+local-runtime codes, normalized platform/architecture, component versions,
+hashes, and reviewed remediation. They exclude usernames, hostnames, absolute
+paths, environment values, process output, response bodies, and tokens.
+
+The manager owns profile `ancestryllm-local-arm64`, context
+`colima-ancestryllm-local-arm64`, its Docker configuration, and a Unix socket
+beneath application-owned storage. Kubernetes, public address publication, and
+privileged mode are disabled. Ambient Docker context and configuration are
+ignored. Neither the renderer nor a container receives the socket. Removal
+first verifies ownership; choose **preserve app data** for recoverable removal
+or **delete app data** only after reviewing the explicit destructive plan.
+
+### Runtime policy updates
+
+`desktop/resources/macos-arm64-runtime-policy-v1.json` is the only supported
+policy. A reviewed update must change the version, repository, asset name,
+source URL, byte size, SHA-256, license identity, and license digest together
+for each affected component. Reviewers must obtain those values from the named
+upstream release and license, regenerate focused fixtures, run extraction and
+package-resource contracts, and record why every identity changed. There is no
+implicit latest version, no mirror fallback, no alternate source or
+architecture, and no unverified `PATH` fallback. Unknown schemas, fields,
+platforms, archives, or omitted trust data fail closed. Downloaded artifacts
+cannot execute before exact byte-size and SHA-256 verification, and extracted
+members cannot publish until archive-safety and expected-executable checks
+pass.
 
 ## Installation and updates
 

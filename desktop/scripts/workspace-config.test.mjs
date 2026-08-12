@@ -6,6 +6,13 @@ const workspaceUrl = new URL('../pnpm-workspace.yaml', import.meta.url)
 const lockfileUrl = new URL('../pnpm-lock.yaml', import.meta.url)
 const npmrcUrl = new URL('../.npmrc', import.meta.url)
 const packageUrl = new URL('../package.json', import.meta.url)
+const builderConfigUrl = new URL('../electron-builder.yml', import.meta.url)
+const releaseBuilderConfigUrl = new URL('../electron-builder.release.yml', import.meta.url)
+
+const runtimePolicyResource = {
+  from: 'resources/macos-arm64-runtime-policy-v1.json',
+  to: 'runtime-policy/macos-arm64-runtime-policy-v1.json',
+}
 
 test('pnpm 11 controls live in the supported workspace config and lockfile', async () => {
   const workspace = await readFile(workspaceUrl, 'utf8')
@@ -32,4 +39,22 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.equal(packageJson.devDependencies['electron-builder'], '26.15.7')
   assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.15.7')
   await assert.rejects(access(npmrcUrl), { code: 'ENOENT' })
+})
+
+test('every standalone builder packages the reviewed local-runtime policy', async () => {
+  const packageJson = JSON.parse(await readFile(packageUrl, 'utf8'))
+
+  assert.deepEqual(
+    packageJson.build.extraResources.filter((resource) => resource.to === runtimePolicyResource.to),
+    [runtimePolicyResource],
+  )
+
+  const expectedYaml = [
+    `  - from: ${runtimePolicyResource.from}`,
+    `    to: ${runtimePolicyResource.to}`,
+  ].join('\n')
+  for (const configUrl of [builderConfigUrl, releaseBuilderConfigUrl]) {
+    const config = await readFile(configUrl, 'utf8')
+    assert.equal(config.split(expectedYaml).length - 1, 1)
+  }
 })

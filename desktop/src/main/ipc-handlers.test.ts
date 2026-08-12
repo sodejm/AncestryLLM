@@ -6,6 +6,8 @@ import type {
   ConsentPreview,
   FileGrant,
   FileGrantId,
+  LocalRuntimePreview,
+  LocalRuntimeStatus,
   ProviderConfiguration,
 } from '../shared-contract/desktop'
 import { desktopChannels } from '../shared-contract/desktop'
@@ -42,6 +44,125 @@ const consentPreview = result({
   retain_payloads: false,
   warning_codes: [],
 }) satisfies BridgeResult<ConsentPreview>
+const localRuntimeStatus = Object.freeze({
+  schema_version: 1,
+  state: 'not-installed',
+  code: 'RUNTIME_NOT_INSTALLED',
+  supported: true,
+  host: Object.freeze({
+    operating_system: 'macos',
+    architecture: 'arm64',
+    macos_major: 15,
+    virtualization: 'available',
+    free_space: 'sufficient',
+    existing_docker_contexts: 0,
+  }),
+  allocation: Object.freeze({ cpus: 4, memory_gib: 8, disk_gib: 60 }),
+  components: Object.freeze([
+    Object.freeze({ name: 'colima', version: '0.10.3', installed: false }),
+    Object.freeze({ name: 'lima', version: '2.2.0', installed: false }),
+    Object.freeze({ name: 'docker-cli', version: '29.7.2', installed: false }),
+    Object.freeze({ name: 'docker-buildx', version: '0.36.1', installed: false }),
+    Object.freeze({ name: 'docker-compose', version: '5.4.0', installed: false }),
+  ]),
+  vm_image: Object.freeze({ version: '0.10.4', installed: false }),
+}) satisfies LocalRuntimeStatus
+const localRuntimeReview = Object.freeze({
+  artifacts: Object.freeze([
+    Object.freeze({
+      name: 'colima',
+      version: '0.10.3',
+      repository: 'abiosoft/colima',
+      asset_name: 'colima-Darwin-arm64',
+      source_url: 'https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64',
+      sha256: '1'.repeat(64),
+      size_bytes: 15_656_320,
+      license: 'MIT',
+      license_url: 'https://raw.githubusercontent.com/abiosoft/colima/v0.10.3/LICENSE',
+      license_sha256: '2'.repeat(64),
+    }),
+    Object.freeze({
+      name: 'lima',
+      version: '2.2.0',
+      repository: 'lima-vm/lima',
+      asset_name: 'lima-2.2.0-Darwin-arm64.tar.gz',
+      source_url: 'https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz',
+      sha256: '3'.repeat(64),
+      size_bytes: 37_586_365,
+      license: 'Apache-2.0',
+      license_url: 'https://raw.githubusercontent.com/lima-vm/lima/v2.2.0/LICENSE',
+      license_sha256: '4'.repeat(64),
+    }),
+    Object.freeze({
+      name: 'docker-cli',
+      version: '29.7.2',
+      repository: 'docker/cli',
+      asset_name: 'docker-29.7.2.tgz',
+      source_url: 'https://download.docker.com/mac/static/stable/aarch64/docker-29.7.2.tgz',
+      sha256: '5'.repeat(64),
+      size_bytes: 18_920_558,
+      license: 'Apache-2.0',
+      license_url: 'https://raw.githubusercontent.com/docker/cli/v29.7.2/LICENSE',
+      license_sha256: '6'.repeat(64),
+    }),
+    Object.freeze({
+      name: 'docker-buildx',
+      version: '0.36.1',
+      repository: 'docker/buildx',
+      asset_name: 'buildx-v0.36.1.darwin-arm64',
+      source_url: 'https://github.com/docker/buildx/releases/download/v0.36.1/buildx-v0.36.1.darwin-arm64',
+      sha256: '7'.repeat(64),
+      size_bytes: 62_541_920,
+      license: 'Apache-2.0',
+      license_url: 'https://raw.githubusercontent.com/docker/buildx/v0.36.1/LICENSE',
+      license_sha256: '8'.repeat(64),
+    }),
+    Object.freeze({
+      name: 'docker-compose',
+      version: '5.4.0',
+      repository: 'docker/compose',
+      asset_name: 'docker-compose-darwin-aarch64',
+      source_url: 'https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-darwin-aarch64',
+      sha256: '9'.repeat(64),
+      size_bytes: 46_852_962,
+      license: 'Apache-2.0',
+      license_url: 'https://raw.githubusercontent.com/docker/compose/v5.4.0/LICENSE',
+      license_sha256: 'a'.repeat(64),
+    }),
+  ]),
+  vm_image: Object.freeze({
+    version: '0.10.4',
+    repository: 'abiosoft/colima-core',
+    asset_name: 'ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+    source_url: 'https://github.com/abiosoft/colima-core/releases/download/v0.10.4/ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+    sha256: 'b'.repeat(64),
+    size_bytes: 332_354_401,
+  }),
+  ownership: Object.freeze({
+    profile: 'ancestryllm-local-arm64',
+    context: 'colima-ancestryllm-local-arm64',
+  }),
+  isolation: Object.freeze({
+    loopback_only: true,
+    kubernetes: false,
+    privileged_containers: false,
+    renderer_socket_access: false,
+    container_socket_access: false,
+    cross_profile_socket_access: false,
+  }),
+}) satisfies LocalRuntimePreview['review']
+const localRuntimePreview = result({
+  schema_version: 1,
+  operation: 'setup',
+  offline: false,
+  actions: [{ code: 'RUNTIME_INSTALL_COMPONENTS' }],
+  confirmation_phrase: 'SET UP LOCAL RUNTIME',
+  preserves_data: true,
+  deletes_data: false,
+  plan_revision: 'a'.repeat(64),
+  status: localRuntimeStatus,
+  review: localRuntimeReview,
+}) satisfies BridgeResult<LocalRuntimePreview>
 
 const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
@@ -67,6 +188,14 @@ const bridge = (): MainDesktopBridge => ({
   getSecretStatus: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
   setSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'present' })),
   deleteSecret: vi.fn().mockResolvedValue(result({ reference: 'openai.api_key', status: 'missing' })),
+  getLocalRuntimeStatus: vi.fn().mockResolvedValue(result(localRuntimeStatus)),
+  previewLocalRuntime: vi.fn().mockResolvedValue(localRuntimePreview),
+  applyLocalRuntime: vi.fn().mockResolvedValue(result({
+    schema_version: 1,
+    operation: 'setup',
+    state: 'ready',
+    code: 'RUNTIME_READY',
+  })),
 })
 
 const grantId = `grt_${'a'.repeat(64)}` as FileGrantId
@@ -181,7 +310,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the twenty declared static channels', () => {
+  it('registers exactly the twenty-three declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -189,7 +318,7 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(20)
+    expect(handlers.size).toBe(23)
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly twenty deterministic, deeply frozen methods', async () => {
+  it('exposes exactly twenty-three deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
       'createConsent',
@@ -10,12 +10,14 @@ describe('versioned mock bridge', () => {
       'deleteSecret',
       'getAppInfo',
       'getCapabilities',
+      'getLocalRuntimeStatus',
       'getPreferences',
       'getProviderConfiguration',
       'getSecretStatus',
       'getSettings',
       'getStartupDiagnostics',
       'previewConsent',
+      'previewLocalRuntime',
       'requestOpenFileGrant',
       'requestSaveFileGrant',
       'retrySidecar',
@@ -25,9 +27,38 @@ describe('versioned mock bridge', () => {
       'updatePreferences',
       'updateSettings',
       'validateProviderEndpoint',
-    ])
+      'applyLocalRuntime',
+    ].sort())
     expect(await bridge.getStartupDiagnostics()).toEqual(await bridge.getStartupDiagnostics())
     expect(Object.isFrozen(await bridge.getCapabilities())).toBe(true)
+  })
+
+  it('models explicit preview confirmation and local-runtime state transitions', async () => {
+    const bridge = createMockAncestryBridge('success')
+    const preview = await bridge.previewLocalRuntime({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+    })
+    expect(preview).toMatchObject({
+      ok: true,
+      data: {
+        confirmation_phrase: 'SET UP LOCAL RUNTIME',
+        status: { state: 'not-installed' },
+      },
+    })
+    if (!preview.ok) throw new Error('Expected runtime preview')
+    await expect(bridge.applyLocalRuntime({
+      schema_version: 1,
+      operation: 'setup',
+      offline: false,
+      plan_revision: preview.data.plan_revision,
+      confirmation: preview.data.confirmation_phrase,
+    })).resolves.toMatchObject({ ok: true, data: { state: 'ready' } })
+    await expect(bridge.getLocalRuntimeStatus()).resolves.toMatchObject({
+      ok: true,
+      data: { state: 'ready' },
+    })
   })
 
   it('models atomic settings revisions and status-only secret lifecycle responses', async () => {

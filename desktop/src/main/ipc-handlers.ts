@@ -16,6 +16,10 @@ import {
   type FileGrantId,
   type FileGrantRevocation,
   type LocalPreferences,
+  type LocalRuntimeApplyRequest,
+  type LocalRuntimePreview,
+  type LocalRuntimeRequest,
+  type LocalRuntimeResult,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderConfiguration,
@@ -37,6 +41,11 @@ import {
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
+  parseLocalRuntimeApplyRequest,
+  parseLocalRuntimePreviewResult,
+  parseLocalRuntimeRequest,
+  parseLocalRuntimeResult,
+  parseLocalRuntimeStatusResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
@@ -77,6 +86,9 @@ export interface MainDesktopBridge extends Omit<
   | 'requestOpenFileGrant'
   | 'requestSaveFileGrant'
   | 'revokeFileGrant'
+  | 'getLocalRuntimeStatus'
+  | 'previewLocalRuntime'
+  | 'applyLocalRuntime'
 > {
   getAppInfo(signal?: AbortSignal): ReturnType<AncestryBridge['getAppInfo']>
   getStartupDiagnostics(signal?: AbortSignal): ReturnType<AncestryBridge['getStartupDiagnostics']>
@@ -110,6 +122,15 @@ export interface MainDesktopBridge extends Omit<
     request: ConsentRevokeRequest,
     signal?: AbortSignal,
   ): ReturnType<AncestryBridge['revokeConsent']>
+  getLocalRuntimeStatus(signal?: AbortSignal): ReturnType<AncestryBridge['getLocalRuntimeStatus']>
+  previewLocalRuntime(
+    request: LocalRuntimeRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['previewLocalRuntime']>
+  applyLocalRuntime(
+    request: LocalRuntimeApplyRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['applyLocalRuntime']>
 }
 
 export interface MainFileGrantBroker {
@@ -138,9 +159,10 @@ export interface DesktopIpcController {
   dispose(): void
 }
 
-interface RegistrationOptions {
+export interface RegistrationOptions {
   readonly operationTimeoutMs?: number
   readonly fileDialogTimeoutMs?: number
+  readonly runtimeOperationTimeoutMs?: number
 }
 interface Authorization {
   readonly contents: BridgeWebContents
@@ -193,6 +215,7 @@ const MAX_QUEUED_REQUESTS = 8
 const MAX_CAPABILITY_SUBSCRIBERS = 32
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
 const DEFAULT_FILE_DIALOG_TIMEOUT_MS = 300_000
+const DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
 const CANCELLED = Symbol('bridge-request-cancelled')
 const TIMED_OUT = Symbol('bridge-request-timed-out')
 
@@ -470,11 +493,16 @@ export function registerDesktopIpcHandlers(
 ): DesktopIpcController {
   const timeoutMs = options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS
   const fileDialogTimeoutMs = options.fileDialogTimeoutMs ?? DEFAULT_FILE_DIALOG_TIMEOUT_MS
+  const runtimeOperationTimeoutMs = options.runtimeOperationTimeoutMs
+    ?? DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error('Desktop IPC operation timeout must be positive.')
   }
   if (!Number.isFinite(fileDialogTimeoutMs) || fileDialogTimeoutMs <= 0) {
     throw new Error('Desktop IPC file dialog timeout must be positive.')
+  }
+  if (!Number.isFinite(runtimeOperationTimeoutMs) || runtimeOperationTimeoutMs <= 0) {
+    throw new Error('Desktop IPC runtime operation timeout must be positive.')
   }
   const authorizations = new Map<BridgeWebContents, Authorization>()
   let disposed = false
@@ -752,6 +780,50 @@ export function registerDesktopIpcHandlers(
       timeoutMs,
       () => fileGrantOperation(() => fileGrants.revokeGrant(state.contents, grantId)),
       parseFileGrantRevocationResult,
+    )
+  })
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.getLocalRuntimeStatus,
+    authorize,
+    (signal) => bridge.getLocalRuntimeStatus(signal),
+    parseLocalRuntimeStatusResult,
+    runtimeOperationTimeoutMs,
+  )
+  ipc.handle(desktopChannels.previewLocalRuntime, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<LocalRuntimePreview>()
+    if (args.length !== 1) return invalidRequest<LocalRuntimePreview>()
+    let request: LocalRuntimeRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseLocalRuntimeRequest(args[0])
+    } catch {
+      return invalidRequest<LocalRuntimePreview>()
+    }
+    return schedule(
+      state,
+      runtimeOperationTimeoutMs,
+      (signal) => bridge.previewLocalRuntime(request, signal),
+      parseLocalRuntimePreviewResult,
+    )
+  })
+  ipc.handle(desktopChannels.applyLocalRuntime, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<LocalRuntimeResult>()
+    if (args.length !== 1) return invalidRequest<LocalRuntimeResult>()
+    let request: LocalRuntimeApplyRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseLocalRuntimeApplyRequest(args[0])
+    } catch {
+      return invalidRequest<LocalRuntimeResult>()
+    }
+    return schedule(
+      state,
+      runtimeOperationTimeoutMs,
+      (signal) => bridge.applyLocalRuntime(request, signal),
+      parseLocalRuntimeResult,
     )
   })
 

@@ -55,6 +55,7 @@ export type HostContainerProcessErrorCode =
   | 'PROCESS_INPUT_LIMIT'
   | 'PROCESS_OUTPUT_LIMIT'
   | 'PROCESS_TIMEOUT'
+  | 'PROCESS_CANCELLED'
   | 'PROCESS_EXIT'
   | 'PROCESS_RESPONSE_INVALID'
 
@@ -63,6 +64,7 @@ const PROCESS_ERROR_MESSAGES: Readonly<Record<HostContainerProcessErrorCode, str
   PROCESS_INPUT_LIMIT: 'The bounded host process input exceeded its limit.',
   PROCESS_OUTPUT_LIMIT: 'The bounded host process output exceeded its limit.',
   PROCESS_TIMEOUT: 'The bounded host process exceeded its time limit.',
+  PROCESS_CANCELLED: 'The bounded host process was cancelled.',
   PROCESS_EXIT: 'The bounded host process failed.',
   PROCESS_RESPONSE_INVALID: 'The bounded host process returned an invalid response.',
 }
@@ -83,6 +85,7 @@ export interface HostProcessRequest {
   readonly timeoutMs: number
   readonly maxInputBytes: number
   readonly maxOutputBytes: number
+  readonly signal?: AbortSignal
 }
 
 export interface HostProcessResult {
@@ -143,6 +146,7 @@ function validateRequest(request: HostProcessRequest): void {
     || !isPositiveInteger(request.timeoutMs)
     || !isPositiveInteger(request.maxInputBytes)
     || !isPositiveInteger(request.maxOutputBytes)
+    || (request.signal !== undefined && !(request.signal instanceof AbortSignal))
   ) processFail('PROCESS_REQUEST_INVALID')
 }
 
@@ -192,6 +196,9 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
   if (Buffer.byteLength(input, 'utf8') > request.maxInputBytes) {
     return Promise.reject(new HostContainerProcessError('PROCESS_INPUT_LIMIT'))
   }
+  if (request.signal?.aborted) {
+    return Promise.reject(new HostContainerProcessError('PROCESS_CANCELLED'))
+  }
 
   return new Promise((resolve, reject) => {
     let child: ChildProcessWithoutNullStreams
@@ -210,6 +217,7 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
     let settled = false
     let outputBytes = 0
     const stdout: Buffer[] = []
+    let abort = (): void => undefined
 
     const timer = setTimeout(() => {
       failAfterTermination('PROCESS_TIMEOUT')
@@ -219,6 +227,7 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
       if (settled || settling) return
       settled = true
       clearTimeout(timer)
+      request.signal?.removeEventListener('abort', abort)
       callback()
     }
 
@@ -232,6 +241,7 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
       if (settled || settling) return
       settling = true
       clearTimeout(timer)
+      request.signal?.removeEventListener('abort', abort)
       void terminateNativeSidecarProcess(child)
         .catch(() => undefined)
         .finally(() => {
@@ -240,6 +250,9 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
           reject(new HostContainerProcessError(code))
         })
     }
+
+    abort = (): void => failAfterTermination('PROCESS_CANCELLED')
+    request.signal?.addEventListener('abort', abort, { once: true })
 
     const account = (chunk: Buffer, retain: boolean): void => {
       if (settled || settling) return
@@ -263,6 +276,7 @@ export function runBoundedHostProcess(request: HostProcessRequest): Promise<Host
     })
     child.stdin.once('error', () => failAfterTermination('PROCESS_EXIT'))
     child.stdin.end(input)
+    if (request.signal?.aborted) abort()
   })
 }
 

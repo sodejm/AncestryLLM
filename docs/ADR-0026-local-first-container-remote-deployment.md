@@ -1,6 +1,6 @@
 # ADR-0026: Local-first container and advanced remote deployment profiles
 
-- Status: Accepted architecture; profile control plane and host control foundation implemented; runtime gates remain open
+- Status: Accepted architecture; profile control, host control, and macOS arm64 runtime-tool management implemented; application-runtime gates remain open
 - Date: 2026-08-09
 - Decision owner: AncestryLLM maintainer
 - Supersedes: no prior ADR
@@ -21,10 +21,14 @@ default, reviewed mode copy, explicit previews, confirmation-bound local
 recovery, diagnostics, and redacted backup/support metadata. Issue #363 adds a
 host-only minimum container-control foundation inside Electron Main, with an
 exact policy and plan, app-owned Docker selection, bounded lifecycle commands,
-and owned-resource reconciliation. It remains deliberately unwired from the
-profile executor, renderer, application image, secret broker, and genealogy
-services. The current release still has no supported container, LAN, public,
-browser, or remote application runtime. Each non-local profile remains
+and owned-resource reconciliation. Issue #348 adds a narrow status, review, and
+apply surface for policy-bound acquisition and lifecycle of an app-owned macOS
+arm64 Colima/Lima and Docker tool substrate. No Docker socket, executable,
+arbitrary command, or ambient context crosses into the renderer or a container,
+and the manager remains disconnected from application images, profile
+activation, secret brokering, and genealogy services. The current release still
+has no supported application container, LAN, public, browser, or remote
+application runtime. Each non-local profile remains
 unavailable until its linked issues, threat-model gates, native-platform
 evidence, operator documentation, and release decision pass. In particular,
 accepting Host Remote does not make the current internal API public and does
@@ -71,16 +75,19 @@ user, a read-only root filesystem, all capabilities dropped,
 `no-new-privileges`, named volumes, internal networks, and loopback-only ports.
 Only exact app-owned resources may be reconciled. Neither the renderer nor any
 container receives the socket, context, executable, generic process authority,
-or a supervisor bridge. This foundation does not yet select or install a
-runtime, render an application image, broker secrets, grant family-tree
+or a supervisor bridge. Issue #348 uses this boundary to select, verify,
+install, and manage only the app-owned macOS arm64 runtime-tool substrate. It
+does not render an application image, broker secrets, grant family-tree
 sources, migrate storage, activate a profile, or expose an application route.
 
 The native macOS arm64 evidence record exercises the #363 subset against an
 isolated Colima profile and app-owned context, including start, stop, repair,
 preserving uninstall, deleting uninstall, conflict rejection, and cleanup:
 [`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json).
-It does not satisfy the remaining `G5` or `G7` runtime, application-image,
-secret, storage, workload, budget, recovery, or cross-platform gates.
+It establishes the #363 lifecycle subset but predates #348's policy-bound
+acquisition implementation. Neither source surface satisfies the remaining
+`G5` or `G7` application-image, secret, storage, workload, quantitative-budget,
+packaged-release, or cross-platform gates.
 
 The offline invariant is stronger than a provider-egress restriction:
 `provider=none` is incompatible with Connect Remote and Host Remote. Selecting
@@ -369,7 +376,8 @@ risk blocks the affected gate.
 | #98 | Architecture and threat-model approval precede implementation. | Closed baseline; ADR-0026 adds, not replaces, its gates. |
 | #101 | Electron Main is the only renderer-host authority; use the existing typed bridge and application contracts. | Open implementation dependency. |
 | #102 | Reusable supervision, one active backend, bounded readiness/recovery, no renderer/container Docker socket. | Open lifecycle dependency. |
-| #363 | Electron Main is the sole Docker authority; endpoint, Engine, plan, and owned-resource identity fail closed around bounded lifecycle operations. | Host-control foundation and one native macOS arm64 evidence row implemented; runtime integration and remaining platform/release evidence stay open. |
+| #363 | Electron Main is the sole Docker authority; endpoint, Engine, plan, and owned-resource identity fail closed around bounded lifecycle operations. | Host-control foundation and one native macOS arm64 evidence row implemented. |
+| #348 | Verified macOS arm64 Colima/Lima and Docker-tool acquisition, app-owned lifecycle, consent, recovery, and removal remain inside fixed Main-owned contracts. | Runtime-tool substrate implemented; application images, profile activation, and target-matched packaged release evidence remain open. |
 | #105 | OS keyring is Local Desktop root of trust; containers use a broker; secrets support presence/write/delete, never readback. | Closed source-level secret foundation; runtime broker evidence remains open. |
 | #107 | Local convenience still authenticates traffic; Host Remote needs explicit TLS, identity, authorization, enrollment, and recovery. | Open authentication dependency. |
 | #108 | Profiles and consent are explicit, endpoint-bound, transactional, and never inferred. | Source and packaged settings flow implemented; provider execution and target-matched network evidence remain #110/#131. |

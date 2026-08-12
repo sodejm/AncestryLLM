@@ -479,6 +479,53 @@ describe('accessible desktop shell', () => {
     expect(screen.getByText(/an API key never enables a provider by itself/i)).toBeVisible()
   })
 
+  it('reviews and explicitly confirms the app-owned local runtime plan before applying it', async () => {
+    const base = await createCompletedBridge()
+    const previewLocalRuntime = vi.fn((request) => base.previewLocalRuntime(request))
+    const applyLocalRuntime = vi.fn((request) => base.applyLocalRuntime(request))
+    const bridge: AncestryBridge = { ...base, previewLocalRuntime, applyLocalRuntime }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const runtime = await screen.findByRole('region', { name: 'Local container runtime' })
+
+    expect(within(runtime).getByText(/Docker Desktop remains compatible but is not required/i)).toBeVisible()
+    expect(within(runtime).getByText(/State: Not installed/i)).toBeVisible()
+    await userEvent.click(within(runtime).getByRole('checkbox', { name: 'Use downloaded files only' }))
+    await userEvent.click(within(runtime).getByRole('button', { name: 'Review setup' }))
+
+    expect(previewLocalRuntime).toHaveBeenCalledWith({
+      schema_version: 1,
+      operation: 'setup',
+      offline: true,
+    })
+    const review = await within(runtime).findByRole('region', { name: 'Reviewed runtime plan' })
+    expect(review).toHaveTextContent('SET UP LOCAL RUNTIME')
+    expect(review).toHaveTextContent('colima 0.10.3')
+    expect(review).toHaveTextContent('1'.repeat(64))
+    expect(review).toHaveTextContent('MIT')
+    expect(review).toHaveTextContent('ancestryllm-local-arm64')
+    expect(review).toHaveTextContent('colima-ancestryllm-local-arm64')
+    expect(review).toHaveTextContent(/Loopback only: Yes/i)
+    expect(within(runtime).getByRole('button', { name: 'Apply setup' })).toBeDisabled()
+
+    await userEvent.type(
+      within(runtime).getByLabelText('Type the exact confirmation phrase'),
+      'SET UP LOCAL RUNTIME',
+    )
+    await userEvent.click(within(runtime).getByRole('button', { name: 'Apply setup' }))
+
+    expect(applyLocalRuntime).toHaveBeenCalledWith({
+      schema_version: 1,
+      operation: 'setup',
+      offline: true,
+      plan_revision: 'a'.repeat(64),
+      confirmation: 'SET UP LOCAL RUNTIME',
+    })
+    expect(await within(runtime).findByText(/State: Ready/i)).toBeVisible()
+  })
+
   it('requires a successful explicit endpoint test for the exact profile before save', async () => {
     const base = await createCompletedBridge()
     const validateProviderEndpoint = vi.fn((request) => base.validateProviderEndpoint(request))
@@ -709,6 +756,8 @@ describe('accessible desktop shell', () => {
     const base = createMockAncestryBridge('success')
     const getCapabilities = vi.fn(base.getCapabilities)
     const updatePreferences = vi.fn(base.updatePreferences)
+    const previewLocalRuntime = vi.fn(base.previewLocalRuntime)
+    const applyLocalRuntime = vi.fn(base.applyLocalRuntime)
     const degraded = {
       ok: true,
       protocolVersion: '1',
@@ -740,6 +789,8 @@ describe('accessible desktop shell', () => {
       getCapabilities,
       getStartupDiagnostics: vi.fn().mockResolvedValue(degraded),
       updatePreferences,
+      previewLocalRuntime,
+      applyLocalRuntime,
     }
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
 
@@ -755,6 +806,15 @@ describe('accessible desktop shell', () => {
 
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByText('Settings are read-only while startup diagnostics are degraded.')).toBeVisible()
+    const runtime = screen.getByRole('region', { name: 'Local container runtime' })
+    expect(runtime).toBeVisible()
+    expect(within(runtime).getByRole('combobox', { name: 'Operation' })).toBeDisabled()
+    expect(within(runtime).getByRole('checkbox', { name: 'Use downloaded files only' })).toBeDisabled()
+    const review = within(runtime).getByRole('button', { name: 'Review setup' })
+    expect(review).toBeDisabled()
+    await userEvent.click(review)
+    expect(previewLocalRuntime).not.toHaveBeenCalled()
+    expect(applyLocalRuntime).not.toHaveBeenCalled()
     expect(screen.queryByRole('heading', { name: 'Application settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Credentials' })).not.toBeInTheDocument()
   })
