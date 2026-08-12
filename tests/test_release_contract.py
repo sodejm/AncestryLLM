@@ -113,7 +113,7 @@ def test_module_entry_point_reports_the_same_version() -> None:
 def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     version = str(_project()["version"])
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    versioning = (ROOT / "docs/VERSIONING.md").read_text(encoding="utf-8")
+    versioning = (ROOT / "docs/reference/VERSIONING.md").read_text(encoding="utf-8")
     releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     release_notes = ROOT / "docs/release-notes" / f"{version}.md"
@@ -177,7 +177,7 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert (ROOT / "docs/release-evidence/0.2.0/interoperability.json").is_file()
     assert "prune tests" in manifest
     assert "prune family_trees" in manifest
-    assert "include docs/FILE_INGRESS.md" in manifest
+    assert "include docs/reference/FILE_INGRESS.md" in manifest
 
 
 def test_readme_orients_new_readers_to_the_released_product_boundary() -> None:
@@ -206,12 +206,12 @@ def test_readme_orients_new_readers_to_the_released_product_boundary() -> None:
     assert "OS keyring" in prose
     links = set(re.findall(r"\]\((https://[^)]+)\)", readme))
     assert {
-        "https://github.com/sodejm/AncestryLLM/blob/main/docs/CLI.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/CLI.md",
         "https://github.com/sodejm/AncestryLLM/blob/main/docs/CONSOLE.md",
         "https://github.com/sodejm/AncestryLLM/blob/main/docs/SETUP_DIAGNOSTICS.md",
-        "https://github.com/sodejm/AncestryLLM/blob/main/docs/DESKTOP_SHELL.md",
-        "https://github.com/sodejm/AncestryLLM/blob/main/docs/PRIVACY_AND_CONSENT.md",
-        "https://github.com/sodejm/AncestryLLM/blob/main/docs/PROVIDERS.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/explanation/DESKTOP_SHELL.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/explanation/PRIVACY_AND_CONSENT.md",
+        "https://github.com/sodejm/AncestryLLM/blob/main/docs/reference/PROVIDERS.md",
         "https://github.com/sodejm/AncestryLLM/blob/main/CONTRIBUTING.md",
     } <= links
     assert "(docs/" not in readme
@@ -228,11 +228,11 @@ def test_release_sdist_closes_shipped_cli_document_links() -> None:
     allowed = _literal_string_set(build_script, "ALLOWED_SDIST_FILES")
     required = _literal_string_set(build_script, "REQUIRED_SDIST_PATHS")
     shipped_cli_docs = {
-        "docs/CLI.md",
+        "docs/reference/CLI.md",
         "docs/CONSOLE.md",
-        "docs/FILE_INGRESS.md",
-        "docs/GEDCOM_COMPATIBILITY.md",
-        "docs/PROVIDERS.md",
+        "docs/reference/FILE_INGRESS.md",
+        "docs/reference/GEDCOM_COMPATIBILITY.md",
+        "docs/reference/PROVIDERS.md",
     }
 
     pending = list(shipped_cli_docs)

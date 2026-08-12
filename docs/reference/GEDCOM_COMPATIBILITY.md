@@ -112,7 +112,7 @@ modify the caller's normal AncestryLLM or XDG configuration/data directories.
 
 Automated validation does not establish product interoperability. Before
 claiming a release interoperable, complete the dated vendor evidence matrix in
-[`release-evidence/issue-10-import-smoke-tests.md`](release-evidence/issue-10-import-smoke-tests.md)
+[`release-evidence/issue-10-import-smoke-tests.md`](../release-evidence/issue-10-import-smoke-tests.md)
 for current Ancestry, Geni, and MyHeritage products. The matrix covers both
 5.5.5 and any advertised 5.5.1 fallback and must identify each vendor result as
 verified, failed, unavailable, or unverified. Verify root selection,

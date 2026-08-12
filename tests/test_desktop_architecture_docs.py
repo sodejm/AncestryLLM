@@ -10,13 +10,13 @@ _ADR = _ROOT / "docs" / "ADR-0025-electron-fastapi-desktop.md"
 _DEPLOYMENT_ADR = _ROOT / "docs" / "ADR-0026-local-first-container-remote-deployment.md"
 _THREAT_MODEL = _ROOT / "docs" / "THREAT_MODEL.md"
 _ARCHITECTURE = _ROOT / "ARCHITECTURE.md"
-_PRIVACY = _ROOT / "docs" / "PRIVACY_AND_CONSENT.md"
+_PRIVACY = _ROOT / "docs" / "explanation" / "PRIVACY_AND_CONSENT.md"
 _RELEASING = _ROOT / "docs" / "RELEASING.md"
 _CONTRIBUTING = _ROOT / "CONTRIBUTING.md"
 _SIDEBAR = _ROOT / "docs" / "_Sidebar.md"
-_FILE_INGRESS = _ROOT / "docs" / "FILE_INGRESS.md"
+_FILE_INGRESS = _ROOT / "docs" / "reference" / "FILE_INGRESS.md"
 _DESKTOP_README = _ROOT / "desktop" / "README.md"
-_DESKTOP_SHELL = _ROOT / "docs" / "DESKTOP_SHELL.md"
+_DESKTOP_SHELL = _ROOT / "docs" / "explanation" / "DESKTOP_SHELL.md"
 
 
 def _read(path: Path) -> str:

@@ -77,4 +77,4 @@ The report documents why the evaluated candidate may or may not proceed to a
 separate adoption change. It does not prove a later commit or release candidate,
 cannot replace exact-candidate readiness evidence, and cannot turn an
 incompatible comparison into an authorized release backend. See the human
-[uv_build evaluation](../UV_BUILD_EVALUATION.md) for the disposition.
+[uv_build evaluation](../reference/UV_BUILD_EVALUATION.md) for the disposition.

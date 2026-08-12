@@ -9,7 +9,7 @@ All user-selected inputs use the documented
 commands return the same stable file error codes.
 
 Run `ancestry` with no arguments to open the interactive console; see
-[the console guide](CONSOLE.md). The console and one-shot commands share action
+[the console guide](../CONSOLE.md). The console and one-shot commands share action
 dispatch and stable application-error codes. Parser presentation intentionally
 differs: one-shot usage errors use the standard command-line parser, while the
 console keeps running and renders a safe REPL usage error.
@@ -37,7 +37,7 @@ an encrypted SQLCipher database; its random key is stored only in the OS
 credential store.
 
 Run `database diagnose` for privacy-safe, read-only SQLCipher and credential-store
-checks. The [setup diagnostics](SETUP_DIAGNOSTICS.md) guide explains its stable
+checks. The [setup diagnostics](../SETUP_DIAGNOSTICS.md) guide explains its stable
 JSON output and remediation routes.
 
 ### Deployment profiles

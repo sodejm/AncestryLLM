@@ -66,9 +66,9 @@ def test_release_version_guidance_preserves_the_multifile_contract() -> None:
 
 def test_cleanup_guides_record_tool_ownership_and_audit_completeness() -> None:
     contributing = _read("CONTRIBUTING.md")
-    ci = _read("docs/CI.md")
-    dependency_maintenance = _read("docs/DEPENDENCY_MAINTENANCE.md")
-    ty_evaluation = _read("docs/TY_ADVISORY_EVALUATION.md")
+    ci = _read("docs/reference/CI.md")
+    dependency_maintenance = _read("docs/reference/DEPENDENCY_MAINTENANCE.md")
+    ty_evaluation = _read("docs/reference/TY_ADVISORY_EVALUATION.md")
 
     assert "charliermarsh.ruff" in contributing
     assert "ms-python.mypy-type-checker" in contributing

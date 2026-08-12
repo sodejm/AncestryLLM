@@ -153,9 +153,9 @@ def test_operation_contracts_cover_every_command_route_exactly() -> None:
 
 
 def test_application_contract_inventory_lists_every_deployment_operation() -> None:
-    documentation = (Path(__file__).parents[2] / "docs" / "APPLICATION_CONTRACTS.md").read_text(
-        encoding="utf-8"
-    )
+    documentation = (
+        Path(__file__).parents[2] / "docs" / "reference" / "APPLICATION_CONTRACTS.md"
+    ).read_text(encoding="utf-8")
 
     assert (
         "| Deployment | `deployment.modes`, `deployment.status`, `deployment.preview`, "

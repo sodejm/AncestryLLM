@@ -467,7 +467,7 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
 def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> None:
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
     desktop = (ROOT / "docs" / "DESKTOP_VERIFICATION.md").read_text(encoding="utf-8")
-    desktop_shell = (ROOT / "docs" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
+    desktop_shell = (ROOT / "docs" / "explanation" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
     release_notes = (ROOT / "docs" / "release-notes" / "0.5.0.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")

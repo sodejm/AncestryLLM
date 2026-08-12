@@ -188,7 +188,7 @@ class TestCheckInventory:
     def test_dependency_audit_allowlist_maps_to_its_review_procedure(self) -> None:
         assert (
             NON_COMMENT_FORMAT_MAP["config/dependency-audit-exclusions.json"]
-            == "docs/DEPENDENCY_MAINTENANCE.md"
+            == "docs/reference/DEPENDENCY_MAINTENANCE.md"
         )
 
     @pytest.mark.parametrize(

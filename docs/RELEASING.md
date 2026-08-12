@@ -425,7 +425,7 @@ and source-distribution smoke jobs remain unchanged because they validate the
 published consumer experience rather than authorize a build.
 Setuptools remains the production backend. The locked `uv_build` candidate and
 `make evaluate-uv-build` exist only for the fail-closed 0.6 comparison recorded
-in the [uv_build evaluation](UV_BUILD_EVALUATION.md); its incompatible result
+in the [uv_build evaluation](reference/UV_BUILD_EVALUATION.md); its incompatible result
 does not authorize a backend change or weaken any release check.
 Release construction uses SHA-pinned `actions/setup-python` with Python 3.12,
 then the verified repository contract requires exactly `uv` 0.12.1, selects

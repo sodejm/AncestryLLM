@@ -16,7 +16,7 @@ routes. Packaged main stores the bounded local-preference schema in
 `preferences.json` beneath Electron's OS app-data directory. The renderer never
 receives that path and has no storage access.
 
-The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
+The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
 Unreleased Issue #106 adds the reusable, responsive presentation shell for the
 0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
@@ -72,7 +72,7 @@ or literal packaged-executable test. `test:accessibility` scans every shell
 route in light, dark, and high-contrast modes with the exact locked `axe-core`
 version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
 200% zoom for horizontal clipping. Neither command replaces the manual
-screen-reader review in the [desktop shell guide](../docs/DESKTOP_SHELL.md).
+screen-reader review in the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
 `desktop-security` runs the high-severity dependency audit, source secret scan,
 produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
 package after verifying the native sidecar resource, and inspects the resulting
@@ -114,7 +114,7 @@ packaged builds, main privately starts and verifies the control-only native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
 details never enter IPC or the preload bridge. See
-[the lifecycle and diagnostics guide](../docs/DESKTOP_SIDECAR.md). A later
+[the lifecycle and diagnostics guide](../docs/reference/DESKTOP_SIDECAR.md). A later
 domain transport adapter must consume the application-service contract and
 shared file-ingress policy; do not place domain logic in Electron.
 
@@ -135,7 +135,7 @@ identity, and license digest. The manager accepts only Apple silicon on macOS
 13 or later with hardware virtualization and 24 GiB free, never requests
 administrator privileges, and ignores ambient Docker selection. Docker Desktop
 is optional and is neither installed nor modified. See the
-[desktop shell guide](../docs/DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
+[desktop shell guide](../docs/explanation/DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
 for review/apply commands, interruption recovery, offline behavior, and the
 separate preserve-data and delete-data removal choices.
 

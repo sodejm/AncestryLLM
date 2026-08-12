@@ -49,7 +49,7 @@ dependency group. After verification, `make setup` runs
 Purpose-specific workflows may synchronize smaller locked profiles before
 calling the same canonical Make targets, and the production PyPI verification
 job installs only `release-verifier`. See [Dependency
-maintenance](../DEPENDENCY_MAINTENANCE.md) for the complete group contract.
+maintenance](../reference/DEPENDENCY_MAINTENANCE.md) for the complete group contract.
 
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on

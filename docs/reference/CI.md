@@ -24,7 +24,7 @@ the checked-in GFM structural checks to every tracked Markdown file, whether
 or not a contributor installed the hooks.
 
 `make setup` first runs the
-[verified uv bootstrap](security/verified-uv-bootstrap.md), then uses the
+[verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
 repository-local `.tools/uv/uv` binary to install the locked environment
 without changing Git hooks. It requires a system-supplied Python 3.12-3.14;
 `.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
@@ -267,7 +267,7 @@ exact-head machine-readable evidence. They do not establish production binary
 signing. Project-produced 0.x release installers must be unsigned; full trusted
 binary signing is deferred until and required starting with v1.0.0. Release validation still
 requires the exact installer bytes to install and execute on the supported OS
-matrix. See the [desktop verification guide](DESKTOP_VERIFICATION.md).
+matrix. See the [desktop verification guide](../DESKTOP_VERIFICATION.md).
 
 ## Semgrep rule policy
 

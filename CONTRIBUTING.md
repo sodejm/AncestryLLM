@@ -11,7 +11,7 @@ required local GitHub authentication, trust policy, failure recovery, and
 reviewed update procedure. `make setup` executes
 `uv sync --locked --all-extras --all-groups`; purpose-specific CI jobs may
 synchronize a narrower declared profile before invoking the same canonical Make
-target. See [dependency maintenance](docs/DEPENDENCY_MAINTENANCE.md) for the
+target. See [dependency maintenance](docs/reference/DEPENDENCY_MAINTENANCE.md) for the
 group-to-command contract and lockfile review procedure. Define commands
 through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
@@ -20,7 +20,7 @@ remain independent of Click, prompt-toolkit, Rich, FastAPI/Pydantic, Electron,
 provider SDKs, and host-filesystem objects. New providers implement the common
 contract and mocked timeout/malformed-output/consent/offline tests. New modules
 must be explicit built-ins with one-shot and console parity; follow the
-[module-authoring contract](docs/MODULE_AUTHORING.md) rather than adding a
+[module-authoring contract](docs/reference/MODULE_AUTHORING.md) rather than adding a
 second command registry.
 
 ## GitHub Flow branch strategy
@@ -119,7 +119,7 @@ During the 0.6 advisory period, `make typecheck` remains the authoritative
 strict-mypy gate with the Pydantic plugin. `make typecheck-ty` runs exact
 `ty 0.0.69` across the same complete source tree and preserves its real status;
 CI exposes that result in a separate nonblocking step. See the
-[ty advisory evaluation](docs/TY_ADVISORY_EVALUATION.md) before interpreting
+[ty advisory evaluation](docs/reference/TY_ADVISORY_EVALUATION.md) before interpreting
 its diagnostics or proposing the separately gated 0.7 cutover.
 
 The checked-in VS Code profile recommends `charliermarsh.ruff` for Python

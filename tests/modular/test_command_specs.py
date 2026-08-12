@@ -243,8 +243,10 @@ def test_modules_json_keeps_legacy_descriptor_shape(app_context: AppContext, cap
 
 
 def test_cli_reference_includes_read_only_database_diagnostics() -> None:
-    documentation = (Path(__file__).parents[2] / "docs" / "CLI.md").read_text(encoding="utf-8")
+    documentation = (Path(__file__).parents[2] / "docs" / "reference" / "CLI.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "`database` | `backup DESTINATION`, `diagnose`" in documentation
     assert "`database diagnose`" in documentation
-    assert "[setup diagnostics](SETUP_DIAGNOSTICS.md)" in documentation
+    assert "[setup diagnostics](../SETUP_DIAGNOSTICS.md)" in documentation

@@ -5,7 +5,7 @@
     "title": "AncestryLLM documentation",
     "description": "Local-first genealogy research with optional LLM providers. Start with the current CLI and REPL, or the released bounded desktop control shell and its reviewed macOS arm64 runtime-tool controls; broader desktop-domain capabilities remain planned."
   },
-  "CLI.md": {
+  "reference/CLI.md": {
     "title": "CLI reference — AncestryLLM",
     "description": "Complete reference for AncestryLLM one-shot command-line interface commands, options, and exit codes."
   },
@@ -21,19 +21,19 @@
     "title": "Run an offline GEDCOM merge — AncestryLLM",
     "description": "Merge public fictional GEDCOM fixtures with provider none, verify the rooted result, and recover without partial output."
   },
-  "PROVIDERS.md": {
+  "reference/PROVIDERS.md": {
     "title": "Provider guide — AncestryLLM",
     "description": "Provider policy, execution behavior, profiles, and capability limits for network-free, local, and consented cloud models."
   },
-  "PRIVACY_AND_CONSENT.md": {
+  "explanation/PRIVACY_AND_CONSENT.md": {
     "title": "Privacy and consent — AncestryLLM",
     "description": "How AncestryLLM keeps genealogy data local-first, requires explicit consent for cloud providers, and preserves your privacy."
   },
-  "GEDCOM_COMPATIBILITY.md": {
+  "reference/GEDCOM_COMPATIBILITY.md": {
     "title": "GEDCOM compatibility and release checks — AncestryLLM",
     "description": "Supported GEDCOM versions, known compatibility limits, import smoke-test results, and vendor interoperability status."
   },
-  "VERSIONING.md": {
+  "reference/VERSIONING.md": {
     "title": "Versioning and compatibility — AncestryLLM",
     "description": "Semantic versioning policy, supported Python versions, upgrade paths, and deprecation schedule."
   },
@@ -49,47 +49,47 @@
     "title": "First-run storage diagnostics — AncestryLLM",
     "description": "Troubleshoot storage, permissions, configuration, and macOS arm64 runtime-tool failures with AncestryLLM's built-in diagnostics."
   },
-  "FILE_INGRESS.md": {
+  "reference/FILE_INGRESS.md": {
     "title": "Bounded file ingress — AncestryLLM",
     "description": "File-ingress policy: byte and record budgets, race detection, output alias rejection, and transactional publication."
   },
-  "MODULE_AUTHORING.md": {
+  "reference/MODULE_AUTHORING.md": {
     "title": "Built-in module authoring — AncestryLLM",
     "description": "How to author, register, and test built-in research modules using the AncestryLLM CommandSpec contract."
   },
-  "LOCAL_LLM_BENCHMARKS.md": {
+  "reference/LOCAL_LLM_BENCHMARKS.md": {
     "title": "Local LLM benchmarks — AncestryLLM",
     "description": "Performance and quality benchmark results for locally run LLM models evaluated against genealogy research tasks."
   },
-  "LOCAL_RETRIEVAL_EVALUATION.md": {
+  "reference/LOCAL_RETRIEVAL_EVALUATION.md": {
     "title": "Local-first retrieval evaluation — AncestryLLM",
     "description": "Evaluation methodology and results for local-first retrieval strategies used in AncestryLLM."
   },
-  "CI.md": {
+  "reference/CI.md": {
     "title": "Continuous integration — AncestryLLM",
     "description": "CI pipeline gates, workflow structure, and how to reproduce checks locally."
   },
-  "DEPENDENCY_MAINTENANCE.md": {
+  "reference/DEPENDENCY_MAINTENANCE.md": {
     "title": "Dependency maintenance — AncestryLLM",
     "description": "Purpose-specific dependency groups, locked environment profiles, and the reviewed dependency update procedure."
   },
-  "TY_ADVISORY_EVALUATION.md": {
+  "reference/TY_ADVISORY_EVALUATION.md": {
     "title": "ty advisory evaluation — AncestryLLM",
     "description": "Reproducible ty 0.0.69 diagnostics, checker-parity evidence, suppressions, timing, and conditional cutover disposition."
   },
-  "RUFF_EXPANSION_EVALUATION.md": {
+  "reference/RUFF_EXPANSION_EVALUATION.md": {
     "title": "Ruff rule-expansion evaluation — AncestryLLM",
     "description": "Reviewed Ruff 0.16.1 diagnostics, import and startup contracts, batch evidence, and safety disposition."
   },
-  "UV_BUILD_EVALUATION.md": {
+  "reference/UV_BUILD_EVALUATION.md": {
     "title": "uv_build evaluation — AncestryLLM",
     "description": "Reproducible setuptools and uv_build artifact comparison, semantic drift evidence, and fail-closed backend disposition."
   },
-  "ARCHITECTURE_CONTRACTS.md": {
+  "reference/ARCHITECTURE_CONTRACTS.md": {
     "title": "Architecture ownership and dependency contracts — AncestryLLM",
     "description": "Authoritative ownership boundaries, layer dependency rules, and transport-neutral service contracts."
   },
-  "COMMAND_EXECUTOR.md": {
+  "reference/COMMAND_EXECUTOR.md": {
     "title": "Command executor — AncestryLLM",
     "description": "Transport-neutral CommandInvocation and CommandExecutor boundary used by CLI, REPL, and future adapters."
   },
@@ -117,11 +117,11 @@
     "title": "Merge fictional GEDCOM records offline — AncestryLLM",
     "description": "A safe end-to-end GEDCOM 5.5.5 merge tutorial using fictional fixtures, provider none, and no network calls."
   },
-  "DESKTOP_SHELL.md": {
+  "explanation/DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
     "description": "Released v0.5.0 Electron desktop control shell for Home, Diagnostics, Settings, and capability onboarding; genealogy and domain capabilities remain excluded."
   },
-  "DESKTOP_SIDECAR.md": {
+  "reference/DESKTOP_SIDECAR.md": {
     "title": "Packaged desktop sidecar — AncestryLLM",
     "description": "Released private FastAPI control sidecar for the bounded v0.5.0 shell; it excludes genealogy, jobs, files, provider, cloud, and updater routes."
   },
@@ -133,11 +133,11 @@
     "title": "Deployment — AncestryLLM",
     "description": "Released bounded desktop publication controls and app-owned macOS arm64 runtime-tool management; not a hosted application or domain-capability rollout."
   },
-  "REPL_ARCHITECTURE.md": {
+  "explanation/REPL_ARCHITECTURE.md": {
     "title": "REPL architecture — AncestryLLM",
     "description": "Internal architecture of the prompt-toolkit/Rich interactive REPL, command dispatch, and session lifecycle."
   },
-  "APPLICATION_CONTRACTS.md": {
+  "reference/APPLICATION_CONTRACTS.md": {
     "title": "Application contracts — AncestryLLM",
     "description": "Service-layer DTOs, application ports, artifact references, and error-mapping contracts."
   },
@@ -165,7 +165,7 @@
     "title": "In-code documentation policy — AncestryLLM",
     "description": "Standards for Python docstrings, comments, API contracts, and documentation-focused review in AncestryLLM."
   },
-  "api/API_REFERENCE.md": {
+  "reference/api/API_REFERENCE.md": {
     "title": "Internal API contract — AncestryLLM",
     "description": "Authenticated health and capability endpoints used by the released bounded desktop control shell."
   },

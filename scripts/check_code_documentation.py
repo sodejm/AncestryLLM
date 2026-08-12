@@ -98,11 +98,11 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     # GitHub release config — semantics described in docs/RELEASING.md
     ".github/release-config.json": "docs/RELEASING.md",
     # Issue/PR template form schemas — self-describing YAML siblings in same dir
-    ".github/ISSUE_TEMPLATE/config.yml": "docs/CI.md",
+    ".github/ISSUE_TEMPLATE/config.yml": "docs/reference/CI.md",
     # desktop components.json — shadcn/ui generated registry; see desktop/README.md
     "desktop/components.json": "desktop/README.md",
-    # plist/XML: Electron builder configuration; see docs/DESKTOP_SIDECAR.md
-    "desktop/resources/entitlements.mac.plist": "docs/DESKTOP_SIDECAR.md",
+    # plist/XML: Electron builder configuration; see docs/reference/DESKTOP_SIDECAR.md
+    "desktop/resources/entitlements.mac.plist": "docs/reference/DESKTOP_SIDECAR.md",
     # .env.example — example environment variable names; see README.md for setup
     ".env.example": "README.md",
     # desktop/package.json — Node package manifest; semantics in desktop/README.md
@@ -128,7 +128,7 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     # Executable bootstrap trust roots and their reviewed update procedure.
     "config/uv-bootstrap-policy.json": "docs/security/verified-uv-bootstrap.md",
     # Dependency-audit export exclusions and their fail-closed review procedure.
-    "config/dependency-audit-exclusions.json": "docs/DEPENDENCY_MAINTENANCE.md",
+    "config/dependency-audit-exclusions.json": "docs/reference/DEPENDENCY_MAINTENANCE.md",
     # Version 1 security dependency policy and its reviewed update procedure.
     "config/version-1-security-policy.json": "docs/RELEASING.md",
 }
