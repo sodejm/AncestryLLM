@@ -7,9 +7,9 @@ import os
 import secrets
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Engine, Table, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool
 
@@ -22,7 +22,7 @@ from ancestryllm.core.publication import (
     seal_staged_path,
     staging_path,
 )
-from ancestryllm.storage.models import Base
+from ancestryllm.storage.models import Base, JobEventModel, JobModel
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 DATABASE_SECRET = "database.master_key"  # noqa: S105 - keyring reference, not a credential
-SCHEMA_REVISION = "0001"
+PREVIOUS_SCHEMA_REVISION = "0001"
+SCHEMA_REVISION = "0002"
 
 
 def _integrity_result(connection: Any) -> str | None:
@@ -178,21 +179,45 @@ class Database:
         return self._engine
 
     def initialize(self) -> None:
-        Base.metadata.create_all(self.engine)
         with self.engine.begin() as connection:
+            version_table_exists = bool(
+                connection.exec_driver_sql(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version'"
+                ).scalar()
+            )
+            if version_table_exists:
+                revisions = tuple(
+                    connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalars()
+                )
+                if len(revisions) > 1 or (
+                    revisions and revisions[0] not in {PREVIOUS_SCHEMA_REVISION, SCHEMA_REVISION}
+                ):
+                    rendered = revisions[0] if len(revisions) == 1 else "multiple revisions"
+                    raise StorageError(
+                        "DATABASE_MIGRATION_REQUIRED",
+                        f"Workspace schema {rendered!r} is not supported by this release.",
+                        "Run the documented encrypted database migration command.",
+                    )
+            else:
+                revisions = ()
+
+            current = revisions[0] if revisions else None
+            if current == PREVIOUS_SCHEMA_REVISION:
+                cast("Table", JobModel.__table__).create(connection, checkfirst=False)
+                cast("Table", JobEventModel.__table__).create(connection, checkfirst=False)
+                connection.exec_driver_sql(
+                    "UPDATE alembic_version SET version_num = ?",
+                    (SCHEMA_REVISION,),
+                )
+                return
+
+            Base.metadata.create_all(connection)
             connection.exec_driver_sql(
                 "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
             )
-            current = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar()
             if current is None:
                 connection.exec_driver_sql(
                     "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
-                )
-            elif current != SCHEMA_REVISION:
-                raise StorageError(
-                    "DATABASE_MIGRATION_REQUIRED",
-                    f"Workspace schema {current!r} is not supported by this release.",
-                    "Run the documented encrypted database migration command.",
                 )
 
     def session(self) -> Session:

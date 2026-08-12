@@ -19,6 +19,17 @@ _SafeCode = Annotated[str, Field(min_length=1, max_length=96, pattern=r"^[A-Za-z
 _SafeText = Annotated[str, Field(min_length=1, max_length=512)]
 _BuildIdentity = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:+-]+$")]
 _ConfigurationRevision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+_JobId = Annotated[str, Field(pattern=r"^j[0-9]{6,12}$")]
+_JobTimestamp = Annotated[str, Field(min_length=1, max_length=64)]
+_JobState = Literal[
+    "queued",
+    "running",
+    "cancelling",
+    "pending-safe-point",
+    "completed",
+    "failed",
+    "cancelled",
+]
 _ProviderId = Literal["ollama", "openai", "anthropic", "gemini", "openrouter"]
 _DataClass = Literal[
     "public_genealogy",
@@ -371,6 +382,120 @@ class ProviderConfigurationMutationRequest(BaseModel):
     expected_revision: _ConfigurationRevision
 
 
+class JobProgressResponse(BaseModel):
+    """Bounded progress metadata without operation payloads."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    operation: Annotated[str, Field(min_length=1, max_length=512)]
+    timestamp: _JobTimestamp
+    completed: Annotated[int, Field(ge=0, le=1_000_000_000)] | None
+    total: Annotated[int, Field(ge=0, le=1_000_000_000)] | None
+
+
+class JobArtifactResponse(BaseModel):
+    """Opaque completed-job artifact descriptor; host paths are never exposed."""
+
+    model_config = _STRICT_MODEL
+
+    artifact_id: Annotated[
+        str, Field(min_length=36, max_length=132, pattern=r"^art_[A-Za-z0-9._:-]+$")
+    ]
+    media_type: Annotated[
+        str,
+        Field(
+            min_length=3,
+            max_length=127,
+            pattern=r"^[^/\r\n\x00]+/[^/\r\n\x00]+$",
+        ),
+    ]
+    artifact_type: _SafeCode
+    size_bytes: Annotated[int, Field(ge=0, le=2_147_483_648)]
+    status: Literal["pending", "ready", "failed", "revoked"]
+    sha256: _ConfigurationRevision | None = None
+
+
+class JobSnapshotResponse(BaseModel):
+    """Renderer-safe current state for one restart-safe background job."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    sequence: Annotated[int, Field(ge=1, le=9_999_999_999)]
+    job_id: _JobId
+    name: Annotated[str, Field(min_length=1, max_length=256)]
+    state: _JobState
+    submitted_at: _JobTimestamp
+    started_at: _JobTimestamp | None
+    finished_at: _JobTimestamp | None
+    resource_refs: Annotated[
+        tuple[Annotated[str, Field(pattern=r"^resource_[0-9a-f]{64}$")], ...],
+        Field(max_length=32),
+    ] = ()
+    artifact: JobArtifactResponse | None
+    outcome_summary: Annotated[str, Field(min_length=1, max_length=2_048)] | None
+    next_action: Annotated[str, Field(min_length=1, max_length=2_048)] | None
+    error_code: _SafeCode | None
+    error_message: Annotated[str, Field(min_length=1, max_length=2_048)] | None
+    error_remediation: Annotated[str, Field(min_length=1, max_length=2_048)] | None
+    progress: JobProgressResponse | None
+    cancellation_requested_at: _JobTimestamp | None
+    cancellation_deferred_by: Annotated[str, Field(min_length=1, max_length=512)] | None
+
+
+class JobEventResponse(BaseModel):
+    """One monotonically ordered replay or live event."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    sequence: Annotated[int, Field(ge=1, le=9_999_999_999)]
+    kind: Literal["snapshot", "progress", "cancellation", "terminal"]
+    created_at: _JobTimestamp
+    snapshot: JobSnapshotResponse
+
+
+class JobListResponse(BaseModel):
+    """Bounded newest-first job listing."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    jobs: Annotated[tuple[JobSnapshotResponse, ...], Field(max_length=1_000)] = ()
+
+
+class JobShutdownRequest(BaseModel):
+    """Fail-closed bounded shutdown preparation request."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    action: Literal["cancel", "wait"]
+    timeout_seconds: Annotated[float, Field(ge=0, le=30, allow_inf_nan=False)]
+
+
+class JobShutdownResponse(BaseModel):
+    """Explicit authorization for Electron to terminate the sidecar."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    safe_to_quit: bool
+    active_jobs: Annotated[tuple[JobSnapshotResponse, ...], Field(max_length=1_000)] = ()
+
+
+class JobStreamFailureResponse(BaseModel):
+    """Stable in-band SSE failure emitted after response headers are committed."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    code: Literal["JOB_EVENT_REPLAY_EXPIRED"]
+    message: _SafeText
+    remediation: _SafeText
+
+
 class FailureDetail(BaseModel):
     model_config = _STRICT_MODEL
 
@@ -426,6 +551,14 @@ __all__ = [
     "ErrorScalar",
     "FailureDetail",
     "HealthResponse",
+    "JobArtifactResponse",
+    "JobEventResponse",
+    "JobListResponse",
+    "JobProgressResponse",
+    "JobShutdownRequest",
+    "JobShutdownResponse",
+    "JobSnapshotResponse",
+    "JobStreamFailureResponse",
     "PageMetadata",
     "PaginationPolicy",
     "PaginationRequest",

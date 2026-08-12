@@ -64,6 +64,70 @@ describe('main-only sidecar capabilities client', () => {
     )
   })
 
+  it('prepares bounded job shutdown through the fixed authenticated route', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: 1,
+        safe_to_quit: true,
+        active_jobs: [],
+      }),
+    })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+    await expect(client.prepareJobShutdown('wait')).resolves.toEqual({
+      schema_version: 1,
+      safe_to_quit: true,
+      active_jobs: [],
+    })
+    expect(request).toHaveBeenCalledWith(
+      session,
+      '/api/v1/jobs/shutdown',
+      undefined,
+      {
+        method: 'POST',
+        body: JSON.stringify({ schema_version: 1, action: 'wait', timeout_seconds: 2 }),
+      },
+    )
+  })
+
+  it('fails closed on ambiguous or unsafe job shutdown assessments', async () => {
+    const bodies: unknown[] = [
+      { schema_version: 1, safe_to_quit: false, active_jobs: [] },
+      { schema_version: 1, safe_to_quit: true, active_jobs: [{ job_id: 'j000001' }] },
+      { schema_version: 2, safe_to_quit: true, active_jobs: [] },
+      { schema_version: 1, safe_to_quit: true, active_jobs: [], ignored: true },
+      { schema_version: 1, safe_to_quit: true },
+      null,
+    ]
+    for (const body of bodies) {
+      const request = vi.fn().mockResolvedValue({
+        statusCode: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      })
+      const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+      await expect(client.prepareJobShutdown('cancel')).rejects.toEqual(
+        new SidecarClientError('invalid_response'),
+      )
+    }
+  })
+
+  it('fails closed when bounded job shutdown is not accepted by the sidecar', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'JOB_SHUTDOWN_UNSAFE' }),
+    })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+    await expect(client.prepareJobShutdown('cancel')).rejects.toEqual(
+      new SidecarClientError('request_failed'),
+    )
+  })
+
   it('rejects malformed, oversized, and unsuccessful responses', async () => {
     for (const response of [
       { statusCode: 200, contentType: 'application/json', body: '{' },

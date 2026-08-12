@@ -45,6 +45,13 @@ scope, create that exact preview, and revoke consent. Secrets remain blank,
 write-only fields managed through Issue #105's credential boundary; presence of
 a stored key cannot select a provider or grant consent.
 
+Unreleased Issue #104 adds a main-process-only safe-shutdown preflight and a
+Python-owned, UI-neutral job lifecycle. It adds no renderer bridge method,
+event listener, supported job screen, or job-submission surface. During an
+application quit, Electron main can present the native choices **Wait**,
+**Request cancellation**, and **Stay open** without exposing the authenticated
+sidecar session or job event stream to the renderer.
+
 Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
 The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
@@ -56,13 +63,21 @@ Use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnp
 ```sh
 corepack enable
 corepack prepare pnpm@11.9.0 --activate
-pnpm --dir desktop install --frozen-lockfile
+make desktop-install
 make desktop-check
 make desktop-e2e
 make desktop-security
 pnpm --dir desktop test:accessibility
 pnpm --dir desktop test:visual
 ```
+
+`desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
+locked Electron package, and fails with a stable error if its platform runtime
+is still absent. The explicit rebuild makes setup fail closed even when a
+shared pnpm store contains stale build-script state. Electron 39.8.10 remains
+exactly pinned; its installer resolves `extract-zip` to the Electron-maintained
+`@electron-internal/extract-zip` 1.0.5 package through the locked override and
+reviewed compatibility patch.
 
 `desktop-check` runs lint, separated main/preload/renderer type checks, unit
 tests, the presentation-boundary contract, and a source-map-free build
@@ -113,7 +128,10 @@ same-document application routes retain the existing renderer identity. In
 packaged builds, main privately starts and verifies the control-only native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
-details never enter IPC or the preload bridge. See
+details never enter IPC or the preload bridge. The Unreleased Issue #104
+shutdown preflight is likewise main-process-only: it asks the sidecar whether
+active jobs are safe to drain, wait for, or cancel before the IPC boundary is
+disposed. See
 [the lifecycle and diagnostics guide](../docs/reference/DESKTOP_SIDECAR.md). A later
 domain transport adapter must consume the application-service contract and
 shared file-ingress policy; do not place domain logic in Electron.
@@ -164,4 +182,5 @@ The allowlisted external-link helper is main-process-internal and testable: it a
 | `TM-I01` | The bridge retains its fixed reviewed methods. Main validates sender, request, response, renderer ownership, purpose, access, session, and revocation. The Issue #106 shell consumes versioned responses only through existing hooks; its routes and `CapabilityGate` neither add bridge methods nor grant authority. E2E asserts that no path, resolver, direct filesystem, security-reporting, external-link, or domain method leaks into the renderer bridge. | `make desktop-check`, `make desktop-e2e` |
 | `TM-A02`, `TM-S01`, `TM-D01`, `TM-O01` | Issue #107 validates the fixed startup-diagnostic route and exact four-component schema, requires keyring-only packaged secret selection, blocks affected mutations and capability access while degraded, and exposes one bounded non-repairing retry. Contract and renderer tests reject secrets, host identity, paths, payloads, unknown fields, duplicate initialization, key replacement, plaintext fallback, and misleading recovery. | `make test`, `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
 | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`, `TM-O01` | Native-dialog selection validates regular-file/link state, bounded size, purpose-specific format, canonical identity, and fingerprints before issuing a random one-use grant. Redemption revalidates identity, replacement confirmation is native and race-checked, aliases and concurrent output grants fail closed, and stable responses omit paths. Focused broker and dialog tests exercise cancellation, replacement races, revocation, alias rejection, and output locks. A dedicated verification-only packaged adapter exercises native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation across the hosted platform matrix without entering production builds. Full worker and publication evidence remains #114/#118/#131. | `make desktop-check`, exact-head packaged workflow |
+| `TM-E01`, `TM-D01`, `TM-C01`, `TM-O01` | Issue #104 persists bounded schema-v1 job snapshots and events in SQLCipher, reconciles interrupted non-terminal jobs to one terminal outcome on startup, isolates slow subscribers with coded replay resynchronization, and keeps cancellation cooperative at declared safe points. Electron main obtains a sanitized shutdown assessment and offers native **Wait**, **Request cancellation**, and **Stay open** choices; the renderer receives no job or sidecar authority. | `make test`, `make desktop-check`, `pnpm --dir desktop test` |
 | `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.5.0. | `make desktop-security` |

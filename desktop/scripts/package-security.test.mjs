@@ -12,6 +12,10 @@ import {
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const pnpmWorkspace = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8')
+const electronPatch = await readFile(
+  new URL('../patches/electron@39.8.10.patch', import.meta.url),
+  'utf8',
+)
 const productionMain = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 
 const minimumPatchedElectronVersion = [39, 8, 10]
@@ -62,8 +66,18 @@ test('packaging pins Electron at the minimum audited security remediation', () =
 })
 
 test('dependency overrides preserve the audited transitive remediation floors', () => {
+  assert.match(
+    pnpmWorkspace,
+    /^ {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5$/m,
+  )
   assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.1$/m)
   assert.match(pnpmWorkspace, /^ {2}nanoid@3\.3\.16: 3\.3\.17$/m)
+  assert.match(
+    pnpmWorkspace,
+    /^patchedDependencies:\n {2}electron@39\.8\.10: patches\/electron@39\.8\.10\.patch$/m,
+  )
+  assert.match(electronPatch, /\+const \{ extract \} = require\('extract-zip'\);/)
+  assert.doesNotMatch(electronPatch, /\+const extract = require\('extract-zip'\);/)
 })
 
 test('production main entry contains no fixture bridge or test hook', () => {

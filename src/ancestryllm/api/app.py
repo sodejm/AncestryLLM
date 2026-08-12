@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import StreamingResponse
 
 from ancestryllm.api.capabilities import (
     ModuleDescriptorRegistry,
@@ -28,6 +30,14 @@ from ancestryllm.api.contracts import (
     EndpointValidationResponse,
     ErrorEnvelope,
     HealthResponse,
+    JobArtifactResponse,
+    JobEventResponse,
+    JobListResponse,
+    JobProgressResponse,
+    JobShutdownRequest,
+    JobShutdownResponse,
+    JobSnapshotResponse,
+    JobStreamFailureResponse,
     PageMetadata,
     PaginationRequest,
     ProviderConfigurationMutationRequest,
@@ -56,12 +66,19 @@ from ancestryllm.storage.diagnostics import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     from fastapi.responses import JSONResponse
 
     from ancestryllm.api.settings import ApiSettings
     from ancestryllm.application.executor import CommandExecutor
+    from ancestryllm.application.jobs import (
+        JobEvent,
+        JobLifecycleService,
+        PublicJobProgress,
+        PublicJobSnapshot,
+        ShutdownAssessment,
+    )
     from ancestryllm.application.secret_management import SecretManagementService, SecretStatus
     from ancestryllm.application.settings import SettingField, SettingsService, SettingsSnapshot
     from ancestryllm.llm.endpoint_validation import (
@@ -87,16 +104,24 @@ class ApiLifecycle(Protocol):
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorEnvelope, "description": "The request failed closed."},
     401: {"model": ErrorEnvelope, "description": "The private bearer is invalid."},
-    404: {"model": ErrorEnvelope, "description": "The route is not exposed."},
+    404: {"model": ErrorEnvelope, "description": "The resource or route is unavailable."},
     405: {"model": ErrorEnvelope, "description": "The method is not accepted."},
     409: {
         "model": ErrorEnvelope,
         "description": "The request conflicts with the current protected state.",
     },
+    410: {
+        "model": ErrorEnvelope,
+        "description": "The bounded replay window has expired; fetch a fresh snapshot.",
+    },
     413: {"model": ErrorEnvelope, "description": "The request is too large."},
     415: {"model": ErrorEnvelope, "description": "The content type is not accepted."},
+    429: {
+        "model": ErrorEnvelope,
+        "description": "A bounded queue or subscriber limit was reached.",
+    },
     500: {"model": ErrorEnvelope, "description": "The request failed safely."},
-    503: {"model": ErrorEnvelope, "description": "Secure credential storage is unavailable."},
+    503: {"model": ErrorEnvelope, "description": "A protected local dependency is unavailable."},
 }
 _HANDSHAKE_PARAMETERS: list[dict[str, object]] = [
     {
@@ -112,6 +137,20 @@ _HANDSHAKE_PARAMETERS: list[dict[str, object]] = [
         "schema": {"type": "string", "minLength": 1, "maxLength": 128},
     },
 ]
+_JOB_EVENT_PARAMETERS = [
+    *_HANDSHAKE_PARAMETERS,
+    {
+        "in": "header",
+        "name": "Last-Event-ID",
+        "required": False,
+        "schema": {
+            "type": "string",
+            "pattern": r"^[0-9]{1,10}$",
+            "description": "Last durably processed job-event sequence; defaults to zero.",
+        },
+    },
+]
+_TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
 
 def _correlation_ref(request: Request) -> str:
@@ -213,6 +252,115 @@ def _endpoint_validation_response(
     )
 
 
+def _job_progress_response(progress: PublicJobProgress) -> JobProgressResponse:
+    return JobProgressResponse(
+        schema_version=1,
+        operation=progress.operation,
+        timestamp=progress.timestamp,
+        completed=progress.completed,
+        total=progress.total,
+    )
+
+
+def _job_snapshot_response(snapshot: PublicJobSnapshot) -> JobSnapshotResponse:
+    artifact = snapshot.artifact
+    return JobSnapshotResponse(
+        schema_version=1,
+        sequence=snapshot.sequence,
+        job_id=snapshot.job_id,
+        name=snapshot.name,
+        state=cast("Any", snapshot.state.value),
+        submitted_at=snapshot.submitted_at,
+        started_at=snapshot.started_at,
+        finished_at=snapshot.finished_at,
+        resource_refs=snapshot.resource_refs,
+        artifact=(
+            JobArtifactResponse(
+                artifact_id=artifact.artifact_id,
+                media_type=artifact.media_type,
+                artifact_type=artifact.artifact_type,
+                size_bytes=artifact.size_bytes,
+                status=cast("Any", artifact.status.value),
+                sha256=artifact.sha256,
+            )
+            if artifact is not None
+            else None
+        ),
+        outcome_summary=snapshot.outcome_summary,
+        next_action=snapshot.next_action,
+        error_code=snapshot.error_code,
+        error_message=snapshot.error_message,
+        error_remediation=snapshot.error_remediation,
+        progress=(
+            _job_progress_response(snapshot.progress) if snapshot.progress is not None else None
+        ),
+        cancellation_requested_at=snapshot.cancellation_requested_at,
+        cancellation_deferred_by=snapshot.cancellation_deferred_by,
+    )
+
+
+def _job_event_response(event: JobEvent) -> JobEventResponse:
+    return JobEventResponse(
+        schema_version=1,
+        sequence=event.sequence,
+        kind=cast("Any", event.kind.value),
+        created_at=event.created_at,
+        snapshot=_job_snapshot_response(event.snapshot),
+    )
+
+
+def _job_shutdown_response(assessment: ShutdownAssessment) -> JobShutdownResponse:
+    return JobShutdownResponse(
+        schema_version=1,
+        safe_to_quit=assessment.safe_to_quit,
+        active_jobs=tuple(_job_snapshot_response(item) for item in assessment.active_jobs),
+    )
+
+
+def _sse_record(event: JobEvent) -> str:
+    payload = json.dumps(
+        _job_event_response(event).model_dump(mode="json"),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"id: {event.sequence}\nevent: {event.kind.value}\ndata: {payload}\n\n"
+
+
+def _sse_resync_required() -> str:
+    payload = JobStreamFailureResponse(
+        schema_version=1,
+        code="JOB_EVENT_REPLAY_EXPIRED",
+        message="The bounded job-event replay window is no longer available.",
+        remediation="Fetch the current job snapshot, then reconnect from its sequence.",
+    )
+    encoded = json.dumps(
+        payload.model_dump(mode="json"),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"event: resync-required\ndata: {encoded}\n\n"
+
+
+def _acknowledged_sequence(request: Request) -> int:
+    raw = request.headers.get("last-event-id")
+    if raw is None:
+        return 0
+    if not 1 <= len(raw) <= 10 or not raw.isascii() or not raw.isdecimal():
+        raise AncestryError(
+            "JOB_EVENT_CURSOR_INVALID",
+            "The acknowledged job-event sequence is invalid.",
+            exit_code=2,
+        )
+    value = int(raw)
+    if value > 9_999_999_999:
+        raise AncestryError(
+            "JOB_EVENT_CURSOR_INVALID",
+            "The acknowledged job-event sequence is invalid.",
+            exit_code=2,
+        )
+    return value
+
+
 def _default_startup_diagnostics() -> StartupDiagnosticReport:
     components = tuple(
         StartupDiagnosticComponent(
@@ -304,6 +452,8 @@ def create_app(
     secret_service: SecretManagementService,
     provider_configuration_service: ProviderConfigurationService | None = None,
     endpoint_validation_service: EndpointValidationService | None = None,
+    job_service: Callable[[], JobLifecycleService] | None = None,
+    job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     lifecycle: ApiLifecycle | None = None,
     startup_diagnostics: Callable[[], StartupDiagnosticReport] | None = None,
     mutations_allowed: Callable[[], bool] | None = None,
@@ -366,6 +516,20 @@ def create_app(
             )
         return endpoint_validation_service
 
+    def jobs() -> JobLifecycleService:
+        if job_service is None:
+            raise StorageError(
+                "JOB_SERVICE_UNAVAILABLE",
+                "Background-job coordination is unavailable.",
+                "Resolve startup diagnostics and restart the desktop application.",
+            )
+        return job_service()
+
+    def prepare_jobs_for_shutdown(action: str, timeout_seconds: float) -> ShutdownAssessment:
+        if job_shutdown is not None:
+            return job_shutdown(action, timeout_seconds)
+        return jobs().prepare_shutdown(action=action, timeout_seconds=timeout_seconds)
+
     @app.exception_handler(AncestryError)
     async def handle_ancestry_error(request: Request, error: AncestryError) -> JSONResponse:
         return error_response(error, correlation_ref=_correlation_ref(request))
@@ -418,6 +582,108 @@ def create_app(
     )
     def get_startup_diagnostics() -> StartupDiagnosticReportResponse:
         return _startup_diagnostics_response(diagnostics_provider())
+
+    @app.get(
+        f"{API_NAMESPACE}/jobs",
+        response_model=JobListResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="listInternalJobs",
+        tags=["jobs"],
+    )
+    def list_jobs() -> JobListResponse:
+        return JobListResponse(
+            schema_version=1,
+            jobs=tuple(_job_snapshot_response(item) for item in jobs().list(limit=100)),
+        )
+
+    @app.post(
+        f"{API_NAMESPACE}/jobs/shutdown",
+        response_model=JobShutdownResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="prepareInternalJobShutdown",
+        tags=["jobs"],
+    )
+    def prepare_job_shutdown(request: JobShutdownRequest) -> JobShutdownResponse:
+        return _job_shutdown_response(
+            prepare_jobs_for_shutdown(request.action, request.timeout_seconds)
+        )
+
+    @app.get(
+        f"{API_NAMESPACE}/jobs/{{job_id}}",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalJob",
+        tags=["jobs"],
+    )
+    def get_job(job_id: str) -> JobSnapshotResponse:
+        return _job_snapshot_response(jobs().get(job_id))
+
+    @app.post(
+        f"{API_NAMESPACE}/jobs/{{job_id}}/cancel",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="cancelInternalJob",
+        tags=["jobs"],
+    )
+    def cancel_job(job_id: str) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(jobs().cancel(job_id))
+
+    @app.get(
+        f"{API_NAMESPACE}/jobs/{{job_id}}/events",
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "description": "A bounded replay followed by live job events.",
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            },
+            **_ERROR_RESPONSES,
+        },
+        openapi_extra={"parameters": _JOB_EVENT_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="streamInternalJobEvents",
+        tags=["jobs"],
+    )
+    def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
+        service = jobs()
+        subscription = service.subscribe(job_id, after=_acknowledged_sequence(request))
+
+        def event_stream() -> Iterator[str]:
+            try:
+                for event in subscription.replay.events:
+                    yield _sse_record(event)
+                    if event.snapshot.state.value in _TERMINAL_JOB_STATES:
+                        return
+                if service.get(job_id).state.value in _TERMINAL_JOB_STATES:
+                    return
+                while True:
+                    try:
+                        event = subscription.next(timeout=15.0)
+                    except AncestryError as error:
+                        if error.code == "JOB_EVENT_WAIT_TIMEOUT":
+                            yield ": keep-alive\n\n"
+                            continue
+                        if error.code == "JOB_EVENT_REPLAY_EXPIRED":
+                            yield _sse_resync_required()
+                            return
+                        raise
+                    yield _sse_record(event)
+                    if event.snapshot.state.value in _TERMINAL_JOB_STATES:
+                        return
+            finally:
+                subscription.close()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get(
         f"{API_NAMESPACE}/settings",

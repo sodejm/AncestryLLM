@@ -128,6 +128,34 @@ stderr, raw sidecar or bridge errors, or stack traces. See the
 [desktop ADR](../ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
+## Unreleased job lifecycle and safe shutdown
+
+Issue #104 adds the source-level job lifecycle needed by later desktop domain
+work without adding a renderer job screen, renderer event listener, bridge
+method, job producer, or submission route. The Python application layer owns
+strict schema-v1 snapshots and events, increasing per-job sequence numbers,
+bounded persistence and replay, cooperative cancellation, and exactly one
+terminal result. A reconnecting internal client can resume from
+`Last-Event-ID`; an expired replay window fails with the stable
+`JOB_EVENT_REPLAY_EXPIRED` code instead of silently skipping progress.
+
+The lifecycle distinguishes queued, running, cancelling,
+pending-safe-point, completed, failed, and cancelled states. Progress may be
+determinate or indeterminate. Cancellation is a request: a job inside an
+atomic publication section remains pending at its declared safe point rather
+than abandoning or corrupting output. Non-terminal persisted work is
+reconciled to one sanitized interrupted terminal result when the sidecar
+restarts.
+
+When the user quits while work is active, Electron main—not the renderer—uses
+an authenticated shutdown preflight and presents native **Wait**, **Request
+cancellation**, and **Stay open** choices. **Wait** keeps the application open
+until jobs drain within the bounded deadline; **Request cancellation** asks
+interruptible jobs to stop and explains any pending safe point; **Stay open**
+aborts the quit. A degraded sidecar startup has no admitted local jobs, so its
+sanitized empty shutdown assessment is safe. The IPC boundary remains intact
+when sidecar shutdown fails, allowing a subsequent bounded recovery attempt.
+
 ## Unreleased opaque file-mediation foundation
 
 Issue #103 adds a security boundary for later genealogy workflows without

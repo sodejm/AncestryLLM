@@ -24,7 +24,7 @@ help:
 	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
 
 desktop-install:
-	@pnpm --dir desktop install --frozen-lockfile
+	@node desktop/scripts/install-locked.mjs
 
 desktop-check:
 	@pnpm --dir desktop lint

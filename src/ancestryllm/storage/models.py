@@ -175,3 +175,37 @@ class LlmRunModel(Base):
     error_code: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[str] = mapped_column(String(40), default=utc_now, nullable=False)
     completed_at: Mapped[str | None] = mapped_column(String(40))
+
+
+class JobModel(Base):
+    """Latest sanitized snapshot for one restart-safe background job."""
+
+    __tablename__ = "jobs"
+
+    job_id: Mapped[str] = mapped_column(String(13), primary_key=True)
+    job_number: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("ix_jobs_number", "job_number"),
+        Index("ix_jobs_state", "state"),
+    )
+
+
+class JobEventModel(Base):
+    """One bounded, replayable sanitized event for a background job."""
+
+    __tablename__ = "job_events"
+
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("ix_job_events_replay", "job_id", "sequence"),)

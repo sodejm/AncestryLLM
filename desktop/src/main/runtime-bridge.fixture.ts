@@ -4,6 +4,7 @@ import type { MainDesktopBridge } from './ipc-handlers'
 interface FixtureRuntimeBridge {
   bridge: MainDesktopBridge
   supervisor?: never
+  prepareJobShutdown?: never
 }
 
 export async function startRuntimeBridge(): Promise<FixtureRuntimeBridge> {

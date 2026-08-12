@@ -46,6 +46,7 @@ const sidecarClient = (
   getSecretStatus: vi.fn(),
   setSecret: vi.fn(),
   deleteSecret: vi.fn(),
+  prepareJobShutdown: vi.fn(),
   ...overrides,
 })
 

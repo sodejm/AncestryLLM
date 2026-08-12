@@ -118,6 +118,13 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "scripts/smoke_sidecar.py" in workflow
     assert "ANCESTRYLLM_PACKAGED_RUNTIME_PATH" in workflow
     assert "Get-AuthenticodeSignature" in workflow
+
+
+def test_release_workflow_uses_the_canonical_desktop_install_contract() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count("node desktop/scripts/install-locked.mjs") == 2
+    assert "pnpm --dir desktop install --frozen-lockfile" not in workflow
     assert "codesign --verify --deep --strict" in workflow
     assert "spctl --assess" in workflow
     assert "stapler validate" in workflow

@@ -223,8 +223,10 @@ untrusted even when they originated locally.
 - Terminate the full isolated POSIX process group or Windows process tree with
   bounded graceful/forced escalation and fail closed when termination cannot be
   verified. The current lifespan drains the Uvicorn listener/server, stdio,
-  process tree, and temporary launch directory. Future jobs, provider streams,
-  and database sessions must register their own drains before their routes ship.
+  process tree, temporary launch directory, and Issue #104's application job
+  admission, cooperative cancellation or bounded wait, and encrypted event
+  repository. Future provider streams and other database sessions must register
+  their own drains before their routes ship.
 
 ## Internal contract principles
 
@@ -251,6 +253,16 @@ change creates a new namespace and coordinated main, sidecar, generated-client,
 mock, migration, and rollback plan. A version is removed only after every
 supported packaged application using it is outside the support window. There
 is no public compatibility promise and no renderer-configurable API URL.
+
+Issue #104 implements this event contract in the UI-neutral Python application
+layer with strict schema-v1 snapshots, bounded SQLCipher persistence and replay,
+increasing per-job sequences, cooperative safe-point cancellation, and exactly
+one terminal result after ordinary completion or restart reconciliation. Fixed
+authenticated list, status, cancel, SSE, and shutdown-assessment routes adapt
+that lifecycle. Electron main alone calls shutdown assessment and presents the
+native **Wait**, **Request cancellation**, or **Stay open** choice. There is no
+renderer job method or listener, producer, submission route, provider stream,
+GEDCOM or RootsMagic operation, or supported job UI in this issue.
 
 File payloads are not copied wholesale through JSON or IPC. Electron main
 resolves a grant to a path only for the declared operation; Python rechecks
@@ -308,7 +320,7 @@ The foundation sequence is:
 | `EL-05` / #100 | Electron sandbox, CSP, protocol, navigation, permissions, and fuse policy. | #98 and #99 merged. |
 | `EL-06` / #101 | Typed context bridge and main-process API proxy. | #99, #11, #102, and #100 merged. |
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |
-| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Internal API and bridge prerequisites merged. |
+| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Source implementation adds the UI-neutral lifecycle, encrypted persistence, fixed authenticated routes, and main-only shutdown preflight; packaged/provider-worker evidence remains with #111/#131. |
 | `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
 | `EL-10` / #106 | Responsive accessible design-system shell and presentation-only interaction contracts. | Renderer foundation and fixed bridge prerequisites merged. |
 | `EL-36` / #131 | Desktop contract, security, accessibility, E2E, and performance evidence. | Begins with #99/#11; gates the MVP. |

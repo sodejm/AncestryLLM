@@ -31,8 +31,20 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
     assert.match(workspace, new RegExp(`^${name}: ${value}$`, 'm'))
   }
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
-  assert.match(workspace, /^overrides:\n {2}fast-uri: 3\.1\.5$/m)
-  assert.match(lockfile, /^overrides:\n {2}fast-uri: 3\.1\.5$/m)
+  assert.match(
+    workspace,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.5$/m,
+  )
+  assert.match(
+    lockfile,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.5$/m,
+  )
+  assert.match(
+    lockfile,
+    /^patchedDependencies:\n {2}electron@39\.8\.10: [0-9a-f]{64}$/m,
+  )
+  assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
+  assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
   assert.match(lockfile, /^ {2}fast-uri@3\.1\.5:$/m)
   assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.4:$/m)
   assert.equal(packageJson.devDependencies['@testing-library/dom'], '10.4.1')

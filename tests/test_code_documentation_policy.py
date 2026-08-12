@@ -116,6 +116,13 @@ class TestClassify:
     def test_pnpm_lock(self) -> None:
         assert classify("pnpm-lock.yaml") == "generated-vendor"
 
+    def test_reviewed_electron_patch(self) -> None:
+        assert classify("desktop/patches/electron@39.8.10.patch") == "generated-vendor"
+
+    def test_unreviewed_patch_raises(self) -> None:
+        with pytest.raises(ValueError, match="unclassified"):
+            classify("desktop/patches/electron@39.8.11.patch")
+
     def test_node_modules_subtree(self) -> None:
         assert classify("desktop/node_modules/foo/index.js") == "generated-vendor"
 
