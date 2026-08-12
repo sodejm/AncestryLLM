@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
+import ancestryllm.api.sidecar as sidecar_module
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import (
     SIDECAR_BUILD,
@@ -23,6 +25,9 @@ from ancestryllm.api.sidecar import (
     parse_launch_frame,
     readiness_line,
 )
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.errors import ConfigurationError
+from ancestryllm.core.secrets import MemorySecretStore, SecretSourceMode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -107,8 +112,106 @@ def test_packaged_sidecar_adds_no_domain_routes() -> None:
         "/api/v1/secrets/{reference}/delete",
         "/api/v1/secrets/{reference}/set",
         "/api/v1/secrets/{reference}/status",
+        "/api/v1/startup-diagnostics",
         "/api/v1/settings",
     }
+
+
+def test_packaged_sidecar_uses_keyring_only_secret_resolution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    selected_modes: list[SecretSourceMode] = []
+
+    def secret_store_factory(*, source_mode: SecretSourceMode) -> MemorySecretStore:
+        selected_modes.append(source_mode)
+        return MemorySecretStore({})
+
+    monkeypatch.setattr(sidecar_module, "KeyringSecretStore", secret_store_factory)
+    create_sidecar_app(
+        LaunchFrame(
+            contract=API_CONTRACT,
+            app_build=SIDECAR_BUILD,
+            bearer_token="A" * 43,
+        ),
+        config=AppConfig(
+            config_path=tmp_path / "config.toml",
+            data_dir=tmp_path,
+        ),
+    )
+
+    assert selected_modes == [SecretSourceMode.KEYRING_ONLY]
+
+
+def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    private_marker = "PRIVATE-CONFIG-PAYLOAD-MARKER"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(private_marker, encoding="utf-8")
+    fallback = AppConfig(config_path=config_path, data_dir=tmp_path / "data")
+
+    def fail_load(_cls: type[AppConfig]) -> AppConfig:
+        raise ConfigurationError(
+            "CONFIG_INVALID",
+            "Configuration is not valid TOML.",
+            "Correct the TOML syntax or restore a known-good configuration file.",
+            details={"payload": private_marker},
+        )
+
+    monkeypatch.setattr(AppConfig, "load", classmethod(fail_load))
+    monkeypatch.setattr(
+        sidecar_module,
+        "_packaged_fallback_config",
+        lambda: fallback,
+        raising=False,
+    )
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+    )
+    app = create_sidecar_app(frame, secret_store=MemorySecretStore({}))
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False) as client:
+        diagnostics = client.get("/api/v1/startup-diagnostics", headers=headers)
+        blocked = client.patch(
+            "/api/v1/settings",
+            headers=headers,
+            json={
+                "schema_version": 1,
+                "expected_revision": 0,
+                "changes": {"limits.max_query_rows": 250},
+            },
+        )
+
+    assert diagnostics.status_code == 200
+    payload = diagnostics.json()
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "degraded"
+    configuration = next(
+        item for item in payload["components"] if item["component"] == "configuration"
+    )
+    assert configuration == {
+        "component": "configuration",
+        "status": "blocked",
+        "code": "CONFIG_INVALID",
+        "message": "The desktop configuration could not be validated.",
+        "remediation": "Repair or restore config.toml, then retry startup diagnostics.",
+        "restart_required": False,
+        "blocks_mutations": True,
+    }
+    assert private_marker not in diagnostics.text
+    assert str(tmp_path) not in diagnostics.text
+    assert blocked.status_code == 503
+    assert blocked.json()["code"] == "STARTUP_MUTATION_BLOCKED"
+    assert private_marker not in blocked.text
+    assert config_path.read_text(encoding="utf-8") == private_marker
+    assert not fallback.data_dir.exists()
 
 
 def test_windows_process_tree_guard_is_retained_and_other_platforms_are_noops() -> None:

@@ -5,6 +5,7 @@ import {
   type BridgeResult,
   type CapabilityManifest,
   type LocalPreferences,
+  type StartupDiagnosticReport,
   type StartupDiagnostics,
 } from '../shared-contract/desktop'
 
@@ -30,11 +31,56 @@ export const appInfoFixture = success<AppInfo>({
   buildChannel: 'development',
 })
 
+export const readyStartupReportFixture = deepFreeze<StartupDiagnosticReport>({
+  schema_version: 1,
+  status: 'ready',
+  platform: { operating_system: 'macos', architecture: 'arm64' },
+  components: [
+    {
+      component: 'configuration',
+      status: 'ready',
+      code: 'CONFIGURATION_READY',
+      message: 'Configuration is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'sqlcipher',
+      status: 'ready',
+      code: 'SQLCIPHER_READY',
+      message: 'SQLCipher is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'keyring',
+      status: 'ready',
+      code: 'KEYRING_READY',
+      message: 'Credential storage is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'workspace',
+      status: 'ready',
+      code: 'DATABASE_DIRECTORY_READY',
+      message: 'Workspace is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+  ],
+})
+
 export const readyDiagnosticsFixture = success<StartupDiagnostics>({
   state: 'ready',
   failure: null,
   automaticRestartsRemaining: 2,
   manualRetriesRemaining: 1,
+  report: readyStartupReportFixture,
 })
 
 export const degradedDiagnosticsFixture = success<StartupDiagnostics>({
@@ -42,6 +88,7 @@ export const degradedDiagnosticsFixture = success<StartupDiagnostics>({
   failure: 'startup_failed',
   automaticRestartsRemaining: 0,
   manualRetriesRemaining: 1,
+  report: null,
 })
 
 export const capabilitiesFixture = success<CapabilityManifest>({

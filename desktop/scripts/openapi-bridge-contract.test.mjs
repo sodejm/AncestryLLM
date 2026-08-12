@@ -14,8 +14,10 @@ test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract'
     '/api/v1/secrets/{reference}/set',
     '/api/v1/secrets/{reference}/status',
     '/api/v1/settings',
+    '/api/v1/startup-diagnostics',
   ])
   assert.equal(document.paths['/api/v1/capabilities'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/CapabilityManifest')
+  assert.equal(document.paths['/api/v1/startup-diagnostics'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/StartupDiagnosticReportResponse')
 
   const settingsPath = document.paths['/api/v1/settings']
   assert.equal(settingsPath.get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/SettingsResponse')

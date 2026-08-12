@@ -290,6 +290,9 @@ h3 { margin-top: 0; }
 .async-state p:last-child { margin-bottom: 0; }
 .summary-value { margin-bottom: var(--space-1); font-size: 1.25rem; font-weight: 750; }
 .diagnostics-summary { margin-bottom: var(--space-6); }
+.diagnostic-list { display: grid; gap: var(--space-4); margin-top: var(--space-5); }
+.diagnostic-item { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.diagnostic-item:first-child { padding-top: 0; border-top: 0; }
 .welcome { max-width: 50rem; }
 .welcome-grid .summary-card a { color: var(--color-text); font-weight: 750; }
 .welcome-actions,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass, field
+from enum import StrEnum
 from hmac import compare_digest
 from typing import Any, Protocol, cast
 
@@ -23,6 +24,13 @@ ENVIRONMENT_NAMES = {
 }
 if frozenset(ENVIRONMENT_NAMES) != SUPPORTED_SECRET_REFERENCES:
     raise RuntimeError("Secret reference configuration is inconsistent.")
+
+
+class SecretSourceMode(StrEnum):
+    """Explicit secret-source policy for one application boundary."""
+
+    KEYRING_WITH_ENVIRONMENT_FALLBACK = "keyring-with-environment-fallback"
+    KEYRING_ONLY = "keyring-only"
 
 
 @dataclass(slots=True)
@@ -58,9 +66,10 @@ class SecretStore(Protocol):
 
 @dataclass(slots=True)
 class KeyringSecretStore:
-    """Prefer the OS keyring and accept environment injection as fallback."""
+    """Use the OS keyring with an explicit, boundary-owned fallback policy."""
 
     service_name: str = KEYRING_SERVICE
+    source_mode: SecretSourceMode = SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK
     _redactor: SensitiveValueRedactor = field(
         default_factory=SensitiveValueRedactor, init=False, repr=False
     )
@@ -91,10 +100,11 @@ class KeyringSecretStore:
             secret_value = cast("str", value)
             self.register_sensitive(secret_value)
             return secret_value
-        environment_value = os.getenv(environment_name)
-        if environment_value:
-            self.register_sensitive(environment_value)
-            return environment_value
+        if self.source_mode is SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK:
+            environment_value = os.getenv(environment_name)
+            if environment_value:
+                self.register_sensitive(environment_value)
+                return environment_value
         if keyring_error is not None:
             raise StorageError(
                 "KEYRING_READ_FAILED",
@@ -105,7 +115,8 @@ class KeyringSecretStore:
 
     def set(self, name: str, value: str) -> None:
         environment_name = self._environment_name(name)
-        self._reject_environment_managed(environment_name)
+        if self.source_mode is SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK:
+            self._reject_environment_managed(environment_name)
         if not value:
             raise StorageError("SECRET_EMPTY", "Empty secret values are not stored.")
         self.register_sensitive(value)
@@ -127,7 +138,8 @@ class KeyringSecretStore:
 
     def delete(self, name: str) -> None:
         environment_name = self._environment_name(name)
-        self._reject_environment_managed(environment_name)
+        if self.source_mode is SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK:
+            self._reject_environment_managed(environment_name)
         try:
             keyring = self._keyring()
             existing = keyring.get_password(self.service_name, name)

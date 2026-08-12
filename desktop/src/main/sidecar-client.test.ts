@@ -9,6 +9,24 @@ const session: Readonly<AuthenticatedSidecarSession> = Object.freeze({
 })
 
 describe('main-only sidecar capabilities client', () => {
+  it('uses the fixed authenticated startup-diagnostics request and validates its response', async () => {
+    const request = vi.fn().mockResolvedValue({ statusCode: 200, contentType: 'application/json', body: JSON.stringify({
+      schema_version: 1,
+      status: 'ready',
+      platform: { operating_system: 'linux', architecture: 'x64' },
+      components: [
+        { component: 'configuration', status: 'ready', code: 'CONFIGURATION_READY', message: 'Configuration is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+        { component: 'sqlcipher', status: 'ready', code: 'SQLCIPHER_READY', message: 'SQLCipher is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+        { component: 'keyring', status: 'ready', code: 'KEYRING_READY', message: 'Credential storage is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+        { component: 'workspace', status: 'ready', code: 'DATABASE_DIRECTORY_READY', message: 'Workspace is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+      ],
+    }) })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+    await expect(client.getStartupDiagnostics()).resolves.toMatchObject({ status: 'ready', schema_version: 1 })
+    expect(request).toHaveBeenCalledWith(session, '/api/v1/startup-diagnostics', undefined)
+  })
+
   it('uses the fixed authenticated capabilities request and validates its response', async () => {
     const request = vi.fn().mockResolvedValue({ statusCode: 200, contentType: 'application/json', body: JSON.stringify({
       api: { namespace: '/api/v1', contract: 'ancestryllm.internal-api/1', application_contract: 'ancestryllm.application/0.3' },

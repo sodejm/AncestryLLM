@@ -20,7 +20,12 @@ from ancestryllm.core.secrets import (
     MemorySecretStore,
 )
 from ancestryllm.storage.database import DATABASE_SECRET, SQLITE_HEADER, Database
-from ancestryllm.storage.diagnostics import diagnose_storage
+from ancestryllm.storage.diagnostics import (
+    StartupConfigurationFailure,
+    StartupDiagnosticReport,
+    diagnose_startup,
+    diagnose_storage,
+)
 
 
 def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
@@ -186,6 +191,55 @@ def test_storage_diagnostics_are_read_only_and_serializable(tmp_path: Path) -> N
     serialized = json.dumps(diagnostics)
     assert str(private_parent) not in serialized
     assert "PRIVATE-HOST-DIAGNOSTIC-PATH" not in serialized
+
+
+def test_startup_diagnostics_are_typed_deterministic_and_ready_without_writes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workspace.db"
+
+    report = diagnose_startup(
+        path, MemorySecretStore({}), operating_system="darwin", machine="arm64"
+    )
+
+    assert isinstance(report, StartupDiagnosticReport)
+    assert report.schema_version == 1
+    assert report.status == "ready"
+    assert report.platform.operating_system == "macos"
+    assert report.platform.architecture == "arm64"
+    assert [component.component for component in report.components] == [
+        "configuration",
+        "sqlcipher",
+        "keyring",
+        "workspace",
+    ]
+    assert report.mutations_allowed is True
+    assert path.exists() is False
+
+
+def test_startup_diagnostics_block_mutations_for_corrupt_configuration_without_leaks(
+    tmp_path: Path,
+) -> None:
+    private_marker = "PRIVATE-CONFIG-PAYLOAD-MARKER"
+
+    report = diagnose_startup(
+        tmp_path / private_marker / "workspace.db",
+        MemorySecretStore({}),
+        configuration_failure=StartupConfigurationFailure(
+            code="CONFIG_INVALID",
+        ),
+        operating_system="linux",
+        machine="x86_64",
+    )
+
+    configuration = next(
+        component for component in report.components if component.component == "configuration"
+    )
+    assert report.status == "degraded"
+    assert report.mutations_allowed is False
+    assert configuration.status == "blocked"
+    assert configuration.blocks_mutations is True
+    assert private_marker not in repr(report)
 
 
 def test_storage_diagnostics_report_keyring_failures_without_secret_values(tmp_path: Path) -> None:

@@ -9,9 +9,31 @@ const manifest = {
   pagination: { default_limit: 25, maximum_limit: 100, maximum_cursor_characters: 256 },
 } as const
 
+const startupReport = {
+  schema_version: 1 as const,
+  status: 'ready' as const,
+  platform: { operating_system: 'macos' as const, architecture: 'arm64' as const },
+  components: [
+    { component: 'configuration' as const, status: 'ready' as const, code: 'CONFIGURATION_READY', message: 'Configuration is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+    { component: 'sqlcipher' as const, status: 'ready' as const, code: 'SQLCIPHER_READY', message: 'SQLCipher is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+    { component: 'keyring' as const, status: 'ready' as const, code: 'KEYRING_READY', message: 'Credential storage is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+    { component: 'workspace' as const, status: 'ready' as const, code: 'DATABASE_DIRECTORY_READY', message: 'Workspace is ready.', remediation: null, restart_required: false, blocks_mutations: false },
+  ],
+} as const
+
+const blockedStartupReport = {
+  ...startupReport,
+  status: 'degraded' as const,
+  components: [
+    { component: 'configuration' as const, status: 'blocked' as const, code: 'CONFIG_INVALID', message: 'Configuration is invalid.', remediation: 'Repair config.toml and retry.', restart_required: false, blocks_mutations: true },
+    ...startupReport.components.slice(1),
+  ],
+} as const
+
 const sidecarClient = (
   overrides: Partial<SidecarClient> = {},
 ): SidecarClient => ({
+  getStartupDiagnostics: vi.fn().mockResolvedValue(startupReport),
   getCapabilities: vi.fn().mockResolvedValue(manifest),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -36,7 +58,7 @@ describe('desktop control bridge', () => {
     })
 
     await expect(bridge.getAppInfo()).resolves.toMatchObject({ ok: true })
-    await expect(bridge.getStartupDiagnostics()).resolves.toEqual({ ok: true, protocolVersion: '1', data: { state: 'ready', failure: null, automaticRestartsRemaining: 2, manualRetriesRemaining: 1 } })
+    await expect(bridge.getStartupDiagnostics()).resolves.toEqual({ ok: true, protocolVersion: '1', data: { state: 'ready', failure: null, automaticRestartsRemaining: 2, manualRetriesRemaining: 1, report: startupReport } })
     await expect(bridge.getCapabilities()).resolves.toEqual({ ok: true, protocolVersion: '1', data: manifest })
     await expect(bridge.getPreferences()).resolves.toMatchObject({ ok: true, data: { colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 } })
   })
@@ -51,7 +73,7 @@ describe('desktop control bridge', () => {
       preferences: new MemoryPreferencesStore(),
     })
 
-    await expect(bridge.retrySidecar()).resolves.toEqual({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'crash_loop', automaticRestartsRemaining: 0, manualRetriesRemaining: 0 } })
+    await expect(bridge.retrySidecar()).resolves.toEqual({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'crash_loop', automaticRestartsRemaining: 0, manualRetriesRemaining: 0, report: null } })
     expect(retry).toHaveBeenCalledOnce()
   })
 
@@ -99,11 +121,35 @@ describe('desktop control bridge', () => {
   it('updates preferences through a main-owned store and increments revision', async () => {
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
-      supervisor: { diagnostics: () => ({ state: 'idle' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
       sidecarClient: sidecarClient(),
       preferences: new MemoryPreferencesStore(),
     })
     await expect(bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark', reducedMotion: true })).resolves.toMatchObject({ ok: true, data: { colorScheme: 'dark', reducedMotion: true, revision: 1 } })
     await expect(bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'light' })).resolves.toMatchObject({ ok: false, error: { code: 'PREFERENCES_CONFLICT' } })
+  })
+
+  it('blocks every renderer mutation when startup diagnostics are degraded', async () => {
+    const client = sidecarClient({
+      getStartupDiagnostics: vi.fn().mockResolvedValue(blockedStartupReport),
+      updateSettings: vi.fn(),
+      setSecret: vi.fn(),
+      deleteSecret: vi.fn(),
+    })
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'packaged' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 1 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.updatePreferences({ expectedRevision: 0, colorScheme: 'dark' })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
+    await expect(bridge.updateSettings({ schema_version: 1, expected_revision: 0, changes: { 'providers.default': 'none' } })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
+    await expect(bridge.setSecret({ reference: 'openai.api_key', value: 'never-written' })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
+    await expect(bridge.deleteSecret({ reference: 'openai.api_key' })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
+    await expect(bridge.getPreferences()).resolves.toMatchObject({ ok: true, data: { revision: 0, colorScheme: 'system' } })
+    expect(client.updateSettings).not.toHaveBeenCalled()
+    expect(client.setSecret).not.toHaveBeenCalled()
+    expect(client.deleteSecret).not.toHaveBeenCalled()
   })
 })

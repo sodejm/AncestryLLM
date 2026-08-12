@@ -26,8 +26,11 @@ import {
   type SecretReferenceRequest,
   type SecretSetRequest,
   type SecretStatus,
+  type StartupDiagnosticComponent,
+  type StartupDiagnosticReport,
   type StartupDiagnostics,
   fileGrantPurposes,
+  startupDiagnosticComponents,
 } from './desktop'
 
 type Parser<T> = (value: unknown) => T
@@ -42,6 +45,7 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'REQUEST_TIMEOUT',
   'SIDECAR_UNAVAILABLE',
   'SIDECAR_REQUEST_FAILED',
+  'STARTUP_MUTATION_BLOCKED',
   'PREFERENCES_UNAVAILABLE',
   'PREFERENCES_CONFLICT',
   'SETTINGS_UNAVAILABLE',
@@ -61,6 +65,10 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
 ]
 const startupStates = ['starting', 'ready', 'degraded', 'stopped'] as const
 const startupFailures = ['startup_failed', 'startup_timeout', 'incompatible_build', 'crash_loop'] as const
+const startupReportStatuses = ['ready', 'degraded'] as const
+const startupComponentStatuses = ['ready', 'warning', 'blocked'] as const
+const startupOperatingSystems = ['linux', 'macos', 'windows', 'unsupported'] as const
+const startupArchitectures = ['x64', 'arm64', 'unsupported'] as const
 const identifierPattern = /^[A-Za-z0-9._:-]+$/
 const dispatchKeyPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 const fileGrantIdPattern = /^grt_[a-f0-9]{64}$/
@@ -69,6 +77,9 @@ const digestPattern = /^[a-f0-9]{64}$/
 // Control characters are intentionally rejected from user-visible file names.
 // eslint-disable-next-line no-control-regex
 const safeDisplayNamePattern = /^[^/\\\u0000-\u001f\u007f]+$/
+// Diagnostic prose crosses the renderer trust boundary and must never expose paths.
+// eslint-disable-next-line no-control-regex
+const safeDiagnosticTextPattern = /^[^/\\\u0000-\u001f\u007f]+$/
 const mediaTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/
 const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'markdown']
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
@@ -205,13 +216,64 @@ function parseAppInfo(value: unknown): AppInfo {
   return value as unknown as AppInfo
 }
 
+function parseStartupDiagnosticComponent(value: unknown, expectedComponent: string): StartupDiagnosticComponent {
+  if (!record(value)
+    || !exactKeys(value, ['component', 'status', 'code', 'message', 'remediation', 'restart_required', 'blocks_mutations'])
+    || value.component !== expectedComponent
+    || !startupComponentStatuses.includes(value.status as typeof startupComponentStatuses[number])
+    || !bounded(value.code, 1, 96) || !identifierPattern.test(value.code)
+    || !bounded(value.message, 1, 512) || !safeDiagnosticTextPattern.test(value.message)
+    || (value.remediation !== null
+      && (!bounded(value.remediation, 1, 512) || !safeDiagnosticTextPattern.test(value.remediation)))
+    || typeof value.restart_required !== 'boolean'
+    || typeof value.blocks_mutations !== 'boolean'
+    || ((value.status === 'blocked') !== value.blocks_mutations)) invalidResponse()
+  return value as unknown as StartupDiagnosticComponent
+}
+
+export function parseStartupDiagnosticReport(value: unknown): Readonly<StartupDiagnosticReport> {
+  if (!record(value)
+    || !exactKeys(value, ['schema_version', 'status', 'platform', 'components'])
+    || value.schema_version !== 1
+    || !startupReportStatuses.includes(value.status as typeof startupReportStatuses[number])
+    || !record(value.platform)
+    || !exactKeys(value.platform, ['operating_system', 'architecture'])
+    || !startupOperatingSystems.includes(value.platform.operating_system as typeof startupOperatingSystems[number])
+    || !startupArchitectures.includes(value.platform.architecture as typeof startupArchitectures[number])
+    || !Array.isArray(value.components)
+    || value.components.length !== startupDiagnosticComponents.length) invalidResponse()
+  const components = value.components.map((component, index) =>
+    parseStartupDiagnosticComponent(component, startupDiagnosticComponents[index] ?? ''))
+  const blocked = components.some((component) => component.blocks_mutations)
+  if ((value.status === 'degraded') !== blocked) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    status: value.status,
+    platform: {
+      operating_system: value.platform.operating_system,
+      architecture: value.platform.architecture,
+    },
+    components,
+  } as StartupDiagnosticReport)
+}
+
 function parseStartupDiagnostics(value: unknown): StartupDiagnostics {
-  if (!record(value) || !exactKeys(value, ['state', 'failure', 'automaticRestartsRemaining', 'manualRetriesRemaining'])
+  if (!record(value) || !exactKeys(value, ['state', 'failure', 'automaticRestartsRemaining', 'manualRetriesRemaining', 'report'])
     || !startupStates.includes(value.state as typeof startupStates[number])
     || (value.failure !== null && !startupFailures.includes(value.failure as typeof startupFailures[number]))
     || !integer(value.automaticRestartsRemaining, 0, 100)
     || !integer(value.manualRetriesRemaining, 0, 100)) invalidResponse()
-  return value as unknown as StartupDiagnostics
+  const report = value.report === null ? null : parseStartupDiagnosticReport(value.report)
+  if (value.state === 'ready' && report?.status !== 'ready') invalidResponse()
+  if (value.state === 'degraded' && report !== null && report.status !== 'degraded') invalidResponse()
+  if ((value.state === 'starting' || value.state === 'stopped') && report !== null) invalidResponse()
+  return deepFreeze({
+    state: value.state,
+    failure: value.failure,
+    automaticRestartsRemaining: value.automaticRestartsRemaining,
+    manualRetriesRemaining: value.manualRetriesRemaining,
+    report,
+  } as StartupDiagnostics)
 }
 
 function parseCapabilityManifest(value: unknown): CapabilityManifest {

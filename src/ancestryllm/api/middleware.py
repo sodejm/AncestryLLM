@@ -69,7 +69,11 @@ class _RoutePolicy:
 
 
 def _route_policy(path: str) -> _RoutePolicy | None:
-    if path in {f"{API_NAMESPACE}/health", f"{API_NAMESPACE}/capabilities"}:
+    if path in {
+        f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/startup-diagnostics",
+    }:
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/settings":
         return _RoutePolicy("PATCH", accepts_json=True)

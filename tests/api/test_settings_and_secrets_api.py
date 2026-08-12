@@ -38,6 +38,34 @@ def test_settings_get_exposes_only_reviewed_non_secret_schema(
     assert "config_path" not in response.text
 
 
+def test_startup_diagnostics_are_versioned_typed_and_path_free(
+    api_client: TestClient, api_headers: dict[str, str]
+) -> None:
+    response = api_client.get(f"{API_NAMESPACE}/startup-diagnostics", headers=api_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "ready"
+    assert set(payload["platform"]) == {"operating_system", "architecture"}
+    assert payload["components"]
+    assert all(
+        set(item)
+        == {
+            "component",
+            "status",
+            "code",
+            "message",
+            "remediation",
+            "restart_required",
+            "blocks_mutations",
+        }
+        for item in payload["components"]
+    )
+    assert "/" not in json.dumps(payload)
+    assert "\\" not in json.dumps(payload)
+
+
 def test_settings_patch_is_allowlisted_revision_checked_and_secret_free(
     api_client: TestClient, api_headers: dict[str, str]
 ) -> None:
@@ -197,6 +225,7 @@ def test_openapi_marks_secret_input_write_only_and_has_no_readback_contract() ->
     assert schema["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
         f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/startup-diagnostics",
         f"{API_NAMESPACE}/settings",
         f"{API_NAMESPACE}/secrets/{{reference}}/status",
         f"{API_NAMESPACE}/secrets/{{reference}}/set",
