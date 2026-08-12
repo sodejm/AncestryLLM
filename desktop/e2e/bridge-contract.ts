@@ -1,3 +1,4 @@
+/** Defines the explicit preload bridge allowlist shared by source and packaged tests. */
 import type { AncestryBridge } from '../src/shared-contract/desktop'
 
 const bridgeMethodSet = {
