@@ -25,7 +25,8 @@ test('keeps sidecar capabilities and diagnostics out of renderer and preload cod
   const exposedSource = await readSources(exposedRoots)
   assert.doesNotMatch(exposedSource, /bearerToken|AuthenticatedSidecarSession/)
   assert.doesNotMatch(exposedSource, /SidecarDiagnostics|sidecar-supervisor/)
-  assert.doesNotMatch(exposedSource, /127\.0\.0\.1|Authorization:\s*Bearer/)
+  assert.doesNotMatch(exposedSource, /Authorization:\s*Bearer/)
+  assert.doesNotMatch(exposedSource, /\b(?:fetch|XMLHttpRequest|WebSocket)\b/)
 })
 
 test('keeps host container authority out of renderer, preload, and shared contracts', async () => {

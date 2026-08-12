@@ -30,14 +30,14 @@ async function expectNoUnsupportedSurfaces(page: Page, allowProviderSettings = f
     /Component gallery/i,
     /Primary action/i,
     /Quiet action/i,
-    /\bgenealogy\b/i,
-    /\bcloud\b/i,
     /\baccounts?\b/i,
     /\bjobs?\b/i,
     /\bchat\b/i,
     /\bupdaters?\b/i,
   ]
-  if (!allowProviderSettings) prohibited.push(/\bproviders?\b/i)
+  if (!allowProviderSettings) {
+    prohibited.push(/\bgenealogy\b/i, /\bcloud\b/i, /\bproviders?\b/i)
+  }
   for (const pattern of prohibited) {
     await expect(main).not.toContainText(pattern)
   }
@@ -262,6 +262,73 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
     await reducedMotion.click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.reducedMotion)).toBe('true')
     await expect(reducedMotion).toBeChecked()
+
+    for (const name of [
+      'General',
+      'Storage',
+      'Local providers',
+      'Cloud providers',
+      'Consent',
+      'Privacy',
+      'Limits',
+      'Secrets',
+    ]) {
+      await expect(main.getByRole('region', { name })).toBeVisible()
+    }
+    const deployment = main.getByRole('region', { name: 'Deployment mode' })
+    await expect(deployment.getByRole('heading', { name: 'Local Desktop' })).toBeVisible()
+    await expect(deployment.getByRole('heading', { name: 'Connect Remote' })).toBeVisible()
+    await expect(deployment.getByRole('heading', { name: 'Host Remote' })).toBeVisible()
+    await expect(deployment.getByText('Not available in this release')).toHaveCount(2)
+
+    const localProviders = main.getByRole('region', { name: 'Local providers' })
+    await localProviders.getByLabel('Profile name').fill('private-local')
+    await localProviders.getByLabel('Model').fill('fictional-local-model')
+    const saveLocal = localProviders.getByRole('button', { name: 'Save local provider profile' })
+    await expect(saveLocal).toBeDisabled()
+    await localProviders.getByRole('button', { name: 'Test local provider endpoint' }).click()
+    await expect(localProviders.getByText('Endpoint tested: reachable on this device.')).toBeVisible()
+    await expect(saveLocal).toBeEnabled()
+    await saveLocal.click()
+    await expect(localProviders.getByRole('heading', { name: 'private-local' })).toBeVisible()
+
+    const cloudProviders = main.getByRole('region', { name: 'Cloud providers' })
+    await cloudProviders.getByLabel('Profile name').fill('reviewed-cloud')
+    await cloudProviders.getByLabel('Model').fill('fictional-cloud-model')
+    const saveCloud = cloudProviders.getByRole('button', { name: 'Save cloud provider profile' })
+    await expect(saveCloud).toBeDisabled()
+    await cloudProviders.getByRole('button', { name: 'Test cloud provider endpoint' }).click()
+    await expect(cloudProviders.getByText('Endpoint tested: reviewed remote destination is reachable.')).toBeVisible()
+    await expect(saveCloud).toBeEnabled()
+    await saveCloud.click()
+    await expect(cloudProviders.getByRole('heading', { name: 'reviewed-cloud' })).toBeVisible()
+
+    const consent = main.getByRole('region', { name: 'Consent' })
+    await consent.getByLabel('Consent name').fill('reviewed-consent')
+    await consent.getByLabel('Provider profile').selectOption('reviewed-cloud')
+    await consent.getByRole('checkbox', { name: 'Living person', exact: true }).check()
+    await consent.getByLabel('Maximum cost in US dollars').fill('1.25')
+    await consent.getByRole('checkbox', { name: 'Allow provider retention' }).check()
+    const saveConsent = consent.getByRole('button', { name: 'Save consent' })
+    await expect(saveConsent).toBeDisabled()
+    await consent.getByRole('button', { name: 'Review consent' }).click()
+    const review = consent.getByRole('region', { name: 'Consent review' })
+    await expect(review).toContainText('Provider: openai')
+    await expect(review).toContainText('Profile: reviewed-cloud')
+    await expect(review).toContainText('Model: fictional-cloud-model')
+    await expect(review).toContainText('Purpose: genealogy-analysis')
+    await expect(review).toContainText('Data classes: Living person')
+    await expect(review).toContainText('Retention: Allowed')
+    await expect(review).toContainText('Budget: $1.25 USD')
+    await expect(review).toContainText('Living-person data will leave this device.')
+    await expect(review).toContainText('This provider endpoint is remote.')
+    await expect(review).toContainText('The remote provider may retain payloads.')
+    await expect(saveConsent).toBeEnabled()
+    await saveConsent.click()
+    await expect(consent.getByRole('heading', { name: 'reviewed-consent' })).toBeVisible()
+    await expect(consent.getByText('Active', { exact: true })).toBeVisible()
+    await consent.getByRole('button', { name: 'Revoke reviewed-consent' }).click()
+    await expect(consent.getByText('Revoked', { exact: true })).toBeVisible()
     await expectNoUnsupportedSurfaces(page, true)
   } finally {
     await app.close()

@@ -8,12 +8,20 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
+  type ConsentCreateRequest,
+  type ConsentPreview,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
   type FileGrant,
   type FileGrantId,
   type FileGrantRevocation,
   type LocalPreferences,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
+  type ProviderConfiguration,
+  type ProviderEndpointValidation,
+  type ProviderEndpointValidationRequest,
+  type ProviderProfileCreateRequest,
   type SaveFileGrantRequest,
   type SecretReferenceRequest,
   type SecretSetRequest,
@@ -22,12 +30,20 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseConsentCreateRequest,
+  parseConsentPreviewRequest,
+  parseConsentPreviewResult,
+  parseConsentRevokeRequest,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
+  parseProviderConfigurationResult,
+  parseProviderEndpointValidationRequest,
+  parseProviderEndpointValidationResult,
+  parseProviderProfileCreateRequest,
   parseSaveFileGrantRequest,
   parseSecretReferenceRequest,
   parseSecretSetRequest,
@@ -52,7 +68,15 @@ export interface BridgeWebContents {
 
 export interface MainDesktopBridge extends Omit<
   AncestryBridge,
-  'requestOpenFileGrant' | 'requestSaveFileGrant' | 'revokeFileGrant'
+  | 'getProviderConfiguration'
+  | 'createProviderProfile'
+  | 'validateProviderEndpoint'
+  | 'previewConsent'
+  | 'createConsent'
+  | 'revokeConsent'
+  | 'requestOpenFileGrant'
+  | 'requestSaveFileGrant'
+  | 'revokeFileGrant'
 > {
   getAppInfo(signal?: AbortSignal): ReturnType<AncestryBridge['getAppInfo']>
   getStartupDiagnostics(signal?: AbortSignal): ReturnType<AncestryBridge['getStartupDiagnostics']>
@@ -65,6 +89,27 @@ export interface MainDesktopBridge extends Omit<
   getSecretStatus(request: SecretReferenceRequest, signal?: AbortSignal): ReturnType<AncestryBridge['getSecretStatus']>
   setSecret(request: SecretSetRequest, signal?: AbortSignal): ReturnType<AncestryBridge['setSecret']>
   deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal): ReturnType<AncestryBridge['deleteSecret']>
+  getProviderConfiguration(signal?: AbortSignal): ReturnType<AncestryBridge['getProviderConfiguration']>
+  createProviderProfile(
+    request: ProviderProfileCreateRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['createProviderProfile']>
+  validateProviderEndpoint(
+    request: ProviderEndpointValidationRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['validateProviderEndpoint']>
+  previewConsent(
+    request: ConsentPreviewRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['previewConsent']>
+  createConsent(
+    request: ConsentCreateRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['createConsent']>
+  revokeConsent(
+    request: ConsentRevokeRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['revokeConsent']>
 }
 
 export interface MainFileGrantBroker {
@@ -162,6 +207,12 @@ const secretRequestLimits = Object.freeze({
   maxDepth: 3,
   maxItems: 4,
   maxStringCharacters: 65_536,
+})
+const providerRequestLimits = Object.freeze({
+  maxBytes: 65_600,
+  maxDepth: 5,
+  maxItems: 512,
+  maxStringCharacters: 2_048,
 })
 const responseLimits = Object.freeze({
   maxBytes: 1_100_000,
@@ -549,6 +600,104 @@ export function registerDesktopIpcHandlers(
       timeoutMs,
       (signal) => bridge.deleteSecret(request, signal),
       parseSecretStatusResult,
+    )
+  })
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.getProviderConfiguration,
+    authorize,
+    (signal) => bridge.getProviderConfiguration(signal),
+    parseProviderConfigurationResult,
+    timeoutMs,
+  )
+  ipc.handle(desktopChannels.createProviderProfile, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ProviderConfiguration>()
+    if (args.length !== 1) return invalidRequest<ProviderConfiguration>()
+    let request: ProviderProfileCreateRequest
+    try {
+      validateStructuredClone(args[0], providerRequestLimits)
+      request = parseProviderProfileCreateRequest(args[0])
+    } catch {
+      return invalidRequest<ProviderConfiguration>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.createProviderProfile(request, signal),
+      parseProviderConfigurationResult,
+    )
+  })
+  ipc.handle(desktopChannels.validateProviderEndpoint, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ProviderEndpointValidation>()
+    if (args.length !== 1) return invalidRequest<ProviderEndpointValidation>()
+    let request: ProviderEndpointValidationRequest
+    try {
+      validateStructuredClone(args[0], providerRequestLimits)
+      request = parseProviderEndpointValidationRequest(args[0])
+    } catch {
+      return invalidRequest<ProviderEndpointValidation>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.validateProviderEndpoint(request, signal),
+      parseProviderEndpointValidationResult,
+    )
+  })
+  ipc.handle(desktopChannels.previewConsent, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ConsentPreview>()
+    if (args.length !== 1) return invalidRequest<ConsentPreview>()
+    let request: ConsentPreviewRequest
+    try {
+      validateStructuredClone(args[0], providerRequestLimits)
+      request = parseConsentPreviewRequest(args[0])
+    } catch {
+      return invalidRequest<ConsentPreview>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.previewConsent(request, signal),
+      parseConsentPreviewResult,
+    )
+  })
+  ipc.handle(desktopChannels.createConsent, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ProviderConfiguration>()
+    if (args.length !== 1) return invalidRequest<ProviderConfiguration>()
+    let request: ConsentCreateRequest
+    try {
+      validateStructuredClone(args[0], providerRequestLimits)
+      request = parseConsentCreateRequest(args[0])
+    } catch {
+      return invalidRequest<ProviderConfiguration>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.createConsent(request, signal),
+      parseProviderConfigurationResult,
+    )
+  })
+  ipc.handle(desktopChannels.revokeConsent, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ProviderConfiguration>()
+    if (args.length !== 1) return invalidRequest<ProviderConfiguration>()
+    let request: ConsentRevokeRequest
+    try {
+      validateStructuredClone(args[0], providerRequestLimits)
+      request = parseConsentRevokeRequest(args[0])
+    } catch {
+      return invalidRequest<ProviderConfiguration>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.revokeConsent(request, signal),
+      parseProviderConfigurationResult,
     )
   })
   ipc.handle(desktopChannels.requestOpenFileGrant, async (event, ...args) => {

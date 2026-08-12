@@ -4,6 +4,14 @@ import {
   type ApplicationSettings,
   type ApplicationSettingsPatch,
   type CapabilityManifest,
+  type ConsentCreateRequest,
+  type ConsentPreview,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
+  type ProviderConfiguration,
+  type ProviderEndpointValidation,
+  type ProviderEndpointValidationRequest,
+  type ProviderProfileCreateRequest,
   type SecretReference,
   type SecretReferenceRequest,
   type SecretSetRequest,
@@ -12,6 +20,9 @@ import {
 } from '../shared-contract/desktop'
 import {
   parseCapabilitiesResult,
+  parseConsentPreviewResult,
+  parseProviderConfigurationResult,
+  parseProviderEndpointValidationResult,
   parseSecretStatusResult,
   parseSettingsResult,
   parseStartupDiagnosticReport,
@@ -21,6 +32,11 @@ import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 const CAPABILITIES_PATH = '/api/v1/capabilities' as const
 const STARTUP_DIAGNOSTICS_PATH = '/api/v1/startup-diagnostics' as const
 const SETTINGS_PATH = '/api/v1/settings' as const
+const PROVIDER_CONFIGURATION_PATH = '/api/v1/provider-configuration' as const
+const PROVIDER_PROFILES_PATH = '/api/v1/provider-profiles' as const
+const PROVIDER_ENDPOINT_VALIDATION_PATH = '/api/v1/provider-endpoints/validate' as const
+const CONSENT_PREVIEW_PATH = '/api/v1/consents/preview' as const
+const CONSENTS_PATH = '/api/v1/consents' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -30,6 +46,12 @@ type SidecarPath =
   | typeof CAPABILITIES_PATH
   | typeof STARTUP_DIAGNOSTICS_PATH
   | typeof SETTINGS_PATH
+  | typeof PROVIDER_CONFIGURATION_PATH
+  | typeof PROVIDER_PROFILES_PATH
+  | typeof PROVIDER_ENDPOINT_VALIDATION_PATH
+  | typeof CONSENT_PREVIEW_PATH
+  | typeof CONSENTS_PATH
+  | `/api/v1/consents/${string}/revoke`
   | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
 export type SidecarClientFailure =
@@ -42,6 +64,11 @@ export type SidecarClientFailure =
   | 'secret_store_unavailable'
   | 'secret_environment_managed'
   | 'secret_invalid'
+  | 'provider_configuration_conflict'
+  | 'provider_configuration_invalid'
+  | 'endpoint_rejected'
+  | 'consent_invalid'
+  | 'consent_preview_stale'
 
 export class SidecarClientError extends Error {
   constructor(readonly reason: SidecarClientFailure) {
@@ -76,6 +103,18 @@ export interface SidecarClient {
   getSecretStatus(request: SecretReferenceRequest, signal?: AbortSignal): Promise<SecretStatus>
   setSecret(request: SecretSetRequest, signal?: AbortSignal): Promise<SecretStatus>
   deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal): Promise<SecretStatus>
+  getProviderConfiguration(signal?: AbortSignal): Promise<ProviderConfiguration>
+  createProviderProfile(
+    request: ProviderProfileCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderConfiguration>
+  validateProviderEndpoint(
+    request: ProviderEndpointValidationRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderEndpointValidation>
+  previewConsent(request: ConsentPreviewRequest, signal?: AbortSignal): Promise<ConsentPreview>
+  createConsent(request: ConsentCreateRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
+  revokeConsent(request: ConsentRevokeRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
 }
 
 function requestFixedRoute(
@@ -177,6 +216,13 @@ function secretPath(reference: SecretReference, operation: SecretOperation): Sid
   return `/api/v1/secrets/${reference}/${operation}`
 }
 
+function consentRevokePath(name: string): SidecarPath {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$/.test(name)) {
+    throw new SidecarClientError('consent_invalid')
+  }
+  return `/api/v1/consents/${name}/revoke`
+}
+
 function validJsonResponse(response: Readonly<SidecarHttpResponse>): boolean {
   return /^application\/json(?:\s*;|$)/i.test(response.contentType)
     && Buffer.byteLength(response.body, 'utf8') <= MAX_RESPONSE_BYTES
@@ -210,6 +256,51 @@ function secretFailure(statusCode: number): SidecarClientError {
   if (statusCode === 409) return new SidecarClientError('secret_environment_managed')
   if (statusCode === 400 || statusCode === 422) return new SidecarClientError('secret_invalid')
   if (statusCode === 503) return new SidecarClientError('secret_store_unavailable')
+  return new SidecarClientError('request_failed')
+}
+
+function failureCode(response: Readonly<SidecarHttpResponse>): string | undefined {
+  if (!validJsonResponse(response)) return undefined
+  try {
+    const payload = JSON.parse(response.body) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
+    const code = (payload as Readonly<Record<string, unknown>>).code
+    return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(code) ? code : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function providerFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'PROVIDER_CONFIGURATION_CONFLICT') {
+    return new SidecarClientError('provider_configuration_conflict')
+  }
+  if (code?.startsWith('ENDPOINT_')) return new SidecarClientError('endpoint_rejected')
+  if (code?.startsWith('PROVIDER_') || [400, 404, 409, 422].includes(response.statusCode)) {
+    return new SidecarClientError('provider_configuration_invalid')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function endpointFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code?.startsWith('ENDPOINT_') || [400, 403, 409, 422, 502, 503].includes(response.statusCode)) {
+    return new SidecarClientError('endpoint_rejected')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function consentFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'PROVIDER_CONFIGURATION_CONFLICT') {
+    return new SidecarClientError('provider_configuration_conflict')
+  }
+  if (code === 'CONSENT_PREVIEW_STALE') return new SidecarClientError('consent_preview_stale')
+  if (code?.startsWith('CONSENT_') || code?.startsWith('PROVIDER_PROFILE_')
+    || [400, 404, 409, 422].includes(response.statusCode)) {
+    return new SidecarClientError('consent_invalid')
+  }
   return new SidecarClientError('request_failed')
 }
 
@@ -287,6 +378,57 @@ export function createSidecarClient(dependencies: Readonly<{
       })
       if (response.statusCode !== 200) throw secretFailure(response.statusCode)
       return parseJson(response, parseSecretStatusResult)
+    },
+    async getProviderConfiguration(signal?: AbortSignal) {
+      const response = await perform(PROVIDER_CONFIGURATION_PATH, signal)
+      if (response.statusCode !== 200) throw providerFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async createProviderProfile(profile: ProviderProfileCreateRequest, signal?: AbortSignal) {
+      const response = await perform(PROVIDER_PROFILES_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(profile),
+      })
+      if (response.statusCode !== 200) throw providerFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async validateProviderEndpoint(
+      endpoint: ProviderEndpointValidationRequest,
+      signal?: AbortSignal,
+    ) {
+      const response = await perform(PROVIDER_ENDPOINT_VALIDATION_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(endpoint),
+      })
+      if (response.statusCode !== 200) throw endpointFailure(response)
+      return parseJson(response, parseProviderEndpointValidationResult)
+    },
+    async previewConsent(consent: ConsentPreviewRequest, signal?: AbortSignal) {
+      const response = await perform(CONSENT_PREVIEW_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(consent),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseConsentPreviewResult)
+    },
+    async createConsent(consent: ConsentCreateRequest, signal?: AbortSignal) {
+      const response = await perform(CONSENTS_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(consent),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async revokeConsent(consent: ConsentRevokeRequest, signal?: AbortSignal) {
+      const response = await perform(consentRevokePath(consent.name), signal, {
+        method: 'POST',
+        body: JSON.stringify({
+          schema_version: consent.schema_version,
+          expected_revision: consent.expected_revision,
+        }),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
     },
   })
 }

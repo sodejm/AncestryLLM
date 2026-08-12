@@ -3,9 +3,14 @@ import {
   desktopChannels,
   type AncestryBridge,
   type ApplicationSettingsPatch,
+  type ConsentCreateRequest,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
   type FileGrantId,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
+  type ProviderEndpointValidationRequest,
+  type ProviderProfileCreateRequest,
   type SaveFileGrantRequest,
   type SecretReferenceRequest,
   type SecretSetRequest,
@@ -13,12 +18,20 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseConsentCreateRequest,
+  parseConsentPreviewRequest,
+  parseConsentPreviewResult,
+  parseConsentRevokeRequest,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
+  parseProviderConfigurationResult,
+  parseProviderEndpointValidationRequest,
+  parseProviderEndpointValidationResult,
+  parseProviderProfileCreateRequest,
   parseSaveFileGrantRequest,
   parseSecretReferenceRequest,
   parseSecretSetRequest,
@@ -49,6 +62,27 @@ const ancestry: AncestryBridge = Object.freeze({
   ),
   deleteSecret: async (request: SecretReferenceRequest) => parseSecretStatusResult(
     await ipcRenderer.invoke(desktopChannels.deleteSecret, parseSecretReferenceRequest(request)),
+  ),
+  getProviderConfiguration: async () => parseProviderConfigurationResult(
+    await ipcRenderer.invoke(desktopChannels.getProviderConfiguration),
+  ),
+  createProviderProfile: async (request: ProviderProfileCreateRequest) => parseProviderConfigurationResult(
+    await ipcRenderer.invoke(desktopChannels.createProviderProfile, parseProviderProfileCreateRequest(request)),
+  ),
+  validateProviderEndpoint: async (request: ProviderEndpointValidationRequest) => parseProviderEndpointValidationResult(
+    await ipcRenderer.invoke(
+      desktopChannels.validateProviderEndpoint,
+      parseProviderEndpointValidationRequest(request),
+    ),
+  ),
+  previewConsent: async (request: ConsentPreviewRequest) => parseConsentPreviewResult(
+    await ipcRenderer.invoke(desktopChannels.previewConsent, parseConsentPreviewRequest(request)),
+  ),
+  createConsent: async (request: ConsentCreateRequest) => parseProviderConfigurationResult(
+    await ipcRenderer.invoke(desktopChannels.createConsent, parseConsentCreateRequest(request)),
+  ),
+  revokeConsent: async (request: ConsentRevokeRequest) => parseProviderConfigurationResult(
+    await ipcRenderer.invoke(desktopChannels.revokeConsent, parseConsentRevokeRequest(request)),
   ),
   requestOpenFileGrant: async (request: OpenFileGrantRequest) => parseFileGrantResult(
     await ipcRenderer.invoke(desktopChannels.requestOpenFileGrant, parseOpenFileGrantRequest(request)),

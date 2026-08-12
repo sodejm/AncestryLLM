@@ -451,6 +451,151 @@ describe('accessible desktop shell', () => {
     expect(document.body).not.toHaveTextContent(/raw stale revision details|raw conflict remediation/i)
   })
 
+  it('presents the complete local-first settings and deployment boundaries', async () => {
+    const bridge = await createCompletedBridge()
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+
+    for (const name of [
+      'General',
+      'Storage',
+      'Local providers',
+      'Cloud providers',
+      'Consent',
+      'Privacy',
+      'Limits',
+      'Secrets',
+    ]) {
+      expect(await screen.findByRole('region', { name })).toBeVisible()
+    }
+    const deployment = screen.getByRole('region', { name: 'Deployment mode' })
+    expect(within(deployment).getByRole('heading', { name: 'Local Desktop' })).toBeVisible()
+    expect(within(deployment).getByRole('heading', { name: 'Connect Remote' })).toBeVisible()
+    expect(within(deployment).getByRole('heading', { name: 'Host Remote' })).toBeVisible()
+    expect(within(deployment).getAllByText('Not available in this release')).toHaveLength(2)
+    expect(within(deployment).getByText(/non-loopback hosting remains disabled/i)).toBeVisible()
+    expect(screen.getByText(/an API key never enables a provider by itself/i)).toBeVisible()
+  })
+
+  it('requires a successful explicit endpoint test for the exact profile before save', async () => {
+    const base = await createCompletedBridge()
+    const validateProviderEndpoint = vi.fn((request) => base.validateProviderEndpoint(request))
+    const createProviderProfile = vi.fn((request) => base.createProviderProfile(request))
+    const bridge: AncestryBridge = { ...base, validateProviderEndpoint, createProviderProfile }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const local = await screen.findByRole('region', { name: 'Local providers' })
+    await userEvent.type(within(local).getByLabelText('Profile name'), 'private-local')
+    await userEvent.type(within(local).getByLabelText('Model'), 'fictional-model')
+
+    const save = within(local).getByRole('button', { name: 'Save local provider profile' })
+    expect(save).toBeDisabled()
+    await userEvent.click(within(local).getByRole('button', { name: 'Test local provider endpoint' }))
+
+    expect(validateProviderEndpoint).toHaveBeenCalledWith({
+      schema_version: 1,
+      provider_id: 'ollama',
+      endpoint: 'http://127.0.0.1:11434',
+    })
+    expect(await within(local).findByText('Endpoint tested: reachable on this device.')).toBeVisible()
+    expect(save).toBeEnabled()
+
+    await userEvent.clear(within(local).getByLabelText('Endpoint'))
+    await userEvent.type(within(local).getByLabelText('Endpoint'), 'http://localhost:11434')
+    expect(save).toBeDisabled()
+    expect(within(local).queryByText(/Endpoint tested:/)).not.toBeInTheDocument()
+
+    await userEvent.click(within(local).getByRole('button', { name: 'Test local provider endpoint' }))
+    await waitFor(() => expect(save).toBeEnabled())
+    await userEvent.click(save)
+    expect(createProviderProfile).toHaveBeenCalledWith({
+      schema_version: 1,
+      expected_revision: '0'.repeat(64),
+      name: 'private-local',
+      provider_id: 'ollama',
+      model: 'fictional-model',
+      endpoint: 'http://localhost:11434',
+      endpoint_identity_sha256: 'a'.repeat(64),
+    })
+  })
+
+  it('shows the complete consent disclosure and warnings before an atomic save', async () => {
+    const base = await createCompletedBridge()
+    const empty = await base.getProviderConfiguration()
+    if (!empty.ok) throw new Error('Expected provider configuration fixture')
+    const configured = await base.createProviderProfile({
+      schema_version: 1,
+      expected_revision: empty.data.revision,
+      name: 'reviewed-cloud',
+      provider_id: 'openai',
+      model: 'fictional-model',
+      endpoint: 'https://api.openai.com/v1',
+      endpoint_identity_sha256: 'a'.repeat(64),
+    })
+    if (!configured.ok) throw new Error('Expected provider profile fixture')
+    const previewConsent = vi.fn((request) => base.previewConsent(request))
+    const createConsent = vi.fn((request) => base.createConsent(request))
+    const bridge: AncestryBridge = { ...base, previewConsent, createConsent }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+    const consent = await screen.findByRole('region', { name: 'Consent' })
+    await userEvent.type(within(consent).getByLabelText('Consent name'), 'reviewed-consent')
+    await userEvent.click(within(consent).getByRole('checkbox', { name: 'Living person' }))
+    await userEvent.type(within(consent).getByLabelText('Maximum cost in US dollars'), '1.25')
+    await userEvent.click(within(consent).getByRole('checkbox', { name: 'Allow provider retention' }))
+
+    const save = within(consent).getByRole('button', { name: 'Save consent' })
+    expect(save).toBeDisabled()
+    await userEvent.click(within(consent).getByRole('button', { name: 'Review consent' }))
+
+    expect(previewConsent).toHaveBeenCalledWith({
+      schema_version: 1,
+      provider_profile_name: 'reviewed-cloud',
+      modules: ['summary'],
+      purposes: ['genealogy-analysis'],
+      data_classes: ['living_person'],
+      models: ['fictional-model'],
+      max_cost_usd: 1.25,
+      retain_payloads: true,
+    })
+    const review = await within(consent).findByRole('region', { name: 'Consent review' })
+    expect(review).toHaveTextContent('Provider: openai')
+    expect(review).toHaveTextContent('Profile: reviewed-cloud')
+    expect(review).toHaveTextContent('Model: fictional-model')
+    expect(review).toHaveTextContent('Purpose: genealogy-analysis')
+    expect(review).toHaveTextContent('Data classes: Living person')
+    expect(review).toHaveTextContent('Retention: Allowed')
+    expect(review).toHaveTextContent('Budget: $1.25 USD')
+    expect(review).toHaveTextContent('Living-person data will leave this device.')
+    expect(review).toHaveTextContent('This provider endpoint is remote.')
+    expect(review).toHaveTextContent('The remote provider may retain payloads.')
+    expect(save).toBeEnabled()
+
+    await userEvent.click(save)
+    expect(createConsent).toHaveBeenCalledWith({
+      schema_version: 1,
+      expected_revision: configured.data.revision,
+      name: 'reviewed-consent',
+      preview: expect.objectContaining({
+        provider_profile_name: 'reviewed-cloud',
+        provider_id: 'openai',
+        warning_codes: [
+          'LIVING_PERSON_DATA_INCLUDED',
+          'REMOTE_PROVIDER_SELECTED',
+          'REMOTE_RETENTION_ENABLED',
+        ],
+      }),
+    })
+    expect(await within(consent).findByText('reviewed-consent')).toBeVisible()
+    expect(within(consent).getByText('Active')).toBeVisible()
+  })
+
   it('clears credential form state immediately and exposes status only', async () => {
     const base = await createCompletedBridge()
     const setSecret = vi.fn((request) => base.setSecret(request))

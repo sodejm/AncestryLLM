@@ -357,7 +357,10 @@ fieldset label { display: inline-flex; align-items: center; gap: .45rem; }
 .setting-meta { color: var(--color-text-muted); }
 .settings-error { margin-top: var(--space-4); }
 .application-settings-list,
-.credential-grid { display: grid; gap: var(--space-4); }
+.credential-grid,
+.provider-profile-list,
+.consent-list,
+.deployment-grid { display: grid; gap: var(--space-4); }
 .application-setting,
 .credential-control {
   display: grid;
@@ -372,6 +375,8 @@ fieldset label { display: inline-flex; align-items: center; gap: .45rem; }
 .application-setting input,
 .application-setting select,
 .credential-control input,
+.provider-form input,
+.provider-form select,
 .command-filter input {
   min-height: 2.75rem;
   width: min(100%, 28rem);
@@ -384,7 +389,37 @@ fieldset label { display: inline-flex; align-items: center; gap: .45rem; }
 }
 .application-setting .button { justify-self: start; }
 .setting-meta { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: .9rem; }
-.credential-control form { display: grid; gap: .65rem; min-width: 0; }
+.credential-control form,
+.provider-form { display: grid; gap: .65rem; min-width: 0; }
+.provider-form > label { font-weight: 750; }
+.provider-form fieldset { display: grid; }
+.provider-profile-list,
+.consent-list,
+.deployment-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  margin-top: var(--space-5);
+}
+.provider-profile-list article,
+.consent-list article,
+.deployment-grid article,
+.consent-review {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+}
+.provider-profile-list article p,
+.consent-list article p { overflow-wrap: anywhere; }
+.consent-review { margin-top: var(--space-5); }
+.consent-warning {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--color-danger);
+  font-weight: 700;
+}
+.consent-warning svg { flex: none; }
 
 .command-palette {
   width: min(38rem, calc(100% - 2rem));

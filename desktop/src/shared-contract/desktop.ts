@@ -159,6 +159,123 @@ export interface SecretStatus {
   status: 'present' | 'missing' | 'unavailable'
 }
 
+export const providerIds = Object.freeze([
+  'ollama',
+  'openai',
+  'anthropic',
+  'gemini',
+  'openrouter',
+] as const)
+
+export type ProviderId = typeof providerIds[number]
+
+export const providerDataClasses = Object.freeze([
+  'public_genealogy',
+  'deceased_person',
+  'living_person',
+  'possibly_living_person',
+  'free_text_note',
+  'source_transcription',
+  'government_identifier',
+] as const)
+
+export type ProviderDataClass = typeof providerDataClasses[number]
+export type ConsentWarningCode =
+  | 'LIVING_PERSON_DATA_INCLUDED'
+  | 'REMOTE_PROVIDER_SELECTED'
+  | 'REMOTE_RETENTION_ENABLED'
+
+export interface ProviderProfileSummary {
+  name: string
+  provider_id: ProviderId
+  model: string
+  endpoint: string
+  endpoint_kind: 'loopback' | 'remote'
+  secret_reference: SecretReference | null
+  enabled: boolean
+}
+
+export interface ConsentGrantSummary {
+  name: string
+  provider_profile_name: string
+  provider_id: ProviderId
+  modules: readonly string[]
+  purposes: readonly string[]
+  data_classes: readonly ProviderDataClass[]
+  models: readonly string[]
+  max_cost_usd: number | null
+  retain_payloads: boolean
+  active: boolean
+}
+
+export interface ProviderConfiguration {
+  schema_version: 1
+  revision: string
+  profiles: readonly ProviderProfileSummary[]
+  consents: readonly ConsentGrantSummary[]
+}
+
+export type ProviderProfileCreateRequest = Readonly<{
+  schema_version: 1
+  expected_revision: string
+  name: string
+  provider_id: ProviderId
+  model: string
+  endpoint: string
+  endpoint_identity_sha256: string
+}>
+
+export type ProviderEndpointValidationRequest = Readonly<{
+  schema_version: 1
+  provider_id: ProviderId
+  endpoint: string
+}>
+
+export interface ProviderEndpointValidation {
+  schema_version: 1
+  status: 'reachable'
+  endpoint_kind: 'loopback' | 'remote'
+  http_status: number
+  destination_digest: string
+}
+
+export type ConsentPreviewRequest = Readonly<{
+  schema_version: 1
+  provider_profile_name: string
+  modules: readonly string[]
+  purposes: readonly string[]
+  data_classes: readonly ProviderDataClass[]
+  models: readonly string[]
+  max_cost_usd: number | null
+  retain_payloads: boolean
+}>
+
+export interface ConsentPreview {
+  schema_version: 1
+  provider_profile_name: string
+  provider_id: ProviderId
+  modules: readonly string[]
+  purposes: readonly string[]
+  data_classes: readonly ProviderDataClass[]
+  models: readonly string[]
+  max_cost_usd: number | null
+  retain_payloads: boolean
+  warning_codes: readonly ConsentWarningCode[]
+}
+
+export type ConsentCreateRequest = Readonly<{
+  schema_version: 1
+  expected_revision: string
+  name: string
+  preview: Readonly<ConsentPreview>
+}>
+
+export type ConsentRevokeRequest = Readonly<{
+  schema_version: 1
+  expected_revision: string
+  name: string
+}>
+
 export const fileGrantPurposes = Object.freeze([
   'gedcom-read',
   'rootsmagic-read',
@@ -228,6 +345,12 @@ export type BridgeErrorCode =
   | 'SECRET_STORE_UNAVAILABLE'
   | 'SECRET_ENVIRONMENT_MANAGED'
   | 'SECRET_INVALID'
+  | 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+  | 'PROVIDER_CONFIGURATION_CONFLICT'
+  | 'PROVIDER_CONFIGURATION_INVALID'
+  | 'ENDPOINT_REJECTED'
+  | 'CONSENT_INVALID'
+  | 'CONSENT_PREVIEW_STALE'
   | 'FILE_SELECTION_INVALID'
   | 'FILE_TOO_LARGE'
   | 'FILE_GRANT_FORBIDDEN'
@@ -259,6 +382,12 @@ export interface AncestryBridge {
   getSecretStatus(request: SecretReferenceRequest): Promise<BridgeResult<SecretStatus>>
   setSecret(request: SecretSetRequest): Promise<BridgeResult<SecretStatus>>
   deleteSecret(request: SecretReferenceRequest): Promise<BridgeResult<SecretStatus>>
+  getProviderConfiguration(): Promise<BridgeResult<ProviderConfiguration>>
+  createProviderProfile(request: ProviderProfileCreateRequest): Promise<BridgeResult<ProviderConfiguration>>
+  validateProviderEndpoint(request: ProviderEndpointValidationRequest): Promise<BridgeResult<ProviderEndpointValidation>>
+  previewConsent(request: ConsentPreviewRequest): Promise<BridgeResult<ConsentPreview>>
+  createConsent(request: ConsentCreateRequest): Promise<BridgeResult<ProviderConfiguration>>
+  revokeConsent(request: ConsentRevokeRequest): Promise<BridgeResult<ProviderConfiguration>>
   requestOpenFileGrant(request: OpenFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   requestSaveFileGrant(request: SaveFileGrantRequest): Promise<BridgeResult<FileGrant | null>>
   revokeFileGrant(grantId: FileGrantId): Promise<BridgeResult<FileGrantRevocation>>
@@ -276,6 +405,12 @@ export const desktopChannels = Object.freeze({
   getSecretStatus: 'ancestry:desktop:get-secret-status',
   setSecret: 'ancestry:desktop:set-secret',
   deleteSecret: 'ancestry:desktop:delete-secret',
+  getProviderConfiguration: 'ancestry:desktop:get-provider-configuration',
+  createProviderProfile: 'ancestry:desktop:create-provider-profile',
+  validateProviderEndpoint: 'ancestry:desktop:validate-provider-endpoint',
+  previewConsent: 'ancestry:desktop:preview-consent',
+  createConsent: 'ancestry:desktop:create-consent',
+  revokeConsent: 'ancestry:desktop:revoke-consent',
   requestOpenFileGrant: 'ancestry:desktop:request-open-file-grant',
   requestSaveFileGrant: 'ancestry:desktop:request-save-file-grant',
   revokeFileGrant: 'ancestry:desktop:revoke-file-grant',
