@@ -288,11 +288,20 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 
 async function closePackaged(result: LaunchResult): Promise<void> {
   const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
-  await withinDeadline(
-    'closing packaged application window',
-    packagedCleanupTimeoutMs,
-    () => result.page.close({ runBeforeUnload: false }),
-  )
+  if (process.platform === 'darwin') {
+    // A CDP page close does not consistently map to a native BrowserWindow
+    // close on macOS. Exercise Electron's production SIGTERM-to-app.quit path,
+    // then release the automation client before awaiting verified shutdown.
+    if (!result.process.kill('SIGTERM')) {
+      throw new Error('Packaged app rejected the macOS quit request.')
+    }
+  } else {
+    await withinDeadline(
+      'closing packaged application window',
+      packagedCleanupTimeoutMs,
+      () => result.page.close({ runBeforeUnload: false }),
+    )
+  }
   await withinDeadline(
     'closing packaged browser automation',
     packagedCleanupTimeoutMs,

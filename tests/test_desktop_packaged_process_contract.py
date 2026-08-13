@@ -73,7 +73,7 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "expect(capabilityBurst.unexpectedErrorCodes).toEqual([])" in source
 
 
-def test_packaged_clean_quit_closes_last_window_and_waits_for_exit() -> None:
+def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     close_start = source.index("async function closePackaged")
@@ -85,7 +85,11 @@ def test_packaged_clean_quit_closes_last_window_and_waits_for_exit() -> None:
     process_wait_index = close_source.index(
         "const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)"
     )
-    window_close_index = close_source.index("result.page.close({ runBeforeUnload: false })")
+    platform_index = close_source.index("process.platform === 'darwin'")
+    signal_index = close_source.index("result.process.kill('SIGTERM')", platform_index)
+    window_close_index = close_source.index(
+        "result.page.close({ runBeforeUnload: false })", platform_index
+    )
     browser_close_index = close_source.index("result.browser.close()", window_close_index)
     status_index = close_source.index("const status = await processExit", browser_close_index)
 
@@ -94,8 +98,15 @@ def test_packaged_clean_quit_closes_last_window_and_waits_for_exit() -> None:
     assert "newBrowserCDPSession" not in close_source
     assert "session.send('Browser.close')" not in close_source
     assert "result.page.keyboard.press('Meta+Q')" not in close_source
-    assert "result.process.kill('SIGTERM')" not in close_source
-    assert "process.platform === 'darwin'" not in close_source
+    assert "result.process.kill('SIGKILL')" not in close_source
+    assert re.search(
+        r"if \(process\.platform === 'darwin'\) \{.*?"
+        r"if \(!result\.process\.kill\('SIGTERM'\)\) \{\s*"
+        r"throw new Error\('Packaged app rejected the macOS quit request\.'\)\s*"
+        r"\}\s*\} else \{",
+        close_source,
+        re.DOTALL,
+    )
     assert re.search(
         r"await withinDeadline\(\s*'closing packaged application window',\s*"
         r"packagedCleanupTimeoutMs,\s*"
@@ -104,7 +115,9 @@ def test_packaged_clean_quit_closes_last_window_and_waits_for_exit() -> None:
     )
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
-    assert process_wait_index < window_close_index < browser_close_index < status_index
+    assert process_wait_index < platform_index < signal_index < browser_close_index
+    assert process_wait_index < platform_index < window_close_index < browser_close_index
+    assert browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
     runtime_owner_index = main_source.index("sidecarSupervisor = runtime.supervisor")
     sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")
