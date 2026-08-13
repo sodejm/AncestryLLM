@@ -75,11 +75,16 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
   const [lifecycleRevision, setLifecycleRevision] = useState(0)
   const [clockMs, setClockMs] = useState(() => Date.now())
   const mountedRef = useRef(false)
+  const stateRef = useRef(state)
   const subscriptionsRef = useRef(new Map<string, string>())
   const blockedSubscriptionsRef = useRef(new Set<string>())
   const refreshingRef = useRef(new Set<string>())
   const streamRecoveryAttemptsRef = useRef(new Map<string, number>())
   const refreshJobRef = useRef<(jobId: string) => Promise<void>>(async () => undefined)
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   const setStreamFailure = useCallback(
     (jobId: string, code: BridgeErrorCode | null): void => {
@@ -201,9 +206,16 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
         return
       }
       const returnedJobIds = new Set(result.data.jobs.map((job) => job.job_id))
+      const retainedJobs = [...subscriptionsRef.current.keys()]
+        .filter((jobId) => !returnedJobIds.has(jobId))
+        .flatMap((jobId) => {
+          const snapshot = stateRef.current.jobs[jobId]
+          return snapshot !== undefined && !terminalStates.has(snapshot.state) ? [snapshot] : []
+        })
+      const retainedJobIds = new Set(retainedJobs.map((job) => job.job_id))
       await Promise.all(
         [...subscriptionsRef.current.keys()]
-          .filter((jobId) => !returnedJobIds.has(jobId))
+          .filter((jobId) => !returnedJobIds.has(jobId) && !retainedJobIds.has(jobId))
           .map(closeSubscription),
       )
       if (!mountedRef.current) return
@@ -212,7 +224,7 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       setStreamFailures(new Map())
       setCancellationFailures(new Map())
       setFailure(null)
-      dispatch({ type: 'loaded', jobs: result.data.jobs })
+      dispatch({ type: 'loaded', jobs: [...result.data.jobs, ...retainedJobs] })
     } catch {
       if (mountedRef.current) setFailure('JOB_SERVICE_UNAVAILABLE')
     } finally {

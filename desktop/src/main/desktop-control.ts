@@ -87,6 +87,7 @@ const startupMutationBlocked = <T>(): BridgeResult<T> => failure(
 
 function jobFailure<T>(cause: unknown): BridgeResult<T> {
   const reason = cause instanceof SidecarClientError ? cause.reason : null
+  if (reason === 'startup_mutation_blocked') return startupMutationBlocked()
   if (reason === 'job_id_invalid') {
     return failure('JOB_ID_INVALID', 'The selected task identifier is invalid.', 'Refresh the task center and try again.')
   }

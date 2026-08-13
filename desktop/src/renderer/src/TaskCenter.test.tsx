@@ -294,6 +294,28 @@ describe('Task Center', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Code: JOB_EVENT_STREAM_FAILED')
   })
 
+  it('retains a subscribed active task omitted by the bounded list response', async () => {
+    const active = snapshot()
+    const base = bridgeFor([active])
+    const listJobs = vi.fn()
+      .mockResolvedValueOnce(success({ schema_version: 1 as const, jobs: [active] }))
+      .mockResolvedValueOnce(success({ schema_version: 1 as const, jobs: [] }))
+    const bridge: AncestryBridge = { ...base, listJobs }
+
+    render(<TaskCenter bridge={bridge} />)
+    await screen.findByRole('heading', { name: active.name })
+    await waitFor(() => expect(bridge.subscribeJobEvents).toHaveBeenCalledOnce())
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh tasks' }))
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeEnabled())
+
+    expect(screen.getByRole('heading', { name: active.name })).toBeVisible()
+    expect(bridge.unsubscribeJobEvents).not.toHaveBeenCalled()
+  })
+
   it('retries a subscription capped by the main-process limit after a slot becomes free', async () => {
     const jobs = Array.from({ length: 33 }, (_, index) => snapshot({
       job_id: `j${String(index + 1).padStart(6, '0')}`,

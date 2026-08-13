@@ -166,6 +166,23 @@ describe('main-only sidecar capabilities client', () => {
     )
   })
 
+  it('preserves the stable startup mutation code for a rejected job cancellation', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'STARTUP_MUTATION_BLOCKED',
+        message: 'Changes are disabled until startup diagnostics pass.',
+        remediation: 'Resolve the blocking startup diagnostic and retry.',
+      }),
+    })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+    await expect(client.cancelJob({ schema_version: 1, job_id: 'j123456' })).rejects.toEqual(
+      new SidecarClientError('startup_mutation_blocked'),
+    )
+  })
+
   it('authenticates and validates sequenced job events while ignoring heartbeats', async () => {
     const requests: Array<Readonly<{
       url: string | undefined
@@ -231,6 +248,54 @@ describe('main-only sidecar capabilities client', () => {
       authorization: 'Bearer private-test-token',
       cursor: '1',
     }])
+  })
+
+  it('does not rearm the inactivity deadline after a terminal listener aborts', async () => {
+    const controller = new AbortController()
+    let timerCallsAtAbort = 0
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write(`id: 2\nevent: terminal\ndata: ${JSON.stringify({
+        schema_version: 1,
+        sequence: 2,
+        kind: 'terminal',
+        created_at: '2026-08-12T12:00:04+00:00',
+        snapshot: jobSnapshot({
+          sequence: 2,
+          state: 'completed',
+          finished_at: '2026-08-12T12:00:04+00:00',
+          outcome_summary: 'Export completed.',
+        }),
+      })}\n\n`)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+    })
+    try {
+      await expect(client.streamJobEvents({
+        schema_version: 1,
+        subscription_id: `sub_${'a'.repeat(32)}`,
+        job_id: 'j123456',
+        after: 1,
+      }, () => {
+        timerCallsAtAbort = timeoutSpy.mock.calls.length
+        controller.abort()
+      }, controller.signal)).rejects.toEqual(new SidecarClientError('cancelled'))
+
+      expect(timerCallsAtAbort).toBeGreaterThan(0)
+      expect(timeoutSpy).toHaveBeenCalledTimes(timerCallsAtAbort)
+    } finally {
+      timeoutSpy.mockRestore()
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 
   it('fails closed when the bounded event replay window has expired', async () => {

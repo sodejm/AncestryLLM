@@ -86,6 +86,7 @@ export type SidecarClientFailure =
   | 'endpoint_rejected'
   | 'consent_invalid'
   | 'consent_preview_stale'
+  | 'startup_mutation_blocked'
   | 'job_id_invalid'
   | 'job_not_found'
   | 'job_event_cursor_invalid'
@@ -356,6 +357,9 @@ function consentFailure(response: Readonly<SidecarHttpResponse>): SidecarClientE
 
 function jobFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
   const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
   if (code === 'JOB_ID_INVALID') return new SidecarClientError('job_id_invalid')
   if (code === 'JOB_NOT_FOUND' || response.statusCode === 404) {
     return new SidecarClientError('job_not_found')
@@ -518,7 +522,7 @@ function streamFixedJobEvents(
       lastSequence = result.data.sequence
       terminalSeen = result.data.kind === 'terminal'
       listener(result.data)
-      resetInactivityDeadline()
+      if (!settled) resetInactivityDeadline()
     }
 
     const processBuffer = (final = false) => {

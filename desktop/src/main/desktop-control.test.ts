@@ -227,6 +227,7 @@ describe('desktop control bridge', () => {
   })
 
   it.each([
+    ['startup_mutation_blocked', 'STARTUP_MUTATION_BLOCKED'],
     ['job_id_invalid', 'JOB_ID_INVALID'],
     ['job_not_found', 'JOB_NOT_FOUND'],
     ['job_event_cursor_invalid', 'JOB_EVENT_CURSOR_INVALID'],
