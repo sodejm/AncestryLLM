@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from sqlalchemy import Engine, Table, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import StorageError
@@ -51,6 +52,21 @@ def _expected_schema_tables(*, revision: str) -> frozenset[str]:
     if revision == PREVIOUS_SCHEMA_REVISION:
         tables -= {JobModel.__tablename__, JobEventModel.__tablename__}
     return tables | {"alembic_version"}
+
+
+def _create_tables_on_native_connection(connection: Any, tables: tuple[Table, ...]) -> None:
+    """Compile authoritative metadata and execute DDL through SQLCipher directly.
+
+    The SQLAlchemy DDL execution visitor can exhaust the native stack in the
+    bundled Windows ARM64 runtime. Compiling from the mapped tables preserves
+    the single schema definition while bypassing that failing execution path.
+    """
+    native_connection = connection.connection.driver_connection
+    assert native_connection is not None
+    for table in tables:
+        native_connection.execute(str(CreateTable(table).compile(dialect=connection.dialect)))
+        for index in sorted(table.indexes, key=lambda candidate: candidate.name or ""):
+            native_connection.execute(str(CreateIndex(index).compile(dialect=connection.dialect)))
 
 
 def _migration_required(message: str) -> StorageError:
@@ -228,11 +244,16 @@ class Database:
                     raise _migration_required(
                         "The encrypted workspace contains an incomplete unversioned schema."
                     )
-                Base.metadata.create_all(connection, checkfirst=False)
-                connection.exec_driver_sql(
+                _create_tables_on_native_connection(
+                    connection,
+                    tuple(Base.metadata.sorted_tables),
+                )
+                native_connection = connection.connection.driver_connection
+                assert native_connection is not None
+                native_connection.execute(
                     "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
                 )
-                connection.exec_driver_sql(
+                native_connection.execute(
                     "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
                 )
                 return
@@ -243,8 +264,13 @@ class Database:
                 )
 
             if current == PREVIOUS_SCHEMA_REVISION:
-                cast("Table", JobModel.__table__).create(connection, checkfirst=False)
-                cast("Table", JobEventModel.__table__).create(connection, checkfirst=False)
+                _create_tables_on_native_connection(
+                    connection,
+                    (
+                        cast("Table", JobModel.__table__),
+                        cast("Table", JobEventModel.__table__),
+                    ),
+                )
                 connection.exec_driver_sql(
                     "UPDATE alembic_version SET version_num = ?",
                     (SCHEMA_REVISION,),

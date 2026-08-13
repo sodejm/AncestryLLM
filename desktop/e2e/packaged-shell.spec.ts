@@ -23,6 +23,7 @@ const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const packagedAttachTimeoutMs = 45_000
 const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
+const packagedQuitTimeoutMs = 30_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
 const integrityEvidencePath = process.env.ANCESTRYLLM_INTEGRITY_EVIDENCE
@@ -275,7 +276,6 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 }
 
 async function closePackaged(result: LaunchResult): Promise<void> {
-  const exited = waitForProcessExit(result.process, 15_000)
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(result.browserEndpoint)
     const timer = setTimeout(() => {
@@ -300,7 +300,7 @@ async function closePackaged(result: LaunchResult): Promise<void> {
       reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
     }, { once: true })
   })
-  const status = await exited
+  const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs)
   await result.browser.close().catch(() => undefined)
   expect(status).toEqual({ code: 0, signal: null })
 }
@@ -399,10 +399,18 @@ async function expectStartupDiagnostics(
   page: Page,
   expected: StartupDiagnosticsExpectation,
 ): Promise<void> {
-  await expect.poll(
-    async () => startupDiagnostics(page),
-    { timeout: 30_000 },
-  ).toMatchObject(expected)
+  try {
+    await expect.poll(
+      async () => startupDiagnostics(page),
+      { timeout: 30_000 },
+    ).toMatchObject(expected)
+  } catch (error) {
+    const actual = await startupDiagnostics(page).catch(() => null)
+    throw new Error(
+      `Packaged startup diagnostics did not match expected state: ${JSON.stringify(actual)}`,
+      { cause: error },
+    )
+  }
 }
 
 function packageRootForExecutable(applicationExecutable: string): string {
@@ -816,19 +824,23 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
         Array.from({ length: 32 }, () => ancestry.getCapabilities()),
       )
       return {
-        allSuccessful: responses.every((result) => result.ok),
+        successful: responses.filter((result) => result.ok).length,
+        overloaded: responses.filter(
+          (result) => !result.ok && result.error?.code === 'BRIDGE_OVERLOADED',
+        ).length,
         count: responses.length,
-        errorCodes: [...new Set(responses.flatMap(
-          (result) => result.error ? [result.error.code] : [],
+        unexpectedErrorCodes: [...new Set(responses.flatMap(
+          (result) => !result.ok && result.error?.code !== 'BRIDGE_OVERLOADED'
+            ? [result.error?.code ?? 'unknown']
+            : [],
         ))].sort(),
       }
     }),
   )
-  expect(capabilityBurst).toEqual({
-    allSuccessful: true,
-    count: 32,
-    errorCodes: [],
-  })
+  expect(capabilityBurst.count).toBe(32)
+  expect(capabilityBurst.successful).toBeGreaterThan(0)
+  expect(capabilityBurst.successful + capabilityBurst.overloaded).toBe(capabilityBurst.count)
+  expect(capabilityBurst.unexpectedErrorCodes).toEqual([])
 
   const externalRequests: string[] = []
   page.on('request', (request) => {

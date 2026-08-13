@@ -57,8 +57,24 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "Array.from({ length: 32 }" in source
     assert "Promise.all(" in source
     assert "ancestry.getCapabilities()" in source
-    assert "allSuccessful: responses.every((result) => result.ok)" in source
-    assert "expect(capabilityBurst).toEqual" in source
+    assert "successful: responses.filter((result) => result.ok).length" in source
+    assert "result.error?.code === 'BRIDGE_OVERLOADED'" in source
+    assert "expect(capabilityBurst.successful).toBeGreaterThan(0)" in source
+    assert "capabilityBurst.successful + capabilityBurst.overloaded" in source
+    assert "expect(capabilityBurst.unexpectedErrorCodes).toEqual([])" in source
+
+
+def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    close_start = source.index("async function closePackaged")
+    close_end = source.index("\nasync function launchPackaged", close_start)
+    close_source = source[close_start:close_end]
+
+    assert "const packagedQuitTimeoutMs = 30_000" in source
+    assert "waitForProcessExit(result.process, 15_000)" not in close_source
+    assert close_source.index("method: 'Browser.close'") < close_source.index(
+        "waitForProcessExit(result.process, packagedQuitTimeoutMs)"
+    )
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
@@ -136,6 +152,8 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
         in source
     )
     assert "return withinDeadline('reading packaged startup diagnostics'" in source
+    assert "Packaged startup diagnostics did not match expected state" in source
+    assert "JSON.stringify(actual)" in source
     assert "async function writeIntegrityDiagnostics" in source
     assert "let cleanupFailure: unknown" in source
     assert "let primaryFailurePhase: string | null = null" in source

@@ -9,6 +9,7 @@ import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -26,6 +27,7 @@ from ancestryllm.storage.diagnostics import (
     diagnose_startup,
     diagnose_storage,
 )
+from ancestryllm.storage.models import Base
 
 
 def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
@@ -55,6 +57,40 @@ def test_schema_bootstrap_and_reuse_do_not_reflect_sqlcipher_tables(
 
     database.initialize()
     database.initialize()
+
+
+def test_schema_bootstrap_bypasses_sqlalchemy_ddl_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_sqlalchemy_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        if statement.lstrip().upper().startswith(("CREATE TABLE", "CREATE INDEX")):
+            raise AssertionError("schema DDL must execute through the native SQLCipher connection")
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_sqlalchemy_ddl)
+
+    database.initialize()
+
+    with database.engine.connect() as connection:
+        table_names = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            )
+        }
+        assert table_names == {
+            *Base.metadata.tables,
+            "alembic_version",
+        }
 
 
 def test_unversioned_partial_schema_fails_closed_before_bootstrap(tmp_path: Path) -> None:

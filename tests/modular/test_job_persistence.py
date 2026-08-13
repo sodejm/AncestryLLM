@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -45,8 +45,26 @@ def _legacy_database(path: Path, secrets: MemorySecretStore) -> Database:
     return database
 
 
-def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(tmp_path: Path) -> None:
+def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     database = _legacy_database(tmp_path / "workspace.db", MemorySecretStore({}))
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_sqlalchemy_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        if statement.lstrip().upper().startswith(("CREATE TABLE", "CREATE INDEX")):
+            raise AssertionError(
+                "migration DDL must execute through the native SQLCipher connection"
+            )
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_sqlalchemy_ddl)
 
     database.initialize()
 
