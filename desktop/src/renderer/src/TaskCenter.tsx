@@ -68,6 +68,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
   const [streamFailures, setStreamFailures] = useState<
     ReadonlyMap<string, BridgeErrorCode>
   >(new Map())
+  const [cancellationFailures, setCancellationFailures] = useState<
+    ReadonlyMap<string, BridgeErrorCode>
+  >(new Map())
   const [cancellationRequests, setCancellationRequests] = useState<ReadonlySet<string>>(new Set())
   const [lifecycleRevision, setLifecycleRevision] = useState(0)
   const [clockMs, setClockMs] = useState(() => Date.now())
@@ -92,15 +95,30 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
     [],
   )
 
-  const closeSubscription = useCallback(async (jobId: string): Promise<void> => {
+  const setCancellationFailure = useCallback(
+    (jobId: string, code: BridgeErrorCode | null): void => {
+      setCancellationFailures((current) => {
+        if (code === null && !current.has(jobId)) return current
+        if (code !== null && current.get(jobId) === code) return current
+        const next = new Map(current)
+        if (code === null) next.delete(jobId)
+        else next.set(jobId, code)
+        return next
+      })
+    },
+    [],
+  )
+
+  const closeSubscription = useCallback(async (jobId: string): Promise<boolean> => {
     const subscriptionId = subscriptionsRef.current.get(jobId)
-    if (subscriptionId === undefined) return
+    if (subscriptionId === undefined) return false
     subscriptionsRef.current.delete(jobId)
     try {
       await bridge.unsubscribeJobEvents({ schema_version: 1, subscription_id: subscriptionId })
     } catch {
       // The main process also closes all sender-owned streams when the renderer exits.
     }
+    return true
   }, [bridge])
 
   const refreshJob = useCallback(async (jobId: string): Promise<void> => {
@@ -155,7 +173,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       }
       if (!result.ok) {
         subscriptionsRef.current.delete(snapshot.job_id)
-        blockedSubscriptionsRef.current.add(snapshot.job_id)
+        if (result.error.code !== 'JOB_SUBSCRIBER_LIMIT') {
+          blockedSubscriptionsRef.current.add(snapshot.job_id)
+        }
         setStreamFailure(snapshot.job_id, result.error.code)
         return
       }
@@ -190,6 +210,7 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       streamRecoveryAttemptsRef.current.clear()
       blockedSubscriptionsRef.current.clear()
       setStreamFailures(new Map())
+      setCancellationFailures(new Map())
       setFailure(null)
       dispatch({ type: 'loaded', jobs: result.data.jobs })
     } catch {
@@ -238,7 +259,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       if (state.needsResync.includes(jobId)) {
         void refreshJob(jobId)
       } else if (terminalStates.has(snapshot.state)) {
-        void closeSubscription(jobId)
+        void closeSubscription(jobId).then((closed) => {
+          if (closed && mountedRef.current) setLifecycleRevision((value) => value + 1)
+        })
       } else {
         void subscribe(snapshot)
       }
@@ -255,7 +278,10 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
     return () => window.clearInterval(interval)
   }, [hasActiveJobs])
 
-  const displayedFailure = failure ?? streamFailures.values().next().value ?? null
+  const displayedFailure = failure
+    ?? cancellationFailures.values().next().value
+    ?? streamFailures.values().next().value
+    ?? null
 
   const requestCancellation = async (snapshot: Readonly<JobSnapshot>): Promise<void> => {
     setCancellationRequests((current) => new Set(current).add(snapshot.job_id))
@@ -263,13 +289,15 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       const result = await bridge.cancelJob({ schema_version: 1, job_id: snapshot.job_id })
       if (!mountedRef.current) return
       if (!result.ok) {
-        setFailure(result.error.code)
+        setCancellationFailure(snapshot.job_id, result.error.code)
         return
       }
-      setFailure(null)
+      setCancellationFailure(snapshot.job_id, null)
       dispatch({ type: 'refreshed', snapshot: result.data })
     } catch {
-      if (mountedRef.current) setFailure('JOB_SERVICE_UNAVAILABLE')
+      if (mountedRef.current) {
+        setCancellationFailure(snapshot.job_id, 'JOB_SERVICE_UNAVAILABLE')
+      }
     } finally {
       if (mountedRef.current) {
         setCancellationRequests((current) => {

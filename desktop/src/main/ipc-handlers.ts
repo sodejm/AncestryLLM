@@ -76,6 +76,7 @@ import {
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
+import { SidecarClientError } from './sidecar-client'
 import { validateStructuredClone } from './structured-clone-policy'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
@@ -479,19 +480,25 @@ function invalidate(state: Authorization, notifyJobStreams = false): void {
 function jobStreamFailure(
   state: Authorization,
   subscription: JobSubscription,
-  code: 'JOB_SUBSCRIPTION_CLOSED' | 'JOB_EVENT_STREAM_FAILED',
+  code: 'JOB_EVENT_REPLAY_EXPIRED' | 'JOB_SUBSCRIPTION_CLOSED' | 'JOB_EVENT_STREAM_FAILED',
 ): void {
   try {
     if (state.contents.isDestroyed() || state.navigating
       || state.generation !== subscription.generation
       || !state.trustedUrl(state.contents.mainFrame.url)) return
-    const diagnostic = code === 'JOB_SUBSCRIPTION_CLOSED'
+    const diagnostic = code === 'JOB_EVENT_REPLAY_EXPIRED'
       ? Object.freeze({
+          code,
+          message: 'Earlier task updates are no longer available.',
+          remediation: 'Refresh the task center to load the current task snapshot.',
+        })
+      : code === 'JOB_SUBSCRIPTION_CLOSED'
+        ? Object.freeze({
           code,
           message: 'Task updates ended before the task finished.',
           remediation: 'Refresh the task center to reconnect.',
         })
-      : Object.freeze({
+        : Object.freeze({
           code,
           message: 'Task updates could not be verified.',
           remediation: 'Refresh the task center to reconnect.',
@@ -509,6 +516,12 @@ function jobStreamFailure(
   } catch {
     // A destroyed or replaced renderer must not keep a stream alive.
   }
+}
+
+function jobStreamFailureCode(cause: unknown): 'JOB_EVENT_REPLAY_EXPIRED' | 'JOB_EVENT_STREAM_FAILED' {
+  return cause instanceof SidecarClientError && cause.reason === 'job_event_replay_expired'
+    ? 'JOB_EVENT_REPLAY_EXPIRED'
+    : 'JOB_EVENT_STREAM_FAILED'
 }
 
 function deliverJobEvent(
@@ -1025,14 +1038,21 @@ export function registerDesktopIpcHandlers(
         (next) => deliverJobEvent(state, subscription, next),
         subscription.controller.signal,
       )
-    } catch {
+    } catch (cause) {
       state.jobSubscriptions.delete(request.subscription_id)
       subscription.controller.abort(CANCELLED)
-      return error(
-        'JOB_EVENT_STREAM_FAILED',
-        'Task updates could not be verified.',
-        'Refresh the task center to reconnect.',
-      )
+      const code = jobStreamFailureCode(cause)
+      return code === 'JOB_EVENT_REPLAY_EXPIRED'
+        ? error(
+            code,
+            'Earlier task updates are no longer available.',
+            'Refresh the task center to load the current task snapshot.',
+          )
+        : error(
+            code,
+            'Task updates could not be verified.',
+            'Refresh the task center to reconnect.',
+          )
     }
     void stream.then(
       () => {
@@ -1042,11 +1062,11 @@ export function registerDesktopIpcHandlers(
           jobStreamFailure(state, subscription, 'JOB_SUBSCRIPTION_CLOSED')
         }
       },
-      () => {
+      (cause) => {
         if (state.jobSubscriptions.get(request.subscription_id) !== subscription) return
         state.jobSubscriptions.delete(request.subscription_id)
         if (!subscription.controller.signal.aborted) {
-          jobStreamFailure(state, subscription, 'JOB_EVENT_STREAM_FAILED')
+          jobStreamFailure(state, subscription, jobStreamFailureCode(cause))
         }
       },
     )

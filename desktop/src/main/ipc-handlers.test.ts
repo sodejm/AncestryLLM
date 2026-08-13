@@ -16,6 +16,7 @@ import type {
 import { desktopChannels, desktopEventChannels } from '../shared-contract/desktop'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
+import { SidecarClientError } from './sidecar-client'
 import {
   registerDesktopIpcHandlers,
   type MainDesktopBridge,
@@ -538,6 +539,30 @@ describe('desktop IPC handlers', () => {
       args: [{ kind: 'failure', error: { code: 'JOB_EVENT_STREAM_FAILED' } }],
     })
     expect(JSON.stringify(contents.sent)).not.toContain('/private/tree.ged')
+  })
+
+  it('preserves the stable replay-expiration code when a job stream rejects', async () => {
+    const control = bridge()
+    vi.mocked(control.streamJobEvents).mockRejectedValue(
+      new SidecarClientError('job_event_replay_expired'),
+    )
+    const { contents, event, handlers } = harness(control)
+    const request = {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      after: 1,
+    }
+
+    await handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)
+
+    await vi.waitFor(() => expect(contents.sent).toContainEqual({
+      channel: desktopEventChannels.jobEvent,
+      args: [expect.objectContaining({
+        kind: 'failure',
+        error: expect.objectContaining({ code: 'JOB_EVENT_REPLAY_EXPIRED' }),
+      })],
+    }))
   })
 
   it('aborts renderer job streams on main-frame navigation and sidecar replacement', async () => {

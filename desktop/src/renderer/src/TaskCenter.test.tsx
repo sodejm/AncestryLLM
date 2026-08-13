@@ -151,6 +151,49 @@ describe('Task Center', () => {
     expect(document.body).not.toHaveTextContent('fictional private parser details')
   })
 
+  it('preserves one cancellation failure when a sibling cancellation succeeds', async () => {
+    const first = snapshot()
+    const second = snapshot({
+      job_id: 'j654321',
+      name: 'Review fictional matches',
+    })
+    let rejectFirst: ((value: BridgeResult<JobSnapshot>) => void) | undefined
+    let resolveSecond: ((value: BridgeResult<JobSnapshot>) => void) | undefined
+    const firstCancellation = new Promise<BridgeResult<JobSnapshot>>((resolve) => {
+      rejectFirst = resolve
+    })
+    const secondCancellation = new Promise<BridgeResult<JobSnapshot>>((resolve) => {
+      resolveSecond = resolve
+    })
+    const bridge: AncestryBridge = {
+      ...bridgeFor([first, second]),
+      cancelJob: vi.fn(({ job_id }) => (
+        job_id === first.job_id ? firstCancellation : secondCancellation
+      )),
+    }
+
+    render(<TaskCenter bridge={bridge} />)
+    await userEvent.click(await screen.findByRole('button', { name: `Cancel ${first.name}` }))
+    await userEvent.click(screen.getByRole('button', { name: `Cancel ${second.name}` }))
+
+    rejectFirst!({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'JOB_NOT_FOUND',
+        message: 'The task is no longer available.',
+        remediation: 'Refresh task activity.',
+      },
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: JOB_NOT_FOUND')
+
+    resolveSecond!(success(second))
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: `Cancel ${second.name}` }),
+    ).toBeEnabled())
+    expect(screen.getByRole('alert')).toHaveTextContent('Code: JOB_NOT_FOUND')
+  })
+
   it('refreshes and replaces the subscription after a sequence gap, then cleans up on unmount', async () => {
     const active = snapshot()
     let deliver: ((delivery: Readonly<JobEventDelivery>) => void) | undefined
@@ -249,6 +292,73 @@ describe('Task Center', () => {
     await act(async () => releaseHealthySubscription!())
 
     expect(screen.getByRole('alert')).toHaveTextContent('Code: JOB_EVENT_STREAM_FAILED')
+  })
+
+  it('retries a subscription capped by the main-process limit after a slot becomes free', async () => {
+    const jobs = Array.from({ length: 33 }, (_, index) => snapshot({
+      job_id: `j${String(index + 1).padStart(6, '0')}`,
+      name: `Fictional task ${index + 1}`,
+    }))
+    const cappedJob = jobs[32]!
+    let deliver: ((delivery: Readonly<JobEventDelivery>) => void) | undefined
+    let cappedAttempts = 0
+    const subscribeJobEvents = vi.fn(async (request) => {
+      if (request.job_id === cappedJob.job_id && cappedAttempts++ === 0) {
+        return {
+          ok: false as const,
+          protocolVersion: '1' as const,
+          error: {
+            code: 'JOB_SUBSCRIBER_LIMIT' as const,
+            message: 'The task update subscription limit was reached.',
+            remediation: 'Wait for another task stream to finish.',
+          },
+        }
+      }
+      return success({
+        schema_version: 1 as const,
+        subscription_id: request.subscription_id,
+        job_id: request.job_id,
+        subscribed: true as const,
+      })
+    })
+    const bridge: AncestryBridge = {
+      ...bridgeFor(jobs),
+      subscribeJobEvents,
+      onJobEvent: vi.fn((listener) => {
+        deliver = listener
+        return () => undefined
+      }),
+    }
+
+    render(<TaskCenter bridge={bridge} />)
+    await waitFor(() => expect(subscribeJobEvents).toHaveBeenCalledTimes(33))
+    const firstRequest = subscribeJobEvents.mock.calls.find(
+      ([request]) => request.job_id === jobs[0]!.job_id,
+    )![0]
+
+    act(() => deliver!({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: firstRequest.subscription_id,
+      job_id: jobs[0]!.job_id,
+      event: {
+        schema_version: 1,
+        sequence: 2,
+        kind: 'terminal',
+        created_at: '2026-08-12T12:00:04+00:00',
+        snapshot: snapshot({
+          ...jobs[0],
+          sequence: 2,
+          state: 'completed',
+          finished_at: '2026-08-12T12:00:04+00:00',
+        }),
+      },
+      error: null,
+    }))
+
+    await waitFor(() => expect(
+      subscribeJobEvents.mock.calls.filter(([request]) => request.job_id === cappedJob.job_id),
+    ).toHaveLength(2))
   })
 
   it('bounds automatic stream replacement until the user explicitly refreshes', async () => {
