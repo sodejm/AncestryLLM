@@ -51,6 +51,7 @@ const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
+const JOB_EVENT_INACTIVITY_TIMEOUT_MS = 45_000
 
 type SecretOperation = 'status' | 'set' | 'delete'
 type SidecarPath =
@@ -402,6 +403,7 @@ function streamFixedJobEvents(
   sidecar: Readonly<AuthenticatedSidecarSession>,
   subscription: JobEventSubscriptionRequest,
   listener: (event: Readonly<JobEvent>) => void,
+  inactivityTimeoutMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -455,10 +457,20 @@ function streamFixedJobEvents(
       responseStream?.destroy()
       request.destroy()
     }
+    const resetDeadline = (timeoutMs: number) => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      deadline = setTimeout(() => {
+        failStream(new SidecarClientError('job_event_stream_failed'))
+      }, timeoutMs)
+    }
+    const resetInactivityDeadline = () => resetDeadline(inactivityTimeoutMs)
 
     const processFrame = (frame: string) => {
       const lines = frame.split('\n')
-      if (lines.every((line) => line.startsWith(':'))) return
+      if (lines.every((line) => line.startsWith(':'))) {
+        resetInactivityDeadline()
+        return
+      }
       if (terminalSeen) throw new SidecarClientError('job_event_stream_failed')
       const fields = new Map<string, string>()
       for (const line of lines) {
@@ -506,6 +518,7 @@ function streamFixedJobEvents(
       lastSequence = result.data.sequence
       terminalSeen = result.data.kind === 'terminal'
       listener(result.data)
+      resetInactivityDeadline()
     }
 
     const processBuffer = (final = false) => {
@@ -540,8 +553,6 @@ function streamFixedJobEvents(
       headers,
     }, (response) => {
       responseStream = response
-      if (deadline !== undefined) clearTimeout(deadline)
-      deadline = undefined
       const contentType = Array.isArray(response.headers['content-type'])
         ? (response.headers['content-type'][0] ?? '')
         : (response.headers['content-type'] ?? '')
@@ -568,6 +579,7 @@ function streamFixedJobEvents(
         response.on('error', rejectOnce)
         return
       }
+      resetInactivityDeadline()
       response.on('data', (chunk: Buffer | string) => {
         if (settled) return
         try {
@@ -592,9 +604,7 @@ function streamFixedJobEvents(
       response.on('error', rejectOnce)
     })
     request.on('error', rejectOnce)
-    deadline = setTimeout(() => {
-      failStream(new SidecarClientError('job_event_stream_failed'))
-    }, REQUEST_TIMEOUT_MS)
+    resetDeadline(REQUEST_TIMEOUT_MS)
     signal?.addEventListener('abort', abort, { once: true })
     if (signal?.aborted) {
       abort()
@@ -639,7 +649,13 @@ function parseJobShutdownAssessment(
 export function createSidecarClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
+  jobEventInactivityTimeoutMs?: number
 }>): Readonly<SidecarClient> {
+  const jobEventInactivityTimeoutMs = dependencies.jobEventInactivityTimeoutMs
+    ?? JOB_EVENT_INACTIVITY_TIMEOUT_MS
+  if (!Number.isFinite(jobEventInactivityTimeoutMs) || jobEventInactivityTimeoutMs <= 0) {
+    throw new Error('Job event inactivity timeout must be positive.')
+  }
   const request = dependencies.request ?? requestFixedRoute
   const perform = async (
     path: SidecarPath,
@@ -794,7 +810,13 @@ export function createSidecarClient(dependencies: Readonly<{
       const session = dependencies.session()
       if (!session) throw new SidecarClientError('unavailable')
       try {
-        await streamFixedJobEvents(session, subscription, listener, signal)
+        await streamFixedJobEvents(
+          session,
+          subscription,
+          listener,
+          jobEventInactivityTimeoutMs,
+          signal,
+        )
       } catch (error) {
         if (signal?.aborted) throw new SidecarClientError('cancelled')
         if (error instanceof SidecarClientError) throw error
@@ -807,6 +829,7 @@ export function createSidecarClient(dependencies: Readonly<{
 export function createSidecarCapabilitiesClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
+  jobEventInactivityTimeoutMs?: number
 }>): Readonly<SidecarClient> {
   return createSidecarClient(dependencies)
 }

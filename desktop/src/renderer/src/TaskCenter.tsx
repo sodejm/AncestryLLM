@@ -359,8 +359,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
 
           {snapshot.state === 'failed' && <CodedErrorView
             code={snapshot.error_code ?? 'TASK_FAILED'}
-            title="This task did not complete."
-            recovery="Review local service diagnostics, then retry the operation."
+            title={snapshot.error_message ?? 'This task did not complete.'}
+            recovery={snapshot.error_remediation
+              ?? 'Review local service diagnostics, then retry the operation.'}
           />}
 
           {snapshot.artifact && <dl className="task-artifact">

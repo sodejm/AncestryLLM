@@ -1,4 +1,4 @@
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import type { JobSnapshot } from '../shared-contract/desktop'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
@@ -294,6 +294,53 @@ describe('main-only sidecar capabilities client', () => {
     try {
       await expect(stream).rejects.toEqual(new SidecarClientError('cancelled'))
     } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('retains and refreshes a bounded inactivity deadline after SSE headers arrive', async () => {
+    let streamResponse: ServerResponse | undefined
+    let acceptRequest!: () => void
+    const accepted = new Promise<void>((resolve) => { acceptRequest = resolve })
+    const server = createServer((_request, response) => {
+      streamResponse = response
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write(': keep-alive\n\n')
+      acceptRequest()
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+      jobEventInactivityTimeoutMs: 500,
+    })
+    let failure: unknown
+    const stream = client.streamJobEvents({
+      schema_version: 1,
+      subscription_id: `sub_${'a'.repeat(32)}`,
+      job_id: 'j123456',
+      after: 0,
+    }, vi.fn()).catch((error: unknown) => { failure = error })
+    try {
+      await accepted
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      expect(failure).toBeUndefined()
+
+      streamResponse?.write(': keep-alive\n\n')
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      expect(failure).toBeUndefined()
+
+      await stream
+      expect(failure).toEqual(new SidecarClientError('job_event_stream_failed'))
+    } finally {
+      streamResponse?.destroy()
       server.closeAllConnections()
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }

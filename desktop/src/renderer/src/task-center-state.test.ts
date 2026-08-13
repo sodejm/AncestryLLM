@@ -66,6 +66,7 @@ describe('task center state', () => {
     })
     expect(gap.jobs.j123456?.sequence).toBe(1)
     expect(gap.needsResync).toEqual(['j123456'])
+    expect(gap.resyncTargets).toEqual({ j123456: 3 })
 
     const refreshed = taskCenterReducer(gap, {
       type: 'refreshed',
@@ -73,6 +74,7 @@ describe('task center state', () => {
     })
     expect(refreshed.jobs.j123456?.state).toBe('cancelled')
     expect(refreshed.needsResync).toEqual([])
+    expect(refreshed.resyncTargets).toEqual({})
     expect(refreshed.announcement).toBe('Export fictional tree was cancelled.')
   })
 
@@ -159,5 +161,51 @@ describe('task center state', () => {
     expect(delayedList.jobs.j123456?.sequence).toBe(2)
     expect(delayedList.jobs.j123456?.state).toBe('completed')
     expect(delayedList.announcement).toBeNull()
+  })
+
+  it('preserves a pending resync when a delayed list is older than the live snapshot', () => {
+    const loaded = taskCenterReducer(initialTaskCenterState, { type: 'loaded', jobs: [snapshot()] })
+    const advanced = taskCenterReducer(loaded, {
+      type: 'event',
+      event: event(snapshot({ sequence: 2 }), 'progress'),
+    })
+    const gap = taskCenterReducer(advanced, {
+      type: 'event',
+      event: event(snapshot({ sequence: 4 }), 'progress'),
+    })
+
+    const delayedList = taskCenterReducer(gap, { type: 'loaded', jobs: [snapshot()] })
+
+    expect(delayedList.jobs.j123456?.sequence).toBe(2)
+    expect(delayedList.needsResync).toEqual(['j123456'])
+    expect(delayedList.resyncTargets).toEqual({ j123456: 4 })
+  })
+
+  it('clears a pending list resync only after the list reaches the observed gap sequence', () => {
+    const loaded = taskCenterReducer(initialTaskCenterState, { type: 'loaded', jobs: [snapshot()] })
+    const advanced = taskCenterReducer(loaded, {
+      type: 'event',
+      event: event(snapshot({ sequence: 2 }), 'progress'),
+    })
+    const gap = taskCenterReducer(advanced, {
+      type: 'event',
+      event: event(snapshot({ sequence: 4 }), 'progress'),
+    })
+
+    const stillStale = taskCenterReducer(gap, {
+      type: 'loaded',
+      jobs: [snapshot({ sequence: 3 })],
+    })
+    const caughtUp = taskCenterReducer(gap, {
+      type: 'loaded',
+      jobs: [snapshot({ sequence: 4 })],
+    })
+
+    expect(stillStale.jobs.j123456?.sequence).toBe(3)
+    expect(stillStale.needsResync).toEqual(['j123456'])
+    expect(stillStale.resyncTargets).toEqual({ j123456: 4 })
+    expect(caughtUp.jobs.j123456?.sequence).toBe(4)
+    expect(caughtUp.needsResync).toEqual([])
+    expect(caughtUp.resyncTargets).toEqual({})
   })
 })

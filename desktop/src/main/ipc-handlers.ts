@@ -462,11 +462,16 @@ function schedule<T>(
   })
 }
 
-function invalidate(state: Authorization): void {
+function invalidate(state: Authorization, notifyJobStreams = false): void {
+  const subscriptions = [...state.jobSubscriptions.values()]
+  if (notifyJobStreams) {
+    for (const subscription of subscriptions) {
+      jobStreamFailure(state, subscription, 'JOB_SUBSCRIPTION_CLOSED')
+    }
+  }
   state.generation += 1
   for (const controller of state.controllers) controller.abort(CANCELLED)
   for (const entry of state.queue.splice(0)) entry.cancel()
-  const subscriptions = [...state.jobSubscriptions.values()]
   state.jobSubscriptions.clear()
   for (const subscription of subscriptions) subscription.controller.abort(CANCELLED)
 }
@@ -1134,7 +1139,7 @@ export function registerDesktopIpcHandlers(
     },
     invalidateSidecarSession(): void {
       fileGrants.revokeAll()
-      for (const state of authorizations.values()) invalidate(state)
+      for (const state of authorizations.values()) invalidate(state, true)
     },
     dispose(): void {
       if (disposed) return

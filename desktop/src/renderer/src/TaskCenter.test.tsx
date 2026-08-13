@@ -329,4 +329,23 @@ describe('Task Center', () => {
     expect(alert).toHaveTextContent('Retry the local service or restart AncestryLLM.')
     expect(alert).not.toHaveTextContent(/secret|private-tree|43117|request body/i)
   })
+
+  it('renders validated task-specific failure guidance from the authoritative snapshot', async () => {
+    const failed = snapshot({
+      sequence: 3,
+      state: 'failed',
+      finished_at: '2026-08-12T12:00:04+00:00',
+      error_code: 'JOB_INTERRUPTED',
+      error_message: 'AncestryLLM restarted before this task finished.',
+      error_remediation: 'Review the operation state before retrying manually.',
+    })
+
+    render(<TaskCenter bridge={bridgeFor([failed])} />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Code: JOB_INTERRUPTED')
+    expect(alert).toHaveTextContent('AncestryLLM restarted before this task finished.')
+    expect(alert).toHaveTextContent('Review the operation state before retrying manually.')
+    expect(alert).not.toHaveTextContent('Review local service diagnostics')
+  })
 })

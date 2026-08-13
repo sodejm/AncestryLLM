@@ -562,6 +562,14 @@ describe('desktop IPC handlers', () => {
     await subscribe?.(event(), request('c'))
     controller.invalidateSidecarSession()
     expect(signals[1]?.aborted).toBe(true)
+    expect(contents.sent).toContainEqual({
+      channel: desktopEventChannels.jobEvent,
+      args: [expect.objectContaining({
+        kind: 'failure',
+        subscription_id: `sub_${'c'.repeat(32)}`,
+        error: expect.objectContaining({ code: 'JOB_SUBSCRIPTION_CLOSED' }),
+      })],
+    })
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {
