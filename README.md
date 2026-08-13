@@ -46,6 +46,14 @@ only safe artifact metadata. The renderer stores no job state and receives no
 path or artifact authority. This surface admits no work and adds no provider or
 genealogy operation.
 
+Unreleased Issue #56 adds an internal asynchronous adapter for already
+authorized provider streams. Consent and capability checks complete before its
+provider worker starts; a bounded queue, per-chunk byte limit, absolute
+deadline, and cooperative cancellation constrain the stream. Success, failure,
+timeout, and cancellation each produce one privacy-minimal audit outcome. This
+is source-level groundwork only: it adds no Electron bridge, chat UI, public
+streaming transport, or network path for `provider=none`.
+
 The unreleased desktop first run now recommends **Local Desktop** and keeps
 **Connect Remote** and **Host Remote** visible but unavailable. Before it
 enables settings or credential changes, the shell checks a sanitized schema-v1

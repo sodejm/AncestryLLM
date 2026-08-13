@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import hmac
@@ -15,6 +16,12 @@ from ancestryllm.core.errors import (
     is_provider_cancellation,
     normalize_provider_error,
 )
+from ancestryllm.llm.async_stream import (
+    DEFAULT_ASYNC_STREAM_MAX_CHUNK_BYTES,
+    DEFAULT_ASYNC_STREAM_QUEUE_ITEMS,
+    BoundedAsyncStreamBridge,
+    validate_async_stream_bounds,
+)
 from ancestryllm.llm.execution import (
     CancellationCheck,
     ExactResultCache,
@@ -25,7 +32,8 @@ from ancestryllm.llm.validation import validate_structured_output
 from ancestryllm.storage.models import LlmRunModel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    import threading
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     from ancestryllm.llm.contracts import (
         GenerationRequest,
@@ -54,7 +62,13 @@ class LLMService:
         execution: ProviderExecutionCoordinator | None = None,
         cache: ExactResultCache | None = None,
         cancellation_check: CancellationCheck | None = None,
+        async_stream_queue_items: int = DEFAULT_ASYNC_STREAM_QUEUE_ITEMS,
+        async_stream_max_chunk_bytes: int = DEFAULT_ASYNC_STREAM_MAX_CHUNK_BYTES,
     ) -> None:
+        validate_async_stream_bounds(
+            max_items=async_stream_queue_items,
+            max_chunk_bytes=async_stream_max_chunk_bytes,
+        )
         self.registry = registry
         self.database = database
         self.policy = policy or ConsentPolicy()
@@ -63,6 +77,8 @@ class LLMService:
         self.cache = cache or ExactResultCache()
         self._cache_key = secrets.token_bytes(32)
         self._explicit_cancellation_check = cancellation_check
+        self._async_stream_queue_items = async_stream_queue_items
+        self._async_stream_max_chunk_bytes = async_stream_max_chunk_bytes
 
     @staticmethod
     def _request_metadata(request: GenerationRequest) -> tuple[str, str]:
@@ -368,6 +384,193 @@ class LLMService:
             retain=retain,
         )
 
+    async def async_stream(
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None = None,
+    ) -> AsyncIterator[str]:
+        """Adapt one authorized synchronous provider stream without blocking asyncio."""
+
+        planned_request, provider = self._prepare(request, consent)
+        if planned_request.response_schema is not None:
+            raise ProviderError(
+                "PROVIDER_STREAM_STRUCTURED_OUTPUT_UNSUPPORTED",
+                "Structured output requires the validated non-streaming generation path.",
+                "Use generate for requests with a response schema.",
+            )
+        if not provider.capabilities.streaming:
+            raise ProviderError(
+                "PROVIDER_STREAMING_UNSUPPORTED",
+                f"The {planned_request.provider_id} provider does not support streaming.",
+                "Select a streaming-capable provider or use non-streaming generation.",
+            )
+
+        canonical, request_hash = self._request_metadata(planned_request)
+        started = dt.datetime.now(dt.UTC).isoformat()
+        retain = bool(consent and consent.retain_payloads)
+        response_hasher = hashlib.sha256()
+        retained_chunks: list[str] | None = [] if retain else None
+        stream_started = False
+        failure: BaseException | None = None
+        caller_cancelled = False
+        bridge = BoundedAsyncStreamBridge(
+            lambda publish, stop: self._produce_async_stream(
+                planned_request,
+                provider,
+                publish,
+                stop,
+            ),
+            max_items=self._async_stream_queue_items,
+            max_chunk_bytes=self._async_stream_max_chunk_bytes,
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + planned_request.timeout_seconds
+        deadline_handle: asyncio.TimerHandle | None = None
+        try:
+            bridge.start()
+            deadline_handle = loop.call_at(deadline, bridge.cancel)
+            while True:
+                if loop.time() >= deadline:
+                    raise TimeoutError
+                async with asyncio.timeout_at(deadline):
+                    item = await bridge.receive()
+                if item.failure is not None:
+                    failure = item.failure
+                    break
+                if item.complete:
+                    break
+                chunk = item.chunk
+                if chunk is None:
+                    raise ProviderError(
+                        "PROVIDER_STREAM_BRIDGE_INVALID",
+                        "The provider stream bridge returned an invalid item.",
+                    )
+                stream_started = True
+                response_hasher.update(chunk.encode("utf-8"))
+                if retained_chunks is not None:
+                    retained_chunks.append(chunk)
+                yield chunk
+        except BaseException as exc:  # noqa: BLE001 - cancellation is outside Exception
+            failure = exc
+            caller_cancelled = isinstance(exc, asyncio.CancelledError)
+        finally:
+            if deadline_handle is not None:
+                deadline_handle.cancel()
+            bridge.cancel()
+
+        if failure is not None:
+            error = self._record_stream_failure(
+                planned_request,
+                consent,
+                failure,
+                canonical=canonical,
+                request_hash=request_hash,
+                started_at=started,
+                retain=retain,
+                retained_chunks=retained_chunks,
+                stream_started=stream_started,
+            )
+            if isinstance(failure, GeneratorExit):
+                return
+            if caller_cancelled:
+                raise failure
+            if error is failure:
+                raise error
+            raise error from failure
+
+        self._record_run(
+            planned_request,
+            consent,
+            request_hash=request_hash,
+            started_at=started,
+            status="succeeded",
+            response_hash=response_hasher.hexdigest(),
+            input_payload=canonical if retain else None,
+            output_payload=("".join(retained_chunks) if retained_chunks is not None else None),
+        )
+
+    def _produce_async_stream(
+        self,
+        request: GenerationRequest,
+        provider: LLMProvider,
+        publish: Callable[[str], None],
+        stop: threading.Event,
+    ) -> None:
+        failure: BaseException | None = None
+        iterator: Iterator[str] | None = None
+
+        def check_cancellation() -> None:
+            if stop.is_set():
+                raise asyncio.CancelledError
+            self._check_cancellation()
+
+        try:
+            with self.execution.lease(
+                self._execution_key(request),
+                max_concurrency=request.execution.max_concurrency,
+                max_pending=request.execution.max_pending,
+                timeout_seconds=request.timeout_seconds,
+                cancellation_check=check_cancellation,
+            ):
+                check_cancellation()
+                iterator = iter(provider.stream(request))
+                for chunk in iterator:
+                    check_cancellation()
+                    publish(chunk)
+                check_cancellation()
+        except BaseException as exc:  # noqa: BLE001 - cancellation is outside Exception
+            failure = exc
+        finally:
+            close = getattr(iterator, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except BaseException as exc:  # noqa: BLE001 - cancellation is outside Exception
+                    if failure is None:
+                        failure = exc
+        if failure is not None:
+            raise failure
+
+    def _record_stream_failure(
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None,
+        failure: BaseException,
+        *,
+        canonical: str,
+        request_hash: str,
+        started_at: str,
+        retain: bool,
+        retained_chunks: list[str] | None,
+        stream_started: bool,
+    ) -> ProviderError:
+        if not isinstance(failure, Exception) and not is_provider_cancellation(failure):
+            raise failure
+        error = normalize_provider_error(
+            failure,
+            request.provider_id,
+            streaming=True,
+            stream_started=stream_started,
+        )
+        partial_output = (
+            "".join(retained_chunks)
+            if error.code != "PROVIDER_CANCELLED" and retained_chunks is not None and stream_started
+            else None
+        )
+        self._record_run(
+            request,
+            consent,
+            request_hash=request_hash,
+            started_at=started_at,
+            status=(
+                "aborted" if stream_started or error.code == "PROVIDER_CANCELLED" else "failed"
+            ),
+            input_payload=canonical if retain else None,
+            output_payload=partial_output,
+            error_code=error.code,
+        )
+        return error
+
     def _stream_lifecycle(
         self,
         request: GenerationRequest,
@@ -415,32 +618,16 @@ class LLMService:
                         failure = exc
 
         if failure is not None:
-            if not isinstance(failure, Exception) and not is_provider_cancellation(failure):
-                raise failure
-            error = normalize_provider_error(
-                failure,
-                request.provider_id,
-                streaming=True,
-                stream_started=stream_started,
-            )
-            partial_output = (
-                "".join(retained_chunks)
-                if error.code != "PROVIDER_CANCELLED"
-                and retained_chunks is not None
-                and stream_started
-                else None
-            )
-            self._record_run(
+            error = self._record_stream_failure(
                 request,
                 consent,
+                failure,
+                canonical=canonical,
                 request_hash=request_hash,
                 started_at=started_at,
-                status="aborted"
-                if stream_started or error.code == "PROVIDER_CANCELLED"
-                else "failed",
-                input_payload=canonical if retain else None,
-                output_payload=partial_output,
-                error_code=error.code,
+                retain=retain,
+                retained_chunks=retained_chunks,
+                stream_started=stream_started,
             )
             if isinstance(failure, GeneratorExit):
                 return

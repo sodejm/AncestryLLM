@@ -61,9 +61,39 @@ Successful user and assistant messages remain only in the owning `ChatService`
 process. Failed runs do not append content, and deletion or application
 shutdown clears the session. Audit output contains identifiers, counters,
 usage, and one-way payload hashes rather than prompts or responses. Issue #110
-does not add an Electron renderer or preload bridge, streaming or cancellation,
-safe Markdown presentation, or packaged-network evidence; those remain owned
-by Issues #111, #112, and #131.
+itself does not add an Electron renderer or preload bridge, streaming or
+cancellation, safe Markdown presentation, or packaged-network evidence; those
+remain owned by Issues #111, #112, and #131.
+
+## Audited asynchronous provider streams
+
+Unreleased Issue #56 adds `LLMService.async_stream()` as an internal adapter
+for provider SDKs whose stream iterators are synchronous. Named-profile
+planning, endpoint and credential policy, consent, and streaming-capability
+checks finish before the provider worker starts. Requests with a response
+schema are rejected from this path and continue through `generate()`, where
+their complete response receives schema validation.
+
+The adapter copies the current cancellation context into an off-loop daemon
+worker and connects it to the event loop through a bounded queue. Defaults are
+16 queued items and 64 KiB per UTF-8 chunk. Configuration cannot exceed 256
+items, 1 MiB per chunk, or 16 MiB of queue capacity. One absolute lifecycle
+deadline covers execution admission and provider iteration. Only asynchronous
+queue waits are wrapped by the timeout, so work the caller performs between
+yielded chunks is not accidentally cancelled; a scheduled stop signal still
+prevents the worker from continuing to enqueue after the deadline. Caller
+cancellation and early consumer close also signal cooperative stop.
+
+Success, provider failure, timeout, cancellation, and early close each produce
+exactly one terminal audit outcome. The default record contains one-way request
+and response hashes rather than payloads. Explicit retention consent is still
+required to retain content, and cancellation discards partial retained output.
+Stable errors omit provider bodies, chunks, secrets, paths, and local identity.
+A synchronous SDK may not finish unwinding until its iterator next yields or
+returns, so provider-side network timeouts remain necessary. The worker is a
+shutdown-safe daemon and holds its execution lease until that unwind completes.
+Issue #56 adds no HTTP, IPC, Electron, renderer, or public streaming contract;
+end-to-end chat stream ownership remains Issue #111.
 
 ## Application boundary
 

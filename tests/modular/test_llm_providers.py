@@ -32,7 +32,7 @@ from ancestryllm.llm.providers.openai import OpenAIProvider
 from ancestryllm.llm.service import LLMService
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
     import httpx
 
@@ -714,6 +714,7 @@ class BlockingStreamProvider(LifecycleProvider):
         super().__init__()
         self.started = threading.Event()
         self.release = threading.Event()
+        self.closed_event = threading.Event()
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
         self.stream_called = True
@@ -723,6 +724,7 @@ class BlockingStreamProvider(LifecycleProvider):
             yield "must not be consumed"
         finally:
             self.closed = True
+            self.closed_event.set()
 
 
 class PartialBlockingStreamProvider(LifecycleProvider):
@@ -730,6 +732,7 @@ class PartialBlockingStreamProvider(LifecycleProvider):
         super().__init__()
         self.started = threading.Event()
         self.release = threading.Event()
+        self.closed_event = threading.Event()
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
         self.stream_called = True
@@ -738,6 +741,37 @@ class PartialBlockingStreamProvider(LifecycleProvider):
             self.started.set()
             assert self.release.wait(2)
             yield "must not be consumed"
+        finally:
+            self.closed = True
+            self.closed_event.set()
+
+
+class RapidStreamProvider(LifecycleProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.yield_count = 0
+        self.closed_event = threading.Event()
+
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        del request
+        self.stream_called = True
+        self.stream_calls += 1
+        try:
+            while True:
+                self.yield_count += 1
+                yield f"chunk-{self.yield_count}"
+        finally:
+            self.closed = True
+            self.closed_event.set()
+
+
+class OversizedChunkProvider(LifecycleProvider):
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        del request
+        self.stream_called = True
+        self.stream_calls += 1
+        try:
+            yield "sensitive oversized provider output"
         finally:
             self.closed = True
 
@@ -788,6 +822,10 @@ def retention_consent() -> ConsentGrant:
         model_allowlist=("test-*",),
         retain_payloads=True,
     )
+
+
+async def collect_async_stream(stream: AsyncIterator[str]) -> list[str]:
+    return [chunk async for chunk in stream]
 
 
 def test_service_stream_authorizes_before_calling_remote_provider() -> None:
@@ -900,6 +938,296 @@ def test_service_stream_normalizes_provider_cancellation_before_output() -> None
     assert row.status == "aborted"
     assert row.error_code == "PROVIDER_CANCELLED"
     assert row.output_payload is None
+
+
+def test_service_async_stream_authorizes_before_starting_worker() -> None:
+    provider = LifecycleProvider(remote=True)
+    llm, database = service(provider)
+
+    with pytest.raises(SecurityPolicyError, match="consent"):
+        asyncio.run(collect_async_stream(llm.async_stream(request("test"))))
+
+    assert not provider.stream_called
+    assert database.rows == []
+
+
+def test_service_async_stream_audits_success_without_retaining_payload() -> None:
+    provider = LifecycleProvider()
+    llm, database = service(provider)
+
+    chunks = asyncio.run(collect_async_stream(llm.async_stream(request("test"))))
+
+    assert chunks == ["partial", " complete"]
+    assert provider.closed
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "succeeded"
+    assert row.input_payload is None
+    assert row.output_payload is None
+    assert row.response_hash == hashlib.sha256(b"partial complete").hexdigest()
+
+
+def test_service_async_stream_retains_success_only_with_explicit_consent() -> None:
+    provider = LifecycleProvider()
+    llm, database = service(provider)
+    generation_request = request("test")
+
+    chunks = asyncio.run(
+        collect_async_stream(llm.async_stream(generation_request, retention_consent()))
+    )
+
+    assert chunks == ["partial", " complete"]
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "succeeded"
+    assert row.input_payload == generation_request.model_dump_json()
+    assert row.output_payload == "partial complete"
+
+
+def test_service_async_stream_audits_partial_timeout_once_without_payload() -> None:
+    provider = LifecycleProvider(fail_after_chunk=True)
+    llm, database = service(provider)
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(collect_async_stream(llm.async_stream(request("test"))))
+
+    assert raised.value.code == "PROVIDER_STREAM_TIMEOUT"
+    assert provider.closed
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "aborted"
+    assert row.error_code == "PROVIDER_STREAM_TIMEOUT"
+    assert row.response_hash is None
+    assert row.input_payload is None
+    assert row.output_payload is None
+
+
+def test_service_async_stream_enforces_wall_clock_timeout_and_closes_provider() -> None:
+    provider = BlockingStreamProvider()
+    llm, database = service(provider)
+
+    try:
+        with pytest.raises(ProviderError) as raised:
+            asyncio.run(
+                collect_async_stream(llm.async_stream(request("test", timeout_seconds=1.0)))
+            )
+    finally:
+        provider.release.set()
+
+    assert raised.value.code == "PROVIDER_TIMEOUT"
+    assert provider.closed_event.wait(2)
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "failed"
+    assert row.error_code == "PROVIDER_TIMEOUT"
+    assert row.input_payload is None
+    assert row.output_payload is None
+
+
+def test_service_async_stream_timeout_never_cancels_consumer_between_chunks() -> None:
+    provider = PartialBlockingStreamProvider()
+    llm, database = service(provider)
+
+    async def consume_after_deadline() -> None:
+        stream = llm.async_stream(request("test", timeout_seconds=1.0))
+        assert await anext(stream) == "partial"
+        await asyncio.sleep(1.05)
+        with pytest.raises(ProviderError) as raised:
+            await anext(stream)
+        assert raised.value.code == "PROVIDER_STREAM_TIMEOUT"
+
+    try:
+        asyncio.run(consume_after_deadline())
+    finally:
+        provider.release.set()
+
+    assert provider.closed_event.wait(2)
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_STREAM_TIMEOUT"
+
+
+def test_service_async_stream_cancellation_releases_worker_and_audits_once() -> None:
+    provider = BlockingStreamProvider()
+    llm, database = service(provider)
+
+    async def cancel_request() -> None:
+        stream = llm.async_stream(request("test"))
+        pending = asyncio.create_task(anext(stream))
+        assert await asyncio.to_thread(provider.started.wait, 2)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        await stream.aclose()
+
+    try:
+        asyncio.run(cancel_request())
+    finally:
+        provider.release.set()
+
+    assert provider.closed_event.wait(2)
+    assert provider.closed
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "aborted"
+    assert row.error_code == "PROVIDER_CANCELLED"
+    assert row.output_payload is None
+
+
+def test_job_cancellation_propagates_through_async_stream_worker_context() -> None:
+    provider = BlockingStreamProvider()
+    llm, database = service(provider)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "asynchronous provider stream",
+            lambda: asyncio.run(collect_async_stream(llm.async_stream(request("test")))),
+        )
+        assert provider.started.wait(2)
+        manager.cancel(job.job_id)
+        provider.release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        provider.release.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert provider.closed_event.wait(2)
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+    assert database.rows[0].output_payload is None
+
+
+def test_job_cancellation_discards_retained_partial_async_stream_payload() -> None:
+    provider = PartialBlockingStreamProvider()
+    llm, database = service(provider)
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit(
+            "retained asynchronous provider stream",
+            lambda: asyncio.run(
+                collect_async_stream(llm.async_stream(request("test"), retention_consent()))
+            ),
+        )
+        assert provider.started.wait(2)
+        manager.cancel(job.job_id)
+        provider.release.set()
+        cancelled = manager.wait(job.job_id, timeout=2)
+    finally:
+        provider.release.set()
+        manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert provider.closed is True
+    assert len(database.rows) == 1
+    row = database.rows[0]
+    assert row.status == "aborted"
+    assert row.error_code == "PROVIDER_CANCELLED"
+    assert row.input_payload is not None
+    assert row.output_payload is None
+
+
+def test_service_async_stream_applies_bounded_backpressure() -> None:
+    provider = RapidStreamProvider()
+    database = AuditDatabase()
+    llm = LLMService(
+        StaticRegistry(provider),  # type: ignore[arg-type]
+        database,  # type: ignore[arg-type]
+        async_stream_queue_items=2,
+    )
+
+    async def consume_one_chunk() -> None:
+        stream = llm.async_stream(request("test"))
+        assert await anext(stream) == "chunk-1"
+        await asyncio.sleep(0.1)
+        assert provider.yield_count <= 4
+        await stream.aclose()
+
+    asyncio.run(consume_one_chunk())
+
+    assert provider.closed_event.wait(2)
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "aborted"
+    assert database.rows[0].error_code == "PROVIDER_CANCELLED"
+
+
+def test_service_async_stream_rejects_oversized_chunk_without_disclosure() -> None:
+    provider = OversizedChunkProvider()
+    database = AuditDatabase()
+    llm = LLMService(
+        StaticRegistry(provider),  # type: ignore[arg-type]
+        database,  # type: ignore[arg-type]
+        async_stream_max_chunk_bytes=8,
+    )
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(collect_async_stream(llm.async_stream(request("test"))))
+
+    assert raised.value.code == "PROVIDER_STREAM_CHUNK_TOO_LARGE"
+    assert "sensitive" not in raised.value.render()
+    assert provider.closed
+    assert len(database.rows) == 1
+    assert database.rows[0].status == "failed"
+    assert database.rows[0].error_code == "PROVIDER_STREAM_CHUNK_TOO_LARGE"
+
+
+@pytest.mark.parametrize(
+    ("queue_items", "chunk_bytes"),
+    [
+        (True, 64 * 1024),
+        (16, True),
+        (17, 1024 * 1024),
+    ],
+)
+def test_service_async_stream_rejects_unsafe_buffer_configuration(
+    queue_items: int,
+    chunk_bytes: int,
+) -> None:
+    provider = LifecycleProvider()
+
+    with pytest.raises(ValueError, match="async stream"):
+        LLMService(
+            StaticRegistry(provider),  # type: ignore[arg-type]
+            AuditDatabase(),  # type: ignore[arg-type]
+            async_stream_queue_items=queue_items,
+            async_stream_max_chunk_bytes=chunk_bytes,
+        )
+
+
+def test_service_async_stream_rejects_missing_stream_capability_before_call() -> None:
+    provider = LifecycleProvider()
+    provider.capabilities = provider.capabilities.model_copy(update={"streaming": False})
+    llm, database = service(provider)
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(collect_async_stream(llm.async_stream(request("test"))))
+
+    assert raised.value.code == "PROVIDER_STREAMING_UNSUPPORTED"
+    assert provider.stream_calls == 0
+    assert database.rows == []
+
+
+def test_service_async_stream_rejects_structured_output_before_provider_call() -> None:
+    provider = LifecycleProvider()
+    llm, database = service(provider)
+    structured_request = request("test").model_copy(
+        update={
+            "response_schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            }
+        }
+    )
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(collect_async_stream(llm.async_stream(structured_request)))
+
+    assert raised.value.code == "PROVIDER_STREAM_STRUCTURED_OUTPUT_UNSUPPORTED"
+    assert provider.stream_calls == 0
+    assert database.rows == []
 
 
 def test_service_generate_does_not_retry_without_explicit_opt_in() -> None:

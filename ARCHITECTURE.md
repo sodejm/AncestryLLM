@@ -45,6 +45,13 @@ the model receives no tools, and privacy-minimal audit records contain only
 reviewed identifiers, counters, and hashes. This source boundary adds no
 renderer bridge, chat UI, streaming transport, genealogy operation, or generic
 provider-dispatch route.
+Issue #56 adds a service-internal asynchronous iterator over existing
+synchronous provider streams. Policy, consent, and capability checks finish
+before a context-preserving worker begins. The off-loop bridge uses a bounded
+queue and byte-bounded chunks, an absolute lifecycle deadline, cooperative
+cancellation, and exactly one terminal audit outcome. Structured requests stay
+on the validated non-streaming path. This boundary adds no API route, Electron
+bridge, renderer state, public streaming transport, or provider authority.
 Packaged desktop startup uses the OS keyring only, blocks settings, preference,
 credential, provider-profile, and consent mutations while a required startup
 component is degraded, and never repairs configuration, creates a database, or
@@ -194,7 +201,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/core/` | Configuration, typed deployment-profile schema, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, diagnostics, and the Unreleased bounded job snapshot/event repository. |
-| `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. Issue #110's `ChatService` owns transient synchronous chat history, exact-profile preflight, fresh consent, bounded generation, and payload-free audit composition. |
+| `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. Issue #110's `ChatService` owns transient synchronous chat history, exact-profile preflight, fresh consent, bounded generation, and payload-free audit composition. Issue #56's internal bridge adapts authorized synchronous provider iterators to bounded asynchronous consumption without adding transport authority. |
 | `src/ancestryllm/rootsmagic/` | Public immutable-source, query-orchestration, and GEDCOM mapping/export boundaries over characterized compatibility modules. |
 | `src/ancestryllm/gedcom/` | Public parser, graph, identity, quality, serialization, service, and sync boundaries over characterized loss-minimizing kernels. |
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
@@ -481,8 +488,19 @@ still requires its distribution and target-assurance gates to pass.
   Every run performs fresh policy and consent preflight, uses a fixed
   nonautonomous system instruction, disables structured/tool output, and emits
   payload-free audit metadata. Failed runs do not mutate history, and teardown
-  clears all sessions. Renderer bridging, streaming, cancellation, and chat
+  clears all sessions. Renderer bridging, end-to-end streaming, and chat
   presentation remain separately owned later work.
+- Issue #56 implements the service-internal asynchronous provider-stream
+  adapter needed by later chat work. A provider worker starts only after policy,
+  consent, and streaming-capability preflight. A context-preserving off-loop
+  worker publishes through a queue of 16 items by default, with 64 KiB chunks;
+  configuration is capped at 256 items, 1 MiB per chunk, and 16 MiB of queue
+  capacity. An absolute deadline signals cooperative stop while timeouts wrap
+  only bridge waits, so yielded caller work is not cancelled. Success, provider
+  failure, timeout, caller cancellation, and early consumer close record one
+  terminal audit outcome. Structured output continues through `generate()` and
+  its schema validation. API, Electron, renderer, and public stream ownership
+  remain #111 and later presentation work.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
   do not move into the renderer or main process.
@@ -802,6 +820,17 @@ depending on FastAPI, Pydantic, provider SDKs, storage, or presentation.
 fresh policy and consent preflight, synchronous bounded generation, transient
 history, and payload-free audit metadata. The HTTP adapter only validates and
 translates the fixed routes; it does not own policy or session state.
+
+Issue #56 adds `LLMService.async_stream()` below that application boundary.
+It reuses the same named-profile planning, policy, consent, provider registry,
+execution coordinator, error normalization, and audit repository as
+non-streaming generation. The bridge copies the current cancellation context
+into a daemon worker and bounds communication back to the event loop. Provider
+SDK iterators remain synchronous and may not finish unwinding until their next
+yield or return, so SDK network timeouts remain a required outer bound; the
+worker cannot block process shutdown and its execution lease remains held until
+unwind completes. This method is not an HTTP, IPC, renderer, or public API
+contract.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
