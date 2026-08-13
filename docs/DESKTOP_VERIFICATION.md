@@ -194,8 +194,14 @@ keyring implementation. Linux uses the native Secret Service harness described
 above rather than a mock backend. The clean-quit check registers the native
 process exit listener first. On macOS it sends `SIGTERM`, exercising the
 production signal-to-quit path whose handler is installed before asynchronous
-runtime startup; on Windows and Linux it closes the attached renderer page under
-a bounded deadline, exercising the final-window path. A source contract test
+runtime startup. If that first request has not produced a verified exit after
+20 seconds—longer than the production supervisor's 15-second stop boundary—the
+harness sends one later `SIGTERM` and waits under a separate 30-second deadline.
+This exercises the production contract that a failed stop remains fail-closed
+but does not leave a rejected shutdown promise cached forever. A second failure
+still fails the packaged test; force termination is reserved for test cleanup.
+On Windows and Linux the harness closes the attached renderer page under a
+bounded deadline, exercising the final-window path. A source contract test
 also proves that Electron owns the supervisor and job preflight before payload
 verification or process launch can yield. The
 harness then releases the Playwright connection and waits for a normal zero-code

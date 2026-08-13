@@ -78,17 +78,20 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
+    retry_start = source.index("async function requestMacPackagedQuit")
+    retry_end = source.index("\nasync function forceClosePackaged", retry_start)
+    retry_source = source[retry_start:retry_end]
     close_start = source.index("async function closePackaged")
     close_end = source.index("\nasync function launchPackaged", close_start)
     close_source = source[close_start:close_end]
 
+    assert "const packagedQuitRetryDelayMs = 20_000" in source
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
-    process_wait_index = close_source.index(
-        "const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)"
-    )
     platform_index = close_source.index("process.platform === 'darwin'")
-    signal_index = close_source.index("result.process.kill('SIGTERM')", platform_index)
+    retry_index = close_source.index(
+        "processExit = requestMacPackagedQuit(result.process)", platform_index
+    )
     window_close_index = close_source.index(
         "result.page.close({ runBeforeUnload: false })", platform_index
     )
@@ -101,12 +104,22 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "session.send('Browser.close')" not in close_source
     assert "result.page.keyboard.press('Meta+Q')" not in close_source
     assert "result.process.kill('SIGKILL')" not in close_source
+    assert "child.kill('SIGKILL')" not in retry_source
     assert re.search(
-        r"if \(process\.platform === 'darwin'\) \{.*?"
-        r"if \(!result\.process\.kill\('SIGTERM'\)\) \{\s*"
-        r"throw new Error\('Packaged app rejected the macOS quit request\.'\)\s*"
-        r"\}\s*\} else \{",
-        close_source,
+        r"const initialExit = waitForProcessExit\(child, packagedQuitRetryDelayMs\)\s*"
+        r"requestQuit\('initial', initialExit\)\s*"
+        r"try \{\s*return await initialExit\s*\} catch \{.*?"
+        r"const retryExit = waitForProcessExit\(child, packagedQuitTimeoutMs\)\s*"
+        r"requestQuit\('retry', retryExit\)\s*return retryExit",
+        retry_source,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"if \(!child\.kill\('SIGTERM'\)\) \{.*?"
+        r"void processExit\.catch\(\(\) => undefined\)\s*"
+        r"throw new Error\(`Packaged app rejected the macOS \$\{attempt\} quit request\.`\)\s*"
+        r"\}",
+        retry_source,
         re.DOTALL,
     )
     assert re.search(
@@ -117,8 +130,8 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     )
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
-    assert process_wait_index < platform_index < signal_index < browser_close_index
-    assert process_wait_index < platform_index < window_close_index < browser_close_index
+    assert platform_index < retry_index < browser_close_index
+    assert platform_index < window_close_index < browser_close_index
     assert browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
     sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")

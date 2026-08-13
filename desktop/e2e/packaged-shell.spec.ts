@@ -24,6 +24,7 @@ const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const packagedAttachTimeoutMs = 45_000
 const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
+const packagedQuitRetryDelayMs = 20_000
 const packagedQuitTimeoutMs = 30_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
@@ -251,6 +252,36 @@ function waitForProcessExit(
   })
 }
 
+async function requestMacPackagedQuit(
+  child: ChildProcessWithoutNullStreams,
+): Promise<ExitStatus> {
+  const requestQuit = (
+    attempt: 'initial' | 'retry',
+    processExit: Promise<ExitStatus>,
+  ): void => {
+    if (!child.kill('SIGTERM')) {
+      // The wait registered before the signal can still time out after this
+      // synchronous failure. Observe that rejection so the explicit quit
+      // error remains the only failure reported by the harness.
+      void processExit.catch(() => undefined)
+      throw new Error(`Packaged app rejected the macOS ${attempt} quit request.`)
+    }
+  }
+
+  const initialExit = waitForProcessExit(child, packagedQuitRetryDelayMs)
+  requestQuit('initial', initialExit)
+  try {
+    return await initialExit
+  } catch {
+    // Production bounds a sidecar stop at 15 seconds and deliberately leaves a
+    // rejected shutdown retryable. Wait beyond that boundary, then exercise the
+    // later native quit request that must start a fresh verified stop attempt.
+    const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs)
+    requestQuit('retry', retryExit)
+    return retryExit
+  }
+}
+
 async function forceClosePackaged(result: LaunchResult): Promise<void> {
   await withinDeadline('closing packaged browser automation', packagedCleanupTimeoutMs, () => result.browser.close())
     .catch(() => undefined)
@@ -290,15 +321,15 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 }
 
 async function closePackaged(result: LaunchResult): Promise<void> {
-  const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
+  let processExit: Promise<ExitStatus>
   if (process.platform === 'darwin') {
     // A CDP page close does not consistently map to a native BrowserWindow
     // close on macOS. Exercise Electron's production SIGTERM-to-app.quit path,
-    // then release the automation client before awaiting verified shutdown.
-    if (!result.process.kill('SIGTERM')) {
-      throw new Error('Packaged app rejected the macOS quit request.')
-    }
+    // including its one bounded later-request retry, then release automation
+    // before awaiting verified shutdown.
+    processExit = requestMacPackagedQuit(result.process)
   } else {
+    processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
     await withinDeadline(
       'closing packaged application window',
       packagedCleanupTimeoutMs,

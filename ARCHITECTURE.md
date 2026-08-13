@@ -404,8 +404,12 @@ still requires its distribution and target-assurance gates to pass.
   deadline. Electron uses
   `app.exit(0)` only from that authorized completion callback, after every owned
   resource has been released, to avoid a second platform-specific quit cycle.
-  Shutdown fails closed when termination cannot be verified. The implemented
-  drain covers the Uvicorn server and listener, stdio, process tree, temporary
+  Shutdown fails closed when termination cannot be verified, while clearing the
+  rejected shutdown attempt so a later native quit request can start one fresh,
+  fully verified stop. The packaged macOS matrix exercises that later-request
+  recovery under independent bounded deadlines and never treats force-kill
+  cleanup as a successful exit. The implemented drain covers the Uvicorn server
+  and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative
   cancellation or bounded wait, and encrypted snapshot/event repository.
   Future provider streams and other database sessions must register their own
