@@ -810,9 +810,12 @@ allowlist includes the active D-Bus session address and XDG runtime directory
 needed to reach the user's native Secret Service, but not home, cache,
 configuration, or data directories. Electron main pins the child to the native
 Secret Service backend and ignores ambient Python keyring selectors and
-configuration. Exact-head Linux packaged verification reaches its disposable
-service only through the private D-Bus session. Provider credentials and
-`PATH` remain excluded from the child environment.
+configuration. Exact-head Linux packaged verification passes its owner-only
+temporary root through a verifier-specific Electron command-line switch; Main
+validates that Linux-only absolute root and derives the sidecar's home and XDG
+paths from it instead of accepting ambient values. The root is never inherited
+from the packaged process environment. Provider credentials and `PATH` remain
+excluded from the child environment.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 

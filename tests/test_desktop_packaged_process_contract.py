@@ -157,10 +157,15 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
 
 def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    main_source = MAIN_INDEX.read_text(encoding="utf-8")
     supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
 
     assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in source
+    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" in source
+    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" not in supervisor_source
     assert "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME'" not in source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in main_source
     assert re.search(
         r"platform === 'linux'\s*\?\s*\[.*?"
         r"'DBUS_SESSION_BUS_ADDRESS'.*?'XDG_RUNTIME_DIR'.*?\]",
@@ -168,10 +173,11 @@ def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> N
         re.DOTALL,
     )
     assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in supervisor_source
-    assert "'HOME'" not in supervisor_source
-    assert "'XDG_CACHE_HOME'" not in supervisor_source
-    assert "'XDG_CONFIG_HOME'" not in supervisor_source
-    assert "'XDG_DATA_HOME'" not in supervisor_source
+    assert "linuxKeyringVerificationRoot" in supervisor_source
+    assert "source.HOME" not in supervisor_source
+    assert "source.XDG_CACHE_HOME" not in supervisor_source
+    assert "source.XDG_CONFIG_HOME" not in supervisor_source
+    assert "source.XDG_DATA_HOME" not in supervisor_source
     assert (
         "environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'"
     ) in supervisor_source

@@ -18,6 +18,10 @@ export interface RuntimeBridge {
   prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
 }
 
+export interface RuntimeBridgeOptions {
+  linuxKeyringVerificationRoot?: string | undefined
+}
+
 type OwnSidecarSupervisor = (
   supervisor: SidecarSupervisor,
   prepareJobShutdown: (action: JobShutdownAction) => Promise<void>,
@@ -25,6 +29,7 @@ type OwnSidecarSupervisor = (
 
 export async function startRuntimeBridge(
   onSupervisorOwned?: OwnSidecarSupervisor,
+  options: RuntimeBridgeOptions = {},
 ): Promise<RuntimeBridge> {
   if (!app.isPackaged) {
     throw new Error('The production runtime bridge requires a packaged application.')
@@ -56,6 +61,7 @@ export async function startRuntimeBridge(
     shutdownTimeoutMs: 15_000,
     maxRestarts: 2,
     maxManualRetries: 1,
+    linuxKeyringVerificationRoot: options.linuxKeyringVerificationRoot,
   })
   const sidecarClient = createSidecarClient({ session: () => supervisor.session() })
   const desktopControl = createDesktopControlBridge({

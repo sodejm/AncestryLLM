@@ -39,7 +39,10 @@ import {
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
-import type { SidecarSupervisor } from './sidecar-supervisor'
+import {
+  LINUX_KEYRING_VERIFICATION_SWITCH,
+  type SidecarSupervisor,
+} from './sidecar-supervisor'
 import type { JobShutdownAction } from './sidecar-client'
 import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
@@ -82,6 +85,11 @@ function rendererPolicy() {
 
 function isProductionRenderer(): boolean {
   return resolveRendererTarget(rendererPolicy()).value === APP_ENTRY_URL
+}
+
+function requestedLinuxKeyringVerificationRoot(): string | undefined {
+  if (!app.commandLine.hasSwitch(LINUX_KEYRING_VERIFICATION_SWITCH)) return undefined
+  return app.commandLine.getSwitchValue(LINUX_KEYRING_VERIFICATION_SWITCH)
 }
 
 function denyWebContentsCapabilities(contents: WebContents): void {
@@ -215,6 +223,8 @@ if (localRuntimeCliRequested && !primaryInstance) {
     const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
       sidecarSupervisor = supervisor
       prepareJobShutdown = prepareJobs
+    }, {
+      linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(),
     })
     bridge = runtime.bridge
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))

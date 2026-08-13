@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
   chromium,
@@ -12,6 +12,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
+import { LINUX_KEYRING_VERIFICATION_SWITCH } from '../src/main/sidecar-supervisor'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
@@ -34,6 +35,18 @@ const fileGrantOpenPath = process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH
 const fileGrantSavePath = process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH
 const fileGrantEvidencePath = process.env.ANCESTRYLLM_FILE_GRANT_EVIDENCE
 const execFileAsync = promisify(execFile)
+
+function linuxKeyringVerificationArguments(): string[] {
+  const root = process.env.ANCESTRYLLM_NATIVE_KEYRING_ROOT
+  if (process.platform !== 'linux') {
+    if (root !== undefined) throw new Error('Linux keyring verification root is Linux only.')
+    return []
+  }
+  if (!root || !isAbsolute(root)) {
+    throw new Error('Packaged Linux verification requires an absolute native keyring root.')
+  }
+  return [`--${LINUX_KEYRING_VERIFICATION_SWITCH}=${root}`]
+}
 
 type LaunchResult = Readonly<{
   browser: Browser
@@ -313,6 +326,7 @@ async function launchPackaged(
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
   const child = spawn(applicationExecutable, [
     ...automationArguments,
+    ...linuxKeyringVerificationArguments(),
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0',
     `--user-data-dir=${root}`,
@@ -726,6 +740,7 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
   const launchArguments = [
     ...automationArguments,
+    ...linuxKeyringVerificationArguments(),
     `--user-data-dir=${root}`,
     `--disk-cache-dir=${join(root, 'chromium-cache')}`,
     `--crash-dumps-dir=${join(root, 'crash-dumps')}`,

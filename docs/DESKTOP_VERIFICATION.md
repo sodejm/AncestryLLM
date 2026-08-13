@@ -56,11 +56,13 @@ check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
 before Playwright may start. The normal Linux launch allowlist retains the D-Bus
 address and XDG runtime directory required by native Secret Service; the exact
-verification marker additionally admits the runner's disposable home and XDG
-cache, configuration, and data directories. The packaged process therefore
-reaches that verified service without selecting a Python test backend,
-injecting a packaged credential, or retaining runner keyring state. An
-unavailable or failed native service fails the row.
+verification runner passes its owner-only root through a Linux-only Electron
+command-line switch. Main requires an absolute Linux path and derives the
+sidecar's disposable home and XDG cache, configuration, data, and runtime paths
+from that root; it does not inherit those values from Playwright's environment.
+The packaged process therefore reaches that verified service without selecting
+a Python test backend, injecting a packaged credential, or retaining runner
+keyring state. An unavailable or failed native service fails the row.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.

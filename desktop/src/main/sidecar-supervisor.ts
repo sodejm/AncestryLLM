@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import { SidecarIntegrityError } from './sidecar-integrity'
 
 export const API_CONTRACT = 'ancestryllm.internal-api/1'
+export const LINUX_KEYRING_VERIFICATION_SWITCH = 'ancestryllm-linux-keyring-verification-root'
 
 export interface SidecarReadyFrame {
   contract: string
@@ -42,6 +43,7 @@ interface SidecarSupervisorOptions {
   maxManualRetries?: number
   platform?: NodeJS.Platform
   sourceEnvironment?: NodeJS.ProcessEnv
+  linuxKeyringVerificationRoot?: string | undefined
   onFatal?: (diagnostics: SidecarDiagnostics) => void
 }
 
@@ -116,7 +118,9 @@ export function createLaunchToken(
 export function minimalSidecarEnvironment(
   platform: NodeJS.Platform,
   source: NodeJS.ProcessEnv,
+  linuxKeyringVerificationRoot?: string,
 ): NodeJS.ProcessEnv {
+  validateLinuxKeyringVerificationRoot(platform, linuxKeyringVerificationRoot)
   const platformAllowed = platform === 'win32'
     ? ['SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP']
     : platform === 'linux'
@@ -135,8 +139,29 @@ export function minimalSidecarEnvironment(
   )
   if (platform === 'linux') {
     environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'
+    if (linuxKeyringVerificationRoot !== undefined) {
+      const home = posix.join(linuxKeyringVerificationRoot, 'home')
+      environment.HOME = home
+      environment.XDG_CACHE_HOME = posix.join(home, '.cache')
+      environment.XDG_CONFIG_HOME = posix.join(home, '.config')
+      environment.XDG_DATA_HOME = posix.join(home, '.local', 'share')
+      environment.XDG_RUNTIME_DIR = posix.join(linuxKeyringVerificationRoot, 'runtime')
+    }
   }
   return environment
+}
+
+function validateLinuxKeyringVerificationRoot(
+  platform: NodeJS.Platform,
+  root: string | undefined,
+): void {
+  if (root === undefined) return
+  if (platform !== 'linux') {
+    throw new Error('The Linux keyring verification root is supported on Linux only.')
+  }
+  if (!root || !posix.isAbsolute(root)) {
+    throw new Error('The Linux keyring verification root must be an absolute Linux path.')
+  }
 }
 
 export function resolveSidecarExecutable(
@@ -200,6 +225,7 @@ export class SidecarSupervisor {
   private current: RunningSidecar | undefined
   private readonly pending = new Set<RunningSidecar>()
   private readonly terminationRequests = new Map<RunningSidecar, Promise<void>>()
+  private readonly failedTerminations = new Set<RunningSidecar>()
   private activeSession: Readonly<AuthenticatedSidecarSession> | undefined
   private hasExposedAuthenticatedSession = false
   private remainingRestarts: number
@@ -233,6 +259,10 @@ export class SidecarSupervisor {
     ) {
       throw new Error('maxManualRetries must be a non-negative integer.')
     }
+    validateLinuxKeyringVerificationRoot(
+      options.platform ?? process.platform,
+      options.linuxKeyringVerificationRoot,
+    )
     this.remainingRestarts = options.maxRestarts
     this.remainingManualRetries = options.maxManualRetries ?? 0
     this.stopRequested = new Promise((resolve) => {
@@ -338,11 +368,16 @@ export class SidecarSupervisor {
     this.setActiveSession(undefined)
     const processes = new Set(this.pending)
     if (active) processes.add(active)
+    for (const failed of this.failedTerminations) processes.add(failed)
     const terminations = [...processes].map((process) => this.terminateOnce(process))
     const initialTerminationResults = Promise.allSettled(terminations)
     const launches = [...this.inFlightLaunches]
-    this.stopPromise = this.finishStop(launches, initialTerminationResults)
-    return this.stopPromise
+    const attempt = this.finishStop(launches, initialTerminationResults, processes)
+    this.stopPromise = attempt
+    void attempt.catch(() => {
+      if (this.stopPromise === attempt) this.stopPromise = undefined
+    })
+    return attempt
   }
 
   private async launchOne(): Promise<void> {
@@ -359,6 +394,7 @@ export class SidecarSupervisor {
       environment: minimalSidecarEnvironment(
         this.options.platform ?? process.platform,
         this.options.sourceEnvironment ?? process.env,
+        this.options.linuxKeyringVerificationRoot,
       ),
       launchFrame,
     })
@@ -375,10 +411,7 @@ export class SidecarSupervisor {
           this.options.startupTimeoutMs,
         ),
       )
-      if (this.stopping) {
-        await this.terminateOnce(sidecar)
-        throw new SidecarStoppingError()
-      }
+      if (this.stopping) throw new SidecarStoppingError()
       this.current = sidecar
       this.setActiveSession(Object.freeze({
         host: '127.0.0.1',
@@ -490,6 +523,15 @@ export class SidecarSupervisor {
     if (existing) return existing
     const termination = sidecar.terminate()
     this.terminationRequests.set(sidecar, termination)
+    void termination.then(
+      () => { this.failedTerminations.delete(sidecar) },
+      () => {
+        this.failedTerminations.add(sidecar)
+        if (this.terminationRequests.get(sidecar) === termination) {
+          this.terminationRequests.delete(sidecar)
+        }
+      },
+    )
     return termination
   }
 
@@ -503,10 +545,11 @@ export class SidecarSupervisor {
   private async finishStop(
     launches: readonly Promise<void>[],
     initialTerminationResults: Promise<readonly PromiseSettledResult<void>[]>,
+    initiallyAttempted: ReadonlySet<RunningSidecar>,
   ): Promise<void> {
     try {
       await withTimeout(
-        this.drainStop(launches, initialTerminationResults),
+        this.drainStop(launches, initialTerminationResults, initiallyAttempted),
         this.options.shutdownTimeoutMs ?? 15_000,
         () => new SidecarShutdownTimeoutError(),
       )
@@ -521,18 +564,27 @@ export class SidecarSupervisor {
   private async drainStop(
     launches: readonly Promise<void>[],
     initialTerminationResults: Promise<readonly PromiseSettledResult<void>[]>,
+    initiallyAttempted: ReadonlySet<RunningSidecar>,
   ): Promise<void> {
     await Promise.allSettled(launches)
     const lateProcesses = new Set(this.pending)
     if (this.current) lateProcesses.add(this.current)
+    for (const process of initiallyAttempted) lateProcesses.delete(process)
     const lateTerminationResults = Promise.allSettled(
       [...lateProcesses].map((process) => this.terminateOnce(process)),
     )
-    await Promise.all([initialTerminationResults, lateTerminationResults])
+    const [initialResults, lateResults] = await Promise.all([
+      initialTerminationResults,
+      lateTerminationResults,
+    ])
     const terminations = await Promise.allSettled([
       ...new Set(this.terminationRequests.values()),
     ])
-    if (terminations.some((result) => result.status === 'rejected')) {
+    if (
+      [...initialResults, ...lateResults, ...terminations]
+        .some((result) => result.status === 'rejected')
+      || this.failedTerminations.size > 0
+    ) {
       throw new Error('Sidecar shutdown failed.')
     }
   }

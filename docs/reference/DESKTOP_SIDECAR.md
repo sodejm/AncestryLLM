@@ -61,9 +61,13 @@ The checked-in launcher starts that service on a private D-Bus session with
 owner-only temporary storage, waits for its well-known name, and proves native
 store, read, and delete operations with a non-secret probe. The packaged
 process reaches that service only through the launcher's private D-Bus session
-and XDG runtime directory. Every Linux sidecar launch pins the native Secret
-Service backend, ignores ambient Python keyring selectors and configuration,
-and excludes home, cache, configuration, data, provider credential, and `PATH`
+and an exact verifier-only command-line switch carrying the owner-only
+temporary root. Electron Main rejects that switch outside Linux or when its
+value is not an absolute Linux path, then derives the sidecar's home and XDG
+paths from the root rather than inheriting ambient values. Every Linux sidecar
+launch pins the native Secret Service backend, ignores ambient Python keyring
+selectors and configuration, and excludes provider credential and `PATH`
+values. Normal launches also exclude home, cache, configuration, and data
 values. The launcher preserves the packaged command's real exit status and
 removes the state afterward. No mock or alternate Python keyring backend is
 permitted. This is
@@ -81,8 +85,9 @@ fallback or weaken keyring-only startup.
    `PATH`, and home-directory values are not inherited during normal launches.
    Linux additionally retains only the active D-Bus address and XDG runtime
    directory required by native Secret Service. The exact internal verification
-   marker additionally permits only the disposable verifier's home and XDG
-   cache, configuration, and data directories.
+   switch additionally permits only paths derived from the disposable
+   verifier's validated absolute root; it does not accept ambient home or XDG
+   values.
 4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness

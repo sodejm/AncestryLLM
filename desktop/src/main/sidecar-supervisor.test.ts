@@ -70,6 +70,35 @@ describe('sidecar launch boundary', () => {
     })
   })
 
+  it('derives native Linux keyring paths only from an explicit verifier root', () => {
+    const source = {
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/ambient/home',
+      XDG_CACHE_HOME: '/ambient/cache',
+      XDG_CONFIG_HOME: '/ambient/config',
+      XDG_DATA_HOME: '/ambient/data',
+      XDG_RUNTIME_DIR: '/ambient/runtime',
+      LANG: 'en_US.UTF-8',
+    }
+
+    expect(minimalSidecarEnvironment('linux', source, '/tmp/private-keyring')).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/tmp/private-keyring/home',
+      XDG_CACHE_HOME: '/tmp/private-keyring/home/.cache',
+      XDG_CONFIG_HOME: '/tmp/private-keyring/home/.config',
+      XDG_DATA_HOME: '/tmp/private-keyring/home/.local/share',
+      XDG_RUNTIME_DIR: '/tmp/private-keyring/runtime',
+      LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
+    })
+    expect(() => minimalSidecarEnvironment('linux', source, 'relative/keyring')).toThrow(
+      'absolute Linux path',
+    )
+    expect(() => minimalSidecarEnvironment('darwin', source, '/tmp/private-keyring')).toThrow(
+      'Linux only',
+    )
+  })
+
   it('resolves only supported native bundle targets', () => {
     expect(resolveSidecarExecutable('/app/resources', 'darwin', 'arm64')).toBe(
       '/app/resources/sidecar/darwin-arm64/ancestryllm-sidecar/ancestryllm-sidecar',
@@ -371,6 +400,10 @@ describe('SidecarSupervisor', () => {
     await expect(startup).rejects.toThrow('stopping')
     expect(sidecar.terminate).toHaveBeenCalledOnce()
     expect(supervisor.diagnostics().state).toBe('unavailable')
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('stopped')
   })
 
   it('fails shutdown closed when a late launch process cannot be terminated', async () => {
@@ -395,6 +428,10 @@ describe('SidecarSupervisor', () => {
     await expect(shutdown).rejects.toThrow('Sidecar shutdown failed')
     expect(sidecar.terminate).toHaveBeenCalledOnce()
     expect(supervisor.diagnostics().state).toBe('unavailable')
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledTimes(2)
+    expect(supervisor.diagnostics().state).toBe('stopped')
   })
 
   it('keeps failures degraded and diagnostics free of secret process details', async () => {
@@ -513,6 +550,10 @@ describe('SidecarSupervisor', () => {
     })
     expect(JSON.stringify(results)).not.toContain(privateFailure)
     expect(JSON.stringify(fatal.mock.calls)).not.toContain(privateFailure)
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledTimes(2)
+    expect(supervisor.diagnostics().state).toBe('stopped')
   })
 
   it('fails closed without an unhandled restart when crash cleanup fails', async () => {
