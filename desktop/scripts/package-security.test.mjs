@@ -17,6 +17,10 @@ const electronPatch = await readFile(
   'utf8',
 )
 const productionMain = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+const productionRuntimeBridge = await readFile(
+  new URL('../src/main/runtime-bridge.ts', import.meta.url),
+  'utf8',
+)
 
 const minimumPatchedElectronVersion = [39, 8, 10]
 
@@ -85,6 +89,35 @@ test('production main entry contains no fixture bridge or test hook', () => {
   assert.doesNotMatch(productionMain, /ANCESTRYLLM_DESKTOP_FIXTURE/)
   assert.doesNotMatch(productionMain, /ANCESTRYLLM_DESKTOP_SECURITY_E2E/)
   assert.doesNotMatch(productionMain, /__ancestryllmSecurityStateForTests/)
+})
+
+test('production shutdown owns the supervisor before asynchronous sidecar startup', () => {
+  const signalRegistration = productionMain.indexOf("process.on('SIGTERM'")
+  const runtimeStartup = productionMain.indexOf('await startRuntimeBridge(')
+  assert.notEqual(signalRegistration, -1, 'production main must handle SIGTERM')
+  assert.notEqual(runtimeStartup, -1, 'production main must start the runtime bridge')
+  assert.ok(
+    signalRegistration < runtimeStartup,
+    'SIGTERM handling must be installed before asynchronous runtime startup',
+  )
+  assert.match(
+    productionMain,
+    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}\)/,
+  )
+  assert.match(
+    productionMain,
+    /\(\) => supervisor\.isExplicitSafeEmpty\(\)/,
+    'shutdown may skip HTTP preflight only through the supervisor-owned safe-empty proof',
+  )
+
+  const ownershipCallback = productionRuntimeBridge.indexOf('onSupervisorOwned?.(')
+  const supervisorStartup = productionRuntimeBridge.indexOf('await supervisor.start()')
+  assert.notEqual(ownershipCallback, -1, 'runtime startup must expose supervisor ownership')
+  assert.notEqual(supervisorStartup, -1, 'runtime startup must start the sidecar supervisor')
+  assert.ok(
+    ownershipCallback < supervisorStartup,
+    'Electron main must own the supervisor before startup can spawn a sidecar',
+  )
 })
 
 test('macOS ASAR integrity metadata is verified against the packaged header hash', () => {

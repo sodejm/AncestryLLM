@@ -24,9 +24,9 @@ claim the five task requests and validated event listener.
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`
-application on each exact supported runner below. The assembled application exists only
-inside that job; CI uploads its JSON evidence and SBOM, not the application
-tree.
+application on each exact supported runner below. The assembled application
+exists only inside that job; CI uploads its JSON evidence and SBOM, not the
+application tree.
 
 | Runner | Bundled sidecar | Intended target | Executed OS | Host architecture | Artifact architecture | `platformValidated` |
 |---|---|---|---|---|---|---|
@@ -191,8 +191,11 @@ is not part of a shipped launch path and does not replace the sidecar's OS
 keyring implementation. Linux uses the native Secret Service harness described
 above rather than a mock backend. The clean-quit check registers the native
 process exit listener first. On macOS it sends `SIGTERM`, exercising the
-production signal-to-quit path; on Windows and Linux it closes the attached
-renderer page under a bounded deadline, exercising the final-window path. The
+production signal-to-quit path whose handler is installed before asynchronous
+runtime startup; on Windows and Linux it closes the attached renderer page under
+a bounded deadline, exercising the final-window path. A source contract test
+also proves that Electron owns the supervisor and job preflight before payload
+verification or process launch can yield. The
 harness then releases the Playwright connection and waits for a normal zero-code
 native process exit. Both paths request `app.quit()` and are vetoed while the
 fail-closed job preflight and verified sidecar shutdown run. Only the authorized

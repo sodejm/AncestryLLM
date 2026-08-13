@@ -125,14 +125,19 @@ Before quitting, Electron main waits for a bounded safe-shutdown assessment. If
 work remains active, a native dialog offers **Wait**, **Request cancellation**,
 or **Stay open**. Cancellation is cooperative: protected publication can remain
 `pending-safe-point`, and Electron never silently abandons it. Process shutdown
-continues only after a safe assessment and verified sidecar stop. A degraded
-startup admits no process-local jobs, so its main-only shutdown assessment is
-the explicit safe empty case only while the supervisor is `unavailable` and has
-no authenticated session. That case skips the unavailable HTTP assessment but
-still requires the verified sidecar process-tree stop. The first `app.quit()`
-lifecycle is vetoed during that assessment. After IPC disposal and verified
-sidecar stop release every owned resource, the authorized completion callback
-uses `app.exit(0)` rather than re-entering platform-specific window closure.
+continues only after a safe assessment and verified sidecar stop. Electron owns
+the supervisor before asynchronous verification or process launch and installs
+its `SIGTERM` handler before runtime startup. A degraded startup admits no
+process-local jobs, so its main-only shutdown assessment is explicitly safe
+empty only while the supervisor is `idle`, `starting`, or `unavailable`, has no
+authenticated session, and has never exposed one. Once an authenticated session
+has been exposed, losing it never restores that shortcut. The explicit-empty
+case skips the unavailable HTTP assessment but still cancels pre-spawn work,
+drains any launch already in flight, and requires verified process-tree stop.
+The first `app.quit()` lifecycle is vetoed during that assessment. After IPC
+disposal and verified sidecar stop release every owned resource, the authorized
+completion callback uses `app.exit(0)` rather than re-entering
+platform-specific window closure.
 Future provider streams and other database sessions must register an orderly
 drain before their routes are enabled.
 The native Windows descendant-kill assertion can run only on Windows; the

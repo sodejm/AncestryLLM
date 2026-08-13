@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
 MAIN_INDEX = ROOT / "desktop" / "src" / "main" / "index.ts"
+RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 SIDECAR_SUPERVISOR = ROOT / "desktop" / "src" / "main" / "sidecar-supervisor.ts"
 
 
@@ -76,6 +77,7 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
+    runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
     close_start = source.index("async function closePackaged")
     close_end = source.index("\nasync function launchPackaged", close_start)
     close_source = source[close_start:close_end]
@@ -119,10 +121,16 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert process_wait_index < platform_index < window_close_index < browser_close_index
     assert browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
-    runtime_owner_index = main_source.index("sidecarSupervisor = runtime.supervisor")
     sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")
+    runtime_start_index = main_source.index("const runtime = await startRuntimeBridge(")
+    runtime_owner_index = main_source.index("sidecarSupervisor = supervisor", runtime_start_index)
     packaged_window_index = main_source.index("createWindow()", sigterm_handler_index)
-    assert runtime_owner_index < sigterm_handler_index < packaged_window_index
+    assert sigterm_handler_index < runtime_start_index < runtime_owner_index < packaged_window_index
+    own_supervisor_index = runtime_bridge_source.index(
+        "onSupervisorOwned?.(supervisor, prepareJobShutdown)"
+    )
+    start_supervisor_index = runtime_bridge_source.index("await supervisor.start()")
+    assert own_supervisor_index < start_supervisor_index
     assert "window.on('close', (event) => {" in main_source
     assert "requestVerifiedShutdownBeforeWindowClose(" in main_source
     assert (
@@ -131,11 +139,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     )
     assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
-    assert re.search(
-        r"supervisor\.diagnostics\(\)\.state === 'unavailable'\s*"
-        r"&& supervisor\.session\(\) === undefined",
-        main_source,
-    )
+    assert "supervisor.isExplicitSafeEmpty()" in main_source
     verified_exit_start = main_source.index(
         "() => {\n          disposeIpcBoundary()",
         main_source.index("shutdownPromise = completeAppShutdown("),

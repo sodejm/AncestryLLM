@@ -208,14 +208,15 @@ if (localRuntimeCliRequested && !primaryInstance) {
     app.exit(1)
   })
 } else if (primaryInstance) {
+  // Retain the listener for the process lifetime so a signal can never bypass
+  // the verified shutdown path, including while sidecar startup is in flight.
+  process.on('SIGTERM', () => app.quit())
   app.whenReady().then(async () => {
-    const runtime = await startRuntimeBridge()
+    const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
+      sidecarSupervisor = supervisor
+      prepareJobShutdown = prepareJobs
+    })
     bridge = runtime.bridge
-    sidecarSupervisor = runtime.supervisor
-    prepareJobShutdown = runtime.prepareJobShutdown
-    // Install only after the sidecar supervisor is owned, then retain the
-    // listener so repeated signals cannot bypass verified shutdown.
-    process.on('SIGTERM', () => app.quit())
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
@@ -256,10 +257,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
           // Electron cannot re-enter a platform-specific window-close cycle.
           app.exit(0)
         },
-        () => (
-          supervisor.diagnostics().state === 'unavailable'
-          && supervisor.session() === undefined
-        ),
+        () => supervisor.isExplicitSafeEmpty(),
       ).finally(() => { shutdownPromise = undefined })
     }
   })

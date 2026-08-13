@@ -18,7 +18,14 @@ export interface RuntimeBridge {
   prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
 }
 
-export async function startRuntimeBridge(): Promise<RuntimeBridge> {
+type OwnSidecarSupervisor = (
+  supervisor: SidecarSupervisor,
+  prepareJobShutdown: (action: JobShutdownAction) => Promise<void>,
+) => void
+
+export async function startRuntimeBridge(
+  onSupervisorOwned?: OwnSidecarSupervisor,
+): Promise<RuntimeBridge> {
   if (!app.isPackaged) {
     throw new Error('The production runtime bridge requires a packaged application.')
   }
@@ -68,11 +75,15 @@ export async function startRuntimeBridge(): Promise<RuntimeBridge> {
     ...desktopControl,
     ...localRuntimeControl,
   })
+  const prepareJobShutdown = async (action: JobShutdownAction): Promise<void> => {
+    await sidecarClient.prepareJobShutdown(action)
+  }
 
+  onSupervisorOwned?.(supervisor, prepareJobShutdown)
   await supervisor.start().catch(() => undefined)
   return {
     bridge,
     supervisor,
-    prepareJobShutdown: async (action) => { await sidecarClient.prepareJobShutdown(action) },
+    prepareJobShutdown,
   }
 }

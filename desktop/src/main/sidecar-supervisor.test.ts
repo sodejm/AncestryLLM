@@ -287,6 +287,100 @@ describe('SidecarSupervisor', () => {
     expect(sidecar.terminate).toHaveBeenCalledTimes(1)
   })
 
+  it('does not launch a sidecar when shutdown begins during payload verification', async () => {
+    let releaseVerification: (() => void) | undefined
+    const verification = new Promise<void>((resolve) => {
+      releaseVerification = resolve
+    })
+    const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar',
+      verify: async () => verification, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(supervisor.diagnostics().state).toBe('starting'))
+    expect(supervisor.isExplicitSafeEmpty()).toBe(true)
+    const shutdown = supervisor.stop()
+    releaseVerification?.()
+
+    await expect(startup).rejects.toThrow('stopping')
+    await expect(shutdown).resolves.toBeUndefined()
+    expect(launch).not.toHaveBeenCalled()
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('never treats a supervisor that exposed a job-capable session as explicit safe empty', async () => {
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    expect(supervisor.isExplicitSafeEmpty()).toBe(true)
+    await supervisor.start()
+    expect(supervisor.isExplicitSafeEmpty()).toBe(false)
+
+    sidecar.emit('exit', 1)
+    await vi.waitFor(() => expect(supervisor.diagnostics().state).toBe('unavailable'))
+    expect(supervisor.session()).toBeUndefined()
+    expect(supervisor.isExplicitSafeEmpty()).toBe(false)
+  })
+
+  it('waits for an in-flight launch and terminates its process before shutdown completes', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    let shutdownComplete = false
+    const shutdown = supervisor.stop().then(() => { shutdownComplete = true })
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    expect(shutdownComplete).toBe(false)
+
+    releaseLaunch?.()
+    await expect(startup).rejects.toThrow('stopping')
+    await expect(shutdown).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('fails shutdown closed when a late launch process cannot be terminated', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    sidecar.terminate.mockRejectedValueOnce(new Error('late process tree remains'))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    const shutdown = supervisor.stop()
+    releaseLaunch?.()
+
+    await expect(startup).rejects.toThrow('late process tree remains')
+    await expect(shutdown).rejects.toThrow('Sidecar shutdown failed')
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('unavailable')
+  })
+
   it('keeps failures degraded and diagnostics free of secret process details', async () => {
     const secret = 'secret-token-canary'
     const privatePath = '/private/path/canary-sidecar'
@@ -352,6 +446,7 @@ describe('SidecarSupervisor', () => {
     await expect(supervisor.start()).rejects.toThrow('initial failure')
 
     const retry = supervisor.retry()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
     await supervisor.stop()
 
     await expect(retry).resolves.toBe(false)

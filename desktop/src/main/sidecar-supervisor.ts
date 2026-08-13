@@ -90,6 +90,13 @@ class SidecarTimeoutError extends Error {
   }
 }
 
+class SidecarStoppingError extends Error {
+  constructor() {
+    super('Sidecar supervisor is stopping.')
+    this.name = 'SidecarStoppingError'
+  }
+}
+
 export function createLaunchToken(
   randomSource: (size: number) => Buffer = randomBytes,
 ): string {
@@ -186,12 +193,16 @@ export class SidecarSupervisor {
   private readonly pending = new Set<RunningSidecar>()
   private readonly terminationRequests = new Map<RunningSidecar, Promise<void>>()
   private activeSession: Readonly<AuthenticatedSidecarSession> | undefined
+  private hasExposedAuthenticatedSession = false
   private remainingRestarts: number
   private remainingManualRetries: number
   private lifecycleState: SidecarLifecycleState = 'idle'
   private lastFailure: SidecarFailure | null = null
   private stopping = false
   private stopPromise: Promise<void> | undefined
+  private readonly inFlightLaunches = new Set<Promise<void>>()
+  private readonly stopRequested: Promise<void>
+  private resolveStopRequested: () => void = () => undefined
   private manualRetryPromise: Promise<boolean> | undefined
   private readonly sessionInvalidationListeners = new Set<() => void>()
 
@@ -210,6 +221,9 @@ export class SidecarSupervisor {
     }
     this.remainingRestarts = options.maxRestarts
     this.remainingManualRetries = options.maxManualRetries ?? 0
+    this.stopRequested = new Promise((resolve) => {
+      this.resolveStopRequested = resolve
+    })
   }
 
   async start(): Promise<void> {
@@ -218,7 +232,7 @@ export class SidecarSupervisor {
     }
     this.transition('starting', null)
     try {
-      await this.launchOne()
+      await this.launchOneTracked()
     } catch (error) {
       if (error instanceof SidecarIntegrityError) {
         this.reportUnavailable('startup_failed')
@@ -232,7 +246,7 @@ export class SidecarSupervisor {
       while (this.remainingRestarts > 0 && !this.stopping) {
         this.remainingRestarts -= 1
         try {
-          await this.launchOne()
+          await this.launchOneTracked()
           return
         } catch (retryError) {
           if (retryError instanceof SidecarIntegrityError) {
@@ -262,6 +276,13 @@ export class SidecarSupervisor {
 
   session(): Readonly<AuthenticatedSidecarSession> | undefined {
     return this.activeSession
+  }
+
+  /** True only before this supervisor has ever exposed an authenticated job-capable session. */
+  isExplicitSafeEmpty(): boolean {
+    return !this.hasExposedAuthenticatedSession
+      && this.activeSession === undefined
+      && ['idle', 'starting', 'unavailable'].includes(this.lifecycleState)
   }
 
   /** Notifies when an authenticated session is revoked or replaced, not on first acquisition. */
@@ -297,25 +318,22 @@ export class SidecarSupervisor {
     if (this.stopPromise) return this.stopPromise
     this.stopping = true
     this.transition('stopping', null)
+    this.resolveStopRequested()
     const active = this.current
     this.current = undefined
     this.setActiveSession(undefined)
     const processes = new Set(this.pending)
     if (active) processes.add(active)
-    this.stopPromise = Promise.allSettled(
-      [...processes].map((process) => this.terminateOnce(process)),
-    ).then((results) => {
-      if (results.some((result) => result.status === 'rejected')) {
-        this.reportUnavailable('startup_failed')
-        throw new Error('Sidecar shutdown failed.')
-      }
-      this.transition('stopped', null)
-    })
+    const terminations = [...processes].map((process) => this.terminateOnce(process))
+    const initialTerminationResults = Promise.allSettled(terminations)
+    const launches = [...this.inFlightLaunches]
+    this.stopPromise = this.finishStop(launches, initialTerminationResults)
     return this.stopPromise
   }
 
   private async launchOne(): Promise<void> {
-    await this.options.verify()
+    await this.cancelOnStop(this.options.verify())
+    if (this.stopping) throw new SidecarStoppingError()
     const token = (this.options.tokenFactory ?? createLaunchToken)()
     const launchFrame = `${JSON.stringify({
       contract: API_CONTRACT,
@@ -332,15 +350,20 @@ export class SidecarSupervisor {
     })
     this.pending.add(sidecar)
     try {
-      const ready = await withTimeout(sidecar.ready, this.options.startupTimeoutMs)
+      if (this.stopping) throw new SidecarStoppingError()
+      const ready = await this.cancelOnStop(
+        withTimeout(sidecar.ready, this.options.startupTimeoutMs),
+      )
       requireCompatible(ready, this.options.appBuild)
-      await withTimeout(
-        this.options.probe(ready, token, this.options.appBuild),
-        this.options.startupTimeoutMs,
+      await this.cancelOnStop(
+        withTimeout(
+          this.options.probe(ready, token, this.options.appBuild),
+          this.options.startupTimeoutMs,
+        ),
       )
       if (this.stopping) {
         await this.terminateOnce(sidecar)
-        throw new Error('Sidecar supervisor is stopping.')
+        throw new SidecarStoppingError()
       }
       this.current = sidecar
       this.setActiveSession(Object.freeze({
@@ -384,7 +407,7 @@ export class SidecarSupervisor {
     while (this.remainingRestarts > 0 && !this.stopping) {
       this.remainingRestarts -= 1
       try {
-        await this.launchOne()
+        await this.launchOneTracked()
         return
       } catch (error) {
         if (error instanceof SidecarIntegrityError) {
@@ -405,7 +428,7 @@ export class SidecarSupervisor {
   private async retryOnce(): Promise<boolean> {
     this.transition('starting', null)
     try {
-      await this.launchOne()
+      await this.launchOneTracked()
       return true
     } catch (error) {
       if (this.stopping) return false
@@ -432,6 +455,7 @@ export class SidecarSupervisor {
     if (this.activeSession === session) return
     const previous = this.activeSession
     this.activeSession = session
+    if (session) this.hasExposedAuthenticatedSession = true
     if (!previous) return
     for (const listener of [...this.sessionInvalidationListeners]) {
       try {
@@ -453,5 +477,40 @@ export class SidecarSupervisor {
     const termination = sidecar.terminate()
     this.terminationRequests.set(sidecar, termination)
     return termination
+  }
+
+  private launchOneTracked(): Promise<void> {
+    const launch = this.launchOne()
+    this.inFlightLaunches.add(launch)
+    void launch.finally(() => { this.inFlightLaunches.delete(launch) }).catch(() => undefined)
+    return launch
+  }
+
+  private async finishStop(
+    launches: readonly Promise<void>[],
+    initialTerminationResults: Promise<readonly PromiseSettledResult<void>[]>,
+  ): Promise<void> {
+    await Promise.allSettled(launches)
+    const lateProcesses = new Set(this.pending)
+    if (this.current) lateProcesses.add(this.current)
+    const lateTerminationResults = Promise.allSettled(
+      [...lateProcesses].map((process) => this.terminateOnce(process)),
+    )
+    await Promise.all([initialTerminationResults, lateTerminationResults])
+    const terminations = await Promise.allSettled([
+      ...new Set(this.terminationRequests.values()),
+    ])
+    if (terminations.some((result) => result.status === 'rejected')) {
+      this.reportUnavailable('startup_failed')
+      throw new Error('Sidecar shutdown failed.')
+    }
+    this.transition('stopped', null)
+  }
+
+  private cancelOnStop<T>(operation: Promise<T>): Promise<T> {
+    return Promise.race([
+      operation,
+      this.stopRequested.then(() => { throw new SidecarStoppingError() }),
+    ])
   }
 }
