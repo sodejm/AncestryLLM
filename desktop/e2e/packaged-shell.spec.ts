@@ -976,7 +976,9 @@ test.describe('unpublished unpacked native package', () => {
       await expect(page.getByText('Ready', { exact: true })).toBeVisible()
       await page.getByRole('link', { name: 'Diagnostics' }).press('Enter')
       await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
-      await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+      await expect(
+        page.getByLabel('Desktop service').getByText('Ready', { exact: true }),
+      ).toBeVisible()
       await expect(page.getByRole('alert')).toHaveCount(0)
       if (!cold.process.pid) throw new Error('Packaged app PID is unavailable.')
       const rssBytes = await expectProductionBoundary(page, cold.browser, cold.process.pid)
