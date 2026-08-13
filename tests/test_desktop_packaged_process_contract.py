@@ -140,11 +140,22 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert platform_index < window_close_index < browser_close_index
     assert browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
-    sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")
+    assert "const requestVerifiedAppQuit = (): void => { app.quit() }" in main_source
+    assert "process.off('SIGTERM', requestVerifiedAppQuit)" in main_source
+    assert "process.on('SIGTERM', requestVerifiedAppQuit)" in main_source
+    primary_instance_index = main_source.index("} else if (primaryInstance) {")
+    sigterm_handler_index = main_source.index("armVerifiedSigtermHandler()", primary_instance_index)
     runtime_start_index = main_source.index("const runtime = await startRuntimeBridge(")
     runtime_owner_index = main_source.index("sidecarSupervisor = supervisor", runtime_start_index)
+    runtime_rearm_index = main_source.index("armVerifiedSigtermHandler()", runtime_owner_index)
     packaged_window_index = main_source.index("createWindow()", sigterm_handler_index)
-    assert sigterm_handler_index < runtime_start_index < runtime_owner_index < packaged_window_index
+    assert (
+        sigterm_handler_index
+        < runtime_start_index
+        < runtime_owner_index
+        < runtime_rearm_index
+        < packaged_window_index
+    )
     own_supervisor_index = runtime_bridge_source.index(
         "onSupervisorOwned?.(supervisor, prepareJobShutdown)"
     )

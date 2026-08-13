@@ -75,6 +75,13 @@ const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }
 let ipcController: DesktopIpcController | undefined
 let removeSidecarSessionListener: (() => void) | undefined
 
+const requestVerifiedAppQuit = (): void => { app.quit() }
+
+function armVerifiedSigtermHandler(): void {
+  process.off('SIGTERM', requestVerifiedAppQuit)
+  process.on('SIGTERM', requestVerifiedAppQuit)
+}
+
 function rendererPolicy() {
   return {
     developmentUrl: process.env.ELECTRON_RENDERER_URL,
@@ -211,13 +218,15 @@ if (localRuntimeCliRequested && !primaryInstance) {
     app.exit(1)
   })
 } else if (primaryInstance) {
-  // Retain the listener for the process lifetime so a signal can never bypass
-  // the verified shutdown path, including while sidecar startup is in flight.
-  process.on('SIGTERM', () => app.quit())
+  // Cover signals before Electron readiness, then re-arm the same named
+  // listener once runtime ownership is established. Electron/Chromium startup
+  // must never leave SIGTERM on its default process-termination path.
+  armVerifiedSigtermHandler()
   app.whenReady().then(async () => {
     const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
       sidecarSupervisor = supervisor
       prepareJobShutdown = prepareJobs
+      armVerifiedSigtermHandler()
     }, {
       linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
     })

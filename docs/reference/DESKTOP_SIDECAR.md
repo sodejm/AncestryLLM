@@ -137,12 +137,14 @@ or **Stay open**. Cancellation is cooperative: protected publication can remain
 `pending-safe-point`, and Electron never silently abandons it. Process shutdown
 continues only after a safe assessment and verified sidecar stop. Electron owns
 the supervisor before asynchronous verification or process launch and installs
-its `SIGTERM` handler before runtime startup. A degraded startup admits no
-process-local jobs, so its main-only shutdown assessment is explicitly safe
-empty only while the supervisor is `idle`, `starting`, or `unavailable`, has no
-authenticated session, and has never exposed one. Once an authenticated session
-has been exposed, losing it never restores that shortcut. The explicit-empty
-case skips the unavailable HTTP assessment but still cancels pre-spawn work,
+its named `SIGTERM` handler before runtime startup. It idempotently re-arms the
+same handler when the Electron-ready runtime takes ownership, so initialization
+cannot leave the signal on its immediate-termination default. A degraded startup
+admits no process-local jobs, so its main-only shutdown assessment is explicitly
+safe empty only while the supervisor is `idle`, `starting`, or `unavailable`,
+has no authenticated session, and has never exposed one. Once an authenticated
+session has been exposed, losing it never restores that shortcut. The
+explicit-empty case skips the unavailable HTTP assessment but still cancels pre-spawn work,
 drains any launch already in flight within the supervisor deadline, and
 requires verified process-tree stop.
 The first `app.quit()` lifecycle is vetoed during that assessment. After IPC

@@ -199,10 +199,12 @@ is not part of a shipped launch path and does not replace the sidecar's OS
 keyring implementation. Linux uses the native Secret Service harness described
 above rather than a mock backend. The clean-quit check registers the native
 process exit listener first. On macOS it sends `SIGTERM`, exercising the
-production signal-to-quit path whose handler is installed before asynchronous
-runtime startup. If that first request has not produced a verified exit after
-20 seconds—longer than the production supervisor's 15-second stop boundary—the
-harness sends one later `SIGTERM` and waits under a separate 30-second deadline.
+production signal-to-quit path. Its named handler is installed before
+asynchronous runtime startup and idempotently re-armed when the Electron-ready
+runtime takes ownership, preventing initialization from restoring the signal's
+immediate-termination default. If that first request has not produced a verified
+exit after 20 seconds—longer than the production supervisor's 15-second stop
+boundary—the harness sends one later `SIGTERM` and waits under a separate 30-second deadline.
 This exercises the production contract that a failed stop remains fail-closed
 but does not leave a rejected shutdown promise cached forever. A second failure
 still fails the packaged test; force termination is reserved for test cleanup.

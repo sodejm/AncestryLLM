@@ -396,12 +396,15 @@ still requires its distribution and target-assurance gates to pass.
   Closing the final desktop window requests `app.quit()` on every supported OS,
   including macOS, so the sidecar never remains resident without a visible
   application window. Electron main installs its `SIGTERM`-to-`app.quit()`
-  handler before asynchronous runtime startup and owns the supervisor and job
-  preflight before payload verification or process launch can yield. Both quit
-  entry points are vetoed until the native job preflight and verified sidecar
-  stop finish. A stop request cancels pre-spawn verification and drains any
-  process launch already in flight within a fixed 15-second supervisor
-  deadline. Electron uses
+  handler before asynchronous runtime startup, then idempotently re-arms that
+  same named handler as soon as the Electron-ready runtime owns the supervisor.
+  This prevents Electron/Chromium initialization from leaving `SIGTERM` on its
+  default immediate-termination path. The supervisor and job preflight are
+  owned before payload verification or process launch can yield. Both quit entry
+  points are vetoed until the native job preflight and verified sidecar stop
+  finish. A stop request cancels pre-spawn verification and drains any process
+  launch already in flight within a fixed 15-second supervisor deadline.
+  Electron uses
   `app.exit(0)` only from that authorized completion callback, after every owned
   resource has been released, to avoid a second platform-specific quit cycle.
   Shutdown fails closed when termination cannot be verified, while clearing the

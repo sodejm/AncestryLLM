@@ -522,12 +522,14 @@ owned by Issues #11 and #102:
   desktop window requests `app.quit()` on every supported OS, including macOS,
   so no invisible app-owned sidecar remains resident and every ordinary window
   close enters the fail-closed shutdown contract. Electron main installs its
-  `SIGTERM`-to-`app.quit()` handler before asynchronous runtime startup and owns
-  the supervisor and job preflight before verification or process launch can
-  yield, so service-manager shutdown cannot bypass the same drain. Stop cancels
-  pre-spawn work and waits no more than 15 seconds for any launch already in
-  flight and verified process-tree termination before failing closed. The
-  initial quit is vetoed while cleanup runs; only the
+  named `SIGTERM`-to-`app.quit()` handler before asynchronous runtime startup and
+  idempotently re-arms it once the Electron-ready runtime owns the supervisor.
+  Electron/Chromium initialization therefore cannot restore the signal's
+  immediate-termination default and let service-manager shutdown bypass the
+  same drain. The job preflight is owned before verification or process launch
+  can yield. Stop cancels pre-spawn work and waits no more than 15 seconds for
+  any launch already in flight and verified process-tree termination before
+  failing closed. The initial quit is vetoed while cleanup runs; only the
   authorized completion callback calls
   `app.exit(0)`, after the IPC boundary and verified sidecar ownership have been
   released. Future provider streams and other database sessions must register
