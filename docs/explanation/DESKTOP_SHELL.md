@@ -20,6 +20,11 @@ The supported desktop destinations are deliberately small:
 Unreleased Issue #109 adds a **Tasks** destination to present backend-owned
 work. It remains outside the released 0.5.0 installer claim.
 
+Unreleased Issue #110 adds an internal, synchronous, transient-chat service and
+fixed sidecar routes. It does not add a renderer destination, preload bridge
+method, chat UI, provider stream, tool call, genealogy operation, or generic
+dispatch surface.
+
 These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
 zoomed layouts.
@@ -114,8 +119,11 @@ controls as well as visible content.
 ## Offline and process boundary
 
 Electron starts the packaged sidecar on a private, ephemeral loopback endpoint
-with provider `none`; the Electron main process is the sole authenticated
-client. The preload bridge exposes exactly these six methods:
+from the network-free `provider=none` baseline; the Electron main process is
+the sole authenticated client. Issue #110's internal chat boundary can execute
+only after a caller supplies an exact stored profile and model and the Python
+service rechecks endpoint policy and any required consent. Ambient credentials
+cannot select a provider. The preload bridge exposes exactly these six methods:
 
 - `getAppInfo`
 - `getStartupDiagnostics`
@@ -184,6 +192,34 @@ asynchronous verification or launch, and shutdown cancels pre-spawn work and
 drains any launch already in flight. Losing a previously exposed session never
 restores the empty shortcut. The IPC boundary remains intact when sidecar
 shutdown fails, allowing a subsequent bounded recovery attempt.
+
+## Unreleased transient-chat foundation
+
+Issue #110 defines one schema-v1 Python service contract for short-lived chat
+sessions and one fixed synchronous run operation. Session creation accepts an
+exact stored profile and model plus reviewed purpose and data-class values. It
+rejects direct provider identifiers, `provider=none`, missing or incompatible
+profiles, missing credentials, failed endpoint revalidation, and missing or
+revoked cloud consent before provider generation can begin. Consent is fetched
+again for every run, so a grant revoked after session creation fails closed.
+
+The service permits at most 32 concurrent sessions, 32 stored messages per
+session, 16,384 characters per message, 65,536 characters of total context,
+4,096 output tokens, one safe retry, and a 120-second timeout. Those bounds,
+the exact profile/model binding, and the no-tool request shape are validated
+before provider access. A fixed system instruction treats user and prior model
+content as untrusted data, denies tools, files, databases, shells, plugins,
+external services, and autonomous actions, and labels generated text as
+advisory rather than genealogy evidence.
+
+Sessions and successful message history exist only in process memory. Failed
+runs do not append history, deletion clears the session, and sidecar shutdown
+clears every remaining session. Audit records retain only reviewed identifiers,
+counters, and content hashes; they do not retain prompts, responses, secrets,
+host identity, or local paths. These authenticated sidecar routes are currently
+an internal Python boundary only: Electron main and preload expose no chat
+method, and Issue #111 separately owns streaming, cancellation after provider
+access begins, worker/event integration, and renderer presentation.
 
 ## Unreleased opaque file-mediation foundation
 

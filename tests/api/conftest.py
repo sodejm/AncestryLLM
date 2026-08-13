@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,15 @@ from ancestryllm.api import (
     ApiSettings,
     create_app,
 )
+from ancestryllm.application.chat import (
+    ChatCapability,
+    ChatDataClass,
+    ChatMessage,
+    ChatPurpose,
+    ChatRole,
+    ChatRunSummary,
+    ChatSession,
+)
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
 from ancestryllm.application.jobs import JobLifecycleService, MemoryJobEventRepository
 from ancestryllm.application.results import StructuredResult
@@ -23,6 +33,7 @@ from ancestryllm.core.commands import BUILTIN_MODULES, DispatchKey, ModuleDescri
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import MemorySecretStore
+from ancestryllm.llm.chat import ChatService
 from ancestryllm.llm.endpoint_validation import (
     EndpointProbeRequest,
     EndpointProbeResponse,
@@ -82,11 +93,45 @@ def job_service() -> Iterator[JobLifecycleService]:
 
 
 @pytest.fixture
+def chat_service() -> Mock:
+    service = Mock(spec=ChatService)
+    session = ChatSession(
+        session_id="chat_" + ("a" * 32),
+        provider_profile_name="fictional-local",
+        provider_id="ollama",
+        model="fictional-model",
+        purpose=ChatPurpose.GENEALOGY_ANALYSIS,
+        data_classes=(ChatDataClass.DECEASED_PERSON,),
+        remote=False,
+        consent_name=None,
+        message_count=0,
+    )
+    service.capability.return_value = ChatCapability()
+    service.start.return_value = session
+    service.get.return_value = session
+    service.run.return_value = ChatRunSummary(
+        assistant_message=ChatMessage(
+            role=ChatRole.ASSISTANT,
+            content="Fictional response with no evidentiary status.",
+        ),
+        provider_id="ollama",
+        model="fictional-model",
+        remote=False,
+        input_tokens=12,
+        output_tokens=7,
+        cost_usd=None,
+        message_count=2,
+    )
+    return service
+
+
+@pytest.fixture
 def api_client(
     api_settings: ApiSettings,
     registered_keys: tuple[DispatchKey, ...],
     secret_store: MemorySecretStore,
     job_service: JobLifecycleService,
+    chat_service: Mock,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[TestClient]:
     registry = FixtureRegistry(
@@ -122,6 +167,7 @@ def api_client(
         ),
         endpoint_validation_service=endpoint_validator,
         job_service=lambda: job_service,
+        chat_service=chat_service,
     )
     with TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False) as client:
         yield client

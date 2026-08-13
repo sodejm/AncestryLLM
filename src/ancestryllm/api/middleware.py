@@ -35,6 +35,9 @@ _JOB_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/jobs/[A-Za-z0-9][A-Za-z0-9._~-]{{0,31}}"
     r"(?P<operation>/cancel|/events)?$"
 )
+_CHAT_SESSION_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}(?P<operation>/runs)?$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -84,6 +87,15 @@ def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePoli
     if surface == "probe":
         return None
     if path == f"{API_NAMESPACE}/startup-diagnostics":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/chat/capability":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/chat/sessions":
+        return _RoutePolicy("POST", accepts_json=True)
+    chat_match = _CHAT_SESSION_ROUTE.fullmatch(path)
+    if chat_match is not None:
+        if chat_match.group("operation") == "/runs":
+            return _RoutePolicy("POST", accepts_json=True)
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/jobs":
         return _RoutePolicy("GET")
@@ -203,6 +215,8 @@ def _validate_request(
     method = cast("str", scope.get("method", ""))
     if path == f"{API_NAMESPACE}/settings" and method == "GET":
         policy = _RoutePolicy("GET")
+    if _CHAT_SESSION_ROUTE.fullmatch(path) is not None and method == "DELETE":
+        policy = _RoutePolicy("DELETE")
     if method != policy.method:
         raise request_error(
             405, "METHOD_NOT_ALLOWED", "The internal API route does not accept this method."

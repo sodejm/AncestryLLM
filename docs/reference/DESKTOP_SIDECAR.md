@@ -9,9 +9,12 @@ credential management. Issue #107 adds a sanitized schema-v1 startup report,
 keyring-only packaged secret resolution, and fail-closed mutation gating for
 local first run. Issue #104 adds an unreleased UI-neutral job-lifecycle and
 safe-shutdown boundary. Issue #109 adds its bounded Tasks presentation through
-five fixed request methods and one validated event listener. It exposes no
-genealogy operation, job submission, chat, provider execution, cloud-account,
-updater, or generic command route; the sidecar is not a domain-data transport.
+five fixed request methods and one validated event listener. Issue #110 adds a
+fixed, synchronous, transient chat service behind authenticated internal routes.
+That service requires an exact named profile and model plus current policy and
+consent; it adds no renderer bridge, streaming, tools, file or database access,
+genealogy operation, job submission, cloud-account, updater, autonomous action,
+or generic command route. The sidecar is not a general domain-data transport.
 The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -103,14 +106,20 @@ does not add a production credential fallback or weaken keyring-only startup.
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness
    output, or diagnostics.
-5. The sidecar forces `provider=none`, binds IPv4 `127.0.0.1` on port `0`, and
-   exposes authenticated fixed routes only. The released 0.5.0 composition has
+5. The sidecar starts from the network-free `provider=none` default, binds IPv4
+   `127.0.0.1` on port `0`, and exposes authenticated fixed routes only. Ambient
+   provider credentials remain excluded from the packaged process. The released
+   0.5.0 composition has
    `/api/v1/health` and `/api/v1/capabilities`; the unreleased #105 source adds
    `/api/v1/settings` plus fixed status, set, and delete operations beneath
    `/api/v1/secrets/{reference}`. Issue #107 adds the read-only
    `/api/v1/startup-diagnostics` route. Issue #104 adds fixed job list, status,
    cancel, SSE-event, and safe-shutdown routes. Those routes expose lifecycle
-   metadata only and admit no work. It still has no generic route dispatcher.
+   metadata only and admit no work. Issue #110 adds fixed chat capability,
+   session-create, session-read, session-delete, and synchronous run routes. A
+   run can leave the network-free default only after exact profile/model policy,
+   current consent, bounded-input, and provider preflight checks succeed. It
+   still has no generic route dispatcher.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -138,7 +147,8 @@ snapshot to exactly one failed `JOB_INTERRUPTED` terminal state at startup; it
 never automatically replays side-effecting work. Shutdown drains the Uvicorn
 server task and loopback listener, child stdio, the supervised process tree,
 Electron's private temporary working directory, and the encrypted provider and
-job database sessions.
+job database sessions. Issue #110 also closes the chat service before its
+provider dependencies and discards every process-local session and message.
 
 Before quitting, Electron main waits for a bounded safe-shutdown assessment. If
 work remains active, a native dialog offers **Wait**, **Request cancellation**,
@@ -161,7 +171,8 @@ disposal and verified sidecar stop release every owned resource, the authorized
 completion callback uses `app.exit(0)` rather than re-entering
 platform-specific window closure.
 Future provider streams and other database sessions must register an orderly
-drain before their routes are enabled.
+drain before their routes are enabled. Issue #110 is synchronous and admits no
+streaming or background generation.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not
@@ -186,6 +197,11 @@ requires the exact event-stream content type, bounds a response or event stream
 buffer to 1 MiB, and fails a stalled connection after three seconds. The renderer
 receives only parsed snapshots, events, and stable coded failures; it receives
 no HTTP or sidecar connection authority.
+
+Issue #110's chat routes are internal Python-sidecar contracts only. Electron
+main, preload, and the renderer do not call or expose them. A later renderer
+surface must receive a separately reviewed fixed bridge rather than acquiring
+HTTP, bearer, provider, session, or generic route authority.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,

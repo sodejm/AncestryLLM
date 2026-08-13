@@ -38,6 +38,33 @@ against the current consent revision. Secret fields remain blank and
 write-only; configuration reports key presence only. A stored key alone cannot
 enable a provider, choose a profile, or grant consent.
 
+## Transient chat execution
+
+Unreleased Issue #110 adds a source-level, synchronous transient-chat boundary
+behind the authenticated private API. A session names one stored operational
+profile and its exact model, purpose, and data classes. Direct provider
+identifiers, `provider=none`, missing or incompatible profiles, and conflicting
+models fail before provider construction. Session creation preflights the
+profile, endpoint, credential, policy, and consent; every run repeats that
+preflight and fetches current consent before any remote generation.
+
+The boundary admits at most 32 sessions, including pending creations. Each
+session retains at most 32 messages in process memory, each message is limited
+to 16,384 characters, and a request is limited to 65,536 context characters,
+4,096 output tokens, one safe retry, and 120 seconds. A fixed system instruction
+marks user content as untrusted and the response as advisory. Chat requests
+have no tool schema or authority to read files, query databases, invoke a shell
+or plugin, call another external service, perform genealogy operations, or act
+autonomously.
+
+Successful user and assistant messages remain only in the owning `ChatService`
+process. Failed runs do not append content, and deletion or application
+shutdown clears the session. Audit output contains identifiers, counters,
+usage, and one-way payload hashes rather than prompts or responses. Issue #110
+does not add an Electron renderer or preload bridge, streaming or cancellation,
+safe Markdown presentation, or packaged-network evidence; those remain owned
+by Issues #111, #112, and #131.
+
 ## Application boundary
 
 Only modules under `ancestryllm.llm.providers` initiate LLM network requests.
@@ -46,6 +73,9 @@ GEDCOM merge, incremental update, and quality operations build the same
 scoring, preservation, rollback, and report logic receive only a narrow
 provider-neutral resolver. The old GEDCOM and OCR HTTP/SDK implementations and
 environment-key auto-selection paths have been removed.
+
+`ChatService` also composes `LLMService`, but owns only bounded transient chat
+state and has no genealogy, artifact, file, database, shell, or tool authority.
 
 This makes profile planning, consent, schema validation, timeouts, retries,
 bounded scheduling, exact-result caching, and audit metadata apply to every
@@ -64,11 +94,12 @@ command-line model is rejected. Cloud consent is bound to the exact named
 profile as well as provider, module, purpose, data classes, and model, so a
 grant for one endpoint cannot authorize another.
 
-A direct remote selection still executes a named operational profile: the
-required `--consent` identifies its linked profile, and the direct provider and
-model must match that profile. Resolution happens before SDK use, so direct
-syntax cannot bypass the profile's endpoint, execution settings, or consent
-scope.
+A direct remote selection from the CLI or genealogy workflows still executes a
+named operational profile: the required `--consent` identifies its linked
+profile, and the direct provider and model must match that profile. Resolution
+happens before SDK use, so direct syntax cannot bypass the profile's endpoint,
+execution settings, or consent scope. The private transient-chat boundary is
+narrower and rejects direct provider syntax entirely.
 
 Ollama profiles support safe endpoint selection, `keep_alive`, `num_ctx`,
 `num_batch`, `num_thread`, `num_gpu`, `seed`, temperature/output limits,

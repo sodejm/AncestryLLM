@@ -86,6 +86,18 @@ and remote retention receive explicit warnings. Creation requires the current
 optimistic revision and the exact preview; revocation is a separate explicit
 action. The surface does not execute a provider request or genealogy workflow.
 
+Unreleased Issue #110 adds a separate source-level transient-chat execution
+boundary behind the authenticated private API. It accepts only an exact stored
+profile and model, rejects direct or ambient provider selection, and rechecks
+endpoint, credential, policy, and current consent before every run. Its fixed
+system instruction treats all user content as untrusted, grants no tools or
+file, database, shell, plugin, genealogy, or autonomous authority, and labels
+provider output as advisory rather than evidence. Content is bounded and held
+only in process memory; failed runs retain nothing, deletion and shutdown clear
+the session, and audit records contain only identifiers, counters, usage, and
+one-way payload hashes. No Electron chat surface, streaming transport, or safe
+renderer presentation is included yet.
+
 Desktop capability discovery uses non-sensitive metadata. It must not probe
 private files, databases, keyrings, people, providers, or networks. Local,
 remote, sensitive, destructive, and Post-MVP states use text and icons as well
@@ -99,7 +111,9 @@ fixed desktop consent route accepts only a current, exact preview, and Python
 policy verifies the endpoint identity, profile, provider, model, purpose, data
 classes, retention, and active consent again before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
-renderer privileges.
+renderer privileges. The source-level chat service does not weaken this rule:
+it rejects `provider=none` for generation while leaving the offline profile
+socket-free and cannot be reached through the renderer.
 
 ## Deployment-profile privacy boundary
 

@@ -27,7 +27,12 @@ from ancestryllm.storage.models import LlmRunModel
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, LLMProvider
+    from ancestryllm.llm.contracts import (
+        GenerationRequest,
+        GenerationResult,
+        LLMProvider,
+        ProviderCapabilities,
+    )
     from ancestryllm.llm.profiles import ProviderProfileService
     from ancestryllm.llm.registry import ProviderRegistry
     from ancestryllm.storage.database import Database
@@ -87,10 +92,16 @@ class LLMService:
         self,
         request: GenerationRequest,
         consent: ConsentGrant | None,
+        *,
+        enforce_request_bounds: bool = False,
     ) -> GenerationRequest:
         if self.profiles is None:
             return request
-        return self.profiles.resolve_request(request, consent)
+        return self.profiles.resolve_request(
+            request,
+            consent,
+            enforce_request_bounds=enforce_request_bounds,
+        )
 
     def _provider(self, request: GenerationRequest) -> LLMProvider:
         execution = request.execution
@@ -106,6 +117,39 @@ class LLMService:
             zero_data_retention=execution.zero_data_retention,
             profile_name=execution.profile_name,
         )
+
+    def _prepare(
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None,
+        *,
+        enforce_request_bounds: bool = False,
+    ) -> tuple[GenerationRequest, LLMProvider]:
+        planned_request = self._resolve_request(
+            request,
+            consent,
+            enforce_request_bounds=enforce_request_bounds,
+        )
+        self._check_cancellation()
+        provider = self._provider(planned_request)
+        self.policy.authorize(planned_request, provider.capabilities, consent)
+        return planned_request, provider
+
+    def preflight(
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None = None,
+        *,
+        enforce_request_bounds: bool = False,
+    ) -> tuple[GenerationRequest, ProviderCapabilities]:
+        """Resolve and authorize a request without executing or auditing generation."""
+
+        planned_request, provider = self._prepare(
+            request,
+            consent,
+            enforce_request_bounds=enforce_request_bounds,
+        )
+        return planned_request, provider.capabilities
 
     @staticmethod
     def _execution_key(request: GenerationRequest) -> tuple[str, ...]:
@@ -166,12 +210,17 @@ class LLMService:
             session.commit()
 
     def generate(
-        self, request: GenerationRequest, consent: ConsentGrant | None = None
+        self,
+        request: GenerationRequest,
+        consent: ConsentGrant | None = None,
+        *,
+        enforce_request_bounds: bool = False,
     ) -> GenerationResult:
-        planned_request = self._resolve_request(request, consent)
-        self._check_cancellation()
-        provider = self._provider(planned_request)
-        self.policy.authorize(planned_request, provider.capabilities, consent)
+        planned_request, provider = self._prepare(
+            request,
+            consent,
+            enforce_request_bounds=enforce_request_bounds,
+        )
         canonical, request_hash = self._request_metadata(planned_request)
         started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
@@ -305,10 +354,7 @@ class LLMService:
     ) -> Iterator[str]:
         """Authorize and audit a provider stream without retaining partial output by default."""
 
-        planned_request = self._resolve_request(request, consent)
-        self._check_cancellation()
-        provider = self._provider(planned_request)
-        self.policy.authorize(planned_request, provider.capabilities, consent)
+        planned_request, provider = self._prepare(request, consent)
         canonical, request_hash = self._request_metadata(planned_request)
         started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)

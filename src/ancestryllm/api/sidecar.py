@@ -12,6 +12,7 @@ import ctypes
 import json
 import socket
 import sys
+from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
@@ -31,9 +32,12 @@ from ancestryllm.core.config import APP_NAME, AppConfig
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
+from ancestryllm.llm.chat import ChatService
 from ancestryllm.llm.endpoint_validation import EndpointValidationService
 from ancestryllm.llm.profiles import ProviderProfileService
 from ancestryllm.llm.provider_configuration import ProviderConfigurationService
+from ancestryllm.llm.registry import ProviderRegistry
+from ancestryllm.llm.service import LLMService
 from ancestryllm.storage.database import Database
 from ancestryllm.storage.diagnostics import StartupConfigurationFailure, diagnose_startup
 from ancestryllm.storage.job_events import SqlJobEventRepository
@@ -95,7 +99,29 @@ class _SidecarLifecycle:
 
     database: Database
     startup_diagnostics: Callable[[], StartupDiagnosticReport]
+    chat_service: ChatService
+    llm_service: LLMService
     job_lifecycle: JobLifecycleService | None = field(init=False, default=None, repr=False)
+
+    def _close_owned_resources(
+        self,
+        startup_job_service: JobLifecycleService | None = None,
+    ) -> None:
+        first_failure: BaseException | None = None
+        job_service = startup_job_service or self.job_lifecycle
+        self.job_lifecycle = None
+        actions = []
+        if job_service is not None:
+            actions.append(job_service.close)
+        actions.extend((self.chat_service.close, self.llm_service.close, self.database.close))
+        for action in actions:
+            try:
+                action()
+            except BaseException as exc:  # noqa: BLE001 - every owned resource must close
+                if first_failure is None:
+                    first_failure = exc
+        if first_failure is not None:
+            raise first_failure
 
     async def startup(self) -> None:
         """Open writable storage only after startup diagnostics authorize it."""
@@ -112,9 +138,8 @@ class _SidecarLifecycle:
             )
             service.startup()
         except BaseException:
-            if service is not None:
-                service.close()
-            self.database.close()
+            with suppress(BaseException):
+                self._close_owned_resources(service)
             raise
         assert service is not None
         self.job_lifecycle = service
@@ -145,9 +170,7 @@ class _SidecarLifecycle:
         )
 
     async def shutdown(self) -> None:
-        if self.job_lifecycle is not None:
-            self.job_lifecycle.close()
-        self.database.close()
+        self._close_owned_resources()
 
 
 def _create_native_windows_process_tree_guard() -> object:
@@ -346,8 +369,20 @@ def create_sidecar_app(
         database,
         endpoint_validator=endpoint_validator,
     )
+    provider_registry = ProviderRegistry(resolved_secret_store)
+    llm_service = LLMService(
+        provider_registry,
+        database,
+        profiles=provider_profiles,
+    )
+    chat_service = ChatService(llm_service, provider_profiles)
 
-    lifecycle = _SidecarLifecycle(database, startup_report)
+    lifecycle = _SidecarLifecycle(
+        database,
+        startup_report,
+        chat_service,
+        llm_service,
+    )
     return create_app(
         settings=frame.settings(),
         registry=_EmptyRegistry(),
@@ -359,6 +394,7 @@ def create_sidecar_app(
             endpoint_validator,
         ),
         endpoint_validation_service=endpoint_validator,
+        chat_service=chat_service,
         lifecycle=lifecycle,
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,

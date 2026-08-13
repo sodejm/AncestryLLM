@@ -6,6 +6,8 @@ atomic non-secret settings and write-only credential management. Issue #107
 adds the read-only startup-diagnostics contract and fail-closed mutation gate.
 Issue #108 adds the provider-profile, endpoint-test, and consent-administration
 contract. Issue #104 adds the unreleased, UI-neutral job-lifecycle contract.
+Issue #110 adds a bounded, transient chat contract that can execute only through
+an exact named profile, model, and current policy grant.
 This remains a private, authenticated, IPv4-loopback FastAPI adapter over
 transport-neutral application contracts. It is not a public, LAN, browser, or
 multi-user API.
@@ -59,13 +61,29 @@ The unreleased #104 source adds five fixed job-lifecycle path templates:
   and supports `Last-Event-ID` replay.
 - `POST /api/v1/jobs/shutdown` performs the main-process safe-quit preflight.
 
-Together, the API has eighteen exact path templates. There is no generic
-command or route dispatcher and no genealogy, GEDCOM, RootsMagic, provider
-execution, storage, file, job-submission, or other domain-operation route. The
-credential and provider-configuration routes cannot read a secret value. Job
-routes expose lifecycle metadata only; they do not admit or execute work.
-Separately owned follow-on work must adapt the same transport-neutral
-application services.
+The unreleased #110 source adds four fixed transient-chat path templates and
+five operations:
+
+- `GET /api/v1/chat/capability` returns the exact schema-v1 limits and disabled
+  capabilities.
+- `POST /api/v1/chat/sessions` preflights one exact named provider profile,
+  model, purpose, data-class set, and optional named consent grant.
+- `GET /api/v1/chat/sessions/{session_id}` returns one path-free session
+  summary without message content.
+- `DELETE /api/v1/chat/sessions/{session_id}` discards the session and every
+  in-memory message it owns.
+- `POST /api/v1/chat/sessions/{session_id}/runs` performs one bounded,
+  synchronous policy-enforced generation and commits history only after a
+  successful provider result.
+
+Together, the API has twenty-two exact path templates. There is no generic
+command or route dispatcher and no genealogy, GEDCOM, RootsMagic, storage,
+file, job-submission, direct-provider, tool-capable, or other domain-operation
+route. The fixed chat route is the sole provider-execution surface. Credential
+and provider-configuration routes cannot read a secret value or execute a
+provider. Job routes expose lifecycle metadata only; they do not admit or
+execute work. Separately owned follow-on work must adapt the same
+transport-neutral application services.
 
 ## Security boundary
 
@@ -114,6 +132,22 @@ modules, purposes, data classes, retention, living-person and remote-retention
 warnings, and optional budget. Creation accepts only the complete current
 preview; revocation is explicit. Neither a stored key nor a saved profile
 selects a provider, grants consent, or executes a request.
+
+Transient chat accepts only a named provider profile and its exact model. It
+rejects `provider=none`, direct provider identifiers, missing or stale profiles,
+incompatible capabilities, missing cloud consent, revoked consent, and changed
+endpoint identity before remote generation. Every run re-fetches consent and
+re-enters the central provider preflight. At most 32 sessions are active; each
+session has at most 32 user/assistant messages, each message has at most 16,384
+characters, and total context has at most 65,536 characters. Output tokens,
+temperature, timeout, and safe retries are independently bounded. The fixed
+system instruction treats input as untrusted data, disables tools, files,
+databases, shells, plugins, and external-service autonomy, and labels generated
+text as advisory rather than evidence. Sessions and messages exist only in
+process memory, are cleared on explicit teardown and sidecar shutdown, and are
+excluded from audit payloads. Provider audit retains only privacy-minimal
+identity, outcome, timing, and digest metadata. Degraded startup blocks session
+creation and runs before provider access.
 
 Job snapshots and events use strict schema version 1 and expose only bounded,
 sanitized status, progress, artifact-reference, and error fields. Sequence
@@ -167,10 +201,12 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 
 The health and capability contract shipped with the bounded `0.5.0` control
 shell. The settings, credential-management, startup-diagnostic,
-provider-profile, endpoint-test, consent-administration, and job-lifecycle
-operations are source-level work for `0.6.0`; they are not a released user
-surface until the applicable desktop packaging, security, and exact-head
-verification gates pass. The job contract has no producer, submission route,
-or renderer job UI in this change. Its presence in the committed OpenAPI
-artifact does not enable a public API, provider call, or genealogy workflow.
-Consent administration never replaces the execution-time policy check.
+provider-profile, endpoint-test, consent-administration, job-lifecycle, and
+transient-chat operations are source-level work for `0.6.0`; they are not a
+released user surface until the applicable desktop packaging, security, and
+exact-head verification gates pass. The job contract has no producer or
+submission route. The chat contract has no renderer destination, preload
+bridge, streaming route, tool surface, or genealogy integration. Its presence
+in the committed OpenAPI artifact does not enable a public API, generic
+provider call, or genealogy workflow. Consent administration never replaces
+the execution-time policy check.

@@ -224,6 +224,10 @@ def test_openapi_marks_secret_input_write_only_and_has_no_readback_contract() ->
 
     assert schema["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/chat/capability",
+        f"{API_NAMESPACE}/chat/sessions",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/runs",
         f"{API_NAMESPACE}/consents",
         f"{API_NAMESPACE}/consents/preview",
         f"{API_NAMESPACE}/consents/{{name}}/revoke",

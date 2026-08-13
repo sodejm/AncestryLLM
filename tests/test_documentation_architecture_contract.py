@@ -131,9 +131,10 @@ def test_navigation_separates_reader_modes_from_supporting_material() -> None:
     assert "All surfaces use the same command specification" not in home
     assert "Desktop-domain capabilities" in home_text
     assert "presentation-only **Tasks** adapters" in home_text
+    assert "source-level synchronous transient-chat API" in home_text
     assert (
-        "genealogy/domain task admission or execution, direct artifact access, provider "
-        "execution, cloud accounts, and updater flows" in home_text
+        "Electron chat presentation and streaming, genealogy/domain task admission or "
+        "execution, direct artifact access, cloud accounts, and updater flows" in home_text
     )
     for page in ("Home.md", "_Sidebar.md"):
         navigation = (DOCS_DIRECTORY / page).read_text(encoding="utf-8")

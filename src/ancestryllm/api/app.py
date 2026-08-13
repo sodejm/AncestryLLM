@@ -6,7 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import StreamingResponse
@@ -22,6 +22,11 @@ from ancestryllm.api.contracts import (
     API_NAMESPACE,
     API_VERSION_HEADER,
     CapabilityManifest,
+    ChatCapability,
+    ChatRunRequest,
+    ChatRunSummary,
+    ChatSession,
+    ChatSessionCreateRequest,
     ConsentCreateRequest,
     ConsentGrantResponse,
     ConsentPreviewRequest,
@@ -81,6 +86,7 @@ if TYPE_CHECKING:
     )
     from ancestryllm.application.secret_management import SecretManagementService, SecretStatus
     from ancestryllm.application.settings import SettingField, SettingsService, SettingsSnapshot
+    from ancestryllm.llm.chat import ChatService
     from ancestryllm.llm.endpoint_validation import (
         EndpointValidationResult,
         EndpointValidationService,
@@ -104,6 +110,10 @@ class ApiLifecycle(Protocol):
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorEnvelope, "description": "The request failed closed."},
     401: {"model": ErrorEnvelope, "description": "The private bearer is invalid."},
+    403: {
+        "model": ErrorEnvelope,
+        "description": "Cloud-provider consent is absent, stale, mismatched, or revoked.",
+    },
     404: {"model": ErrorEnvelope, "description": "The resource or route is unavailable."},
     405: {"model": ErrorEnvelope, "description": "The method is not accepted."},
     409: {
@@ -452,6 +462,7 @@ def create_app(
     secret_service: SecretManagementService,
     provider_configuration_service: ProviderConfigurationService | None = None,
     endpoint_validation_service: EndpointValidationService | None = None,
+    chat_service: ChatService | None = None,
     job_service: Callable[[], JobLifecycleService] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     lifecycle: ApiLifecycle | None = None,
@@ -515,6 +526,15 @@ def create_app(
                 "Restart the desktop application and retry.",
             )
         return endpoint_validation_service
+
+    def chat() -> ChatService:
+        if chat_service is None:
+            raise StorageError(
+                "CHAT_SERVICE_UNAVAILABLE",
+                "Transient chat is unavailable.",
+                "Resolve startup diagnostics and restart the desktop application.",
+            )
+        return chat_service
 
     def jobs() -> JobLifecycleService:
         if job_service is None:
@@ -582,6 +602,66 @@ def create_app(
     )
     def get_startup_diagnostics() -> StartupDiagnosticReportResponse:
         return _startup_diagnostics_response(diagnostics_provider())
+
+    @app.get(
+        f"{API_NAMESPACE}/chat/capability",
+        response_model=ChatCapability,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalChatCapability",
+        tags=["chat"],
+    )
+    def get_chat_capability() -> ChatCapability:
+        return ChatCapability.from_application(chat().capability())
+
+    @app.post(
+        f"{API_NAMESPACE}/chat/sessions",
+        response_model=ChatSession,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="startInternalChatSession",
+        tags=["chat"],
+    )
+    def start_chat_session(request: ChatSessionCreateRequest) -> ChatSession:
+        assert_mutations_allowed()
+        return ChatSession.from_application(chat().start(request.to_application()))
+
+    @app.get(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}",
+        response_model=ChatSession,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalChatSession",
+        tags=["chat"],
+    )
+    def get_chat_session(session_id: str) -> ChatSession:
+        return ChatSession.from_application(chat().get(session_id))
+
+    @app.delete(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}",
+        status_code=204,
+        response_class=Response,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="deleteInternalChatSession",
+        tags=["chat"],
+    )
+    def delete_chat_session(session_id: str) -> Response:
+        assert_mutations_allowed()
+        chat().teardown(session_id)
+        return Response(status_code=204)
+
+    @app.post(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/runs",
+        response_model=ChatRunSummary,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="runInternalChatSession",
+        tags=["chat"],
+    )
+    def run_chat_session(session_id: str, request: ChatRunRequest) -> ChatRunSummary:
+        assert_mutations_allowed()
+        return ChatRunSummary.from_application(chat().run(session_id, request.to_application()))
 
     @app.get(
         f"{API_NAMESPACE}/jobs",
