@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,11 +18,15 @@ from ancestryllm.api import (
 from ancestryllm.application.chat import (
     ChatCapability,
     ChatDataClass,
+    ChatEvent,
+    ChatEventPayload,
+    ChatEventType,
     ChatMessage,
     ChatPurpose,
     ChatRole,
     ChatRunSummary,
     ChatSession,
+    ChatStreamRun,
 )
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
 from ancestryllm.application.jobs import JobLifecycleService, MemoryJobEventRepository
@@ -34,6 +38,7 @@ from ancestryllm.core.config import AppConfig
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import MemorySecretStore
 from ancestryllm.llm.chat import ChatService
+from ancestryllm.llm.chat_streaming import ChatStreamingService
 from ancestryllm.llm.endpoint_validation import (
     EndpointProbeRequest,
     EndpointProbeResponse,
@@ -126,12 +131,80 @@ def chat_service() -> Mock:
 
 
 @pytest.fixture
+def chat_streaming_service() -> Mock:
+    service = Mock(spec=ChatStreamingService)
+    session_id = "chat_" + ("a" * 32)
+    run_id = "run_" + ("b" * 32)
+    timestamp = "2026-08-13T12:00:00+00:00"
+    events = (
+        ChatEvent(
+            run_id=run_id,
+            sequence=1,
+            type=ChatEventType.ACTIVE,
+            timestamp=timestamp,
+            payload=ChatEventPayload(
+                provider_id="ollama",
+                model="fictional-model",
+                remote=False,
+            ),
+        ),
+        ChatEvent(
+            run_id=run_id,
+            sequence=2,
+            type=ChatEventType.FIRST_TOKEN,
+            timestamp=timestamp,
+            payload=ChatEventPayload(text="Fictional "),
+        ),
+        ChatEvent(
+            run_id=run_id,
+            sequence=3,
+            type=ChatEventType.DELTA,
+            timestamp=timestamp,
+            payload=ChatEventPayload(text=" "),
+        ),
+        ChatEvent(
+            run_id=run_id,
+            sequence=4,
+            type=ChatEventType.COMPLETED,
+            timestamp=timestamp,
+            payload=ChatEventPayload(message_count=2),
+        ),
+    )
+
+    async def subscription() -> object:
+        for event in events:
+            yield event
+
+    service.start = AsyncMock(
+        return_value=ChatStreamRun(
+            session_id=session_id,
+            run_id=run_id,
+            state=ChatEventType.ACTIVE,
+            latest_sequence=1,
+            terminal=False,
+        )
+    )
+    service.subscribe = AsyncMock(side_effect=lambda *_args, **_kwargs: subscription())
+    service.cancel = AsyncMock(
+        return_value=ChatStreamRun(
+            session_id=session_id,
+            run_id=run_id,
+            state=ChatEventType.INTERRUPTED,
+            latest_sequence=4,
+            terminal=True,
+        )
+    )
+    return service
+
+
+@pytest.fixture
 def api_client(
     api_settings: ApiSettings,
     registered_keys: tuple[DispatchKey, ...],
     secret_store: MemorySecretStore,
     job_service: JobLifecycleService,
     chat_service: Mock,
+    chat_streaming_service: Mock,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[TestClient]:
     registry = FixtureRegistry(
@@ -168,6 +241,7 @@ def api_client(
         endpoint_validation_service=endpoint_validator,
         job_service=lambda: job_service,
         chat_service=chat_service,
+        chat_streaming_service=chat_streaming_service,
     )
     with TestClient(app, base_url="http://127.0.0.1:8421", raise_server_exceptions=False) as client:
         yield client

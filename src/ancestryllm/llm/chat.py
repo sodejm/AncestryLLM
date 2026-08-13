@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 import threading
 from dataclasses import dataclass, replace
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING
 from ancestryllm.application.chat import (
     CHAT_MAX_ACTIVE_SESSIONS,
     CHAT_MAX_CONTEXT_CHARACTERS,
+    CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_MESSAGES,
     CHAT_MODULE_ID,
     ChatCapability,
@@ -25,6 +27,8 @@ from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
 from ancestryllm.llm.registry import PROVIDER_IDS
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
     from ancestryllm.llm.policy import ConsentGrant
     from ancestryllm.llm.profiles import ProviderProfileService
     from ancestryllm.llm.service import LLMService
@@ -41,6 +45,18 @@ class _SessionState:
     session: ChatSession
     messages: list[ChatMessage]
     busy: bool = False
+
+
+@dataclass(slots=True)
+class ChatStreamHandle:
+    """Internal ownership token for one reserved transient chat stream."""
+
+    session_id: str
+    run_id: str
+    state: _SessionState
+    user_message: ChatMessage
+    iterator: AsyncIterator[str]
+    released: bool = False
 
 
 class ChatService:
@@ -191,9 +207,11 @@ class ChatService:
                 )
             return self._public_session(state)
 
-    def run(self, session_id: str, request: ChatRunRequest) -> ChatRunSummary:
-        """Generate one bounded response and commit history only after success."""
-
+    def _reserve_run(
+        self,
+        session_id: str,
+        request: ChatRunRequest,
+    ) -> tuple[_SessionState, ChatMessage, tuple[Message, ...]]:
         with self._lock:
             self._require_open()
             state = self._sessions.get(session_id)
@@ -233,6 +251,19 @@ class ChatService:
             *(Message(role=message.role.value, content=message.content) for message in history),
             Message(role="user", content=user_message.content),
         )
+        return state, user_message, provider_messages
+
+    def _release_run(self, handle: ChatStreamHandle) -> None:
+        with self._lock:
+            if handle.released:
+                return
+            handle.released = True
+            handle.state.busy = False
+
+    def run(self, session_id: str, request: ChatRunRequest) -> ChatRunSummary:
+        """Generate one bounded response and commit history only after success."""
+
+        state, user_message, provider_messages = self._reserve_run(session_id, request)
         try:
             consent = self._request_consent(self._profiles, state.session.consent_name)
             result = self._llm.generate(
@@ -281,6 +312,93 @@ class ChatService:
             with self._lock:
                 state.busy = False
 
+    def open_stream(
+        self,
+        session_id: str,
+        request: ChatRunRequest,
+        *,
+        run_id: str,
+    ) -> ChatStreamHandle:
+        """Reserve one session and create its audited provider stream synchronously."""
+
+        state, user_message, provider_messages = self._reserve_run(session_id, request)
+        try:
+            consent = self._request_consent(self._profiles, state.session.consent_name)
+            iterator = self._llm.async_stream(
+                self._generation_request(state.session, provider_messages, request),
+                consent,
+                enforce_request_bounds=True,
+                audit_run_id=run_id,
+                max_response_characters=CHAT_MAX_MESSAGE_CHARACTERS,
+            )
+            return ChatStreamHandle(
+                session_id=session_id,
+                run_id=run_id,
+                state=state,
+                user_message=user_message,
+                iterator=iterator,
+            )
+        except BaseException:
+            with self._lock:
+                state.busy = False
+            raise
+
+    async def consume_stream(
+        self,
+        handle: ChatStreamHandle,
+        on_chunk: Callable[[str], Awaitable[None]],
+    ) -> ChatRunSummary:
+        """Consume output and commit transient history only after successful completion."""
+
+        chunks: list[str] = []
+        try:
+            async for chunk in handle.iterator:
+                chunks.append(chunk)
+                await on_chunk(chunk)
+            try:
+                assistant_message = ChatMessage(
+                    role=ChatRole.ASSISTANT,
+                    content="".join(chunks),
+                )
+            except ValueError as exc:
+                raise ProviderError(
+                    "CHAT_PROVIDER_OUTPUT_INVALID",
+                    "The provider returned an empty or oversized chat response.",
+                ) from exc
+            with self._lock:
+                self._require_open()
+                if self._sessions.get(handle.session_id) is not handle.state:
+                    raise AncestryError(
+                        "CHAT_SESSION_NOT_FOUND",
+                        "The transient chat session no longer exists.",
+                    )
+                handle.state.messages.extend((handle.user_message, assistant_message))
+                message_count = len(handle.state.messages)
+            return ChatRunSummary(
+                assistant_message=assistant_message,
+                provider_id=handle.state.session.provider_id,
+                model=handle.state.session.model,
+                remote=handle.state.session.remote,
+                input_tokens=None,
+                output_tokens=None,
+                cost_usd=None,
+                message_count=message_count,
+            )
+        except BaseException:
+            close = getattr(handle.iterator, "aclose", None)
+            if close is not None:
+                with contextlib.suppress(BaseException):
+                    await close()
+            raise
+        finally:
+            self._release_run(handle)
+
+    def abandon_stream(self, handle: ChatStreamHandle, *, error_code: str) -> None:
+        """Release a stream that will never be consumed and terminalize its audit."""
+
+        self._llm.terminalize_stream_audit(handle.run_id, error_code=error_code)
+        self._release_run(handle)
+
     def teardown(self, session_id: str) -> None:
         """Discard one session and every in-memory message payload it owns."""
 
@@ -313,4 +431,4 @@ class ChatService:
             state.messages.clear()
 
 
-__all__ = ["ChatService"]
+__all__ = ["ChatService", "ChatStreamHandle"]

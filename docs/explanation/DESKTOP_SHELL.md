@@ -21,9 +21,10 @@ Unreleased Issue #109 adds a **Tasks** destination to present backend-owned
 work. It remains outside the released 0.5.0 installer claim.
 
 Unreleased Issue #110 adds an internal, synchronous, transient-chat service and
-fixed sidecar routes. It does not add a renderer destination, preload bridge
-method, chat UI, provider stream, tool call, genealogy operation, or generic
-dispatch surface.
+fixed sidecar routes. Issue #111 adds only the audited source transport: fixed
+stream start, cancellation, acknowledgement, and event contracts owned by
+Electron Main. It does not add a renderer destination, chat presentation, tool
+call, genealogy operation, or generic dispatch surface.
 
 These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
@@ -134,7 +135,8 @@ cannot select a provider. The preload bridge exposes exactly these six methods:
 
 Unreleased source additions are fixed, separately reviewed contracts and do
 not change that released six-method claim. Issue #109 contributes five task
-request methods and one validated event listener described below.
+request methods and one validated event listener. Issue #111 contributes three
+chat-stream request methods and one validated event listener described below.
 
 The renderer receives no Node.js, Electron, network, filesystem, keyring,
 provider, database, shell, or arbitrary-path access. It must never receive the
@@ -216,10 +218,20 @@ Sessions and successful message history exist only in process memory. Failed
 runs do not append history, deletion clears the session, and sidecar shutdown
 clears every remaining session. Audit records retain only reviewed identifiers,
 counters, and content hashes; they do not retain prompts, responses, secrets,
-host identity, or local paths. These authenticated sidecar routes are currently
-an internal Python boundary only: Electron main and preload expose no chat
-method, and Issue #111 separately owns streaming, cancellation after provider
-access begins, worker/event integration, and renderer presentation.
+host identity, or local paths.
+
+Issue #111 extends that boundary with owner-scoped schema-v1 lifecycle events
+and a 256 KiB in-memory replay budget. Electron Main alone owns the authenticated
+SSE connection and rejects redirects, an unexpected media type, the wrong
+owner or run, malformed events, and non-monotonic sequences. It batches events
+for no more than 16 milliseconds or 4 KiB, counts the exact UTF-8 JSON bytes
+sent but not acknowledged, pauses at 256 KiB, and cancels with a stable coded
+outcome if the renderer remains stalled for 15 seconds. One reconnect may
+resume the same run from its last cursor; provider generation is never retried
+after output begins. Shutdown, reload, and startup reconciliation record one
+payload-free terminal audit outcome. Preload exposes only fixed start, cancel,
+acknowledge, and event contracts. Issue #112 separately owns the renderer chat
+destination, model-output allowlisting, and interactive presentation.
 
 ## Unreleased opaque file-mediation foundation
 
@@ -299,11 +311,13 @@ values are never retained in React state, query caches, bridge fixtures,
 responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
 configuration. The renderer still has no direct keyring or network access.
 Together with the three unreleased file-grant methods, the current development
-bridge therefore contains twenty-five fixed request methods: the six released
+bridge therefore contains thirty-one fixed request methods: the six released
 control methods, three opaque file-grant methods, five settings/credential
-methods, six provider-configuration methods, and five task-lifecycle methods.
-Issue #109 also adds one fixed, validated job-event listener. There is still no
-generic send, listen, route-selection, or command operation.
+methods, six provider-configuration methods, five task-lifecycle methods, three
+local-runtime methods, and three chat-stream methods. Issue #109 adds one fixed,
+validated `onJobEvent` listener, and Issue #111 adds one fixed, validated
+`onChatEventBatch` listener. There is still no generic send, listen,
+route-selection, or command operation.
 
 The unreleased source implements the non-secret, versioned deployment-profile
 control plane accepted by the

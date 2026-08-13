@@ -5,6 +5,12 @@ import {
   type ApplicationSettingsPatch,
   type AncestryBridge,
   type BridgeResult,
+  type ChatEventDelivery,
+  type ChatStreamAcknowledgement,
+  type ChatStreamAckRequest,
+  type ChatStreamCancelRequest,
+  type ChatStreamRun,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreview,
   type ConsentPreviewRequest,
@@ -39,6 +45,9 @@ import {
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentRevokeRequest,
+  parseChatStreamAckRequest,
+  parseChatStreamCancelRequest,
+  parseChatStreamStartRequest,
   parseJobEventSubscriptionRequest,
   parseJobEventUnsubscriptionRequest,
   parseJobRequest,
@@ -78,6 +87,9 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
   const presentSecrets = new Set<SecretReference>()
   const jobEventListeners = new Set<(delivery: Readonly<JobEventDelivery>) => void>()
   const jobSubscriptions = new Map<string, Readonly<{ jobId: string; after: number }>>()
+  const chatEventListeners = new Set<(delivery: Readonly<ChatEventDelivery>) => void>()
+  const chatRuns = new Map<string, Readonly<ChatStreamRun>>()
+  let nextChatRun = 0
   let jobs: readonly Readonly<JobSnapshot>[] = deepFreeze([
     {
       schema_version: 1,
@@ -174,6 +186,19 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
           : 'Task activity is temporarily unavailable.',
       remediation: code === 'JOB_NOT_FOUND'
         ? 'Refresh task activity.'
+        : 'Retry the local service or restart AncestryLLM.',
+    },
+  })
+  const chatFailure = <T>(code: 'CHAT_STREAM_NOT_FOUND' | 'CHAT_STREAM_SERVICE_UNAVAILABLE'): BridgeResult<T> => deepFreeze({
+    ok: false,
+    protocolVersion: DESKTOP_PROTOCOL_VERSION,
+    error: {
+      code,
+      message: code === 'CHAT_STREAM_NOT_FOUND'
+        ? 'The requested chat stream is no longer available.'
+        : 'Chat streaming is temporarily unavailable.',
+      remediation: code === 'CHAT_STREAM_NOT_FOUND'
+        ? 'Start a new chat response.'
         : 'Retry the local service or restart AncestryLLM.',
     },
   })
@@ -608,6 +633,61 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         code: localRuntimeStatus().code,
       }
       return success(result)
+    },
+    async startChatStream(input: ChatStreamStartRequest) {
+      const request = parseChatStreamStartRequest(input)
+      if (mode === 'unavailable') return chatFailure<ChatStreamRun>('CHAT_STREAM_SERVICE_UNAVAILABLE')
+      nextChatRun += 1
+      const run: Readonly<ChatStreamRun> = deepFreeze({
+        schema_version: 1,
+        session_id: request.session_id,
+        run_id: `run_${nextChatRun.toString(16).padStart(32, '0')}`,
+        state: 'active',
+        latest_sequence: 1,
+        terminal: false,
+      })
+      chatRuns.set(run.run_id, run)
+      return success(run)
+    },
+    async cancelChatStream(input: ChatStreamCancelRequest) {
+      const request = parseChatStreamCancelRequest(input)
+      if (mode === 'unavailable') return chatFailure<ChatStreamRun>('CHAT_STREAM_SERVICE_UNAVAILABLE')
+      const current = chatRuns.get(request.run_id)
+      if (current === undefined || current.session_id !== request.session_id) {
+        return chatFailure<ChatStreamRun>('CHAT_STREAM_NOT_FOUND')
+      }
+      const run: Readonly<ChatStreamRun> = deepFreeze({
+        ...current,
+        state: 'cancelling',
+        latest_sequence: current.latest_sequence + 1,
+        terminal: false,
+      })
+      chatRuns.set(run.run_id, run)
+      return success(run)
+    },
+    async acknowledgeChatStream(input: ChatStreamAckRequest) {
+      const request = parseChatStreamAckRequest(input)
+      if (mode === 'unavailable') {
+        return chatFailure<ChatStreamAcknowledgement>('CHAT_STREAM_SERVICE_UNAVAILABLE')
+      }
+      const current = chatRuns.get(request.run_id)
+      if (current === undefined || current.session_id !== request.session_id) {
+        return chatFailure<ChatStreamAcknowledgement>('CHAT_STREAM_NOT_FOUND')
+      }
+      if (request.through_sequence > current.latest_sequence) {
+        throw new Error('Mock chat acknowledgement exceeds the latest event')
+      }
+      return success<ChatStreamAcknowledgement>({
+        schema_version: 1,
+        session_id: request.session_id,
+        run_id: request.run_id,
+        through_sequence: request.through_sequence,
+        acknowledged: true,
+      })
+    },
+    onChatEventBatch(listener: (delivery: Readonly<ChatEventDelivery>) => void) {
+      chatEventListeners.add(listener)
+      return () => { chatEventListeners.delete(listener) }
     },
     async listJobs() {
       if (mode === 'unavailable') return jobFailure<{ schema_version: 1; jobs: readonly Readonly<JobSnapshot>[] }>('JOB_SERVICE_UNAVAILABLE')

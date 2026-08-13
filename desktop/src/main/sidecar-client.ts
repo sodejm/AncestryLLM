@@ -5,6 +5,10 @@ import {
   type ApplicationSettings,
   type ApplicationSettingsPatch,
   type CapabilityManifest,
+  type ChatEvent,
+  type ChatStreamCancelRequest,
+  type ChatStreamRun,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreview,
   type ConsentPreviewRequest,
@@ -26,6 +30,8 @@ import {
 } from '../shared-contract/desktop'
 import {
   parseCapabilitiesResult,
+  parseChatEventResult,
+  parseChatStreamRunResult,
   parseConsentPreviewResult,
   parseJobEventResult,
   parseJobListResult,
@@ -52,6 +58,7 @@ const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
 const JOB_EVENT_INACTIVITY_TIMEOUT_MS = 45_000
+const CHAT_EVENT_INACTIVITY_TIMEOUT_MS = 45_000
 
 type SecretOperation = 'status' | 'set' | 'delete'
 type SidecarPath =
@@ -68,6 +75,9 @@ type SidecarPath =
   | `/api/v1/jobs/${string}`
   | `/api/v1/jobs/${string}/cancel`
   | `/api/v1/jobs/${string}/events`
+  | `/api/v1/chat/sessions/${string}/streams`
+  | `/api/v1/chat/sessions/${string}/streams/${string}/cancel`
+  | `/api/v1/chat/sessions/${string}/streams/${string}/events`
   | `/api/v1/consents/${string}/revoke`
   | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
@@ -95,6 +105,14 @@ export type SidecarClientFailure =
   | 'job_subscriber_limit'
   | 'job_subscription_closed'
   | 'job_event_stream_failed'
+  | 'chat_session_not_found'
+  | 'chat_stream_not_found'
+  | 'chat_stream_cursor_invalid'
+  | 'chat_stream_replay_expired'
+  | 'chat_stream_service_unavailable'
+  | 'chat_stream_limit'
+  | 'chat_event_stream_interrupted'
+  | 'chat_event_stream_failed'
 
 export class SidecarClientError extends Error {
   constructor(readonly reason: SidecarClientFailure) {
@@ -153,6 +171,32 @@ export interface SidecarClient {
     listener: (event: Readonly<JobEvent>) => void,
     signal?: AbortSignal,
   ): Promise<void>
+  startChatStream(
+    request: ChatStreamStartRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatStreamRun>>
+  cancelChatStream(
+    request: ChatStreamCancelRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatStreamRun>>
+  streamChatEvents(
+    request: ChatEventStreamRequest,
+    listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
+}
+
+export interface ChatEventStreamRequest {
+  readonly schema_version: 1
+  readonly session_id: string
+  readonly run_id: string
+  readonly after: number
+}
+
+/** Main-process-only flow control over the authenticated HTTP response. */
+export interface ChatEventFlowControl {
+  pause(): void
+  resume(): void
 }
 
 export type JobShutdownAction = 'wait' | 'cancel'
@@ -274,6 +318,29 @@ function jobPath(jobId: string, suffix: '' | '/cancel' | '/events' = ''): Sideca
   return `/api/v1/jobs/${jobId}${suffix}`
 }
 
+function chatPath(sessionId: string): SidecarPath
+function chatPath(
+  sessionId: string,
+  runId: string,
+  suffix: '/cancel' | '/events',
+): SidecarPath
+function chatPath(
+  sessionId: string,
+  runId?: string,
+  suffix?: '/cancel' | '/events',
+): SidecarPath {
+  if (!/^chat_[a-f0-9]{32}$/.test(sessionId)) {
+    throw new SidecarClientError('chat_session_not_found')
+  }
+  if (runId === undefined) return `/api/v1/chat/sessions/${sessionId}/streams`
+  if (!/^run_[a-f0-9]{32}$/.test(runId)) {
+    throw new SidecarClientError('chat_stream_not_found')
+  }
+  if (suffix === '/cancel') return `/api/v1/chat/sessions/${sessionId}/streams/${runId}/cancel`
+  if (suffix === '/events') return `/api/v1/chat/sessions/${sessionId}/streams/${runId}/events`
+  throw new SidecarClientError('chat_stream_not_found')
+}
+
 function validJsonResponse(response: Readonly<SidecarHttpResponse>): boolean {
   return /^application\/json(?:\s*;|$)/i.test(response.contentType)
     && Buffer.byteLength(response.body, 'utf8') <= MAX_RESPONSE_BYTES
@@ -379,6 +446,38 @@ function jobFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError
   if (code === 'JOB_SERVICE_CLOSED' || code === 'JOB_SERVICE_UNAVAILABLE'
     || response.statusCode === 503) {
     return new SidecarClientError('job_service_unavailable')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function chatFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
+  if (code === 'CHAT_SESSION_NOT_FOUND') {
+    return new SidecarClientError('chat_session_not_found')
+  }
+  if (code === 'CHAT_STREAM_NOT_FOUND' || response.statusCode === 404) {
+    return new SidecarClientError('chat_stream_not_found')
+  }
+  if (code === 'CHAT_STREAM_CURSOR_INVALID') {
+    return new SidecarClientError('chat_stream_cursor_invalid')
+  }
+  if (code === 'CHAT_STREAM_REPLAY_EXPIRED' || response.statusCode === 410) {
+    return new SidecarClientError('chat_stream_replay_expired')
+  }
+  if (code === 'CHAT_SESSION_BUSY'
+    || code === 'CHAT_SESSION_LIMIT'
+    || code === 'CHAT_STREAM_LIMIT'
+    || response.statusCode === 429) {
+    return new SidecarClientError('chat_stream_limit')
+  }
+  if (code === 'CHAT_STREAM_SERVICE_CLOSED'
+    || code === 'CHAT_STREAM_SERVICE_NOT_READY'
+    || code === 'CHAT_STREAM_SERVICE_UNAVAILABLE'
+    || response.statusCode === 503) {
+    return new SidecarClientError('chat_stream_service_unavailable')
   }
   return new SidecarClientError('request_failed')
 }
@@ -618,6 +717,244 @@ function streamFixedJobEvents(
   })
 }
 
+function streamFixedChatEvents(
+  sidecar: Readonly<AuthenticatedSidecarSession>,
+  subscription: Readonly<ChatEventStreamRequest>,
+  listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+  inactivityTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new SidecarClientError('cancelled'))
+      return
+    }
+    if (subscription.schema_version !== 1
+      || !Number.isSafeInteger(subscription.after)
+      || subscription.after < 0) {
+      reject(new SidecarClientError('chat_stream_cursor_invalid'))
+      return
+    }
+
+    const path = chatPath(subscription.session_id, subscription.run_id, '/events')
+    let responseStream: IncomingMessage | undefined
+    let settled = false
+    let paused = false
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let buffer = ''
+    let lastSequence = subscription.after
+    let terminalSeen = false
+    const decoder = new StringDecoder('utf8')
+
+    const cleanup = () => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
+    }
+    const resolveOnce = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+    const rejectOnce = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error instanceof SidecarClientError
+        ? error
+        : new SidecarClientError('chat_event_stream_failed'))
+    }
+    const abort = () => {
+      const error = new SidecarClientError('cancelled')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }
+    const failStream = (error: SidecarClientError) => {
+      rejectOnce(error)
+      responseStream?.destroy()
+      request.destroy()
+    }
+    const resetDeadline = (timeoutMs: number) => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      deadline = setTimeout(() => {
+        failStream(new SidecarClientError('chat_event_stream_interrupted'))
+      }, timeoutMs)
+    }
+    const resetInactivityDeadline = () => resetDeadline(inactivityTimeoutMs)
+    const flow = Object.freeze<ChatEventFlowControl>({
+      pause() {
+        if (settled || paused || responseStream === undefined) return
+        paused = true
+        if (deadline !== undefined) clearTimeout(deadline)
+        responseStream.pause()
+      },
+      resume() {
+        if (settled || !paused || responseStream === undefined) return
+        paused = false
+        try {
+          processBuffer()
+          if (settled || paused) return
+          resetInactivityDeadline()
+          responseStream.resume()
+        } catch (error) {
+          failStream(error instanceof SidecarClientError
+            ? error
+            : new SidecarClientError('chat_event_stream_failed'))
+        }
+      },
+    })
+
+    const processFrame = (frame: string) => {
+      const lines = frame.split('\n')
+      if (lines.every((line) => line.startsWith(':'))) {
+        resetInactivityDeadline()
+        return
+      }
+      if (terminalSeen) throw new SidecarClientError('chat_event_stream_failed')
+      const fields = new Map<string, string>()
+      for (const line of lines) {
+        const separator = line.indexOf(': ')
+        if (separator <= 0) throw new SidecarClientError('chat_event_stream_failed')
+        const name = line.slice(0, separator)
+        if (!['id', 'event', 'data'].includes(name) || fields.has(name)) {
+          throw new SidecarClientError('chat_event_stream_failed')
+        }
+        fields.set(name, line.slice(separator + 2))
+      }
+      const id = fields.get('id')
+      const eventName = fields.get('event')
+      const data = fields.get('data')
+      if (fields.size !== 3 || id === undefined || eventName === undefined || data === undefined
+        || !/^[1-9][0-9]{0,15}$/.test(id)) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      let payload: unknown
+      try {
+        payload = JSON.parse(data) as unknown
+      } catch {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      const result = parseChatEventResult({
+        ok: true,
+        protocolVersion: DESKTOP_PROTOCOL_VERSION,
+        data: payload,
+      })
+      const sequence = Number(id)
+      if (!Number.isSafeInteger(sequence)
+        || !result.ok
+        || result.data === undefined
+        || result.data.type !== eventName
+        || result.data.run_id !== subscription.run_id
+        || result.data.sequence !== sequence
+        || result.data.sequence !== lastSequence + 1) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      lastSequence = result.data.sequence
+      terminalSeen = ['completed', 'interrupted', 'failed'].includes(result.data.type)
+      listener(result.data, flow)
+      if (!settled) resetInactivityDeadline()
+    }
+
+    const processBuffer = (final = false) => {
+      buffer = buffer.replaceAll('\r\n', '\n')
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_RESPONSE_BYTES || buffer.includes('\r')) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0 && !paused) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        if (frame.length > 0) processFrame(frame)
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (final && buffer.length > 0) throw new SidecarClientError('chat_event_stream_failed')
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${sidecar.bearerToken}`,
+      Connection: 'close',
+      Host: `${sidecar.host}:${sidecar.port}`,
+      'X-Ancestry-API-Version': sidecar.contract,
+      'X-Ancestry-App-Build': sidecar.appBuild,
+    }
+    if (subscription.after > 0) headers['Last-Event-ID'] = String(subscription.after)
+    const request = httpRequest({
+      hostname: sidecar.host,
+      port: sidecar.port,
+      path,
+      method: 'GET',
+      headers,
+    }, (response) => {
+      responseStream = response
+      const contentType = Array.isArray(response.headers['content-type'])
+        ? (response.headers['content-type'][0] ?? '')
+        : (response.headers['content-type'] ?? '')
+      if (response.statusCode === 200
+        && !/^text\/event-stream(?:\s*;|$)/i.test(contentType)) {
+        failStream(new SidecarClientError('chat_event_stream_failed'))
+        return
+      }
+      if (response.statusCode !== 200) {
+        const chunks: Buffer[] = []
+        let bytes = 0
+        response.on('data', (chunk: Buffer | string) => {
+          const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          bytes += value.length
+          if (bytes > MAX_RESPONSE_BYTES) {
+            failStream(new SidecarClientError('chat_event_stream_failed'))
+            return
+          }
+          chunks.push(value)
+        })
+        response.on('end', () => {
+          if (settled) return
+          rejectOnce(chatFailure({
+            statusCode: response.statusCode ?? 0,
+            contentType,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }))
+        })
+        response.on('error', rejectOnce)
+        return
+      }
+      resetInactivityDeadline()
+      response.on('data', (chunk: Buffer | string) => {
+        if (settled) return
+        try {
+          buffer += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          processBuffer()
+        } catch (error) {
+          failStream(error instanceof SidecarClientError
+            ? error
+            : new SidecarClientError('chat_event_stream_failed'))
+        }
+      })
+      response.on('end', () => {
+        if (settled) return
+        try {
+          buffer += decoder.end()
+          processBuffer(true)
+          if (!terminalSeen) throw new SidecarClientError('chat_event_stream_interrupted')
+          resolveOnce()
+        } catch (error) {
+          rejectOnce(error)
+        }
+      })
+      response.on('error', () => rejectOnce(new SidecarClientError('chat_event_stream_interrupted')))
+    })
+    request.on('error', () => rejectOnce(new SidecarClientError('chat_event_stream_interrupted')))
+    resetDeadline(REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    request.end()
+  })
+}
+
 function parseJobShutdownAssessment(
   response: Readonly<SidecarHttpResponse>,
 ): Readonly<JobShutdownAssessment> {
@@ -654,11 +991,17 @@ export function createSidecarClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
   jobEventInactivityTimeoutMs?: number
+  chatEventInactivityTimeoutMs?: number
 }>): Readonly<SidecarClient> {
   const jobEventInactivityTimeoutMs = dependencies.jobEventInactivityTimeoutMs
     ?? JOB_EVENT_INACTIVITY_TIMEOUT_MS
   if (!Number.isFinite(jobEventInactivityTimeoutMs) || jobEventInactivityTimeoutMs <= 0) {
     throw new Error('Job event inactivity timeout must be positive.')
+  }
+  const chatEventInactivityTimeoutMs = dependencies.chatEventInactivityTimeoutMs
+    ?? CHAT_EVENT_INACTIVITY_TIMEOUT_MS
+  if (!Number.isFinite(chatEventInactivityTimeoutMs) || chatEventInactivityTimeoutMs <= 0) {
+    throw new Error('Chat event inactivity timeout must be positive.')
   }
   const request = dependencies.request ?? requestFixedRoute
   const perform = async (
@@ -827,6 +1170,52 @@ export function createSidecarClient(dependencies: Readonly<{
         throw new SidecarClientError('job_event_stream_failed')
       }
     },
+    async startChatStream(chat: ChatStreamStartRequest, signal?: AbortSignal) {
+      const response = await perform(chatPath(chat.session_id), signal, {
+        method: 'POST',
+        body: JSON.stringify({
+          schema_version: chat.schema_version,
+          message: chat.message,
+          max_output_tokens: chat.max_output_tokens,
+          temperature: chat.temperature,
+          timeout_seconds: chat.timeout_seconds,
+          max_safe_retries: chat.max_safe_retries,
+        }),
+      })
+      if (response.statusCode !== 200) throw chatFailure(response)
+      return parseJson(response, parseChatStreamRunResult)
+    },
+    async cancelChatStream(chat: ChatStreamCancelRequest, signal?: AbortSignal) {
+      const response = await perform(
+        chatPath(chat.session_id, chat.run_id, '/cancel'),
+        signal,
+        { method: 'POST' },
+      )
+      if (response.statusCode !== 200) throw chatFailure(response)
+      return parseJson(response, parseChatStreamRunResult)
+    },
+    async streamChatEvents(
+      subscription: ChatEventStreamRequest,
+      listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+      signal?: AbortSignal,
+    ) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      const session = dependencies.session()
+      if (!session) throw new SidecarClientError('unavailable')
+      try {
+        await streamFixedChatEvents(
+          session,
+          subscription,
+          listener,
+          chatEventInactivityTimeoutMs,
+          signal,
+        )
+      } catch (error) {
+        if (signal?.aborted) throw new SidecarClientError('cancelled')
+        if (error instanceof SidecarClientError) throw error
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+    },
   })
 }
 
@@ -834,6 +1223,7 @@ export function createSidecarCapabilitiesClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
   jobEventInactivityTimeoutMs?: number
+  chatEventInactivityTimeoutMs?: number
 }>): Readonly<SidecarClient> {
   return createSidecarClient(dependencies)
 }

@@ -2,8 +2,10 @@
 import type { AncestryBridge } from '../src/shared-contract/desktop'
 
 const bridgeMethodSet = {
+  acknowledgeChatStream: true,
   createConsent: true,
   createProviderProfile: true,
+  cancelChatStream: true,
   cancelJob: true,
   deleteSecret: true,
   getAppInfo: true,
@@ -16,6 +18,7 @@ const bridgeMethodSet = {
   getSettings: true,
   getStartupDiagnostics: true,
   listJobs: true,
+  onChatEventBatch: true,
   onJobEvent: true,
   previewConsent: true,
   previewLocalRuntime: true,
@@ -25,6 +28,7 @@ const bridgeMethodSet = {
   revokeConsent: true,
   revokeFileGrant: true,
   setSecret: true,
+  startChatStream: true,
   subscribeJobEvents: true,
   unsubscribeJobEvents: true,
   updatePreferences: true,

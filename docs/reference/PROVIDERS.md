@@ -62,8 +62,10 @@ process. Failed runs do not append content, and deletion or application
 shutdown clears the session. Audit output contains identifiers, counters,
 usage, and one-way payload hashes rather than prompts or responses. Issue #110
 itself does not add an Electron renderer or preload bridge, streaming or
-cancellation, safe Markdown presentation, or packaged-network evidence; those
-remain owned by Issues #111, #112, and #131.
+cancellation, safe Markdown presentation, or packaged-network evidence. Issue
+#111 now supplies the bounded private streaming and cancellation transport;
+renderer presentation and packaged-network evidence remain owned by Issues
+#112 and #131.
 
 ## Audited asynchronous provider streams
 
@@ -92,8 +94,14 @@ Stable errors omit provider bodies, chunks, secrets, paths, and local identity.
 A synchronous SDK may not finish unwinding until its iterator next yields or
 returns, so provider-side network timeouts remain necessary. The worker is a
 shutdown-safe daemon and holds its execution lease until that unwind completes.
-Issue #56 adds no HTTP, IPC, Electron, renderer, or public streaming contract;
-end-to-end chat stream ownership remains Issue #111.
+Issue #56 adds no HTTP, IPC, Electron, renderer, or public streaming contract.
+Issue #111 consumes this adapter through fixed authenticated start, SSE, and
+cancellation routes plus an Electron-Main-owned source bridge. That transport
+strictly validates owner-scoped monotonic events, batches within 16 milliseconds
+or 4 KiB, pauses above 256 KiB of exact unacknowledged data, cancels after a
+15-second acknowledgement stall, and permits one same-run cursor reconnect
+without retrying provider output. Renderer chat state and safe model-output
+presentation remain Issue #112; packaged adversarial evidence remains #131.
 
 ## Application boundary
 

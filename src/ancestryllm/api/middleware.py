@@ -38,6 +38,10 @@ _JOB_ROUTE = re.compile(
 _CHAT_SESSION_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}(?P<operation>/runs)?$"
 )
+_CHAT_STREAM_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}/streams"
+    r"(?:/run_[0-9a-f]{32}(?P<operation>/events|/cancel))?$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -91,6 +95,14 @@ def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePoli
     if path == f"{API_NAMESPACE}/chat/capability":
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/chat/sessions":
+        return _RoutePolicy("POST", accepts_json=True)
+    chat_stream_match = _CHAT_STREAM_ROUTE.fullmatch(path)
+    if chat_stream_match is not None:
+        operation = chat_stream_match.group("operation")
+        if operation == "/events":
+            return _RoutePolicy("GET")
+        if operation == "/cancel":
+            return _RoutePolicy("POST")
         return _RoutePolicy("POST", accepts_json=True)
     chat_match = _CHAT_SESSION_ROUTE.fullmatch(path)
     if chat_match is not None:
@@ -221,6 +233,9 @@ def _validate_request(
         raise request_error(
             405, "METHOD_NOT_ALLOWED", "The internal API route does not accept this method."
         )
+    chat_stream_match = _CHAT_STREAM_ROUTE.fullmatch(path)
+    if chat_stream_match is not None and chat_stream_match.group("operation") == "/events":
+        _one_header(headers, b"last-event-id")
     if cast("bytes", scope.get("query_string", b"")):
         raise request_error(
             400,

@@ -7,7 +7,8 @@ adds the read-only startup-diagnostics contract and fail-closed mutation gate.
 Issue #108 adds the provider-profile, endpoint-test, and consent-administration
 contract. Issue #104 adds the unreleased, UI-neutral job-lifecycle contract.
 Issue #110 adds a bounded, transient chat contract that can execute only through
-an exact named profile, model, and current policy grant.
+an exact named profile, model, and current policy grant. Issue #111 adds its
+owner-scoped, audited streaming lifecycle and bounded replay transport.
 This remains a private, authenticated, IPv4-loopback FastAPI adapter over
 transport-neutral application contracts. It is not a public, LAN, browser, or
 multi-user API.
@@ -76,10 +77,22 @@ five operations:
   synchronous policy-enforced generation and commits history only after a
   successful provider result.
 
-Together, the API has twenty-two exact path templates. There is no generic
+The unreleased #111 source adds three fixed transient-chat stream path
+templates and operations:
+
+- `POST /api/v1/chat/sessions/{session_id}/streams` starts one owner-scoped
+  streaming run after the same profile, policy, credential, and consent
+  preflight.
+- `GET /api/v1/chat/sessions/{session_id}/streams/{run_id}/events` streams
+  strict schema-v1 lifecycle events over SSE and resumes only through
+  `Last-Event-ID`.
+- `POST /api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel`
+  idempotently requests cancellation of that exact session-owned run.
+
+Together, the API has twenty-five exact path templates. There is no generic
 command or route dispatcher and no genealogy, GEDCOM, RootsMagic, storage,
 file, job-submission, direct-provider, tool-capable, or other domain-operation
-route. The fixed chat route is the sole provider-execution surface. Credential
+route. The fixed chat routes are the sole provider-execution surface. Credential
 and provider-configuration routes cannot read a secret value or execute a
 provider. Job routes expose lifecycle metadata only; they do not admit or
 execute work. Separately owned follow-on work must adapt the same
@@ -149,6 +162,16 @@ excluded from audit payloads. Provider audit retains only privacy-minimal
 identity, outcome, timing, and digest metadata. Degraded startup blocks session
 creation and runs before provider access.
 
+Streaming runs retain a bounded 256 KiB process-memory replay and publish only
+strict owner-scoped schema-v1 `active`, `first-token`, `delta`, `cancelling`,
+`completed`, `interrupted`, and `failed` events with monotonically increasing
+sequences. The SSE route rejects an absent or wrong session owner, an unknown
+run, malformed cursors, and replay gaps; it never accepts a query-string cursor
+or silently skips an event. Cancellation, sidecar shutdown, and startup
+reconciliation each converge on exactly one payload-free terminal audit
+outcome. A stream never retries provider execution after output begins, and
+receipts and audit records exclude prompt and response content.
+
 Job snapshots and events use strict schema version 1 and expose only bounded,
 sanitized status, progress, artifact-reference, and error fields. Sequence
 numbers increase monotonically per job. Each job retains at most 256 events;
@@ -205,8 +228,10 @@ provider-profile, endpoint-test, consent-administration, job-lifecycle, and
 transient-chat operations are source-level work for `0.6.0`; they are not a
 released user surface until the applicable desktop packaging, security, and
 exact-head verification gates pass. The job contract has no producer or
-submission route. The chat contract has no renderer destination, preload
-bridge, streaming route, tool surface, or genealogy integration. Its presence
-in the committed OpenAPI artifact does not enable a public API, generic
-provider call, or genealogy workflow. Consent administration never replaces
-the execution-time policy check.
+submission route. Issue #111 gives the chat contract fixed streaming routes and
+a source-level Electron Main/preload bridge, but no renderer conversation,
+Markdown presentation, tool surface, or genealogy integration. Issue #112 owns
+that renderer boundary, and Issue #131 owns target-matched packaged evidence.
+Presence in the committed OpenAPI artifact does not enable a public API,
+generic provider call, or genealogy workflow. Consent administration never
+replaces the execution-time policy check.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +20,7 @@ CHAT_MAX_OUTPUT_TOKENS: Final[Literal[4096]] = 4_096
 CHAT_MAX_TEMPERATURE = 1.0
 CHAT_MAX_TIMEOUT_SECONDS = 120.0
 CHAT_MAX_SAFE_RETRIES: Final[Literal[1]] = 1
+CHAT_STREAM_REPLAY_MAX_BYTES: Final[Literal[262144]] = 262_144
 
 
 class ChatPurpose(StrEnum):
@@ -48,6 +50,18 @@ class ChatRole(StrEnum):
     ASSISTANT = "assistant"
 
 
+class ChatEventType(StrEnum):
+    """Ordered lifecycle and output events emitted by one streaming run."""
+
+    ACTIVE = "active"
+    FIRST_TOKEN = "first-token"  # noqa: S105 - lifecycle label, not credential material
+    DELTA = "delta"
+    CANCELLING = "cancelling"
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+
+
 def _validate_schema_version(value: int) -> None:
     if isinstance(value, bool) or value != CHAT_SCHEMA_VERSION:
         raise ValueError("unsupported chat schema version")
@@ -58,6 +72,17 @@ def _validate_text(label: str, value: str, *, maximum: int) -> None:
         raise ValueError(f"{label} must be non-blank and at most {maximum} characters")
     if "\x00" in value:
         raise ValueError(f"{label} must not contain a null character")
+
+
+def _validate_event_text(value: str) -> None:
+    """Preserve provider fragments, including meaningful whitespace tokens."""
+
+    if not isinstance(value, str) or not value or len(value) > CHAT_MAX_MESSAGE_CHARACTERS:
+        raise ValueError(
+            f"chat event text must be non-empty and at most {CHAT_MAX_MESSAGE_CHARACTERS} characters"
+        )
+    if "\x00" in value:
+        raise ValueError("chat event text must not contain a null character")
 
 
 def _validate_bool(label: str, value: bool, *, expected: bool | None = None) -> None:
@@ -92,6 +117,25 @@ def _validate_data_classes(value: tuple[ChatDataClass, ...]) -> None:
         raise ValueError("chat data classes contain an unsupported value")
     if len(set(value)) != len(value):
         raise ValueError("chat data classes must not contain duplicates")
+
+
+def _validate_run_id(value: str) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) != 36
+        or not value.startswith("run_")
+        or any(character not in "0123456789abcdef" for character in value[4:])
+    ):
+        raise ValueError("chat stream run id must be an opaque lowercase identifier")
+
+
+def _validate_timestamp(value: str) -> None:
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("chat event timestamp must be ISO 8601 UTC") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+        raise ValueError("chat event timestamp must be ISO 8601 UTC")
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +276,126 @@ class ChatRunSummary(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class ChatEventPayload(BoundaryDTO):
+    """Sanitized, type-checked payload fields for a streaming chat event."""
+
+    text: str | None = None
+    code: str | None = None
+    provider_id: str | None = None
+    model: str | None = None
+    remote: bool | None = None
+    message_count: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.text is not None:
+            _validate_event_text(self.text)
+        if self.code is not None:
+            _validate_text("chat event code", self.code, maximum=100)
+            if any(
+                character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in self.code
+            ):
+                raise ValueError("chat event code must be a stable uppercase identifier")
+        if self.provider_id is not None:
+            _validate_text("chat event provider id", self.provider_id, maximum=200)
+        if self.model is not None:
+            _validate_text("chat event model", self.model, maximum=200)
+        if self.remote is not None:
+            _validate_bool("chat event remote status", self.remote)
+        _validate_integer(
+            "chat event message count",
+            self.message_count,
+            minimum=0,
+            maximum=CHAT_MAX_MESSAGES,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatEvent(ServiceResult):
+    """One schema-versioned event in a monotonic streaming run."""
+
+    run_id: str
+    sequence: int
+    type: ChatEventType
+    timestamp: str
+    payload: ChatEventPayload
+    schema_version: int = CHAT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_schema_version(self.schema_version)
+        _validate_run_id(self.run_id)
+        if self.sequence is None:
+            raise ValueError("chat event sequence is required")
+        _validate_integer("chat event sequence", self.sequence, minimum=1, maximum=2**63 - 1)
+        if not isinstance(self.type, ChatEventType):
+            raise ValueError("chat event type is unsupported")
+        _validate_timestamp(self.timestamp)
+        if not isinstance(self.payload, ChatEventPayload):
+            raise ValueError("chat event payload must use the chat contract")
+        populated = {
+            name
+            for name in ("text", "code", "provider_id", "model", "remote", "message_count")
+            if getattr(self.payload, name) is not None
+        }
+        expected = {
+            ChatEventType.ACTIVE: {"provider_id", "model", "remote"},
+            ChatEventType.FIRST_TOKEN: {"text"},
+            ChatEventType.DELTA: {"text"},
+            ChatEventType.CANCELLING: set(),
+            ChatEventType.COMPLETED: {"message_count"},
+            ChatEventType.INTERRUPTED: {"code"},
+            ChatEventType.FAILED: {"code"},
+        }[self.type]
+        if populated != expected:
+            raise ValueError(f"chat event payload does not match {self.type.value}")
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamRun(ServiceResult):
+    """Current sanitized state for one in-memory streaming run."""
+
+    session_id: str
+    run_id: str
+    state: ChatEventType
+    latest_sequence: int
+    terminal: bool
+    schema_version: int = CHAT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_schema_version(self.schema_version)
+        if (
+            len(self.session_id) != 37
+            or not self.session_id.startswith("chat_")
+            or any(character not in "0123456789abcdef" for character in self.session_id[5:])
+        ):
+            raise ValueError("chat session id must be an opaque lowercase identifier")
+        _validate_run_id(self.run_id)
+        if self.state not in {
+            ChatEventType.ACTIVE,
+            ChatEventType.CANCELLING,
+            ChatEventType.COMPLETED,
+            ChatEventType.INTERRUPTED,
+            ChatEventType.FAILED,
+        }:
+            raise ValueError("chat stream state is unsupported")
+        if self.latest_sequence is None:
+            raise ValueError("chat stream latest sequence is required")
+        _validate_integer(
+            "chat stream latest sequence",
+            self.latest_sequence,
+            minimum=1,
+            maximum=2**63 - 1,
+        )
+        _validate_bool("chat stream terminal status", self.terminal)
+        expected_terminal = self.state in {
+            ChatEventType.COMPLETED,
+            ChatEventType.INTERRUPTED,
+            ChatEventType.FAILED,
+        }
+        if self.terminal is not expected_terminal:
+            raise ValueError("chat stream terminal status does not match its state")
+
+
+@dataclass(frozen=True, slots=True)
 class ChatCapability(ServiceResult):
     schema_version: int = CHAT_SCHEMA_VERSION
     max_active_sessions: int = CHAT_MAX_ACTIVE_SESSIONS
@@ -246,7 +410,8 @@ class ChatCapability(ServiceResult):
     tools_enabled: bool = False
     payload_retention: bool = False
     output_is_evidence: bool = False
-    streaming: bool = False
+    streaming: bool = True
+    stream_replay_max_bytes: int = CHAT_STREAM_REPLAY_MAX_BYTES
 
     def __post_init__(self) -> None:
         expected = (
@@ -263,7 +428,8 @@ class ChatCapability(ServiceResult):
             and self.tools_enabled is False
             and self.payload_retention is False
             and self.output_is_evidence is False
-            and self.streaming is False
+            and self.streaming is True
+            and self.stream_replay_max_bytes == CHAT_STREAM_REPLAY_MAX_BYTES
         )
         if not expected:
             raise ValueError("chat capability values do not match schema version 1")
@@ -280,8 +446,12 @@ __all__ = [
     "CHAT_MAX_TIMEOUT_SECONDS",
     "CHAT_MODULE_ID",
     "CHAT_SCHEMA_VERSION",
+    "CHAT_STREAM_REPLAY_MAX_BYTES",
     "ChatCapability",
     "ChatDataClass",
+    "ChatEvent",
+    "ChatEventPayload",
+    "ChatEventType",
     "ChatMessage",
     "ChatPurpose",
     "ChatRole",
@@ -289,4 +459,5 @@ __all__ = [
     "ChatRunSummary",
     "ChatSession",
     "ChatSessionCreateRequest",
+    "ChatStreamRun",
 ]

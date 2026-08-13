@@ -327,6 +327,111 @@ export interface ArtifactRef {
   status: 'staged' | 'published'
 }
 
+/** Maximum renderer delivery debt before the main process pauses the SSE source. */
+export const CHAT_STREAM_MAX_UNACKNOWLEDGED_BYTES = 262_144
+
+/** Target encoded batch size used to coalesce high-frequency token events. */
+export const CHAT_STREAM_BATCH_MAX_BYTES = 4_096
+
+/** Maximum batching delay before available token events are delivered. */
+export const CHAT_STREAM_BATCH_WINDOW_MS = 16
+
+export const chatEventTypes = Object.freeze([
+  'active',
+  'first-token',
+  'delta',
+  'cancelling',
+  'completed',
+  'interrupted',
+  'failed',
+] as const)
+
+export type ChatEventType = typeof chatEventTypes[number]
+export type ChatStreamState = 'active' | 'cancelling' | 'completed' | 'interrupted' | 'failed'
+
+export interface ChatEventPayload {
+  text: string | null
+  code: string | null
+  provider_id: string | null
+  model: string | null
+  remote: boolean | null
+  message_count: number | null
+}
+
+/** One ordered, sanitized event from an owner-scoped transient provider run. */
+export interface ChatEvent {
+  schema_version: 1
+  run_id: string
+  sequence: number
+  type: ChatEventType
+  timestamp: string
+  payload: Readonly<ChatEventPayload>
+}
+
+export type ChatStreamStartRequest = Readonly<{
+  schema_version: 1
+  session_id: string
+  message: string
+  max_output_tokens: number
+  temperature: number
+  timeout_seconds: number
+  max_safe_retries: number
+}>
+
+export type ChatStreamCancelRequest = Readonly<{
+  schema_version: 1
+  session_id: string
+  run_id: string
+}>
+
+export type ChatStreamAckRequest = Readonly<{
+  schema_version: 1
+  session_id: string
+  run_id: string
+  through_sequence: number
+}>
+
+export interface ChatStreamRun {
+  schema_version: 1
+  session_id: string
+  run_id: string
+  state: ChatStreamState
+  latest_sequence: number
+  terminal: boolean
+}
+
+export interface ChatStreamAcknowledgement {
+  schema_version: 1
+  session_id: string
+  run_id: string
+  through_sequence: number
+  acknowledged: true
+}
+
+export type ChatEventDelivery =
+  | Readonly<{
+    schema_version: 1
+    kind: 'batch'
+    session_id: string
+    run_id: string
+    from_sequence: number
+    through_sequence: number
+    encoded_bytes: number
+    events: readonly Readonly<ChatEvent>[]
+    error: null
+  }>
+  | Readonly<{
+    schema_version: 1
+    kind: 'failure'
+    session_id: string
+    run_id: string
+    from_sequence: null
+    through_sequence: null
+    encoded_bytes: 0
+    events: null
+    error: Readonly<BridgeError>
+  }>
+
 export const jobStates = Object.freeze([
   'queued',
   'running',
@@ -604,6 +709,15 @@ export type BridgeErrorCode =
   | 'JOB_SUBSCRIPTION_CLOSED'
   | 'JOB_SUBSCRIPTION_CONFLICT'
   | 'JOB_EVENT_STREAM_FAILED'
+  | 'CHAT_SESSION_NOT_FOUND'
+  | 'CHAT_STREAM_NOT_FOUND'
+  | 'CHAT_STREAM_CURSOR_INVALID'
+  | 'CHAT_STREAM_REPLAY_EXPIRED'
+  | 'CHAT_STREAM_SERVICE_UNAVAILABLE'
+  | 'CHAT_STREAM_LIMIT'
+  | 'CHAT_STREAM_BACKPRESSURE_TIMEOUT'
+  | 'CHAT_STREAM_STALLED'
+  | 'CHAT_STREAM_EVENT_INVALID'
   | 'INTERNAL_ERROR'
 
 export interface BridgeError {
@@ -640,6 +754,10 @@ export interface AncestryBridge {
   getLocalRuntimeStatus(): Promise<BridgeResult<LocalRuntimeStatus>>
   previewLocalRuntime(request: LocalRuntimeRequest): Promise<BridgeResult<LocalRuntimePreview>>
   applyLocalRuntime(request: LocalRuntimeApplyRequest): Promise<BridgeResult<LocalRuntimeResult>>
+  startChatStream(request: ChatStreamStartRequest): Promise<BridgeResult<ChatStreamRun>>
+  cancelChatStream(request: ChatStreamCancelRequest): Promise<BridgeResult<ChatStreamRun>>
+  acknowledgeChatStream(request: ChatStreamAckRequest): Promise<BridgeResult<ChatStreamAcknowledgement>>
+  onChatEventBatch(listener: (delivery: Readonly<ChatEventDelivery>) => void): () => void
   listJobs(): Promise<BridgeResult<JobList>>
   getJob(request: JobRequest): Promise<BridgeResult<JobSnapshot>>
   cancelJob(request: JobRequest): Promise<BridgeResult<JobSnapshot>>
@@ -672,6 +790,9 @@ export const desktopChannels = Object.freeze({
   getLocalRuntimeStatus: 'ancestry:desktop:get-local-runtime-status',
   previewLocalRuntime: 'ancestry:desktop:preview-local-runtime',
   applyLocalRuntime: 'ancestry:desktop:apply-local-runtime',
+  startChatStream: 'ancestry:desktop:start-chat-stream',
+  cancelChatStream: 'ancestry:desktop:cancel-chat-stream',
+  acknowledgeChatStream: 'ancestry:desktop:acknowledge-chat-stream',
   listJobs: 'ancestry:desktop:list-jobs',
   getJob: 'ancestry:desktop:get-job',
   cancelJob: 'ancestry:desktop:cancel-job',
@@ -680,5 +801,6 @@ export const desktopChannels = Object.freeze({
 } as const)
 
 export const desktopEventChannels = Object.freeze({
+  chatEventBatch: 'ancestry:desktop:chat-event-batch',
   jobEvent: 'ancestry:desktop:job-event',
 } as const)

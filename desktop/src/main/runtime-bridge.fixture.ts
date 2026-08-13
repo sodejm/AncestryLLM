@@ -51,8 +51,41 @@ export async function startRuntimeBridge(
       })
     }
   }
+  const streamChatEvents: MainDesktopBridge['streamChatEvents'] = async (
+    request,
+    listener,
+    signal,
+  ) => {
+    let finish = (): void => undefined
+    const complete = new Promise<void>((resolve) => { finish = resolve })
+    const onAbort = (): void => { finish() }
+    const flow = Object.freeze({ pause: (): void => undefined, resume: (): void => undefined })
+    const removeListener = rendererBridge.onChatEventBatch((delivery) => {
+      if (delivery.session_id !== request.session_id || delivery.run_id !== request.run_id) return
+      if (delivery.kind === 'failure') {
+        finish()
+        return
+      }
+      for (const event of delivery.events ?? []) {
+        if (event.sequence > request.after) listener(event, flow)
+        if (event.type === 'completed' || event.type === 'interrupted' || event.type === 'failed') {
+          finish()
+        }
+      }
+    })
+
+    try {
+      if (signal?.aborted) finish()
+      else signal?.addEventListener('abort', onAbort, { once: true })
+      await complete
+    } finally {
+      signal?.removeEventListener('abort', onAbort)
+      removeListener()
+    }
+  }
   const bridge: MainDesktopBridge = Object.freeze({
     ...rendererBridge,
+    streamChatEvents,
     streamJobEvents,
   })
   return {

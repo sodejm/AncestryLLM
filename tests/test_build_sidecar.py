@@ -9,6 +9,7 @@ from scripts.build_sidecar import (
     MANIFEST_SCHEMA,
     executable_path,
     native_target,
+    pyinstaller_arguments,
     runtime_target,
     write_payload_manifest,
 )
@@ -63,6 +64,20 @@ def test_executable_path_matches_electron_resource_layout(tmp_path: Path) -> Non
     assert executable_path(tmp_path, "win32-arm64") == (
         tmp_path / "win32-arm64" / "ancestryllm-sidecar" / "ancestryllm-sidecar.exe"
     )
+
+
+def test_pyinstaller_collects_runtime_grammar_data(tmp_path: Path) -> None:
+    arguments = pyinstaller_arguments(
+        tmp_path / "output",
+        "darwin-arm64",
+        tmp_path / "temporary",
+    )
+
+    collect_data_indexes = [
+        index for index, value in enumerate(arguments) if value == "--collect-data"
+    ]
+    assert collect_data_indexes
+    assert [arguments[index + 1] for index in collect_data_indexes] == ["rfc3987_syntax"]
 
 
 def test_payload_manifest_is_deterministic_and_covers_the_complete_payload(

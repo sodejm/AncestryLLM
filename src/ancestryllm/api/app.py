@@ -23,10 +23,12 @@ from ancestryllm.api.contracts import (
     API_VERSION_HEADER,
     CapabilityManifest,
     ChatCapability,
+    ChatEvent,
     ChatRunRequest,
     ChatRunSummary,
     ChatSession,
     ChatSessionCreateRequest,
+    ChatStreamRun,
     ConsentCreateRequest,
     ConsentGrantResponse,
     ConsentPreviewRequest,
@@ -87,6 +89,7 @@ if TYPE_CHECKING:
     from ancestryllm.application.secret_management import SecretManagementService, SecretStatus
     from ancestryllm.application.settings import SettingField, SettingsService, SettingsSnapshot
     from ancestryllm.llm.chat import ChatService
+    from ancestryllm.llm.chat_streaming import ChatStreamingService
     from ancestryllm.llm.endpoint_validation import (
         EndpointValidationResult,
         EndpointValidationService,
@@ -157,6 +160,19 @@ _JOB_EVENT_PARAMETERS = [
             "type": "string",
             "pattern": r"^[0-9]{1,10}$",
             "description": "Last durably processed job-event sequence; defaults to zero.",
+        },
+    },
+]
+_CHAT_EVENT_PARAMETERS = [
+    *_HANDSHAKE_PARAMETERS,
+    {
+        "in": "header",
+        "name": "Last-Event-ID",
+        "required": False,
+        "schema": {
+            "type": "string",
+            "pattern": r"^[0-9]{1,19}$",
+            "description": "Last durably processed chat-event sequence; defaults to zero.",
         },
     },
 ]
@@ -371,6 +387,36 @@ def _acknowledged_sequence(request: Request) -> int:
     return value
 
 
+def _chat_acknowledged_sequence(request: Request) -> int:
+    raw = request.headers.get("last-event-id")
+    if raw is None:
+        return 0
+    if not 1 <= len(raw) <= 19 or not raw.isascii() or not raw.isdecimal():
+        raise AncestryError(
+            "CHAT_STREAM_CURSOR_INVALID",
+            "The acknowledged chat-event sequence is invalid.",
+            exit_code=2,
+        )
+    value = int(raw)
+    if value > 2**63 - 1:
+        raise AncestryError(
+            "CHAT_STREAM_CURSOR_INVALID",
+            "The acknowledged chat-event sequence is invalid.",
+            exit_code=2,
+        )
+    return value
+
+
+def _chat_sse_record(event: object) -> str:
+    response = ChatEvent.from_application(cast("Any", event))
+    payload = json.dumps(
+        response.model_dump(mode="json"),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"id: {response.sequence}\nevent: {response.type}\ndata: {payload}\n\n"
+
+
 def _default_startup_diagnostics() -> StartupDiagnosticReport:
     components = tuple(
         StartupDiagnosticComponent(
@@ -463,6 +509,7 @@ def create_app(
     provider_configuration_service: ProviderConfigurationService | None = None,
     endpoint_validation_service: EndpointValidationService | None = None,
     chat_service: ChatService | None = None,
+    chat_streaming_service: ChatStreamingService | None = None,
     job_service: Callable[[], JobLifecycleService] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     lifecycle: ApiLifecycle | None = None,
@@ -535,6 +582,15 @@ def create_app(
                 "Resolve startup diagnostics and restart the desktop application.",
             )
         return chat_service
+
+    def chat_streaming() -> ChatStreamingService:
+        if chat_streaming_service is None:
+            raise StorageError(
+                "CHAT_STREAM_SERVICE_UNAVAILABLE",
+                "Transient chat streaming is unavailable.",
+                "Resolve startup diagnostics and restart the desktop application.",
+            )
+        return chat_streaming_service
 
     def jobs() -> JobLifecycleService:
         if job_service is None:
@@ -662,6 +718,61 @@ def create_app(
     def run_chat_session(session_id: str, request: ChatRunRequest) -> ChatRunSummary:
         assert_mutations_allowed()
         return ChatRunSummary.from_application(chat().run(session_id, request.to_application()))
+
+    @app.post(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams",
+        response_model=ChatStreamRun,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="startInternalChatStream",
+        tags=["chat"],
+    )
+    async def start_chat_stream(session_id: str, request: ChatRunRequest) -> ChatStreamRun:
+        assert_mutations_allowed()
+        run = await chat_streaming().start(session_id, request.to_application())
+        return ChatStreamRun.from_application(run)
+
+    @app.get(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams/{{run_id}}/events",
+        response_class=StreamingResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _CHAT_EVENT_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="streamInternalChatEvents",
+        tags=["chat"],
+    )
+    async def stream_chat_events(
+        request: Request,
+        session_id: str,
+        run_id: str,
+    ) -> StreamingResponse:
+        subscription = await chat_streaming().subscribe(
+            session_id,
+            run_id,
+            after_sequence=_chat_acknowledged_sequence(request),
+        )
+
+        async def event_stream() -> AsyncIterator[str]:
+            async for event in subscription:
+                yield _chat_sse_record(event)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post(
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams/{{run_id}}/cancel",
+        response_model=ChatStreamRun,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="cancelInternalChatStream",
+        tags=["chat"],
+    )
+    async def cancel_chat_stream(session_id: str, run_id: str) -> ChatStreamRun:
+        assert_mutations_allowed()
+        run = await chat_streaming().cancel(session_id, run_id)
+        return ChatStreamRun.from_application(run)
 
     @app.get(
         f"{API_NAMESPACE}/jobs",

@@ -326,7 +326,7 @@ The foundation sequence is:
 | `EL-05` / #100 | Electron sandbox, CSP, protocol, navigation, permissions, and fuse policy. | #98 and #99 merged. |
 | `EL-06` / #101 | Typed context bridge and main-process API proxy. | #99, #11, #102, and #100 merged. |
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |
-| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Source implementation adds the UI-neutral lifecycle, encrypted persistence, fixed authenticated routes, and main-only shutdown preflight; packaged/provider-worker evidence remains with #111/#131. |
+| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Source implementation adds the UI-neutral lifecycle, encrypted persistence, fixed authenticated routes, and main-only shutdown preflight. The #56/#111 source provider-stream transport is implemented; target-matched packaged evidence remains #131. |
 | `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
 | `EL-10` / #106 | Responsive accessible design-system shell and presentation-only interaction contracts. | Renderer foundation and fixed bridge prerequisites merged. |
 | `EL-13` / #109 | Bounded Tasks presentation, main-owned event subscriptions, cancellation UX, coded failures, and safe artifact metadata. | #103, #104, and #106 merged; packaged and adversarial evidence remains #131. |
