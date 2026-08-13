@@ -393,6 +393,10 @@ still requires its distribution and target-assurance gates to pass.
 - POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
   escalation over the complete group. The Windows sidecar joins a
   kill-on-close Job Object and Electron main requests full-tree termination.
+  After Electron main owns the sidecar supervisor, it translates its own
+  `SIGTERM` into `app.quit()` and retains that signal handler during shutdown,
+  so service-manager termination and packaged verification cannot bypass the
+  native job preflight or verified sidecar stop.
   Shutdown fails closed when termination cannot be verified. The implemented
   drain covers the Uvicorn server and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative

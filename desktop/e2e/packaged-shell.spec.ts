@@ -287,11 +287,23 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 }
 
 async function closePackaged(result: LaunchResult): Promise<void> {
-  const session = await result.browser.newBrowserCDPSession()
-  void session.send('Browser.close').catch(() => undefined)
+  let session: Awaited<ReturnType<Browser['newBrowserCDPSession']>> | undefined
+  if (process.platform === 'darwin') {
+    // Browser.close only closes Chromium's windows on macOS, where applications
+    // conventionally remain running. SIGTERM is translated by the main process
+    // into app.quit(), preserving the verified sidecar shutdown contract.
+    result.process.kill('SIGTERM')
+  } else {
+    session = await result.browser.newBrowserCDPSession()
+    void session.send('Browser.close').catch(() => undefined)
+  }
   const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs).finally(async () => {
-    await session.detach().catch(() => undefined)
-    await result.browser.close().catch(() => undefined)
+    if (session) await session.detach().catch(() => undefined)
+    await withinDeadline(
+      'closing packaged browser automation',
+      packagedCleanupTimeoutMs,
+      () => result.browser.close(),
+    ).catch(() => undefined)
   })
   expect(status).toEqual({ code: 0, signal: null })
 }

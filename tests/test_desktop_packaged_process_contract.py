@@ -75,12 +75,15 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 
 def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    main_source = MAIN_INDEX.read_text(encoding="utf-8")
     close_start = source.index("async function closePackaged")
     close_end = source.index("\nasync function launchPackaged", close_start)
     close_source = source[close_start:close_end]
 
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
+    darwin_index = close_source.index("process.platform === 'darwin'")
+    macos_quit_index = close_source.index("result.process.kill('SIGTERM')", darwin_index)
     session_index = close_source.index("result.browser.newBrowserCDPSession()")
     command_index = close_source.index("session.send('Browser.close')", session_index)
     detach_index = close_source.index("session.detach()", command_index)
@@ -91,12 +94,20 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
 
     assert "new WebSocket(" not in close_source
     assert "browserEndpoint" not in close_source
+    assert "result.page.keyboard.press('Meta+Q')" not in close_source
     assert "void session.send('Browser.close').catch(() => undefined)" in close_source
     assert "await session.send('Browser.close')" not in close_source
     assert "requesting packaged clean quit" not in close_source
+    assert "'closing packaged browser automation'" in close_source
+    assert "packagedCleanupTimeoutMs" in close_source
+    assert darwin_index < macos_quit_index < process_wait_index
     assert session_index < command_index < process_wait_index
     assert process_wait_index < detach_index < browser_close_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
+    runtime_owner_index = main_source.index("sidecarSupervisor = runtime.supervisor")
+    sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")
+    packaged_window_index = main_source.index("createWindow()", sigterm_handler_index)
+    assert runtime_owner_index < sigterm_handler_index < packaged_window_index
 
 
 def test_linux_packaged_environment_preserves_native_keyring_session_boundary() -> None:

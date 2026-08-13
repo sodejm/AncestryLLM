@@ -201,6 +201,9 @@ if (localRuntimeCliRequested && !primaryInstance) {
     bridge = runtime.bridge
     sidecarSupervisor = runtime.supervisor
     prepareJobShutdown = runtime.prepareJobShutdown
+    // Install only after the sidecar supervisor is owned, then retain the
+    // listener so repeated signals cannot bypass verified shutdown.
+    process.on('SIGTERM', () => app.quit())
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
