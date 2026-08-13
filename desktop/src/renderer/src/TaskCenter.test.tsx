@@ -63,6 +63,16 @@ const completedSnapshot = snapshot({
   },
 })
 
+const artifactAccessCases: readonly {
+  status: NonNullable<JobSnapshot['artifact']>['status']
+  note: string
+}[] = [
+  { status: 'pending', note: 'Artifact is still being prepared.' },
+  { status: 'ready', note: 'Available through a grant-mediated product action.' },
+  { status: 'failed', note: 'Artifact preparation failed; review task guidance before retrying.' },
+  { status: 'revoked', note: 'Artifact access has been revoked.' },
+]
+
 function bridgeFor(jobs: readonly JobSnapshot[]): AncestryBridge {
   const base = createMockAncestryBridge('success')
   return {
@@ -86,7 +96,7 @@ function bridgeFor(jobs: readonly JobSnapshot[]): AncestryBridge {
 }
 
 describe('Task Center', () => {
-  it('renders multiple backend snapshots without exposing opaque identifiers or inventing progress', async () => {
+  it('renders multiple backend snapshots with accessible determinate and indeterminate progress', async () => {
     const active = snapshot({
       progress: {
         schema_version: 1,
@@ -105,7 +115,8 @@ describe('Task Center', () => {
     expect(activeCard).not.toBeNull()
     expect(completedCard).not.toBeNull()
     expect(within(activeCard!).getByText('Preparing export')).toBeVisible()
-    expect(within(activeCard!).queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(within(activeCard!).getByRole('progressbar')).not.toHaveAttribute('value')
+    expect(within(activeCard!).getByText('Progress total unknown.')).toBeVisible()
     expect(within(completedCard!).getByRole('progressbar')).toHaveAttribute('value', '4')
     expect(within(completedCard!).getByRole('progressbar')).toHaveAttribute('max', '4')
     expect(within(completedCard!).getByText('Elapsed: 3 seconds')).toBeVisible()
@@ -120,6 +131,23 @@ describe('Task Center', () => {
     expect(visibleText).not.toContain(completedSnapshot.artifact!.artifact_id)
     expect(visibleText).not.toContain(completedSnapshot.artifact!.sha256!)
   })
+
+  it.each(artifactAccessCases)(
+    'describes $status artifact access without claiming unavailable output is ready',
+    async ({ status, note }) => {
+      const artifact = snapshot({
+        ...completedSnapshot,
+        artifact: { ...completedSnapshot.artifact!, status },
+      })
+
+      render(<TaskCenter bridge={bridgeFor([artifact])} />)
+
+      expect(await screen.findByText(note)).toBeVisible()
+      if (status !== 'ready') {
+        expect(screen.queryByText('Available through a grant-mediated product action.')).not.toBeInTheDocument()
+      }
+    },
+  )
 
   it('waits for the backend cancellation result and distinguishes a pending safe point', async () => {
     const active = snapshot()

@@ -548,10 +548,15 @@ function parseNullableJobTimestamp(value: unknown): string | null {
   return value === null ? null : parseJobTimestamp(value)
 }
 
+function validJobText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && Array.from(value).length <= maximum
+    && !value.includes('\u0000')
+}
+
 function parseNullableJobText(value: unknown, maximum: number): string | null {
   if (value === null) return null
-  if (!bounded(value, 1, maximum) || value.trim().length === 0
-    || !safeDiagnosticTextPattern.test(value)) invalidResponse()
+  if (!validJobText(value, maximum)) invalidResponse()
   return value
 }
 
@@ -565,8 +570,7 @@ function parseJobProgress(value: unknown): Readonly<JobProgress> {
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'operation', 'timestamp', 'completed', 'total',
   ]) || value.schema_version !== 1
-    || !bounded(value.operation, 1, 512) || value.operation.trim().length === 0
-    || !safeDiagnosticTextPattern.test(value.operation)) invalidResponse()
+    || !validJobText(value.operation, 512) || value.operation.trim().length === 0) invalidResponse()
   const timestamp = parseJobTimestamp(value.timestamp)
   if ((value.completed === null) !== (value.total === null)) invalidResponse()
   if (value.completed !== null && (!integer(value.completed, 0, 1_000_000_000)
@@ -619,8 +623,7 @@ function parseJobSnapshot(value: unknown): Readonly<JobSnapshot> {
   if (!record(value) || !exactKeys(value, keys) || value.schema_version !== 1
     || !integer(value.sequence, 1, 9_999_999_999)
     || typeof value.job_id !== 'string' || !jobIdPattern.test(value.job_id)
-    || !bounded(value.name, 1, 256) || value.name.trim().length === 0
-    || !safeDiagnosticTextPattern.test(value.name)
+    || !validJobText(value.name, 256) || value.name.trim().length === 0
     || typeof value.state !== 'string' || !jobStates.includes(value.state as typeof jobStates[number])
     || !Array.isArray(value.resource_refs) || value.resource_refs.length > 32
     || value.resource_refs.some((item) => typeof item !== 'string' || !jobResourcePattern.test(item))

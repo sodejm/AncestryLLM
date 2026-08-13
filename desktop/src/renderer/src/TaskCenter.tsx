@@ -25,6 +25,15 @@ const stateLabels: Readonly<Record<JobState, string>> = {
   cancelled: 'Cancelled',
 }
 
+type JobArtifactStatus = NonNullable<JobSnapshot['artifact']>['status']
+
+const artifactAccessLabels: Readonly<Record<JobArtifactStatus, string>> = {
+  pending: 'Artifact is still being prepared.',
+  ready: 'Available through a grant-mediated product action.',
+  failed: 'Artifact preparation failed; review task guidance before retrying.',
+  revoked: 'Artifact access has been revoked.',
+}
+
 const bridgeFromWindow = (): AncestryBridge => (
   window as unknown as { ancestry: AncestryBridge }
 ).ancestry
@@ -387,9 +396,12 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
 
           {snapshot.progress && <div className="task-progress">
             <p>{snapshot.progress.operation}</p>
-            {determinate && <>
+            {determinate ? <>
               <progress value={completed} max={total} aria-label={`${snapshot.name} progress`} />
               <p>{completed} of {total}</p>
+            </> : <>
+              <progress aria-label={`${snapshot.name} progress, total unknown`} />
+              <p>Progress total unknown.</p>
             </>}
           </div>}
 
@@ -411,7 +423,7 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
             <div><dt>Status</dt><dd>{snapshot.artifact.status}</dd></div>
             <div className="task-artifact-note">
               <dt>Access</dt>
-              <dd>Available through a grant-mediated product action.</dd>
+              <dd>{artifactAccessLabels[snapshot.artifact.status]}</dd>
             </div>
           </dl>}
         </article>

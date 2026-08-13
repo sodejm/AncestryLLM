@@ -529,7 +529,7 @@ describe('desktop IPC handlers', () => {
     await handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)
     listener?.({
       ...progressEvent,
-      snapshot: { ...progressEvent.snapshot, error_message: '/private/tree.ged' },
+      snapshot: { ...progressEvent.snapshot, error_message: 'secret-marker\u0000invalid' },
     } as never)
 
     expect(streamSignal?.aborted).toBe(true)
@@ -538,7 +538,7 @@ describe('desktop IPC handlers', () => {
       channel: desktopEventChannels.jobEvent,
       args: [{ kind: 'failure', error: { code: 'JOB_EVENT_STREAM_FAILED' } }],
     })
-    expect(JSON.stringify(contents.sent)).not.toContain('/private/tree.ged')
+    expect(JSON.stringify(contents.sent)).not.toContain('secret-marker')
   })
 
   it('preserves the stable replay-expiration code when a job stream rejects', async () => {

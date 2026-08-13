@@ -347,9 +347,35 @@ describe('runtime bridge validation', () => {
     })).toMatchObject({ kind: 'event', event: { sequence: 2 } })
   })
 
+  it('accepts slash characters allowed by the public job text contract', () => {
+    expect(parseJobSnapshotResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        ...jobSnapshot,
+        name: 'Import GEDCOM/5.5 from a fictional C:\\archive',
+        outcome_summary: 'Reviewed branch A/B.',
+        next_action: 'Save to C:\\fictional\\exports.',
+        error_message: 'Could not read A/B.',
+        error_remediation: 'Choose C:\\fictional\\input.',
+        cancellation_deferred_by: 'Parser stage A/B',
+        progress: {
+          ...jobSnapshot.progress,
+          operation: 'Reading C:\\fictional\\tree.ged',
+        },
+      },
+    })).toMatchObject({
+      ok: true,
+      data: {
+        name: 'Import GEDCOM/5.5 from a fictional C:\\archive',
+        progress: { operation: 'Reading C:\\fictional\\tree.ged' },
+      },
+    })
+  })
+
   it('fails closed on unsafe or incoherent job data', () => {
     const result = (snapshot: unknown) => ({ ok: true, protocolVersion: '1', data: snapshot })
-    expect(() => parseJobSnapshotResult(result({ ...jobSnapshot, name: '/private/tree.ged' }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({ ...jobSnapshot, name: 'unsafe\u0000name' }))).toThrow('Invalid bridge response')
     expect(() => parseJobSnapshotResult(result({
       ...jobSnapshot,
       progress: { ...jobSnapshot.progress, completed: 2, total: null },
