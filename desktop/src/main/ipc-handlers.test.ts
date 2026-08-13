@@ -6,13 +6,17 @@ import type {
   ConsentPreview,
   FileGrant,
   FileGrantId,
+  JobEvent,
+  JobList,
+  JobSnapshot,
   LocalRuntimePreview,
   LocalRuntimeStatus,
   ProviderConfiguration,
 } from '../shared-contract/desktop'
-import { desktopChannels } from '../shared-contract/desktop'
+import { desktopChannels, desktopEventChannels } from '../shared-contract/desktop'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
+import { SidecarClientError } from './sidecar-client'
 import {
   registerDesktopIpcHandlers,
   type MainDesktopBridge,
@@ -164,6 +168,53 @@ const localRuntimePreview = result({
   review: localRuntimeReview,
 }) satisfies BridgeResult<LocalRuntimePreview>
 
+const runningJob = Object.freeze({
+  schema_version: 1,
+  sequence: 1,
+  job_id: 'j000001',
+  name: 'Export fictional tree',
+  state: 'running',
+  submitted_at: '2026-08-12T12:00:00Z',
+  started_at: '2026-08-12T12:00:01Z',
+  finished_at: null,
+  resource_refs: Object.freeze([]),
+  artifact: null,
+  outcome_summary: null,
+  next_action: null,
+  error_code: null,
+  error_message: null,
+  error_remediation: null,
+  progress: Object.freeze({
+    schema_version: 1,
+    operation: 'Writing records',
+    timestamp: '2026-08-12T12:00:02Z',
+    completed: 1,
+    total: 4,
+  }),
+  cancellation_requested_at: null,
+  cancellation_deferred_by: null,
+}) satisfies JobSnapshot
+const jobList = result(Object.freeze({
+  schema_version: 1,
+  jobs: Object.freeze([runningJob]),
+})) satisfies BridgeResult<JobList>
+const progressEvent = Object.freeze({
+  schema_version: 1,
+  sequence: 2,
+  kind: 'progress',
+  created_at: '2026-08-12T12:00:03Z',
+  snapshot: Object.freeze({
+    ...runningJob,
+    sequence: 2,
+    progress: Object.freeze({
+      ...runningJob.progress,
+      timestamp: '2026-08-12T12:00:03Z',
+      completed: 2,
+    }),
+  }),
+}) satisfies JobEvent
+const subscriptionId = `sub_${'a'.repeat(32)}`
+
 const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
   getStartupDiagnostics: vi.fn().mockResolvedValue(result({ state: 'ready', failure: null, automaticRestartsRemaining: 1, manualRetriesRemaining: 1, report: readyStartupReportFixture })),
@@ -196,6 +247,15 @@ const bridge = (): MainDesktopBridge => ({
     state: 'ready',
     code: 'RUNTIME_READY',
   })),
+  listJobs: vi.fn().mockResolvedValue(jobList),
+  getJob: vi.fn().mockResolvedValue(result(runningJob)),
+  cancelJob: vi.fn().mockResolvedValue(result({
+    ...runningJob,
+    sequence: 2,
+    state: 'cancelling',
+    cancellation_requested_at: '2026-08-12T12:00:03Z',
+  })),
+  streamJobEvents: vi.fn().mockResolvedValue(undefined),
 })
 
 const grantId = `grt_${'a'.repeat(64)}` as FileGrantId
@@ -227,6 +287,7 @@ const fileGrantBroker = (): MainFileGrantBroker => ({
 
 class FakeWebContents extends EventEmitter {
   readonly id: number
+  readonly sent: Array<Readonly<{ channel: string; args: readonly unknown[] }>> = []
   mainFrame: Readonly<{ url: string }>
   private destroyed = false
 
@@ -237,6 +298,10 @@ class FakeWebContents extends EventEmitter {
   }
 
   isDestroyed(): boolean { return this.destroyed }
+
+  send(channel: string, ...args: unknown[]): void {
+    this.sent.push(Object.freeze({ channel, args: Object.freeze(args) }))
+  }
 
   startNavigation(url = 'app://bundle/index.html', isMainFrame = true, isSameDocument = false): void {
     this.emit(
@@ -310,7 +375,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the twenty-three declared static channels', () => {
+  it('registers exactly the twenty-eight declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -318,7 +383,218 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(23)
+    expect(handlers.size).toBe(28)
+  })
+
+  it('routes strict job list, detail, and cancellation requests through bounded operations', async () => {
+    const control = bridge()
+    const { event, handlers } = harness(control)
+    const request = Object.freeze({ schema_version: 1 as const, job_id: runningJob.job_id })
+
+    await expect(handlers.get(desktopChannels.listJobs)?.(event())).resolves.toEqual(jobList)
+    await expect(handlers.get(desktopChannels.getJob)?.(event(), request)).resolves.toEqual(result(runningJob))
+    await expect(handlers.get(desktopChannels.cancelJob)?.(event(), request)).resolves.toMatchObject({
+      ok: true,
+      data: { job_id: runningJob.job_id, state: 'cancelling' },
+    })
+    await expect(handlers.get(desktopChannels.getJob)?.(
+      event(),
+      { ...request, path: '/private/tree.ged' },
+    )).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    await expect(handlers.get(desktopChannels.listJobs)?.(event(), 'surplus')).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'INVALID_REQUEST' },
+    })
+    expect(control.listJobs).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(control.getJob).toHaveBeenCalledWith(request, expect.any(AbortSignal))
+    expect(control.cancelJob).toHaveBeenCalledWith(request, expect.any(AbortSignal))
+    expect(control.getJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('binds job subscriptions to one renderer and aborts them on explicit unsubscribe', async () => {
+    const control = bridge()
+    let listener: ((event: Readonly<JobEvent>) => void) | undefined
+    let streamSignal: AbortSignal | undefined
+    vi.mocked(control.streamJobEvents).mockImplementation((_request, next, signal) => {
+      listener = next
+      streamSignal = signal
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, event, handlers } = harness(control)
+    const request = Object.freeze({
+      schema_version: 1 as const,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      after: 1,
+    })
+
+    await expect(handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)).resolves.toEqual(result({
+      schema_version: 1,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      subscribed: true,
+    }))
+    await expect(handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'JOB_SUBSCRIPTION_CONFLICT' },
+    })
+    listener?.(progressEvent)
+    listener?.(progressEvent)
+    expect(contents.sent).toEqual([{
+      channel: desktopEventChannels.jobEvent,
+      args: [{
+        schema_version: 1,
+        kind: 'event',
+        subscription_id: subscriptionId,
+        job_id: runningJob.job_id,
+        event: progressEvent,
+        error: null,
+      }],
+    }])
+    await expect(handlers.get(desktopChannels.unsubscribeJobEvents)?.(event(), {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+    })).resolves.toEqual(result({
+      schema_version: 1,
+      subscription_id: subscriptionId,
+      unsubscribed: true,
+    }))
+    expect(streamSignal?.aborted).toBe(true)
+    await expect(handlers.get(desktopChannels.unsubscribeJobEvents)?.(event(), {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+    })).resolves.toMatchObject({ ok: true })
+  })
+
+  it('closes a job subscription immediately after its terminal event', async () => {
+    const control = bridge()
+    let listener: ((event: Readonly<JobEvent>) => void) | undefined
+    let streamSignal: AbortSignal | undefined
+    vi.mocked(control.streamJobEvents).mockImplementation((_request, next, signal) => {
+      listener = next
+      streamSignal = signal
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, event, handlers } = harness(control)
+    const request = Object.freeze({
+      schema_version: 1 as const,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      after: 1,
+    })
+
+    await handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)
+    listener?.({
+      schema_version: 1,
+      sequence: 2,
+      kind: 'terminal',
+      created_at: '2026-08-12T12:00:04Z',
+      snapshot: {
+        ...runningJob,
+        sequence: 2,
+        state: 'completed',
+        finished_at: '2026-08-12T12:00:04Z',
+      },
+    })
+
+    expect(contents.sent).toHaveLength(1)
+    expect(contents.sent[0]).toMatchObject({
+      channel: desktopEventChannels.jobEvent,
+      args: [{ kind: 'event', event: { kind: 'terminal' } }],
+    })
+    expect(streamSignal?.aborted).toBe(true)
+    await expect(handlers.get(desktopChannels.unsubscribeJobEvents)?.(event(), {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+    })).resolves.toMatchObject({ ok: true })
+  })
+
+  it('fails a malformed job stream closed without exposing event data', async () => {
+    const control = bridge()
+    let listener: ((event: Readonly<JobEvent>) => void) | undefined
+    let streamSignal: AbortSignal | undefined
+    vi.mocked(control.streamJobEvents).mockImplementation((_request, next, signal) => {
+      listener = next
+      streamSignal = signal
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, event, handlers } = harness(control)
+    const request = {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      after: 1,
+    }
+
+    await handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)
+    listener?.({
+      ...progressEvent,
+      snapshot: { ...progressEvent.snapshot, error_message: 'secret-marker\u0000invalid' },
+    } as never)
+
+    expect(streamSignal?.aborted).toBe(true)
+    expect(contents.sent).toHaveLength(1)
+    expect(contents.sent[0]).toMatchObject({
+      channel: desktopEventChannels.jobEvent,
+      args: [{ kind: 'failure', error: { code: 'JOB_EVENT_STREAM_FAILED' } }],
+    })
+    expect(JSON.stringify(contents.sent)).not.toContain('secret-marker')
+  })
+
+  it('preserves the stable replay-expiration code when a job stream rejects', async () => {
+    const control = bridge()
+    vi.mocked(control.streamJobEvents).mockRejectedValue(
+      new SidecarClientError('job_event_replay_expired'),
+    )
+    const { contents, event, handlers } = harness(control)
+    const request = {
+      schema_version: 1,
+      subscription_id: subscriptionId,
+      job_id: runningJob.job_id,
+      after: 1,
+    }
+
+    await handlers.get(desktopChannels.subscribeJobEvents)?.(event(), request)
+
+    await vi.waitFor(() => expect(contents.sent).toContainEqual({
+      channel: desktopEventChannels.jobEvent,
+      args: [expect.objectContaining({
+        kind: 'failure',
+        error: expect.objectContaining({ code: 'JOB_EVENT_REPLAY_EXPIRED' }),
+      })],
+    }))
+  })
+
+  it('aborts renderer job streams on main-frame navigation and sidecar replacement', async () => {
+    const control = bridge()
+    const signals: AbortSignal[] = []
+    vi.mocked(control.streamJobEvents).mockImplementation((_request, _next, signal) => {
+      if (signal) signals.push(signal)
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, controller, event, handlers } = harness(control)
+    const subscribe = handlers.get(desktopChannels.subscribeJobEvents)
+    const request = (suffix: string) => ({
+      schema_version: 1,
+      subscription_id: `sub_${suffix.repeat(32)}`,
+      job_id: runningJob.job_id,
+      after: 1,
+    })
+
+    await subscribe?.(event(), request('b'))
+    contents.navigate()
+    expect(signals[0]?.aborted).toBe(true)
+    await subscribe?.(event(), request('c'))
+    controller.invalidateSidecarSession()
+    expect(signals[1]?.aborted).toBe(true)
+    expect(contents.sent).toContainEqual({
+      channel: desktopEventChannels.jobEvent,
+      args: [expect.objectContaining({
+        kind: 'failure',
+        subscription_id: `sub_${'c'.repeat(32)}`,
+        error: expect.objectContaining({ code: 'JOB_SUBSCRIPTION_CLOSED' }),
+      })],
+    })
   })
 
   it('requires the exact live WebContents, main frame, and trusted origin on every request', async () => {

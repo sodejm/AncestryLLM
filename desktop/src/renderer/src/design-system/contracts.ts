@@ -1,10 +1,10 @@
 // Typed routes, navigation metadata, async states, and focus contracts.
 
-export type AppRoute = 'home' | 'diagnostics' | 'settings'
+export type AppRoute = 'home' | 'tasks' | 'diagnostics' | 'settings'
 
 export interface NavigationItem {
   readonly route: AppRoute
-  readonly href: '#/' | '#/diagnostics' | '#/settings'
+  readonly href: '#/' | '#/tasks' | '#/diagnostics' | '#/settings'
   readonly label: string
   readonly description: string
   readonly shortcut: string
@@ -50,6 +50,13 @@ export const navigationItems: readonly NavigationItem[] = Object.freeze([
     shortcut: 'H',
   }),
   Object.freeze({
+    route: 'tasks',
+    href: '#/tasks',
+    label: 'Tasks',
+    description: 'Track local work and request safe cancellation.',
+    shortcut: 'T',
+  }),
+  Object.freeze({
     route: 'diagnostics',
     href: '#/diagnostics',
     label: 'Diagnostics',
@@ -66,6 +73,7 @@ export const navigationItems: readonly NavigationItem[] = Object.freeze([
 ])
 
 export function routeFromHash(hash: string): AppRoute {
+  if (hash === '#/tasks') return 'tasks'
   if (hash === '#/diagnostics') return 'diagnostics'
   if (hash === '#/settings') return 'settings'
   return 'home'

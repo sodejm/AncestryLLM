@@ -6,6 +6,12 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Unreleased desktop Tasks destination backed by strict job snapshots, bounded
+  sender-owned event subscriptions, cooperative cancellation, coded redacted
+  errors, reload resynchronization, and grant-mediated artifact presentation.
+
 ## [0.5.0] - 2026-08-04
 
 ### Added

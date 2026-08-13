@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
-import type { SidecarClient } from './sidecar-client'
+import { SidecarClientError, type SidecarClient } from './sidecar-client'
 
 const manifest = {
   api: { namespace: '/api/v1', contract: 'ancestryllm.internal-api/1', application_contract: 'ancestryllm.application/0.3' },
@@ -30,6 +30,33 @@ const blockedStartupReport = {
   ],
 } as const
 
+const runningJob = {
+  schema_version: 1 as const,
+  sequence: 3,
+  job_id: 'j123456',
+  name: 'Import family tree',
+  state: 'running' as const,
+  submitted_at: '2026-08-12T12:00:00Z',
+  started_at: '2026-08-12T12:00:01Z',
+  finished_at: null,
+  resource_refs: [],
+  artifact: null,
+  outcome_summary: null,
+  next_action: null,
+  error_code: null,
+  error_message: null,
+  error_remediation: null,
+  progress: {
+    schema_version: 1 as const,
+    operation: 'Reading records',
+    timestamp: '2026-08-12T12:00:02Z',
+    completed: 4,
+    total: 10,
+  },
+  cancellation_requested_at: null,
+  cancellation_deferred_by: null,
+} as const
+
 const sidecarClient = (
   overrides: Partial<SidecarClient> = {},
 ): SidecarClient => ({
@@ -47,6 +74,15 @@ const sidecarClient = (
   setSecret: vi.fn(),
   deleteSecret: vi.fn(),
   prepareJobShutdown: vi.fn(),
+  listJobs: vi.fn().mockResolvedValue({ schema_version: 1, jobs: [runningJob] }),
+  getJob: vi.fn().mockResolvedValue(runningJob),
+  cancelJob: vi.fn().mockResolvedValue({
+    ...runningJob,
+    sequence: 4,
+    state: 'cancelling',
+    cancellation_requested_at: '2026-08-12T12:00:03Z',
+  }),
+  streamJobEvents: vi.fn().mockResolvedValue(undefined),
   ...overrides,
 })
 
@@ -158,5 +194,103 @@ describe('desktop control bridge', () => {
     expect(client.updateSettings).not.toHaveBeenCalled()
     expect(client.setSecret).not.toHaveBeenCalled()
     expect(client.deleteSecret).not.toHaveBeenCalled()
+  })
+
+  it('routes job snapshots and cancellation through the authenticated sidecar client', async () => {
+    const client = sidecarClient()
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+    const signal = new AbortController().signal
+    const request = { schema_version: 1 as const, job_id: runningJob.job_id }
+
+    await expect(bridge.listJobs(signal)).resolves.toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: { schema_version: 1, jobs: [runningJob] },
+    })
+    await expect(bridge.getJob(request, signal)).resolves.toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: runningJob,
+    })
+    await expect(bridge.cancelJob(request, signal)).resolves.toMatchObject({
+      ok: true,
+      data: { state: 'cancelling', cancellation_requested_at: '2026-08-12T12:00:03Z' },
+    })
+    expect(client.listJobs).toHaveBeenCalledWith(signal)
+    expect(client.getJob).toHaveBeenCalledWith(request, signal)
+    expect(client.cancelJob).toHaveBeenCalledWith(request, signal)
+  })
+
+  it.each([
+    ['startup_mutation_blocked', 'STARTUP_MUTATION_BLOCKED'],
+    ['job_id_invalid', 'JOB_ID_INVALID'],
+    ['job_not_found', 'JOB_NOT_FOUND'],
+    ['job_event_cursor_invalid', 'JOB_EVENT_CURSOR_INVALID'],
+    ['job_event_replay_expired', 'JOB_EVENT_REPLAY_EXPIRED'],
+    ['job_subscriber_limit', 'JOB_SUBSCRIBER_LIMIT'],
+    ['job_subscription_closed', 'JOB_SUBSCRIPTION_CLOSED'],
+    ['job_event_stream_failed', 'JOB_EVENT_STREAM_FAILED'],
+  ] as const)('maps %s to the stable renderer code %s', async (reason, code) => {
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: sidecarClient({ getJob: vi.fn().mockRejectedValue(new SidecarClientError(reason)) }),
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.getJob({ schema_version: 1, job_id: runningJob.job_id })).resolves.toMatchObject({
+      ok: false,
+      error: { code },
+    })
+  })
+
+  it('redacts unclassified sidecar job failures', async () => {
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: sidecarClient({
+        listJobs: vi.fn().mockRejectedValue(new Error('Bearer private-secret failed at /Users/person/family.ged')),
+      }),
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    const result = await bridge.listJobs()
+
+    expect(result).toEqual({
+      ok: false,
+      protocolVersion: '1',
+      error: {
+        code: 'JOB_SERVICE_UNAVAILABLE',
+        message: 'Task information is unavailable.',
+        remediation: 'Retry the private service or restart AncestryLLM.',
+      },
+    })
+    expect(JSON.stringify(result)).not.toMatch(/private-secret|Users|family\.ged|Bearer/i)
+  })
+
+  it('streams sequenced job events without reshaping or retaining payloads', async () => {
+    const listener = vi.fn()
+    const signal = new AbortController().signal
+    const request = {
+      schema_version: 1 as const,
+      subscription_id: 'sub_0123456789abcdef0123456789abcdef',
+      job_id: runningJob.job_id,
+      after: runningJob.sequence,
+    }
+    const client = sidecarClient()
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.streamJobEvents(request, listener, signal)).resolves.toBeUndefined()
+    expect(client.streamJobEvents).toHaveBeenCalledWith(request, listener, signal)
   })
 })

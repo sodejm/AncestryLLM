@@ -27,11 +27,14 @@ All user-selected files are governed by the shared
 budgets, race detection, output alias rejection, and transactional publication.
 
 The released bounded Electron desktop control shell uses the authenticated
-health/capability sidecar. Desktop-domain capabilities—genealogy/domain routes,
-files, jobs, providers, cloud accounts, and updater flows—remain planned or
-incomplete. The current desktop records document the released control-surface
-boundary and the verification needed for later expansion; they are not a
-current journey for excluded domain capabilities.
+health/capability sidecar. Unreleased source also includes explicitly bounded
+file-grant, provider-configuration, and presentation-only **Tasks** adapters.
+Desktop-domain capabilities beyond those marked adapters—genealogy/domain task
+admission or execution, direct artifact access, provider execution, cloud
+accounts, and updater flows—remain planned or incomplete. The current desktop
+records distinguish released control surfaces from Unreleased source and the
+verification needed for later expansion; they are not a current journey for
+excluded domain capabilities.
 
 The accepted deployment architecture now has a source-level profile control
 plane: Local Desktop is the safe default, while Connect Remote and advanced
@@ -93,7 +96,7 @@ Concepts, rationale, and design context:
 
 - [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
 - [REPL architecture](explanation/REPL_ARCHITECTURE.md) — internal session and dispatch design
-- [Desktop shell (released bounded v0.5.0 control surface)](explanation/DESKTOP_SHELL.md) — Home, Diagnostics, Settings, and capability onboarding only
+- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — released Home, Diagnostics, Settings, and onboarding plus bounded Unreleased Tasks presentation
 
 ## Supporting records and publishing
 

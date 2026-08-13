@@ -2,6 +2,7 @@
 import {
   DESKTOP_PROTOCOL_VERSION,
   desktopChannels,
+  desktopEventChannels,
   type AncestryBridge,
   type ApplicationSettings,
   type ApplicationSettingsPatch,
@@ -20,6 +21,11 @@ import {
   type LocalRuntimePreview,
   type LocalRuntimeRequest,
   type LocalRuntimeResult,
+  type JobEvent,
+  type JobEventSubscriptionRequest,
+  type JobEventUnsubscriptionRequest,
+  type JobRequest,
+  type JobSnapshot,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderConfiguration,
@@ -46,6 +52,14 @@ import {
   parseLocalRuntimeRequest,
   parseLocalRuntimeResult,
   parseLocalRuntimeStatusResult,
+  parseJobEventDelivery,
+  parseJobEventSubscriptionRequest,
+  parseJobEventSubscriptionResult,
+  parseJobEventUnsubscriptionRequest,
+  parseJobEventUnsubscriptionResult,
+  parseJobListResult,
+  parseJobRequest,
+  parseJobSnapshotResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
@@ -62,6 +76,7 @@ import {
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
+import { SidecarClientError } from './sidecar-client'
 import { validateStructuredClone } from './structured-clone-policy'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
@@ -71,6 +86,7 @@ export interface BridgeFrame { readonly url: string }
 export interface BridgeWebContents {
   readonly mainFrame: BridgeFrame
   isDestroyed(): boolean
+  send(channel: string, ...args: unknown[]): void
   on(event: string, listener: (...args: unknown[]) => void): unknown
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown
 }
@@ -89,6 +105,12 @@ export interface MainDesktopBridge extends Omit<
   | 'getLocalRuntimeStatus'
   | 'previewLocalRuntime'
   | 'applyLocalRuntime'
+  | 'listJobs'
+  | 'getJob'
+  | 'cancelJob'
+  | 'subscribeJobEvents'
+  | 'unsubscribeJobEvents'
+  | 'onJobEvent'
 > {
   getAppInfo(signal?: AbortSignal): ReturnType<AncestryBridge['getAppInfo']>
   getStartupDiagnostics(signal?: AbortSignal): ReturnType<AncestryBridge['getStartupDiagnostics']>
@@ -131,6 +153,14 @@ export interface MainDesktopBridge extends Omit<
     request: LocalRuntimeApplyRequest,
     signal?: AbortSignal,
   ): ReturnType<AncestryBridge['applyLocalRuntime']>
+  listJobs(signal?: AbortSignal): ReturnType<AncestryBridge['listJobs']>
+  getJob(request: JobRequest, signal?: AbortSignal): ReturnType<AncestryBridge['getJob']>
+  cancelJob(request: JobRequest, signal?: AbortSignal): ReturnType<AncestryBridge['cancelJob']>
+  streamJobEvents(
+    request: JobEventSubscriptionRequest,
+    listener: (event: Readonly<JobEvent>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
 }
 
 export interface MainFileGrantBroker {
@@ -169,11 +199,19 @@ interface Authorization {
   readonly trustedUrl: (url: string) => boolean
   readonly controllers: Set<AbortController>
   readonly queue: QueueEntry[]
+  readonly jobSubscriptions: Map<string, JobSubscription>
   readonly removeLifecycleListeners: () => void
   active: number
   generation: number
   navigating: boolean
   capabilityFlight?: CapabilityFlight
+}
+interface JobSubscription {
+  readonly controller: AbortController
+  readonly generation: number
+  readonly request: JobEventSubscriptionRequest
+  lastSequence: number
+  terminalSeen: boolean
 }
 interface NavigationStartDetails {
   readonly isMainFrame: boolean
@@ -213,6 +251,7 @@ interface OperationRun<T> {
 const MAX_ACTIVE_REQUESTS = 4
 const MAX_QUEUED_REQUESTS = 8
 const MAX_CAPABILITY_SUBSCRIBERS = 32
+const MAX_JOB_SUBSCRIPTIONS = 32
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
 const DEFAULT_FILE_DIALOG_TIMEOUT_MS = 300_000
 const DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
@@ -424,10 +463,99 @@ function schedule<T>(
   })
 }
 
-function invalidate(state: Authorization): void {
+function invalidate(state: Authorization, notifyJobStreams = false): void {
+  const subscriptions = [...state.jobSubscriptions.values()]
+  if (notifyJobStreams) {
+    for (const subscription of subscriptions) {
+      jobStreamFailure(state, subscription, 'JOB_SUBSCRIPTION_CLOSED')
+    }
+  }
   state.generation += 1
   for (const controller of state.controllers) controller.abort(CANCELLED)
   for (const entry of state.queue.splice(0)) entry.cancel()
+  state.jobSubscriptions.clear()
+  for (const subscription of subscriptions) subscription.controller.abort(CANCELLED)
+}
+
+function jobStreamFailure(
+  state: Authorization,
+  subscription: JobSubscription,
+  code: 'JOB_EVENT_REPLAY_EXPIRED' | 'JOB_SUBSCRIPTION_CLOSED' | 'JOB_EVENT_STREAM_FAILED',
+): void {
+  try {
+    if (state.contents.isDestroyed() || state.navigating
+      || state.generation !== subscription.generation
+      || !state.trustedUrl(state.contents.mainFrame.url)) return
+    const diagnostic = code === 'JOB_EVENT_REPLAY_EXPIRED'
+      ? Object.freeze({
+          code,
+          message: 'Earlier task updates are no longer available.',
+          remediation: 'Refresh the task center to load the current task snapshot.',
+        })
+      : code === 'JOB_SUBSCRIPTION_CLOSED'
+        ? Object.freeze({
+          code,
+          message: 'Task updates ended before the task finished.',
+          remediation: 'Refresh the task center to reconnect.',
+        })
+        : Object.freeze({
+          code,
+          message: 'Task updates could not be verified.',
+          remediation: 'Refresh the task center to reconnect.',
+        })
+    const delivery = parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'failure',
+      subscription_id: subscription.request.subscription_id,
+      job_id: subscription.request.job_id,
+      event: null,
+      error: diagnostic,
+    })
+    validateStructuredClone(delivery, responseLimits)
+    state.contents.send(desktopEventChannels.jobEvent, delivery)
+  } catch {
+    // A destroyed or replaced renderer must not keep a stream alive.
+  }
+}
+
+function jobStreamFailureCode(cause: unknown): 'JOB_EVENT_REPLAY_EXPIRED' | 'JOB_EVENT_STREAM_FAILED' {
+  return cause instanceof SidecarClientError && cause.reason === 'job_event_replay_expired'
+    ? 'JOB_EVENT_REPLAY_EXPIRED'
+    : 'JOB_EVENT_STREAM_FAILED'
+}
+
+function deliverJobEvent(
+  state: Authorization,
+  subscription: JobSubscription,
+  event: Readonly<JobEvent>,
+): void {
+  if (state.jobSubscriptions.get(subscription.request.subscription_id) !== subscription
+    || state.generation !== subscription.generation) return
+  try {
+    const delivery = parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: subscription.request.subscription_id,
+      job_id: subscription.request.job_id,
+      event,
+      error: null,
+    })
+    validateStructuredClone(delivery, responseLimits)
+    if (delivery.event === null || delivery.event.sequence <= subscription.lastSequence) return
+    if (state.contents.isDestroyed() || state.navigating
+      || !state.trustedUrl(state.contents.mainFrame.url)) throw new Error('Renderer unavailable')
+    state.contents.send(desktopEventChannels.jobEvent, delivery)
+    subscription.lastSequence = delivery.event.sequence
+    subscription.terminalSeen = event.kind === 'terminal'
+    if (subscription.terminalSeen) {
+      state.jobSubscriptions.delete(subscription.request.subscription_id)
+      subscription.controller.abort(CANCELLED)
+    }
+  } catch {
+    state.jobSubscriptions.delete(subscription.request.subscription_id)
+    subscription.controller.abort(CANCELLED)
+    jobStreamFailure(state, subscription, 'JOB_EVENT_STREAM_FAILED')
+  }
 }
 
 function capabilityRequest(
@@ -826,6 +954,151 @@ export function registerDesktopIpcHandlers(
       parseLocalRuntimeResult,
     )
   })
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.listJobs,
+    authorize,
+    (signal) => bridge.listJobs(signal),
+    parseJobListResult,
+    timeoutMs,
+  )
+  ipc.handle(desktopChannels.getJob, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<JobSnapshot>()
+    if (args.length !== 1) return invalidRequest<JobSnapshot>()
+    let request: JobRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseJobRequest(args[0])
+    } catch {
+      return invalidRequest<JobSnapshot>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.getJob(request, signal),
+      parseJobSnapshotResult,
+    )
+  })
+  ipc.handle(desktopChannels.cancelJob, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<JobSnapshot>()
+    if (args.length !== 1) return invalidRequest<JobSnapshot>()
+    let request: JobRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseJobRequest(args[0])
+    } catch {
+      return invalidRequest<JobSnapshot>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.cancelJob(request, signal),
+      parseJobSnapshotResult,
+    )
+  })
+  ipc.handle(desktopChannels.subscribeJobEvents, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized()
+    if (args.length !== 1) return invalidRequest()
+    let request: JobEventSubscriptionRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseJobEventSubscriptionRequest(args[0])
+    } catch {
+      return invalidRequest()
+    }
+    if (state.jobSubscriptions.has(request.subscription_id)) {
+      return error(
+        'JOB_SUBSCRIPTION_CONFLICT',
+        'That task update subscription is already active.',
+        'Reload the task center before retrying.',
+      )
+    }
+    if (state.jobSubscriptions.size >= MAX_JOB_SUBSCRIPTIONS) {
+      return error(
+        'JOB_SUBSCRIBER_LIMIT',
+        'The task update subscription limit was reached.',
+        'Close unused task views and try again.',
+      )
+    }
+    const subscription: JobSubscription = {
+      controller: new AbortController(),
+      generation: state.generation,
+      request,
+      lastSequence: request.after,
+      terminalSeen: false,
+    }
+    state.jobSubscriptions.set(request.subscription_id, subscription)
+    let stream: Promise<void>
+    try {
+      stream = bridge.streamJobEvents(
+        request,
+        (next) => deliverJobEvent(state, subscription, next),
+        subscription.controller.signal,
+      )
+    } catch (cause) {
+      state.jobSubscriptions.delete(request.subscription_id)
+      subscription.controller.abort(CANCELLED)
+      const code = jobStreamFailureCode(cause)
+      return code === 'JOB_EVENT_REPLAY_EXPIRED'
+        ? error(
+            code,
+            'Earlier task updates are no longer available.',
+            'Refresh the task center to load the current task snapshot.',
+          )
+        : error(
+            code,
+            'Task updates could not be verified.',
+            'Refresh the task center to reconnect.',
+          )
+    }
+    void stream.then(
+      () => {
+        if (state.jobSubscriptions.get(request.subscription_id) !== subscription) return
+        state.jobSubscriptions.delete(request.subscription_id)
+        if (!subscription.controller.signal.aborted && !subscription.terminalSeen) {
+          jobStreamFailure(state, subscription, 'JOB_SUBSCRIPTION_CLOSED')
+        }
+      },
+      (cause) => {
+        if (state.jobSubscriptions.get(request.subscription_id) !== subscription) return
+        state.jobSubscriptions.delete(request.subscription_id)
+        if (!subscription.controller.signal.aborted) {
+          jobStreamFailure(state, subscription, jobStreamFailureCode(cause))
+        }
+      },
+    )
+    return safeResponse(success({
+      schema_version: 1,
+      subscription_id: request.subscription_id,
+      job_id: request.job_id,
+      subscribed: true,
+    }), parseJobEventSubscriptionResult)
+  })
+  ipc.handle(desktopChannels.unsubscribeJobEvents, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized()
+    if (args.length !== 1) return invalidRequest()
+    let request: JobEventUnsubscriptionRequest
+    try {
+      validateStructuredClone(args[0], requestLimits)
+      request = parseJobEventUnsubscriptionRequest(args[0])
+    } catch {
+      return invalidRequest()
+    }
+    const subscription = state.jobSubscriptions.get(request.subscription_id)
+    if (subscription) {
+      state.jobSubscriptions.delete(request.subscription_id)
+      subscription.controller.abort(CANCELLED)
+    }
+    return safeResponse(success({
+      schema_version: 1,
+      subscription_id: request.subscription_id,
+      unsubscribed: true,
+    }), parseJobEventUnsubscriptionResult)
+  })
 
   return Object.freeze({
     authorizeWebContents(
@@ -859,6 +1132,7 @@ export function registerDesktopIpcHandlers(
         trustedUrl,
         controllers: new Set(),
         queue: [],
+        jobSubscriptions: new Map(),
         active: 0,
         generation: 0,
         navigating: false,
@@ -885,7 +1159,7 @@ export function registerDesktopIpcHandlers(
     },
     invalidateSidecarSession(): void {
       fileGrants.revokeAll()
-      for (const state of authorizations.values()) invalidate(state)
+      for (const state of authorizations.values()) invalidate(state, true)
     },
     dispose(): void {
       if (disposed) return

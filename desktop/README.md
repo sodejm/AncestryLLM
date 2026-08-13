@@ -9,10 +9,11 @@ information, startup diagnostics, capabilities, bounded sidecar retry,
 preference reads, and optimistic-concurrency preference updates. Unreleased
 Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
 settings and credential methods, Issue #108 adds six fixed provider-profile,
-endpoint-test, and consent methods, and Issue #348 adds three fixed
-local-runtime status/preview/apply methods. Development uses deterministic fictional
-fixtures; packaged main is the sole authenticated client for the fixed sidecar
-routes. Packaged main stores the bounded local-preference schema in
+endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
+request methods and one validated job-event listener, and Issue #348 adds three
+fixed local-runtime status/preview/apply methods. Development uses deterministic
+fictional fixtures; packaged main is the sole authenticated client for the
+fixed sidecar routes. Packaged main stores the bounded local-preference schema in
 `preferences.json` beneath Electron's OS app-data directory. The renderer never
 receives that path and has no storage access.
 
@@ -51,6 +52,15 @@ event listener, supported job screen, or job-submission surface. During an
 application quit, Electron main can present the native choices **Wait**,
 **Request cancellation**, and **Stay open** without exposing the authenticated
 sidecar session or job event stream to the renderer.
+
+Unreleased Issue #109 adds a **Tasks** destination over that lifecycle. Five
+fixed requests list, inspect, cancel, subscribe, and unsubscribe, while one
+validated event listener receives only the main-owned subscription's events.
+The renderer rebuilds state from backend snapshots after reload, resynchronizes
+on event gaps, and closes a subscription after one terminal state. It stores no
+job state, admits no work, receives no sidecar session or artifact path, and
+adds no provider or genealogy operation. Artifact cards display only safe
+metadata; any future open or save action must use Issue #103's grant mediation.
 
 Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
@@ -136,6 +146,12 @@ disposed. See
 domain transport adapter must consume the application-service contract and
 shared file-ingress policy; do not place domain logic in Electron.
 
+Issue #109 keeps authenticated SSE in main and binds at most 32 opaque job
+subscriptions to each authorized renderer. Cross-document navigation,
+renderer exit, sidecar replacement, terminal delivery, and application
+shutdown clean them up. Preload exposes one validated event listener rather
+than generic listen or channel authority.
+
 Unreleased Issue #363 adds the Electron-Main-only container-control foundation,
 and Issue #348 wires only its macOS arm64 runtime-acquisition and lifecycle
 surface through three fixed methods. Settings can inspect a sanitized status,
@@ -183,4 +199,5 @@ The allowlisted external-link helper is main-process-internal and testable: it a
 | `TM-A02`, `TM-S01`, `TM-D01`, `TM-O01` | Issue #107 validates the fixed startup-diagnostic route and exact four-component schema, requires keyring-only packaged secret selection, blocks affected mutations and capability access while degraded, and exposes one bounded non-repairing retry. Contract and renderer tests reject secrets, host identity, paths, payloads, unknown fields, duplicate initialization, key replacement, plaintext fallback, and misleading recovery. | `make test`, `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
 | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`, `TM-O01` | Native-dialog selection validates regular-file/link state, bounded size, purpose-specific format, canonical identity, and fingerprints before issuing a random one-use grant. Redemption revalidates identity, replacement confirmation is native and race-checked, aliases and concurrent output grants fail closed, and stable responses omit paths. Focused broker and dialog tests exercise cancellation, replacement races, revocation, alias rejection, and output locks. A dedicated verification-only packaged adapter exercises native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation across the hosted platform matrix without entering production builds. Full worker and publication evidence remains #114/#118/#131. | `make desktop-check`, exact-head packaged workflow |
 | `TM-E01`, `TM-D01`, `TM-C01`, `TM-O01` | Issue #104 persists bounded schema-v1 job snapshots and events in SQLCipher, reconciles interrupted non-terminal jobs to one terminal outcome on startup, isolates slow subscribers with coded replay resynchronization, and keeps cancellation cooperative at declared safe points. Electron main obtains a sanitized shutdown assessment and offers native **Wait**, **Request cancellation**, and **Stay open** choices; the renderer receives no job or sidecar authority. | `make test`, `make desktop-check`, `pnpm --dir desktop test` |
+| `TM-I01`, `TM-D01`, `TM-O01`, `TM-F01`, `TM-F02` | Issue #109 validates five fixed task requests and one fixed event listener. Main owns authenticated bounded SSE and at most 32 sender-owned subscriptions. The renderer ignores stale or duplicate events, refreshes gaps, reloads backend snapshots, closes terminal streams, announces meaningful state changes once, renders coded redacted failures, and displays path-free artifact metadata. It adds no job admission or direct artifact action. | `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
 | `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.5.0. | `make desktop-security` |

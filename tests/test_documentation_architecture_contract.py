@@ -130,14 +130,15 @@ def test_navigation_separates_reader_modes_from_supporting_material() -> None:
     assert "The CLI and REPL use the same command specification" in home
     assert "All surfaces use the same command specification" not in home
     assert "Desktop-domain capabilities" in home_text
+    assert "presentation-only **Tasks** adapters" in home_text
     assert (
-        "genealogy/domain routes, files, jobs, providers, cloud accounts, and updater flows"
-        in home_text
+        "genealogy/domain task admission or execution, direct artifact access, provider "
+        "execution, cloud accounts, and updater flows" in home_text
     )
     for page in ("Home.md", "_Sidebar.md"):
         navigation = (DOCS_DIRECTORY / page).read_text(encoding="utf-8")
         assert (
-            "[Desktop shell (released bounded v0.5.0 control surface)]"
+            "[Desktop shell (released bounded v0.5.0 plus marked Unreleased source)]"
             "(explanation/DESKTOP_SHELL.md)" in navigation
         )
         assert (
@@ -177,7 +178,10 @@ def test_architecture_authority_and_migration_controls_are_explicit() -> None:
         "`reference/MODULE_AUTHORING.md` | Reference | `docs/reference/MODULE_AUTHORING.md`"
         in authoring_guide
     )
-    assert "Released bounded 0.5.0 shell; desktop-domain capabilities planned" in authoring_guide
+    assert (
+        "Released bounded 0.5.0 shell; clearly marked Unreleased Tasks presentation"
+        in authoring_guide
+    )
     assert (
         "Implemented verification gate for released bounded shell; later domain work planned"
         in authoring_guide

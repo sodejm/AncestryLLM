@@ -17,6 +17,9 @@ The supported desktop destinations are deliberately small:
 - **Settings** stores local visual preferences only: color scheme and reduced
   motion. The internal onboarding flag is not a user-facing setting.
 
+Unreleased Issue #109 adds a **Tasks** destination to present backend-owned
+work. It remains outside the released 0.5.0 installer claim.
+
 These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
 zoomed layouts.
@@ -26,9 +29,10 @@ zoomed layouts.
 Unreleased Issue #106 implements the reusable presentation shell for the 0.6
 desktop work. It preserves a persistent primary navigation region, workspace
 header, context-and-help panel, and explicit **Local and offline** status across
-Home, Diagnostics, and Settings. The compact layout keeps the current route and
-local status visible when the window narrows; at the 720-by-560 minimum size
-and 200% zoom, primary actions reflow without horizontal clipping.
+Home, Diagnostics, Settings, and the unreleased Tasks destination. The compact
+layout keeps the current route and local status visible when the window narrows;
+at the 720-by-560 minimum size and 200% zoom, primary actions reflow without
+horizontal clipping.
 
 The shell exposes one typed route and navigation contract rather than another
 command registry. <kbd>Ctrl</kbd>+<kbd>K</kbd> or
@@ -120,6 +124,10 @@ client. The preload bridge exposes exactly these six methods:
 - `getPreferences`
 - `updatePreferences`
 
+Unreleased source additions are fixed, separately reviewed contracts and do
+not change that released six-method claim. Issue #109 contributes five task
+request methods and one validated event listener described below.
+
 The renderer receives no Node.js, Electron, network, filesystem, keyring,
 provider, database, shell, or arbitrary-path access. It must never receive the
 sidecar port, bearer token, endpoint, executable path, preference-file path,
@@ -128,16 +136,24 @@ stderr, raw sidecar or bridge errors, or stack traces. See the
 [desktop ADR](../ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
-## Unreleased job lifecycle and safe shutdown
+## Unreleased task center and safe shutdown
 
-Issue #104 adds the source-level job lifecycle needed by later desktop domain
-work without adding a renderer job screen, renderer event listener, bridge
-method, job producer, or submission route. The Python application layer owns
-strict schema-v1 snapshots and events, increasing per-job sequence numbers,
-bounded persistence and replay, cooperative cancellation, and exactly one
-terminal result. A reconnecting internal client can resume from
-`Last-Event-ID`; an expired replay window fails with the stable
-`JOB_EVENT_REPLAY_EXPIRED` code instead of silently skipping progress.
+Issue #104 supplies the UI-neutral Python lifecycle: strict schema-v1 snapshots
+and events, increasing per-job sequence numbers, bounded persistence and
+replay, cooperative cancellation, and exactly one terminal result. A
+reconnecting internal client resumes from `Last-Event-ID`; an expired replay
+window fails with `JOB_EVENT_REPLAY_EXPIRED` instead of silently skipping
+progress.
+
+Issue #109 presents that lifecycle through five fixed request methods—list,
+get, cancel, subscribe, and unsubscribe—and one validated event listener. The
+backend remains authoritative. The renderer loads complete sanitized snapshots,
+ignores duplicate or stale sequence numbers, and refreshes and resubscribes
+when it detects a gap or expired replay cursor. A reload reconstructs the view
+from the backend rather than renderer storage, and each terminal delivery
+closes its subscription. Multiple jobs may be shown at once. Progress is
+determinate only when the snapshot supplies a trustworthy total; otherwise the
+view explicitly reports indeterminate progress.
 
 The lifecycle distinguishes queued, running, cancelling,
 pending-safe-point, completed, failed, and cancelled states. Progress may be
@@ -146,6 +162,15 @@ atomic publication section remains pending at its declared safe point rather
 than abandoning or corrupting output. Non-terminal persisted work is
 reconciled to one sanitized interrupted terminal result when the sidecar
 restarts.
+
+One polite, atomic live region announces only meaningful lifecycle changes.
+Failures contain a stable code, reviewed message, and bounded remediation—never
+stacks, paths, records, prompts, responses, or raw backend content. Artifact
+cards contain only type, media type, byte size, and status. They expose no
+path, grant identifier, digest, or direct open action; any future artifact
+access must pass through Issue #103's main-owned grant boundary. Tasks admits
+no work and adds no producer, provider call, genealogy operation, or domain
+route.
 
 When the user quits while work is active, Electron main—not the renderer—uses
 an authenticated shutdown preflight and presents native **Wait**, **Request
@@ -180,7 +205,7 @@ filesystem fingerprint. Grants are bound to the requesting renderer, exact
 purpose and access mode, current application session, and one redemption.
 Explicit revocation, renderer close or cross-document navigation, and
 application restart invalidate them. Trusted same-document routes such as the
-application's hash-based Home, Diagnostics, and Settings transitions preserve
+application's hash-based Home, Tasks, Diagnostics, and Settings transitions preserve
 the renderer identity and its grants; each bridge request still rechecks the
 exact main frame and trusted application URL. Existing-output replacement
 requires a native confirmation and identity revalidation; source/output aliases
@@ -234,10 +259,11 @@ values are never retained in React state, query caches, bridge fixtures,
 responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
 configuration. The renderer still has no direct keyring or network access.
 Together with the three unreleased file-grant methods, the current development
-bridge therefore contains twenty fixed methods: the six released control
-methods, three opaque file-grant methods, five settings/credential methods, and
-six provider-configuration methods. There is still no generic send, listen,
-route-selection, or command operation.
+bridge therefore contains twenty-five fixed request methods: the six released
+control methods, three opaque file-grant methods, five settings/credential
+methods, six provider-configuration methods, and five task-lifecycle methods.
+Issue #109 also adds one fixed, validated job-event listener. There is still no
+generic send, listen, route-selection, or command operation.
 
 The unreleased source implements the non-secret, versioned deployment-profile
 control plane accepted by the

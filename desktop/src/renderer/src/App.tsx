@@ -27,6 +27,7 @@ import {
 } from '../../shared-contract/desktop'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
+import { TaskCenter } from './TaskCenter'
 import { CodedErrorView } from './design-system/CodedErrorView'
 import { navigationItems, routeFromHash, type AppRoute, type NavigationItem } from './design-system/contracts'
 
@@ -1111,6 +1112,10 @@ function Shell() {
         ? 'Your desktop control shell stays local to this device.'
         : 'A calm overview of this desktop shell.',
     },
+    tasks: {
+      title: 'Tasks',
+      description: 'Track backend-owned local work and request safe cancellation.',
+    },
     diagnostics: {
       title: 'Diagnostics',
       description: 'Review local startup state and bounded recovery guidance.',
@@ -1165,7 +1170,7 @@ function Shell() {
           </section>
           <section className="summary-card" aria-labelledby="welcome-scope">
             <h2 id="welcome-scope">What this shell supports</h2>
-            <p>Use Home for a local status overview and Diagnostics for startup recovery.</p>
+            <p>Use Home for local status, Tasks for long-running work, and Diagnostics for startup recovery.</p>
           </section>
           <section className="summary-card" aria-labelledby="welcome-recovery">
             <h2 id="welcome-recovery">Recovery and updates</h2>
@@ -1197,7 +1202,7 @@ function Shell() {
               </Button>
               : <Button
                   variant="quiet"
-                  onClick={() => navigate(navigationItems[1]!)}
+                  onClick={() => navigate(navigationItems.find((item) => item.route === 'diagnostics')!)}
                 >
                   Open read-only diagnostics
                 </Button>}
@@ -1239,6 +1244,8 @@ function Shell() {
           <Button variant="quiet" onClick={() => setReviewingWelcome(true)}>Review welcome</Button>
         </div>
       </>}
+
+      {route === 'tasks' && <TaskCenter />}
 
       {route === 'diagnostics' && <>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">

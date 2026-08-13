@@ -94,6 +94,15 @@ const remediations: Readonly<Record<BridgeErrorCode, string>> = {
   RUNTIME_OWNERSHIP_INVALID: 'Run Repair or remove only the app-owned runtime after reviewing the warning.',
   RUNTIME_PROCESS_FAILED: 'Retry the operation or collect sanitized runtime diagnostics.',
   RUNTIME_HEALTH_FAILED: 'Run Repair, then retry the operation.',
+  JOB_ID_INVALID: 'Refresh task activity and try again.',
+  JOB_NOT_FOUND: 'Refresh task activity.',
+  JOB_EVENT_CURSOR_INVALID: 'Refresh task activity to reconnect.',
+  JOB_EVENT_REPLAY_EXPIRED: 'Refresh task activity to load the current state.',
+  JOB_SERVICE_UNAVAILABLE: 'Retry the local service or restart AncestryLLM.',
+  JOB_SUBSCRIBER_LIMIT: 'Close another task view and try again.',
+  JOB_SUBSCRIPTION_CLOSED: 'Refresh task activity to reconnect.',
+  JOB_SUBSCRIPTION_CONFLICT: 'Refresh task activity to replace the existing subscription.',
+  JOB_EVENT_STREAM_FAILED: 'Refresh task activity or restart AncestryLLM.',
   INTERNAL_ERROR: 'Try again or restart AncestryLLM.',
 }
 

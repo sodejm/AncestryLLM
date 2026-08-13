@@ -21,7 +21,7 @@ async function launchShell(fixture: 'success' | 'degraded' = 'success') {
 
 async function expectProductionNavigation(page: Page) {
   const navigation = page.getByRole('navigation', { name: 'Primary' })
-  await expect(navigation.getByRole('link')).toHaveText(['Home', 'Diagnostics', 'Settings'])
+  await expect(navigation.getByRole('link')).toHaveText(['Home', 'Tasks', 'Diagnostics', 'Settings'])
 }
 
 async function expectNoUnsupportedSurfaces(page: Page, allowProviderSettings = false) {
@@ -215,7 +215,7 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
   expect(externalRequests).toEqual([])
 }
 
-test('built shell exposes the bounded production Home, Diagnostics, and Settings surfaces', async () => {
+test('built shell exposes the bounded production Home, Tasks, Diagnostics, and Settings surfaces', async () => {
   const app = await launchShell()
   try {
     const page = await app.firstWindow()
@@ -335,6 +335,62 @@ test('built shell exposes the bounded production Home, Diagnostics, and Settings
   }
 })
 
+test('task center streams one safe cancellation lifecycle and reloads the terminal backend snapshot', async () => {
+  const app = await launchShell()
+  try {
+    const page = await app.firstWindow()
+    const main = page.getByRole('main')
+
+    await page.getByRole('link', { name: 'Tasks', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeFocused()
+    await expect(main.getByRole('heading', { name: 'Task activity' })).toBeVisible()
+    await expect(main.getByRole('list', { name: 'Task activity' }).getByRole('listitem')).toHaveCount(2)
+    await expect(main.locator('[aria-live="polite"]')).toHaveCount(1)
+
+    const activeTask = main.getByRole('listitem').filter({ hasText: 'Prepare fictional export' })
+    const completedTask = main.getByRole('listitem').filter({ hasText: 'Review fictional matches' })
+    await expect(activeTask).toHaveCount(1)
+    await expect(completedTask).toHaveCount(1)
+    await expect(activeTask.getByRole('progressbar', { name: 'Prepare fictional export progress' }))
+      .toHaveAttribute('value', '2')
+    await expect(activeTask.getByRole('progressbar', { name: 'Prepare fictional export progress' }))
+      .toHaveAttribute('max', '4')
+    await expect(completedTask).toContainText('match-report')
+    await expect(completedTask).toContainText('application/json')
+    await expect(completedTask).toContainText('Available through a grant-mediated product action.')
+    await expect(completedTask.getByRole('button', { name: /open|save|download/i })).toHaveCount(0)
+    await expect(main).not.toContainText(/art_[a-f0-9]{32}|[a-f0-9]{64}/i)
+
+    await activeTask.getByRole('button', { name: 'Cancel Prepare fictional export' }).click()
+    await expect(activeTask.getByText('Cancelling', { exact: true })).toBeVisible()
+    await expect(main.locator('[aria-live="polite"]')).toHaveText(
+      'Cancellation requested for Prepare fictional export.',
+    )
+    await expect(activeTask.getByText('Waiting for a safe point', { exact: true })).toBeVisible()
+    await expect(activeTask).toContainText(
+      'Cancellation will happen after the current safe operation completes.',
+    )
+    await expect(main.locator('[aria-live="polite"]')).toHaveText(
+      'Cancellation for Prepare fictional export is waiting for a safe point.',
+    )
+    await expect(activeTask.getByText('Cancelled', { exact: true })).toBeVisible()
+    await expect(main.locator('[aria-live="polite"]')).toHaveText(
+      'Prepare fictional export was cancelled.',
+    )
+    await expect(activeTask.getByRole('button', { name: /cancel/i })).toHaveCount(0)
+
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeFocused()
+    const reloadedTask = main.getByRole('listitem').filter({ hasText: 'Prepare fictional export' })
+    await expect(reloadedTask).toHaveCount(1)
+    await expect(reloadedTask.getByText('Cancelled', { exact: true })).toBeVisible()
+    await expect(main.getByRole('list', { name: 'Task activity' }).getByRole('listitem')).toHaveCount(2)
+    await expect(main.locator('[aria-live="polite"]')).toHaveCount(1)
+  } finally {
+    await app.close()
+  }
+})
+
 test('built degraded shell offers one bounded recovery and renders the ready result', async () => {
   const app = await launchShell('degraded')
   try {
@@ -417,6 +473,10 @@ test('built shell passes automated WCAG checks across routes and explicit themes
     await main.getByRole('button', { name: 'Continue to Home' }).click()
     await expectNoAccessibilityViolations(page)
 
+    await page.getByRole('link', { name: 'Tasks', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Tasks' })).toBeFocused()
+    await expectNoAccessibilityViolations(page)
+
     await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
     await expectNoAccessibilityViolations(page)
@@ -444,6 +504,8 @@ test('minimum desktop window at 200 percent zoom keeps every action horizontally
     })
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(365)
 
+    await expectNoHorizontalClipping(page)
+    await page.getByRole('link', { name: 'Tasks', exact: true }).click()
     await expectNoHorizontalClipping(page)
     await page.getByRole('link', { name: 'Diagnostics', exact: true }).click()
     await expectNoHorizontalClipping(page)

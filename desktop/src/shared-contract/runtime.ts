@@ -1,6 +1,7 @@
 import {
   DESKTOP_PROTOCOL_VERSION,
   applicationSettingKeys,
+  jobStates,
   providerDataClasses,
   providerIds,
   secretReferences,
@@ -35,6 +36,17 @@ import {
   type LocalRuntimeReview,
   type LocalRuntimeResult,
   type LocalRuntimeStatus,
+  type JobArtifactRef,
+  type JobEvent,
+  type JobEventDelivery,
+  type JobEventSubscription,
+  type JobEventSubscriptionRequest,
+  type JobEventUnsubscription,
+  type JobEventUnsubscriptionRequest,
+  type JobList,
+  type JobProgress,
+  type JobRequest,
+  type JobSnapshot,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderConfiguration,
@@ -105,6 +117,15 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'RUNTIME_OWNERSHIP_INVALID',
   'RUNTIME_PROCESS_FAILED',
   'RUNTIME_HEALTH_FAILED',
+  'JOB_ID_INVALID',
+  'JOB_NOT_FOUND',
+  'JOB_EVENT_CURSOR_INVALID',
+  'JOB_EVENT_REPLAY_EXPIRED',
+  'JOB_SERVICE_UNAVAILABLE',
+  'JOB_SUBSCRIBER_LIMIT',
+  'JOB_SUBSCRIPTION_CLOSED',
+  'JOB_SUBSCRIPTION_CONFLICT',
+  'JOB_EVENT_STREAM_FAILED',
   'INTERNAL_ERROR',
 ]
 const startupStates = ['starting', 'ready', 'degraded', 'stopped'] as const
@@ -117,7 +138,12 @@ const identifierPattern = /^[A-Za-z0-9._:-]+$/
 const dispatchKeyPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 const fileGrantIdPattern = /^grt_[a-f0-9]{64}$/
 const artifactIdPattern = /^art_[a-f0-9]{32}$/
+const jobArtifactIdPattern = /^art_[A-Za-z0-9._:-]+$/
+const jobIdPattern = /^j[0-9]{6,12}$/
+const jobResourcePattern = /^resource_[a-f0-9]{64}$/
+const jobSubscriptionIdPattern = /^sub_[a-f0-9]{32}$/
 const digestPattern = /^[a-f0-9]{64}$/
+const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
 // Control characters are intentionally rejected from user-visible file names.
 // eslint-disable-next-line no-control-regex
 const safeDisplayNamePattern = /^[^/\\\u0000-\u001f\u007f]+$/
@@ -499,6 +525,268 @@ export function parseLocalRuntimeApplyRequest(value: unknown): LocalRuntimeApply
 export function parseFileGrantId(value: unknown): FileGrantId {
   if (typeof value !== 'string' || !fileGrantIdPattern.test(value)) throw new Error('Invalid file-grant ID')
   return value as FileGrantId
+}
+
+function parseJobId(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !jobIdPattern.test(value)) throw new Error(message)
+  return value
+}
+
+function parseJobSubscriptionId(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !jobSubscriptionIdPattern.test(value)) throw new Error(message)
+  return value
+}
+
+function parseJobTimestamp(value: unknown): string {
+  if (!bounded(value, 1, 64) || !timestampPattern.test(value) || Number.isNaN(Date.parse(value))) {
+    invalidResponse()
+  }
+  return value
+}
+
+function parseNullableJobTimestamp(value: unknown): string | null {
+  return value === null ? null : parseJobTimestamp(value)
+}
+
+function validJobText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && Array.from(value).length <= maximum
+    && !value.includes('\u0000')
+}
+
+function parseNullableJobText(value: unknown, maximum: number): string | null {
+  if (value === null) return null
+  if (!validJobText(value, maximum)) invalidResponse()
+  return value
+}
+
+function parseNullableJobCode(value: unknown): string | null {
+  if (value === null) return null
+  if (!bounded(value, 1, 96) || !identifierPattern.test(value)) invalidResponse()
+  return value
+}
+
+function parseJobProgress(value: unknown): Readonly<JobProgress> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'operation', 'timestamp', 'completed', 'total',
+  ]) || value.schema_version !== 1
+    || !validJobText(value.operation, 512) || value.operation.trim().length === 0) invalidResponse()
+  const timestamp = parseJobTimestamp(value.timestamp)
+  if ((value.completed === null) !== (value.total === null)) invalidResponse()
+  if (value.completed !== null && (!integer(value.completed, 0, 1_000_000_000)
+    || !integer(value.total, 1, 1_000_000_000)
+    || value.completed > value.total)) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    operation: value.operation,
+    timestamp,
+    completed: value.completed,
+    total: value.total,
+  } as JobProgress)
+}
+
+function parseJobArtifact(value: unknown): Readonly<JobArtifactRef> {
+  if (!record(value) || !exactKeys(value, [
+    'artifact_id', 'media_type', 'artifact_type', 'size_bytes', 'status', 'sha256',
+  ]) || !bounded(value.artifact_id, 36, 132) || !jobArtifactIdPattern.test(value.artifact_id)
+    || value.artifact_id.includes('..')
+    || !bounded(value.media_type, 3, 127) || !mediaTypePattern.test(value.media_type)
+    || !bounded(value.artifact_type, 1, 96) || !identifierPattern.test(value.artifact_type)
+    || !integer(value.size_bytes, 0, 2_147_483_648)
+    || !['pending', 'ready', 'failed', 'revoked'].includes(value.status as string)
+    || (value.sha256 !== null && (typeof value.sha256 !== 'string'
+      || !digestPattern.test(value.sha256)))) invalidResponse()
+  return deepFreeze({ ...value }) as unknown as Readonly<JobArtifactRef>
+}
+
+function parseJobSnapshot(value: unknown): Readonly<JobSnapshot> {
+  const keys = [
+    'schema_version',
+    'sequence',
+    'job_id',
+    'name',
+    'state',
+    'submitted_at',
+    'started_at',
+    'finished_at',
+    'resource_refs',
+    'artifact',
+    'outcome_summary',
+    'next_action',
+    'error_code',
+    'error_message',
+    'error_remediation',
+    'progress',
+    'cancellation_requested_at',
+    'cancellation_deferred_by',
+  ] as const
+  if (!record(value) || !exactKeys(value, keys) || value.schema_version !== 1
+    || !integer(value.sequence, 1, 9_999_999_999)
+    || typeof value.job_id !== 'string' || !jobIdPattern.test(value.job_id)
+    || !validJobText(value.name, 256) || value.name.trim().length === 0
+    || typeof value.state !== 'string' || !jobStates.includes(value.state as typeof jobStates[number])
+    || !Array.isArray(value.resource_refs) || value.resource_refs.length > 32
+    || value.resource_refs.some((item) => typeof item !== 'string' || !jobResourcePattern.test(item))
+    || new Set(value.resource_refs).size !== value.resource_refs.length) invalidResponse()
+
+  const submittedAt = parseJobTimestamp(value.submitted_at)
+  const startedAt = parseNullableJobTimestamp(value.started_at)
+  const finishedAt = parseNullableJobTimestamp(value.finished_at)
+  const cancellationRequestedAt = parseNullableJobTimestamp(value.cancellation_requested_at)
+  const artifact = value.artifact === null ? null : parseJobArtifact(value.artifact)
+  const progress = value.progress === null ? null : parseJobProgress(value.progress)
+  const terminal = ['completed', 'failed', 'cancelled'].includes(value.state)
+  if ((terminal && finishedAt === null) || (!terminal && finishedAt !== null)
+    || (artifact !== null && value.state !== 'completed')) invalidResponse()
+
+  return deepFreeze({
+    schema_version: 1,
+    sequence: value.sequence,
+    job_id: value.job_id,
+    name: value.name,
+    state: value.state,
+    submitted_at: submittedAt,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    resource_refs: value.resource_refs.slice(),
+    artifact,
+    outcome_summary: parseNullableJobText(value.outcome_summary, 2_048),
+    next_action: parseNullableJobText(value.next_action, 2_048),
+    error_code: parseNullableJobCode(value.error_code),
+    error_message: parseNullableJobText(value.error_message, 2_048),
+    error_remediation: parseNullableJobText(value.error_remediation, 2_048),
+    progress,
+    cancellation_requested_at: cancellationRequestedAt,
+    cancellation_deferred_by: parseNullableJobText(value.cancellation_deferred_by, 512),
+  } as JobSnapshot)
+}
+
+function parseJobEvent(value: unknown): Readonly<JobEvent> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'sequence', 'kind', 'created_at', 'snapshot',
+  ]) || value.schema_version !== 1 || !integer(value.sequence, 1, 9_999_999_999)
+    || !['snapshot', 'progress', 'cancellation', 'terminal'].includes(value.kind as string)) {
+    invalidResponse()
+  }
+  const createdAt = parseJobTimestamp(value.created_at)
+  const snapshot = parseJobSnapshot(value.snapshot)
+  const terminal = ['completed', 'failed', 'cancelled'].includes(snapshot.state)
+  if (value.sequence !== snapshot.sequence || ((value.kind === 'terminal') !== terminal)) {
+    invalidResponse()
+  }
+  return deepFreeze({
+    schema_version: 1,
+    sequence: value.sequence,
+    kind: value.kind,
+    created_at: createdAt,
+    snapshot,
+  } as JobEvent)
+}
+
+function parseJobList(value: unknown): Readonly<JobList> {
+  if (!record(value) || !exactKeys(value, ['schema_version', 'jobs'])
+    || value.schema_version !== 1 || !Array.isArray(value.jobs) || value.jobs.length > 1_000) {
+    invalidResponse()
+  }
+  const jobs = value.jobs.map(parseJobSnapshot)
+  if (new Set(jobs.map((job) => job.job_id)).size !== jobs.length) invalidResponse()
+  return deepFreeze({ schema_version: 1, jobs })
+}
+
+function parseJobEventSubscription(value: unknown): Readonly<JobEventSubscription> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'subscription_id', 'job_id', 'subscribed',
+  ]) || value.schema_version !== 1 || value.subscribed !== true) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    subscription_id: parseJobSubscriptionId(value.subscription_id, 'Invalid bridge response'),
+    job_id: parseJobId(value.job_id, 'Invalid bridge response'),
+    subscribed: true,
+  })
+}
+
+function parseJobEventUnsubscription(value: unknown): Readonly<JobEventUnsubscription> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'subscription_id', 'unsubscribed',
+  ]) || value.schema_version !== 1 || value.unsubscribed !== true) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    subscription_id: parseJobSubscriptionId(value.subscription_id, 'Invalid bridge response'),
+    unsubscribed: true,
+  })
+}
+
+export function parseJobRequest(value: unknown): JobRequest {
+  const message = 'Invalid job request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'job_id'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({ schema_version: 1, job_id: parseJobId(value.job_id, message) })
+}
+
+export function parseJobEventSubscriptionRequest(value: unknown): JobEventSubscriptionRequest {
+  const message = 'Invalid job-event subscription request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'subscription_id', 'job_id', 'after',
+  ]) || value.schema_version !== 1 || !integer(value.after, 0, 9_999_999_999)) {
+    throw new Error(message)
+  }
+  return deepFreeze({
+    schema_version: 1,
+    subscription_id: parseJobSubscriptionId(value.subscription_id, message),
+    job_id: parseJobId(value.job_id, message),
+    after: value.after,
+  })
+}
+
+export function parseJobEventUnsubscriptionRequest(value: unknown): JobEventUnsubscriptionRequest {
+  const message = 'Invalid job-event unsubscription request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'subscription_id'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    subscription_id: parseJobSubscriptionId(value.subscription_id, message),
+  })
+}
+
+export function parseJobEventDelivery(value: unknown): Readonly<JobEventDelivery> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'kind', 'subscription_id', 'job_id', 'event', 'error',
+  ]) || value.schema_version !== 1 || (value.kind !== 'event' && value.kind !== 'failure')) {
+    invalidResponse()
+  }
+  const subscriptionId = parseJobSubscriptionId(value.subscription_id, 'Invalid bridge response')
+  const jobId = parseJobId(value.job_id, 'Invalid bridge response')
+  if (value.kind === 'event') {
+    if (value.error !== null) invalidResponse()
+    const event = parseJobEvent(value.event)
+    if (event.snapshot.job_id !== jobId) invalidResponse()
+    return deepFreeze({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: subscriptionId,
+      job_id: jobId,
+      event,
+      error: null,
+    })
+  }
+  if (value.event !== null || !record(value.error)
+    || !exactKeys(value.error, ['code', 'message', 'remediation'])
+    || !bridgeErrorCodes.includes(value.error.code as BridgeErrorCode)
+    || !bounded(value.error.message, 1, 240) || !safeDiagnosticTextPattern.test(value.error.message)
+    || !bounded(value.error.remediation, 1, 240)
+    || !safeDiagnosticTextPattern.test(value.error.remediation)) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    kind: 'failure',
+    subscription_id: subscriptionId,
+    job_id: jobId,
+    event: null,
+    error: {
+      code: value.error.code,
+      message: value.error.message,
+      remediation: value.error.remediation,
+    },
+  } as JobEventDelivery)
 }
 
 function parseAppInfo(value: unknown): AppInfo {
@@ -1127,3 +1415,8 @@ export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<Fil
 export const parseLocalRuntimeStatusResult = (value: unknown): BridgeResult<LocalRuntimeStatus> => parseBridgeResult(value, parseLocalRuntimeStatus)
 export const parseLocalRuntimePreviewResult = (value: unknown): BridgeResult<LocalRuntimePreview> => parseBridgeResult(value, parseLocalRuntimePreview)
 export const parseLocalRuntimeResult = (value: unknown): BridgeResult<LocalRuntimeResult> => parseBridgeResult(value, parseLocalRuntimeOutcome)
+export const parseJobListResult = (value: unknown): BridgeResult<JobList> => parseBridgeResult(value, parseJobList)
+export const parseJobSnapshotResult = (value: unknown): BridgeResult<JobSnapshot> => parseBridgeResult(value, parseJobSnapshot)
+export const parseJobEventResult = (value: unknown): BridgeResult<JobEvent> => parseBridgeResult(value, parseJobEvent)
+export const parseJobEventSubscriptionResult = (value: unknown): BridgeResult<JobEventSubscription> => parseBridgeResult(value, parseJobEventSubscription)
+export const parseJobEventUnsubscriptionResult = (value: unknown): BridgeResult<JobEventUnsubscription> => parseBridgeResult(value, parseJobEventUnsubscription)

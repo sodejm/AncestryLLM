@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   APP_ASSET_MANIFEST,
+  APP_ENTRY_ROUTE_HASHES,
   APP_ENTRY_URL,
   APP_SCHEME_PRIVILEGES,
   PRODUCTION_CSP,
@@ -13,6 +14,7 @@ import {
 describe('production renderer security policy', () => {
   it('uses only the minimum custom-scheme privileges and a network-denying CSP', () => {
     expect(APP_ENTRY_URL).toBe('app://bundle/index.html')
+    expect(APP_ENTRY_ROUTE_HASHES).toEqual(['#/', '#/tasks', '#/diagnostics', '#/settings'])
     expect(APP_SCHEME_PRIVILEGES).toEqual({
       standard: true,
       secure: true,
@@ -47,6 +49,21 @@ describe('production renderer security policy', () => {
     expect(readAsset).toHaveBeenCalledWith('index.html')
   })
 
+  it.each(['#/', '#/tasks', '#/diagnostics', '#/settings'])(
+    'serves the entry document when Electron reloads the reviewed renderer route %s',
+    async (route) => {
+      const readAsset = vi.fn(async (file: string) => new TextEncoder().encode(file))
+      const response = await createAppProtocolHandler(readAsset)({
+        method: 'GET',
+        url: `${APP_ENTRY_URL}${route}`,
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('index.html')
+      expect(readAsset).toHaveBeenCalledWith('index.html')
+    },
+  )
+
   it.each([
     'app://bundle/%2e%2e/secret.txt',
     'app://bundle/%252e%252e/secret.txt',
@@ -55,6 +72,8 @@ describe('production renderer security policy', () => {
     'app://other/index.html',
     'app://bundle/index.html?override=assets/index.js',
     'app://bundle/index.html#assets/index.js',
+    'app://bundle/index.html#/unknown',
+    'app://bundle/assets/index.js#/tasks',
   ])('fails closed for unknown or encoded paths: %s', async (url) => {
     const readAsset = vi.fn(async () => new Uint8Array())
     const response = await createAppProtocolHandler(readAsset)({ method: 'GET', url })

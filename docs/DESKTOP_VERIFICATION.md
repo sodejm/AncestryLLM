@@ -15,6 +15,12 @@ packaged bridge claim below. The later Issue #131 gate must update the package
 harness and exact-method evidence before a packaged application can claim the
 five new bridge operations.
 
+Issue #109 likewise adds source-level task-contract, sender-subscription,
+renderer-state, accessibility, and reload end-to-end evidence. It does not
+expand the recorded exact-six packaged claim; Issue #131 must update the
+package harness and adversarial evidence before a packaged application can
+claim the five task requests and validated event listener.
+
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`

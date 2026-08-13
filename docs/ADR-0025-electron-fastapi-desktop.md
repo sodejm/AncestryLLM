@@ -260,9 +260,15 @@ increasing per-job sequences, cooperative safe-point cancellation, and exactly
 one terminal result after ordinary completion or restart reconciliation. Fixed
 authenticated list, status, cancel, SSE, and shutdown-assessment routes adapt
 that lifecycle. Electron main alone calls shutdown assessment and presents the
-native **Wait**, **Request cancellation**, or **Stay open** choice. There is no
-renderer job method or listener, producer, submission route, provider stream,
-GEDCOM or RootsMagic operation, or supported job UI in this issue.
+native **Wait**, **Request cancellation**, or **Stay open** choice.
+
+Issue #109 separately implements the target Tasks presentation through five
+fixed request methods and one validated event listener. Main owns the
+authenticated SSE connection and sender-scoped subscription lifecycle; the
+renderer reconstructs state from backend snapshots after reload, resynchronizes
+on event gaps, and receives path-free artifact metadata only. It adds no job
+producer, submission route, direct artifact action, provider stream, GEDCOM or
+RootsMagic operation, or other domain authority.
 
 File payloads are not copied wholesale through JSON or IPC. Electron main
 resolves a grant to a path only for the declared operation; Python rechecks
@@ -323,6 +329,7 @@ The foundation sequence is:
 | `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Source implementation adds the UI-neutral lifecycle, encrypted persistence, fixed authenticated routes, and main-only shutdown preflight; packaged/provider-worker evidence remains with #111/#131. |
 | `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
 | `EL-10` / #106 | Responsive accessible design-system shell and presentation-only interaction contracts. | Renderer foundation and fixed bridge prerequisites merged. |
+| `EL-13` / #109 | Bounded Tasks presentation, main-owned event subscriptions, cancellation UX, coded failures, and safe artifact metadata. | #103, #104, and #106 merged; packaged and adversarial evidence remains #131. |
 | `EL-36` / #131 | Desktop contract, security, accessibility, E2E, and performance evidence. | Begins with #99/#11; gates the MVP. |
 
 ## Exclusive ownership and coordination
