@@ -65,6 +65,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
   const [state, dispatch] = useReducer(taskCenterReducer, initialTaskCenterState)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<BridgeErrorCode | null>(null)
+  const [streamFailures, setStreamFailures] = useState<
+    ReadonlyMap<string, BridgeErrorCode>
+  >(new Map())
   const [cancellationRequests, setCancellationRequests] = useState<ReadonlySet<string>>(new Set())
   const [lifecycleRevision, setLifecycleRevision] = useState(0)
   const [clockMs, setClockMs] = useState(() => Date.now())
@@ -72,7 +75,22 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
   const subscriptionsRef = useRef(new Map<string, string>())
   const blockedSubscriptionsRef = useRef(new Set<string>())
   const refreshingRef = useRef(new Set<string>())
+  const streamRecoveryAttemptsRef = useRef(new Map<string, number>())
   const refreshJobRef = useRef<(jobId: string) => Promise<void>>(async () => undefined)
+
+  const setStreamFailure = useCallback(
+    (jobId: string, code: BridgeErrorCode | null): void => {
+      setStreamFailures((current) => {
+        if (code === null && !current.has(jobId)) return current
+        if (code !== null && current.get(jobId) === code) return current
+        const next = new Map(current)
+        if (code === null) next.delete(jobId)
+        else next.set(jobId, code)
+        return next
+      })
+    },
+    [],
+  )
 
   const closeSubscription = useCallback(async (jobId: string): Promise<void> => {
     const subscriptionId = subscriptionsRef.current.get(jobId)
@@ -95,23 +113,23 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       if (!mountedRef.current) return
       if (!result.ok) {
         blockedSubscriptionsRef.current.add(jobId)
-        setFailure(result.error.code)
+        setStreamFailure(jobId, result.error.code)
         return
       }
       blockedSubscriptionsRef.current.delete(jobId)
-      setFailure(null)
+      setStreamFailure(jobId, null)
       dispatch({ type: 'refreshed', snapshot: result.data })
       refreshed = true
     } catch {
       if (mountedRef.current) {
         blockedSubscriptionsRef.current.add(jobId)
-        setFailure('JOB_SERVICE_UNAVAILABLE')
+        setStreamFailure(jobId, 'JOB_SERVICE_UNAVAILABLE')
       }
     } finally {
       refreshingRef.current.delete(jobId)
       if (refreshed && mountedRef.current) setLifecycleRevision((value) => value + 1)
     }
-  }, [bridge, closeSubscription])
+  }, [bridge, closeSubscription, setStreamFailure])
   refreshJobRef.current = refreshJob
 
   const subscribe = useCallback(async (snapshot: Readonly<JobSnapshot>): Promise<void> => {
@@ -138,20 +156,20 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
       if (!result.ok) {
         subscriptionsRef.current.delete(snapshot.job_id)
         blockedSubscriptionsRef.current.add(snapshot.job_id)
-        setFailure(result.error.code)
+        setStreamFailure(snapshot.job_id, result.error.code)
         return
       }
-      setFailure(null)
+      setStreamFailure(snapshot.job_id, null)
     } catch {
       if (subscriptionsRef.current.get(snapshot.job_id) === subscriptionId) {
         subscriptionsRef.current.delete(snapshot.job_id)
       }
       if (mountedRef.current) {
         blockedSubscriptionsRef.current.add(snapshot.job_id)
-        setFailure('JOB_SERVICE_UNAVAILABLE')
+        setStreamFailure(snapshot.job_id, 'JOB_SERVICE_UNAVAILABLE')
       }
     }
-  }, [bridge])
+  }, [bridge, setStreamFailure])
 
   const loadJobs = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -169,7 +187,9 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
           .map(closeSubscription),
       )
       if (!mountedRef.current) return
+      streamRecoveryAttemptsRef.current.clear()
       blockedSubscriptionsRef.current.clear()
+      setStreamFailures(new Map())
       setFailure(null)
       dispatch({ type: 'loaded', jobs: result.data.jobs })
     } catch {
@@ -185,6 +205,14 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
     const removeListener = bridge.onJobEvent((delivery: Readonly<JobEventDelivery>) => {
       if (subscriptions.get(delivery.job_id) !== delivery.subscription_id) return
       if (delivery.kind === 'failure') {
+        const attempts = streamRecoveryAttemptsRef.current.get(delivery.job_id) ?? 0
+        if (attempts >= 1) {
+          blockedSubscriptionsRef.current.add(delivery.job_id)
+          setStreamFailure(delivery.job_id, delivery.error.code)
+          void closeSubscription(delivery.job_id)
+          return
+        }
+        streamRecoveryAttemptsRef.current.set(delivery.job_id, attempts + 1)
         void refreshJobRef.current(delivery.job_id)
         return
       }
@@ -201,7 +229,7 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
         void bridge.unsubscribeJobEvents({ schema_version: 1, subscription_id: subscriptionId })
       }
     }
-  }, [bridge, loadJobs])
+  }, [bridge, closeSubscription, loadJobs, setStreamFailure])
 
   useEffect(() => {
     for (const jobId of state.order) {
@@ -226,6 +254,8 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
     const interval = window.setInterval(() => setClockMs(Date.now()), 1_000)
     return () => window.clearInterval(interval)
   }, [hasActiveJobs])
+
+  const displayedFailure = failure ?? streamFailures.values().next().value ?? null
 
   const requestCancellation = async (snapshot: Readonly<JobSnapshot>): Promise<void> => {
     setCancellationRequests((current) => new Set(current).add(snapshot.job_id))
@@ -265,15 +295,15 @@ export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{state.announcement}</p>
 
-    {failure && <CodedErrorView
-      code={failure}
+    {displayedFailure && <CodedErrorView
+      code={displayedFailure}
       title="Task activity is temporarily unavailable."
       recovery="Retry the local service or restart AncestryLLM."
       actionLabel="Refresh tasks"
       onAction={() => void loadJobs()}
     />}
 
-    {!loading && state.order.length === 0 && !failure && <div className="empty-state">
+    {!loading && state.order.length === 0 && !displayedFailure && <div className="empty-state">
       <h3>No tasks yet</h3>
       <p>Long-running local operations will appear here after they start.</p>
     </div>}

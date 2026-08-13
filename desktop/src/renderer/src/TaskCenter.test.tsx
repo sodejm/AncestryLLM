@@ -208,6 +208,105 @@ describe('Task Center', () => {
     await waitFor(() => expect(unsubscribeJobEvents).toHaveBeenCalledTimes(2))
   })
 
+  it('keeps a failed job subscription visible when a sibling subscription succeeds', async () => {
+    const failedJob = snapshot()
+    const healthyJob = snapshot({
+      job_id: 'j654321',
+      name: 'Review fictional matches',
+    })
+    let releaseHealthySubscription: (() => void) | undefined
+    const healthySubscription = new Promise<void>((resolve) => {
+      releaseHealthySubscription = resolve
+    })
+    const subscribeJobEvents = vi.fn(async (request) => {
+      if (request.job_id === failedJob.job_id) {
+        return {
+          ok: false as const,
+          protocolVersion: '1' as const,
+          error: {
+            code: 'JOB_EVENT_STREAM_FAILED' as const,
+            message: 'Task updates were interrupted.',
+            remediation: 'Refresh task activity.',
+          },
+        }
+      }
+      await healthySubscription
+      return success({
+        schema_version: 1 as const,
+        subscription_id: request.subscription_id,
+        job_id: request.job_id,
+        subscribed: true as const,
+      })
+    })
+    const bridge: AncestryBridge = {
+      ...bridgeFor([failedJob, healthyJob]),
+      subscribeJobEvents,
+    }
+
+    render(<TaskCenter bridge={bridge} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: JOB_EVENT_STREAM_FAILED')
+    await act(async () => releaseHealthySubscription!())
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Code: JOB_EVENT_STREAM_FAILED')
+  })
+
+  it('bounds automatic stream replacement until the user explicitly refreshes', async () => {
+    const active = snapshot()
+    let deliver: ((delivery: Readonly<JobEventDelivery>) => void) | undefined
+    const getJob = vi.fn().mockResolvedValue(success(active))
+    const subscribeJobEvents = vi.fn(async (request) => success({
+      schema_version: 1 as const,
+      subscription_id: request.subscription_id,
+      job_id: request.job_id,
+      subscribed: true as const,
+    }))
+    const unsubscribeJobEvents = vi.fn(async (request) => success({
+      schema_version: 1 as const,
+      subscription_id: request.subscription_id,
+      unsubscribed: true as const,
+    }))
+    const bridge: AncestryBridge = {
+      ...bridgeFor([active]),
+      getJob,
+      subscribeJobEvents,
+      unsubscribeJobEvents,
+      onJobEvent: vi.fn((listener) => {
+        deliver = listener
+        return () => undefined
+      }),
+    }
+    const streamFailure = (subscriptionId: string): JobEventDelivery => ({
+      schema_version: 1,
+      kind: 'failure',
+      subscription_id: subscriptionId,
+      job_id: active.job_id,
+      event: null,
+      error: {
+        code: 'JOB_EVENT_STREAM_FAILED',
+        message: 'Task updates were interrupted.',
+        remediation: 'Refresh task activity.',
+      },
+    })
+
+    render(<TaskCenter bridge={bridge} />)
+    await screen.findByRole('heading', { name: active.name })
+    await waitFor(() => expect(subscribeJobEvents).toHaveBeenCalledTimes(1))
+
+    act(() => deliver!(streamFailure(subscribeJobEvents.mock.calls[0]![0].subscription_id)))
+    await waitFor(() => expect(getJob).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(subscribeJobEvents).toHaveBeenCalledTimes(2))
+
+    act(() => deliver!(streamFailure(subscribeJobEvents.mock.calls[1]![0].subscription_id)))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: JOB_EVENT_STREAM_FAILED')
+    await waitFor(() => expect(unsubscribeJobEvents).toHaveBeenCalledTimes(2))
+    expect(getJob).toHaveBeenCalledTimes(1)
+    expect(subscribeJobEvents).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Refresh tasks' }))
+    await waitFor(() => expect(subscribeJobEvents).toHaveBeenCalledTimes(3))
+  })
+
   it('renders only coded fixed recovery when the task snapshot cannot be loaded', async () => {
     const base = bridgeFor([])
     const bridge: AncestryBridge = {

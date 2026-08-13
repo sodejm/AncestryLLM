@@ -71,16 +71,15 @@ const replaceSnapshot = (
       return {
         ...state,
         needsResync: removeResync(state.needsResync, snapshot.job_id),
-        announcement: null,
       }
     }
     if (!authoritative && snapshot.sequence !== current.sequence + 1) {
       const needsResync = addResync(state.needsResync, snapshot.job_id)
-      return needsResync === state.needsResync ? state : { ...state, needsResync, announcement: null }
+      return needsResync === state.needsResync ? state : { ...state, needsResync }
     }
   } else if (!authoritative && snapshot.sequence !== 1) {
     const needsResync = addResync(state.needsResync, snapshot.job_id)
-    return needsResync === state.needsResync ? state : { ...state, needsResync, announcement: null }
+    return needsResync === state.needsResync ? state : { ...state, needsResync }
   }
 
   const stateChanged = current?.state !== snapshot.state
@@ -88,7 +87,7 @@ const replaceSnapshot = (
     jobs: { ...state.jobs, [snapshot.job_id]: snapshot },
     order: current ? state.order : [...state.order, snapshot.job_id],
     needsResync: removeResync(state.needsResync, snapshot.job_id),
-    announcement: stateChanged ? announce(snapshot) : null,
+    announcement: stateChanged ? announce(snapshot) : state.announcement,
   }
 }
 

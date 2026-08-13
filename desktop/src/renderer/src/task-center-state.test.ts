@@ -114,6 +114,35 @@ describe('task center state', () => {
     expect(cancelling.announcement).toBe('Cancellation requested for Export fictional tree.')
   })
 
+  it('preserves a state-change announcement across a following progress update', () => {
+    const loaded = taskCenterReducer(initialTaskCenterState, { type: 'loaded', jobs: [snapshot()] })
+    const cancelling = taskCenterReducer(loaded, {
+      type: 'event',
+      event: event(snapshot({
+        sequence: 2,
+        state: 'cancelling',
+        cancellation_requested_at: '2026-08-12T12:00:03+00:00',
+      }), 'cancellation'),
+    })
+    const progress = taskCenterReducer(cancelling, {
+      type: 'event',
+      event: event(snapshot({
+        sequence: 3,
+        state: 'cancelling',
+        cancellation_requested_at: '2026-08-12T12:00:03+00:00',
+        progress: {
+          schema_version: 1,
+          operation: 'Finishing the current safe operation',
+          timestamp: '2026-08-12T12:00:04+00:00',
+          completed: 2,
+          total: 4,
+        },
+      }), 'progress'),
+    })
+
+    expect(progress.announcement).toBe('Cancellation requested for Export fictional tree.')
+  })
+
   it('does not let a delayed list response regress a job advanced by a live event', () => {
     const loaded = taskCenterReducer(initialTaskCenterState, { type: 'loaded', jobs: [snapshot()] })
     const completed = taskCenterReducer(loaded, {
