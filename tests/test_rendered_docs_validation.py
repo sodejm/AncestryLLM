@@ -171,6 +171,26 @@ def test_smoke_refuses_non_production_host_without_network_access() -> None:
     ]
 
 
+def test_smoke_checks_current_home_cli_and_discovery_routes(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    requested_urls: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        requested_urls.append(url)
+        return '<meta name="ancestryllm-source-commit" content="abc123">'
+
+    monkeypatch.setattr(pages_smoke, "_fetch", fake_fetch)
+
+    assert pages_smoke.smoke("https://sodejm.github.io/AncestryLLM/", "abc123") == []
+    assert requested_urls == [
+        "https://sodejm.github.io/AncestryLLM/",
+        "https://sodejm.github.io/AncestryLLM/reference/CLI.html",
+        "https://sodejm.github.io/AncestryLLM/robots.txt",
+        "https://sodejm.github.io/AncestryLLM/sitemap.xml",
+    ]
+
+
 def test_rendered_validation_resolves_fragment_only_links_against_current_page(
     tmp_path: Path,
 ) -> None:

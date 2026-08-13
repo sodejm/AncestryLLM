@@ -71,14 +71,14 @@ def smoke(base_url: str, expected_source_sha: str) -> list[str]:
     if parsed.scheme != "https" or parsed.hostname != _PRODUCTION_HOST:
         return [f"refusing non-production Pages URL: {base_url}"]
     errors: list[str] = []
-    for path in ("", "CLI.html", "robots.txt", "sitemap.xml"):
+    for path in ("", "reference/CLI.html", "robots.txt", "sitemap.xml"):
         url = urljoin(base_url.rstrip("/") + "/", path)
         try:
             content = _fetch(url)
         except RuntimeError as error:
             errors.append(str(error))
             continue
-        if path in {"", "CLI.html"}:
+        if path in {"", "reference/CLI.html"}:
             match = _MARKER.search(content)
             actual = match.group("sha") if match else "<missing>"
             if actual != expected_source_sha:
