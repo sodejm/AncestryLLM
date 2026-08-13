@@ -123,6 +123,12 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")
     packaged_window_index = main_source.index("createWindow()", sigterm_handler_index)
     assert runtime_owner_index < sigterm_handler_index < packaged_window_index
+    assert "window.on('close', (event) => {" in main_source
+    assert "requestVerifiedShutdownBeforeWindowClose(" in main_source
+    assert (
+        "!shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined)"
+        in main_source
+    )
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
 
 

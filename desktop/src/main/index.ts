@@ -10,7 +10,11 @@ import {
   session,
   type WebContents,
 } from 'electron'
-import { completeAppShutdown, type UnsafeShutdownChoice } from './app-shutdown'
+import {
+  completeAppShutdown,
+  requestVerifiedShutdownBeforeWindowClose,
+  type UnsafeShutdownChoice,
+} from './app-shutdown'
 import { FileGrantBroker } from './file-grant-broker'
 import {
   registerDesktopIpcHandlers,
@@ -150,6 +154,13 @@ function createWindow(): void {
     window.webContents as unknown as BridgeWebContents,
     (url) => isTrustedRendererUrl({ ...rendererPolicy(), senderUrl: url }),
   )
+  window.on('close', (event) => {
+    requestVerifiedShutdownBeforeWindowClose(
+      event,
+      !shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined),
+      () => app.quit(),
+    )
+  })
   window.once('ready-to-show', () => {
     window.show()
     console.info(WINDOW_READY_RECORD)

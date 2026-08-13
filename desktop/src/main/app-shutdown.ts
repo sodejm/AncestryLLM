@@ -3,6 +3,19 @@ import type { JobShutdownAction } from './sidecar-client'
 
 export type UnsafeShutdownChoice = JobShutdownAction | 'stay'
 
+type WindowCloseEvent = { preventDefault: () => void }
+
+/** Keeps a native window visible while the verified shutdown handshake runs. */
+export function requestVerifiedShutdownBeforeWindowClose(
+  event: WindowCloseEvent,
+  shutdownRequired: boolean,
+  requestQuit: () => void,
+): void {
+  if (!shutdownRequired) return
+  event.preventDefault()
+  requestQuit()
+}
+
 /** Authorizes Electron shutdown only after jobs and the sidecar stop safely. */
 export async function completeAppShutdown(
   prepareJobs: (action: JobShutdownAction) => Promise<void>,

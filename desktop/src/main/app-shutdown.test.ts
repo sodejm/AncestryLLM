@@ -1,6 +1,28 @@
 // Verifies Electron quit remains bounded and fails closed while jobs are unsafe.
 import { describe, expect, it, vi } from 'vitest'
-import { completeAppShutdown } from './app-shutdown'
+import { completeAppShutdown, requestVerifiedShutdownBeforeWindowClose } from './app-shutdown'
+
+describe('Electron window shutdown guard', () => {
+  it('keeps the final window open until verified shutdown is authorized', () => {
+    const event = { preventDefault: vi.fn() }
+    const requestQuit = vi.fn()
+
+    requestVerifiedShutdownBeforeWindowClose(event, true, requestQuit)
+
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(requestQuit).toHaveBeenCalledOnce()
+  })
+
+  it('allows the final window to close after verified shutdown is authorized', () => {
+    const event = { preventDefault: vi.fn() }
+    const requestQuit = vi.fn()
+
+    requestVerifiedShutdownBeforeWindowClose(event, false, requestQuit)
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(requestQuit).not.toHaveBeenCalled()
+  })
+})
 
 describe('Electron app shutdown', () => {
   it('reports job preparation failure without exposing details and stays open', async () => {
