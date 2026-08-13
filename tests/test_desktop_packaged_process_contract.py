@@ -91,8 +91,12 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
 
     assert "new WebSocket(" not in close_source
     assert "browserEndpoint" not in close_source
-    assert session_index < command_index < detach_index < browser_close_index
-    assert browser_close_index < process_wait_index
+    assert "void session.send('Browser.close').catch(() => undefined)" in close_source
+    assert "await session.send('Browser.close')" not in close_source
+    assert "requesting packaged clean quit" not in close_source
+    assert session_index < command_index < process_wait_index
+    assert process_wait_index < detach_index < browser_close_index
+    assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
 
 
 def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
