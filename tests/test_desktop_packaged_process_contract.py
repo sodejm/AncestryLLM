@@ -83,12 +83,13 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
     session_index = close_source.index("result.browser.newBrowserCDPSession()")
+    process_wait_index = close_source.index(
+        "const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)"
+    )
     command_index = close_source.index("session.send('Browser.close')", session_index)
     detach_index = close_source.index("session.detach()", command_index)
     browser_close_index = close_source.index("result.browser.close()", command_index)
-    process_wait_index = close_source.index(
-        "waitForProcessExit(result.process, packagedQuitTimeoutMs)"
-    )
+    status_index = close_source.index("const status = await processExit", browser_close_index)
 
     assert "new WebSocket(" not in close_source
     assert "browserEndpoint" not in close_source
@@ -98,10 +99,11 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
     assert "void session.send('Browser.close').catch(() => undefined)" in close_source
     assert "await session.send('Browser.close')" not in close_source
     assert "requesting packaged clean quit" not in close_source
+    assert "'detaching packaged browser session'" in close_source
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
-    assert session_index < command_index < process_wait_index
-    assert process_wait_index < detach_index < browser_close_index
+    assert session_index < process_wait_index < command_index
+    assert command_index < detach_index < browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
     runtime_owner_index = main_source.index("sidecarSupervisor = runtime.supervisor")
     sigterm_handler_index = main_source.index("process.on('SIGTERM', () => app.quit())")

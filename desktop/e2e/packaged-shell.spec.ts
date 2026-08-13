@@ -288,15 +288,19 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 
 async function closePackaged(result: LaunchResult): Promise<void> {
   const session = await result.browser.newBrowserCDPSession()
+  const processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
   void session.send('Browser.close').catch(() => undefined)
-  const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs).finally(async () => {
-    await session.detach().catch(() => undefined)
-    await withinDeadline(
-      'closing packaged browser automation',
-      packagedCleanupTimeoutMs,
-      () => result.browser.close(),
-    ).catch(() => undefined)
-  })
+  await withinDeadline(
+    'detaching packaged browser session',
+    packagedCleanupTimeoutMs,
+    () => session.detach(),
+  ).catch(() => undefined)
+  await withinDeadline(
+    'closing packaged browser automation',
+    packagedCleanupTimeoutMs,
+    () => result.browser.close(),
+  ).catch(() => undefined)
+  const status = await processExit
   expect(status).toEqual({ code: 0, signal: null })
 }
 
