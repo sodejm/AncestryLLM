@@ -874,7 +874,7 @@ jobs:
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
-          desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum \
+          desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu signing and installation state
@@ -1405,7 +1405,7 @@ jobs:
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
-          desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum \
+          desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             pnpm --dir desktop run test:e2e:packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu validation installation

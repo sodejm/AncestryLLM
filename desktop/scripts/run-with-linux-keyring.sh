@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a private native Secret Service session for packaged Linux verification.
+# Start a disposable native Secret Service session for packaged Linux verification.
 set -euo pipefail
 
 readonly usage_error=64
@@ -21,9 +21,10 @@ stop_keyring() {
 }
 
 run_inside_session() {
-  [[ $# -ge 2 ]] || fail "missing isolated root or command" "$usage_error"
+  [[ $# -ge 3 ]] || fail "missing isolated root, runtime directory, or command" "$usage_error"
   local keyring_root=$1
-  shift
+  local session_runtime=$2
+  shift 2
   local keyring_home="$keyring_root/home"
   local keyring_runtime="$keyring_root/runtime"
   local keyring_control="$keyring_root/control"
@@ -44,7 +45,7 @@ run_inside_session() {
   export XDG_CACHE_HOME="$keyring_home/.cache"
   export XDG_CONFIG_HOME="$keyring_home/.config"
   export XDG_DATA_HOME="$keyring_home/.local/share"
-  export XDG_RUNTIME_DIR="$keyring_runtime"
+  export XDG_RUNTIME_DIR="$session_runtime"
   gnome-keyring-daemon \
     --foreground \
     --unlock \
@@ -95,6 +96,12 @@ run_inside_session() {
   exit "$command_status"
 }
 
+production_runtime_bus=false
+if [[ "${1:-}" == "--production-runtime-bus" ]]; then
+  production_runtime_bus=true
+  shift
+fi
+
 if [[ "${1:-}" == "--inside-session" ]]; then
   shift
   run_inside_session "$@"
@@ -102,7 +109,7 @@ fi
 
 [[ "$(uname -s)" == Linux ]] || fail "this launcher supports Linux only" "$unavailable_error"
 [[ $# -ge 1 ]] || fail "a command is required" "$usage_error"
-for required_command in dbus-daemon dbus-send gnome-keyring-daemon secret-tool; do
+for required_command in dbus-daemon dbus-send gnome-keyring-daemon id install secret-tool stat; do
   command -v "$required_command" >/dev/null 2>&1 || \
     fail "required native command is unavailable: $required_command" "$unavailable_error"
 done
@@ -113,18 +120,65 @@ temporary_parent=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 keyring_root="$(mktemp -d "$temporary_parent/ancestryllm-keyring.XXXXXX")"
 chmod 700 "$keyring_root"
 install -d -m 700 "$keyring_root/runtime"
-session_address="unix:path=$keyring_root/runtime/bus"
-export DBUS_SESSION_BUS_ADDRESS="$session_address"
 bus_log="$keyring_root/bus.log"
 dbus_pid=
+production_runtime_directory=
+production_runtime_created=false
+production_socket_owned=false
+production_socket_identity=
+session_runtime_directory="$keyring_root/runtime"
+session_socket="$session_runtime_directory/bus"
 cleanup_root() {
   if [[ -n "${dbus_pid:-}" ]]; then
     kill "$dbus_pid" 2>/dev/null || true
     wait "$dbus_pid" 2>/dev/null || true
   fi
+  if [[ "$production_runtime_bus" == true ]]; then
+    if [[ "$production_socket_owned" == true && -S "$session_socket" ]]; then
+      current_socket_identity="$(stat -c '%d:%i' -- "$session_socket" 2>/dev/null || true)"
+      if [[ "$current_socket_identity" == "$production_socket_identity" ]]; then
+        rm -f -- "$session_socket"
+      fi
+    fi
+    if [[ "$production_runtime_created" == true ]]; then
+      sudo rmdir -- "$production_runtime_directory" 2>/dev/null || true
+    fi
+  fi
   rm -rf -- "$keyring_root"
 }
 trap cleanup_root EXIT
+
+if [[ "$production_runtime_bus" == true ]]; then
+  user_id="$(id -u)"
+  user_group_id="$(id -g)"
+  production_runtime_directory="/run/user/$user_id"
+  if [[ -e "$production_runtime_directory" || -L "$production_runtime_directory" ]]; then
+    [[ -d "$production_runtime_directory" && ! -L "$production_runtime_directory" ]] || \
+      fail "production runtime path is not a real directory" "$startup_error"
+  else
+    command -v sudo >/dev/null 2>&1 || \
+      fail "sudo is required to create the production runtime directory" "$unavailable_error"
+    production_runtime_created=true
+    sudo install \
+      -d \
+      -o "$user_id" \
+      -g "$user_group_id" \
+      -m 700 \
+      -- "$production_runtime_directory"
+  fi
+  runtime_metadata="$(stat -c '%u:%g:%a' -- "$production_runtime_directory")" || \
+    fail "production runtime metadata is unavailable" "$startup_error"
+  [[ "$runtime_metadata" == "$user_id:$user_group_id:700" ]] || \
+    fail "production runtime directory must be owner-only and owned by the current user" \
+      "$startup_error"
+  session_runtime_directory="$production_runtime_directory"
+  session_socket="$production_runtime_directory/bus"
+  [[ ! -e "$session_socket" && ! -L "$session_socket" ]] || \
+    fail "production D-Bus endpoint is already occupied" "$startup_error"
+fi
+
+session_address="unix:path=$session_socket"
+export DBUS_SESSION_BUS_ADDRESS="$session_address"
 
 dbus-daemon \
   --session \
@@ -151,9 +205,16 @@ for ((attempt = 0; attempt < 100; attempt += 1)); do
   sleep 0.1
 done
 [[ "$bus_ready" == true ]] || fail "private D-Bus session did not become ready" "$startup_error"
+if [[ "$production_runtime_bus" == true ]]; then
+  [[ -S "$session_socket" ]] || \
+    fail "production D-Bus endpoint is not a socket" "$startup_error"
+  production_socket_identity="$(stat -c '%d:%i' -- "$session_socket")" || \
+    fail "production D-Bus endpoint metadata is unavailable" "$startup_error"
+  production_socket_owned=true
+fi
 
 set +e
-"$script_path" --inside-session "$keyring_root" "$@"
+"$script_path" --inside-session "$keyring_root" "$session_runtime_directory" "$@"
 session_status=$?
 set -e
 exit "$session_status"

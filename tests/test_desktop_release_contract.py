@@ -213,7 +213,8 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
     assert "--status-fd 1 --verify" in verification_step
     assert 'sudo apt-get install -y "./$INSTALLER"' in verification_step
     assert (
-        "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum" in verification_step
+        "desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus "
+        "xvfb-run --auto-servernum" in verification_step
     )
     assert "pnpm --dir desktop run test:e2e:packaged" in verification_step
 

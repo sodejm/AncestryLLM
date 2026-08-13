@@ -296,17 +296,27 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     install = (
         "sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools"
     )
-    launcher = "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum"
+    verifier_launcher = "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum"
+    production_launcher = (
+        "desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus "
+        "xvfb-run --auto-servernum"
+    )
 
     assert workflow.count(install) == 1
     assert release.count(install) == 2
-    assert workflow.count(launcher) == 2
-    assert release.count(launcher) == 2
+    assert workflow.count(verifier_launcher) == 2
+    assert release.count(production_launcher) == 2
+    assert "--production-runtime-bus" not in workflow
     assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
     assert "dbus-run-session" not in runner
     assert "dbus-daemon" in runner
     assert '--address="$session_address"' in runner
     assert 'export DBUS_SESSION_BUS_ADDRESS="$session_address"' in runner
+    assert 'production_runtime_directory="/run/user/$user_id"' in runner
+    assert 'session_socket="$production_runtime_directory/bus"' in runner
+    assert '[[ ! -e "$session_socket" && ! -L "$session_socket" ]]' in runner
+    assert 'production_socket_identity="$(stat -c \'%d:%i\' -- "$session_socket")"' in runner
+    assert '[[ "$current_socket_identity" == "$production_socket_identity" ]]' in runner
     assert "gnome-keyring-daemon" in runner
     assert "--components=secrets" in runner
     assert "org.freedesktop.DBus.NameHasOwner" in runner

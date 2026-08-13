@@ -50,7 +50,7 @@ sidecar and application are built and launched natively. The aggregate records
 
 The Ubuntu row installs the distribution-provided GNOME keyring and launches
 the packaged check through `desktop/scripts/run-with-linux-keyring.sh`. That
-runner creates a private D-Bus session, isolated owner-only keyring directories,
+runner creates a disposable D-Bus session, isolated owner-only keyring directories,
 and a disposable native Secret Service collection, then removes them when the
 check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
@@ -70,6 +70,16 @@ Playwright's environment. The packaged process therefore reaches that verified
 service without selecting a Python test backend, injecting a packaged
 credential, or retaining runner keyring state. An unavailable or failed native
 service fails the row.
+
+The Ubuntu release-installer checks exercise the installed production package,
+not the unpublished verifier adapter. They select the launcher's
+`--production-runtime-bus` mode, which validates or creates the owner-only
+`/run/user/<uid>` directory, refuses an occupied or linked `bus` endpoint, and
+binds the disposable D-Bus daemon to the exact endpoint production Electron
+Main derives from the process user ID. Secret Service storage remains isolated
+under the temporary verifier root. This proves that an installed production
+sidecar can reach the native service without accepting an environment-selected
+endpoint or compiling the verifier switch into the shipped package.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.

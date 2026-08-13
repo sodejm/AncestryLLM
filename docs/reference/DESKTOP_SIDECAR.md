@@ -57,11 +57,11 @@ channel, or staged rollout.
 
 On Ubuntu, the packaged-runtime and installer checks exercise the production
 keyring integration against the distribution-provided GNOME Secret Service.
-The checked-in launcher starts that service on a private D-Bus session with
+The checked-in launcher starts that service on a disposable D-Bus session with
 owner-only temporary storage, waits for its well-known name, and proves native
-store, read, and delete operations with a non-secret probe. The packaged
-process reaches that service only through the launcher's private D-Bus session
-and a separate unpublished Linux verifier package. Only the verifier package
+store, read, and delete operations with a non-secret probe. Exact-head packaged
+verification reaches that service through a private socket and a separate
+unpublished Linux verifier package. Only the verifier package
 compiles the adapter that reads an exact command-line switch carrying the
 owner-only temporary root. The production package is assembled and scanned
 first, its adapter never reads the selector, and its build rejects the selector
@@ -74,8 +74,13 @@ ignores ambient Python keyring selectors and configuration, and excludes
 provider credential and `PATH` values. Normal launches also exclude home,
 cache, configuration, and data values; they ignore ambient D-Bus and XDG
 runtime selectors and bind to `unix:path=/run/user/<uid>/bus` using the
-kernel-reported process user ID. The launcher preserves the packaged command's
-real exit status and removes the state afterward. No mock or alternate Python
+kernel-reported process user ID. Release-installer verification runs the
+installed production package and binds its disposable D-Bus daemon to that same
+production-derived endpoint. The launcher requires an owner-only runtime
+directory owned by the current user and fails if the endpoint already exists or
+is a link; only the Secret Service data stays under its temporary root. The
+launcher preserves the packaged command's real exit status and removes the
+state afterward. No mock or alternate Python
 keyring backend is permitted. This is verification infrastructure only; it
 does not add a production credential fallback or weaken keyring-only startup.
 

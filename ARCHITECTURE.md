@@ -830,7 +830,11 @@ absolute root and derives the sidecar's home, XDG paths, and exact
 `runtime/bus` address from it instead of accepting ambient values. The verifier
 launcher binds its private D-Bus daemon to that owner-only socket. The root is
 never inherited from the packaged process environment. Provider credentials
-and `PATH` remain excluded from the child environment.
+and `PATH` remain excluded from the child environment. Release-installer
+verification instead runs the installed production package while staging its
+disposable native service at the owner-only conventional
+`/run/user/<uid>/bus` endpoint that production Main derives; it refuses an
+occupied or linked endpoint and does not enable the verifier adapter.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 
