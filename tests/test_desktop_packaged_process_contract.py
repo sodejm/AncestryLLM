@@ -155,44 +155,26 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "app.quit()" not in verified_exit_source
 
 
-def test_linux_packaged_environment_preserves_native_keyring_session_boundary() -> None:
+def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
 
-    inherited_linux_session = (
-        "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', "
-        "'XDG_DATA_HOME', 'XDG_RUNTIME_DIR'])"
-    )
-    assert inherited_linux_session in source
-    assert re.search(
-        r"if \(\s*process\.platform === 'linux'\s*&&\s*"
-        r"process\.env\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'\s*\) \{\s*"
-        r"Object\.assign\(environment, inheritedEnvironment.*?\)\s*"
-        r"environment\.ANCESTRYLLM_NATIVE_KEYRING_SESSION = '1'",
-        source,
-        re.DOTALL,
-    )
+    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in source
+    assert "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME'" not in source
     assert re.search(
         r"platform === 'linux'\s*\?\s*\[.*?"
         r"'DBUS_SESSION_BUS_ADDRESS'.*?'XDG_RUNTIME_DIR'.*?\]",
         supervisor_source,
         re.DOTALL,
     )
-    verifier_directories = re.search(
-        r"const verificationKeyringDirectoriesAllowed = platform === 'linux'\s*&&\s*"
-        r"source\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'\s*\?\s*\[(.*?)\]\s*:\s*\[\]",
-        supervisor_source,
-        re.DOTALL,
-    )
-    assert verifier_directories is not None
-    assert "'HOME'" in verifier_directories.group(1)
-    assert "'XDG_CACHE_HOME'" in verifier_directories.group(1)
-    assert "'XDG_CONFIG_HOME'" in verifier_directories.group(1)
-    assert "'XDG_DATA_HOME'" in verifier_directories.group(1)
-    assert "'DBUS_SESSION_BUS_ADDRESS'" not in verifier_directories.group(1)
-    assert "'XDG_RUNTIME_DIR'" not in verifier_directories.group(1)
-    assert "'ANCESTRYLLM_NATIVE_KEYRING_SESSION'" not in supervisor_source
-    assert "'PYTHON_KEYRING_BACKEND'" not in supervisor_source
+    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in supervisor_source
+    assert "'HOME'" not in supervisor_source
+    assert "'XDG_CACHE_HOME'" not in supervisor_source
+    assert "'XDG_CONFIG_HOME'" not in supervisor_source
+    assert "'XDG_DATA_HOME'" not in supervisor_source
+    assert (
+        "environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'"
+    ) in supervisor_source
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:

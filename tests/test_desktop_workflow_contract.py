@@ -274,7 +274,7 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert "secret-tool lookup" in runner
     assert "secret-tool clear" in runner
     assert "service ancestryllm-verifier key bootstrap" in runner
-    assert 'export ANCESTRYLLM_NATIVE_KEYRING_SESSION="1"' in runner
+    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in runner
     assert "mktemp -d" in runner
     assert "chmod 700" in runner
     assert 'rm -rf -- "$keyring_root"' in runner

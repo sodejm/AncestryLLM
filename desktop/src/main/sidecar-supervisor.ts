@@ -37,6 +37,7 @@ interface SidecarSupervisorOptions {
   probe: ProbeSidecar
   tokenFactory?: () => string
   startupTimeoutMs: number
+  shutdownTimeoutMs?: number
   maxRestarts: number
   maxManualRetries?: number
   platform?: NodeJS.Platform
@@ -97,6 +98,13 @@ class SidecarStoppingError extends Error {
   }
 }
 
+class SidecarShutdownTimeoutError extends Error {
+  constructor() {
+    super('Sidecar shutdown timed out.')
+    this.name = 'SidecarShutdownTimeoutError'
+  }
+}
+
 export function createLaunchToken(
   randomSource: (size: number) => Buffer = randomBytes,
 ): string {
@@ -120,19 +128,15 @@ export function minimalSidecarEnvironment(
           'XDG_RUNTIME_DIR',
         ]
       : ['LANG', 'LC_ALL', 'TMPDIR']
-  const verificationKeyringDirectoriesAllowed = platform === 'linux'
-    && source.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'
-    ? [
-        'HOME',
-        'XDG_CACHE_HOME',
-        'XDG_CONFIG_HOME',
-        'XDG_DATA_HOME',
-      ]
-    : []
-  const allowed = [...platformAllowed, ...verificationKeyringDirectoriesAllowed]
-  return Object.fromEntries(
-    allowed.flatMap((name) => source[name] === undefined ? [] : [[name, source[name]]]),
+  const environment = Object.fromEntries(
+    platformAllowed.flatMap(
+      (name) => source[name] === undefined ? [] : [[name, source[name]]],
+    ),
   )
+  if (platform === 'linux') {
+    environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'
+  }
+  return environment
 }
 
 export function resolveSidecarExecutable(
@@ -163,10 +167,14 @@ export function resolveSidecarTargetRoot(
   return join(resourcesPath, 'sidecar', target)
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutError: () => Error = () => new SidecarTimeoutError(),
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new SidecarTimeoutError()),
+      () => reject(timeoutError()),
       timeoutMs,
     )
     void promise.then(
@@ -212,6 +220,12 @@ export class SidecarSupervisor {
     }
     if (!Number.isFinite(options.startupTimeoutMs) || options.startupTimeoutMs <= 0) {
       throw new Error('startupTimeoutMs must be positive.')
+    }
+    if (
+      options.shutdownTimeoutMs !== undefined
+      && (!Number.isFinite(options.shutdownTimeoutMs) || options.shutdownTimeoutMs <= 0)
+    ) {
+      throw new Error('shutdownTimeoutMs must be positive.')
     }
     if (
       options.maxManualRetries !== undefined
@@ -490,6 +504,24 @@ export class SidecarSupervisor {
     launches: readonly Promise<void>[],
     initialTerminationResults: Promise<readonly PromiseSettledResult<void>[]>,
   ): Promise<void> {
+    try {
+      await withTimeout(
+        this.drainStop(launches, initialTerminationResults),
+        this.options.shutdownTimeoutMs ?? 15_000,
+        () => new SidecarShutdownTimeoutError(),
+      )
+    } catch (error) {
+      this.reportUnavailable('startup_failed')
+      if (error instanceof SidecarShutdownTimeoutError) throw error
+      throw new Error('Sidecar shutdown failed.')
+    }
+    this.transition('stopped', null)
+  }
+
+  private async drainStop(
+    launches: readonly Promise<void>[],
+    initialTerminationResults: Promise<readonly PromiseSettledResult<void>[]>,
+  ): Promise<void> {
     await Promise.allSettled(launches)
     const lateProcesses = new Set(this.pending)
     if (this.current) lateProcesses.add(this.current)
@@ -501,10 +533,8 @@ export class SidecarSupervisor {
       ...new Set(this.terminationRequests.values()),
     ])
     if (terminations.some((result) => result.status === 'rejected')) {
-      this.reportUnavailable('startup_failed')
       throw new Error('Sidecar shutdown failed.')
     }
-    this.transition('stopped', null)
   }
 
   private cancelOnStop<T>(operation: Promise<T>): Promise<T> {

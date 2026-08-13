@@ -53,6 +53,7 @@ export async function startRuntimeBridge(
     launch: launchNativeSidecar,
     probe: probeNativeSidecar,
     startupTimeoutMs: 10_000,
+    shutdownTimeoutMs: 15_000,
     maxRestarts: 2,
     maxManualRetries: 1,
   })

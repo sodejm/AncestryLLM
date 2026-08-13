@@ -400,7 +400,8 @@ still requires its distribution and target-assurance gates to pass.
   preflight before payload verification or process launch can yield. Both quit
   entry points are vetoed until the native job preflight and verified sidecar
   stop finish. A stop request cancels pre-spawn verification and drains any
-  process launch already in flight before completion. Electron uses
+  process launch already in flight within a fixed 15-second supervisor
+  deadline. Electron uses
   `app.exit(0)` only from that authorized completion callback, after every owned
   resource has been released, to avoid a second platform-specific quit cycle.
   Shutdown fails closed when termination cannot be verified. The implemented
@@ -807,12 +808,11 @@ so ambient environment values cannot satisfy or replace a desktop credential.
 Normal launches inherit only the minimal platform environment. On Linux, that
 allowlist includes the active D-Bus session address and XDG runtime directory
 needed to reach the user's native Secret Service, but not home, cache,
-configuration, or data directories. Exact-head Linux packaged verification may
-set the exact internal marker `ANCESTRYLLM_NATIVE_KEYRING_SESSION=1`; Electron
-main then additionally forwards only that verifier's disposable home and XDG
-cache, configuration, and data directories. The marker itself, provider
-credentials, `PATH`, and alternate Python keyring selectors remain excluded
-from the child environment.
+configuration, or data directories. Electron main pins the child to the native
+Secret Service backend and ignores ambient Python keyring selectors and
+configuration. Exact-head Linux packaged verification reaches its disposable
+service only through the private D-Bus session. Provider credentials and
+`PATH` remain excluded from the child environment.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 

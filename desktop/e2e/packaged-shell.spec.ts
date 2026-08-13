@@ -141,17 +141,7 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',
   }
-  // Linux verification supplies a disposable native Secret Service whose
-  // collection and D-Bus runtime live under these launcher-owned directories.
-  // Keep the packaged process in that session. Chromium state remains isolated
-  // by --user-data-dir and the explicit app-data paths.
-  if (
-    process.platform === 'linux'
-    && process.env.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'
-  ) {
-    Object.assign(environment, inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR']))
-    environment.ANCESTRYLLM_NATIVE_KEYRING_SESSION = '1'
-  } else if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin') {
     // Electron consults the login keychain before it creates a renderer on
     // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup.
     environment.HOME = isolatedHome

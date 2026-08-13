@@ -87,8 +87,6 @@ run_inside_session() {
     fail "native Secret Service returned the wrong verifier probe" "$startup_error"
   secret-tool clear service ancestryllm-verifier key bootstrap || \
     fail "native Secret Service could not delete the verifier probe" "$startup_error"
-  export ANCESTRYLLM_NATIVE_KEYRING_SESSION="1"
-
   set +e
   "$@"
   local command_status=$?

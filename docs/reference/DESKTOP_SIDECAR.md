@@ -60,15 +60,13 @@ keyring integration against the distribution-provided GNOME Secret Service.
 The checked-in launcher starts that service on a private D-Bus session with
 owner-only temporary storage, waits for its well-known name, and proves native
 store, read, and delete operations with a non-secret probe. The packaged
-process shares the launcher's disposable home, XDG, runtime, and D-Bus session
-paths. Every Linux launch forwards only the active D-Bus address and XDG
-runtime directory required to reach the user's native Secret Service. Electron
-main recognizes only the exact internal verification marker before it
-additionally forwards the verifier's disposable home and XDG cache,
-configuration, and data directories. The marker itself, provider credentials,
-`PATH`, and alternate Python keyring selectors remain excluded. The launcher
-preserves the packaged command's real exit status and removes the state
-afterward. No mock or alternate Python keyring backend is permitted. This is
+process reaches that service only through the launcher's private D-Bus session
+and XDG runtime directory. Every Linux sidecar launch pins the native Secret
+Service backend, ignores ambient Python keyring selectors and configuration,
+and excludes home, cache, configuration, data, provider credential, and `PATH`
+values. The launcher preserves the packaged command's real exit status and
+removes the state afterward. No mock or alternate Python keyring backend is
+permitted. This is
 verification infrastructure only; it does not add a production credential
 fallback or weaken keyring-only startup.
 
@@ -113,6 +111,11 @@ Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
 leader. No sidecar is started by the development mock shell.
 
+Electron bounds the complete supervisor stop to 15 seconds, including any
+launch already in flight and all verified process-tree termination. Exceeding
+that deadline fails closed and leaves the supervisor unavailable instead of
+allowing application shutdown to wait indefinitely.
+
 The sidecar creates its SQLCipher-backed job repository only when startup
 diagnostics permit database access. It reconciles any persisted nonterminal
 snapshot to exactly one failed `JOB_INTERRUPTED` terminal state at startup; it
@@ -133,7 +136,8 @@ empty only while the supervisor is `idle`, `starting`, or `unavailable`, has no
 authenticated session, and has never exposed one. Once an authenticated session
 has been exposed, losing it never restores that shortcut. The explicit-empty
 case skips the unavailable HTTP assessment but still cancels pre-spawn work,
-drains any launch already in flight, and requires verified process-tree stop.
+drains any launch already in flight within the supervisor deadline, and
+requires verified process-tree stop.
 The first `app.quit()` lifecycle is vetoed during that assessment. After IPC
 disposal and verified sidecar stop release every owned resource, the authorized
 completion callback uses `app.exit(0)` rather than re-entering

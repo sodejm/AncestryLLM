@@ -42,11 +42,12 @@ describe('sidecar launch boundary', () => {
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
       XDG_RUNTIME_DIR: '/run/user/1000',
       LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
     })
     expect(minimalSidecarEnvironment('win32', source)).toEqual({ SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp' })
   })
 
-  it('adds only disposable Linux keyring directories for the exact verifier marker', () => {
+  it('ignores ambient keyring overrides and pins the native Linux backend', () => {
     const source = {
       ANCESTRYLLM_NATIVE_KEYRING_SESSION: '1',
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
@@ -63,20 +64,9 @@ describe('sidecar launch boundary', () => {
 
     expect(minimalSidecarEnvironment('linux', source)).toEqual({
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
-      HOME: '/verification/home',
-      XDG_CACHE_HOME: '/verification/home/.cache',
-      XDG_CONFIG_HOME: '/verification/home/.config',
-      XDG_DATA_HOME: '/verification/home/.local/share',
       XDG_RUNTIME_DIR: '/verification/runtime',
       LANG: 'en_US.UTF-8',
-    })
-    expect(minimalSidecarEnvironment('linux', {
-      ...source,
-      ANCESTRYLLM_NATIVE_KEYRING_SESSION: 'true',
-    })).toEqual({
-      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
-      XDG_RUNTIME_DIR: '/verification/runtime',
-      LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
     })
   })
 
@@ -355,6 +345,32 @@ describe('SidecarSupervisor', () => {
     await expect(shutdown).resolves.toBeUndefined()
     expect(sidecar.terminate).toHaveBeenCalledOnce()
     expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('fails shutdown closed when an in-flight launch exceeds the shutdown deadline', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, shutdownTimeoutMs: 5, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    await expect(supervisor.stop()).rejects.toThrow('Sidecar shutdown timed out')
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 0, manualRetriesRemaining: 0,
+    })
+
+    releaseLaunch?.()
+    await expect(startup).rejects.toThrow('stopping')
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('unavailable')
   })
 
   it('fails shutdown closed when a late launch process cannot be terminated', async () => {
