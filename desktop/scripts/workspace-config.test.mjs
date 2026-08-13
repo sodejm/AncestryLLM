@@ -8,6 +8,7 @@ const npmrcUrl = new URL('../.npmrc', import.meta.url)
 const packageUrl = new URL('../package.json', import.meta.url)
 const builderConfigUrl = new URL('../electron-builder.yml', import.meta.url)
 const releaseBuilderConfigUrl = new URL('../electron-builder.release.yml', import.meta.url)
+const gitignoreUrl = new URL('../../.gitignore', import.meta.url)
 
 const runtimePolicyResource = {
   from: 'resources/macos-arm64-runtime-policy-v1.json',
@@ -68,5 +69,22 @@ test('every standalone builder packages the reviewed local-runtime policy', asyn
   for (const configUrl of [builderConfigUrl, releaseBuilderConfigUrl]) {
     const config = await readFile(configUrl, 'utf8')
     assert.equal(config.split(expectedYaml).length - 1, 1)
+  }
+})
+
+test('generated electron-builder output trees are ignored', async () => {
+  const ignoredPaths = new Set(
+    (await readFile(gitignoreUrl, 'utf8'))
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  )
+
+  for (const outputPath of [
+    'desktop/release/',
+    'desktop/release-file-grant-verification/',
+    'desktop/release-native-verification/',
+  ]) {
+    assert.ok(ignoredPaths.has(outputPath), `${outputPath} must be ignored`)
   }
 })
