@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
 MAIN_INDEX = ROOT / "desktop" / "src" / "main" / "index.ts"
+SIDECAR_SUPERVISOR = ROOT / "desktop" / "src" / "main" / "sidecar-supervisor.ts"
 
 
 def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
@@ -86,6 +87,7 @@ def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
 
 def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
 
     inherited_linux_session = (
         "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', "
@@ -98,6 +100,22 @@ def test_linux_packaged_environment_preserves_native_keyring_session_directories
         r"Object\.assign\(environment, inheritedEnvironment",
         source,
     )
+    assert re.search(
+        r"platform === 'linux'\s*&&\s*"
+        r"source\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'",
+        supervisor_source,
+    )
+    for name in (
+        "DBUS_SESSION_BUS_ADDRESS",
+        "HOME",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+    ):
+        assert f"'{name}'" in supervisor_source
+    assert "'ANCESTRYLLM_NATIVE_KEYRING_SESSION'" not in supervisor_source
+    assert "'PYTHON_KEYRING_BACKEND'" not in supervisor_source
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:

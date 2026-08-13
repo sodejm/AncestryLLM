@@ -41,6 +41,36 @@ describe('sidecar launch boundary', () => {
     expect(minimalSidecarEnvironment('win32', source)).toEqual({ SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp' })
   })
 
+  it('forwards only the native Linux keyring session to the sidecar verifier', () => {
+    const source = {
+      ANCESTRYLLM_NATIVE_KEYRING_SESSION: '1',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/verification/home',
+      XDG_CACHE_HOME: '/verification/home/.cache',
+      XDG_CONFIG_HOME: '/verification/home/.config',
+      XDG_DATA_HOME: '/verification/home/.local/share',
+      XDG_RUNTIME_DIR: '/verification/runtime',
+      LANG: 'en_US.UTF-8',
+      PATH: '/unsafe/path',
+      OPENAI_API_KEY: 'canary-openai',
+      PYTHON_KEYRING_BACKEND: 'keyrings.alt.file.PlaintextKeyring',
+    }
+
+    expect(minimalSidecarEnvironment('linux', source)).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/verification/home',
+      XDG_CACHE_HOME: '/verification/home/.cache',
+      XDG_CONFIG_HOME: '/verification/home/.config',
+      XDG_DATA_HOME: '/verification/home/.local/share',
+      XDG_RUNTIME_DIR: '/verification/runtime',
+      LANG: 'en_US.UTF-8',
+    })
+    expect(minimalSidecarEnvironment('linux', {
+      ...source,
+      ANCESTRYLLM_NATIVE_KEYRING_SESSION: 'true',
+    })).toEqual({ LANG: 'en_US.UTF-8' })
+  })
+
   it('resolves only supported native bundle targets', () => {
     expect(resolveSidecarExecutable('/app/resources', 'darwin', 'arm64')).toBe(
       '/app/resources/sidecar/darwin-arm64/ancestryllm-sidecar/ancestryllm-sidecar',

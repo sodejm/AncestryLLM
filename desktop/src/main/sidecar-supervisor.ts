@@ -102,9 +102,21 @@ export function minimalSidecarEnvironment(
   platform: NodeJS.Platform,
   source: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
-  const allowed = platform === 'win32'
+  const platformAllowed = platform === 'win32'
     ? ['SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP']
     : ['LANG', 'LC_ALL', 'TMPDIR']
+  const nativeKeyringSessionAllowed = platform === 'linux'
+    && source.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'
+    ? [
+        'DBUS_SESSION_BUS_ADDRESS',
+        'HOME',
+        'XDG_CACHE_HOME',
+        'XDG_CONFIG_HOME',
+        'XDG_DATA_HOME',
+        'XDG_RUNTIME_DIR',
+      ]
+    : []
+  const allowed = [...platformAllowed, ...nativeKeyringSessionAllowed]
   return Object.fromEntries(
     allowed.flatMap((name) => source[name] === undefined ? [] : [[name, source[name]]]),
   )

@@ -61,11 +61,13 @@ The checked-in launcher starts that service on a private D-Bus session with
 owner-only temporary storage, waits for its well-known name, and proves native
 store, read, and delete operations with a non-secret probe. The packaged
 process shares the launcher's disposable home, XDG, runtime, and D-Bus session
-paths. The launcher preserves the packaged command's real exit status and
-removes the state afterward. No mock or alternate Python keyring backend is
-permitted. This is verification infrastructure only; it does not alter the
-packaged application, add a credential fallback, or weaken keyring-only
-startup.
+paths. Electron main recognizes only the exact internal verification marker and
+forwards only those session paths across the sanitized sidecar launch boundary;
+the marker itself, provider credentials, `PATH`, and alternate Python keyring
+selectors remain excluded. The launcher preserves the packaged command's real
+exit status and removes the state afterward. No mock or alternate Python
+keyring backend is permitted. This is verification infrastructure only; it does
+not add a production credential fallback or weaken keyring-only startup.
 
 ## Private lifecycle
 
@@ -75,7 +77,9 @@ startup.
    the operating-system random source.
 3. It starts the executable with no arguments, no shell, a private temporary
    working directory, and an allowlisted environment. Provider credentials,
-   `PATH`, and home-directory values are not inherited.
+   `PATH`, and home-directory values are not inherited during normal launches.
+   The exact internal Linux verification marker permits only the disposable
+   Secret Service session's D-Bus address and home/XDG directories.
 4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness
