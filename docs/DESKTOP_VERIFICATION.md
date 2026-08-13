@@ -190,14 +190,15 @@ use a login keychain. That automation-only switch
 is not part of a shipped launch path and does not replace the sidecar's OS
 keyring implementation. Linux uses the native Secret Service harness described
 above rather than a mock backend. The clean-quit check registers the native
-process exit listener first, then closes the attached renderer page under a
-bounded deadline. That closes the application's actual final native window
-instead of merely ending its browser-level automation session. The harness then
-releases the Playwright connection and waits for a normal zero-code native
-process exit. Closing the final desktop window calls `app.quit()` on every
-supported OS, including macOS, so the same
-fail-closed job preflight and verified sidecar shutdown run before a normal
-zero-code exit.
+process exit listener first. On macOS it sends `SIGTERM`, exercising the
+production signal-to-quit path; on Windows and Linux it closes the attached
+renderer page under a bounded deadline, exercising the final-window path. The
+harness then releases the Playwright connection and waits for a normal zero-code
+native process exit. Both paths request `app.quit()` and are vetoed while the
+fail-closed job preflight and verified sidecar shutdown run. Only the authorized
+completion callback uses `app.exit(0)`, after releasing the IPC boundary and
+sidecar supervisor, so Electron cannot enter a second platform-dependent quit
+cycle.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and

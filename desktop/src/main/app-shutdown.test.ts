@@ -39,44 +39,44 @@ describe('Electron app shutdown', () => {
     const privateFailure = '/private/process-tree-cleanup-failure'
     const stopSidecar = vi.fn()
     const reportFailure = vi.fn()
-    const authorizeAndQuit = vi.fn()
+    const authorizeAndExit = vi.fn()
 
     await expect(completeAppShutdown(
       async () => { throw new Error(privateFailure) },
       async () => 'stay',
       stopSidecar,
       reportFailure,
-      authorizeAndQuit,
+      authorizeAndExit,
     )).resolves.toBe(false)
 
     expect(stopSidecar).not.toHaveBeenCalled()
     expect(reportFailure).toHaveBeenCalledOnce()
     expect(reportFailure).toHaveBeenCalledWith()
-    expect(authorizeAndQuit).not.toHaveBeenCalled()
+    expect(authorizeAndExit).not.toHaveBeenCalled()
     expect(JSON.stringify(reportFailure.mock.calls)).not.toContain(privateFailure)
   })
 
-  it('prepares jobs before stopping the sidecar and authorizing quit', async () => {
+  it('prepares jobs before stopping the sidecar and authorizing exit', async () => {
     const order: string[] = []
     const actions: string[] = []
     const reportFailure = vi.fn()
-    const authorizeAndQuit = vi.fn(() => order.push('quit'))
+    const authorizeAndExit = vi.fn(() => order.push('exit'))
 
     await expect(completeAppShutdown(
       async (action) => { actions.push(action); order.push('prepare') },
       vi.fn(),
       async () => { order.push('stop') },
       reportFailure,
-      authorizeAndQuit,
+      authorizeAndExit,
     )).resolves.toBe(true)
 
     expect(reportFailure).not.toHaveBeenCalled()
-    expect(authorizeAndQuit).toHaveBeenCalledOnce()
+    expect(authorizeAndExit).toHaveBeenCalledOnce()
     expect(actions).toEqual(['wait'])
-    expect(order).toEqual(['prepare', 'stop', 'quit'])
+    expect(order).toEqual(['prepare', 'stop', 'exit'])
   })
 
-  it('lets the user wait again before authorizing quit', async () => {
+  it('lets the user wait again before authorizing exit', async () => {
     const actions: string[] = []
     const prepareJobs = vi.fn(async (action: string) => {
       actions.push(action)
@@ -84,20 +84,20 @@ describe('Electron app shutdown', () => {
     })
     const chooseUnsafeAction = vi.fn().mockResolvedValue('wait')
     const stopSidecar = vi.fn().mockResolvedValue(undefined)
-    const authorizeAndQuit = vi.fn()
+    const authorizeAndExit = vi.fn()
 
     await expect(completeAppShutdown(
       prepareJobs,
       chooseUnsafeAction,
       stopSidecar,
       vi.fn(),
-      authorizeAndQuit,
+      authorizeAndExit,
     )).resolves.toBe(true)
 
     expect(actions).toEqual(['wait', 'wait'])
     expect(chooseUnsafeAction).toHaveBeenCalledOnce()
     expect(stopSidecar).toHaveBeenCalledOnce()
-    expect(authorizeAndQuit).toHaveBeenCalledOnce()
+    expect(authorizeAndExit).toHaveBeenCalledOnce()
   })
 
   it('requests cancellation only after the user chooses it', async () => {
@@ -122,19 +122,19 @@ describe('Electron app shutdown', () => {
 
   it('vetoes quit when sidecar process-tree shutdown cannot be verified', async () => {
     const reportFailure = vi.fn()
-    const authorizeAndQuit = vi.fn()
+    const authorizeAndExit = vi.fn()
 
     await expect(completeAppShutdown(
       vi.fn().mockResolvedValue(undefined),
       vi.fn(),
       vi.fn().mockRejectedValue(new Error('/private/sidecar/process')),
       reportFailure,
-      authorizeAndQuit,
+      authorizeAndExit,
     )).resolves.toBe(false)
 
     expect(reportFailure).toHaveBeenCalledOnce()
     expect(reportFailure).toHaveBeenCalledWith()
-    expect(authorizeAndQuit).not.toHaveBeenCalled()
+    expect(authorizeAndExit).not.toHaveBeenCalled()
   })
 
   it('fails closed if the shutdown-choice prompt cannot return a valid choice', async () => {

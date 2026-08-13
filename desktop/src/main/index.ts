@@ -251,7 +251,10 @@ if (localRuntimeCliRequested && !primaryInstance) {
           sidecarSupervisor = undefined
           prepareJobShutdown = undefined
           shutdownAuthorized = true
-          app.quit()
+          // The normal quit lifecycle has already been vetoed while the
+          // sidecar was owned. Once shutdown is verified, exit directly so
+          // Electron cannot re-enter a platform-specific window-close cycle.
+          app.exit(0)
         },
       ).finally(() => { shutdownPromise = undefined })
     }

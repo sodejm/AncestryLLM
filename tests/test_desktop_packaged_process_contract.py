@@ -131,6 +131,19 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     )
     assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
+    verified_exit_start = main_source.index(
+        "() => {\n          disposeIpcBoundary()",
+        main_source.index("shutdownPromise = completeAppShutdown("),
+    )
+    verified_exit_end = main_source.index("\n        },", verified_exit_start)
+    verified_exit_source = main_source[verified_exit_start:verified_exit_end]
+    dispose_index = verified_exit_source.index("disposeIpcBoundary()")
+    supervisor_release_index = verified_exit_source.index("sidecarSupervisor = undefined")
+    authorization_index = verified_exit_source.index("shutdownAuthorized = true")
+    exit_index = verified_exit_source.index("app.exit(0)")
+
+    assert dispose_index < supervisor_release_index < authorization_index < exit_index
+    assert "app.quit()" not in verified_exit_source
 
 
 def test_linux_packaged_environment_preserves_native_keyring_session_boundary() -> None:

@@ -23,7 +23,7 @@ export async function completeAppShutdown(
   chooseUnsafeAction: () => Promise<UnsafeShutdownChoice>,
   stopSidecar: () => Promise<void>,
   reportFailure: () => void,
-  authorizeAndQuit: () => void,
+  authorizeAndExit: () => void,
 ): Promise<boolean> {
   let action: JobShutdownAction = 'wait'
   while (true) {
@@ -50,6 +50,6 @@ export async function completeAppShutdown(
     reportFailure()
     return false
   }
-  authorizeAndQuit()
+  authorizeAndExit()
   return true
 }

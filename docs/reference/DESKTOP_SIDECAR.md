@@ -127,8 +127,12 @@ or **Stay open**. Cancellation is cooperative: protected publication can remain
 `pending-safe-point`, and Electron never silently abandons it. Process shutdown
 continues only after a safe assessment and verified sidecar stop. A degraded
 startup admits no process-local jobs, so its main-only shutdown assessment is
-the explicit safe empty case. Future provider streams and other database
-sessions must register an orderly drain before their routes are enabled.
+the explicit safe empty case. The first `app.quit()` lifecycle is vetoed during
+that assessment. After IPC disposal and verified sidecar stop release every
+owned resource, the authorized completion callback uses `app.exit(0)` rather
+than re-entering platform-specific window closure. Future provider streams and
+other database sessions must register an orderly drain before their routes are
+enabled.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not

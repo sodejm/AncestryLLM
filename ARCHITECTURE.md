@@ -393,12 +393,14 @@ still requires its distribution and target-assurance gates to pass.
 - POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
   escalation over the complete group. The Windows sidecar joins a
   kill-on-close Job Object and Electron main requests full-tree termination.
-  Closing the final desktop window calls `app.quit()` on every supported OS,
+  Closing the final desktop window requests `app.quit()` on every supported OS,
   including macOS, so the sidecar never remains resident without a visible
   application window. After Electron main owns the sidecar supervisor, it also
   translates its own `SIGTERM` into `app.quit()` and retains that handler during
-  shutdown. Both entry points preserve the native job preflight and verified
-  sidecar stop.
+  shutdown. Both entry points are vetoed until the native job preflight and
+  verified sidecar stop finish. Electron uses `app.exit(0)` only from that
+  authorized completion callback, after every owned resource has been released,
+  to avoid a second platform-specific quit cycle.
   Shutdown fails closed when termination cannot be verified. The implemented
   drain covers the Uvicorn server and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative
