@@ -1,3 +1,5 @@
+/** Verifies the preload job bridge validates lifecycle requests and event delivery. */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   desktopChannels,
@@ -135,8 +137,10 @@ describe('preload job bridge', () => {
     const listener = vi.fn()
     const cleanup = bridge.onJobEvent(listener)
     expect(electron.on).toHaveBeenCalledOnce()
-    expect(electron.on).toHaveBeenCalledWith(desktopEventChannels.jobEvent, expect.any(Function))
-    const ipcListener = electron.on.mock.calls[0]?.[1] as (...args: unknown[]) => void
+    const registration = electron.on.mock.calls[0]
+    expect(registration?.[0]).toBe(desktopEventChannels.jobEvent)
+    expect(typeof registration?.[1]).toBe('function')
+    const ipcListener = registration?.[1] as (...args: unknown[]) => void
     const delivery = {
       schema_version: 1 as const,
       kind: 'event' as const,

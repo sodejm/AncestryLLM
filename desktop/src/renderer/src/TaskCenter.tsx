@@ -1,3 +1,5 @@
+/** Renders durable sidecar jobs with bounded progress, cancellation, and recovery controls. */
+
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type {
   AncestryBridge,

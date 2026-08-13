@@ -1,3 +1,5 @@
+/** Verifies monotonic task-center state, gap recovery, and terminal convergence. */
+
 import { describe, expect, it } from 'vitest'
 import type { JobEvent, JobSnapshot } from '../../shared-contract/desktop'
 import { initialTaskCenterState, taskCenterReducer } from './task-center-state'

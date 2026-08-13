@@ -1,3 +1,5 @@
+/** Reduces job snapshots and events monotonically while requesting authoritative resynchronization. */
+
 import type { JobEvent, JobSnapshot, JobState } from '../../shared-contract/desktop'
 
 const terminalStates: ReadonlySet<JobState> = new Set(['completed', 'failed', 'cancelled'])

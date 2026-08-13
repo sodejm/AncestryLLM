@@ -1,3 +1,5 @@
+/** Exercises task-center rendering, recovery, cancellation, and reload behavior. */
+
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
