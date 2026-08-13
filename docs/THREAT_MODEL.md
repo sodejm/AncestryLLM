@@ -518,12 +518,14 @@ owned by Issues #11 and #102:
 - The current shutdown path drains the Uvicorn listener/server, stdio, complete
   sidecar process tree, temporary launch directory, and Issue #104's admitted
   jobs through a bounded wait or cooperative cancellation assessment backed by
-  encrypted lifecycle persistence and restart reconciliation. After taking
-  ownership of the sidecar supervisor, Electron main translates `SIGTERM` into
-  `app.quit()` and retains the listener during that drain, so a repeated signal
-  cannot restore default termination and bypass the fail-closed shutdown
-  contract. Future provider streams and other database sessions must register
-  their own drains before their routes ship.
+  encrypted lifecycle persistence and restart reconciliation. Closing the final
+  desktop window calls `app.quit()` on every supported OS, including macOS, so
+  no invisible app-owned sidecar remains resident and every ordinary window
+  close enters the fail-closed shutdown contract. Electron main also retains its
+  `SIGTERM`-to-`app.quit()` handler after taking ownership of the supervisor, so
+  service-manager shutdown cannot bypass the same drain. Future provider
+  streams and other database sessions must register their own drains before
+  their routes ship.
 
 Private-stdin bootstrap, Electron supervision, token-derived readiness, bounded
 restart/shutdown behavior, pre-spawn integrity, and native packaged-resource

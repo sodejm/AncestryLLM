@@ -190,11 +190,9 @@ use a login keychain. That automation-only switch
 is not part of a shipped launch path and does not replace the sidecar's OS
 keyring implementation. Linux uses the native Secret Service harness described
 above rather than a mock backend. The clean-quit check uses CDP's
-`Browser.close` command on Windows and Linux. On macOS, where closing the final
-window conventionally leaves an application running, the harness sends
-`SIGTERM`; after taking ownership of the sidecar supervisor, Electron main
-translates that signal into `app.quit()` so the same fail-closed job preflight
-and verified sidecar shutdown run before a normal zero-code exit.
+`Browser.close` command on every target. Closing the final desktop window calls
+`app.quit()` on every supported OS, including macOS, so the same fail-closed job
+preflight and verified sidecar shutdown run before a normal zero-code exit.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and

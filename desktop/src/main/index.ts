@@ -244,5 +244,5 @@ if (localRuntimeCliRequested && !primaryInstance) {
       ).finally(() => { shutdownPromise = undefined })
     }
   })
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+  app.on('window-all-closed', () => { app.quit() })
 }
