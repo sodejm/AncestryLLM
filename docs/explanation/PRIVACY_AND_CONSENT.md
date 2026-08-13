@@ -98,6 +98,19 @@ the session, and audit records contain only identifiers, counters, usage, and
 one-way payload hashes. No Electron chat surface, streaming transport, or safe
 renderer presentation is included yet.
 
+Unreleased Issue #56 adds only a service-internal asynchronous adapter for an
+already-authorized provider stream. The existing profile, endpoint, credential,
+policy, and consent checks complete before its worker starts, and streaming
+capability is required. A bounded queue, byte-bounded chunks, an absolute
+deadline, and cooperative cancellation limit lifetime and memory. Every
+success, provider failure, timeout, caller cancellation, or early consumer
+close records exactly one terminal audit result. Requests and output remain
+one-way hashes by default; explicit consent is still required for payload
+retention, and cancelled partial output is discarded. Structured output stays
+on the validated non-streaming path. This work adds no Electron or public
+streaming surface, and a synchronous provider SDK may finish unwinding only at
+its next yield or return.
+
 Desktop capability discovery uses non-sensitive metadata. It must not probe
 private files, databases, keyrings, people, providers, or networks. Local,
 remote, sensitive, destructive, and Post-MVP states use text and icons as well

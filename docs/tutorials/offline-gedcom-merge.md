@@ -6,6 +6,11 @@ one-shot CLI through the checked-in helper; `provider=none` is fixed in every
 merge, so the workflow makes no provider or network call even if credentials
 are present in your environment.
 
+Issue #56's internal asynchronous provider adapter does not change this
+workflow. With `provider=none`, authorization fails before any provider worker
+or stream queue starts, so installed SDKs and ambient credentials cannot turn
+the tutorial into a network operation.
+
 ## What you will do
 
 You will set up AncestryLLM, merge two deliberately fictional Aster records,
