@@ -129,6 +129,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         "!shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined)"
         in main_source
     )
+    assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
 
 

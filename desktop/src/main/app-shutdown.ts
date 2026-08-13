@@ -9,11 +9,12 @@ type WindowCloseEvent = { preventDefault: () => void }
 export function requestVerifiedShutdownBeforeWindowClose(
   event: WindowCloseEvent,
   shutdownRequired: boolean,
+  shutdownPending: boolean,
   requestQuit: () => void,
 ): void {
   if (!shutdownRequired) return
   event.preventDefault()
-  requestQuit()
+  if (!shutdownPending) requestQuit()
 }
 
 /** Authorizes Electron shutdown only after jobs and the sidecar stop safely. */

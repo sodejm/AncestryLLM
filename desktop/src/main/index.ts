@@ -158,6 +158,7 @@ function createWindow(): void {
     requestVerifiedShutdownBeforeWindowClose(
       event,
       !shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined),
+      shutdownPromise !== undefined,
       () => app.quit(),
     )
   })

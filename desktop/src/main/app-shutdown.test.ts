@@ -7,17 +7,27 @@ describe('Electron window shutdown guard', () => {
     const event = { preventDefault: vi.fn() }
     const requestQuit = vi.fn()
 
-    requestVerifiedShutdownBeforeWindowClose(event, true, requestQuit)
+    requestVerifiedShutdownBeforeWindowClose(event, true, false, requestQuit)
 
     expect(event.preventDefault).toHaveBeenCalledOnce()
     expect(requestQuit).toHaveBeenCalledOnce()
+  })
+
+  it('does not re-enter app quit while verified shutdown is already pending', () => {
+    const event = { preventDefault: vi.fn() }
+    const requestQuit = vi.fn()
+
+    requestVerifiedShutdownBeforeWindowClose(event, true, true, requestQuit)
+
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(requestQuit).not.toHaveBeenCalled()
   })
 
   it('allows the final window to close after verified shutdown is authorized', () => {
     const event = { preventDefault: vi.fn() }
     const requestQuit = vi.fn()
 
-    requestVerifiedShutdownBeforeWindowClose(event, false, requestQuit)
+    requestVerifiedShutdownBeforeWindowClose(event, false, false, requestQuit)
 
     expect(event.preventDefault).not.toHaveBeenCalled()
     expect(requestQuit).not.toHaveBeenCalled()
