@@ -42,7 +42,6 @@ type LaunchResult = Readonly<{
   launchMs: number
   readyMs: number
   userData: string
-  browserEndpoint: string
 }>
 
 type ExitStatus = Readonly<{
@@ -288,52 +287,17 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 }
 
 async function closePackaged(result: LaunchResult): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(result.browserEndpoint)
-    let commandWasSent = false
-    let settled = false
-    const settle = (error?: Error): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (socket.readyState === WebSocket.OPEN) socket.close()
-      if (error) reject(error)
-      else resolve()
-    }
-    const timer = setTimeout(() => {
-      settle(new Error('Timed out waiting for packaged CDP Browser.close acknowledgement.'))
-    }, 5_000)
-    socket.addEventListener('open', () => {
-      try {
-        commandWasSent = true
-        socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
-      } catch (error) {
-        settle(error instanceof Error ? error : new Error(String(error)))
-      }
-    }, { once: true })
-    socket.addEventListener('message', (event) => {
-      let response: { id?: number; error?: unknown }
-      try {
-        response = JSON.parse(String(event.data)) as { id?: number; error?: unknown }
-      } catch {
-        return
-      }
-      if (response.id !== 1) return
-      if (response.error) {
-        settle(new Error('Packaged CDP Browser.close command was rejected.'))
-        return
-      }
-      settle()
-    })
-    socket.addEventListener('close', () => {
-      if (commandWasSent) settle()
-      else settle(new Error('Packaged CDP endpoint closed before the clean-quit command.'))
-    }, { once: true })
-    socket.addEventListener('error', () => {
-      settle(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
-    }, { once: true })
-  })
-  await result.browser.close().catch(() => undefined)
+  const session = await result.browser.newBrowserCDPSession()
+  try {
+    await withinDeadline(
+      'requesting packaged clean quit',
+      5_000,
+      () => session.send('Browser.close'),
+    )
+  } finally {
+    await session.detach().catch(() => undefined)
+    await result.browser.close().catch(() => undefined)
+  }
   const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs)
   expect(status).toEqual({ code: 0, signal: null })
 }
@@ -393,7 +357,6 @@ async function launchPackaged(
         launchMs,
         readyMs,
         userData: root,
-        browserEndpoint: endpoint,
       }
     })
   } catch (error) {

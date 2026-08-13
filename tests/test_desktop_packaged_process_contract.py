@@ -73,7 +73,7 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "expect(capabilityBurst.unexpectedErrorCodes).toEqual([])" in source
 
 
-def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
+def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     close_start = source.index("async function closePackaged")
     close_end = source.index("\nasync function launchPackaged", close_start)
@@ -81,21 +81,18 @@ def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
 
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
-    command_index = close_source.index("method: 'Browser.close'")
+    session_index = close_source.index("result.browser.newBrowserCDPSession()")
+    command_index = close_source.index("session.send('Browser.close')", session_index)
+    detach_index = close_source.index("session.detach()", command_index)
     browser_close_index = close_source.index("result.browser.close()", command_index)
     process_wait_index = close_source.index(
         "waitForProcessExit(result.process, packagedQuitTimeoutMs)"
     )
 
-    assert "socket.addEventListener('message'" in close_source
-    assert "response.id !== 1" in close_source
-    assert "response.error" in close_source
-    assert not re.search(
-        r"socket\.send\(JSON\.stringify\(\{ id: 1, method: 'Browser\.close' \}\)\)\s*"
-        r"socket\.close\(\)",
-        close_source,
-    )
-    assert command_index < browser_close_index < process_wait_index
+    assert "new WebSocket(" not in close_source
+    assert "browserEndpoint" not in close_source
+    assert session_index < command_index < detach_index < browser_close_index
+    assert browser_close_index < process_wait_index
 
 
 def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
