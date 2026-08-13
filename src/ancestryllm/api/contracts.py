@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Annotated, Any, Literal, TypeAlias, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ancestryllm.application.chat import (
     CHAT_MAX_ACTIVE_SESSIONS,
@@ -16,12 +16,19 @@ from ancestryllm.application.chat import (
     CHAT_MAX_SAFE_RETRIES,
     CHAT_MAX_TEMPERATURE,
     CHAT_MAX_TIMEOUT_SECONDS,
+    CHAT_STREAM_REPLAY_MAX_BYTES,
 )
 from ancestryllm.application.chat import (
     ChatCapability as ApplicationChatCapability,
 )
 from ancestryllm.application.chat import (
     ChatDataClass as ApplicationChatDataClass,
+)
+from ancestryllm.application.chat import (
+    ChatEvent as ApplicationChatEvent,
+)
+from ancestryllm.application.chat import (
+    ChatEventPayload as ApplicationChatEventPayload,
 )
 from ancestryllm.application.chat import (
     ChatMessage as ApplicationChatMessage,
@@ -40,6 +47,9 @@ from ancestryllm.application.chat import (
 )
 from ancestryllm.application.chat import (
     ChatSessionCreateRequest as ApplicationChatSessionCreateRequest,
+)
+from ancestryllm.application.chat import (
+    ChatStreamRun as ApplicationChatStreamRun,
 )
 from ancestryllm.application.dto import CONTRACT_VERSION, MAX_BOUNDARY_JSON_BYTES
 
@@ -76,6 +86,15 @@ _DataClass = Literal[
 ]
 _ChatPurpose = Literal["genealogy_analysis", "source_analysis", "writing_assistance"]
 _ChatRole = Literal["user", "assistant"]
+_ChatEventType = Literal[
+    "active",
+    "first-token",
+    "delta",
+    "cancelling",
+    "completed",
+    "interrupted",
+    "failed",
+]
 ErrorScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - Pydantic schema
 
 
@@ -579,8 +598,121 @@ class ChatRunSummary(BaseModel):
         )
 
 
+class ChatEventPayload(BaseModel):
+    """Sanitized, event-specific fields emitted by one chat stream event."""
+
+    model_config = _STRICT_MODEL
+
+    text: Annotated[str, Field(min_length=1, max_length=CHAT_MAX_MESSAGE_CHARACTERS)] | None = None
+    code: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{0,99}$")] | None = None
+    provider_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    model: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    remote: bool | None = None
+    message_count: Annotated[int, Field(ge=0, le=CHAT_MAX_MESSAGES)] | None = None
+
+    @field_validator("provider_id", "model")
+    @classmethod
+    def reject_blank_or_null_text(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or "\x00" in value):
+            raise ValueError("chat event text must be non-blank and contain no nulls")
+        return value
+
+    @field_validator("text")
+    @classmethod
+    def reject_empty_or_null_event_text(cls, value: str | None) -> str | None:
+        if value is not None and (not value or "\x00" in value):
+            raise ValueError("chat event text must be non-empty and contain no nulls")
+        return value
+
+    @classmethod
+    def from_application(cls, payload: ApplicationChatEventPayload) -> ChatEventPayload:
+        return cls(
+            text=payload.text,
+            code=payload.code,
+            provider_id=payload.provider_id,
+            model=payload.model,
+            remote=payload.remote,
+            message_count=payload.message_count,
+        )
+
+
+class ChatEvent(BaseModel):
+    """One strict schema-v1 event in an ordered transient chat stream."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    run_id: Annotated[str, Field(pattern=r"^run_[0-9a-f]{32}$")]
+    sequence: Annotated[int, Field(ge=1, le=2**63 - 1)]
+    type: _ChatEventType
+    timestamp: Annotated[str, Field(min_length=1, max_length=64)]
+    payload: ChatEventPayload
+
+    @model_validator(mode="after")
+    def validate_payload_shape(self) -> ChatEvent:
+        populated = {
+            name
+            for name in ("text", "code", "provider_id", "model", "remote", "message_count")
+            if getattr(self.payload, name) is not None
+        }
+        expected = {
+            "active": {"provider_id", "model", "remote"},
+            "first-token": {"text"},
+            "delta": {"text"},
+            "cancelling": set(),
+            "completed": {"message_count"},
+            "interrupted": {"code"},
+            "failed": {"code"},
+        }[self.type]
+        if populated != expected:
+            raise ValueError(f"chat event payload does not match {self.type}")
+        return self
+
+    @classmethod
+    def from_application(cls, event: ApplicationChatEvent) -> ChatEvent:
+        return cls(
+            schema_version=event.schema_version,
+            run_id=event.run_id,
+            sequence=event.sequence,
+            type=cast("Any", event.type.value),
+            timestamp=event.timestamp,
+            payload=ChatEventPayload.from_application(event.payload),
+        )
+
+
+class ChatStreamRun(BaseModel):
+    """Sanitized current state for one owner-scoped streaming provider run."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    session_id: Annotated[str, Field(pattern=r"^chat_[0-9a-f]{32}$")]
+    run_id: Annotated[str, Field(pattern=r"^run_[0-9a-f]{32}$")]
+    state: Literal["active", "cancelling", "completed", "interrupted", "failed"]
+    latest_sequence: Annotated[int, Field(ge=1, le=2**63 - 1)]
+    terminal: bool
+
+    @model_validator(mode="after")
+    def validate_terminal_state(self) -> ChatStreamRun:
+        expected = self.state in {"completed", "interrupted", "failed"}
+        if self.terminal is not expected:
+            raise ValueError("chat stream terminal status does not match its state")
+        return self
+
+    @classmethod
+    def from_application(cls, run: ApplicationChatStreamRun) -> ChatStreamRun:
+        return cls(
+            schema_version=run.schema_version,
+            session_id=run.session_id,
+            run_id=run.run_id,
+            state=cast("Any", run.state.value),
+            latest_sequence=run.latest_sequence,
+            terminal=run.terminal,
+        )
+
+
 class ChatCapability(BaseModel):
-    """Fixed schema-v1 limits and denied capabilities for transient chat."""
+    """Fixed schema-v1 limits and capabilities for transient chat."""
 
     model_config = _STRICT_MODEL
 
@@ -597,7 +729,8 @@ class ChatCapability(BaseModel):
     tools_enabled: Literal[False] = False
     payload_retention: Literal[False] = False
     output_is_evidence: Literal[False] = False
-    streaming: Literal[False] = False
+    streaming: Literal[True] = True
+    stream_replay_max_bytes: Literal[262144] = CHAT_STREAM_REPLAY_MAX_BYTES
 
     @classmethod
     def from_application(cls, capability: ApplicationChatCapability) -> ChatCapability:
@@ -616,6 +749,7 @@ class ChatCapability(BaseModel):
             payload_retention=capability.payload_retention,
             output_is_evidence=capability.output_is_evidence,
             streaming=capability.streaming,
+            stream_replay_max_bytes=capability.stream_replay_max_bytes,
         )
 
 
@@ -778,11 +912,14 @@ __all__ = [
     "CapabilityManifest",
     "CapabilityModule",
     "ChatCapability",
+    "ChatEvent",
+    "ChatEventPayload",
     "ChatMessage",
     "ChatRunRequest",
     "ChatRunSummary",
     "ChatSession",
     "ChatSessionCreateRequest",
+    "ChatStreamRun",
     "ConsentCreateRequest",
     "ConsentGrantResponse",
     "ConsentPreviewPayloadRequest",

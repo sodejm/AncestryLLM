@@ -12,9 +12,14 @@ safe-shutdown boundary. Issue #109 adds its bounded Tasks presentation through
 five fixed request methods and one validated event listener. Issue #110 adds a
 fixed, synchronous, transient chat service behind authenticated internal routes.
 That service requires an exact named profile and model plus current policy and
-consent; it adds no renderer bridge, streaming, tools, file or database access,
-genealogy operation, job submission, cloud-account, updater, autonomous action,
-or generic command route. The sidecar is not a general domain-data transport.
+consent. Issue #111 adds fixed stream-start, SSE, and cancellation routes plus a
+source-only Electron Main/preload bridge. Main owns authenticated SSE, strict
+owner and sequence validation, bounded batching, acknowledgement backpressure,
+and cancellation; it exposes no bearer or HTTP authority. These chat boundaries
+add no renderer conversation or Markdown presentation, tools, file or database
+access, genealogy operation, job submission, cloud-account, updater, autonomous
+action, or generic command route. The sidecar is not a general domain-data
+transport.
 The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -119,7 +124,9 @@ does not add a production credential fallback or weaken keyring-only startup.
    session-create, session-read, session-delete, and synchronous run routes. A
    run can leave the network-free default only after exact profile/model policy,
    current consent, bounded-input, and provider preflight checks succeed. It
-   still has no generic route dispatcher.
+   still has no generic route dispatcher. Issue #111 adds only fixed
+   stream-start, session/run-owned SSE-event, and stream-cancel operations for
+   the same bounded use case.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -149,6 +156,9 @@ server task and loopback listener, child stdio, the supervised process tree,
 Electron's private temporary working directory, and the encrypted provider and
 job database sessions. Issue #110 also closes the chat service before its
 provider dependencies and discards every process-local session and message.
+Issue #111 first cancels and records one payload-free terminal audit outcome for
+every active stream. Startup reconciliation records one stable interruption for
+an active run left by a prior process without replaying provider work.
 
 Before quitting, Electron main waits for a bounded safe-shutdown assessment. If
 work remains active, a native dialog offers **Wait**, **Request cancellation**,
@@ -170,9 +180,9 @@ The first `app.quit()` lifecycle is vetoed during that assessment. After IPC
 disposal and verified sidecar stop release every owned resource, the authorized
 completion callback uses `app.exit(0)` rather than re-entering
 platform-specific window closure.
-Future provider streams and other database sessions must register an orderly
-drain before their routes are enabled. Issue #110 is synchronous and admits no
-streaming or background generation.
+Issue #111's chat stream service is registered for orderly drain before its
+routes are enabled. Other future provider streams and database sessions must do
+the same.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not
@@ -186,7 +196,8 @@ lifetime manual retry. Concurrent retry requests share a single launch attempt,
 and an exhausted retry is a deterministic no-op. Electron main uses the session
 only for authenticated requests to its fixed startup-diagnostic, capability,
 settings, credential-management, provider-configuration, endpoint-test, and
-consent-administration routes, plus the main-only job shutdown preflight. The
+consent-administration routes, the fixed chat-stream routes, plus the main-only
+job shutdown preflight. The
 bridge exposes the typed result, sanitized diagnostics, and retry outcome, but
 never the session, bearer, port, resolved address, response body, raw HTTP
 data, or a credential value.
@@ -198,10 +209,12 @@ buffer to 1 MiB, and fails a stalled connection after three seconds. The rendere
 receives only parsed snapshots, events, and stable coded failures; it receives
 no HTTP or sidecar connection authority.
 
-Issue #110's chat routes are internal Python-sidecar contracts only. Electron
-main, preload, and the renderer do not call or expose them. A later renderer
-surface must receive a separately reviewed fixed bridge rather than acquiring
-HTTP, bearer, provider, session, or generic route authority.
+Issue #111 consumes the #110/#56 chat boundaries through fixed stream-start,
+SSE-event, and cancellation clients. Electron Main rejects redirects, wrong
+content types, wrong owner/run identities, invalid event DTOs, and stale,
+duplicate, or nonmonotonic sequences. Preload exposes only fixed start, cancel,
+acknowledge, and event-delivery contracts; neither preload nor the renderer
+acquires HTTP, bearer, provider, session, or generic route authority.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
@@ -212,7 +225,10 @@ exactly six provider/consent methods (`getProviderConfiguration`,
 `createProviderProfile`, `validateProviderEndpoint`, `previewConsent`,
 `createConsent`, and `revokeConsent`). Issue #109 adds exactly five task
 request methods (`listJobs`, `getJob`, `cancelJob`, `subscribeJobEvents`, and
-`unsubscribeJobEvents`) plus the fixed, validated `onJobEvent` listener. There
+`unsubscribeJobEvents`) plus the fixed, validated `onJobEvent` listener. Issue
+#111 adds exactly three chat-stream request methods (`startChatStream`,
+`cancelChatStream`, and `acknowledgeChatStream`) plus the fixed, validated
+`onChatEventBatch` listener. There
 is no generic send, listen, route, or channel selection operation. Issue #104's
 shutdown client remains Electron-Main-only.
 Main accepts a call only from the registered
@@ -249,6 +265,20 @@ Duplicate or stale events are not forwarded. A gap or expired replay cursor is
 reported with a stable code so the renderer can refresh the backend snapshot
 and create one replacement subscription. No task state is persisted in
 renderer storage.
+
+Main also owns every active chat stream and binds it to the requesting sender,
+current frame, trusted application document, sidecar session, chat session, and
+run. A sender may hold at most four active streams. Main batches events within
+16 ms or 4 KiB and measures exact UTF-8 JSON delivery bytes. At 256 KiB of
+unacknowledged data it pauses the private sidecar source; a 15-second
+acknowledgement stall cancels the exact run and produces a coded terminal
+outcome. One interrupted connection may resume the same run from its
+acknowledged cursor, but Main never starts or retries provider execution after
+output. Terminal delivery stays owned until acknowledged. Cross-document
+navigation, renderer exit or destruction, sidecar-session loss or replacement,
+bridge disposal, and application shutdown cancel and remove affected streams.
+Issue #112 separately owns renderer conversation state and safe Markdown/XSS
+presentation.
 
 Preference updates require the last renderer-visible non-negative revision and
 return a coded conflict when it is stale. Packaged main persists the exact

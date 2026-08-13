@@ -103,6 +103,15 @@ const remediations: Readonly<Record<BridgeErrorCode, string>> = {
   JOB_SUBSCRIPTION_CLOSED: 'Refresh task activity to reconnect.',
   JOB_SUBSCRIPTION_CONFLICT: 'Refresh task activity to replace the existing subscription.',
   JOB_EVENT_STREAM_FAILED: 'Refresh task activity or restart AncestryLLM.',
+  CHAT_SESSION_NOT_FOUND: 'Reload the conversation and try again.',
+  CHAT_STREAM_NOT_FOUND: 'Start a new response from the current conversation.',
+  CHAT_STREAM_CURSOR_INVALID: 'Reload the conversation before retrying.',
+  CHAT_STREAM_REPLAY_EXPIRED: 'Start a new response; earlier output is no longer available.',
+  CHAT_STREAM_SERVICE_UNAVAILABLE: 'Retry the private service or restart AncestryLLM.',
+  CHAT_STREAM_LIMIT: 'Cancel or finish another response before trying again.',
+  CHAT_STREAM_BACKPRESSURE_TIMEOUT: 'Reload the conversation and start a new response.',
+  CHAT_STREAM_STALLED: 'Start a new response; the original provider request was not retried.',
+  CHAT_STREAM_EVENT_INVALID: 'Start a new response; the invalid stream was cancelled.',
   INTERNAL_ERROR: 'Try again or restart AncestryLLM.',
 }
 

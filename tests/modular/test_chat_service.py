@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,6 +17,9 @@ from ancestryllm.application.chat import (
     CHAT_MAX_MESSAGE_CHARACTERS,
     CHAT_MAX_MESSAGES,
     ChatDataClass,
+    ChatEvent,
+    ChatEventPayload,
+    ChatEventType,
     ChatMessage,
     ChatPurpose,
     ChatRole,
@@ -23,6 +28,7 @@ from ancestryllm.application.chat import (
 )
 from ancestryllm.core.errors import AncestryError, ProviderError, SecurityPolicyError
 from ancestryllm.llm.chat import ChatService
+from ancestryllm.llm.chat_streaming import ChatStreamingService
 from ancestryllm.llm.contracts import (
     DataClass,
     GenerationRequest,
@@ -44,11 +50,16 @@ class _FixtureProvider:
             provider_id=provider_id,
             remote=remote,
             structured_output=False,
-            streaming=False,
+            streaming=True,
             retention_known=True,
             zero_data_retention=True,
         )
         self.calls: list[GenerationRequest] = []
+        self.stream_calls: list[GenerationRequest] = []
+        self.stream_chunks = ["Fictional ", "streamed ", "response."]
+        self.block_after_first_chunk = False
+        self.stream_blocked = threading.Event()
+        self.stream_release = threading.Event()
         self.failure: ProviderError | None = None
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
@@ -64,8 +75,13 @@ class _FixtureProvider:
             cost_usd=0.001 if self.capabilities.remote else None,
         )
 
-    def stream(self, _request: GenerationRequest) -> Iterator[str]:
-        raise AssertionError("transient chat must not invoke provider streaming")
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        self.stream_calls.append(request)
+        for index, chunk in enumerate(self.stream_chunks):
+            yield chunk
+            if index == 0 and self.block_after_first_chunk:
+                self.stream_blocked.set()
+                self.stream_release.wait(timeout=5)
 
 
 class _FixtureRegistry:
@@ -92,6 +108,7 @@ class _ChatEnvironment:
     chat: ChatService
 
     def close(self) -> None:
+        self.provider.stream_release.set()
         self.chat.close()
         self.llm.close()
         self.app_context.close()
@@ -459,4 +476,195 @@ def test_capability_forbids_tools_retention_and_evidentiary_use(
     assert capability.tools_enabled is False
     assert capability.payload_retention is False
     assert capability.output_is_evidence is False
-    assert capability.streaming is False
+    assert capability.streaming is True
+
+
+def test_chat_event_contract_rejects_invalid_schema_sequence_and_payload() -> None:
+    with pytest.raises(ValueError, match="schema"):
+        ChatEvent(
+            schema_version=2,
+            run_id="run_0123456789abcdef0123456789abcdef",
+            sequence=1,
+            type=ChatEventType.ACTIVE,
+            timestamp="2026-08-13T12:00:00+00:00",
+            payload=ChatEventPayload(provider_id="ollama", model="test", remote=False),
+        )
+    with pytest.raises(ValueError, match="sequence"):
+        ChatEvent(
+            run_id="run_0123456789abcdef0123456789abcdef",
+            sequence=0,
+            type=ChatEventType.ACTIVE,
+            timestamp="2026-08-13T12:00:00+00:00",
+            payload=ChatEventPayload(provider_id="ollama", model="test", remote=False),
+        )
+    with pytest.raises(ValueError, match="payload"):
+        ChatEvent(
+            run_id="run_0123456789abcdef0123456789abcdef",
+            sequence=1,
+            type=ChatEventType.DELTA,
+            timestamp="2026-08-13T12:00:00+00:00",
+            payload=ChatEventPayload(code="CHAT_STREAM_FAILED"),
+        )
+
+
+def test_streaming_chat_replays_ordered_events_and_audits_one_run(
+    chat_environment: _ChatEnvironment,
+) -> None:
+    session = chat_environment.chat.start(_start_request())
+    manager = ChatStreamingService(chat_environment.chat, chat_environment.llm)
+
+    async def exercise() -> tuple[object, list[ChatEvent], list[ChatEvent]]:
+        await manager.startup()
+        run = await manager.start(
+            session.session_id,
+            ChatRunRequest(message="Stream this fictional request."),
+        )
+        events = [event async for event in manager.events(session.session_id, run.run_id)]
+        replay = [
+            event
+            async for event in manager.events(
+                session.session_id,
+                run.run_id,
+                after_sequence=2,
+            )
+        ]
+        await manager.shutdown()
+        return run, events, replay
+
+    run, events, replay = asyncio.run(exercise())
+
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    assert [event.type for event in events] == [
+        ChatEventType.ACTIVE,
+        ChatEventType.FIRST_TOKEN,
+        ChatEventType.DELTA,
+        ChatEventType.DELTA,
+        ChatEventType.COMPLETED,
+    ]
+    assert (
+        "".join(
+            event.payload.text or ""
+            for event in events
+            if event.type in {ChatEventType.FIRST_TOKEN, ChatEventType.DELTA}
+        )
+        == "Fictional streamed response."
+    )
+    assert replay == events[2:]
+    assert run.run_id == events[0].run_id
+    assert len(chat_environment.provider.stream_calls) == 1
+    assert chat_environment.chat.get(session.session_id).message_count == 2
+
+    with chat_environment.app_context.database.session() as database_session:
+        rows = list(database_session.scalars(select(LlmRunModel)))
+    assert len(rows) == 1
+    assert rows[0].id == run.run_id
+    assert rows[0].status == "succeeded"
+    assert rows[0].completed_at is not None
+    assert rows[0].input_payload is None
+    assert rows[0].output_payload is None
+
+
+def test_streaming_chat_cancellation_is_ordered_and_terminalized_once(
+    chat_environment: _ChatEnvironment,
+) -> None:
+    session = chat_environment.chat.start(_start_request())
+    chat_environment.provider.block_after_first_chunk = True
+    manager = ChatStreamingService(chat_environment.chat, chat_environment.llm)
+
+    async def exercise() -> tuple[str, list[ChatEvent]]:
+        await manager.startup()
+        run = await manager.start(
+            session.session_id,
+            ChatRunRequest(message="Cancel this fictional request."),
+        )
+        first_events: list[ChatEvent] = []
+        async for event in manager.events(session.session_id, run.run_id):
+            first_events.append(event)
+            if event.type is ChatEventType.FIRST_TOKEN:
+                break
+        await manager.cancel(session.session_id, run.run_id)
+        remaining = [
+            event
+            async for event in manager.events(
+                session.session_id,
+                run.run_id,
+                after_sequence=first_events[-1].sequence,
+            )
+        ]
+        await manager.cancel(session.session_id, run.run_id)
+        await manager.shutdown()
+        return run.run_id, [*first_events, *remaining]
+
+    try:
+        run_id, events = asyncio.run(exercise())
+    finally:
+        chat_environment.provider.stream_release.set()
+
+    assert [event.type for event in events] == [
+        ChatEventType.ACTIVE,
+        ChatEventType.FIRST_TOKEN,
+        ChatEventType.CANCELLING,
+        ChatEventType.INTERRUPTED,
+    ]
+    assert events[-1].payload.code == "CHAT_STREAM_CANCELLED"
+    assert chat_environment.chat.get(session.session_id).message_count == 0
+    with chat_environment.app_context.database.session() as database_session:
+        rows = list(database_session.scalars(select(LlmRunModel)))
+    assert len(rows) == 1
+    assert rows[0].id == run_id
+    assert rows[0].status == "aborted"
+    assert rows[0].completed_at is not None
+
+
+def test_streaming_chat_rejects_cross_session_replay(
+    chat_environment: _ChatEnvironment,
+) -> None:
+    owner = chat_environment.chat.start(_start_request())
+    other = chat_environment.chat.start(_start_request())
+    manager = ChatStreamingService(chat_environment.chat, chat_environment.llm)
+
+    async def exercise() -> str:
+        await manager.startup()
+        run = await manager.start(
+            owner.session_id,
+            ChatRunRequest(message="Owner-only fictional request."),
+        )
+        with pytest.raises(AncestryError) as raised:
+            _ = [event async for event in manager.events(other.session_id, run.run_id)]
+        _ = [event async for event in manager.events(owner.session_id, run.run_id)]
+        await manager.shutdown()
+        return raised.value.code
+
+    assert asyncio.run(exercise()) == "CHAT_STREAM_NOT_FOUND"
+
+
+def test_restart_reconciliation_terminalizes_running_stream_audit_once(
+    chat_environment: _ChatEnvironment,
+) -> None:
+    session = chat_environment.chat.start(_start_request())
+    run_id = "run_0123456789abcdef0123456789abcdef"
+    handle = chat_environment.chat.open_stream(
+        session.session_id,
+        ChatRunRequest(message="Fictional interrupted request."),
+        run_id=run_id,
+    )
+
+    with chat_environment.app_context.database.session() as database_session:
+        running = database_session.get(LlmRunModel, run_id)
+        assert running is not None
+        assert running.status == "running"
+        assert running.completed_at is None
+
+    assert chat_environment.llm.reconcile_interrupted_stream_runs() == 1
+    assert chat_environment.llm.reconcile_interrupted_stream_runs() == 0
+    chat_environment.chat.abandon_stream(
+        handle,
+        error_code="CHAT_STREAM_RESTART_INTERRUPTED",
+    )
+
+    with chat_environment.app_context.database.session() as database_session:
+        row = database_session.get(LlmRunModel, run_id)
+        assert row is not None
+        assert row.status == "aborted"
+        assert row.error_code == "CHAT_STREAM_RESTART_INTERRUPTED"
+        assert row.completed_at is not None

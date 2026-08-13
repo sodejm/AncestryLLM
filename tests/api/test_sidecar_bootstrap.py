@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.routing import APIRoute
@@ -113,6 +113,9 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
         "/api/v1/chat/sessions",
         "/api/v1/chat/sessions/{session_id}",
         "/api/v1/chat/sessions/{session_id}/runs",
+        "/api/v1/chat/sessions/{session_id}/streams",
+        "/api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel",
+        "/api/v1/chat/sessions/{session_id}/streams/{run_id}/events",
         "/api/v1/consents",
         "/api/v1/consents/preview",
         "/api/v1/consents/{name}/revoke",
@@ -175,9 +178,17 @@ def test_packaged_sidecar_closes_chat_and_llm_resources(
     tmp_path: Path,
 ) -> None:
     chat_service = Mock()
+    streaming_service = Mock()
+    streaming_service.startup = AsyncMock()
+    streaming_service.shutdown = AsyncMock()
     llm_service = Mock()
     monkeypatch.setattr(sidecar_module, "LLMService", Mock(return_value=llm_service))
     monkeypatch.setattr(sidecar_module, "ChatService", Mock(return_value=chat_service))
+    monkeypatch.setattr(
+        sidecar_module,
+        "ChatStreamingService",
+        Mock(return_value=streaming_service),
+    )
     frame = LaunchFrame(
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
@@ -195,6 +206,8 @@ def test_packaged_sidecar_closes_chat_and_llm_resources(
 
     chat_service.close.assert_called_once_with()
     llm_service.close.assert_called_once_with()
+    streaming_service.startup.assert_awaited_once_with()
+    streaming_service.shutdown.assert_awaited_once_with()
 
 
 def test_sidecar_cleanup_continues_after_an_interruption(tmp_path: Path) -> None:
@@ -206,6 +219,7 @@ def test_sidecar_cleanup_continues_after_an_interruption(tmp_path: Path) -> None
         database=database,
         startup_diagnostics=Mock(),
         chat_service=chat_service,
+        chat_streaming_service=Mock(),
         llm_service=llm_service,
     )
 

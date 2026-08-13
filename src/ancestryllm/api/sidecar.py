@@ -33,6 +33,7 @@ from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
 from ancestryllm.llm.chat import ChatService
+from ancestryllm.llm.chat_streaming import ChatStreamingService
 from ancestryllm.llm.endpoint_validation import EndpointValidationService
 from ancestryllm.llm.profiles import ProviderProfileService
 from ancestryllm.llm.provider_configuration import ProviderConfigurationService
@@ -101,6 +102,7 @@ class _SidecarLifecycle:
     startup_diagnostics: Callable[[], StartupDiagnosticReport]
     chat_service: ChatService
     llm_service: LLMService
+    chat_streaming_service: ChatStreamingService
     job_lifecycle: JobLifecycleService | None = field(init=False, default=None, repr=False)
 
     def _close_owned_resources(
@@ -137,7 +139,10 @@ class _SidecarLifecycle:
                 repository,
             )
             service.startup()
+            await self.chat_streaming_service.startup()
         except BaseException:
+            with suppress(BaseException):
+                await self.chat_streaming_service.shutdown()
             with suppress(BaseException):
                 self._close_owned_resources(service)
             raise
@@ -170,7 +175,18 @@ class _SidecarLifecycle:
         )
 
     async def shutdown(self) -> None:
-        self._close_owned_resources()
+        first_failure: BaseException | None = None
+        try:
+            await self.chat_streaming_service.shutdown()
+        except BaseException as exc:  # noqa: BLE001 - every owned resource must close
+            first_failure = exc
+        try:
+            self._close_owned_resources()
+        except BaseException as exc:  # noqa: BLE001 - preserve the first failure
+            if first_failure is None:
+                first_failure = exc
+        if first_failure is not None:
+            raise first_failure
 
 
 def _create_native_windows_process_tree_guard() -> object:
@@ -376,12 +392,14 @@ def create_sidecar_app(
         profiles=provider_profiles,
     )
     chat_service = ChatService(llm_service, provider_profiles)
+    chat_streaming_service = ChatStreamingService(chat_service, llm_service)
 
     lifecycle = _SidecarLifecycle(
-        database,
-        startup_report,
-        chat_service,
-        llm_service,
+        database=database,
+        startup_diagnostics=startup_report,
+        chat_service=chat_service,
+        llm_service=llm_service,
+        chat_streaming_service=chat_streaming_service,
     )
     return create_app(
         settings=frame.settings(),
@@ -395,6 +413,7 @@ def create_sidecar_app(
         ),
         endpoint_validation_service=endpoint_validator,
         chat_service=chat_service,
+        chat_streaming_service=chat_streaming_service,
         lifecycle=lifecycle,
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,

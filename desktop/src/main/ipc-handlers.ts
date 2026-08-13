@@ -9,6 +9,13 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
+  type ChatEvent,
+  type ChatEventDelivery,
+  type ChatStreamAcknowledgement,
+  type ChatStreamAckRequest,
+  type ChatStreamCancelRequest,
+  type ChatStreamRun,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreview,
   type ConsentPreviewRequest,
@@ -40,6 +47,11 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseChatStreamAcknowledgementResult,
+  parseChatStreamAckRequest,
+  parseChatStreamCancelRequest,
+  parseChatStreamRunResult,
+  parseChatStreamStartRequest,
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentPreviewResult,
@@ -76,7 +88,12 @@ import {
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
-import { SidecarClientError } from './sidecar-client'
+import { ChatStreamController } from './chat-stream-controller'
+import {
+  SidecarClientError,
+  type ChatEventFlowControl,
+  type ChatEventStreamRequest,
+} from './sidecar-client'
 import { validateStructuredClone } from './structured-clone-policy'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
@@ -105,6 +122,10 @@ export interface MainDesktopBridge extends Omit<
   | 'getLocalRuntimeStatus'
   | 'previewLocalRuntime'
   | 'applyLocalRuntime'
+  | 'startChatStream'
+  | 'cancelChatStream'
+  | 'acknowledgeChatStream'
+  | 'onChatEventBatch'
   | 'listJobs'
   | 'getJob'
   | 'cancelJob'
@@ -153,6 +174,19 @@ export interface MainDesktopBridge extends Omit<
     request: LocalRuntimeApplyRequest,
     signal?: AbortSignal,
   ): ReturnType<AncestryBridge['applyLocalRuntime']>
+  startChatStream(
+    request: ChatStreamStartRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['startChatStream']>
+  cancelChatStream(
+    request: ChatStreamCancelRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['cancelChatStream']>
+  streamChatEvents(
+    request: ChatEventStreamRequest,
+    listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
   listJobs(signal?: AbortSignal): ReturnType<AncestryBridge['listJobs']>
   getJob(request: JobRequest, signal?: AbortSignal): ReturnType<AncestryBridge['getJob']>
   cancelJob(request: JobRequest, signal?: AbortSignal): ReturnType<AncestryBridge['cancelJob']>
@@ -205,6 +239,7 @@ interface Authorization {
   generation: number
   navigating: boolean
   capabilityFlight?: CapabilityFlight
+  chatStreams?: ChatStreamController
 }
 interface JobSubscription {
   readonly controller: AbortController
@@ -275,6 +310,12 @@ const providerRequestLimits = Object.freeze({
   maxDepth: 5,
   maxItems: 512,
   maxStringCharacters: 2_048,
+})
+const chatRequestLimits = Object.freeze({
+  maxBytes: 20_000,
+  maxDepth: 3,
+  maxItems: 8,
+  maxStringCharacters: 16_384,
 })
 const responseLimits = Object.freeze({
   maxBytes: 1_100_000,
@@ -464,6 +505,9 @@ function schedule<T>(
 }
 
 function invalidate(state: Authorization, notifyJobStreams = false): void {
+  const chatStreams = state.chatStreams
+  delete state.chatStreams
+  chatStreams?.dispose()
   const subscriptions = [...state.jobSubscriptions.values()]
   if (notifyJobStreams) {
     for (const subscription of subscriptions) {
@@ -475,6 +519,35 @@ function invalidate(state: Authorization, notifyJobStreams = false): void {
   for (const entry of state.queue.splice(0)) entry.cancel()
   state.jobSubscriptions.clear()
   for (const subscription of subscriptions) subscription.controller.abort(CANCELLED)
+}
+
+function activeChatOwner(state: Authorization, generation: number): boolean {
+  try {
+    return state.generation === generation
+      && !state.contents.isDestroyed()
+      && !state.navigating
+      && state.trustedUrl(state.contents.mainFrame.url)
+  } catch {
+    return false
+  }
+}
+
+function chatStreamsFor(
+  state: Authorization,
+  bridge: MainDesktopBridge,
+): ChatStreamController {
+  if (state.chatStreams !== undefined) return state.chatStreams
+  const generation = state.generation
+  const controller = new ChatStreamController(bridge, {
+    isOwnerActive: () => activeChatOwner(state, generation),
+    deliver: (delivery: Readonly<ChatEventDelivery>) => {
+      if (!activeChatOwner(state, generation)) throw new Error('Chat stream owner is unavailable.')
+      validateStructuredClone(delivery, responseLimits)
+      state.contents.send(desktopEventChannels.chatEventBatch, delivery)
+    },
+  })
+  state.chatStreams = controller
+  return controller
 }
 
 function jobStreamFailure(
@@ -953,6 +1026,79 @@ export function registerDesktopIpcHandlers(
       (signal) => bridge.applyLocalRuntime(request, signal),
       parseLocalRuntimeResult,
     )
+  })
+  ipc.handle(desktopChannels.startChatStream, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ChatStreamRun>()
+    if (args.length !== 1) return invalidRequest<ChatStreamRun>()
+    let request: ChatStreamStartRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseChatStreamStartRequest(args[0])
+    } catch {
+      return invalidRequest<ChatStreamRun>()
+    }
+    const generation = state.generation
+    const response = await schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.startChatStream(request, signal),
+      parseChatStreamRunResult,
+    )
+    if (!response.ok) return response
+    if (!activeChatOwner(state, generation)) {
+      void bridge.cancelChatStream(Object.freeze({
+        schema_version: 1,
+        session_id: response.data.session_id,
+        run_id: response.data.run_id,
+      })).catch(() => undefined)
+      return cancelled<ChatStreamRun>()
+    }
+    const attached = chatStreamsFor(state, bridge).attach(response.data)
+    if (!attached.ok) {
+      void bridge.cancelChatStream(Object.freeze({
+        schema_version: 1,
+        session_id: response.data.session_id,
+        run_id: response.data.run_id,
+      })).catch(() => undefined)
+    }
+    return safeResponse(attached, parseChatStreamRunResult)
+  })
+  ipc.handle(desktopChannels.cancelChatStream, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ChatStreamRun>()
+    if (args.length !== 1) return invalidRequest<ChatStreamRun>()
+    let request: ChatStreamCancelRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseChatStreamCancelRequest(args[0])
+    } catch {
+      return invalidRequest<ChatStreamRun>()
+    }
+    return schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.cancelChatStream(request, signal),
+      parseChatStreamRunResult,
+    )
+  })
+  ipc.handle(desktopChannels.acknowledgeChatStream, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ChatStreamAcknowledgement>()
+    if (args.length !== 1) return invalidRequest<ChatStreamAcknowledgement>()
+    let request: ChatStreamAckRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseChatStreamAckRequest(args[0])
+    } catch {
+      return invalidRequest<ChatStreamAcknowledgement>()
+    }
+    const response = state.chatStreams?.acknowledge(request) ?? error(
+      'CHAT_STREAM_NOT_FOUND',
+      'The selected chat response is no longer available.',
+      'Start a new response from the current conversation.',
+    )
+    return safeResponse(response, parseChatStreamAcknowledgementResult)
   })
   registerNoArgumentHandler(
     ipc,

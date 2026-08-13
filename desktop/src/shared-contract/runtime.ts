@@ -1,6 +1,8 @@
 import {
+  CHAT_STREAM_BATCH_MAX_BYTES,
   DESKTOP_PROTOCOL_VERSION,
   applicationSettingKeys,
+  chatEventTypes,
   jobStates,
   providerDataClasses,
   providerIds,
@@ -14,6 +16,14 @@ import {
   type BridgeErrorCode,
   type BridgeResult,
   type CapabilityManifest,
+  type ChatEvent,
+  type ChatEventDelivery,
+  type ChatEventPayload,
+  type ChatStreamAcknowledgement,
+  type ChatStreamAckRequest,
+  type ChatStreamCancelRequest,
+  type ChatStreamRun,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentGrantSummary,
   type ConsentPreview,
@@ -126,6 +136,15 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'JOB_SUBSCRIPTION_CLOSED',
   'JOB_SUBSCRIPTION_CONFLICT',
   'JOB_EVENT_STREAM_FAILED',
+  'CHAT_SESSION_NOT_FOUND',
+  'CHAT_STREAM_NOT_FOUND',
+  'CHAT_STREAM_CURSOR_INVALID',
+  'CHAT_STREAM_REPLAY_EXPIRED',
+  'CHAT_STREAM_SERVICE_UNAVAILABLE',
+  'CHAT_STREAM_LIMIT',
+  'CHAT_STREAM_BACKPRESSURE_TIMEOUT',
+  'CHAT_STREAM_STALLED',
+  'CHAT_STREAM_EVENT_INVALID',
   'INTERNAL_ERROR',
 ]
 const startupStates = ['starting', 'ready', 'degraded', 'stopped'] as const
@@ -142,6 +161,9 @@ const jobArtifactIdPattern = /^art_[A-Za-z0-9._:-]+$/
 const jobIdPattern = /^j[0-9]{6,12}$/
 const jobResourcePattern = /^resource_[a-f0-9]{64}$/
 const jobSubscriptionIdPattern = /^sub_[a-f0-9]{32}$/
+const chatSessionIdPattern = /^chat_[a-f0-9]{32}$/
+const chatRunIdPattern = /^run_[a-f0-9]{32}$/
+const chatEventCodePattern = /^[A-Z][A-Z0-9_]{0,99}$/
 const digestPattern = /^[a-f0-9]{64}$/
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
 // Control characters are intentionally rejected from user-visible file names.
@@ -525,6 +547,264 @@ export function parseLocalRuntimeApplyRequest(value: unknown): LocalRuntimeApply
 export function parseFileGrantId(value: unknown): FileGrantId {
   if (typeof value !== 'string' || !fileGrantIdPattern.test(value)) throw new Error('Invalid file-grant ID')
   return value as FileGrantId
+}
+
+function parseChatSessionId(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !chatSessionIdPattern.test(value)) throw new Error(message)
+  return value
+}
+
+function parseChatRunId(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !chatRunIdPattern.test(value)) throw new Error(message)
+  return value
+}
+
+function validChatText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && Array.from(value).length >= 1
+    && Array.from(value).length <= maximum
+    && value.trim().length > 0
+    && !value.includes('\u0000')
+}
+
+function validChatEventText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && Array.from(value).length >= 1
+    && Array.from(value).length <= maximum
+    && !value.includes('\u0000')
+}
+
+function validFiniteNumber(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && value >= minimum
+    && value <= maximum
+}
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index)
+    if (codePoint === undefined) continue
+    if (codePoint <= 0x7f) bytes += 1
+    else if (codePoint <= 0x7ff) bytes += 2
+    else if (codePoint <= 0xffff) bytes += 3
+    else {
+      bytes += 4
+      index += 1
+    }
+  }
+  return bytes
+}
+
+export function parseChatStreamStartRequest(value: unknown): ChatStreamStartRequest {
+  const message = 'Invalid chat-stream start request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version',
+    'session_id',
+    'message',
+    'max_output_tokens',
+    'temperature',
+    'timeout_seconds',
+    'max_safe_retries',
+  ]) || value.schema_version !== 1
+    || !validChatText(value.message, 16_384)
+    || !integer(value.max_output_tokens, 1, 4_096)
+    || !validFiniteNumber(value.temperature, 0, 1)
+    || !validFiniteNumber(value.timeout_seconds, 1, 120)
+    || !integer(value.max_safe_retries, 0, 1)) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, message),
+    message: value.message,
+    max_output_tokens: value.max_output_tokens,
+    temperature: value.temperature,
+    timeout_seconds: value.timeout_seconds,
+    max_safe_retries: value.max_safe_retries,
+  })
+}
+
+export function parseChatStreamCancelRequest(value: unknown): ChatStreamCancelRequest {
+  const message = 'Invalid chat-stream cancellation request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'session_id', 'run_id'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, message),
+    run_id: parseChatRunId(value.run_id, message),
+  })
+}
+
+export function parseChatStreamAckRequest(value: unknown): ChatStreamAckRequest {
+  const message = 'Invalid chat-stream acknowledgement request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'session_id', 'run_id', 'through_sequence',
+  ]) || value.schema_version !== 1
+    || !integer(value.through_sequence, 1, Number.MAX_SAFE_INTEGER)) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, message),
+    run_id: parseChatRunId(value.run_id, message),
+    through_sequence: value.through_sequence,
+  })
+}
+
+function parseChatTimestamp(value: unknown): string {
+  if (!bounded(value, 1, 64)
+    || !timestampPattern.test(value)
+    || !/(?:Z|[+-]00:00)$/.test(value)
+    || Number.isNaN(Date.parse(value))) invalidResponse()
+  return value
+}
+
+function parseChatEventPayload(value: unknown, type: ChatEvent['type']): Readonly<ChatEventPayload> {
+  if (!record(value) || !exactKeys(value, [
+    'text', 'code', 'provider_id', 'model', 'remote', 'message_count',
+  ])) invalidResponse()
+  const populated = Object.entries(value)
+    .filter(([, item]) => item !== null)
+    .map(([name]) => name)
+    .sort()
+  const expected: Readonly<Record<ChatEvent['type'], readonly string[]>> = {
+    active: ['model', 'provider_id', 'remote'],
+    'first-token': ['text'],
+    delta: ['text'],
+    cancelling: [],
+    completed: ['message_count'],
+    interrupted: ['code'],
+    failed: ['code'],
+  }
+  if (populated.join(',') !== expected[type].slice().sort().join(',')) invalidResponse()
+  if (value.text !== null && !validChatEventText(value.text, 16_384)) invalidResponse()
+  if (value.code !== null
+    && (typeof value.code !== 'string' || !chatEventCodePattern.test(value.code))) invalidResponse()
+  if (value.provider_id !== null && !validChatText(value.provider_id, 200)) invalidResponse()
+  if (value.model !== null && !validChatText(value.model, 200)) invalidResponse()
+  if (value.remote !== null && typeof value.remote !== 'boolean') invalidResponse()
+  if (value.message_count !== null && !integer(value.message_count, 0, 32)) invalidResponse()
+  return deepFreeze({ ...value }) as unknown as Readonly<ChatEventPayload>
+}
+
+function parseChatEvent(value: unknown): Readonly<ChatEvent> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'run_id', 'sequence', 'type', 'timestamp', 'payload',
+  ]) || value.schema_version !== 1
+    || !integer(value.sequence, 1, Number.MAX_SAFE_INTEGER)
+    || typeof value.type !== 'string'
+    || !chatEventTypes.includes(value.type as ChatEvent['type'])) invalidResponse()
+  const type = value.type as ChatEvent['type']
+  return deepFreeze({
+    schema_version: 1,
+    run_id: parseChatRunId(value.run_id, 'Invalid bridge response'),
+    sequence: value.sequence,
+    type,
+    timestamp: parseChatTimestamp(value.timestamp),
+    payload: parseChatEventPayload(value.payload, type),
+  })
+}
+
+function parseChatStreamRun(value: unknown): Readonly<ChatStreamRun> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'session_id', 'run_id', 'state', 'latest_sequence', 'terminal',
+  ]) || value.schema_version !== 1
+    || !integer(value.latest_sequence, 1, Number.MAX_SAFE_INTEGER)
+    || !['active', 'cancelling', 'completed', 'interrupted', 'failed'].includes(value.state as string)
+    || typeof value.terminal !== 'boolean') invalidResponse()
+  const terminal = ['completed', 'interrupted', 'failed'].includes(value.state as string)
+  if (terminal !== value.terminal) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, 'Invalid bridge response'),
+    run_id: parseChatRunId(value.run_id, 'Invalid bridge response'),
+    state: value.state,
+    latest_sequence: value.latest_sequence,
+    terminal: value.terminal,
+  } as ChatStreamRun)
+}
+
+function parseChatStreamAcknowledgement(value: unknown): Readonly<ChatStreamAcknowledgement> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'session_id', 'run_id', 'through_sequence', 'acknowledged',
+  ]) || value.schema_version !== 1 || value.acknowledged !== true
+    || !integer(value.through_sequence, 1, Number.MAX_SAFE_INTEGER)) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, 'Invalid bridge response'),
+    run_id: parseChatRunId(value.run_id, 'Invalid bridge response'),
+    through_sequence: value.through_sequence,
+    acknowledged: true,
+  })
+}
+
+export function parseChatEventDelivery(value: unknown): Readonly<ChatEventDelivery> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version',
+    'kind',
+    'session_id',
+    'run_id',
+    'from_sequence',
+    'through_sequence',
+    'encoded_bytes',
+    'events',
+    'error',
+  ]) || value.schema_version !== 1 || (value.kind !== 'batch' && value.kind !== 'failure')) {
+    invalidResponse()
+  }
+  const sessionId = parseChatSessionId(value.session_id, 'Invalid bridge response')
+  const runId = parseChatRunId(value.run_id, 'Invalid bridge response')
+  if (value.kind === 'batch') {
+    if (!integer(value.from_sequence, 1, Number.MAX_SAFE_INTEGER)
+      || !integer(value.through_sequence, value.from_sequence, Number.MAX_SAFE_INTEGER)
+      || !integer(value.encoded_bytes, 1, CHAT_STREAM_BATCH_MAX_BYTES)
+      || !Array.isArray(value.events) || value.events.length < 1 || value.events.length > 4_096
+      || value.error !== null) invalidResponse()
+    const fromSequence = value.from_sequence
+    const throughSequence = value.through_sequence
+    const declaredBytes = value.encoded_bytes
+    const events = value.events.map(parseChatEvent)
+    const encodedBytes = utf8ByteLength(JSON.stringify(events))
+    if (events[0]?.sequence !== fromSequence
+      || events.at(-1)?.sequence !== throughSequence
+      || encodedBytes !== declaredBytes
+      || events.some((event, index) => event.run_id !== runId
+        || event.sequence !== fromSequence + index)
+      || events.slice(0, -1).some((event) => ['completed', 'interrupted', 'failed'].includes(event.type))) {
+      invalidResponse()
+    }
+    return deepFreeze({
+      schema_version: 1,
+      kind: 'batch',
+      session_id: sessionId,
+      run_id: runId,
+      from_sequence: fromSequence,
+      through_sequence: throughSequence,
+      encoded_bytes: declaredBytes,
+      events,
+      error: null,
+    })
+  }
+  if (value.from_sequence !== null || value.through_sequence !== null
+    || value.encoded_bytes !== 0 || value.events !== null || !record(value.error)
+    || !exactKeys(value.error, ['code', 'message', 'remediation'])
+    || !bridgeErrorCodes.includes(value.error.code as BridgeErrorCode)
+    || !bounded(value.error.message, 1, 240) || !safeDiagnosticTextPattern.test(value.error.message)
+    || !bounded(value.error.remediation, 1, 240)
+    || !safeDiagnosticTextPattern.test(value.error.remediation)) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    kind: 'failure',
+    session_id: sessionId,
+    run_id: runId,
+    from_sequence: null,
+    through_sequence: null,
+    encoded_bytes: 0,
+    events: null,
+    error: {
+      code: value.error.code,
+      message: value.error.message,
+      remediation: value.error.remediation,
+    },
+  } as ChatEventDelivery)
 }
 
 function parseJobId(value: unknown, message: string): string {
@@ -1415,6 +1695,9 @@ export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<Fil
 export const parseLocalRuntimeStatusResult = (value: unknown): BridgeResult<LocalRuntimeStatus> => parseBridgeResult(value, parseLocalRuntimeStatus)
 export const parseLocalRuntimePreviewResult = (value: unknown): BridgeResult<LocalRuntimePreview> => parseBridgeResult(value, parseLocalRuntimePreview)
 export const parseLocalRuntimeResult = (value: unknown): BridgeResult<LocalRuntimeResult> => parseBridgeResult(value, parseLocalRuntimeOutcome)
+export const parseChatStreamRunResult = (value: unknown): BridgeResult<ChatStreamRun> => parseBridgeResult(value, parseChatStreamRun)
+export const parseChatEventResult = (value: unknown): BridgeResult<ChatEvent> => parseBridgeResult(value, parseChatEvent)
+export const parseChatStreamAcknowledgementResult = (value: unknown): BridgeResult<ChatStreamAcknowledgement> => parseBridgeResult(value, parseChatStreamAcknowledgement)
 export const parseJobListResult = (value: unknown): BridgeResult<JobList> => parseBridgeResult(value, parseJobList)
 export const parseJobSnapshotResult = (value: unknown): BridgeResult<JobSnapshot> => parseBridgeResult(value, parseJobSnapshot)
 export const parseJobEventResult = (value: unknown): BridgeResult<JobEvent> => parseBridgeResult(value, parseJobEvent)

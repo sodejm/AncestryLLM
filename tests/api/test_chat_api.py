@@ -10,7 +10,7 @@ from ancestryllm.application.chat import (
     ChatRunRequest,
     ChatSessionCreateRequest,
 )
-from ancestryllm.core.errors import ProviderError, SecurityPolicyError
+from ancestryllm.core.errors import AncestryError, ProviderError, SecurityPolicyError
 
 if TYPE_CHECKING:
     from unittest.mock import Mock
@@ -71,7 +71,8 @@ def test_chat_capability_and_session_lifecycle_delegate_to_one_service_boundary(
         "tools_enabled": False,
         "payload_retention": False,
         "output_is_evidence": False,
-        "streaming": False,
+        "streaming": True,
+        "stream_replay_max_bytes": 262144,
     }
     assert started.status_code == 200
     assert started.json()["session_id"] == session_id
@@ -190,3 +191,153 @@ def test_chat_consent_failure_is_sanitized_at_the_http_boundary(
     assert response.status_code == 403
     assert response.json()["code"] == "PROVIDER_CONSENT_REQUIRED"
     assert private_marker not in response.text
+
+
+def test_chat_stream_start_delegates_to_the_ordered_stream_service(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    chat_streaming_service: Mock,
+) -> None:
+    session_id = "chat_" + ("a" * 32)
+
+    response = api_client.post(
+        f"/api/v1/chat/sessions/{session_id}/streams",
+        headers=api_headers,
+        json={
+            "schema_version": 1,
+            "message": "Stream this fictional record analysis.",
+            "max_output_tokens": 512,
+            "temperature": 0.0,
+            "timeout_seconds": 30,
+            "max_safe_retries": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema_version": 1,
+        "session_id": session_id,
+        "run_id": "run_" + ("b" * 32),
+        "state": "active",
+        "latest_sequence": 1,
+        "terminal": False,
+    }
+    chat_streaming_service.start.assert_awaited_once_with(
+        session_id,
+        ChatRunRequest(
+            message="Stream this fictional record analysis.",
+            max_output_tokens=512,
+            temperature=0.0,
+            timeout_seconds=30,
+            max_safe_retries=0,
+        ),
+    )
+
+
+def test_chat_stream_events_emit_strict_ordered_sse_and_honor_replay_cursor(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    chat_streaming_service: Mock,
+) -> None:
+    session_id = "chat_" + ("a" * 32)
+    run_id = "run_" + ("b" * 32)
+
+    response = api_client.get(
+        f"/api/v1/chat/sessions/{session_id}/streams/{run_id}/events",
+        headers={**api_headers, "Last-Event-ID": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.text == (
+        'id: 1\nevent: active\ndata: {"payload":{"code":null,"message_count":null,'
+        '"model":"fictional-model","provider_id":"ollama","remote":false,"text":null},'
+        '"run_id":"run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","schema_version":1,'
+        '"sequence":1,"timestamp":"2026-08-13T12:00:00+00:00","type":"active"}\n\n'
+        'id: 2\nevent: first-token\ndata: {"payload":{"code":null,"message_count":null,'
+        '"model":null,"provider_id":null,"remote":null,"text":"Fictional "},'
+        '"run_id":"run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","schema_version":1,'
+        '"sequence":2,"timestamp":"2026-08-13T12:00:00+00:00","type":"first-token"}\n\n'
+        'id: 3\nevent: delta\ndata: {"payload":{"code":null,"message_count":null,'
+        '"model":null,"provider_id":null,"remote":null,"text":" "},'
+        '"run_id":"run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","schema_version":1,'
+        '"sequence":3,"timestamp":"2026-08-13T12:00:00+00:00","type":"delta"}\n\n'
+        'id: 4\nevent: completed\ndata: {"payload":{"code":null,"message_count":2,'
+        '"model":null,"provider_id":null,"remote":null,"text":null},'
+        '"run_id":"run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","schema_version":1,'
+        '"sequence":4,"timestamp":"2026-08-13T12:00:00+00:00","type":"completed"}\n\n'
+    )
+    chat_streaming_service.subscribe.assert_awaited_once_with(
+        session_id,
+        run_id,
+        after_sequence=1,
+    )
+
+
+def test_chat_stream_cancel_is_owner_scoped_and_returns_terminal_state(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    chat_streaming_service: Mock,
+) -> None:
+    session_id = "chat_" + ("a" * 32)
+    run_id = "run_" + ("b" * 32)
+
+    response = api_client.post(
+        f"/api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel",
+        headers=api_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema_version": 1,
+        "session_id": session_id,
+        "run_id": run_id,
+        "state": "interrupted",
+        "latest_sequence": 4,
+        "terminal": True,
+    }
+    chat_streaming_service.cancel.assert_awaited_once_with(session_id, run_id)
+
+
+def test_chat_stream_rejects_invalid_cursor_before_service_execution(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    chat_streaming_service: Mock,
+) -> None:
+    response = api_client.get(
+        f"/api/v1/chat/sessions/chat_{'a' * 32}/streams/run_{'b' * 32}/events",
+        headers={**api_headers, "Last-Event-ID": "-1"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "CHAT_STREAM_CURSOR_INVALID"
+    chat_streaming_service.subscribe.assert_not_awaited()
+
+
+def test_chat_stream_replay_and_owner_failures_are_stable_http_errors(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    chat_streaming_service: Mock,
+) -> None:
+    url = f"/api/v1/chat/sessions/chat_{'a' * 32}/streams/run_{'b' * 32}/events"
+    chat_streaming_service.subscribe.side_effect = AncestryError(
+        "CHAT_STREAM_REPLAY_EXPIRED",
+        "The requested chat stream events are no longer buffered.",
+    )
+
+    expired = api_client.get(url, headers=api_headers)
+
+    assert expired.status_code == 410
+    assert expired.json()["code"] == "CHAT_STREAM_REPLAY_EXPIRED"
+
+    chat_streaming_service.subscribe.reset_mock()
+    chat_streaming_service.subscribe.side_effect = AncestryError(
+        "CHAT_STREAM_NOT_FOUND",
+        "The chat stream does not exist.",
+    )
+    missing = api_client.get(url, headers=api_headers)
+
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "CHAT_STREAM_NOT_FOUND"

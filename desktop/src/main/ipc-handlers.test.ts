@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   BridgeResult,
   CapabilityManifest,
+  ChatEvent,
+  ChatStreamRun,
   ConsentPreview,
   FileGrant,
   FileGrantId,
@@ -214,6 +216,49 @@ const progressEvent = Object.freeze({
   }),
 }) satisfies JobEvent
 const subscriptionId = `sub_${'a'.repeat(32)}`
+const chatSessionId = `chat_${'c'.repeat(32)}`
+const chatRunId = `run_${'d'.repeat(32)}`
+const activeChatRun = Object.freeze({
+  schema_version: 1,
+  session_id: chatSessionId,
+  run_id: chatRunId,
+  state: 'active',
+  latest_sequence: 1,
+  terminal: false,
+} satisfies ChatStreamRun)
+const interruptedChatRun = Object.freeze({
+  ...activeChatRun,
+  state: 'interrupted',
+  latest_sequence: 2,
+  terminal: true,
+} satisfies ChatStreamRun)
+const chatStartRequest = Object.freeze({
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+  message: 'Summarize the fictional family.',
+  max_output_tokens: 256,
+  temperature: 0.2,
+  timeout_seconds: 30,
+  max_safe_retries: 1,
+})
+
+function chatEvent(sequence: number, type: ChatEvent['type']): Readonly<ChatEvent> {
+  return Object.freeze({
+    schema_version: 1,
+    run_id: chatRunId,
+    sequence,
+    type,
+    timestamp: `2026-08-13T12:00:00.${String(sequence).padStart(6, '0')}+00:00`,
+    payload: Object.freeze({
+      text: null,
+      code: null,
+      provider_id: type === 'active' ? 'openai' : null,
+      model: type === 'active' ? 'gpt-test' : null,
+      remote: type === 'active' ? true : null,
+      message_count: type === 'completed' ? 2 : null,
+    }),
+  })
+}
 
 const bridge = (): MainDesktopBridge => ({
   getAppInfo: vi.fn().mockResolvedValue(result({ applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' })),
@@ -247,6 +292,9 @@ const bridge = (): MainDesktopBridge => ({
     state: 'ready',
     code: 'RUNTIME_READY',
   })),
+  startChatStream: vi.fn().mockResolvedValue(result(activeChatRun)),
+  cancelChatStream: vi.fn().mockResolvedValue(result(interruptedChatRun)),
+  streamChatEvents: vi.fn().mockResolvedValue(undefined),
   listJobs: vi.fn().mockResolvedValue(jobList),
   getJob: vi.fn().mockResolvedValue(result(runningJob)),
   cancelJob: vi.fn().mockResolvedValue(result({
@@ -375,7 +423,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the twenty-eight declared static channels', () => {
+  it('registers exactly the thirty-one declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -383,7 +431,88 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(28)
+    expect(handlers.size).toBe(31)
+  })
+
+  it('binds chat streams to one renderer and accepts exact delivered-batch acknowledgements', async () => {
+    const control = bridge()
+    let listener: ((event: Readonly<ChatEvent>, flow: Readonly<{
+      pause(): void
+      resume(): void
+    }>) => void) | undefined
+    let streamSignal: AbortSignal | undefined
+    vi.mocked(control.streamChatEvents).mockImplementation((_request, next, signal) => {
+      listener = next
+      streamSignal = signal
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, event, handlers } = harness(control)
+
+    await expect(handlers.get(desktopChannels.startChatStream)?.(
+      event(),
+      chatStartRequest,
+    )).resolves.toEqual(result(activeChatRun))
+    expect(control.streamChatEvents).toHaveBeenCalledTimes(1)
+    const [streamRequest, streamListener, receivedSignal] = vi.mocked(control.streamChatEvents).mock.calls[0] ?? []
+    expect(streamRequest).toEqual({
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+      after: 0,
+    })
+    expect(typeof streamListener).toBe('function')
+    expect(receivedSignal).toBeInstanceOf(AbortSignal)
+
+    const flow = Object.freeze({ pause: vi.fn(), resume: vi.fn() })
+    listener?.(chatEvent(1, 'active'), flow)
+    listener?.(chatEvent(2, 'completed'), flow)
+
+    expect(contents.sent).toHaveLength(1)
+    expect(contents.sent[0]).toMatchObject({
+      channel: desktopEventChannels.chatEventBatch,
+      args: [{
+        kind: 'batch',
+        session_id: chatSessionId,
+        run_id: chatRunId,
+        from_sequence: 1,
+        through_sequence: 2,
+        error: null,
+      }],
+    })
+    await expect(handlers.get(desktopChannels.acknowledgeChatStream)?.(event(), {
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+      through_sequence: 2,
+    })).resolves.toEqual(result({
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+      through_sequence: 2,
+      acknowledged: true,
+    }))
+    expect(streamSignal?.aborted).toBe(true)
+    expect(control.cancelChatStream).not.toHaveBeenCalled()
+  })
+
+  it('cancels renderer-owned chat work when the owner starts navigating away', async () => {
+    const control = bridge()
+    let streamSignal: AbortSignal | undefined
+    vi.mocked(control.streamChatEvents).mockImplementation((_request, _next, signal) => {
+      streamSignal = signal
+      return new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const { contents, event, handlers } = harness(control)
+
+    await handlers.get(desktopChannels.startChatStream)?.(event(), chatStartRequest)
+    contents.startNavigation('https://attacker.invalid/')
+
+    await vi.waitFor(() => expect(control.cancelChatStream).toHaveBeenCalledWith({
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+    }))
+    expect(streamSignal?.aborted).toBe(true)
   })
 
   it('routes strict job list, detail, and cancellation requests through bounded operations', async () => {

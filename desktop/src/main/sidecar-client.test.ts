@@ -1,12 +1,53 @@
 import { createServer, type ServerResponse } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
-import type { JobSnapshot } from '../shared-contract/desktop'
+import type { ChatEvent, ChatStreamRun, JobSnapshot } from '../shared-contract/desktop'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
-import { SidecarClientError, createSidecarCapabilitiesClient } from './sidecar-client'
+import {
+  SidecarClientError,
+  createSidecarCapabilitiesClient,
+  type SidecarClientFailure,
+} from './sidecar-client'
 
 const session: Readonly<AuthenticatedSidecarSession> = Object.freeze({
   host: '127.0.0.1', port: 43123, contract: 'ancestryllm.internal-api/1',
   appBuild: '0.5.0-dev', sidecarBuild: '0.5.0-dev', bearerToken: 'private-test-token',
+})
+
+const chatSessionId = `chat_${'a'.repeat(32)}`
+const chatRunId = `run_${'b'.repeat(32)}`
+
+const chatStreamRun = (overrides: Partial<ChatStreamRun> = {}): Readonly<ChatStreamRun> => Object.freeze({
+  schema_version: 1,
+  session_id: chatSessionId,
+  run_id: chatRunId,
+  state: 'active',
+  latest_sequence: 1,
+  terminal: false,
+  ...overrides,
+})
+
+const chatEvent = (
+  sequence: number,
+  type: ChatEvent['type'],
+  payload: ChatEvent['payload'],
+  overrides: Partial<ChatEvent> = {},
+): Readonly<ChatEvent> => Object.freeze({
+  schema_version: 1,
+  run_id: chatRunId,
+  sequence,
+  type,
+  timestamp: '2026-08-13T12:00:00+00:00',
+  payload,
+  ...overrides,
+})
+
+const emptyChatPayload = Object.freeze({
+  text: null,
+  code: null,
+  provider_id: null,
+  model: null,
+  remote: null,
+  message_count: null,
 })
 
 const jobSnapshot = (overrides: Partial<JobSnapshot> = {}): Readonly<JobSnapshot> => Object.freeze({
@@ -181,6 +222,254 @@ describe('main-only sidecar capabilities client', () => {
     await expect(client.cancelJob({ schema_version: 1, job_id: 'j123456' })).rejects.toEqual(
       new SidecarClientError('startup_mutation_blocked'),
     )
+  })
+
+  it('starts and cancels chat streams through owner-scoped fixed routes', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(chatStreamRun()),
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(chatStreamRun({
+          state: 'cancelling',
+          latest_sequence: 2,
+        })),
+      })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+    const start = {
+      schema_version: 1 as const,
+      session_id: chatSessionId,
+      message: 'Summarize this fictional family.',
+      max_output_tokens: 512,
+      temperature: 0.2,
+      timeout_seconds: 30,
+      max_safe_retries: 1,
+    }
+
+    await expect(client.startChatStream(start)).resolves.toEqual(chatStreamRun())
+    await expect(client.cancelChatStream({
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+    })).resolves.toEqual(chatStreamRun({
+      state: 'cancelling',
+      latest_sequence: 2,
+    }))
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      session,
+      `/api/v1/chat/sessions/${chatSessionId}/streams`,
+      undefined,
+      { method: 'POST', body: JSON.stringify({
+        schema_version: 1,
+        message: start.message,
+        max_output_tokens: start.max_output_tokens,
+        temperature: start.temperature,
+        timeout_seconds: start.timeout_seconds,
+        max_safe_retries: start.max_safe_retries,
+      }) },
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      session,
+      `/api/v1/chat/sessions/${chatSessionId}/streams/${chatRunId}/cancel`,
+      undefined,
+      { method: 'POST' },
+    )
+  })
+
+  it('authenticates, replays, and flow-controls owner-scoped chat events', async () => {
+    const requests: Array<Readonly<{
+      url: string | undefined
+      authorization: string | undefined
+      cursor: string | undefined
+      apiVersion: string | undefined
+      appBuild: string | undefined
+    }>> = []
+    const server = createServer((request, response) => {
+      requests.push({
+        url: request.url,
+        authorization: request.headers.authorization,
+        cursor: request.headers['last-event-id'] as string | undefined,
+        apiVersion: request.headers['x-ancestry-api-version'] as string | undefined,
+        appBuild: request.headers['x-ancestry-app-build'] as string | undefined,
+      })
+      response.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+      })
+      response.write(': keep-alive\n\n')
+      response.write(`id: 2\nevent: first-token\ndata: ${JSON.stringify(chatEvent(
+        2,
+        'first-token',
+        { ...emptyChatPayload, text: 'Fictional' },
+      ))}\n\n`)
+      response.write(`id: 3\nevent: delta\ndata: ${JSON.stringify(chatEvent(
+        3,
+        'delta',
+        { ...emptyChatPayload, text: ' ' },
+      ))}\n\n`)
+      response.end(`id: 4\nevent: completed\ndata: ${JSON.stringify(chatEvent(
+        4,
+        'completed',
+        { ...emptyChatPayload, message_count: 2 },
+      ))}\n\n`)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+    })
+    const received: number[] = []
+    const pausedAt: number[] = []
+    try {
+      await client.streamChatEvents({
+        schema_version: 1,
+        session_id: chatSessionId,
+        run_id: chatRunId,
+        after: 1,
+      }, (event, flow) => {
+        received.push(event.sequence)
+        if (event.sequence === 2) {
+          flow.pause()
+          pausedAt.push(event.sequence)
+          flow.resume()
+        }
+      })
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+
+    expect(received).toEqual([2, 3, 4])
+    expect(pausedAt).toEqual([2])
+    expect(requests).toEqual([{
+      url: `/api/v1/chat/sessions/${chatSessionId}/streams/${chatRunId}/events`,
+      authorization: 'Bearer private-test-token',
+      cursor: '1',
+      apiVersion: 'ancestryllm.internal-api/1',
+      appBuild: '0.5.0-dev',
+    }])
+  })
+
+  it.each([
+    {
+      name: 'wrong MIME type',
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      reason: 'chat_event_stream_failed',
+    },
+    {
+      name: 'redirect response',
+      status: 302,
+      headers: { 'content-type': 'text/plain', location: 'https://example.invalid/stream' },
+      body: '',
+      reason: 'request_failed',
+    },
+    {
+      name: 'expired replay cursor',
+      status: 410,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: 'CHAT_STREAM_REPLAY_EXPIRED' }),
+      reason: 'chat_stream_replay_expired',
+    },
+  ])('fails closed on a $name', async ({ status, headers, body, reason }) => {
+    let requestCount = 0
+    const server = createServer((_request, response) => {
+      requestCount += 1
+      response.writeHead(status, headers)
+      response.end(body)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+    })
+    try {
+      await expect(client.streamChatEvents({
+        schema_version: 1,
+        session_id: chatSessionId,
+        run_id: chatRunId,
+        after: 0,
+      }, vi.fn())).rejects.toEqual(new SidecarClientError(reason as SidecarClientFailure))
+      expect(requestCount).toBe(1)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it.each([
+    {
+      name: 'wrong run owner',
+      event: chatEvent(2, 'first-token', { ...emptyChatPayload, text: 'x' }, {
+        run_id: `run_${'c'.repeat(32)}`,
+      }),
+      after: 1,
+    },
+    {
+      name: 'nonmonotonic sequence',
+      event: chatEvent(3, 'first-token', { ...emptyChatPayload, text: 'x' }),
+      after: 1,
+    },
+    {
+      name: 'premature EOF',
+      event: chatEvent(2, 'first-token', { ...emptyChatPayload, text: 'x' }),
+      after: 1,
+    },
+  ])('rejects a $name in the chat event stream', async ({ name, event, after }) => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end(`id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an IP test listener')
+    const client = createSidecarCapabilitiesClient({
+      session: () => ({ ...session, port: address.port }),
+    })
+    try {
+      await expect(client.streamChatEvents({
+        schema_version: 1,
+        session_id: chatSessionId,
+        run_id: chatRunId,
+        after,
+      }, vi.fn())).rejects.toEqual(new SidecarClientError(
+        name === 'premature EOF'
+          ? 'chat_event_stream_interrupted'
+          : 'chat_event_stream_failed',
+      ))
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('rejects an invalid chat replay cursor before opening a connection', async () => {
+    const client = createSidecarCapabilitiesClient({ session: () => session })
+
+    await expect(client.streamChatEvents({
+      schema_version: 1,
+      session_id: chatSessionId,
+      run_id: chatRunId,
+      after: -1,
+    }, vi.fn())).rejects.toEqual(new SidecarClientError('chat_stream_cursor_invalid'))
   })
 
   it('authenticates and validates sequenced job events while ignoring heartbeats', async () => {

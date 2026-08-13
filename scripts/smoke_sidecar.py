@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import SIDECAR_BUILD
@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 TIMEOUT_SECONDS = 10.0
+
+
+class _ReadableStream(Protocol):
+    def readline(self) -> bytes: ...
 
 
 def _fail(message: str) -> NoReturn:
@@ -61,6 +65,20 @@ def _get_json(port: int, path: str, token: str) -> dict[str, object]:
     return value
 
 
+def _readline_with_timeout(
+    stream: _ReadableStream,
+    *,
+    timeout_seconds: float = TIMEOUT_SECONDS,
+) -> bytes:
+    """Read one line without waiting for a blocked reader during shutdown."""
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return executor.submit(stream.readline).result(timeout=timeout_seconds)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def smoke(executable: Path) -> None:
     """Launch, authenticate, inspect, and terminate one native sidecar."""
 
@@ -87,8 +105,10 @@ def smoke(executable: Path) -> None:
                 _fail("packaged sidecar pipes were not created")
             process.stdin.write((launch_frame + "\n").encode())
             process.stdin.close()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                line = executor.submit(process.stdout.readline).result(timeout=TIMEOUT_SECONDS)
+            try:
+                line = _readline_with_timeout(process.stdout)
+            except TimeoutError:
+                _fail("packaged sidecar readiness timed out")
             if len(line) > 1024:
                 _fail("packaged sidecar readiness frame exceeded its limit")
             ready = json.loads(line)

@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly twenty-nine deterministic, deeply frozen methods', async () => {
+  it('exposes exactly thirty-three deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
+      'acknowledgeChatStream',
+      'cancelChatStream',
       'createConsent',
       'createProviderProfile',
       'deleteSecret',
@@ -26,9 +28,11 @@ describe('versioned mock bridge', () => {
       'revokeConsent',
       'revokeFileGrant',
       'setSecret',
+      'startChatStream',
       'subscribeJobEvents',
       'unsubscribeJobEvents',
       'onJobEvent',
+      'onChatEventBatch',
       'cancelJob',
       'updatePreferences',
       'updateSettings',

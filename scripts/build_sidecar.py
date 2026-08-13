@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXECUTABLE_NAME = "ancestryllm-sidecar"
 MANIFEST_NAME = "sidecar-manifest.json"
 MANIFEST_SCHEMA = "ancestryllm.sidecar-payload/1"
+PYINSTALLER_DATA_PACKAGES = ("rfc3987_syntax",)
 
 
 def native_target(system: str, machine: str) -> str:
@@ -62,6 +63,34 @@ def executable_path(output_root: Path, target: str) -> Path:
 
     suffix = ".exe" if target.startswith("win32-") else ""
     return output_root / target / EXECUTABLE_NAME / f"{EXECUTABLE_NAME}{suffix}"
+
+
+def pyinstaller_arguments(
+    output_root: Path,
+    target: str,
+    temporary: Path,
+) -> list[str]:
+    """Return the reviewed PyInstaller contract for the desktop sidecar."""
+
+    arguments = [
+        "--noconfirm",
+        "--clean",
+        "--onedir",
+        "--name",
+        EXECUTABLE_NAME,
+        "--distpath",
+        str(output_root / target),
+        "--workpath",
+        str(temporary / "work"),
+        "--specpath",
+        str(temporary / "spec"),
+        "--paths",
+        str(ROOT / "src"),
+    ]
+    for package in PYINSTALLER_DATA_PACKAGES:
+        arguments.extend(("--collect-data", package))
+    arguments.append(str(ROOT / "scripts" / "sidecar_entry.py"))
+    return arguments
 
 
 def project_version() -> str:
@@ -156,24 +185,7 @@ def build(output_root: Path, expected_target: str | None = None) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ancestryllm-pyinstaller-") as work:
         temporary = Path(work)
-        run_pyinstaller(
-            [
-                "--noconfirm",
-                "--clean",
-                "--onedir",
-                "--name",
-                EXECUTABLE_NAME,
-                "--distpath",
-                str(output_root / target),
-                "--workpath",
-                str(temporary / "work"),
-                "--specpath",
-                str(temporary / "spec"),
-                "--paths",
-                str(ROOT / "src"),
-                str(ROOT / "scripts" / "sidecar_entry.py"),
-            ]
-        )
+        run_pyinstaller(pyinstaller_arguments(output_root, target, temporary))
 
     result = executable_path(output_root, target)
     if not result.is_file():

@@ -5,6 +5,9 @@ import {
   type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
+  type ChatEvent,
+  type ChatStreamCancelRequest,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
@@ -24,7 +27,12 @@ import {
 import type { SidecarDiagnostics, SidecarLifecycleState } from './sidecar-supervisor'
 import { PreferencesConflictError, type PreferencesStore } from './preferences-store'
 import type { MainDesktopBridge } from './ipc-handlers'
-import { SidecarClientError, type SidecarClient } from './sidecar-client'
+import {
+  SidecarClientError,
+  type ChatEventFlowControl,
+  type ChatEventStreamRequest,
+  type SidecarClient,
+} from './sidecar-client'
 
 export { MemoryPreferencesStore, PreferencesConflictError } from './preferences-store'
 export type { PreferencesStore } from './preferences-store'
@@ -110,6 +118,27 @@ function jobFailure<T>(cause: unknown): BridgeResult<T> {
     return failure('JOB_EVENT_STREAM_FAILED', 'Task updates were interrupted.', 'Refresh the task snapshot and reconnect.')
   }
   return failure('JOB_SERVICE_UNAVAILABLE', 'Task information is unavailable.', 'Retry the private service or restart AncestryLLM.')
+}
+
+function chatFailure<T>(cause: unknown): BridgeResult<T> {
+  const reason = cause instanceof SidecarClientError ? cause.reason : null
+  if (reason === 'startup_mutation_blocked') return startupMutationBlocked()
+  if (reason === 'chat_session_not_found') {
+    return failure('CHAT_SESSION_NOT_FOUND', 'The selected chat session is no longer available.', 'Refresh the conversation and try again.')
+  }
+  if (reason === 'chat_stream_not_found') {
+    return failure('CHAT_STREAM_NOT_FOUND', 'The selected chat response is no longer available.', 'Start a new response from the current conversation.')
+  }
+  if (reason === 'chat_stream_cursor_invalid') {
+    return failure('CHAT_STREAM_CURSOR_INVALID', 'Chat output could not resume from that point.', 'Start a new response from the current conversation.')
+  }
+  if (reason === 'chat_stream_replay_expired') {
+    return failure('CHAT_STREAM_REPLAY_EXPIRED', 'Earlier chat output is no longer available.', 'Start a new response; the original provider request was not retried.')
+  }
+  if (reason === 'chat_stream_limit') {
+    return failure('CHAT_STREAM_LIMIT', 'The chat streaming limit has been reached.', 'Cancel or finish another response before trying again.')
+  }
+  return failure('CHAT_STREAM_SERVICE_UNAVAILABLE', 'Chat streaming is unavailable.', 'Retry the private service or restart AncestryLLM.')
 }
 
 export function createDesktopControlBridge(dependencies: Readonly<{
@@ -388,6 +417,38 @@ export function createDesktopControlBridge(dependencies: Readonly<{
         }
         return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent could not be revoked.', 'Retry the private service or restart AncestryLLM.')
       }
+    },
+    async startChatStream(request: ChatStreamStartRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const run = await dependencies.sidecarClient.startChatStream(request, signal)
+        requireActive(signal)
+        return success(run)
+      } catch (cause) {
+        requireActive(signal)
+        return chatFailure(cause)
+      }
+    },
+    async cancelChatStream(request: ChatStreamCancelRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const run = await dependencies.sidecarClient.cancelChatStream(request, signal)
+        requireActive(signal)
+        return success(run)
+      } catch (cause) {
+        requireActive(signal)
+        return chatFailure(cause)
+      }
+    },
+    async streamChatEvents(
+      request: ChatEventStreamRequest,
+      listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+      signal?: AbortSignal,
+    ) {
+      requireActive(signal)
+      await dependencies.sidecarClient.streamChatEvents(request, listener, signal)
+      requireActive(signal)
     },
     async listJobs(signal?: AbortSignal) {
       try {

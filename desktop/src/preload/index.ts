@@ -4,6 +4,10 @@ import {
   desktopEventChannels,
   type AncestryBridge,
   type ApplicationSettingsPatch,
+  type ChatEventDelivery,
+  type ChatStreamAckRequest,
+  type ChatStreamCancelRequest,
+  type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
@@ -25,6 +29,12 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseChatEventDelivery,
+  parseChatStreamAcknowledgementResult,
+  parseChatStreamAckRequest,
+  parseChatStreamCancelRequest,
+  parseChatStreamRunResult,
+  parseChatStreamStartRequest,
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentPreviewResult,
@@ -129,6 +139,24 @@ const ancestry: AncestryBridge = Object.freeze({
   cancelJob: async (request: JobRequest) => parseJobSnapshotResult(
     await ipcRenderer.invoke(desktopChannels.cancelJob, parseJobRequest(request)),
   ),
+  startChatStream: async (request: ChatStreamStartRequest) => parseChatStreamRunResult(
+    await ipcRenderer.invoke(
+      desktopChannels.startChatStream,
+      parseChatStreamStartRequest(request),
+    ),
+  ),
+  cancelChatStream: async (request: ChatStreamCancelRequest) => parseChatStreamRunResult(
+    await ipcRenderer.invoke(
+      desktopChannels.cancelChatStream,
+      parseChatStreamCancelRequest(request),
+    ),
+  ),
+  acknowledgeChatStream: async (request: ChatStreamAckRequest) => parseChatStreamAcknowledgementResult(
+    await ipcRenderer.invoke(
+      desktopChannels.acknowledgeChatStream,
+      parseChatStreamAckRequest(request),
+    ),
+  ),
   subscribeJobEvents: async (request: JobEventSubscriptionRequest) => parseJobEventSubscriptionResult(
     await ipcRenderer.invoke(
       desktopChannels.subscribeJobEvents,
@@ -156,6 +184,23 @@ const ancestry: AncestryBridge = Object.freeze({
       if (!active) return
       active = false
       ipcRenderer.removeListener(desktopEventChannels.jobEvent, ipcListener)
+    }
+  },
+  onChatEventBatch(listener: (delivery: Readonly<ChatEventDelivery>) => void) {
+    let active = true
+    const ipcListener = (_event: unknown, value: unknown) => {
+      if (!active) return
+      try {
+        listener(parseChatEventDelivery(value))
+      } catch {
+        // Main-process event payloads are untrusted until this boundary validates them.
+      }
+    }
+    ipcRenderer.on(desktopEventChannels.chatEventBatch, ipcListener)
+    return () => {
+      if (!active) return
+      active = false
+      ipcRenderer.removeListener(desktopEventChannels.chatEventBatch, ipcListener)
     }
   },
 })
