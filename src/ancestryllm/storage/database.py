@@ -86,6 +86,28 @@ def _integrity_result(connection: Any) -> str | None:
     return str(fallback[0]) if fallback and fallback[0] else None
 
 
+def _configure_sqlcipher_connection(connection: Any, key_hex: str) -> None:
+    """Apply the fail-closed SQLCipher connection policy in a stable order."""
+    connection.execute(f"PRAGMA key = \"x'{key_hex}'\"")
+    version = connection.execute("PRAGMA cipher_version").fetchone()
+    if not version or not version[0]:
+        connection.close()
+        raise StorageError(
+            "SQLCIPHER_UNAVAILABLE",
+            "The SQLite driver does not provide SQLCipher encryption.",
+        )
+    # SQLCipher's Windows stderr sink allocates through its protected-memory
+    # allocator. If VirtualLock reaches the process working-set quota, logging
+    # that warning can recurse until the process stack overflows. Disable the
+    # native sink before protected memory is enabled; application diagnostics
+    # use the repository's redacted logging boundary instead.
+    connection.execute("PRAGMA cipher_log_level = NONE")
+    connection.execute("PRAGMA cipher_memory_security = ON")
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA secure_delete = ON")
+    connection.execute("PRAGMA journal_mode = DELETE")
+
+
 def _decode_key(encoded: str) -> bytes:
     try:
         key = base64.urlsafe_b64decode(encoded.encode("ascii"))
@@ -159,18 +181,7 @@ class Database:
 
         def connect() -> Any:
             connection = sqlcipher3.connect(str(self.path), check_same_thread=False)
-            connection.execute(f"PRAGMA key = \"x'{key_hex}'\"")
-            version = connection.execute("PRAGMA cipher_version").fetchone()
-            if not version or not version[0]:
-                connection.close()
-                raise StorageError(
-                    "SQLCIPHER_UNAVAILABLE",
-                    "The SQLite driver does not provide SQLCipher encryption.",
-                )
-            connection.execute("PRAGMA cipher_memory_security = ON")
-            connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute("PRAGMA secure_delete = ON")
-            connection.execute("PRAGMA journal_mode = DELETE")
+            _configure_sqlcipher_connection(connection, key_hex)
             return connection
 
         try:

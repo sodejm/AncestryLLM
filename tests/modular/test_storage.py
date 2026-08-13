@@ -20,6 +20,7 @@ from ancestryllm.core.secrets import (
     KeyringSecretStore,
     MemorySecretStore,
 )
+from ancestryllm.storage import database as database_module
 from ancestryllm.storage.database import DATABASE_SECRET, SQLITE_HEADER, Database
 from ancestryllm.storage.diagnostics import (
     StartupConfigurationFailure,
@@ -91,6 +92,41 @@ def test_schema_bootstrap_bypasses_sqlalchemy_ddl_execution(
             *Base.metadata.tables,
             "alembic_version",
         }
+
+
+def test_sqlcipher_logging_is_disabled_before_memory_security() -> None:
+    statements: list[str] = []
+
+    class FakeResult:
+        def __init__(self, row: tuple[str, ...] | None = None) -> None:
+            self.row = row
+
+        def fetchone(self) -> tuple[str, ...] | None:
+            return self.row
+
+    class FakeConnection:
+        def execute(self, statement: str) -> FakeResult:
+            statements.append(statement)
+            if statement == "PRAGMA cipher_version":
+                return FakeResult(("4.14.0 community",))
+            return FakeResult()
+
+        def close(self) -> None:
+            pass
+
+    connection = FakeConnection()
+
+    database_module._configure_sqlcipher_connection(connection, "00" * 32)
+
+    assert statements == [
+        f"PRAGMA key = \"x'{'00' * 32}'\"",
+        "PRAGMA cipher_version",
+        "PRAGMA cipher_log_level = NONE",
+        "PRAGMA cipher_memory_security = ON",
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA secure_delete = ON",
+        "PRAGMA journal_mode = DELETE",
+    ]
 
 
 def test_unversioned_partial_schema_fails_closed_before_bootstrap(tmp_path: Path) -> None:
