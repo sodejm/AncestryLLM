@@ -63,6 +63,12 @@ def _create_tables_on_native_connection(connection: Any, tables: tuple[Table, ..
     """
     native_connection = connection.connection.driver_connection
     assert native_connection is not None
+    # Python's sqlite-compatible drivers use legacy transaction control by
+    # default, so DDL does not necessarily start the SQLAlchemy transaction.
+    # Begin at the native boundary before the first statement to keep an
+    # interrupted bootstrap or migration atomic.
+    if not native_connection.in_transaction:
+        native_connection.execute("BEGIN")
     for table in tables:
         native_connection.execute(str(CreateTable(table).compile(dialect=connection.dialect)))
         for index in sorted(table.indexes, key=lambda candidate: candidate.name or ""):

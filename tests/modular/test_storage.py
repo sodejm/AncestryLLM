@@ -94,6 +94,45 @@ def test_schema_bootstrap_bypasses_sqlalchemy_ddl_execution(
         }
 
 
+def test_native_schema_ddl_failure_rolls_back_partial_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    create_table = database_module.CreateTable
+    compile_count = 0
+
+    class FailSecondCreateTable:
+        def __init__(self, table: Any) -> None:
+            self.statement = create_table(table)
+
+        def compile(self, *, dialect: Any) -> Any:
+            nonlocal compile_count
+            compile_count += 1
+            if compile_count == 2:
+                raise RuntimeError("fictional interrupted native schema bootstrap")
+            return self.statement.compile(dialect=dialect)
+
+    monkeypatch.setattr(database_module, "CreateTable", FailSecondCreateTable)
+
+    with (
+        pytest.raises(RuntimeError, match="interrupted native schema bootstrap"),
+        database.engine.begin() as connection,
+    ):
+        database_module._create_tables_on_native_connection(
+            connection,
+            tuple(Base.metadata.sorted_tables[:2]),
+        )
+
+    with database.engine.connect() as connection:
+        table_names = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+    assert table_names == set()
+
+
 def test_sqlcipher_logging_is_disabled_before_memory_security() -> None:
     statements: list[str] = []
 
