@@ -31,6 +31,13 @@ type WindowsTreeKillExecutor = (
 ) => void
 
 type WindowsTreeTerminator = (pid: number) => Promise<void>
+type NativeProcessTerminator = (
+  child: ChildProcessWithoutNullStreams,
+) => Promise<void>
+type WorkingDirectoryRemover = (
+  path: string,
+  options: { recursive: true; force: true },
+) => Promise<void>
 
 export interface PosixProcessGroupController {
   signal: (pid: number, signal: NodeJS.Signals) => void
@@ -251,13 +258,15 @@ function readiness(child: ChildProcessWithoutNullStreams): Promise<SidecarReadyF
   })
 }
 
-class NativeRunningSidecar extends EventEmitter implements RunningSidecar {
+export class NativeRunningSidecar extends EventEmitter implements RunningSidecar {
   readonly ready: Promise<SidecarReadyFrame>
   private termination: Promise<void> | undefined
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly workingDirectory: string,
+    private readonly terminateProcess: NativeProcessTerminator = terminateNativeSidecarProcess,
+    private readonly removeWorkingDirectory: WorkingDirectoryRemover = rm,
   ) {
     super()
     this.ready = readiness(child)
@@ -267,13 +276,20 @@ class NativeRunningSidecar extends EventEmitter implements RunningSidecar {
 
   terminate(): Promise<void> {
     if (this.termination) return this.termination
-    this.termination = this.terminateOnce()
-    return this.termination
+    const termination = this.terminateOnce()
+    this.termination = termination
+    void termination.catch(() => {
+      if (this.termination === termination) this.termination = undefined
+    })
+    return termination
   }
 
   private async terminateOnce(): Promise<void> {
-    await terminateNativeSidecarProcess(this.child)
-    await rm(this.workingDirectory, { recursive: true, force: true })
+    await this.terminateProcess(this.child)
+    await this.removeWorkingDirectory(this.workingDirectory, {
+      recursive: true,
+      force: true,
+    })
   }
 }
 

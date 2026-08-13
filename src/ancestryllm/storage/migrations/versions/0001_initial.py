@@ -16,7 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+def _begin_native_sqlite_transaction() -> None:
+    """Ensure SQLite DDL participates in one native transaction."""
+    connection = op.get_bind()
+    if connection.dialect.name != "sqlite":
+        return
+    driver_connection = connection.connection.driver_connection
+    if driver_connection is None:
+        raise RuntimeError("SQLite driver connection is unavailable")
+    if not driver_connection.in_transaction:
+        connection.exec_driver_sql("BEGIN")
+
+
 def upgrade() -> None:
+    _begin_native_sqlite_transaction()
     op.create_table(
         "workspaces",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -178,6 +191,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _begin_native_sqlite_transaction()
     op.drop_table("llm_runs")
     op.drop_table("consent_profiles")
     op.drop_table("provider_profiles")

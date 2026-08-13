@@ -168,6 +168,45 @@ def test_packaged_alembic_migration_rolls_back_all_ddl_after_late_failure(
     assert revision == "0001"
 
 
+def test_initial_packaged_migration_rolls_back_all_domain_ddl_after_late_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_late_initial_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        normalized = " ".join(statement.upper().split())
+        if normalized.startswith("CREATE TABLE LLM_RUNS"):
+            raise RuntimeError("simulated late initial migration failure")
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_late_initial_ddl)
+
+    with pytest.raises(RuntimeError, match="simulated late initial migration failure"):
+        _upgrade_with_packaged_migrations(database, "0001")
+
+    with database.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        revision = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one_or_none()
+
+    assert tables <= {"alembic_version"}
+    assert revision is None
+
+
 def test_unknown_revision_is_rejected_before_job_tables_are_created(tmp_path: Path) -> None:
     database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
     database.open()
