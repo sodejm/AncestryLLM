@@ -56,13 +56,17 @@ check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
 before Playwright may start. The normal Linux launch allowlist retains the D-Bus
 address and XDG runtime directory required by native Secret Service; the exact
-verification runner passes its owner-only root through a Linux-only Electron
-command-line switch. Main requires an absolute Linux path and derives the
-sidecar's disposable home and XDG cache, configuration, data, and runtime paths
-from that root; it does not inherit those values from Playwright's environment.
-The packaged process therefore reaches that verified service without selecting
-a Python test backend, injecting a packaged credential, or retaining runner
-keyring state. An unavailable or failed native service fails the row.
+verification runner launches a separate unpublished Linux verifier package.
+Only that package compiles the adapter that reads its owner-only root from a
+Linux-only Electron command-line switch. The ordinary production package is
+assembled and scanned first; its adapter always returns no verifier root, and
+the production build scan rejects the selector literal. In the verifier, Main
+requires an absolute Linux path and derives the sidecar's disposable home and
+XDG cache, configuration, data, and runtime paths from that root; it does not
+inherit those values from Playwright's environment. The packaged process
+therefore reaches that verified service without selecting a Python test
+backend, injecting a packaged credential, or retaining runner keyring state.
+An unavailable or failed native service fails the row.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
@@ -154,11 +158,13 @@ main process.
 Each native row then:
 
 1. builds and smoke-tests the target-matched sidecar;
-2. builds the production Electron assets and assembles an unpublished unpacked
-   native application;
+2. builds the production Electron assets, rejects verifier-only selectors, and
+   assembles and verifies an unpublished unpacked production application;
 3. verifies that the packaged resources exactly match the deterministic
    target/build-bound sidecar payload manifest;
-4. launches the actual packaged executable with isolated fictional app data;
+4. on Linux only, builds a separate unpublished native-keyring verifier package
+   after the production assembly is complete, then launches that verifier;
+   other rows launch the production package directly;
 5. verifies first-run welcome, Home and healthy Diagnostics, Settings
    persistence across a new process, corrupt-preference fail-closed behavior,
    clean quit and relaunch, custom-protocol and production CSP behavior,

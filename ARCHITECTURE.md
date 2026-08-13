@@ -814,12 +814,16 @@ allowlist includes the active D-Bus session address and XDG runtime directory
 needed to reach the user's native Secret Service, but not home, cache,
 configuration, or data directories. Electron main pins the child to the native
 Secret Service backend and ignores ambient Python keyring selectors and
-configuration. Exact-head Linux packaged verification passes its owner-only
-temporary root through a verifier-specific Electron command-line switch; Main
-validates that Linux-only absolute root and derives the sidecar's home and XDG
-paths from it instead of accepting ambient values. The root is never inherited
-from the packaged process environment. Provider credentials and `PATH` remain
-excluded from the child environment.
+configuration. Exact-head Linux packaged verification uses a separate
+unpublished package whose compile-time adapter may read an owner-only temporary
+root from a verifier-specific Electron command-line switch. The production
+adapter never reads that switch, the production build scanner rejects its
+literal name, and the ordinary package is assembled and verified before the
+verifier package is built. In the verifier, Main validates the Linux-only
+absolute root and derives the sidecar's home and XDG paths from it instead of
+accepting ambient values. The root is never inherited from the packaged process
+environment. Provider credentials and `PATH` remain excluded from the child
+environment.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 
@@ -884,12 +888,14 @@ Packaged Alembic-compatible migration files retain the revision history.
 Runtime bootstrap creates the complete revision `0002` schema only after a
 single inventory query proves that no user table exists. It uses ordered DDL
 without SQLAlchemy's per-table reflection, which avoids native SQLCipher driver
-recursion while preserving atomic bootstrap. Existing revision `0002` layouts
-are inventory-validated and reused without DDL; exact revision `0001` layouts
-receive only the reviewed job-table migration. Empty version rows, unknown
-revisions, and incomplete or unexpected table inventories return
-`DATABASE_MIGRATION_REQUIRED` without implicit repair. There is not yet a
-public in-place migration command.
+recursion while preserving atomic bootstrap. The packaged `0001` to `0002`
+migration starts a native SQLite transaction before its first DDL statement so
+a late failure cannot leave either job table or its indexes behind. Existing
+revision `0002` layouts are inventory-validated and reused without DDL; exact
+revision `0001` layouts receive only the reviewed job-table migration. Empty
+version rows, unknown revisions, and incomplete or unexpected table inventories
+return `DATABASE_MIGRATION_REQUIRED` without implicit repair. There is not yet
+a public in-place migration command.
 
 ## LLM boundary, providers, and consent
 

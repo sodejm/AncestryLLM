@@ -21,6 +21,18 @@ const productionRuntimeBridge = await readFile(
   new URL('../src/main/runtime-bridge.ts', import.meta.url),
   'utf8',
 )
+const productionNativeVerification = await readFile(
+  new URL('../src/main/native-verification.ts', import.meta.url),
+  'utf8',
+)
+const packagedNativeVerification = await readFile(
+  new URL('../e2e/native-verification.packaged-verification.ts', import.meta.url),
+  'utf8',
+)
+const packagedNativeVerificationBuilder = await readFile(
+  new URL('../electron-builder.native-verification.yml', import.meta.url),
+  'utf8',
+)
 
 const minimumPatchedElectronVersion = [39, 8, 10]
 
@@ -91,6 +103,29 @@ test('production main entry contains no fixture bridge or test hook', () => {
   assert.doesNotMatch(productionMain, /__ancestryllmSecurityStateForTests/)
 })
 
+test('production packages cannot select verifier-only native storage roots', () => {
+  assert.doesNotMatch(productionMain, /ancestryllm-linux-keyring-verification-root/)
+  assert.doesNotMatch(productionNativeVerification, /LINUX_KEYRING_VERIFICATION_SWITCH/)
+  assert.doesNotMatch(
+    productionNativeVerification,
+    /ancestryllm-linux-keyring-verification-root/,
+  )
+  assert.match(productionNativeVerification, /return undefined/)
+  assert.match(packagedNativeVerification, /LINUX_KEYRING_VERIFICATION_SWITCH/)
+  assert.equal(
+    packageJson.scripts['build:packaged-native-verification'],
+    'pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification',
+  )
+  assert.match(
+    packagedNativeVerificationBuilder,
+    /^extends: \.\/electron-builder\.verification\.yml$/m,
+  )
+  assert.match(
+    packagedNativeVerificationBuilder,
+    /^ {2}output: release-native-verification$/m,
+  )
+})
+
 test('production shutdown owns the supervisor before asynchronous sidecar startup', () => {
   const signalRegistration = productionMain.indexOf("process.on('SIGTERM'")
   const runtimeStartup = productionMain.indexOf('await startRuntimeBridge(')
@@ -102,12 +137,17 @@ test('production shutdown owns the supervisor before asynchronous sidecar startu
   )
   assert.match(
     productionMain,
-    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(\),\s*\}\)/,
+    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(app\.commandLine\),\s*\}\)/,
   )
   assert.match(
     productionMain,
     /\(\) => supervisor\.isExplicitSafeEmpty\(\)/,
     'shutdown may skip HTTP preflight only through the supervisor-owned safe-empty proof',
+  )
+  assert.match(
+    productionMain,
+    /\(\) => supervisor\.isExplicitSafeEmpty\(\),\s*shutdownProgress,/,
+    'shutdown retries must retain the completed job-preparation phase',
   )
 
   const ownershipCallback = productionRuntimeBridge.indexOf('onSupervisorOwned?.(')
@@ -156,6 +196,15 @@ test('inspection output is optional, cross-platform, and write-once', async (t) 
   t.after(() => rm(directory, { recursive: true, force: true }))
   const outputPath = join(directory, 'package inspection.json')
   assert.deepEqual(parseArguments(['--output', outputPath]), { outputPath })
+  const packageRoot = join(directory, 'unpublished verifier package')
+  assert.deepEqual(
+    parseArguments(['--root', packageRoot, '--output', outputPath]),
+    { rootPath: packageRoot, outputPath },
+  )
+  assert.throws(
+    () => parseArguments(['--root', packageRoot, '--root', packageRoot]),
+    /may be supplied only once/,
+  )
 
   const report = {
     schemaVersion: 1,

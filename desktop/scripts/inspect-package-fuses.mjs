@@ -116,10 +116,21 @@ export function asarIntegrityReport(platform, plist, headerHash) {
 
 export function parseArguments(argv) {
   if (argv.length === 0) return {}
-  assert.equal(argv.length, 2, 'Usage: node scripts/inspect-package-fuses.mjs [--output <path>]')
-  assert.equal(argv[0], '--output', 'Usage: node scripts/inspect-package-fuses.mjs [--output <path>]')
-  assert.ok(argv[1], 'The --output option requires a path')
-  return { outputPath: argv[1] }
+  const usage =
+    'Usage: node scripts/inspect-package-fuses.mjs [--root <path>] [--output <path>]'
+  assert.equal(argv.length % 2, 0, usage)
+
+  const parsed = {}
+  for (let index = 0; index < argv.length; index += 2) {
+    const option = argv[index]
+    const value = argv[index + 1]
+    assert.ok(option === '--root' || option === '--output', usage)
+    assert.ok(value, `The ${option} option requires a path`)
+    const key = option === '--root' ? 'rootPath' : 'outputPath'
+    assert.equal(parsed[key], undefined, `The ${option} option may be supplied only once`)
+    parsed[key] = value
+  }
+  return parsed
 }
 
 export async function writeInspectionReport(outputPath, report) {
@@ -188,8 +199,8 @@ export async function inspectPackage({ root = releaseRoot, platform = process.pl
 }
 
 async function main(argv) {
-  const { outputPath } = parseArguments(argv)
-  const report = await inspectPackage()
+  const { outputPath, rootPath } = parseArguments(argv)
+  const report = await inspectPackage(rootPath ? { root: rootPath } : {})
   if (outputPath) await writeInspectionReport(outputPath, report)
   console.log(formatInspectionSummary(report))
 }

@@ -176,6 +176,41 @@ describe('Electron app shutdown', () => {
     expect(authorizeAndExit).not.toHaveBeenCalled()
   })
 
+  it('retries a failed sidecar stop without repeating a successful job preflight', async () => {
+    const progress = { jobsPrepared: false }
+    const prepareJobs = vi.fn().mockResolvedValue(undefined)
+    const stopSidecar = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary process-tree verification failure'))
+      .mockResolvedValueOnce(undefined)
+    const reportFailure = vi.fn()
+    const authorizeAndExit = vi.fn()
+
+    await expect(completeAppShutdown(
+      prepareJobs,
+      vi.fn(),
+      stopSidecar,
+      reportFailure,
+      authorizeAndExit,
+      () => false,
+      progress,
+    )).resolves.toBe(false)
+    await expect(completeAppShutdown(
+      prepareJobs,
+      vi.fn(),
+      stopSidecar,
+      reportFailure,
+      authorizeAndExit,
+      () => false,
+      progress,
+    )).resolves.toBe(true)
+
+    expect(progress.jobsPrepared).toBe(true)
+    expect(prepareJobs).toHaveBeenCalledOnce()
+    expect(stopSidecar).toHaveBeenCalledTimes(2)
+    expect(reportFailure).toHaveBeenCalledOnce()
+    expect(authorizeAndExit).toHaveBeenCalledOnce()
+  })
+
   it('fails closed if the shutdown-choice prompt cannot return a valid choice', async () => {
     const stopSidecar = vi.fn()
     const reportFailure = vi.fn()

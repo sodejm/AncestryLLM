@@ -9,6 +9,7 @@ RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 MAKEFILE = ROOT / "Makefile"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
+NATIVE_VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.native-verification.yml"
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
 LINUX_KEYRING_RUNNER = ROOT / "desktop" / "scripts" / "run-with-linux-keyring.sh"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
@@ -140,7 +141,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert '--allow-output "$ROW_ROOT"' not in workflow
     assert "--allow-output desktop/out" not in workflow
     assert '--allow-output "$RECEIPTS_DIR/api-contract.json"' in workflow
-    assert "inspect-package-fuses.mjs --output" in workflow
+    assert 'inspect-package-fuses.mjs --root "$PACKAGED_RELEASE_ROOT" --output' in workflow
     assert "pnpm --dir desktop run check:secrets" in workflow
     assert "pnpm --dir desktop run sbom" in workflow
     assert "pnpm --dir desktop sbom" not in workflow
@@ -154,7 +155,37 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "--audit-passed" not in workflow
     assert "desktop/release/" not in workflow
     assert "--config electron-builder.verification.yml" in workflow
+    assert "--config electron-builder.native-verification.yml" in workflow
     assert "--config electron-builder.file-grant-verification.yml" in workflow
+    production_build = workflow.index("pnpm --dir desktop run build\n")
+    production_assembly = workflow.index(
+        "electron-builder --config electron-builder.verification.yml"
+    )
+    production_sidecar_verification = workflow.index(
+        'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release'
+    )
+    native_verification_build = workflow.index(
+        "pnpm --dir desktop run build:packaged-native-verification"
+    )
+    native_verification_assembly = workflow.index(
+        "electron-builder --config electron-builder.native-verification.yml"
+    )
+    native_sidecar_verification = workflow.index(
+        'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-native-verification'
+    )
+    assert (
+        production_build
+        < production_assembly
+        < production_sidecar_verification
+        < native_verification_build
+        < native_verification_assembly
+        < native_sidecar_verification
+    )
+    assert (
+        'echo "PACKAGED_RELEASE_ROOT=desktop/release-native-verification" >> "$GITHUB_ENV"'
+    ) in workflow
+    assert 'packaged_app="$(node desktop/scripts/find-packaged-app.mjs '
+    assert '"$PACKAGED_RELEASE_ROOT")"' in workflow
 
     builder = VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
     assert "extends: ./electron-builder.yml" in builder
@@ -164,6 +195,13 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
         builder,
     )
     assert builder.count("signIgnore:") == 1
+
+    native_verification_builder = NATIVE_VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
+    assert "extends: ./electron-builder.verification.yml" in native_verification_builder
+    assert re.search(
+        r"directories:\n  output: release-native-verification\n?\Z",
+        native_verification_builder,
+    )
 
 
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
@@ -320,7 +358,7 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
     assert f"name: {sandbox_step}" in workflow
     assert "if: runner.os == 'Linux'" in workflow
     assert 'sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"' in workflow
-    assert '"$GITHUB_WORKSPACE/desktop/release"/*) ;;' in workflow
+    assert '"$GITHUB_WORKSPACE/$PACKAGED_RELEASE_ROOT"/*) ;;' in workflow
     assert 'echo "::error::Unexpected Chromium sandbox path"' in workflow
     assert 'test ! -L "$sandbox_path"' in workflow
     assert 'test -f "$sandbox_path"' in workflow

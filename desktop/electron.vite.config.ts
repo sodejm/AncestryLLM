@@ -8,12 +8,19 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 const lifecycle = process.env.npm_lifecycle_event ?? ''
 const fixtureBuild = ['dev', 'dev:gallery', 'build:e2e'].includes(lifecycle)
 const packagedFileGrantBuild = lifecycle === 'build:packaged-file-grants'
+const packagedNativeVerificationBuild = [
+  'build:packaged-native-verification',
+  'build:packaged-file-grants',
+].includes(lifecycle)
 const mainAliases = {
   ...(fixtureBuild
     ? { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') }
     : {}),
   ...(packagedFileGrantBuild
     ? { './native-file-dialogs': resolve('e2e/native-file-dialogs.packaged-verification.ts') }
+    : {}),
+  ...(packagedNativeVerificationBuild
+    ? { './native-verification': resolve('e2e/native-verification.packaged-verification.ts') }
     : {}),
 }
 const sidecarManifest = resolve(

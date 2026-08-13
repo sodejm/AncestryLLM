@@ -24,6 +24,7 @@ const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const packagedAttachTimeoutMs = 45_000
 const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
+const packagedWindowCloseTimeoutMs = 20_000
 const packagedQuitRetryDelayMs = 20_000
 const packagedQuitTimeoutMs = 30_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
@@ -332,7 +333,7 @@ async function closePackaged(result: LaunchResult): Promise<void> {
     processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
     await withinDeadline(
       'closing packaged application window',
-      packagedCleanupTimeoutMs,
+      packagedWindowCloseTimeoutMs,
       () => result.page.close({ runBeforeUnload: false }),
     )
   }

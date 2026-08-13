@@ -13,6 +13,7 @@ import {
 import {
   completeAppShutdown,
   requestVerifiedShutdownBeforeWindowClose,
+  type AppShutdownProgress,
   type UnsafeShutdownChoice,
 } from './app-shutdown'
 import { FileGrantBroker } from './file-grant-broker'
@@ -28,6 +29,7 @@ import {
   writeConcurrentLocalRuntimeCliFailure,
 } from './local-runtime-cli'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
+import { requestedLinuxKeyringVerificationRoot } from './native-verification'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
@@ -39,10 +41,7 @@ import {
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
 import { startRuntimeBridge } from './runtime-bridge'
-import {
-  LINUX_KEYRING_VERIFICATION_SWITCH,
-  type SidecarSupervisor,
-} from './sidecar-supervisor'
+import type { SidecarSupervisor } from './sidecar-supervisor'
 import type { JobShutdownAction } from './sidecar-client'
 import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
@@ -72,6 +71,7 @@ let sidecarSupervisor: SidecarSupervisor | undefined
 let prepareJobShutdown: ((action: JobShutdownAction) => Promise<void>) | undefined
 let shutdownAuthorized = false
 let shutdownPromise: Promise<boolean> | undefined
+const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }
 let ipcController: DesktopIpcController | undefined
 let removeSidecarSessionListener: (() => void) | undefined
 
@@ -85,11 +85,6 @@ function rendererPolicy() {
 
 function isProductionRenderer(): boolean {
   return resolveRendererTarget(rendererPolicy()).value === APP_ENTRY_URL
-}
-
-function requestedLinuxKeyringVerificationRoot(): string | undefined {
-  if (!app.commandLine.hasSwitch(LINUX_KEYRING_VERIFICATION_SWITCH)) return undefined
-  return app.commandLine.getSwitchValue(LINUX_KEYRING_VERIFICATION_SWITCH)
 }
 
 function denyWebContentsCapabilities(contents: WebContents): void {
@@ -224,7 +219,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
       sidecarSupervisor = supervisor
       prepareJobShutdown = prepareJobs
     }, {
-      linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(),
+      linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
     })
     bridge = runtime.bridge
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
@@ -268,6 +263,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
           app.exit(0)
         },
         () => supervisor.isExplicitSafeEmpty(),
+        shutdownProgress,
       ).finally(() => { shutdownPromise = undefined })
     }
   })

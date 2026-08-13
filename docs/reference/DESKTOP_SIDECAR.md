@@ -61,16 +61,18 @@ The checked-in launcher starts that service on a private D-Bus session with
 owner-only temporary storage, waits for its well-known name, and proves native
 store, read, and delete operations with a non-secret probe. The packaged
 process reaches that service only through the launcher's private D-Bus session
-and an exact verifier-only command-line switch carrying the owner-only
-temporary root. Electron Main rejects that switch outside Linux or when its
-value is not an absolute Linux path, then derives the sidecar's home and XDG
-paths from the root rather than inheriting ambient values. Every Linux sidecar
-launch pins the native Secret Service backend, ignores ambient Python keyring
-selectors and configuration, and excludes provider credential and `PATH`
-values. Normal launches also exclude home, cache, configuration, and data
-values. The launcher preserves the packaged command's real exit status and
-removes the state afterward. No mock or alternate Python keyring backend is
-permitted. This is
+and a separate unpublished Linux verifier package. Only the verifier package
+compiles the adapter that reads an exact command-line switch carrying the
+owner-only temporary root. The production package is assembled and scanned
+first, its adapter never reads the selector, and its build rejects the selector
+literal. In the verifier, Electron Main rejects the root outside Linux or when
+it is not an absolute Linux path, then derives the sidecar's home and XDG paths
+from the root rather than inheriting ambient values. Every Linux sidecar launch
+pins the native Secret Service backend, ignores ambient Python keyring selectors
+and configuration, and excludes provider credential and `PATH` values. Normal
+launches also exclude home, cache, configuration, and data values. The launcher
+preserves the packaged command's real exit status and removes the state
+afterward. No mock or alternate Python keyring backend is permitted. This is
 verification infrastructure only; it does not add a production credential
 fallback or weaken keyring-only startup.
 
@@ -85,9 +87,9 @@ fallback or weaken keyring-only startup.
    `PATH`, and home-directory values are not inherited during normal launches.
    Linux additionally retains only the active D-Bus address and XDG runtime
    directory required by native Secret Service. The exact internal verification
-   switch additionally permits only paths derived from the disposable
-   verifier's validated absolute root; it does not accept ambient home or XDG
-   values.
+   adapter additionally permits only paths derived from the disposable
+   verifier's validated absolute root; that adapter is absent from ordinary
+   production packages and does not accept ambient home or XDG values.
 4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness
@@ -284,9 +286,11 @@ After the report is ready, writable sidecar startup creates the encrypted
 revision `0002` schema only when one bounded inventory query proves the
 workspace has no user tables. A complete current schema is reused without DDL,
 and only an exact revision `0001` layout receives the reviewed job-table
-migration. Unversioned partial schemas, unknown revisions, and missing or
-unexpected tables fail with `DATABASE_MIGRATION_REQUIRED`; startup never
-silently repairs or replaces them.
+migration. That packaged migration explicitly begins one native SQLite
+transaction before creating either table or index, so any late DDL failure
+rolls the entire migration back to revision `0001`. Unversioned partial schemas,
+unknown revisions, and missing or unexpected tables fail with
+`DATABASE_MIGRATION_REQUIRED`; startup never silently repairs or replaces them.
 
 For a startup or compatibility failure:
 

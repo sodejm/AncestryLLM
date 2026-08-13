@@ -2,6 +2,7 @@
 import type { JobShutdownAction } from './sidecar-client'
 
 export type UnsafeShutdownChoice = JobShutdownAction | 'stay'
+export type AppShutdownProgress = { jobsPrepared: boolean }
 
 type WindowCloseEvent = { preventDefault: () => void }
 
@@ -25,12 +26,14 @@ export async function completeAppShutdown(
   reportFailure: () => void,
   authorizeAndExit: () => void,
   isExplicitSafeEmpty: () => boolean = () => false,
+  progress: AppShutdownProgress = { jobsPrepared: false },
 ): Promise<boolean> {
-  if (!isExplicitSafeEmpty()) {
+  if (!progress.jobsPrepared && !isExplicitSafeEmpty()) {
     let action: JobShutdownAction = 'wait'
     while (true) {
       try {
         await prepareJobs(action)
+        progress.jobsPrepared = true
         break
       } catch {
         reportFailure()

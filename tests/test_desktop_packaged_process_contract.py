@@ -5,9 +5,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
+PACKAGED_NATIVE_VERIFICATION = (
+    ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
+)
 MAIN_INDEX = ROOT / "desktop" / "src" / "main" / "index.ts"
+PRODUCTION_NATIVE_VERIFICATION = ROOT / "desktop" / "src" / "main" / "native-verification.ts"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 SIDECAR_SUPERVISOR = ROOT / "desktop" / "src" / "main" / "sidecar-supervisor.ts"
+DESKTOP_WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
 
 
 def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
@@ -124,12 +129,13 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     )
     assert re.search(
         r"await withinDeadline\(\s*'closing packaged application window',\s*"
-        r"packagedCleanupTimeoutMs,\s*"
+        r"packagedWindowCloseTimeoutMs,\s*"
         r"\(\) => result\.page\.close\(\{ runBeforeUnload: false \}\),\s*\)",
         close_source,
     )
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
+    assert "const packagedWindowCloseTimeoutMs = 20_000" in source
     assert platform_index < retry_index < browser_close_index
     assert platform_index < window_close_index < browser_close_index
     assert browser_close_index < status_index
@@ -153,6 +159,11 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
     assert "supervisor.isExplicitSafeEmpty()" in main_source
+    assert "const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }" in main_source
+    assert re.search(
+        r"\(\) => supervisor\.isExplicitSafeEmpty\(\),\s*shutdownProgress,",
+        main_source,
+    )
     verified_exit_start = main_source.index(
         "() => {\n          disposeIpcBoundary()",
         main_source.index("shutdownPromise = completeAppShutdown("),
@@ -171,14 +182,35 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
 def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
+    production_verifier_source = PRODUCTION_NATIVE_VERIFICATION.read_text(encoding="utf-8")
+    packaged_verifier_source = PACKAGED_NATIVE_VERIFICATION.read_text(encoding="utf-8")
     supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
+    workflow_source = DESKTOP_WORKFLOW.read_text(encoding="utf-8")
 
     assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in source
     assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" in source
     assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" not in supervisor_source
     assert "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME'" not in source
     assert "LINUX_KEYRING_VERIFICATION_SWITCH" in source
-    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in main_source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" not in main_source
+    assert "ancestryllm-linux-keyring-verification-root" not in main_source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" not in production_verifier_source
+    assert "ancestryllm-linux-keyring-verification-root" not in production_verifier_source
+    assert "return undefined" in production_verifier_source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in packaged_verifier_source
+    assert "requestedLinuxKeyringVerificationRoot(app.commandLine)" in main_source
+    production_build = workflow_source.index("pnpm --dir desktop run build\n")
+    verification_build = workflow_source.index(
+        "pnpm --dir desktop run build:packaged-native-verification"
+    )
+    production_assembly = workflow_source.index(
+        "electron-builder --config electron-builder.verification.yml"
+    )
+    verification_assembly = workflow_source.index(
+        "electron-builder --config electron-builder.native-verification.yml"
+    )
+    assert production_build < production_assembly < verification_build < verification_assembly
+    assert "desktop/release-native-verification" in workflow_source
     assert re.search(
         r"platform === 'linux'\s*\?\s*\[.*?"
         r"'DBUS_SESSION_BUS_ADDRESS'.*?'XDG_RUNTIME_DIR'.*?\]",
