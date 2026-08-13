@@ -8,6 +8,9 @@ import {
   type ConsentCreateRequest,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
+  type JobEvent,
+  type JobEventSubscriptionRequest,
+  type JobRequest,
   type PreferenceUpdate,
   type ProviderEndpointValidationRequest,
   type ProviderProfileCreateRequest,
@@ -81,6 +84,32 @@ const startupMutationBlocked = <T>(): BridgeResult<T> => failure(
   'Changes are disabled until startup diagnostics pass.',
   'Open Diagnostics, resolve each blocking item, and retry.',
 )
+
+function jobFailure<T>(cause: unknown): BridgeResult<T> {
+  const reason = cause instanceof SidecarClientError ? cause.reason : null
+  if (reason === 'job_id_invalid') {
+    return failure('JOB_ID_INVALID', 'The selected task identifier is invalid.', 'Refresh the task center and try again.')
+  }
+  if (reason === 'job_not_found') {
+    return failure('JOB_NOT_FOUND', 'The selected task is no longer available.', 'Refresh the task center.')
+  }
+  if (reason === 'job_event_cursor_invalid') {
+    return failure('JOB_EVENT_CURSOR_INVALID', 'Task updates could not resume from that point.', 'Refresh the task snapshot and reconnect.')
+  }
+  if (reason === 'job_event_replay_expired') {
+    return failure('JOB_EVENT_REPLAY_EXPIRED', 'Earlier task updates are no longer available.', 'Refresh the task snapshot and reconnect.')
+  }
+  if (reason === 'job_subscriber_limit') {
+    return failure('JOB_SUBSCRIBER_LIMIT', 'The task update limit has been reached.', 'Close another task view and try again.')
+  }
+  if (reason === 'job_subscription_closed') {
+    return failure('JOB_SUBSCRIPTION_CLOSED', 'The task update stream has ended.', 'Refresh the task snapshot and reconnect.')
+  }
+  if (reason === 'job_event_stream_failed') {
+    return failure('JOB_EVENT_STREAM_FAILED', 'Task updates were interrupted.', 'Refresh the task snapshot and reconnect.')
+  }
+  return failure('JOB_SERVICE_UNAVAILABLE', 'Task information is unavailable.', 'Retry the private service or restart AncestryLLM.')
+}
 
 export function createDesktopControlBridge(dependencies: Readonly<{
   appInfo: Readonly<AppInfo>
@@ -358,6 +387,48 @@ export function createDesktopControlBridge(dependencies: Readonly<{
         }
         return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent could not be revoked.', 'Retry the private service or restart AncestryLLM.')
       }
+    },
+    async listJobs(signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const jobs = await dependencies.sidecarClient.listJobs(signal)
+        requireActive(signal)
+        return success(jobs)
+      } catch (cause) {
+        requireActive(signal)
+        return jobFailure(cause)
+      }
+    },
+    async getJob(request: JobRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const job = await dependencies.sidecarClient.getJob(request, signal)
+        requireActive(signal)
+        return success(job)
+      } catch (cause) {
+        requireActive(signal)
+        return jobFailure(cause)
+      }
+    },
+    async cancelJob(request: JobRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const job = await dependencies.sidecarClient.cancelJob(request, signal)
+        requireActive(signal)
+        return success(job)
+      } catch (cause) {
+        requireActive(signal)
+        return jobFailure(cause)
+      }
+    },
+    async streamJobEvents(
+      request: JobEventSubscriptionRequest,
+      listener: (event: Readonly<JobEvent>) => void,
+      signal?: AbortSignal,
+    ) {
+      requireActive(signal)
+      await dependencies.sidecarClient.streamJobEvents(request, listener, signal)
+      requireActive(signal)
     },
   })
 }

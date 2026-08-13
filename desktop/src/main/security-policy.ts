@@ -1,4 +1,10 @@
 export const APP_ENTRY_URL = 'app://bundle/index.html' as const
+export const APP_ENTRY_ROUTE_HASHES = Object.freeze([
+  '#/',
+  '#/tasks',
+  '#/diagnostics',
+  '#/settings',
+] as const)
 
 export const APP_SCHEME_PRIVILEGES = Object.freeze({
   standard: true,
@@ -48,7 +54,13 @@ export function createAppProtocolHandler(readAsset: AssetReader): (request: Prot
     } catch {
       return new Response(null, { status: 404, headers: responseHeaders() })
     }
-    if (url.protocol !== 'app:' || url.hostname !== 'bundle' || url.port || url.username || url.password || url.search || url.hash) {
+    if (url.protocol !== 'app:' || url.hostname !== 'bundle' || url.port || url.username || url.password || url.search) {
+      return new Response(null, { status: 404, headers: responseHeaders() })
+    }
+    if (
+      url.hash
+      && (url.pathname !== '/index.html' || !APP_ENTRY_ROUTE_HASHES.includes(url.hash as typeof APP_ENTRY_ROUTE_HASHES[number]))
+    ) {
       return new Response(null, { status: 404, headers: responseHeaders() })
     }
 

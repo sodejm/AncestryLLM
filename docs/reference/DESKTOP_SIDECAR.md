@@ -8,9 +8,10 @@ an unreleased 0.6 source boundary for atomic non-secret settings and write-only
 credential management. Issue #107 adds a sanitized schema-v1 startup report,
 keyring-only packaged secret resolution, and fail-closed mutation gating for
 local first run. Issue #104 adds an unreleased UI-neutral job-lifecycle and
-safe-shutdown boundary. It exposes no genealogy operation, job submission,
-chat, provider execution, cloud-account, updater, or generic command route;
-the sidecar is not a domain-data transport.
+safe-shutdown boundary. Issue #109 adds its bounded Tasks presentation through
+five fixed request methods and one validated event listener. It exposes no
+genealogy operation, job submission, chat, provider execution, cloud-account,
+updater, or generic command route; the sidecar is not a domain-data transport.
 The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -125,6 +126,13 @@ bridge exposes the typed result, sanitized diagnostics, and retry outcome, but
 never the session, bearer, port, resolved address, response body, raw HTTP
 data, or a credential value.
 
+For Issue #109, Electron main also uses the fixed job list, status, cancel, and
+SSE-event routes. Its internal client applies the bearer and `Last-Event-ID`,
+requires the exact event-stream content type, bounds a response or event stream
+buffer to 1 MiB, and fails a stalled connection after three seconds. The renderer
+receives only parsed snapshots, events, and stable coded failures; it receives
+no HTTP or sidecar connection authority.
+
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
 and `updatePreferences`. The current unreleased source adds three opaque
@@ -132,9 +140,11 @@ file-grant methods, exactly five settings/credential methods (`getSettings`,
 `updateSettings`, `getSecretStatus`, `setSecret`, and `deleteSecret`), and
 exactly six provider/consent methods (`getProviderConfiguration`,
 `createProviderProfile`, `validateProviderEndpoint`, `previewConsent`,
-`createConsent`, and `revokeConsent`). There is no generic send, listen, route,
-or channel selection operation. Issue #104 adds no renderer method, event
-listener, or supported job UI; its shutdown client remains Electron-Main-only.
+`createConsent`, and `revokeConsent`). Issue #109 adds exactly five task
+request methods (`listJobs`, `getJob`, `cancelJob`, `subscribeJobEvents`, and
+`unsubscribeJobEvents`) plus the fixed, validated `onJobEvent` listener. There
+is no generic send, listen, route, or channel selection operation. Issue #104's
+shutdown client remains Electron-Main-only.
 Main accepts a call only from the registered
 `WebContents`, its exact current main frame, and the exact trusted
 `app://bundle/index.html` URL. It rechecks those facts on every request.
@@ -157,6 +167,18 @@ the first healthy session does not cancel the retry that created it. Timed-out
 underlying operations continue to occupy an active slot until they actually
 settle, so an uncooperative backend cannot turn repeated renderer timeouts into
 unbounded hidden work.
+
+Main owns every task event subscription and binds it to the requesting sender,
+current frame, trusted application document, sidecar session, job, opaque
+subscription identifier, and last accepted sequence. A sender may hold at most
+32 subscriptions. Duplicate identifiers fail, explicit unsubscribe is
+idempotent, and a terminal event closes the stream. Cross-document navigation,
+renderer exit or destruction, bridge replacement, sidecar-session loss or
+replacement, and application shutdown abort and remove affected subscriptions.
+Duplicate or stale events are not forwarded. A gap or expired replay cursor is
+reported with a stable code so the renderer can refresh the backend snapshot
+and create one replacement subscription. No task state is persisted in
+renderer storage.
 
 Preference updates require the last renderer-visible non-negative revision and
 return a coded conflict when it is stale. Packaged main persists the exact

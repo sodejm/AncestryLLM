@@ -208,11 +208,15 @@ describe('accessible desktop shell', () => {
     expect(await screen.findByRole('heading', { name: 'Home' })).toHaveFocus()
     expect(updatePreferences).not.toHaveBeenCalled()
   })
-  it('supports keyboard navigation across Home, Diagnostics, and Settings', async () => {
+  it('supports keyboard navigation across Home, Tasks, Diagnostics, and Settings', async () => {
     const bridge = await createCompletedBridge()
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
     expect(await screen.findByRole('heading', { name: 'Home' })).toBeVisible()
+    const tasks = screen.getByRole('link', { name: 'Tasks' })
+    tasks.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toHaveFocus()
     const diagnostics = screen.getByRole('link', { name: 'Diagnostics' })
     diagnostics.focus()
     await userEvent.keyboard('{Enter}')

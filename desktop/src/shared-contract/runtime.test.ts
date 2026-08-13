@@ -10,6 +10,10 @@ import {
   parseFileGrantResult,
   parseFileGrantRevocationResult,
   parseLocalRuntimePreviewResult,
+  parseJobEventDelivery,
+  parseJobEventSubscriptionRequest,
+  parseJobListResult,
+  parseJobSnapshotResult,
   parseOpenFileGrantRequest,
   parseProviderProfileCreateRequest,
   parseSecretReferenceRequest,
@@ -162,6 +166,33 @@ const startupReport = {
   ],
 } as const
 
+const jobSnapshot = {
+  schema_version: 1,
+  sequence: 1,
+  job_id: 'j123456',
+  name: 'Export fictional tree',
+  state: 'running',
+  submitted_at: '2026-08-12T12:00:00+00:00',
+  started_at: '2026-08-12T12:00:01+00:00',
+  finished_at: null,
+  resource_refs: [`resource_${'a'.repeat(64)}`],
+  artifact: null,
+  outcome_summary: null,
+  next_action: null,
+  error_code: null,
+  error_message: null,
+  error_remediation: null,
+  progress: {
+    schema_version: 1,
+    operation: 'Preparing export',
+    timestamp: '2026-08-12T12:00:02+00:00',
+    completed: 1,
+    total: 4,
+  },
+  cancellation_requested_at: null,
+  cancellation_deferred_by: null,
+} as const
+
 const localRuntimeStatus = {
   schema_version: 1,
   state: 'not-installed',
@@ -283,6 +314,90 @@ const localRuntimePreview = {
 } as const
 
 describe('runtime bridge validation', () => {
+  it('accepts exact job list, snapshot, subscription, and event contracts', () => {
+    expect(parseJobListResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { schema_version: 1, jobs: [jobSnapshot] },
+    })).toMatchObject({ ok: true, data: { jobs: [{ job_id: 'j123456', sequence: 1 }] } })
+    expect(parseJobSnapshotResult({
+      ok: true,
+      protocolVersion: '1',
+      data: jobSnapshot,
+    })).toMatchObject({ ok: true, data: { progress: { completed: 1, total: 4 } } })
+    expect(parseJobEventSubscriptionRequest({
+      schema_version: 1,
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      after: 1,
+    })).toMatchObject({ job_id: 'j123456', after: 1 })
+    expect(parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: {
+        schema_version: 1,
+        sequence: 2,
+        kind: 'progress',
+        created_at: '2026-08-12T12:00:03+00:00',
+        snapshot: { ...jobSnapshot, sequence: 2 },
+      },
+      error: null,
+    })).toMatchObject({ kind: 'event', event: { sequence: 2 } })
+  })
+
+  it('fails closed on unsafe or incoherent job data', () => {
+    const result = (snapshot: unknown) => ({ ok: true, protocolVersion: '1', data: snapshot })
+    expect(() => parseJobSnapshotResult(result({ ...jobSnapshot, name: '/private/tree.ged' }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      progress: { ...jobSnapshot.progress, completed: 2, total: null },
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      state: 'completed',
+      finished_at: null,
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      artifact: {
+        artifact_id: `art_${'b'.repeat(31)}..c`,
+        media_type: 'text/vnd.gedcom',
+        artifact_type: 'gedcom_export',
+        size_bytes: 42,
+        status: 'ready',
+        sha256: 'c'.repeat(64),
+      },
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: {
+        schema_version: 1,
+        sequence: 2,
+        kind: 'progress',
+        created_at: '2026-08-12T12:00:03+00:00',
+        snapshot: { ...jobSnapshot, sequence: 3 },
+      },
+      error: null,
+    })).toThrow('Invalid bridge response')
+    expect(() => parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'failure',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: null,
+      error: {
+        code: 'JOB_EVENT_STREAM_FAILED',
+        message: 'Read /Users/example/private.log',
+        remediation: 'Inspect the private path.',
+      },
+    })).toThrow('Invalid bridge response')
+  })
+
   it('accepts an exact local-runtime artifact, ownership, and isolation review', () => {
     expect(parseLocalRuntimePreviewResult({
       ok: true,

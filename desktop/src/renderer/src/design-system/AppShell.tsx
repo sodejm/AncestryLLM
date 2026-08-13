@@ -1,12 +1,13 @@
 // Reusable accessible application layout and navigation shell.
 
-import { CircleCheck, Command, Heart, Home, Settings, Stethoscope } from 'lucide-react'
+import { CircleCheck, Command, Heart, Home, ListTodo, Settings, Stethoscope } from 'lucide-react'
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { CommandPalette } from './CommandPalette'
 import { navigationItems, type AppRoute, type NavigationItem } from './contracts'
 
 const routeIcons = {
   home: Home,
+  tasks: ListTodo,
   diagnostics: Stethoscope,
   settings: Settings,
 } as const

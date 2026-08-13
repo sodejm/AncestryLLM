@@ -39,6 +39,13 @@ retention, warnings, and optional budget; living-person and remote-retention
 choices receive explicit warnings. A stored key alone cannot enable a provider,
 and this configuration surface does not execute provider requests.
 
+Unreleased Issue #109 adds a **Tasks** destination for backend-owned work. It
+reloads sanitized snapshots, follows bounded monotonic events, distinguishes
+cancelling, pending-safe-point, cancelled, and terminal outcomes, and displays
+only safe artifact metadata. The renderer stores no job state and receives no
+path or artifact authority. This surface admits no work and adds no provider or
+genealogy operation.
+
 The unreleased desktop first run now recommends **Local Desktop** and keeps
 **Connect Remote** and **Host Remote** visible but unavailable. Before it
 enables settings or credential changes, the shell checks a sanitized schema-v1

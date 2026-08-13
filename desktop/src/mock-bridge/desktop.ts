@@ -11,6 +11,12 @@ import {
   type ConsentRevokeRequest,
   type FileGrant,
   type FileGrantRevocation,
+  type JobEventDelivery,
+  type JobEventKind,
+  type JobEventSubscriptionRequest,
+  type JobEventUnsubscriptionRequest,
+  type JobRequest,
+  type JobSnapshot,
   type LocalPreferences,
   type LocalRuntimeApplyRequest,
   type LocalRuntimeOperation,
@@ -33,6 +39,9 @@ import {
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentRevokeRequest,
+  parseJobEventSubscriptionRequest,
+  parseJobEventUnsubscriptionRequest,
+  parseJobRequest,
   parseLocalRuntimeApplyRequest,
   parseLocalRuntimeRequest,
   parsePreferenceUpdate,
@@ -67,6 +76,63 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     consents: [],
   })
   const presentSecrets = new Set<SecretReference>()
+  const jobEventListeners = new Set<(delivery: Readonly<JobEventDelivery>) => void>()
+  const jobSubscriptions = new Map<string, Readonly<{ jobId: string; after: number }>>()
+  let jobs: readonly Readonly<JobSnapshot>[] = deepFreeze([
+    {
+      schema_version: 1,
+      sequence: 1,
+      job_id: 'j123456',
+      name: 'Prepare fictional export',
+      state: 'running',
+      submitted_at: '2026-08-12T12:00:00+00:00',
+      started_at: '2026-08-12T12:00:01+00:00',
+      finished_at: null,
+      resource_refs: [],
+      artifact: null,
+      outcome_summary: null,
+      next_action: null,
+      error_code: null,
+      error_message: null,
+      error_remediation: null,
+      progress: {
+        schema_version: 1,
+        operation: 'Preparing export',
+        timestamp: '2026-08-12T12:00:02+00:00',
+        completed: 2,
+        total: 4,
+      },
+      cancellation_requested_at: null,
+      cancellation_deferred_by: null,
+    },
+    {
+      schema_version: 1,
+      sequence: 4,
+      job_id: 'j654321',
+      name: 'Review fictional matches',
+      state: 'completed',
+      submitted_at: '2026-08-12T11:59:00+00:00',
+      started_at: '2026-08-12T11:59:01+00:00',
+      finished_at: '2026-08-12T11:59:04+00:00',
+      resource_refs: [],
+      artifact: {
+        artifact_id: `art_${'a'.repeat(32)}`,
+        media_type: 'application/json',
+        artifact_type: 'match-report',
+        size_bytes: 4_096,
+        status: 'ready',
+        sha256: 'c'.repeat(64),
+      },
+      outcome_summary: 'Fictional match review completed.',
+      next_action: null,
+      error_code: null,
+      error_message: null,
+      error_remediation: null,
+      progress: null,
+      cancellation_requested_at: null,
+      cancellation_deferred_by: null,
+    },
+  ] satisfies readonly JobSnapshot[])
   let localRuntimeState: LocalRuntimeState = 'not-installed'
   const localRuntimeConfirmations: Readonly<Record<LocalRuntimeOperation, string>> = {
     setup: 'SET UP LOCAL RUNTIME',
@@ -96,6 +162,113 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         : 'Retry the service or restart AncestryLLM.',
     },
   })
+  const jobFailure = <T>(code: 'JOB_NOT_FOUND' | 'JOB_SERVICE_UNAVAILABLE' | 'JOB_SUBSCRIPTION_CONFLICT'): BridgeResult<T> => deepFreeze({
+    ok: false,
+    protocolVersion: DESKTOP_PROTOCOL_VERSION,
+    error: {
+      code,
+      message: code === 'JOB_NOT_FOUND'
+        ? 'The requested task is no longer available.'
+        : code === 'JOB_SUBSCRIPTION_CONFLICT'
+          ? 'The task event subscription already exists.'
+          : 'Task activity is temporarily unavailable.',
+      remediation: code === 'JOB_NOT_FOUND'
+        ? 'Refresh task activity.'
+        : 'Retry the local service or restart AncestryLLM.',
+    },
+  })
+  const findJob = (jobId: string): Readonly<JobSnapshot> | undefined => (
+    jobs.find((job) => job.job_id === jobId)
+  )
+  const replaceJob = (snapshot: Readonly<JobSnapshot>): Readonly<JobSnapshot> => {
+    const frozen = deepFreeze(snapshot)
+    jobs = deepFreeze(jobs.map((job) => job.job_id === snapshot.job_id ? frozen : job))
+    return frozen
+  }
+  const deliverJobEvent = (
+    subscriptionId: string,
+    snapshot: Readonly<JobSnapshot>,
+    kind: JobEventKind,
+    createdAt: string,
+  ): void => {
+    const subscription = jobSubscriptions.get(subscriptionId)
+    if (subscription === undefined || subscription.jobId !== snapshot.job_id
+      || subscription.after >= snapshot.sequence) return
+    jobSubscriptions.set(subscriptionId, deepFreeze({
+      jobId: subscription.jobId,
+      after: snapshot.sequence,
+    }))
+    const delivery: Readonly<JobEventDelivery> = deepFreeze({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: subscriptionId,
+      job_id: snapshot.job_id,
+      event: {
+        schema_version: 1,
+        sequence: snapshot.sequence,
+        kind,
+        created_at: createdAt,
+        snapshot,
+      },
+      error: null,
+    })
+    for (const listener of jobEventListeners) listener(delivery)
+  }
+  const publishJobEvent = (
+    snapshot: Readonly<JobSnapshot>,
+    kind: JobEventKind,
+    createdAt: string,
+  ): void => {
+    for (const subscriptionId of jobSubscriptions.keys()) {
+      deliverJobEvent(subscriptionId, snapshot, kind, createdAt)
+    }
+  }
+  const scheduleJobTransition = (callback: () => void, milliseconds: number): void => {
+    const timerHost = globalThis as unknown as {
+      setTimeout(callback: () => void, milliseconds: number): unknown
+    }
+    timerHost.setTimeout(callback, milliseconds)
+  }
+  const transitionCancellation = (snapshot: Readonly<JobSnapshot>): Readonly<JobSnapshot> => {
+    const cancelling = replaceJob({
+      ...snapshot,
+      sequence: snapshot.sequence + 1,
+      state: 'cancelling',
+      cancellation_requested_at: '2026-08-12T12:00:03+00:00',
+      cancellation_deferred_by: null,
+    })
+    publishJobEvent(cancelling, 'cancellation', '2026-08-12T12:00:03+00:00')
+    scheduleJobTransition(() => {
+      const current = findJob(snapshot.job_id)
+      if (current?.state !== 'cancelling') return
+      const pending = replaceJob({
+        ...current,
+        sequence: current.sequence + 1,
+        state: 'pending-safe-point',
+        cancellation_deferred_by: 'current safe operation',
+        progress: current.progress === null ? null : {
+          ...current.progress,
+          operation: 'Finishing the current safe operation',
+          timestamp: '2026-08-12T12:00:04+00:00',
+        },
+      })
+      publishJobEvent(pending, 'cancellation', '2026-08-12T12:00:04+00:00')
+    }, 200)
+    scheduleJobTransition(() => {
+      const current = findJob(snapshot.job_id)
+      if (current?.state !== 'pending-safe-point') return
+      const cancelled = replaceJob({
+        ...current,
+        sequence: current.sequence + 1,
+        state: 'cancelled',
+        finished_at: '2026-08-12T12:00:05+00:00',
+        cancellation_deferred_by: null,
+        outcome_summary: 'Cancellation completed at a safe point.',
+      })
+      publishJobEvent(cancelled, 'terminal', '2026-08-12T12:00:05+00:00')
+    }, 650)
+    return cancelling
+  }
   const preferenceConflict = (): BridgeResult<LocalPreferences> => deepFreeze({
     ok: false,
     protocolVersion: DESKTOP_PROTOCOL_VERSION,
@@ -435,6 +608,78 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         code: localRuntimeStatus().code,
       }
       return success(result)
+    },
+    async listJobs() {
+      if (mode === 'unavailable') return jobFailure<{ schema_version: 1; jobs: readonly Readonly<JobSnapshot>[] }>('JOB_SERVICE_UNAVAILABLE')
+      return success({ schema_version: 1 as const, jobs })
+    },
+    async getJob(input: JobRequest) {
+      const request = parseJobRequest(input)
+      if (mode === 'unavailable') return jobFailure<JobSnapshot>('JOB_SERVICE_UNAVAILABLE')
+      const snapshot = findJob(request.job_id)
+      return snapshot === undefined ? jobFailure<JobSnapshot>('JOB_NOT_FOUND') : success(snapshot)
+    },
+    async cancelJob(input: JobRequest) {
+      const request = parseJobRequest(input)
+      if (mode === 'unavailable') return jobFailure<JobSnapshot>('JOB_SERVICE_UNAVAILABLE')
+      const snapshot = findJob(request.job_id)
+      if (snapshot === undefined) return jobFailure<JobSnapshot>('JOB_NOT_FOUND')
+      return success(snapshot.state === 'queued' || snapshot.state === 'running'
+        ? transitionCancellation(snapshot)
+        : snapshot)
+    },
+    async subscribeJobEvents(input: JobEventSubscriptionRequest) {
+      const request = parseJobEventSubscriptionRequest(input)
+      if (mode === 'unavailable') return jobFailure<{
+        schema_version: 1
+        subscription_id: string
+        job_id: string
+        subscribed: true
+      }>('JOB_SERVICE_UNAVAILABLE')
+      if (jobSubscriptions.has(request.subscription_id)) return jobFailure<{
+        schema_version: 1
+        subscription_id: string
+        job_id: string
+        subscribed: true
+      }>('JOB_SUBSCRIPTION_CONFLICT')
+      const snapshot = findJob(request.job_id)
+      if (snapshot === undefined) return jobFailure<{
+        schema_version: 1
+        subscription_id: string
+        job_id: string
+        subscribed: true
+      }>('JOB_NOT_FOUND')
+      jobSubscriptions.set(request.subscription_id, deepFreeze({
+        jobId: request.job_id,
+        after: request.after,
+      }))
+      if (snapshot.sequence > request.after) {
+        void Promise.resolve().then(() => deliverJobEvent(
+          request.subscription_id,
+          snapshot,
+          ['completed', 'failed', 'cancelled'].includes(snapshot.state) ? 'terminal' : 'snapshot',
+          snapshot.finished_at ?? snapshot.started_at ?? snapshot.submitted_at,
+        ))
+      }
+      return success({
+        schema_version: 1 as const,
+        subscription_id: request.subscription_id,
+        job_id: request.job_id,
+        subscribed: true as const,
+      })
+    },
+    async unsubscribeJobEvents(input: JobEventUnsubscriptionRequest) {
+      const request = parseJobEventUnsubscriptionRequest(input)
+      jobSubscriptions.delete(request.subscription_id)
+      return success({
+        schema_version: 1 as const,
+        subscription_id: request.subscription_id,
+        unsubscribed: true as const,
+      })
+    },
+    onJobEvent(listener: (delivery: Readonly<JobEventDelivery>) => void) {
+      jobEventListeners.add(listener)
+      return () => { jobEventListeners.delete(listener) }
     },
   })
 }

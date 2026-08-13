@@ -327,6 +327,119 @@ export interface ArtifactRef {
   status: 'staged' | 'published'
 }
 
+export const jobStates = Object.freeze([
+  'queued',
+  'running',
+  'cancelling',
+  'pending-safe-point',
+  'completed',
+  'failed',
+  'cancelled',
+] as const)
+
+export type JobState = typeof jobStates[number]
+export type JobEventKind = 'snapshot' | 'progress' | 'cancellation' | 'terminal'
+
+export interface JobProgress {
+  schema_version: 1
+  operation: string
+  timestamp: string
+  completed: number | null
+  total: number | null
+}
+
+/** Opaque artifact metadata. Redemption always requires a separate host grant. */
+export interface JobArtifactRef {
+  artifact_id: string
+  media_type: string
+  artifact_type: string
+  size_bytes: number
+  status: 'pending' | 'ready' | 'failed' | 'revoked'
+  sha256: string | null
+}
+
+export interface JobSnapshot {
+  schema_version: 1
+  sequence: number
+  job_id: string
+  name: string
+  state: JobState
+  submitted_at: string
+  started_at: string | null
+  finished_at: string | null
+  resource_refs: readonly string[]
+  artifact: Readonly<JobArtifactRef> | null
+  outcome_summary: string | null
+  next_action: string | null
+  error_code: string | null
+  error_message: string | null
+  error_remediation: string | null
+  progress: Readonly<JobProgress> | null
+  cancellation_requested_at: string | null
+  cancellation_deferred_by: string | null
+}
+
+export interface JobEvent {
+  schema_version: 1
+  sequence: number
+  kind: JobEventKind
+  created_at: string
+  snapshot: Readonly<JobSnapshot>
+}
+
+export interface JobList {
+  schema_version: 1
+  jobs: readonly Readonly<JobSnapshot>[]
+}
+
+export type JobRequest = Readonly<{
+  schema_version: 1
+  job_id: string
+}>
+
+export type JobEventSubscriptionRequest = Readonly<{
+  schema_version: 1
+  subscription_id: string
+  job_id: string
+  after: number
+}>
+
+export type JobEventUnsubscriptionRequest = Readonly<{
+  schema_version: 1
+  subscription_id: string
+}>
+
+export interface JobEventSubscription {
+  schema_version: 1
+  subscription_id: string
+  job_id: string
+  subscribed: true
+}
+
+export interface JobEventUnsubscription {
+  schema_version: 1
+  subscription_id: string
+  unsubscribed: true
+}
+
+export type JobEventDelivery =
+  | Readonly<{
+    schema_version: 1
+    kind: 'event'
+    subscription_id: string
+    job_id: string
+    event: Readonly<JobEvent>
+    error: null
+  }>
+  | Readonly<{
+    schema_version: 1
+    kind: 'failure'
+    subscription_id: string
+    job_id: string
+    event: null
+    error: Readonly<BridgeError>
+  }>
+
 export const localRuntimeOperations = Object.freeze([
   'setup',
   'start',
@@ -482,6 +595,15 @@ export type BridgeErrorCode =
   | 'RUNTIME_OWNERSHIP_INVALID'
   | 'RUNTIME_PROCESS_FAILED'
   | 'RUNTIME_HEALTH_FAILED'
+  | 'JOB_ID_INVALID'
+  | 'JOB_NOT_FOUND'
+  | 'JOB_EVENT_CURSOR_INVALID'
+  | 'JOB_EVENT_REPLAY_EXPIRED'
+  | 'JOB_SERVICE_UNAVAILABLE'
+  | 'JOB_SUBSCRIBER_LIMIT'
+  | 'JOB_SUBSCRIPTION_CLOSED'
+  | 'JOB_SUBSCRIPTION_CONFLICT'
+  | 'JOB_EVENT_STREAM_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface BridgeError {
@@ -518,6 +640,12 @@ export interface AncestryBridge {
   getLocalRuntimeStatus(): Promise<BridgeResult<LocalRuntimeStatus>>
   previewLocalRuntime(request: LocalRuntimeRequest): Promise<BridgeResult<LocalRuntimePreview>>
   applyLocalRuntime(request: LocalRuntimeApplyRequest): Promise<BridgeResult<LocalRuntimeResult>>
+  listJobs(): Promise<BridgeResult<JobList>>
+  getJob(request: JobRequest): Promise<BridgeResult<JobSnapshot>>
+  cancelJob(request: JobRequest): Promise<BridgeResult<JobSnapshot>>
+  subscribeJobEvents(request: JobEventSubscriptionRequest): Promise<BridgeResult<JobEventSubscription>>
+  unsubscribeJobEvents(request: JobEventUnsubscriptionRequest): Promise<BridgeResult<JobEventUnsubscription>>
+  onJobEvent(listener: (delivery: Readonly<JobEventDelivery>) => void): () => void
 }
 
 export const desktopChannels = Object.freeze({
@@ -544,4 +672,13 @@ export const desktopChannels = Object.freeze({
   getLocalRuntimeStatus: 'ancestry:desktop:get-local-runtime-status',
   previewLocalRuntime: 'ancestry:desktop:preview-local-runtime',
   applyLocalRuntime: 'ancestry:desktop:apply-local-runtime',
+  listJobs: 'ancestry:desktop:list-jobs',
+  getJob: 'ancestry:desktop:get-job',
+  cancelJob: 'ancestry:desktop:cancel-job',
+  subscribeJobEvents: 'ancestry:desktop:subscribe-job-events',
+  unsubscribeJobEvents: 'ancestry:desktop:unsubscribe-job-events',
+} as const)
+
+export const desktopEventChannels = Object.freeze({
+  jobEvent: 'ancestry:desktop:job-event',
 } as const)

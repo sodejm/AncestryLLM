@@ -865,6 +865,7 @@ async function expectAccessibleShell(page: Page): Promise<void> {
   await expect(page.getByRole('main')).toHaveCount(1)
   await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('link')).toHaveText([
     'Home',
+    'Tasks',
     'Diagnostics',
     'Settings',
   ])
