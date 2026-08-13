@@ -12,7 +12,7 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
-import type { AncestryBridge } from '../src/shared-contract/desktop'
+import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
@@ -56,11 +56,15 @@ type ProcessRecord = Readonly<{
   commandLine: string
 }>
 
-type StartupDiagnostics = Readonly<{
-  state: 'starting' | 'ready' | 'degraded' | 'stopped'
-  failure: 'startup_failed' | 'startup_timeout' | 'incompatible_build' | 'crash_loop' | null
+type StartupDiagnosticsExpectation = Readonly<{
+  state: StartupDiagnostics['state']
+  failure: StartupDiagnostics['failure']
   automaticRestartsRemaining: number
   manualRetriesRemaining: number
+  report?: Readonly<{
+    schema_version: 1
+    status: NonNullable<StartupDiagnostics['report']>['status']
+  }>
 }>
 
 type PackageCopy = Readonly<{
@@ -69,11 +73,15 @@ type PackageCopy = Readonly<{
   sidecarPath: string
 }>
 
-const READY_DIAGNOSTICS: StartupDiagnostics = Object.freeze({
+const READY_DIAGNOSTICS: StartupDiagnosticsExpectation = Object.freeze({
   state: 'ready',
   failure: null,
   automaticRestartsRemaining: 2,
   manualRetriesRemaining: 1,
+  report: Object.freeze({
+    schema_version: 1,
+    status: 'ready',
+  }),
 })
 
 const DEBUG_ARGUMENT = /(?:^|\s)--(?:remote-debugging(?:-address|-port|-pipe)?|inspect(?:-brk)?)(?:=|\s|$)/
@@ -302,7 +310,7 @@ async function launchPackaged(
   expectedHeading: RegExp,
   phase: string,
   applicationExecutable: string = executablePath ?? '',
-  expectedDiagnostics: StartupDiagnostics = READY_DIAGNOSTICS,
+  expectedDiagnostics: StartupDiagnosticsExpectation = READY_DIAGNOSTICS,
 ): Promise<LaunchResult> {
   if (!applicationExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const startedAt = Date.now()
@@ -389,12 +397,12 @@ async function startupDiagnostics(page: Page): Promise<StartupDiagnostics> {
 
 async function expectStartupDiagnostics(
   page: Page,
-  expected: StartupDiagnostics,
+  expected: StartupDiagnosticsExpectation,
 ): Promise<void> {
   await expect.poll(
     async () => startupDiagnostics(page),
     { timeout: 30_000 },
-  ).toEqual(expected)
+  ).toMatchObject(expected)
 }
 
 function packageRootForExecutable(applicationExecutable: string): string {
@@ -1144,7 +1152,7 @@ test.describe('unpublished unpacked native package', () => {
       await rename(copied.sidecarPath, withheld)
       await signVerificationPackage(copied.packageRoot)
 
-      const degraded: StartupDiagnostics = {
+      const degraded: StartupDiagnosticsExpectation = {
         state: 'degraded',
         failure: 'startup_failed',
         automaticRestartsRemaining: 2,

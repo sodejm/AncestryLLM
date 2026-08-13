@@ -48,6 +48,15 @@ the desktop sidecar starts with provider `none`. The resulting `win32-arm64`
 sidecar and application are built and launched natively. The aggregate records
 `platformValidated: true` only after all six exact rows pass.
 
+The Ubuntu row installs the distribution-provided GNOME keyring and launches
+the packaged check through `desktop/scripts/run-with-linux-keyring.sh`. That
+runner creates a private D-Bus session, isolated owner-only keyring directories,
+and a disposable native Secret Service collection, then removes them when the
+check exits. It verifies that the native service owns
+`org.freedesktop.secrets` before Playwright may start. It does not select a
+Python test backend, inject a packaged credential, or retain runner keyring
+state; an unavailable or failed native service fails the row.
+
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
 Workflow-level path filters are not used: the in-workflow classifier may skip
@@ -173,7 +182,9 @@ constant, non-sensitive lifecycle record emitted by the existing
 renderer-readiness gate. On macOS only, both automation launches pass Chromium's
 `--use-mock-keychain` because the ad hoc, unpackaged runner build cannot reliably
 use a login keychain. That automation-only switch
-is not part of a shipped launch path.
+is not part of a shipped launch path and does not replace the sidecar's OS
+keyring implementation. Linux uses the native Secret Service harness described
+above rather than a mock backend.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and

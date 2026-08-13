@@ -55,6 +55,15 @@ installer plus provenance, installation, target-execution, and packaged
 assurance gates. Version 0.5.0 has no updater, update feed, background update
 channel, or staged rollout.
 
+On Ubuntu, the packaged-runtime and installer checks exercise the production
+keyring integration against the distribution-provided GNOME Secret Service.
+The checked-in launcher starts that service on a private D-Bus session with
+owner-only temporary storage, waits for its well-known name, preserves the
+packaged command's real exit status, and removes the state afterward. No mock
+or alternate Python keyring backend is permitted. This is verification
+infrastructure only; it does not alter the packaged application, add a
+credential fallback, or weaken keyring-only startup.
+
 ## Private lifecycle
 
 1. Electron main resolves only the current native resource target and completes

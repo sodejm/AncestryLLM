@@ -314,6 +314,12 @@ jobs:
           actual_os="Ubuntu $VERSION_ID"
           test "$actual_os" = "$EXPECTED_OS"
           echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
+      - name: Install native Linux keyring verifier
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -417,7 +423,9 @@ jobs:
           export ANCESTRYLLM_INTEGRITY_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution.json"
           export ANCESTRYLLM_INTEGRITY_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"
           package_launcher=()
-          if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-runtime.json" \
@@ -540,7 +548,9 @@ jobs:
           export ANCESTRYLLM_FILE_GRANT_SAVE_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-fixtures/existing-output.ged"
           export ANCESTRYLLM_FILE_GRANT_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-mediation.json"
           package_launcher=()
-          if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-file-grants.json" \

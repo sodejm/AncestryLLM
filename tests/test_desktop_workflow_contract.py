@@ -5,9 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 MAKEFILE = ROOT / "Makefile"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
+PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
+LINUX_KEYRING_RUNNER = ROOT / "desktop" / "scripts" / "run-with-linux-keyring.sh"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 
 
@@ -234,6 +237,43 @@ def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator(
         assert workflow.count(f'--grep "{scenario}"') == 1
 
     assert re.search(r"run-packaged-tests\.mjs --\s", workflow) is None
+
+
+def test_packaged_diagnostics_expectations_follow_the_shared_contract() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "import type { AncestryBridge, StartupDiagnostics }" in source
+    assert "type StartupDiagnostics = Readonly<{" not in source
+    assert "type StartupDiagnosticsExpectation" in source
+    assert "schema_version: 1" in source
+    assert "status: 'ready'" in source
+    assert ").toMatchObject(expected)" in source
+    assert ").toEqual(expected)" not in source
+
+
+def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
+    workflow = _workflow()
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    runner = LINUX_KEYRING_RUNNER.read_text(encoding="utf-8")
+    install = "sudo apt-get install --yes --no-install-recommends dbus gnome-keyring"
+    launcher = "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum"
+
+    assert workflow.count(install) == 1
+    assert release.count(install) == 2
+    assert workflow.count(launcher) == 2
+    assert release.count(launcher) == 2
+    assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
+    assert "dbus-run-session" in runner
+    assert "gnome-keyring-daemon" in runner
+    assert "--components=secrets" in runner
+    assert "org.freedesktop.DBus.NameHasOwner" in runner
+    assert "string:org.freedesktop.secrets" in runner
+    assert "mktemp -d" in runner
+    assert "chmod 700" in runner
+    assert 'rm -rf -- "$keyring_root"' in runner
+    assert "PYTHON_KEYRING_BACKEND" not in workflow
+    assert "PYTHON_KEYRING_BACKEND" not in release
+    assert "PYTHON_KEYRING_BACKEND" not in runner
 
 
 def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandbox() -> None:

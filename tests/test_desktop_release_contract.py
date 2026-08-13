@@ -212,7 +212,10 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
     assert "ancestryllm-signing-gnupg" not in verification_step
     assert "--status-fd 1 --verify" in verification_step
     assert 'sudo apt-get install -y "./$INSTALLER"' in verification_step
-    assert "xvfb-run --auto-servernum pnpm" in verification_step
+    assert (
+        "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum" in verification_step
+    )
+    assert "pnpm --dir desktop run test:e2e:packaged" in verification_step
 
 
 def test_release_installer_runtime_validation_uses_platform_native_copy_and_install() -> None:
