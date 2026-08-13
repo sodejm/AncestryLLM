@@ -58,11 +58,14 @@ channel, or staged rollout.
 On Ubuntu, the packaged-runtime and installer checks exercise the production
 keyring integration against the distribution-provided GNOME Secret Service.
 The checked-in launcher starts that service on a private D-Bus session with
-owner-only temporary storage, waits for its well-known name, preserves the
-packaged command's real exit status, and removes the state afterward. No mock
-or alternate Python keyring backend is permitted. This is verification
-infrastructure only; it does not alter the packaged application, add a
-credential fallback, or weaken keyring-only startup.
+owner-only temporary storage, waits for its well-known name, and proves native
+store, read, and delete operations with a non-secret probe. The packaged
+process shares the launcher's disposable home, XDG, runtime, and D-Bus session
+paths. The launcher preserves the packaged command's real exit status and
+removes the state afterward. No mock or alternate Python keyring backend is
+permitted. This is verification infrastructure only; it does not alter the
+packaged application, add a credential fallback, or weaken keyring-only
+startup.
 
 ## Private lifecycle
 

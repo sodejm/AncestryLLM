@@ -869,7 +869,7 @@ jobs:
             test ! -e "$INSTALLER.asc"
           fi
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring
+          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools
           sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm
@@ -1400,7 +1400,7 @@ jobs:
             test ! -e "$INSTALLER.asc"
           fi
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring
+          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools
           sudo apt-get install -y "./$INSTALLER"
           dpkg-query --show ancestryllm-desktop
           test -x /opt/AncestryLLM/ancestryllm

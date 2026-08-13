@@ -61,7 +61,8 @@ CLI and headless/CI operation described below.
 | `CONFIG_INVALID`, `CONFIGURATION_UNAVAILABLE` | Restore a reviewed configuration or repair access; the desktop does not overwrite it. |
 | `SQLCIPHER_UNAVAILABLE` | Install or repair the supported SQLCipher runtime; never substitute plaintext SQLite. |
 | `KEYRING_READ_FAILED` | Unlock or repair the OS credential store and grant the application access; never copy a key into configuration or an environment variable for packaged use. |
-| `DATABASE_DIRECTORY_UNWRITABLE`, `DATABASE_PERMISSIONS_WEAK` | Repair ownership and owner-only permissions without replacing the workspace. |
+| `DATABASE_DIRECTORY_UNWRITABLE` | Repair ownership and write access without replacing the workspace. On Windows, use the file's Security properties to repair the current user's ACL. |
+| `DATABASE_PERMISSIONS_WEAK` | On macOS or Linux, repair ownership and owner-only permissions without replacing the workspace. This POSIX-mode diagnostic is not emitted on Windows, where `st_mode` does not represent Windows ACL authorization. |
 | `DATABASE_DIRECTORY_MISSING` | Create an owner-only local data directory, then retry. This warning does not itself authorize a database write. |
 
 `CONFIGURATION_READY`, `SQLCIPHER_READY`, `KEYRING_READY`, and
@@ -92,7 +93,7 @@ path, workspace-directory access, and existing workspace permissions.
 | `DATABASE_DIRECTORY_MISSING` | The workspace parent does not exist yet. | Create an owner-only data directory before first use. |
 | `DATABASE_DIRECTORY_UNWRITABLE` | The workspace parent cannot be written or traversed. | Select a writable directory owned by the current user. |
 | `DATABASE_DIRECTORY_READY` | The workspace parent is writable. | Continue. |
-| `DATABASE_PERMISSIONS_WEAK` | An existing workspace grants group/other permissions. | Restrict the file to owner-only permissions. |
+| `DATABASE_PERMISSIONS_WEAK` | On macOS or Linux, an existing workspace grants group/other permissions. | Restrict the file to owner-only permissions. Windows uses ACLs rather than this POSIX-mode check. |
 
 Diagnostics are advisory until the database is opened. Database initialization
 and opening remain fail-closed for plaintext files, missing keys, wrong keys,

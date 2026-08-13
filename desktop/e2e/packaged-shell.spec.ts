@@ -141,10 +141,20 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',
   }
-  // Electron consults the login keychain before it creates a renderer on
-  // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup. Chromium
-  // state remains isolated by --user-data-dir and the explicit app-data paths.
-  if (process.platform !== 'darwin') environment.HOME = isolatedHome
+  // Linux verification supplies a disposable native Secret Service whose
+  // collection and D-Bus runtime live under these launcher-owned directories.
+  // Keep the packaged process in that session. Chromium state remains isolated
+  // by --user-data-dir and the explicit app-data paths.
+  if (
+    process.platform === 'linux'
+    && process.env.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'
+  ) {
+    Object.assign(environment, inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR']))
+  } else if (process.platform !== 'darwin') {
+    // Electron consults the login keychain before it creates a renderer on
+    // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup.
+    environment.HOME = isolatedHome
+  }
   const packagedRuntimePath = process.env.ANCESTRYLLM_PACKAGED_RUNTIME_PATH
   if (packagedRuntimePath !== undefined) environment.PATH = packagedRuntimePath
   return environment
@@ -289,6 +299,7 @@ async function closePackaged(result: LaunchResult): Promise<void> {
     socket.addEventListener('open', () => {
       try {
         socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
+        socket.close()
         commandSent()
       } catch (error) {
         clearTimeout(timer)
@@ -300,8 +311,8 @@ async function closePackaged(result: LaunchResult): Promise<void> {
       reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
     }, { once: true })
   })
-  const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs)
   await result.browser.close().catch(() => undefined)
+  const status = await waitForProcessExit(result.process, packagedQuitTimeoutMs)
   expect(status).toEqual({ code: 0, signal: null })
 }
 

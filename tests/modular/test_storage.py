@@ -492,7 +492,28 @@ def test_storage_diagnostics_report_weak_workspace_permissions(tmp_path: Path) -
     path.write_bytes(b"encrypted-looking")
     path.chmod(0o644)
 
-    diagnostics = diagnose_storage(path, MemorySecretStore({}))
+    diagnostics = diagnose_storage(path, MemorySecretStore({}), operating_system="linux")
 
     permissions = next(item for item in diagnostics if item["code"] == "DATABASE_PERMISSIONS_WEAK")
     assert permissions["status"] == "warning"
+
+
+@pytest.mark.skipif(not hasattr(Path, "chmod"), reason="path permissions unavailable")
+def test_startup_diagnostics_do_not_apply_posix_modes_to_windows_acls(tmp_path: Path) -> None:
+    path = tmp_path / "workspace.db"
+    path.write_bytes(b"encrypted-looking")
+    path.chmod(0o644)
+
+    report = diagnose_startup(
+        path,
+        MemorySecretStore({}),
+        operating_system="win32",
+        machine="arm64",
+    )
+
+    workspace = next(
+        component for component in report.components if component.component == "workspace"
+    )
+    assert report.status == "ready"
+    assert workspace.status == "ready"
+    assert workspace.code != "DATABASE_PERMISSIONS_WEAK"

@@ -72,8 +72,29 @@ def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
 
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
-    assert close_source.index("method: 'Browser.close'") < close_source.index(
+    command_index = close_source.index("method: 'Browser.close'")
+    raw_socket_close_index = close_source.index("socket.close()", command_index)
+    browser_close_index = close_source.index("result.browser.close()", command_index)
+    process_wait_index = close_source.index(
         "waitForProcessExit(result.process, packagedQuitTimeoutMs)"
+    )
+
+    assert command_index < raw_socket_close_index < browser_close_index < process_wait_index
+
+
+def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    inherited_linux_session = (
+        "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', "
+        "'XDG_DATA_HOME', 'XDG_RUNTIME_DIR'])"
+    )
+    assert inherited_linux_session in source
+    assert re.search(
+        r"if \(\s*process\.platform === 'linux'\s*&&\s*"
+        r"process\.env\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'\s*\) \{\s*"
+        r"Object\.assign\(environment, inheritedEnvironment",
+        source,
     )
 
 

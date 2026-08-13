@@ -215,7 +215,11 @@ def _keyring_diagnostic(secret_store: SecretStore) -> StorageDiagnostic:
     )
 
 
-def _path_diagnostics(path: Path) -> list[StorageDiagnostic]:
+def _path_diagnostics(
+    path: Path,
+    *,
+    operating_system: str = sys.platform,
+) -> list[StorageDiagnostic]:
     diagnostics: list[StorageDiagnostic] = []
     parent = path.parent
     try:
@@ -265,7 +269,11 @@ def _path_diagnostics(path: Path) -> list[StorageDiagnostic]:
             )
         )
         return diagnostics
-    if workspace_mode is not None and stat.S_IMODE(workspace_mode) & (stat.S_IRWXG | stat.S_IRWXO):
+    if (
+        operating_system.casefold() != "win32"
+        and workspace_mode is not None
+        and stat.S_IMODE(workspace_mode) & (stat.S_IRWXG | stat.S_IRWXO)
+    ):
         diagnostics.append(
             StorageDiagnostic(
                 "DATABASE_PERMISSIONS_WEAK",
@@ -277,12 +285,17 @@ def _path_diagnostics(path: Path) -> list[StorageDiagnostic]:
     return diagnostics
 
 
-def diagnose_storage(path: Path, secret_store: SecretStore) -> list[dict[str, Any]]:
+def diagnose_storage(
+    path: Path,
+    secret_store: SecretStore,
+    *,
+    operating_system: str = sys.platform,
+) -> list[dict[str, Any]]:
     """Return serializable, payload-free diagnostics without creating a workspace."""
     diagnostics = [
         _sqlcipher_diagnostic(),
         _keyring_diagnostic(secret_store),
-        *_path_diagnostics(path),
+        *_path_diagnostics(path, operating_system=operating_system),
     ]
     return [asdict(item) for item in diagnostics]
 
@@ -300,7 +313,7 @@ def diagnose_startup(
     storage_diagnostics = [
         _sqlcipher_diagnostic(),
         _keyring_diagnostic(secret_store),
-        *_path_diagnostics(path),
+        *_path_diagnostics(path, operating_system=operating_system),
     ]
     components = (
         _configuration_component(configuration_failure),

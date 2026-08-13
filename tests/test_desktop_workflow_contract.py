@@ -255,7 +255,9 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     workflow = _workflow()
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     runner = LINUX_KEYRING_RUNNER.read_text(encoding="utf-8")
-    install = "sudo apt-get install --yes --no-install-recommends dbus gnome-keyring"
+    install = (
+        "sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools"
+    )
     launcher = "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum"
 
     assert workflow.count(install) == 1
@@ -268,6 +270,11 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert "--components=secrets" in runner
     assert "org.freedesktop.DBus.NameHasOwner" in runner
     assert "string:org.freedesktop.secrets" in runner
+    assert "secret-tool store" in runner
+    assert "secret-tool lookup" in runner
+    assert "secret-tool clear" in runner
+    assert "service ancestryllm-verifier key bootstrap" in runner
+    assert 'export ANCESTRYLLM_NATIVE_KEYRING_SESSION="1"' in runner
     assert "mktemp -d" in runner
     assert "chmod 700" in runner
     assert 'rm -rf -- "$keyring_root"' in runner

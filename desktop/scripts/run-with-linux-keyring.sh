@@ -40,17 +40,17 @@ run_inside_session() {
   printf '\n' > "$unlock_file"
   chmod 600 "$unlock_file"
 
-  HOME="$keyring_home" \
-    XDG_CACHE_HOME="$keyring_home/.cache" \
-    XDG_CONFIG_HOME="$keyring_home/.config" \
-    XDG_DATA_HOME="$keyring_home/.local/share" \
-    XDG_RUNTIME_DIR="$keyring_runtime" \
-    gnome-keyring-daemon \
-      --foreground \
-      --unlock \
-      --components=secrets \
-      --control-directory="$keyring_control" \
-      < "$unlock_file" > "$daemon_log" 2>&1 &
+  export HOME="$keyring_home"
+  export XDG_CACHE_HOME="$keyring_home/.cache"
+  export XDG_CONFIG_HOME="$keyring_home/.config"
+  export XDG_DATA_HOME="$keyring_home/.local/share"
+  export XDG_RUNTIME_DIR="$keyring_runtime"
+  gnome-keyring-daemon \
+    --foreground \
+    --unlock \
+    --components=secrets \
+    --control-directory="$keyring_control" \
+    < "$unlock_file" > "$daemon_log" 2>&1 &
   keyring_pid=$!
   trap stop_keyring EXIT
 
@@ -75,6 +75,20 @@ run_inside_session() {
   done
   [[ "$ready" == true ]] || fail "native Secret Service did not become ready" "$startup_error"
 
+  local probe_value="ancestryllm-native-keyring-probe"
+  printf '%s' "$probe_value" | secret-tool store \
+    --label="AncestryLLM verifier probe" \
+    service ancestryllm-verifier key bootstrap || \
+    fail "native Secret Service could not store a verifier probe" "$startup_error"
+  local observed_probe
+  observed_probe="$(secret-tool lookup service ancestryllm-verifier key bootstrap)" || \
+    fail "native Secret Service could not read the verifier probe" "$startup_error"
+  [[ "$observed_probe" == "$probe_value" ]] || \
+    fail "native Secret Service returned the wrong verifier probe" "$startup_error"
+  secret-tool clear service ancestryllm-verifier key bootstrap || \
+    fail "native Secret Service could not delete the verifier probe" "$startup_error"
+  export ANCESTRYLLM_NATIVE_KEYRING_SESSION="1"
+
   set +e
   "$@"
   local command_status=$?
@@ -89,7 +103,7 @@ fi
 
 [[ "$(uname -s)" == Linux ]] || fail "this launcher supports Linux only" "$unavailable_error"
 [[ $# -ge 1 ]] || fail "a command is required" "$usage_error"
-for required_command in dbus-run-session dbus-send gnome-keyring-daemon; do
+for required_command in dbus-run-session dbus-send gnome-keyring-daemon secret-tool; do
   command -v "$required_command" >/dev/null 2>&1 || \
     fail "required native command is unavailable: $required_command" "$unavailable_error"
 done
