@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Start a private native Secret Service session for packaged Linux verification.
 set -euo pipefail
 
 readonly usage_error=64
