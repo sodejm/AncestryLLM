@@ -24,23 +24,26 @@ export async function completeAppShutdown(
   stopSidecar: () => Promise<void>,
   reportFailure: () => void,
   authorizeAndExit: () => void,
+  isExplicitSafeEmpty: () => boolean = () => false,
 ): Promise<boolean> {
-  let action: JobShutdownAction = 'wait'
-  while (true) {
-    try {
-      await prepareJobs(action)
-      break
-    } catch {
-      reportFailure()
-      let choice: UnsafeShutdownChoice
+  if (!isExplicitSafeEmpty()) {
+    let action: JobShutdownAction = 'wait'
+    while (true) {
       try {
-        choice = await chooseUnsafeAction()
+        await prepareJobs(action)
+        break
       } catch {
-        return false
+        reportFailure()
+        let choice: UnsafeShutdownChoice
+        try {
+          choice = await chooseUnsafeAction()
+        } catch {
+          return false
+        }
+        if (choice === 'stay') return false
+        if (choice !== 'wait' && choice !== 'cancel') return false
+        action = choice
       }
-      if (choice === 'stay') return false
-      if (choice !== 'wait' && choice !== 'cancel') return false
-      action = choice
     }
   }
 

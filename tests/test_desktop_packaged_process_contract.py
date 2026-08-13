@@ -131,6 +131,11 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     )
     assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
+    assert re.search(
+        r"supervisor\.diagnostics\(\)\.state === 'unavailable'\s*"
+        r"&& supervisor\.session\(\) === undefined",
+        main_source,
+    )
     verified_exit_start = main_source.index(
         "() => {\n          disposeIpcBoundary()",
         main_source.index("shutdownPromise = completeAppShutdown("),

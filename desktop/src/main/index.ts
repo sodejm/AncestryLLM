@@ -256,6 +256,10 @@ if (localRuntimeCliRequested && !primaryInstance) {
           // Electron cannot re-enter a platform-specific window-close cycle.
           app.exit(0)
         },
+        () => (
+          supervisor.diagnostics().state === 'unavailable'
+          && supervisor.session() === undefined
+        ),
       ).finally(() => { shutdownPromise = undefined })
     }
   })

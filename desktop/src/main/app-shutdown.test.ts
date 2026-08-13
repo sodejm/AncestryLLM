@@ -76,6 +76,45 @@ describe('Electron app shutdown', () => {
     expect(order).toEqual(['prepare', 'stop', 'exit'])
   })
 
+  it('accepts unavailable startup without a session as the explicit safe-empty case', async () => {
+    const prepareJobs = vi.fn()
+    const stopSidecar = vi.fn().mockResolvedValue(undefined)
+    const authorizeAndExit = vi.fn()
+
+    await expect(completeAppShutdown(
+      prepareJobs,
+      vi.fn(),
+      stopSidecar,
+      vi.fn(),
+      authorizeAndExit,
+      () => true,
+    )).resolves.toBe(true)
+
+    expect(prepareJobs).not.toHaveBeenCalled()
+    expect(stopSidecar).toHaveBeenCalledOnce()
+    expect(authorizeAndExit).toHaveBeenCalledOnce()
+  })
+
+  it('still verifies the sidecar stop for the explicit safe-empty case', async () => {
+    const prepareJobs = vi.fn()
+    const reportFailure = vi.fn()
+    const authorizeAndExit = vi.fn()
+
+    await expect(completeAppShutdown(
+      prepareJobs,
+      vi.fn(),
+      vi.fn().mockRejectedValue(new Error('/private/degraded-process-tree')),
+      reportFailure,
+      authorizeAndExit,
+      () => true,
+    )).resolves.toBe(false)
+
+    expect(prepareJobs).not.toHaveBeenCalled()
+    expect(reportFailure).toHaveBeenCalledOnce()
+    expect(reportFailure).toHaveBeenCalledWith()
+    expect(authorizeAndExit).not.toHaveBeenCalled()
+  })
+
   it('lets the user wait again before authorizing exit', async () => {
     const actions: string[] = []
     const prepareJobs = vi.fn(async (action: string) => {
