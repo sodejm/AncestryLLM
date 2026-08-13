@@ -96,9 +96,13 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
     assert "result.page.keyboard.press('Meta+Q')" not in close_source
     assert "result.process.kill('SIGTERM')" not in close_source
     assert "process.platform === 'darwin'" not in close_source
-    assert "void session.send('Browser.close').catch(() => undefined)" in close_source
-    assert "await session.send('Browser.close')" not in close_source
-    assert "requesting packaged clean quit" not in close_source
+    assert "void session.send('Browser.close').catch(() => undefined)" not in close_source
+    assert re.search(
+        r"await withinDeadline\(\s*'requesting packaged clean quit',\s*"
+        r"packagedCleanupTimeoutMs,\s*\(\) => session\.send\('Browser\.close'\),\s*"
+        r"\)\.catch\(\(\) => undefined\)",
+        close_source,
+    )
     assert "'detaching packaged browser session'" in close_source
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
