@@ -82,13 +82,20 @@ def test_packaged_clean_quit_waits_after_sending_browser_close() -> None:
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
     command_index = close_source.index("method: 'Browser.close'")
-    raw_socket_close_index = close_source.index("socket.close()", command_index)
     browser_close_index = close_source.index("result.browser.close()", command_index)
     process_wait_index = close_source.index(
         "waitForProcessExit(result.process, packagedQuitTimeoutMs)"
     )
 
-    assert command_index < raw_socket_close_index < browser_close_index < process_wait_index
+    assert "socket.addEventListener('message'" in close_source
+    assert "response.id !== 1" in close_source
+    assert "response.error" in close_source
+    assert not re.search(
+        r"socket\.send\(JSON\.stringify\(\{ id: 1, method: 'Browser\.close' \}\)\)\s*"
+        r"socket\.close\(\)",
+        close_source,
+    )
+    assert command_index < browser_close_index < process_wait_index
 
 
 def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
@@ -212,6 +219,21 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase" in source
     assert "status: failure || cleanupFailure ? 'failed' : 'passed'" in source
     assert "await writeIntegrityDiagnostics" in source
+
+
+def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    helper_start = source.index("async function expectStartupDiagnostics")
+    helper_end = source.index("\nfunction packageRootForExecutable", helper_start)
+    helper_source = source[helper_start:helper_end]
+
+    poll_start = helper_source.index("await expect.poll")
+    match_index = helper_source.index(").toMatchObject(expected)", poll_start)
+    poll_source = helper_source[poll_start:match_index]
+
+    assert "startupDiagnostics(page).catch(() => null)" in poll_source
+    assert "return actual ?? {}" in poll_source
+    assert ").toMatchObject(expected)" in helper_source
 
 
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:

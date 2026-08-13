@@ -290,27 +290,47 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 async function closePackaged(result: LaunchResult): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(result.browserEndpoint)
-    const timer = setTimeout(() => {
-      socket.close()
-      reject(new Error('Timed out connecting to the packaged CDP endpoint for clean quit.'))
-    }, 5_000)
-    const commandSent = (): void => {
+    let commandWasSent = false
+    let settled = false
+    const settle = (error?: Error): void => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      resolve()
+      if (socket.readyState === WebSocket.OPEN) socket.close()
+      if (error) reject(error)
+      else resolve()
     }
+    const timer = setTimeout(() => {
+      settle(new Error('Timed out waiting for packaged CDP Browser.close acknowledgement.'))
+    }, 5_000)
     socket.addEventListener('open', () => {
       try {
+        commandWasSent = true
         socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
-        socket.close()
-        commandSent()
       } catch (error) {
-        clearTimeout(timer)
-        reject(error)
+        settle(error instanceof Error ? error : new Error(String(error)))
       }
     }, { once: true })
+    socket.addEventListener('message', (event) => {
+      let response: { id?: number; error?: unknown }
+      try {
+        response = JSON.parse(String(event.data)) as { id?: number; error?: unknown }
+      } catch {
+        return
+      }
+      if (response.id !== 1) return
+      if (response.error) {
+        settle(new Error('Packaged CDP Browser.close command was rejected.'))
+        return
+      }
+      settle()
+    })
+    socket.addEventListener('close', () => {
+      if (commandWasSent) settle()
+      else settle(new Error('Packaged CDP endpoint closed before the clean-quit command.'))
+    }, { once: true })
     socket.addEventListener('error', () => {
-      clearTimeout(timer)
-      reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
+      settle(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
     }, { once: true })
   })
   await result.browser.close().catch(() => undefined)
@@ -412,13 +432,18 @@ async function expectStartupDiagnostics(
   page: Page,
   expected: StartupDiagnosticsExpectation,
 ): Promise<void> {
+  let lastActual: StartupDiagnostics | null = null
   try {
     await expect.poll(
-      async () => startupDiagnostics(page),
+      async () => {
+        const actual = await startupDiagnostics(page).catch(() => null)
+        if (actual !== null) lastActual = actual
+        return actual ?? {}
+      },
       { timeout: 30_000 },
     ).toMatchObject(expected)
   } catch (error) {
-    const actual = await startupDiagnostics(page).catch(() => null)
+    const actual = await startupDiagnostics(page).catch(() => lastActual)
     throw new Error(
       `Packaged startup diagnostics did not match expected state: ${JSON.stringify(actual)}`,
       { cause: error },
