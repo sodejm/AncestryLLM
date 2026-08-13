@@ -189,13 +189,13 @@ renderer-readiness gate. On macOS only, both automation launches pass Chromium's
 use a login keychain. That automation-only switch
 is not part of a shipped launch path and does not replace the sidecar's OS
 keyring implementation. Linux uses the native Secret Service harness described
-above rather than a mock backend. The clean-quit check uses CDP's
-`Browser.close` command on every target. It registers the native process exit
-listener first, then lets the command settle under a bounded deadline before it
-releases the CDP session and Playwright connection. This prevents an immediate
-detach from cancelling the quit request while still ensuring that automation
-cannot keep a macOS application resident. Closing the final desktop window
-calls `app.quit()` on every supported OS, including macOS, so the same
+above rather than a mock backend. The clean-quit check registers the native
+process exit listener first, then closes the attached renderer page under a
+bounded deadline. That closes the application's actual final native window
+instead of merely ending its browser-level automation session. The harness then
+releases the Playwright connection and waits for a normal zero-code native
+process exit. Closing the final desktop window calls `app.quit()` on every
+supported OS, including macOS, so the same
 fail-closed job preflight and verified sidecar shutdown run before a normal
 zero-code exit.
 
