@@ -54,19 +54,22 @@ runner creates a private D-Bus session, isolated owner-only keyring directories,
 and a disposable native Secret Service collection, then removes them when the
 check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
-before Playwright may start. The normal Linux launch allowlist retains the D-Bus
-address and XDG runtime directory required by native Secret Service; the exact
-verification runner launches a separate unpublished Linux verifier package.
-Only that package compiles the adapter that reads its owner-only root from a
-Linux-only Electron command-line switch. The ordinary production package is
-assembled and scanned first; its adapter always returns no verifier root, and
-the production build scan rejects the selector literal. In the verifier, Main
-requires an absolute Linux path and derives the sidecar's disposable home and
-XDG cache, configuration, data, and runtime paths from that root; it does not
-inherit those values from Playwright's environment. The packaged process
-therefore reaches that verified service without selecting a Python test
-backend, injecting a packaged credential, or retaining runner keyring state.
-An unavailable or failed native service fails the row.
+before Playwright may start. A normal Linux launch ignores inherited D-Bus and
+XDG runtime selectors and binds the sidecar to the conventional
+`unix:path=/run/user/<uid>/bus` endpoint derived from the kernel-reported user
+ID. The exact verification runner instead binds its private D-Bus daemon to an
+owner-only `runtime/bus` socket and launches a separate unpublished Linux
+verifier package. Only that package compiles the adapter that reads its
+owner-only root from a Linux-only Electron command-line switch. The ordinary
+production package is assembled and scanned first; its adapter always returns
+no verifier root, and the production build scan rejects the selector literal.
+In the verifier, Main requires an absolute Linux path and derives the sidecar's
+disposable home, XDG cache, configuration, data, and runtime paths plus the
+exact D-Bus address from that root; it does not inherit those values from
+Playwright's environment. The packaged process therefore reaches that verified
+service without selecting a Python test backend, injecting a packaged
+credential, or retaining runner keyring state. An unavailable or failed native
+service fails the row.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.

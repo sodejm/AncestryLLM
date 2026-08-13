@@ -303,7 +303,10 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert workflow.count(launcher) == 2
     assert release.count(launcher) == 2
     assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
-    assert "dbus-run-session" in runner
+    assert "dbus-run-session" not in runner
+    assert "dbus-daemon" in runner
+    assert '--address="$session_address"' in runner
+    assert 'export DBUS_SESSION_BUS_ADDRESS="$session_address"' in runner
     assert "gnome-keyring-daemon" in runner
     assert "--components=secrets" in runner
     assert "org.freedesktop.DBus.NameHasOwner" in runner

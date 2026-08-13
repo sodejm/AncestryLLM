@@ -66,15 +66,18 @@ compiles the adapter that reads an exact command-line switch carrying the
 owner-only temporary root. The production package is assembled and scanned
 first, its adapter never reads the selector, and its build rejects the selector
 literal. In the verifier, Electron Main rejects the root outside Linux or when
-it is not an absolute Linux path, then derives the sidecar's home and XDG paths
-from the root rather than inheriting ambient values. Every Linux sidecar launch
-pins the native Secret Service backend, ignores ambient Python keyring selectors
-and configuration, and excludes provider credential and `PATH` values. Normal
-launches also exclude home, cache, configuration, and data values. The launcher
-preserves the packaged command's real exit status and removes the state
-afterward. No mock or alternate Python keyring backend is permitted. This is
-verification infrastructure only; it does not add a production credential
-fallback or weaken keyring-only startup.
+it is not an absolute Linux path, then derives the sidecar's home, XDG paths,
+and exact `runtime/bus` address from the root rather than inheriting ambient
+values. The launcher binds its private D-Bus daemon to that same owner-only
+socket. Every Linux sidecar launch pins the native Secret Service backend,
+ignores ambient Python keyring selectors and configuration, and excludes
+provider credential and `PATH` values. Normal launches also exclude home,
+cache, configuration, and data values; they ignore ambient D-Bus and XDG
+runtime selectors and bind to `unix:path=/run/user/<uid>/bus` using the
+kernel-reported process user ID. The launcher preserves the packaged command's
+real exit status and removes the state afterward. No mock or alternate Python
+keyring backend is permitted. This is verification infrastructure only; it
+does not add a production credential fallback or weaken keyring-only startup.
 
 ## Private lifecycle
 
@@ -85,11 +88,12 @@ fallback or weaken keyring-only startup.
 3. It starts the executable with no arguments, no shell, a private temporary
    working directory, and an allowlisted environment. Provider credentials,
    `PATH`, and home-directory values are not inherited during normal launches.
-   Linux additionally retains only the active D-Bus address and XDG runtime
-   directory required by native Secret Service. The exact internal verification
-   adapter additionally permits only paths derived from the disposable
-   verifier's validated absolute root; that adapter is absent from ordinary
-   production packages and does not accept ambient home or XDG values.
+   Linux ignores ambient D-Bus and XDG runtime selectors and derives the native
+   Secret Service bus address from the kernel-reported user ID. The exact
+   internal verification adapter instead permits only paths and the bus address
+   derived from the disposable verifier's validated absolute root; that adapter
+   is absent from ordinary production packages and does not accept ambient home,
+   XDG, or D-Bus values.
 4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness

@@ -222,12 +222,11 @@ def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> N
     )
     assert production_build < production_assembly < verification_build < verification_assembly
     assert "desktop/release-native-verification" in workflow_source
-    assert re.search(
-        r"platform === 'linux'\s*\?\s*\[.*?"
-        r"'DBUS_SESSION_BUS_ADDRESS'.*?'XDG_RUNTIME_DIR'.*?\]",
-        supervisor_source,
-        re.DOTALL,
-    )
+    assert "'DBUS_SESSION_BUS_ADDRESS'" not in supervisor_source
+    assert "'XDG_RUNTIME_DIR'" not in supervisor_source
+    assert "process.getuid?.()" in supervisor_source
+    assert "posix.join('/run/user', String(userId))" in supervisor_source
+    assert "`unix:path=${posix.join(runtimeDirectory, 'bus')}`" in supervisor_source
     assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in supervisor_source
     assert "linuxKeyringVerificationRoot" in supervisor_source
     assert "source.HOME" not in supervisor_source

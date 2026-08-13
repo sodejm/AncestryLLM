@@ -102,7 +102,7 @@ fi
 
 [[ "$(uname -s)" == Linux ]] || fail "this launcher supports Linux only" "$unavailable_error"
 [[ $# -ge 1 ]] || fail "a command is required" "$usage_error"
-for required_command in dbus-run-session dbus-send gnome-keyring-daemon secret-tool; do
+for required_command in dbus-daemon dbus-send gnome-keyring-daemon secret-tool; do
   command -v "$required_command" >/dev/null 2>&1 || \
     fail "required native command is unavailable: $required_command" "$unavailable_error"
 done
@@ -112,13 +112,48 @@ script_path="$script_directory/$(basename -- "$0")"
 temporary_parent=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 keyring_root="$(mktemp -d "$temporary_parent/ancestryllm-keyring.XXXXXX")"
 chmod 700 "$keyring_root"
+install -d -m 700 "$keyring_root/runtime"
+session_address="unix:path=$keyring_root/runtime/bus"
+export DBUS_SESSION_BUS_ADDRESS="$session_address"
+bus_log="$keyring_root/bus.log"
+dbus_pid=
 cleanup_root() {
+  if [[ -n "${dbus_pid:-}" ]]; then
+    kill "$dbus_pid" 2>/dev/null || true
+    wait "$dbus_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$keyring_root"
 }
 trap cleanup_root EXIT
 
+dbus-daemon \
+  --session \
+  --nofork \
+  --address="$session_address" \
+  > "$bus_log" 2>&1 &
+dbus_pid=$!
+
+bus_ready=false
+for ((attempt = 0; attempt < 100; attempt += 1)); do
+  if ! kill -0 "$dbus_pid" 2>/dev/null; then
+    fail "private D-Bus session exited during startup" "$startup_error"
+  fi
+  if dbus-send \
+    --session \
+    --dest=org.freedesktop.DBus \
+    --type=method_call \
+    --print-reply \
+    /org/freedesktop/DBus \
+    org.freedesktop.DBus.ListNames >/dev/null 2>&1; then
+    bus_ready=true
+    break
+  fi
+  sleep 0.1
+done
+[[ "$bus_ready" == true ]] || fail "private D-Bus session did not become ready" "$startup_error"
+
 set +e
-dbus-run-session -- "$script_path" --inside-session "$keyring_root" "$@"
+"$script_path" --inside-session "$keyring_root" "$@"
 session_status=$?
 set -e
 exit "$session_status"

@@ -812,21 +812,25 @@ for CLI/headless/CI use; keyring values take precedence and an
 environment-managed reference cannot be overwritten or deleted through the
 application. The packaged desktop sidecar explicitly selects keyring-only mode,
 so ambient environment values cannot satisfy or replace a desktop credential.
-Normal launches inherit only the minimal platform environment. On Linux, that
-allowlist includes the active D-Bus session address and XDG runtime directory
-needed to reach the user's native Secret Service, but not home, cache,
-configuration, or data directories. Electron main pins the child to the native
-Secret Service backend and ignores ambient Python keyring selectors and
-configuration. Exact-head Linux packaged verification uses a separate
-unpublished package whose compile-time adapter may read an owner-only temporary
-root from a verifier-specific Electron command-line switch. The production
+Normal launches inherit only the minimal platform environment. On Linux,
+Electron Main ignores ambient D-Bus and XDG runtime selectors and binds the
+child to the conventional `unix:path=/run/user/<uid>/bus` endpoint derived from
+the kernel-reported process user ID. This reaches the user's native Secret
+Service without accepting an environment-selected bus; home, cache,
+configuration, and data directories also remain excluded. Electron Main pins
+the child to the native Secret Service backend and ignores ambient Python
+keyring selectors and configuration. Exact-head Linux packaged verification
+uses a separate unpublished package whose compile-time adapter may read an
+owner-only temporary root from a verifier-specific Electron command-line
+switch. The production
 adapter never reads that switch, the production build scanner rejects its
 literal name, and the ordinary package is assembled and verified before the
 verifier package is built. In the verifier, Main validates the Linux-only
-absolute root and derives the sidecar's home and XDG paths from it instead of
-accepting ambient values. The root is never inherited from the packaged process
-environment. Provider credentials and `PATH` remain excluded from the child
-environment.
+absolute root and derives the sidecar's home, XDG paths, and exact
+`runtime/bus` address from it instead of accepting ambient values. The verifier
+launcher binds its private D-Bus daemon to that owner-only socket. The root is
+never inherited from the packaged process environment. Provider credentials
+and `PATH` remain excluded from the child environment.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 

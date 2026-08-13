@@ -119,6 +119,7 @@ export function minimalSidecarEnvironment(
   platform: NodeJS.Platform,
   source: NodeJS.ProcessEnv,
   linuxKeyringVerificationRoot?: string,
+  linuxUserId?: number,
 ): NodeJS.ProcessEnv {
   validateLinuxKeyringVerificationRoot(platform, linuxKeyringVerificationRoot)
   const platformAllowed = platform === 'win32'
@@ -128,8 +129,6 @@ export function minimalSidecarEnvironment(
           'LANG',
           'LC_ALL',
           'TMPDIR',
-          'DBUS_SESSION_BUS_ADDRESS',
-          'XDG_RUNTIME_DIR',
         ]
       : ['LANG', 'LC_ALL', 'TMPDIR']
   const environment = Object.fromEntries(
@@ -138,6 +137,11 @@ export function minimalSidecarEnvironment(
     ),
   )
   if (platform === 'linux') {
+    const runtimeDirectory = linuxKeyringVerificationRoot === undefined
+      ? linuxUserRuntimeDirectory(linuxUserId ?? process.getuid?.())
+      : posix.join(linuxKeyringVerificationRoot, 'runtime')
+    environment.XDG_RUNTIME_DIR = runtimeDirectory
+    environment.DBUS_SESSION_BUS_ADDRESS = `unix:path=${posix.join(runtimeDirectory, 'bus')}`
     environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'
     if (linuxKeyringVerificationRoot !== undefined) {
       const home = posix.join(linuxKeyringVerificationRoot, 'home')
@@ -145,10 +149,16 @@ export function minimalSidecarEnvironment(
       environment.XDG_CACHE_HOME = posix.join(home, '.cache')
       environment.XDG_CONFIG_HOME = posix.join(home, '.config')
       environment.XDG_DATA_HOME = posix.join(home, '.local', 'share')
-      environment.XDG_RUNTIME_DIR = posix.join(linuxKeyringVerificationRoot, 'runtime')
     }
   }
   return environment
+}
+
+function linuxUserRuntimeDirectory(userId: number | undefined): string {
+  if (userId === undefined || !Number.isSafeInteger(userId) || userId < 0) {
+    throw new Error('The Linux user ID must be a non-negative integer.')
+  }
+  return posix.join('/run/user', String(userId))
 }
 
 function validateLinuxKeyringVerificationRoot(

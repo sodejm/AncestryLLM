@@ -35,10 +35,10 @@ describe('sidecar launch boundary', () => {
     const source = {
       PATH: '/unsafe/path', HOME: '/private/home', OPENAI_API_KEY: 'canary-openai',
       ANTHROPIC_API_KEY: 'canary-anthropic', SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp',
-      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
-      XDG_RUNTIME_DIR: '/run/user/1000', LANG: 'en_US.UTF-8',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/attacker-bus',
+      XDG_RUNTIME_DIR: '/tmp/attacker-runtime', LANG: 'en_US.UTF-8',
     }
-    expect(minimalSidecarEnvironment('linux', source)).toEqual({
+    expect(minimalSidecarEnvironment('linux', source, undefined, 1000)).toEqual({
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
       XDG_RUNTIME_DIR: '/run/user/1000',
       LANG: 'en_US.UTF-8',
@@ -62,9 +62,9 @@ describe('sidecar launch boundary', () => {
       PYTHON_KEYRING_BACKEND: 'keyrings.alt.file.PlaintextKeyring',
     }
 
-    expect(minimalSidecarEnvironment('linux', source)).toEqual({
+    expect(minimalSidecarEnvironment('linux', source, undefined, 1000)).toEqual({
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
-      XDG_RUNTIME_DIR: '/verification/runtime',
+      XDG_RUNTIME_DIR: '/run/user/1000',
       LANG: 'en_US.UTF-8',
       PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
     })
@@ -82,7 +82,7 @@ describe('sidecar launch boundary', () => {
     }
 
     expect(minimalSidecarEnvironment('linux', source, '/tmp/private-keyring')).toEqual({
-      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/private-keyring/runtime/bus',
       HOME: '/tmp/private-keyring/home',
       XDG_CACHE_HOME: '/tmp/private-keyring/home/.cache',
       XDG_CONFIG_HOME: '/tmp/private-keyring/home/.config',
@@ -91,6 +91,9 @@ describe('sidecar launch boundary', () => {
       LANG: 'en_US.UTF-8',
       PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
     })
+    expect(() => minimalSidecarEnvironment('linux', source, undefined, -1)).toThrow(
+      'non-negative integer',
+    )
     expect(() => minimalSidecarEnvironment('linux', source, 'relative/keyring')).toThrow(
       'absolute Linux path',
     )
