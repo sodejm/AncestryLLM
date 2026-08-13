@@ -35,13 +35,18 @@ describe('sidecar launch boundary', () => {
     const source = {
       PATH: '/unsafe/path', HOME: '/private/home', OPENAI_API_KEY: 'canary-openai',
       ANTHROPIC_API_KEY: 'canary-anthropic', SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp',
-      LANG: 'en_US.UTF-8',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      XDG_RUNTIME_DIR: '/run/user/1000', LANG: 'en_US.UTF-8',
     }
-    expect(minimalSidecarEnvironment('linux', source)).toEqual({ LANG: 'en_US.UTF-8' })
+    expect(minimalSidecarEnvironment('linux', source)).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      LANG: 'en_US.UTF-8',
+    })
     expect(minimalSidecarEnvironment('win32', source)).toEqual({ SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp' })
   })
 
-  it('forwards only the native Linux keyring session to the sidecar verifier', () => {
+  it('adds only disposable Linux keyring directories for the exact verifier marker', () => {
     const source = {
       ANCESTRYLLM_NATIVE_KEYRING_SESSION: '1',
       DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
@@ -68,7 +73,11 @@ describe('sidecar launch boundary', () => {
     expect(minimalSidecarEnvironment('linux', {
       ...source,
       ANCESTRYLLM_NATIVE_KEYRING_SESSION: 'true',
-    })).toEqual({ LANG: 'en_US.UTF-8' })
+    })).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      XDG_RUNTIME_DIR: '/verification/runtime',
+      LANG: 'en_US.UTF-8',
+    })
   })
 
   it('resolves only supported native bundle targets', () => {

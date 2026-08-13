@@ -99,7 +99,7 @@ def test_packaged_clean_quit_uses_established_session_and_waits_for_exit() -> No
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
 
 
-def test_linux_packaged_environment_preserves_native_keyring_session_directories() -> None:
+def test_linux_packaged_environment_preserves_native_keyring_session_boundary() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
 
@@ -117,19 +117,24 @@ def test_linux_packaged_environment_preserves_native_keyring_session_directories
         re.DOTALL,
     )
     assert re.search(
-        r"platform === 'linux'\s*&&\s*"
-        r"source\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'",
+        r"platform === 'linux'\s*\?\s*\[.*?"
+        r"'DBUS_SESSION_BUS_ADDRESS'.*?'XDG_RUNTIME_DIR'.*?\]",
         supervisor_source,
+        re.DOTALL,
     )
-    for name in (
-        "DBUS_SESSION_BUS_ADDRESS",
-        "HOME",
-        "XDG_CACHE_HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_RUNTIME_DIR",
-    ):
-        assert f"'{name}'" in supervisor_source
+    verifier_directories = re.search(
+        r"const verificationKeyringDirectoriesAllowed = platform === 'linux'\s*&&\s*"
+        r"source\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'\s*\?\s*\[(.*?)\]\s*:\s*\[\]",
+        supervisor_source,
+        re.DOTALL,
+    )
+    assert verifier_directories is not None
+    assert "'HOME'" in verifier_directories.group(1)
+    assert "'XDG_CACHE_HOME'" in verifier_directories.group(1)
+    assert "'XDG_CONFIG_HOME'" in verifier_directories.group(1)
+    assert "'XDG_DATA_HOME'" in verifier_directories.group(1)
+    assert "'DBUS_SESSION_BUS_ADDRESS'" not in verifier_directories.group(1)
+    assert "'XDG_RUNTIME_DIR'" not in verifier_directories.group(1)
     assert "'ANCESTRYLLM_NATIVE_KEYRING_SESSION'" not in supervisor_source
     assert "'PYTHON_KEYRING_BACKEND'" not in supervisor_source
 

@@ -794,12 +794,15 @@ for CLI/headless/CI use; keyring values take precedence and an
 environment-managed reference cannot be overwritten or deleted through the
 application. The packaged desktop sidecar explicitly selects keyring-only mode,
 so ambient environment values cannot satisfy or replace a desktop credential.
-Normal launches inherit only the minimal platform environment. Exact-head Linux
-packaged verification may set the exact internal marker
-`ANCESTRYLLM_NATIVE_KEYRING_SESSION=1`; Electron main then forwards only that
-disposable session's D-Bus address and home/XDG directories to the sidecar.
-The marker itself, provider credentials, `PATH`, and alternate Python keyring
-selectors remain excluded from the child environment.
+Normal launches inherit only the minimal platform environment. On Linux, that
+allowlist includes the active D-Bus session address and XDG runtime directory
+needed to reach the user's native Secret Service, but not home, cache,
+configuration, or data directories. Exact-head Linux packaged verification may
+set the exact internal marker `ANCESTRYLLM_NATIVE_KEYRING_SESSION=1`; Electron
+main then additionally forwards only that verifier's disposable home and XDG
+cache, configuration, and data directories. The marker itself, provider
+credentials, `PATH`, and alternate Python keyring selectors remain excluded
+from the child environment.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 

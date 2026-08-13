@@ -54,10 +54,13 @@ runner creates a private D-Bus session, isolated owner-only keyring directories,
 and a disposable native Secret Service collection, then removes them when the
 check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
-before Playwright may start. The packaged process inherits the same disposable
-home, XDG, runtime, and D-Bus session paths as that verified service. It does
-not select a Python test backend, inject a packaged credential, or retain
-runner keyring state; an unavailable or failed native service fails the row.
+before Playwright may start. The normal Linux launch allowlist retains the D-Bus
+address and XDG runtime directory required by native Secret Service; the exact
+verification marker additionally admits the runner's disposable home and XDG
+cache, configuration, and data directories. The packaged process therefore
+reaches that verified service without selecting a Python test backend,
+injecting a packaged credential, or retaining runner keyring state. An
+unavailable or failed native service fails the row.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
