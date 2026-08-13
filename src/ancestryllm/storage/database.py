@@ -35,6 +35,32 @@ PREVIOUS_SCHEMA_REVISION = "0001"
 SCHEMA_REVISION = "0002"
 
 
+def _schema_table_names(connection: Any) -> frozenset[str]:
+    """Return user-defined table names without per-table SQLCipher reflection."""
+    return frozenset(
+        str(name)
+        for name in connection.exec_driver_sql(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name"
+        ).scalars()
+    )
+
+
+def _expected_schema_tables(*, revision: str) -> frozenset[str]:
+    tables = frozenset(str(name) for name in Base.metadata.tables)
+    if revision == PREVIOUS_SCHEMA_REVISION:
+        tables -= {JobModel.__tablename__, JobEventModel.__tablename__}
+    return tables | {"alembic_version"}
+
+
+def _migration_required(message: str) -> StorageError:
+    return StorageError(
+        "DATABASE_MIGRATION_REQUIRED",
+        message,
+        "Restore a verified encrypted backup or contact support before modifying the workspace.",
+    )
+
+
 def _integrity_result(connection: Any) -> str | None:
     """Run the strongest integrity check supported by the SQLCipher build."""
     cipher_result = connection.execute("PRAGMA cipher_integrity_check").fetchone()
@@ -180,11 +206,8 @@ class Database:
 
     def initialize(self) -> None:
         with self.engine.begin() as connection:
-            version_table_exists = bool(
-                connection.exec_driver_sql(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version'"
-                ).scalar()
-            )
+            schema_tables = _schema_table_names(connection)
+            version_table_exists = "alembic_version" in schema_tables
             if version_table_exists:
                 revisions = tuple(
                     connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalars()
@@ -193,15 +216,32 @@ class Database:
                     revisions and revisions[0] not in {PREVIOUS_SCHEMA_REVISION, SCHEMA_REVISION}
                 ):
                     rendered = revisions[0] if len(revisions) == 1 else "multiple revisions"
-                    raise StorageError(
-                        "DATABASE_MIGRATION_REQUIRED",
+                    raise _migration_required(
                         f"Workspace schema {rendered!r} is not supported by this release.",
-                        "Run the documented encrypted database migration command.",
                     )
             else:
                 revisions = ()
 
             current = revisions[0] if revisions else None
+            if current is None:
+                if schema_tables:
+                    raise _migration_required(
+                        "The encrypted workspace contains an incomplete unversioned schema."
+                    )
+                Base.metadata.create_all(connection, checkfirst=False)
+                connection.exec_driver_sql(
+                    "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
+                )
+                return
+
+            if schema_tables != _expected_schema_tables(revision=current):
+                raise _migration_required(
+                    f"Workspace schema {current!r} has an incomplete or unexpected table layout."
+                )
+
             if current == PREVIOUS_SCHEMA_REVISION:
                 cast("Table", JobModel.__table__).create(connection, checkfirst=False)
                 cast("Table", JobEventModel.__table__).create(connection, checkfirst=False)
@@ -210,15 +250,6 @@ class Database:
                     (SCHEMA_REVISION,),
                 )
                 return
-
-            Base.metadata.create_all(connection)
-            connection.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-            )
-            if current is None:
-                connection.exec_driver_sql(
-                    "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
-                )
 
     def session(self) -> Session:
         self.initialize()

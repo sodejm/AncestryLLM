@@ -820,7 +820,11 @@ files. Its lifecycle is fail-closed:
    non-WAL `DELETE` journal mode.
 5. For an existing database, run the strongest available cipher/integrity
    check before use.
-6. Create the schema and require schema revision `0001`.
+6. Inspect the user-table inventory with one bounded `sqlite_master` query.
+   Create revision `0002` only for a truly empty workspace, without per-table
+   driver reflection; require an exact revision-to-table match for an existing
+   workspace; and fail closed on partial or unexpected layouts. Revision
+   `0001` is the sole automatic upgrade path and adds only the job tables.
 
 SQLAlchemy uses one SQLCipher connection factory and `SingletonThreadPool`.
 Sessions are short-lived within service/repository calls. Encrypted backups use
@@ -846,12 +850,20 @@ The initial schema groups data by responsibility:
 | Prompts | `prompt_templates`, `prompt_versions` | Immutable, incrementing prompt revisions and optional response schemas. |
 | Provider policy | `provider_profiles`, `consent_profiles` | Explicit provider/model configuration and revocable disclosure grants. |
 | Audit | `llm_runs` | Request/response hashes, status, token/cost metadata, and optional encrypted payload retention. |
+| Jobs | `jobs`, `job_events` | Restart-safe bounded job snapshots and event replay. |
 
 The schema has room for identifiers, facts, and relationships, while the
 current public research service exposes only add/list person operations.
-Packaged Alembic-compatible migration files mirror revision `0001`; runtime
-bootstrap currently uses `Base.metadata.create_all()` and rejects any other
-revision. There is not yet a public in-place migration command.
+Packaged Alembic-compatible migration files retain the revision history.
+Runtime bootstrap creates the complete revision `0002` schema only after a
+single inventory query proves that no user table exists. It uses ordered DDL
+without SQLAlchemy's per-table reflection, which avoids native SQLCipher driver
+recursion while preserving atomic bootstrap. Existing revision `0002` layouts
+are inventory-validated and reused without DDL; exact revision `0001` layouts
+receive only the reviewed job-table migration. Empty version rows, unknown
+revisions, and incomplete or unexpected table inventories return
+`DATABASE_MIGRATION_REQUIRED` without implicit repair. There is not yet a
+public in-place migration command.
 
 ## LLM boundary, providers, and consent
 

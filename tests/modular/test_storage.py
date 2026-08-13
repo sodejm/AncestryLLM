@@ -42,6 +42,72 @@ def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
     assert secrets.present(DATABASE_SECRET)
 
 
+def test_schema_bootstrap_and_reuse_do_not_reflect_sqlcipher_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+
+    def reject_table_reflection(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        raise AssertionError("schema bootstrap must not reflect individual SQLCipher tables")
+
+    monkeypatch.setattr(database.engine.dialect, "has_table", reject_table_reflection)
+
+    database.initialize()
+    database.initialize()
+
+
+def test_unversioned_partial_schema_fails_closed_before_bootstrap(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE interrupted_bootstrap (value INTEGER)")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
+    assert raised.value.remediation == (
+        "Restore a verified encrypted backup or contact support before modifying the workspace."
+    )
+    with database.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert tables == {"interrupted_bootstrap"}
+
+
+def test_versioned_partial_schema_is_not_repaired_implicitly(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.initialize()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE job_events")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
+    with database.engine.connect() as connection:
+        assert not connection.exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'job_events'"
+        ).scalar()
+
+
+def test_unexpected_sqlite_prefixed_user_table_fails_closed(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.initialize()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE sqliteXshadow (value INTEGER)")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
+
+
 def test_plaintext_database_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "workspace.db"
     path.write_bytes(SQLITE_HEADER + bytes(200))

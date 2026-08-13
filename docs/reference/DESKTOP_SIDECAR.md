@@ -239,6 +239,14 @@ environment values, records, prompts, payloads, raw launch frames, response
 bodies, executable paths, stderr, exceptions, or stacks to the report or
 support evidence.
 
+After the report is ready, writable sidecar startup creates the encrypted
+revision `0002` schema only when one bounded inventory query proves the
+workspace has no user tables. A complete current schema is reused without DDL,
+and only an exact revision `0001` layout receives the reviewed job-table
+migration. Unversioned partial schemas, unknown revisions, and missing or
+unexpected tables fail with `DATABASE_MIGRATION_REQUIRED`; startup never
+silently repairs or replaces them.
+
 For a startup or compatibility failure:
 
 1. observe the degraded lifecycle or startup-component state; the window
