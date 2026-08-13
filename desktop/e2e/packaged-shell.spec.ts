@@ -86,6 +86,7 @@ const READY_DIAGNOSTICS: StartupDiagnosticsExpectation = Object.freeze({
 })
 
 const DEBUG_ARGUMENT = /(?:^|\s)--(?:remote-debugging(?:-address|-port|-pipe)?|inspect(?:-brk)?)(?:=|\s|$)/
+const CAPABILITY_SUMMARY_READY = /^(?:No control capabilities are currently available\.|\d+ local control (?:module is|modules are) available\.)$/
 
 type DevToolsVersion = Readonly<{
   webSocketDebuggerUrl?: string
@@ -150,6 +151,7 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     && process.env.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'
   ) {
     Object.assign(environment, inheritedEnvironment(['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR']))
+    environment.ANCESTRYLLM_NATIVE_KEYRING_SESSION = '1'
   } else if (process.platform !== 'darwin') {
     // Electron consults the login keychain before it creates a renderer on
     // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup.
@@ -808,16 +810,9 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
   const response = await page.reload()
   expect(await response?.headerValue('content-security-policy')).toBe(PRODUCTION_CSP)
 
-  const warmCapabilities = await withinDeadline(
-    'warming packaged capability bridge',
-    10_000,
-    () => page.evaluate(() => (
-      (window as unknown as {
-        ancestry: { getCapabilities(): Promise<{ ok: boolean }> }
-      }).ancestry.getCapabilities()
-    )),
-  )
-  expect(warmCapabilities.ok).toBe(true)
+  // The shell owns an initial capability read after startup succeeds. Wait for
+  // its rendered result so the verifier burst measures all 32 reader slots.
+  await expect(page.getByText(CAPABILITY_SUMMARY_READY)).toBeVisible()
 
   const capabilityBurst = await withinDeadline(
     'running bounded packaged capability bridge burst',

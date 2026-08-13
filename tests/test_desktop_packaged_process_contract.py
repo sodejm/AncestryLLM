@@ -54,6 +54,12 @@ def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
 def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 
+    ready_index = source.index(
+        "await expect(page.getByText(CAPABILITY_SUMMARY_READY)).toBeVisible()"
+    )
+    burst_index = source.index("running bounded packaged capability bridge burst")
+    assert ready_index < burst_index
+    assert "warming packaged capability bridge" not in source
     assert "running bounded packaged capability bridge burst" in source
     assert "Array.from({ length: 32 }" in source
     assert "Promise.all(" in source
@@ -97,8 +103,10 @@ def test_linux_packaged_environment_preserves_native_keyring_session_directories
     assert re.search(
         r"if \(\s*process\.platform === 'linux'\s*&&\s*"
         r"process\.env\.ANCESTRYLLM_NATIVE_KEYRING_SESSION === '1'\s*\) \{\s*"
-        r"Object\.assign\(environment, inheritedEnvironment",
+        r"Object\.assign\(environment, inheritedEnvironment.*?\)\s*"
+        r"environment\.ANCESTRYLLM_NATIVE_KEYRING_SESSION = '1'",
         source,
+        re.DOTALL,
     )
     assert re.search(
         r"platform === 'linux'\s*&&\s*"
