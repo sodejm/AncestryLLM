@@ -119,11 +119,11 @@
   },
   "explanation/DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
-    "description": "Released v0.5.0 Electron control shell plus the clearly marked Unreleased bounded Tasks presentation; task admission and domain authority remain excluded."
+    "description": "Released v0.5.0 Electron Home, Diagnostics, Settings, and capability onboarding plus the clearly marked Unreleased bounded Tasks presentation; task admission and domain authority remain excluded."
   },
   "reference/DESKTOP_SIDECAR.md": {
     "title": "Packaged desktop sidecar — AncestryLLM",
-    "description": "Released private FastAPI control sidecar plus clearly marked Unreleased fixed job-lifecycle routes; task admission, genealogy, provider execution, cloud, and updater authority remain excluded."
+    "description": "Released private FastAPI control sidecar plus clearly marked Unreleased fixed job-lifecycle routes; it excludes task admission, genealogy, provider execution, cloud, and updater authority."
   },
   "DESKTOP_VERIFICATION.md": {
     "title": "Desktop verification — AncestryLLM",
