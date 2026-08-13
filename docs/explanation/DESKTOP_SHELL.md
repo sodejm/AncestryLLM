@@ -178,8 +178,12 @@ cancellation**, and **Stay open** choices. **Wait** keeps the application open
 until jobs drain within the bounded deadline; **Request cancellation** asks
 interruptible jobs to stop and explains any pending safe point; **Stay open**
 aborts the quit. A degraded sidecar startup has no admitted local jobs, so its
-sanitized empty shutdown assessment is safe. The IPC boundary remains intact
-when sidecar shutdown fails, allowing a subsequent bounded recovery attempt.
+sanitized empty shutdown assessment is safe only before the supervisor has ever
+exposed an authenticated session. Electron owns that supervisor before
+asynchronous verification or launch, and shutdown cancels pre-spawn work and
+drains any launch already in flight. Losing a previously exposed session never
+restores the empty shortcut. The IPC boundary remains intact when sidecar
+shutdown fails, allowing a subsequent bounded recovery attempt.
 
 ## Unreleased opaque file-mediation foundation
 

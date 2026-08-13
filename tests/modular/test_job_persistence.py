@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from importlib.resources import files
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
 from ancestryllm.application.jobs import JobEventKind, JobLifecycleState
 from ancestryllm.core.errors import AncestryError, StorageError
@@ -45,8 +48,71 @@ def _legacy_database(path: Path, secrets: MemorySecretStore) -> Database:
     return database
 
 
-def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(tmp_path: Path) -> None:
+def _upgrade_with_packaged_migrations(database: Database, revision: str) -> None:
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(files("ancestryllm.storage.migrations")),
+    )
+    with database.engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, revision)
+
+
+def test_packaged_migration_chain_keeps_revision_0001_frozen(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+
+    _upgrade_with_packaged_migrations(database, "0001")
+
+    legacy_tables = set(Base.metadata.tables) - {"jobs", "job_events"}
+    with database.engine.connect() as connection:
+        tables_at_0001 = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+        assert tables_at_0001 == legacy_tables | {"alembic_version"}
+        assert (
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
+            == "0001"
+        )
+
+    _upgrade_with_packaged_migrations(database, "head")
+
+    with database.engine.connect() as connection:
+        tables_at_head = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+        assert tables_at_head == set(Base.metadata.tables) | {"alembic_version"}
+        assert (
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
+            == "0002"
+        )
+
+
+def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     database = _legacy_database(tmp_path / "workspace.db", MemorySecretStore({}))
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_sqlalchemy_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        if statement.lstrip().upper().startswith(("CREATE TABLE", "CREATE INDEX")):
+            raise AssertionError(
+                "migration DDL must execute through the native SQLCipher connection"
+            )
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_sqlalchemy_ddl)
 
     database.initialize()
 
@@ -61,6 +127,84 @@ def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(tmp_path:
         assert (
             connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "0002"
         )
+
+
+def test_packaged_alembic_migration_rolls_back_all_ddl_after_late_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = _legacy_database(tmp_path / "workspace.db", MemorySecretStore({}))
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_late_job_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        normalized = " ".join(statement.upper().split())
+        if normalized.startswith("CREATE TABLE JOB_EVENTS"):
+            raise RuntimeError("simulated late packaged migration failure")
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_late_job_ddl)
+
+    with pytest.raises(RuntimeError, match="simulated late packaged migration failure"):
+        _upgrade_with_packaged_migrations(database, "head")
+
+    with database.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        revision = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one()
+
+    assert "jobs" not in tables
+    assert "job_events" not in tables
+    assert revision == "0001"
+
+
+def test_initial_packaged_migration_rolls_back_all_domain_ddl_after_late_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_late_initial_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        normalized = " ".join(statement.upper().split())
+        if normalized.startswith("CREATE TABLE LLM_RUNS"):
+            raise RuntimeError("simulated late initial migration failure")
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_late_initial_ddl)
+
+    with pytest.raises(RuntimeError, match="simulated late initial migration failure"):
+        _upgrade_with_packaged_migrations(database, "0001")
+
+    with database.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        revision = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one_or_none()
+
+    assert tables <= {"alembic_version"}
+    assert revision is None
 
 
 def test_unknown_revision_is_rejected_before_job_tables_are_created(tmp_path: Path) -> None:

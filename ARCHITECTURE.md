@@ -393,8 +393,26 @@ still requires its distribution and target-assurance gates to pass.
 - POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
   escalation over the complete group. The Windows sidecar joins a
   kill-on-close Job Object and Electron main requests full-tree termination.
-  Shutdown fails closed when termination cannot be verified. The implemented
-  drain covers the Uvicorn server and listener, stdio, process tree, temporary
+  Closing the final desktop window requests `app.quit()` on every supported OS,
+  including macOS, so the sidecar never remains resident without a visible
+  application window. Electron main installs its `SIGTERM`-to-`app.quit()`
+  handler before asynchronous runtime startup, then idempotently re-arms that
+  same named handler as soon as the Electron-ready runtime owns the supervisor.
+  This prevents Electron/Chromium initialization from leaving `SIGTERM` on its
+  default immediate-termination path. The supervisor and job preflight are
+  owned before payload verification or process launch can yield. Both quit entry
+  points are vetoed until the native job preflight and verified sidecar stop
+  finish. A stop request cancels pre-spawn verification and drains any process
+  launch already in flight within a fixed 15-second supervisor deadline.
+  Electron uses
+  `app.exit(0)` only from that authorized completion callback, after every owned
+  resource has been released, to avoid a second platform-specific quit cycle.
+  Shutdown fails closed when termination cannot be verified, while clearing the
+  rejected shutdown attempt so a later native quit request can start one fresh,
+  fully verified stop. The packaged macOS matrix exercises that later-request
+  recovery under independent bounded deadlines and never treats force-kill
+  cleanup as a successful exit. The implemented drain covers the Uvicorn server
+  and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative
   cancellation or bounded wait, and encrypted snapshot/event repository.
   Future provider streams and other database sessions must register their own
@@ -794,6 +812,29 @@ for CLI/headless/CI use; keyring values take precedence and an
 environment-managed reference cannot be overwritten or deleted through the
 application. The packaged desktop sidecar explicitly selects keyring-only mode,
 so ambient environment values cannot satisfy or replace a desktop credential.
+Normal launches inherit only the minimal platform environment. On Linux,
+Electron Main ignores ambient D-Bus and XDG runtime selectors and binds the
+child to the conventional `unix:path=/run/user/<uid>/bus` endpoint derived from
+the kernel-reported process user ID. This reaches the user's native Secret
+Service without accepting an environment-selected bus; home, cache,
+configuration, and data directories also remain excluded. Electron Main pins
+the child to the native Secret Service backend and ignores ambient Python
+keyring selectors and configuration. Exact-head Linux packaged verification
+uses a separate unpublished package whose compile-time adapter may read an
+owner-only temporary root from a verifier-specific Electron command-line
+switch. The production
+adapter never reads that switch, the production build scanner rejects its
+literal name, and the ordinary package is assembled and verified before the
+verifier package is built. In the verifier, Main validates the Linux-only
+absolute root and derives the sidecar's home, XDG paths, and exact
+`runtime/bus` address from it instead of accepting ambient values. The verifier
+launcher binds its private D-Bus daemon to that owner-only socket. The root is
+never inherited from the packaged process environment. Provider credentials
+and `PATH` remain excluded from the child environment. Release-installer
+verification instead runs the installed production package while staging its
+disposable native service at the owner-only conventional
+`/run/user/<uid>/bus` endpoint that production Main derives; it refuses an
+occupied or linked endpoint and does not enable the verifier adapter.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 
@@ -820,7 +861,11 @@ files. Its lifecycle is fail-closed:
    non-WAL `DELETE` journal mode.
 5. For an existing database, run the strongest available cipher/integrity
    check before use.
-6. Create the schema and require schema revision `0001`.
+6. Inspect the user-table inventory with one bounded `sqlite_master` query.
+   Create revision `0002` only for a truly empty workspace, without per-table
+   driver reflection; require an exact revision-to-table match for an existing
+   workspace; and fail closed on partial or unexpected layouts. Revision
+   `0001` is the sole automatic upgrade path and adds only the job tables.
 
 SQLAlchemy uses one SQLCipher connection factory and `SingletonThreadPool`.
 Sessions are short-lived within service/repository calls. Encrypted backups use
@@ -846,12 +891,22 @@ The initial schema groups data by responsibility:
 | Prompts | `prompt_templates`, `prompt_versions` | Immutable, incrementing prompt revisions and optional response schemas. |
 | Provider policy | `provider_profiles`, `consent_profiles` | Explicit provider/model configuration and revocable disclosure grants. |
 | Audit | `llm_runs` | Request/response hashes, status, token/cost metadata, and optional encrypted payload retention. |
+| Jobs | `jobs`, `job_events` | Restart-safe bounded job snapshots and event replay. |
 
 The schema has room for identifiers, facts, and relationships, while the
 current public research service exposes only add/list person operations.
-Packaged Alembic-compatible migration files mirror revision `0001`; runtime
-bootstrap currently uses `Base.metadata.create_all()` and rejects any other
-revision. There is not yet a public in-place migration command.
+Packaged Alembic-compatible migration files retain the revision history.
+Runtime bootstrap creates the complete revision `0002` schema only after a
+single inventory query proves that no user table exists. It uses ordered DDL
+without SQLAlchemy's per-table reflection, which avoids native SQLCipher driver
+recursion while preserving atomic bootstrap. The packaged `0001` to `0002`
+migration starts a native SQLite transaction before its first DDL statement so
+a late failure cannot leave either job table or its indexes behind. Existing
+revision `0002` layouts are inventory-validated and reused without DDL; exact
+revision `0001` layouts receive only the reviewed job-table migration. Empty
+version rows, unknown revisions, and incomplete or unexpected table inventories
+return `DATABASE_MIGRATION_REQUIRED` without implicit repair. There is not yet
+a public in-place migration command.
 
 ## LLM boundary, providers, and consent
 

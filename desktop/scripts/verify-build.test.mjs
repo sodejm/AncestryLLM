@@ -58,15 +58,51 @@ test('production build inspection rejects packaged file-grant verification selec
   }
 })
 
+test('production build inspection rejects the native keyring verification selector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+  await mkdir(join(root, 'out'))
+  await writeFile(
+    join(root, 'out', 'index.js'),
+    "const argument = '--ancestryllm-linux-keyring-verification-root=/tmp/private'",
+  )
+
+  await assert.rejects(inspectBuild(join(root, 'out')))
+})
+
+test('packaged native-verification build permits only its dedicated selector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+  await mkdir(join(root, 'out'))
+  await writeFile(
+    join(root, 'out', 'index.js'),
+    "const argument = '--ancestryllm-linux-keyring-verification-root=/tmp/private'",
+  )
+  await inspectBuild(join(root, 'out'), { allowPackagedNativeVerification: true })
+
+  await writeFile(join(root, 'out', 'index.js'), 'process.env.ANCESTRYLLM_DESKTOP_FIXTURE')
+  await assert.rejects(
+    inspectBuild(join(root, 'out'), { allowPackagedNativeVerification: true }),
+  )
+})
+
 test('packaged file-grant build permits only its dedicated verification selectors', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
   await mkdir(join(root, 'out'))
   await writeFile(
     join(root, 'out', 'index.js'),
-    'process.env.ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION; process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH; process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH',
+    "process.env.ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION; process.env.ANCESTRYLLM_FILE_GRANT_OPEN_PATH; process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH; '--ancestryllm-linux-keyring-verification-root=/tmp/private'",
   )
-  await inspectBuild(join(root, 'out'), { allowPackagedFileGrants: true })
+  await inspectBuild(join(root, 'out'), {
+    allowPackagedNativeVerification: true,
+    allowPackagedFileGrants: true,
+  })
+
+  await assert.rejects(
+    inspectBuild(join(root, 'out'), { allowPackagedFileGrants: true }),
+  )
 
   await writeFile(join(root, 'out', 'index.js'), 'process.env.ANCESTRYLLM_DESKTOP_FIXTURE')
-  await assert.rejects(inspectBuild(join(root, 'out'), { allowPackagedFileGrants: true }))
+  await assert.rejects(inspectBuild(join(root, 'out'), {
+    allowPackagedNativeVerification: true,
+    allowPackagedFileGrants: true,
+  }))
 })

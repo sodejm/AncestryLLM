@@ -24,6 +24,9 @@ const prohibitedPackagedFileGrantContent = [
   /ANCESTRYLLM_FILE_GRANT_OPEN_PATH/,
   /ANCESTRYLLM_FILE_GRANT_SAVE_PATH/,
 ]
+const prohibitedPackagedNativeVerificationContent = [
+  /ancestryllm-linux-keyring-verification-root/,
+]
 async function files(root) { return (await readdir(root, { withFileTypes: true })).flatMap((entry) => entry.isDirectory() ? [] : [join(root, entry.name)]) }
 async function walk(root) {
   const entries = await readdir(root, { withFileTypes: true }); const output = []
@@ -35,7 +38,11 @@ async function walk(root) {
 }
 export async function inspectBuild(
   root,
-  { allowFixtures = false, allowPackagedFileGrants = false } = {},
+  {
+    allowFixtures = false,
+    allowPackagedNativeVerification = false,
+    allowPackagedFileGrants = false,
+  } = {},
 ) {
   const all = await walk(root)
   for (const file of all) {
@@ -49,6 +56,12 @@ export async function inspectBuild(
         ? undefined
         : prohibitedProductionFixtureContent.find((pattern) => pattern.test(content))
       if (fixtureMatch) throw new Error(`Prohibited production fixture content in ${name}: ${fixtureMatch.source}`)
+      const packagedNativeVerificationMatch = allowPackagedNativeVerification
+        ? undefined
+        : prohibitedPackagedNativeVerificationContent.find((pattern) => pattern.test(content))
+      if (packagedNativeVerificationMatch) {
+        throw new Error(`Prohibited packaged native-verification content in ${name}: ${packagedNativeVerificationMatch.source}`)
+      }
       const packagedFileGrantMatch = allowPackagedFileGrants
         ? undefined
         : prohibitedPackagedFileGrantContent.find((pattern) => pattern.test(content))
@@ -68,6 +81,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     resolveBuildOutputPath(import.meta.url),
     {
       allowFixtures: process.argv.includes('--fixture'),
+      allowPackagedNativeVerification: process.argv.includes('--packaged-native-verification'),
       allowPackagedFileGrants: process.argv.includes('--packaged-file-grants'),
     },
   )

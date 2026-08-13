@@ -67,6 +67,7 @@ REQUIRED_SDIST_PATHS = {
     "src/ancestryllm/__init__.py",
     "src/ancestryllm/cli.py",
     "src/ancestryllm/storage/migrations/versions/0001_initial.py",
+    "src/ancestryllm/storage/migrations/versions/0002_job_persistence.py",
 }
 
 

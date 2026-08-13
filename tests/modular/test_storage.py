@@ -9,6 +9,7 @@ import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -19,6 +20,7 @@ from ancestryllm.core.secrets import (
     KeyringSecretStore,
     MemorySecretStore,
 )
+from ancestryllm.storage import database as database_module
 from ancestryllm.storage.database import DATABASE_SECRET, SQLITE_HEADER, Database
 from ancestryllm.storage.diagnostics import (
     StartupConfigurationFailure,
@@ -26,6 +28,7 @@ from ancestryllm.storage.diagnostics import (
     diagnose_startup,
     diagnose_storage,
 )
+from ancestryllm.storage.models import Base
 
 
 def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
@@ -40,6 +43,180 @@ def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
         )
         assert connection.exec_driver_sql("PRAGMA integrity_check").scalar() == "ok"
     assert secrets.present(DATABASE_SECRET)
+
+
+def test_schema_bootstrap_and_reuse_do_not_reflect_sqlcipher_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+
+    def reject_table_reflection(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        raise AssertionError("schema bootstrap must not reflect individual SQLCipher tables")
+
+    monkeypatch.setattr(database.engine.dialect, "has_table", reject_table_reflection)
+
+    database.initialize()
+    database.initialize()
+
+
+def test_schema_bootstrap_bypasses_sqlalchemy_ddl_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    original_do_execute = database.engine.dialect.do_execute
+
+    def reject_sqlalchemy_ddl(
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any = None,
+    ) -> None:
+        if statement.lstrip().upper().startswith(("CREATE TABLE", "CREATE INDEX")):
+            raise AssertionError("schema DDL must execute through the native SQLCipher connection")
+        original_do_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(database.engine.dialect, "do_execute", reject_sqlalchemy_ddl)
+
+    database.initialize()
+
+    with database.engine.connect() as connection:
+        table_names = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            )
+        }
+        assert table_names == {
+            *Base.metadata.tables,
+            "alembic_version",
+        }
+
+
+def test_native_schema_ddl_failure_rolls_back_partial_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    create_table = database_module.CreateTable
+    compile_count = 0
+
+    class FailSecondCreateTable:
+        def __init__(self, table: Any) -> None:
+            self.statement = create_table(table)
+
+        def compile(self, *, dialect: Any) -> Any:
+            nonlocal compile_count
+            compile_count += 1
+            if compile_count == 2:
+                raise RuntimeError("fictional interrupted native schema bootstrap")
+            return self.statement.compile(dialect=dialect)
+
+    monkeypatch.setattr(database_module, "CreateTable", FailSecondCreateTable)
+
+    with (
+        pytest.raises(RuntimeError, match="interrupted native schema bootstrap"),
+        database.engine.begin() as connection,
+    ):
+        database_module._create_tables_on_native_connection(
+            connection,
+            tuple(Base.metadata.sorted_tables[:2]),
+        )
+
+    with database.engine.connect() as connection:
+        table_names = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+    assert table_names == set()
+
+
+def test_sqlcipher_logging_is_disabled_before_memory_security() -> None:
+    statements: list[str] = []
+
+    class FakeResult:
+        def __init__(self, row: tuple[str, ...] | None = None) -> None:
+            self.row = row
+
+        def fetchone(self) -> tuple[str, ...] | None:
+            return self.row
+
+    class FakeConnection:
+        def execute(self, statement: str) -> FakeResult:
+            statements.append(statement)
+            if statement == "PRAGMA cipher_version":
+                return FakeResult(("4.14.0 community",))
+            return FakeResult()
+
+        def close(self) -> None:
+            pass
+
+    connection = FakeConnection()
+
+    database_module._configure_sqlcipher_connection(connection, "00" * 32)
+
+    assert statements == [
+        f"PRAGMA key = \"x'{'00' * 32}'\"",
+        "PRAGMA cipher_version",
+        "PRAGMA cipher_log_level = NONE",
+        "PRAGMA cipher_memory_security = ON",
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA secure_delete = ON",
+        "PRAGMA journal_mode = DELETE",
+    ]
+
+
+def test_unversioned_partial_schema_fails_closed_before_bootstrap(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE interrupted_bootstrap (value INTEGER)")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
+    assert raised.value.remediation == (
+        "Restore a verified encrypted backup or contact support before modifying the workspace."
+    )
+    with database.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert tables == {"interrupted_bootstrap"}
+
+
+def test_versioned_partial_schema_is_not_repaired_implicitly(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.initialize()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE job_events")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
+    with database.engine.connect() as connection:
+        assert not connection.exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'job_events'"
+        ).scalar()
+
+
+def test_unexpected_sqlite_prefixed_user_table_fails_closed(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.initialize()
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE sqliteXshadow (value INTEGER)")
+
+    with pytest.raises(StorageError) as raised:
+        database.initialize()
+
+    assert raised.value.code == "DATABASE_MIGRATION_REQUIRED"
 
 
 def test_plaintext_database_is_rejected(tmp_path: Path) -> None:
@@ -354,7 +531,28 @@ def test_storage_diagnostics_report_weak_workspace_permissions(tmp_path: Path) -
     path.write_bytes(b"encrypted-looking")
     path.chmod(0o644)
 
-    diagnostics = diagnose_storage(path, MemorySecretStore({}))
+    diagnostics = diagnose_storage(path, MemorySecretStore({}), operating_system="linux")
 
     permissions = next(item for item in diagnostics if item["code"] == "DATABASE_PERMISSIONS_WEAK")
     assert permissions["status"] == "warning"
+
+
+@pytest.mark.skipif(not hasattr(Path, "chmod"), reason="path permissions unavailable")
+def test_startup_diagnostics_do_not_apply_posix_modes_to_windows_acls(tmp_path: Path) -> None:
+    path = tmp_path / "workspace.db"
+    path.write_bytes(b"encrypted-looking")
+    path.chmod(0o644)
+
+    report = diagnose_startup(
+        path,
+        MemorySecretStore({}),
+        operating_system="win32",
+        machine="arm64",
+    )
+
+    workspace = next(
+        component for component in report.components if component.component == "workspace"
+    )
+    assert report.status == "ready"
+    assert workspace.status == "ready"
+    assert workspace.code != "DATABASE_PERMISSIONS_WEAK"

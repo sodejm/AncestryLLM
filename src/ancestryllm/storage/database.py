@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from sqlalchemy import Engine, Table, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import StorageError
@@ -35,6 +36,53 @@ PREVIOUS_SCHEMA_REVISION = "0001"
 SCHEMA_REVISION = "0002"
 
 
+def _schema_table_names(connection: Any) -> frozenset[str]:
+    """Return user-defined table names without per-table SQLCipher reflection."""
+    return frozenset(
+        str(name)
+        for name in connection.exec_driver_sql(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name"
+        ).scalars()
+    )
+
+
+def _expected_schema_tables(*, revision: str) -> frozenset[str]:
+    tables = frozenset(str(name) for name in Base.metadata.tables)
+    if revision == PREVIOUS_SCHEMA_REVISION:
+        tables -= {JobModel.__tablename__, JobEventModel.__tablename__}
+    return tables | {"alembic_version"}
+
+
+def _create_tables_on_native_connection(connection: Any, tables: tuple[Table, ...]) -> None:
+    """Compile authoritative metadata and execute DDL through SQLCipher directly.
+
+    The SQLAlchemy DDL execution visitor can exhaust the native stack in the
+    bundled Windows ARM64 runtime. Compiling from the mapped tables preserves
+    the single schema definition while bypassing that failing execution path.
+    """
+    native_connection = connection.connection.driver_connection
+    assert native_connection is not None
+    # Python's sqlite-compatible drivers use legacy transaction control by
+    # default, so DDL does not necessarily start the SQLAlchemy transaction.
+    # Begin at the native boundary before the first statement to keep an
+    # interrupted bootstrap or migration atomic.
+    if not native_connection.in_transaction:
+        native_connection.execute("BEGIN")
+    for table in tables:
+        native_connection.execute(str(CreateTable(table).compile(dialect=connection.dialect)))
+        for index in sorted(table.indexes, key=lambda candidate: candidate.name or ""):
+            native_connection.execute(str(CreateIndex(index).compile(dialect=connection.dialect)))
+
+
+def _migration_required(message: str) -> StorageError:
+    return StorageError(
+        "DATABASE_MIGRATION_REQUIRED",
+        message,
+        "Restore a verified encrypted backup or contact support before modifying the workspace.",
+    )
+
+
 def _integrity_result(connection: Any) -> str | None:
     """Run the strongest integrity check supported by the SQLCipher build."""
     cipher_result = connection.execute("PRAGMA cipher_integrity_check").fetchone()
@@ -42,6 +90,28 @@ def _integrity_result(connection: Any) -> str | None:
         return str(cipher_result[0])
     fallback = connection.execute("PRAGMA integrity_check").fetchone()
     return str(fallback[0]) if fallback and fallback[0] else None
+
+
+def _configure_sqlcipher_connection(connection: Any, key_hex: str) -> None:
+    """Apply the fail-closed SQLCipher connection policy in a stable order."""
+    connection.execute(f"PRAGMA key = \"x'{key_hex}'\"")
+    version = connection.execute("PRAGMA cipher_version").fetchone()
+    if not version or not version[0]:
+        connection.close()
+        raise StorageError(
+            "SQLCIPHER_UNAVAILABLE",
+            "The SQLite driver does not provide SQLCipher encryption.",
+        )
+    # SQLCipher's Windows stderr sink allocates through its protected-memory
+    # allocator. If VirtualLock reaches the process working-set quota, logging
+    # that warning can recurse until the process stack overflows. Disable the
+    # native sink before protected memory is enabled; application diagnostics
+    # use the repository's redacted logging boundary instead.
+    connection.execute("PRAGMA cipher_log_level = NONE")
+    connection.execute("PRAGMA cipher_memory_security = ON")
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA secure_delete = ON")
+    connection.execute("PRAGMA journal_mode = DELETE")
 
 
 def _decode_key(encoded: str) -> bytes:
@@ -117,18 +187,7 @@ class Database:
 
         def connect() -> Any:
             connection = sqlcipher3.connect(str(self.path), check_same_thread=False)
-            connection.execute(f"PRAGMA key = \"x'{key_hex}'\"")
-            version = connection.execute("PRAGMA cipher_version").fetchone()
-            if not version or not version[0]:
-                connection.close()
-                raise StorageError(
-                    "SQLCIPHER_UNAVAILABLE",
-                    "The SQLite driver does not provide SQLCipher encryption.",
-                )
-            connection.execute("PRAGMA cipher_memory_security = ON")
-            connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute("PRAGMA secure_delete = ON")
-            connection.execute("PRAGMA journal_mode = DELETE")
+            _configure_sqlcipher_connection(connection, key_hex)
             return connection
 
         try:
@@ -180,11 +239,8 @@ class Database:
 
     def initialize(self) -> None:
         with self.engine.begin() as connection:
-            version_table_exists = bool(
-                connection.exec_driver_sql(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version'"
-                ).scalar()
-            )
+            schema_tables = _schema_table_names(connection)
+            version_table_exists = "alembic_version" in schema_tables
             if version_table_exists:
                 revisions = tuple(
                     connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalars()
@@ -193,32 +249,50 @@ class Database:
                     revisions and revisions[0] not in {PREVIOUS_SCHEMA_REVISION, SCHEMA_REVISION}
                 ):
                     rendered = revisions[0] if len(revisions) == 1 else "multiple revisions"
-                    raise StorageError(
-                        "DATABASE_MIGRATION_REQUIRED",
+                    raise _migration_required(
                         f"Workspace schema {rendered!r} is not supported by this release.",
-                        "Run the documented encrypted database migration command.",
                     )
             else:
                 revisions = ()
 
             current = revisions[0] if revisions else None
+            if current is None:
+                if schema_tables:
+                    raise _migration_required(
+                        "The encrypted workspace contains an incomplete unversioned schema."
+                    )
+                _create_tables_on_native_connection(
+                    connection,
+                    tuple(Base.metadata.sorted_tables),
+                )
+                native_connection = connection.connection.driver_connection
+                assert native_connection is not None
+                native_connection.execute(
+                    "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                )
+                native_connection.execute(
+                    "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
+                )
+                return
+
+            if schema_tables != _expected_schema_tables(revision=current):
+                raise _migration_required(
+                    f"Workspace schema {current!r} has an incomplete or unexpected table layout."
+                )
+
             if current == PREVIOUS_SCHEMA_REVISION:
-                cast("Table", JobModel.__table__).create(connection, checkfirst=False)
-                cast("Table", JobEventModel.__table__).create(connection, checkfirst=False)
+                _create_tables_on_native_connection(
+                    connection,
+                    (
+                        cast("Table", JobModel.__table__),
+                        cast("Table", JobEventModel.__table__),
+                    ),
+                )
                 connection.exec_driver_sql(
                     "UPDATE alembic_version SET version_num = ?",
                     (SCHEMA_REVISION,),
                 )
                 return
-
-            Base.metadata.create_all(connection)
-            connection.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-            )
-            if current is None:
-                connection.exec_driver_sql(
-                    "INSERT INTO alembic_version(version_num) VALUES (?)", (SCHEMA_REVISION,)
-                )
 
     def session(self) -> Session:
         self.initialize()

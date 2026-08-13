@@ -35,10 +35,71 @@ describe('sidecar launch boundary', () => {
     const source = {
       PATH: '/unsafe/path', HOME: '/private/home', OPENAI_API_KEY: 'canary-openai',
       ANTHROPIC_API_KEY: 'canary-anthropic', SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/attacker-bus',
+      XDG_RUNTIME_DIR: '/tmp/attacker-runtime', LANG: 'en_US.UTF-8',
+    }
+    expect(minimalSidecarEnvironment('linux', source, undefined, 1000)).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
+    })
+    expect(minimalSidecarEnvironment('win32', source)).toEqual({ SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp' })
+  })
+
+  it('ignores ambient keyring overrides and pins the native Linux backend', () => {
+    const source = {
+      ANCESTRYLLM_NATIVE_KEYRING_SESSION: '1',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/verification/home',
+      XDG_CACHE_HOME: '/verification/home/.cache',
+      XDG_CONFIG_HOME: '/verification/home/.config',
+      XDG_DATA_HOME: '/verification/home/.local/share',
+      XDG_RUNTIME_DIR: '/verification/runtime',
+      LANG: 'en_US.UTF-8',
+      PATH: '/unsafe/path',
+      OPENAI_API_KEY: 'canary-openai',
+      PYTHON_KEYRING_BACKEND: 'keyrings.alt.file.PlaintextKeyring',
+    }
+
+    expect(minimalSidecarEnvironment('linux', source, undefined, 1000)).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
+    })
+  })
+
+  it('derives native Linux keyring paths only from an explicit verifier root', () => {
+    const source = {
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      HOME: '/ambient/home',
+      XDG_CACHE_HOME: '/ambient/cache',
+      XDG_CONFIG_HOME: '/ambient/config',
+      XDG_DATA_HOME: '/ambient/data',
+      XDG_RUNTIME_DIR: '/ambient/runtime',
       LANG: 'en_US.UTF-8',
     }
-    expect(minimalSidecarEnvironment('linux', source)).toEqual({ LANG: 'en_US.UTF-8' })
-    expect(minimalSidecarEnvironment('win32', source)).toEqual({ SYSTEMROOT: 'C:\\Windows', TEMP: 'C:\\Temp' })
+
+    expect(minimalSidecarEnvironment('linux', source, '/tmp/private-keyring')).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/private-keyring/runtime/bus',
+      HOME: '/tmp/private-keyring/home',
+      XDG_CACHE_HOME: '/tmp/private-keyring/home/.cache',
+      XDG_CONFIG_HOME: '/tmp/private-keyring/home/.config',
+      XDG_DATA_HOME: '/tmp/private-keyring/home/.local/share',
+      XDG_RUNTIME_DIR: '/tmp/private-keyring/runtime',
+      LANG: 'en_US.UTF-8',
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.SecretService.Keyring',
+    })
+    expect(() => minimalSidecarEnvironment('linux', source, undefined, -1)).toThrow(
+      'non-negative integer',
+    )
+    expect(() => minimalSidecarEnvironment('linux', source, 'relative/keyring')).toThrow(
+      'absolute Linux path',
+    )
+    expect(() => minimalSidecarEnvironment('darwin', source, '/tmp/private-keyring')).toThrow(
+      'Linux only',
+    )
   })
 
   it('resolves only supported native bundle targets', () => {
@@ -248,6 +309,134 @@ describe('SidecarSupervisor', () => {
     expect(sidecar.terminate).toHaveBeenCalledTimes(1)
   })
 
+  it('does not launch a sidecar when shutdown begins during payload verification', async () => {
+    let releaseVerification: (() => void) | undefined
+    const verification = new Promise<void>((resolve) => {
+      releaseVerification = resolve
+    })
+    const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar',
+      verify: async () => verification, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(supervisor.diagnostics().state).toBe('starting'))
+    expect(supervisor.isExplicitSafeEmpty()).toBe(true)
+    const shutdown = supervisor.stop()
+    releaseVerification?.()
+
+    await expect(startup).rejects.toThrow('stopping')
+    await expect(shutdown).resolves.toBeUndefined()
+    expect(launch).not.toHaveBeenCalled()
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('never treats a supervisor that exposed a job-capable session as explicit safe empty', async () => {
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    expect(supervisor.isExplicitSafeEmpty()).toBe(true)
+    await supervisor.start()
+    expect(supervisor.isExplicitSafeEmpty()).toBe(false)
+
+    sidecar.emit('exit', 1)
+    await vi.waitFor(() => expect(supervisor.diagnostics().state).toBe('unavailable'))
+    expect(supervisor.session()).toBeUndefined()
+    expect(supervisor.isExplicitSafeEmpty()).toBe(false)
+  })
+
+  it('waits for an in-flight launch and terminates its process before shutdown completes', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    let shutdownComplete = false
+    const shutdown = supervisor.stop().then(() => { shutdownComplete = true })
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    expect(shutdownComplete).toBe(false)
+
+    releaseLaunch?.()
+    await expect(startup).rejects.toThrow('stopping')
+    await expect(shutdown).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('fails shutdown closed when an in-flight launch exceeds the shutdown deadline', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, shutdownTimeoutMs: 5, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    await expect(supervisor.stop()).rejects.toThrow('Sidecar shutdown timed out')
+    expect(supervisor.diagnostics()).toEqual({
+      state: 'unavailable', failure: 'startup_failed',
+      automaticRestartsRemaining: 0, manualRetriesRemaining: 0,
+    })
+
+    releaseLaunch?.()
+    await expect(startup).rejects.toThrow('stopping')
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('unavailable')
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
+  it('fails shutdown closed when a late launch process cannot be terminated', async () => {
+    let releaseLaunch: (() => void) | undefined
+    const sidecar = new FakeSidecar(new Promise(() => undefined))
+    sidecar.terminate.mockRejectedValueOnce(new Error('late process tree remains'))
+    const launch = vi.fn(() => new Promise<RunningSidecar>((resolve) => {
+      releaseLaunch = () => resolve(sidecar)
+    }))
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+
+    const startup = supervisor.start()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+    const shutdown = supervisor.stop()
+    releaseLaunch?.()
+
+    await expect(startup).rejects.toThrow('late process tree remains')
+    await expect(shutdown).rejects.toThrow('Sidecar shutdown failed')
+    expect(sidecar.terminate).toHaveBeenCalledOnce()
+    expect(supervisor.diagnostics().state).toBe('unavailable')
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledTimes(2)
+    expect(supervisor.diagnostics().state).toBe('stopped')
+  })
+
   it('keeps failures degraded and diagnostics free of secret process details', async () => {
     const secret = 'secret-token-canary'
     const privatePath = '/private/path/canary-sidecar'
@@ -313,6 +502,7 @@ describe('SidecarSupervisor', () => {
     await expect(supervisor.start()).rejects.toThrow('initial failure')
 
     const retry = supervisor.retry()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
     await supervisor.stop()
 
     await expect(retry).resolves.toBe(false)
@@ -363,6 +553,10 @@ describe('SidecarSupervisor', () => {
     })
     expect(JSON.stringify(results)).not.toContain(privateFailure)
     expect(JSON.stringify(fatal.mock.calls)).not.toContain(privateFailure)
+
+    await expect(supervisor.stop()).resolves.toBeUndefined()
+    expect(sidecar.terminate).toHaveBeenCalledTimes(2)
+    expect(supervisor.diagnostics().state).toBe('stopped')
   })
 
   it('fails closed without an unhandled restart when crash cleanup fails', async () => {

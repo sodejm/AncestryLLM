@@ -10,7 +10,12 @@ import {
   session,
   type WebContents,
 } from 'electron'
-import { completeAppShutdown, type UnsafeShutdownChoice } from './app-shutdown'
+import {
+  completeAppShutdown,
+  requestVerifiedShutdownBeforeWindowClose,
+  type AppShutdownProgress,
+  type UnsafeShutdownChoice,
+} from './app-shutdown'
 import { FileGrantBroker } from './file-grant-broker'
 import {
   registerDesktopIpcHandlers,
@@ -24,6 +29,7 @@ import {
   writeConcurrentLocalRuntimeCliFailure,
 } from './local-runtime-cli'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
+import { requestedLinuxKeyringVerificationRoot } from './native-verification'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
@@ -65,8 +71,16 @@ let sidecarSupervisor: SidecarSupervisor | undefined
 let prepareJobShutdown: ((action: JobShutdownAction) => Promise<void>) | undefined
 let shutdownAuthorized = false
 let shutdownPromise: Promise<boolean> | undefined
+const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }
 let ipcController: DesktopIpcController | undefined
 let removeSidecarSessionListener: (() => void) | undefined
+
+const requestVerifiedAppQuit = (): void => { app.quit() }
+
+function armVerifiedSigtermHandler(): void {
+  process.off('SIGTERM', requestVerifiedAppQuit)
+  process.on('SIGTERM', requestVerifiedAppQuit)
+}
 
 function rendererPolicy() {
   return {
@@ -150,6 +164,14 @@ function createWindow(): void {
     window.webContents as unknown as BridgeWebContents,
     (url) => isTrustedRendererUrl({ ...rendererPolicy(), senderUrl: url }),
   )
+  window.on('close', (event) => {
+    requestVerifiedShutdownBeforeWindowClose(
+      event,
+      !shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined),
+      shutdownPromise !== undefined,
+      () => app.quit(),
+    )
+  })
   window.once('ready-to-show', () => {
     window.show()
     console.info(WINDOW_READY_RECORD)
@@ -196,11 +218,19 @@ if (localRuntimeCliRequested && !primaryInstance) {
     app.exit(1)
   })
 } else if (primaryInstance) {
+  // Cover signals before Electron readiness, then re-arm the same named
+  // listener once runtime ownership is established. Electron/Chromium startup
+  // must never leave SIGTERM on its default process-termination path.
+  armVerifiedSigtermHandler()
   app.whenReady().then(async () => {
-    const runtime = await startRuntimeBridge()
+    const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
+      sidecarSupervisor = supervisor
+      prepareJobShutdown = prepareJobs
+      armVerifiedSigtermHandler()
+    }, {
+      linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
+    })
     bridge = runtime.bridge
-    sidecarSupervisor = runtime.supervisor
-    prepareJobShutdown = runtime.prepareJobShutdown
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
@@ -236,10 +266,15 @@ if (localRuntimeCliRequested && !primaryInstance) {
           sidecarSupervisor = undefined
           prepareJobShutdown = undefined
           shutdownAuthorized = true
-          app.quit()
+          // The normal quit lifecycle has already been vetoed while the
+          // sidecar was owned. Once shutdown is verified, exit directly so
+          // Electron cannot re-enter a platform-specific window-close cycle.
+          app.exit(0)
         },
+        () => supervisor.isExplicitSafeEmpty(),
+        shutdownProgress,
       ).finally(() => { shutdownPromise = undefined })
     }
   })
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+  app.on('window-all-closed', () => { app.quit() })
 }

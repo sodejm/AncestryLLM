@@ -24,9 +24,9 @@ claim the five task requests and validated event listener.
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`
-application on each exact supported runner below. The assembled application exists only
-inside that job; CI uploads its JSON evidence and SBOM, not the application
-tree.
+application on each exact supported runner below. The assembled application
+exists only inside that job; CI uploads its JSON evidence and SBOM, not the
+application tree.
 
 | Runner | Bundled sidecar | Intended target | Executed OS | Host architecture | Artifact architecture | `platformValidated` |
 |---|---|---|---|---|---|---|
@@ -47,6 +47,39 @@ AncestryLLM application code. Optional remote-provider SDKs are excluded because
 the desktop sidecar starts with provider `none`. The resulting `win32-arm64`
 sidecar and application are built and launched natively. The aggregate records
 `platformValidated: true` only after all six exact rows pass.
+
+The Ubuntu row installs the distribution-provided GNOME keyring and launches
+the packaged check through `desktop/scripts/run-with-linux-keyring.sh`. That
+runner creates a disposable D-Bus session, isolated owner-only keyring directories,
+and a disposable native Secret Service collection, then removes them when the
+check exits. It verifies that the native service owns
+`org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
+before Playwright may start. A normal Linux launch ignores inherited D-Bus and
+XDG runtime selectors and binds the sidecar to the conventional
+`unix:path=/run/user/<uid>/bus` endpoint derived from the kernel-reported user
+ID. The exact verification runner instead binds its private D-Bus daemon to an
+owner-only `runtime/bus` socket and launches a separate unpublished Linux
+verifier package. Only that package compiles the adapter that reads its
+owner-only root from a Linux-only Electron command-line switch. The ordinary
+production package is assembled and scanned first; its adapter always returns
+no verifier root, and the production build scan rejects the selector literal.
+In the verifier, Main requires an absolute Linux path and derives the sidecar's
+disposable home, XDG cache, configuration, data, and runtime paths plus the
+exact D-Bus address from that root; it does not inherit those values from
+Playwright's environment. The packaged process therefore reaches that verified
+service without selecting a Python test backend, injecting a packaged
+credential, or retaining runner keyring state. An unavailable or failed native
+service fails the row.
+
+The Ubuntu release-installer checks exercise the installed production package,
+not the unpublished verifier adapter. They select the launcher's
+`--production-runtime-bus` mode, which validates or creates the owner-only
+`/run/user/<uid>` directory, refuses an occupied or linked `bus` endpoint, and
+binds the disposable D-Bus daemon to the exact endpoint production Electron
+Main derives from the process user ID. Secret Service storage remains isolated
+under the temporary verifier root. This proves that an installed production
+sidecar can reach the native service without accepting an environment-selected
+endpoint or compiling the verifier switch into the shipped package.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
@@ -138,11 +171,13 @@ main process.
 Each native row then:
 
 1. builds and smoke-tests the target-matched sidecar;
-2. builds the production Electron assets and assembles an unpublished unpacked
-   native application;
+2. builds the production Electron assets, rejects verifier-only selectors, and
+   assembles and verifies an unpublished unpacked production application;
 3. verifies that the packaged resources exactly match the deterministic
    target/build-bound sidecar payload manifest;
-4. launches the actual packaged executable with isolated fictional app data;
+4. on Linux only, builds a separate unpublished native-keyring verifier package
+   after the production assembly is complete, then launches that verifier;
+   other rows launch the production package directly;
 5. verifies first-run welcome, Home and healthy Diagnostics, Settings
    persistence across a new process, corrupt-preference fail-closed behavior,
    clean quit and relaunch, custom-protocol and production CSP behavior,
@@ -173,7 +208,29 @@ constant, non-sensitive lifecycle record emitted by the existing
 renderer-readiness gate. On macOS only, both automation launches pass Chromium's
 `--use-mock-keychain` because the ad hoc, unpackaged runner build cannot reliably
 use a login keychain. That automation-only switch
-is not part of a shipped launch path.
+is not part of a shipped launch path and does not replace the sidecar's OS
+keyring implementation. Linux uses the native Secret Service harness described
+above rather than a mock backend. The clean-quit check registers the native
+process exit listener first. On macOS it sends `SIGTERM`, exercising the
+production signal-to-quit path. Its named handler is installed before
+asynchronous runtime startup and idempotently re-armed when the Electron-ready
+runtime takes ownership, preventing initialization from restoring the signal's
+immediate-termination default. If that first request has not produced a verified
+exit after 20 seconds—longer than the production supervisor's 15-second stop
+boundary—the harness sends one later `SIGTERM` and waits under a separate 30-second deadline.
+This exercises the production contract that a failed stop remains fail-closed
+but does not leave a rejected shutdown promise cached forever. A second failure
+still fails the packaged test; force termination is reserved for test cleanup.
+On Windows and Linux the harness closes the attached renderer page under a
+bounded deadline, exercising the final-window path. A source contract test
+also proves that Electron owns the supervisor and job preflight before payload
+verification or process launch can yield. The
+harness then releases the Playwright connection and waits for a normal zero-code
+native process exit. Both paths request `app.quit()` and are vetoed while the
+fail-closed job preflight and verified sidecar shutdown run. Only the authorized
+completion callback uses `app.exit(0)`, after releasing the IPC boundary and
+sidecar supervisor, so Electron cannot enter a second platform-dependent quit
+cycle.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and

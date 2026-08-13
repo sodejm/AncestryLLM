@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
   chromium,
@@ -12,7 +12,8 @@ import {
   type Page,
 } from '@playwright/test'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
-import type { AncestryBridge } from '../src/shared-contract/desktop'
+import { LINUX_KEYRING_VERIFICATION_SWITCH } from '../src/main/sidecar-supervisor'
+import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
@@ -23,6 +24,9 @@ const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const packagedAttachTimeoutMs = 45_000
 const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
+const packagedWindowCloseTimeoutMs = 20_000
+const packagedQuitRetryDelayMs = 20_000
+const packagedQuitTimeoutMs = 30_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
 const integrityEvidencePath = process.env.ANCESTRYLLM_INTEGRITY_EVIDENCE
@@ -34,6 +38,18 @@ const fileGrantSavePath = process.env.ANCESTRYLLM_FILE_GRANT_SAVE_PATH
 const fileGrantEvidencePath = process.env.ANCESTRYLLM_FILE_GRANT_EVIDENCE
 const execFileAsync = promisify(execFile)
 
+function linuxKeyringVerificationArguments(): string[] {
+  const root = process.env.ANCESTRYLLM_NATIVE_KEYRING_ROOT
+  if (process.platform !== 'linux') {
+    if (root !== undefined) throw new Error('Linux keyring verification root is Linux only.')
+    return []
+  }
+  if (!root || !isAbsolute(root)) {
+    throw new Error('Packaged Linux verification requires an absolute native keyring root.')
+  }
+  return [`--${LINUX_KEYRING_VERIFICATION_SWITCH}=${root}`]
+}
+
 type LaunchResult = Readonly<{
   browser: Browser
   page: Page
@@ -41,7 +57,6 @@ type LaunchResult = Readonly<{
   launchMs: number
   readyMs: number
   userData: string
-  browserEndpoint: string
 }>
 
 type ExitStatus = Readonly<{
@@ -56,11 +71,15 @@ type ProcessRecord = Readonly<{
   commandLine: string
 }>
 
-type StartupDiagnostics = Readonly<{
-  state: 'starting' | 'ready' | 'degraded' | 'stopped'
-  failure: 'startup_failed' | 'startup_timeout' | 'incompatible_build' | 'crash_loop' | null
+type StartupDiagnosticsExpectation = Readonly<{
+  state: StartupDiagnostics['state']
+  failure: StartupDiagnostics['failure']
   automaticRestartsRemaining: number
   manualRetriesRemaining: number
+  report?: Readonly<{
+    schema_version: 1
+    status: NonNullable<StartupDiagnostics['report']>['status']
+  }>
 }>
 
 type PackageCopy = Readonly<{
@@ -69,14 +88,19 @@ type PackageCopy = Readonly<{
   sidecarPath: string
 }>
 
-const READY_DIAGNOSTICS: StartupDiagnostics = Object.freeze({
+const READY_DIAGNOSTICS: StartupDiagnosticsExpectation = Object.freeze({
   state: 'ready',
   failure: null,
   automaticRestartsRemaining: 2,
   manualRetriesRemaining: 1,
+  report: Object.freeze({
+    schema_version: 1,
+    status: 'ready',
+  }),
 })
 
 const DEBUG_ARGUMENT = /(?:^|\s)--(?:remote-debugging(?:-address|-port|-pipe)?|inspect(?:-brk)?)(?:=|\s|$)/
+const CAPABILITY_SUMMARY_READY = /^(?:No control capabilities are currently available\.|\d+ local control (?:module is|modules are) available\.)$/
 
 type DevToolsVersion = Readonly<{
   webSocketDebuggerUrl?: string
@@ -132,10 +156,11 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',
   }
-  // Electron consults the login keychain before it creates a renderer on
-  // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup. Chromium
-  // state remains isolated by --user-data-dir and the explicit app-data paths.
-  if (process.platform !== 'darwin') environment.HOME = isolatedHome
+  if (process.platform !== 'darwin') {
+    // Electron consults the login keychain before it creates a renderer on
+    // macOS. Replacing HOME or CFFIXED_USER_HOME can block that lookup.
+    environment.HOME = isolatedHome
+  }
   const packagedRuntimePath = process.env.ANCESTRYLLM_PACKAGED_RUNTIME_PATH
   if (packagedRuntimePath !== undefined) environment.PATH = packagedRuntimePath
   return environment
@@ -228,6 +253,36 @@ function waitForProcessExit(
   })
 }
 
+async function requestMacPackagedQuit(
+  child: ChildProcessWithoutNullStreams,
+): Promise<ExitStatus> {
+  const requestQuit = (
+    attempt: 'initial' | 'retry',
+    processExit: Promise<ExitStatus>,
+  ): void => {
+    if (!child.kill('SIGTERM')) {
+      // The wait registered before the signal can still time out after this
+      // synchronous failure. Observe that rejection so the explicit quit
+      // error remains the only failure reported by the harness.
+      void processExit.catch(() => undefined)
+      throw new Error(`Packaged app rejected the macOS ${attempt} quit request.`)
+    }
+  }
+
+  const initialExit = waitForProcessExit(child, packagedQuitRetryDelayMs)
+  requestQuit('initial', initialExit)
+  try {
+    return await initialExit
+  } catch {
+    // Production bounds a sidecar stop at 15 seconds and deliberately leaves a
+    // rejected shutdown retryable. Wait beyond that boundary, then exercise the
+    // later native quit request that must start a fresh verified stop attempt.
+    const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs)
+    requestQuit('retry', retryExit)
+    return retryExit
+  }
+}
+
 async function forceClosePackaged(result: LaunchResult): Promise<void> {
   await withinDeadline('closing packaged browser automation', packagedCleanupTimeoutMs, () => result.browser.close())
     .catch(() => undefined)
@@ -267,33 +322,27 @@ async function removeTemporaryPackage(root: string): Promise<void> {
 }
 
 async function closePackaged(result: LaunchResult): Promise<void> {
-  const exited = waitForProcessExit(result.process, 15_000)
-  await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(result.browserEndpoint)
-    const timer = setTimeout(() => {
-      socket.close()
-      reject(new Error('Timed out connecting to the packaged CDP endpoint for clean quit.'))
-    }, 5_000)
-    const commandSent = (): void => {
-      clearTimeout(timer)
-      resolve()
-    }
-    socket.addEventListener('open', () => {
-      try {
-        socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
-        commandSent()
-      } catch (error) {
-        clearTimeout(timer)
-        reject(error)
-      }
-    }, { once: true })
-    socket.addEventListener('error', () => {
-      clearTimeout(timer)
-      reject(new Error('Could not connect to the packaged CDP endpoint for clean quit.'))
-    }, { once: true })
-  })
-  const status = await exited
-  await result.browser.close().catch(() => undefined)
+  let processExit: Promise<ExitStatus>
+  if (process.platform === 'darwin') {
+    // A CDP page close does not consistently map to a native BrowserWindow
+    // close on macOS. Exercise Electron's production SIGTERM-to-app.quit path,
+    // including its one bounded later-request retry, then release automation
+    // before awaiting verified shutdown.
+    processExit = requestMacPackagedQuit(result.process)
+  } else {
+    processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
+    await withinDeadline(
+      'closing packaged application window',
+      packagedWindowCloseTimeoutMs,
+      () => result.page.close({ runBeforeUnload: false }),
+    )
+  }
+  await withinDeadline(
+    'closing packaged browser automation',
+    packagedCleanupTimeoutMs,
+    () => result.browser.close(),
+  ).catch(() => undefined)
+  const status = await processExit
   expect(status).toEqual({ code: 0, signal: null })
 }
 
@@ -302,13 +351,14 @@ async function launchPackaged(
   expectedHeading: RegExp,
   phase: string,
   applicationExecutable: string = executablePath ?? '',
-  expectedDiagnostics: StartupDiagnostics = READY_DIAGNOSTICS,
+  expectedDiagnostics: StartupDiagnosticsExpectation = READY_DIAGNOSTICS,
 ): Promise<LaunchResult> {
   if (!applicationExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const startedAt = Date.now()
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
   const child = spawn(applicationExecutable, [
     ...automationArguments,
+    ...linuxKeyringVerificationArguments(),
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0',
     `--user-data-dir=${root}`,
@@ -352,7 +402,6 @@ async function launchPackaged(
         launchMs,
         readyMs,
         userData: root,
-        browserEndpoint: endpoint,
       }
     })
   } catch (error) {
@@ -389,12 +438,25 @@ async function startupDiagnostics(page: Page): Promise<StartupDiagnostics> {
 
 async function expectStartupDiagnostics(
   page: Page,
-  expected: StartupDiagnostics,
+  expected: StartupDiagnosticsExpectation,
 ): Promise<void> {
-  await expect.poll(
-    async () => startupDiagnostics(page),
-    { timeout: 30_000 },
-  ).toEqual(expected)
+  let lastActual: StartupDiagnostics | null = null
+  try {
+    await expect.poll(
+      async () => {
+        const actual = await startupDiagnostics(page).catch(() => null)
+        if (actual !== null) lastActual = actual
+        return actual ?? {}
+      },
+      { timeout: 30_000 },
+    ).toMatchObject(expected)
+  } catch (error) {
+    const actual = await startupDiagnostics(page).catch(() => lastActual)
+    throw new Error(
+      `Packaged startup diagnostics did not match expected state: ${JSON.stringify(actual)}`,
+      { cause: error },
+    )
+  }
 }
 
 function packageRootForExecutable(applicationExecutable: string): string {
@@ -710,6 +772,7 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
   const launchArguments = [
     ...automationArguments,
+    ...linuxKeyringVerificationArguments(),
     `--user-data-dir=${root}`,
     `--disk-cache-dir=${join(root, 'chromium-cache')}`,
     `--crash-dumps-dir=${join(root, 'crash-dumps')}`,
@@ -781,16 +844,9 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
   const response = await page.reload()
   expect(await response?.headerValue('content-security-policy')).toBe(PRODUCTION_CSP)
 
-  const warmCapabilities = await withinDeadline(
-    'warming packaged capability bridge',
-    10_000,
-    () => page.evaluate(() => (
-      (window as unknown as {
-        ancestry: { getCapabilities(): Promise<{ ok: boolean }> }
-      }).ancestry.getCapabilities()
-    )),
-  )
-  expect(warmCapabilities.ok).toBe(true)
+  // The shell owns an initial capability read after startup succeeds. Wait for
+  // its rendered result so the verifier burst measures all 32 reader slots.
+  await expect(page.getByText(CAPABILITY_SUMMARY_READY)).toBeVisible()
 
   const capabilityBurst = await withinDeadline(
     'running bounded packaged capability bridge burst',
@@ -808,19 +864,23 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
         Array.from({ length: 32 }, () => ancestry.getCapabilities()),
       )
       return {
-        allSuccessful: responses.every((result) => result.ok),
+        successful: responses.filter((result) => result.ok).length,
+        overloaded: responses.filter(
+          (result) => !result.ok && result.error?.code === 'BRIDGE_OVERLOADED',
+        ).length,
         count: responses.length,
-        errorCodes: [...new Set(responses.flatMap(
-          (result) => result.error ? [result.error.code] : [],
+        unexpectedErrorCodes: [...new Set(responses.flatMap(
+          (result) => !result.ok && result.error?.code !== 'BRIDGE_OVERLOADED'
+            ? [result.error?.code ?? 'unknown']
+            : [],
         ))].sort(),
       }
     }),
   )
-  expect(capabilityBurst).toEqual({
-    allSuccessful: true,
-    count: 32,
-    errorCodes: [],
-  })
+  expect(capabilityBurst.count).toBe(32)
+  expect(capabilityBurst.successful).toBe(32)
+  expect(capabilityBurst.overloaded).toBe(0)
+  expect(capabilityBurst.unexpectedErrorCodes).toEqual([])
 
   const externalRequests: string[] = []
   page.on('request', (request) => {
@@ -968,7 +1028,9 @@ test.describe('unpublished unpacked native package', () => {
       await expect(page.getByText('Ready', { exact: true })).toBeVisible()
       await page.getByRole('link', { name: 'Diagnostics' }).press('Enter')
       await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeFocused()
-      await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+      await expect(
+        page.getByLabel('Desktop service').getByText('Ready', { exact: true }),
+      ).toBeVisible()
       await expect(page.getByRole('alert')).toHaveCount(0)
       if (!cold.process.pid) throw new Error('Packaged app PID is unavailable.')
       const rssBytes = await expectProductionBoundary(page, cold.browser, cold.process.pid)
@@ -1144,7 +1206,7 @@ test.describe('unpublished unpacked native package', () => {
       await rename(copied.sidecarPath, withheld)
       await signVerificationPackage(copied.packageRoot)
 
-      const degraded: StartupDiagnostics = {
+      const degraded: StartupDiagnosticsExpectation = {
         state: 'degraded',
         failure: 'startup_failed',
         automaticRestartsRemaining: 2,

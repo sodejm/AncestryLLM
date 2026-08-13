@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createPosixProcessGroupController,
+  NativeRunningSidecar,
   nativeSidecarSpawnOptions,
   terminateNativeSidecarProcess,
   terminateWindowsProcessTree,
@@ -12,6 +13,8 @@ class FakeChild extends EventEmitter {
   readonly pid = 4242
   exitCode: number | null = null
   signalCode: NodeJS.Signals | null = null
+  readonly stderr = { resume: vi.fn() }
+  readonly stdout = new EventEmitter()
   readonly kill = vi.fn((signal?: NodeJS.Signals | number) => {
     this.signalCode = typeof signal === 'string' ? signal : 'SIGTERM'
     this.emit('exit', null, this.signalCode)
@@ -20,6 +23,29 @@ class FakeChild extends EventEmitter {
 }
 
 describe('native sidecar process termination', () => {
+  it('retries native cleanup after a failed termination attempt', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn()
+      .mockRejectedValueOnce(new Error('/private/process-tree-cleanup-failure'))
+      .mockResolvedValueOnce(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      '/private/ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+    )
+
+    await expect(sidecar.terminate()).rejects.toThrow(
+      '/private/process-tree-cleanup-failure',
+    )
+    await expect(sidecar.terminate()).resolves.toBeUndefined()
+    await expect(sidecar.terminate()).resolves.toBeUndefined()
+
+    expect(terminateProcess).toHaveBeenCalledTimes(2)
+    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+  })
+
   it('targets the negative POSIX process-group id', () => {
     const kill = vi.fn(() => true)
     const controller = createPosixProcessGroupController(kill)

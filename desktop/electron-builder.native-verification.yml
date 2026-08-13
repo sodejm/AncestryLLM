@@ -1,0 +1,5 @@
+# CI-only overlay for the unpublished Linux native-storage verifier. The
+# production package is assembled first and never contains this adapter.
+extends: ./electron-builder.verification.yml
+directories:
+  output: release-native-verification

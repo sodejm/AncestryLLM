@@ -2,6 +2,21 @@
 import type { JobShutdownAction } from './sidecar-client'
 
 export type UnsafeShutdownChoice = JobShutdownAction | 'stay'
+export type AppShutdownProgress = { jobsPrepared: boolean }
+
+type WindowCloseEvent = { preventDefault: () => void }
+
+/** Keeps a native window visible while the verified shutdown handshake runs. */
+export function requestVerifiedShutdownBeforeWindowClose(
+  event: WindowCloseEvent,
+  shutdownRequired: boolean,
+  shutdownPending: boolean,
+  requestQuit: () => void,
+): void {
+  if (!shutdownRequired) return
+  event.preventDefault()
+  if (!shutdownPending) requestQuit()
+}
 
 /** Authorizes Electron shutdown only after jobs and the sidecar stop safely. */
 export async function completeAppShutdown(
@@ -9,24 +24,29 @@ export async function completeAppShutdown(
   chooseUnsafeAction: () => Promise<UnsafeShutdownChoice>,
   stopSidecar: () => Promise<void>,
   reportFailure: () => void,
-  authorizeAndQuit: () => void,
+  authorizeAndExit: () => void,
+  isExplicitSafeEmpty: () => boolean = () => false,
+  progress: AppShutdownProgress = { jobsPrepared: false },
 ): Promise<boolean> {
-  let action: JobShutdownAction = 'wait'
-  while (true) {
-    try {
-      await prepareJobs(action)
-      break
-    } catch {
-      reportFailure()
-      let choice: UnsafeShutdownChoice
+  if (!progress.jobsPrepared && !isExplicitSafeEmpty()) {
+    let action: JobShutdownAction = 'wait'
+    while (true) {
       try {
-        choice = await chooseUnsafeAction()
+        await prepareJobs(action)
+        progress.jobsPrepared = true
+        break
       } catch {
-        return false
+        reportFailure()
+        let choice: UnsafeShutdownChoice
+        try {
+          choice = await chooseUnsafeAction()
+        } catch {
+          return false
+        }
+        if (choice === 'stay') return false
+        if (choice !== 'wait' && choice !== 'cancel') return false
+        action = choice
       }
-      if (choice === 'stay') return false
-      if (choice !== 'wait' && choice !== 'cancel') return false
-      action = choice
     }
   }
 
@@ -36,6 +56,6 @@ export async function completeAppShutdown(
     reportFailure()
     return false
   }
-  authorizeAndQuit()
+  authorizeAndExit()
   return true
 }

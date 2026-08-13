@@ -8,7 +8,12 @@ interface FixtureRuntimeBridge {
   prepareJobShutdown?: never
 }
 
-export async function startRuntimeBridge(): Promise<FixtureRuntimeBridge> {
+export async function startRuntimeBridge(
+  _onSupervisorOwned?: (supervisor: never, prepareJobShutdown: never) => void,
+  _options: unknown = {},
+): Promise<FixtureRuntimeBridge> {
+  void _onSupervisorOwned
+  void _options
   const fixture = process.env.ANCESTRYLLM_DESKTOP_FIXTURE
   const rendererBridge = createMockAncestryBridge(
     fixture === 'degraded' || fixture === 'unavailable' ? fixture : 'success',

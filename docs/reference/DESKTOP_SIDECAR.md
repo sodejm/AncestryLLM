@@ -55,6 +55,35 @@ installer plus provenance, installation, target-execution, and packaged
 assurance gates. Version 0.5.0 has no updater, update feed, background update
 channel, or staged rollout.
 
+On Ubuntu, the packaged-runtime and installer checks exercise the production
+keyring integration against the distribution-provided GNOME Secret Service.
+The checked-in launcher starts that service on a disposable D-Bus session with
+owner-only temporary storage, waits for its well-known name, and proves native
+store, read, and delete operations with a non-secret probe. Exact-head packaged
+verification reaches that service through a private socket and a separate
+unpublished Linux verifier package. Only the verifier package
+compiles the adapter that reads an exact command-line switch carrying the
+owner-only temporary root. The production package is assembled and scanned
+first, its adapter never reads the selector, and its build rejects the selector
+literal. In the verifier, Electron Main rejects the root outside Linux or when
+it is not an absolute Linux path, then derives the sidecar's home, XDG paths,
+and exact `runtime/bus` address from the root rather than inheriting ambient
+values. The launcher binds its private D-Bus daemon to that same owner-only
+socket. Every Linux sidecar launch pins the native Secret Service backend,
+ignores ambient Python keyring selectors and configuration, and excludes
+provider credential and `PATH` values. Normal launches also exclude home,
+cache, configuration, and data values; they ignore ambient D-Bus and XDG
+runtime selectors and bind to `unix:path=/run/user/<uid>/bus` using the
+kernel-reported process user ID. Release-installer verification runs the
+installed production package and binds its disposable D-Bus daemon to that same
+production-derived endpoint. The launcher requires an owner-only runtime
+directory owned by the current user and fails if the endpoint already exists or
+is a link; only the Secret Service data stays under its temporary root. The
+launcher preserves the packaged command's real exit status and removes the
+state afterward. No mock or alternate Python
+keyring backend is permitted. This is verification infrastructure only; it
+does not add a production credential fallback or weaken keyring-only startup.
+
 ## Private lifecycle
 
 1. Electron main resolves only the current native resource target and completes
@@ -63,7 +92,13 @@ channel, or staged rollout.
    the operating-system random source.
 3. It starts the executable with no arguments, no shell, a private temporary
    working directory, and an allowlisted environment. Provider credentials,
-   `PATH`, and home-directory values are not inherited.
+   `PATH`, and home-directory values are not inherited during normal launches.
+   Linux ignores ambient D-Bus and XDG runtime selectors and derives the native
+   Secret Service bus address from the kernel-reported user ID. The exact
+   internal verification adapter instead permits only paths and the bus address
+   derived from the disposable verifier's validated absolute root; that adapter
+   is absent from ordinary production packages and does not accept ambient home,
+   XDG, or D-Bus values.
 4. Electron writes one bounded JSON line to stdin containing the exact API
    contract, application build, and bearer. The bearer is never placed in
    command-line arguments, environment variables, renderer state, readiness
@@ -92,6 +127,11 @@ Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
 leader. No sidecar is started by the development mock shell.
 
+Electron bounds the complete supervisor stop to 15 seconds, including any
+launch already in flight and all verified process-tree termination. Exceeding
+that deadline fails closed and leaves the supervisor unavailable instead of
+allowing application shutdown to wait indefinitely.
+
 The sidecar creates its SQLCipher-backed job repository only when startup
 diagnostics permit database access. It reconciles any persisted nonterminal
 snapshot to exactly one failed `JOB_INTERRUPTED` terminal state at startup; it
@@ -104,10 +144,24 @@ Before quitting, Electron main waits for a bounded safe-shutdown assessment. If
 work remains active, a native dialog offers **Wait**, **Request cancellation**,
 or **Stay open**. Cancellation is cooperative: protected publication can remain
 `pending-safe-point`, and Electron never silently abandons it. Process shutdown
-continues only after a safe assessment and verified sidecar stop. A degraded
-startup admits no process-local jobs, so its main-only shutdown assessment is
-the explicit safe empty case. Future provider streams and other database
-sessions must register an orderly drain before their routes are enabled.
+continues only after a safe assessment and verified sidecar stop. Electron owns
+the supervisor before asynchronous verification or process launch and installs
+its named `SIGTERM` handler before runtime startup. It idempotently re-arms the
+same handler when the Electron-ready runtime takes ownership, so initialization
+cannot leave the signal on its immediate-termination default. A degraded startup
+admits no process-local jobs, so its main-only shutdown assessment is explicitly
+safe empty only while the supervisor is `idle`, `starting`, or `unavailable`,
+has no authenticated session, and has never exposed one. Once an authenticated
+session has been exposed, losing it never restores that shortcut. The
+explicit-empty case skips the unavailable HTTP assessment but still cancels pre-spawn work,
+drains any launch already in flight within the supervisor deadline, and
+requires verified process-tree stop.
+The first `app.quit()` lifecycle is vetoed during that assessment. After IPC
+disposal and verified sidecar stop release every owned resource, the authorized
+completion callback uses `app.exit(0)` rather than re-entering
+platform-specific window closure.
+Future provider streams and other database sessions must register an orderly
+drain before their routes are enabled.
 The native Windows descendant-kill assertion can run only on Windows; the
 exact-head hosted `windows-11-arm` receipt is the authoritative native proof.
 Non-Windows local runs exercise only the explicit no-op branch and do not
@@ -238,6 +292,16 @@ permissions. Do not add usernames, hostnames, absolute or temporary paths,
 environment values, records, prompts, payloads, raw launch frames, response
 bodies, executable paths, stderr, exceptions, or stacks to the report or
 support evidence.
+
+After the report is ready, writable sidecar startup creates the encrypted
+revision `0002` schema only when one bounded inventory query proves the
+workspace has no user tables. A complete current schema is reused without DDL,
+and only an exact revision `0001` layout receives the reviewed job-table
+migration. That packaged migration explicitly begins one native SQLite
+transaction before creating either table or index, so any late DDL failure
+rolls the entire migration back to revision `0001`. Unversioned partial schemas,
+unknown revisions, and missing or unexpected tables fail with
+`DATABASE_MIGRATION_REQUIRED`; startup never silently repairs or replaces them.
 
 For a startup or compatibility failure:
 
