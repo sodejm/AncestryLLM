@@ -59,8 +59,10 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "ancestry.getCapabilities()" in source
     assert "successful: responses.filter((result) => result.ok).length" in source
     assert "result.error?.code === 'BRIDGE_OVERLOADED'" in source
-    assert "expect(capabilityBurst.successful).toBeGreaterThan(0)" in source
-    assert "capabilityBurst.successful + capabilityBurst.overloaded" in source
+    assert "expect(capabilityBurst.successful).toBe(32)" in source
+    assert "expect(capabilityBurst.overloaded).toBe(0)" in source
+    assert "expect(capabilityBurst.successful).toBeGreaterThan(0)" not in source
+    assert "capabilityBurst.successful + capabilityBurst.overloaded" not in source
     assert "expect(capabilityBurst.unexpectedErrorCodes).toEqual([])" in source
 
 

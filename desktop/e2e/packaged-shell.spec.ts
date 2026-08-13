@@ -849,8 +849,8 @@ async function expectProductionBoundary(page: Page, browser: Browser, rootPid: n
     }),
   )
   expect(capabilityBurst.count).toBe(32)
-  expect(capabilityBurst.successful).toBeGreaterThan(0)
-  expect(capabilityBurst.successful + capabilityBurst.overloaded).toBe(capabilityBurst.count)
+  expect(capabilityBurst.successful).toBe(32)
+  expect(capabilityBurst.overloaded).toBe(0)
   expect(capabilityBurst.unexpectedErrorCodes).toEqual([])
 
   const externalRequests: string[] = []
