@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
 from ancestryllm.application.jobs import JobEventKind, JobLifecycleState
 from ancestryllm.core.errors import AncestryError, StorageError
@@ -43,6 +46,51 @@ def _legacy_database(path: Path, secrets: MemorySecretStore) -> Database:
         )
         connection.exec_driver_sql("INSERT INTO alembic_version(version_num) VALUES ('0001')")
     return database
+
+
+def _upgrade_with_packaged_migrations(database: Database, revision: str) -> None:
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(files("ancestryllm.storage.migrations")),
+    )
+    with database.engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, revision)
+
+
+def test_packaged_migration_chain_keeps_revision_0001_frozen(tmp_path: Path) -> None:
+    database = Database(tmp_path / "workspace.db", MemorySecretStore({}))
+    database.open()
+
+    _upgrade_with_packaged_migrations(database, "0001")
+
+    legacy_tables = set(Base.metadata.tables) - {"jobs", "job_events"}
+    with database.engine.connect() as connection:
+        tables_at_0001 = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+        assert tables_at_0001 == legacy_tables | {"alembic_version"}
+        assert (
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
+            == "0001"
+        )
+
+    _upgrade_with_packaged_migrations(database, "head")
+
+    with database.engine.connect() as connection:
+        tables_at_head = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'"
+            ).scalars()
+        )
+        assert tables_at_head == set(Base.metadata.tables) | {"alembic_version"}
+        assert (
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
+            == "0002"
+        )
 
 
 def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(
