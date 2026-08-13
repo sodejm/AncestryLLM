@@ -37,6 +37,10 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
     assert committed.endswith("\n")
     assert json.loads(committed)["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/chat/capability",
+        f"{API_NAMESPACE}/chat/sessions",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/runs",
         f"{API_NAMESPACE}/consents",
         f"{API_NAMESPACE}/consents/preview",
         f"{API_NAMESPACE}/consents/{{name}}/revoke",
@@ -56,7 +60,15 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
         f"{API_NAMESPACE}/startup-diagnostics",
     }
     schemas = json.loads(committed)["components"]["schemas"]
-    assert {"PaginationRequest", "PageMetadata"} <= schemas.keys()
+    assert {
+        "ChatCapability",
+        "ChatRunRequest",
+        "ChatRunSummary",
+        "ChatSession",
+        "ChatSessionCreateRequest",
+        "PageMetadata",
+        "PaginationRequest",
+    } <= schemas.keys()
 
 
 def test_runtime_schema_and_docs_are_not_exposed(

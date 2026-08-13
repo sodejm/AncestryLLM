@@ -28,13 +28,16 @@ budgets, race detection, output alias rejection, and transactional publication.
 
 The released bounded Electron desktop control shell uses the authenticated
 health/capability sidecar. Unreleased source also includes explicitly bounded
-file-grant, provider-configuration, and presentation-only **Tasks** adapters.
-Desktop-domain capabilities beyond those marked adapters—genealogy/domain task
-admission or execution, direct artifact access, provider execution, cloud
-accounts, and updater flows—remain planned or incomplete. The current desktop
-records distinguish released control surfaces from Unreleased source and the
-verification needed for later expansion; they are not a current journey for
-excluded domain capabilities.
+file-grant, provider-configuration, presentation-only **Tasks** adapters, and a
+source-level synchronous transient-chat API. That chat boundary requires an
+exact stored profile and model plus current policy and consent, keeps bounded
+content only in memory, and grants no tools or domain authority. Desktop-domain
+capabilities such as Electron chat presentation and streaming, genealogy/domain
+task admission or execution, direct artifact access, cloud accounts, and updater
+flows remain planned or incomplete. The current desktop records distinguish
+released control surfaces
+from Unreleased source and the verification needed for later expansion; they
+are not a current journey for excluded domain capabilities.
 
 The accepted deployment architecture now has a source-level profile control
 plane: Local Desktop is the safe default, while Connect Remote and advanced
@@ -96,7 +99,7 @@ Concepts, rationale, and design context:
 
 - [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
 - [REPL architecture](explanation/REPL_ARCHITECTURE.md) — internal session and dispatch design
-- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — released Home, Diagnostics, Settings, and onboarding plus bounded Unreleased Tasks presentation
+- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — released Home, Diagnostics, Settings, and onboarding plus bounded Unreleased Tasks presentation and transient-chat source contracts
 
 ## Supporting records and publishing
 

@@ -9,6 +9,10 @@ test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract'
   const schemas = document.components.schemas
   assert.deepEqual(Object.keys(document.paths).sort(), [
     '/api/v1/capabilities',
+    '/api/v1/chat/capability',
+    '/api/v1/chat/sessions',
+    '/api/v1/chat/sessions/{session_id}',
+    '/api/v1/chat/sessions/{session_id}/runs',
     '/api/v1/consents',
     '/api/v1/consents/preview',
     '/api/v1/consents/{name}/revoke',

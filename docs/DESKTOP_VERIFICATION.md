@@ -21,6 +21,12 @@ expand the recorded exact-six packaged claim; Issue #131 must update the
 package harness and adversarial evidence before a packaged application can
 claim the five task requests and validated event listener.
 
+Issue #110 adds source-level service, policy, API, sidecar, shutdown, and
+no-network-before-authorization tests for bounded synchronous transient chat.
+It does not add a preload or renderer method, streaming transport, or expand the
+recorded packaged-network claim. Issues #111, #112, and #131 retain those
+presentation, transport, and target-matched evidence gates.
+
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`

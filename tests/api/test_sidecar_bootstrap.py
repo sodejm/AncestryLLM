@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 from fastapi.routing import APIRoute
@@ -108,6 +109,10 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
 
     assert {route.path for route in app.routes if isinstance(route, APIRoute)} == {
         "/api/v1/capabilities",
+        "/api/v1/chat/capability",
+        "/api/v1/chat/sessions",
+        "/api/v1/chat/sessions/{session_id}",
+        "/api/v1/chat/sessions/{session_id}/runs",
         "/api/v1/consents",
         "/api/v1/consents/preview",
         "/api/v1/consents/{name}/revoke",
@@ -148,6 +153,7 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
     with TestClient(app, base_url="http://127.0.0.1:8421") as client:
         response = client.get("/api/v1/provider-configuration", headers=headers)
         jobs = client.get("/api/v1/jobs", headers=headers)
+        chat = client.get("/api/v1/chat/capability", headers=headers)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -158,6 +164,57 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
     }
     assert jobs.status_code == 200
     assert jobs.json() == {"schema_version": 1, "jobs": []}
+    assert chat.status_code == 200
+    assert chat.json()["transient"] is True
+    assert chat.json()["tools_enabled"] is False
+    assert chat.json()["payload_retention"] is False
+
+
+def test_packaged_sidecar_closes_chat_and_llm_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    chat_service = Mock()
+    llm_service = Mock()
+    monkeypatch.setattr(sidecar_module, "LLMService", Mock(return_value=llm_service))
+    monkeypatch.setattr(sidecar_module, "ChatService", Mock(return_value=chat_service))
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+    )
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1:8421"):
+        chat_service.close.assert_not_called()
+        llm_service.close.assert_not_called()
+
+    chat_service.close.assert_called_once_with()
+    llm_service.close.assert_called_once_with()
+
+
+def test_sidecar_cleanup_continues_after_an_interruption(tmp_path: Path) -> None:
+    database = Mock()
+    chat_service = Mock()
+    llm_service = Mock()
+    chat_service.close.side_effect = KeyboardInterrupt("fictional cleanup interruption")
+    lifecycle = sidecar_module._SidecarLifecycle(
+        database=database,
+        startup_diagnostics=Mock(),
+        chat_service=chat_service,
+        llm_service=llm_service,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="fictional cleanup interruption"):
+        lifecycle._close_owned_resources()
+
+    chat_service.close.assert_called_once_with()
+    llm_service.close.assert_called_once_with()
+    database.close.assert_called_once_with()
 
 
 def test_packaged_sidecar_uses_keyring_only_secret_resolution(
@@ -231,6 +288,17 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
                 "changes": {"limits.max_query_rows": 250},
             },
         )
+        blocked_chat = client.post(
+            "/api/v1/chat/sessions",
+            headers=headers,
+            json={
+                "schema_version": 1,
+                "provider_profile_name": "fictional-local",
+                "model": "fictional-model",
+                "purpose": "genealogy_analysis",
+                "data_classes": ["deceased_person"],
+            },
+        )
         jobs = client.get("/api/v1/jobs", headers=headers)
         shutdown = client.post(
             "/api/v1/jobs/shutdown",
@@ -258,6 +326,8 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
     assert str(tmp_path) not in diagnostics.text
     assert blocked.status_code == 503
     assert blocked.json()["code"] == "STARTUP_MUTATION_BLOCKED"
+    assert blocked_chat.status_code == 503
+    assert blocked_chat.json()["code"] == "STARTUP_MUTATION_BLOCKED"
     assert jobs.status_code == 503
     assert jobs.json()["code"] == "JOB_SERVICE_UNAVAILABLE"
     assert shutdown.status_code == 200
@@ -269,6 +339,7 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
     assert private_marker not in jobs.text
     assert str(tmp_path) not in jobs.text
     assert private_marker not in blocked.text
+    assert private_marker not in blocked_chat.text
     assert config_path.read_text(encoding="utf-8") == private_marker
     assert not fallback.data_dir.exists()
 

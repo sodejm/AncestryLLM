@@ -286,8 +286,15 @@ class ProviderProfileService:
         self,
         request: GenerationRequest,
         consent: ConsentGrant | None = None,
+        *,
+        enforce_request_bounds: bool = False,
     ) -> GenerationRequest:
-        """Resolve a built-in provider ID or named profile into one immutable request plan."""
+        """Resolve a provider selection into one immutable request plan.
+
+        Profile retry and temperature settings remain explicit opt-ins for established
+        generation callers. Bounded presentation adapters can instead require every
+        request setting to remain at or below their already-validated request limits.
+        """
 
         selection = request.provider_id
         consent_profile = consent.provider_profile_name if consent is not None else None
@@ -367,10 +374,12 @@ class ProviderProfileService:
                     "The command model does not match the selected provider profile.",
                     "Omit --model or use the model configured by the profile.",
                 )
-            for bounded_name in (
-                "max_output_tokens",
-                "timeout_seconds",
-            ):
+            bounded_settings = (
+                REQUEST_SETTING_NAMES
+                if enforce_request_bounds
+                else frozenset({"max_output_tokens", "timeout_seconds"})
+            )
+            for bounded_name in bounded_settings:
                 if bounded_name in request_settings:
                     request_settings[bounded_name] = min(
                         getattr(request, bounded_name),

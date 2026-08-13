@@ -11,6 +11,11 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - Unreleased desktop Tasks destination backed by strict job snapshots, bounded
   sender-owned event subscriptions, cooperative cancellation, coded redacted
   errors, reload resynchronization, and grant-mediated artifact presentation.
+- Unreleased synchronous transient-chat service and authenticated private API
+  with exact named-profile/model selection, fresh policy and consent checks,
+  strict resource limits, memory-only content, privacy-minimal audit metadata,
+  and no tool, filesystem, database, shell, plugin, genealogy, or autonomous
+  authority.
 
 ## [0.5.0] - 2026-08-04
 

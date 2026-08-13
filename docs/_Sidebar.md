@@ -41,7 +41,7 @@
 
 - [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md)
 - [REPL architecture](explanation/REPL_ARCHITECTURE.md)
-- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md)
+- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — Tasks and transient-chat source boundaries
 
 ### Supporting records and publishing
 
