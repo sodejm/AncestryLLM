@@ -117,6 +117,34 @@
     "title": "Merge fictional GEDCOM records offline — AncestryLLM",
     "description": "A safe end-to-end GEDCOM 5.5.5 merge tutorial using fictional fixtures, provider none, and no network calls."
   },
+  "tutorials/desktop-first-run.md": {
+    "title": "Desktop first run — AncestryLLM",
+    "description": "A safe first journey through the v0.6 desktop source using fictional local state, provider none, and bounded recovery."
+  },
+  "how-to/desktop-diagnostics.md": {
+    "title": "Recover with desktop diagnostics — AncestryLLM",
+    "description": "How to interpret sanitized startup components and use stable codes and bounded actions to recover the desktop service."
+  },
+  "how-to/desktop-file-access.md": {
+    "title": "Grant desktop file access — AncestryLLM",
+    "description": "How scoped opaque grants protect paths while RootsMagic sources stay immutable and GEDCOM handling stays loss-minimal."
+  },
+  "how-to/desktop-provider-consent.md": {
+    "title": "Configure a desktop provider and consent — AncestryLLM",
+    "description": "How to test a provider endpoint, review the exact disclosure scope, save explicit consent, and revoke the grant."
+  },
+  "how-to/desktop-tasks.md": {
+    "title": "Monitor and cancel desktop tasks — AncestryLLM",
+    "description": "How to follow backend-owned task progress and request cooperative cancellation at a declared safe point."
+  },
+  "how-to/desktop-chat.md": {
+    "title": "Use transient desktop chat — AncestryLLM",
+    "description": "How to use the bounded unsaved desktop conversation while treating provider output as advisory rather than evidence."
+  },
+  "reference/DESKTOP.md": {
+    "title": "Desktop reference — AncestryLLM",
+    "description": "Exact v0.6 source routes, states, stable codes, recovery actions, accessibility behavior, platforms, and safety boundaries."
+  },
   "explanation/DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
     "description": "Released v0.5.0 Electron Home, Diagnostics, Settings, and capability onboarding plus clearly marked Unreleased bounded Tasks and private Chat presentation; task admission and domain authority remain excluded."

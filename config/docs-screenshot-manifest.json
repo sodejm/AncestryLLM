@@ -100,6 +100,10 @@
         {
           "path": "docs/Home.md",
           "anchor": "v06-desktop-learning-path"
+        },
+        {
+          "path": "docs/tutorials/desktop-first-run.md",
+          "anchor": "3-confirm-the-local-home-state"
         }
       ],
       "comparison": {
