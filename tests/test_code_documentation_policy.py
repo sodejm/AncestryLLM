@@ -269,6 +269,28 @@ class TestCheckInventory:
 class TestTrackedFiles:
     """Tests for the Git-backed working-tree inventory."""
 
+    def test_git_paths_use_nul_delimiters_without_quote_loss(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tracked = ["src/café.py", "src/line\nbreak.py"]
+        for relative_path in tracked:
+            path = tmp_path / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('"""Documents a machine-safe tracked path."""\n')
+
+        def fake_run(*args: object, **kwargs: object) -> CompletedProcess[str]:
+            assert args[0] == ["git", "ls-files", "-z"]
+            return CompletedProcess(
+                args=["git", "ls-files", "-z"],
+                returncode=0,
+                stdout="\0".join(tracked) + "\0",
+                stderr="",
+            )
+
+        monkeypatch.setattr("scripts.check_code_documentation.subprocess.run", fake_run)
+
+        assert list_tracked_files(tmp_path) == tracked
+
     def test_unstaged_deleted_paths_are_not_checked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -278,9 +300,9 @@ class TestTrackedFiles:
         monkeypatch.setattr(
             "scripts.check_code_documentation.subprocess.run",
             lambda *args, **kwargs: CompletedProcess(
-                args=["git", "ls-files"],
+                args=["git", "ls-files", "-z"],
                 returncode=0,
-                stdout="deleted.py\nkept.py\n",
+                stdout="deleted.py\0kept.py\0",
                 stderr="",
             ),
         )
@@ -438,6 +460,34 @@ class TestCheckFileDocumentation:
             "scripts/empty-header.sh:missing-file-header-comment"
         ]
 
+    def test_shell_multiline_license_without_separate_purpose_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "licensed.sh"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "#!/usr/bin/env bash\n"
+            "# Copyright 2026 Example\n"
+            "# Permission is hereby granted under the project license.\n"
+            "set -e\n"
+        )
+
+        assert check_file_documentation("scripts/licensed.sh", tmp_path) == [
+            "scripts/licensed.sh:missing-file-header-comment"
+        ]
+
+    def test_shell_multiline_license_may_precede_separate_purpose(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "licensed.sh"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "#!/usr/bin/env bash\n"
+            "# Copyright 2026 Example\n"
+            "# Permission is hereby granted under the project license.\n"
+            "\n"
+            "# Runs the reviewed repository build workflow.\n"
+            "set -e\n"
+        )
+
+        assert check_file_documentation("scripts/licensed.sh", tmp_path) == []
+
     # --- TypeScript ---
 
     def test_typescript_with_jsdoc_passes(self, tmp_path: Path) -> None:
@@ -466,6 +516,7 @@ class TestCheckFileDocumentation:
             "// Plain comments are not module documentation.\n",
             "/** */\n",
             "/** TODO */\n",
+            "/** TODO: add documentation later. */\n",
         ],
     )
     def test_typescript_requires_meaningful_jsdoc_header(self, tmp_path: Path, header: str) -> None:

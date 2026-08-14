@@ -249,6 +249,7 @@ PERMANENT_BASELINE_PATH: Final = "docs/CODE_DOCUMENTATION_BASELINE.txt"
 _PLACEHOLDER_DOCUMENTATION_WORDS: Final = frozenset(
     {"doc", "docs", "documentation", "fixme", "placeholder", "tbd", "todo"}
 )
+_PLACEHOLDER_MARKER_WORDS: Final = frozenset({"fixme", "placeholder", "tbd", "todo"})
 _LICENSE_MARKERS: Final = ("copyright", "spdx-license-identifier", "licensed under")
 
 
@@ -278,6 +279,7 @@ def _is_meaningful_documentation(value: str) -> bool:
         len(cleaned) >= 12
         and len(words) >= 2
         and bool(normalized_words - _PLACEHOLDER_DOCUMENTATION_WORDS)
+        and normalized_words.isdisjoint(_PLACEHOLDER_MARKER_WORDS)
     )
 
 
@@ -353,10 +355,15 @@ def _has_swift_doc_header(text: str) -> bool:
 def _has_hash_header(text: str) -> bool:
     """Return whether shell/config *text* begins with a meaningful hash-comment block."""
     lines = _without_shebang(text).splitlines()
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    while lines and lines[0].lstrip().startswith("#") and _is_license_comment(lines[0]):
-        lines.pop(0)
+    while True:
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        block_length = 0
+        while block_length < len(lines) and lines[block_length].lstrip().startswith("#"):
+            block_length += 1
+        if block_length == 0 or not _is_license_comment("\n".join(lines[:block_length])):
+            break
+        del lines[:block_length]
     documentation: list[str] = []
     for line in lines:
         stripped = line.lstrip()
@@ -480,16 +487,17 @@ def check_inventory(tracked: list[str], root: Path) -> list[str]:
 def list_tracked_files(root: Path) -> list[str]:
     """Return Git-tracked relative paths that remain in the working tree."""
     result = subprocess.run(
-        ["git", "ls-files"],  # noqa: S607 — git is a well-known system executable
+        ["git", "ls-files", "-z"],  # noqa: S607 — git is a well-known system executable
         cwd=root,
         capture_output=True,
         text=True,
         check=True,
     )
     return [
-        line
-        for line in result.stdout.splitlines()
-        if line and ((root / line).exists() or (root / line).is_symlink())
+        relative_path
+        for relative_path in result.stdout.split("\0")
+        if relative_path
+        and ((root / relative_path).exists() or (root / relative_path).is_symlink())
     ]
 
 
