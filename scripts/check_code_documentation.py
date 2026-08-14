@@ -142,6 +142,7 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "config/docs-screenshot-manifest-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-screenshot-manifest.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/degraded.json": "docs/DOCS_AUTHORING.md",
+    "tests/fixtures/docs_screenshots/electron-degraded.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/privacy-canary.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/success.json": "docs/DOCS_AUTHORING.md",
 }

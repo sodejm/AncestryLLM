@@ -1,3 +1,5 @@
+// Enforces the deterministic, private Electron documentation-capture contract.
+
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import {

@@ -1,3 +1,5 @@
+// Verifies Electron documentation captures fail closed and publish atomically.
+
 import {
   copyFile,
   mkdtemp,
