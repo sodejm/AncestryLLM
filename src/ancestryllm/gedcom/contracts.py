@@ -15,13 +15,17 @@ if TYPE_CHECKING:
 class DuplicateDecision(Protocol):
     """Resolve a low-confidence duplicate without owning transport interaction."""
 
-    def __call__(self, left: IndividualRecord, right: IndividualRecord) -> bool | None: ...
+    def __call__(self, left: IndividualRecord, right: IndividualRecord) -> bool | None:
+        """Return the explicit duplicate decision for one candidate record pair."""
+        ...
 
 
 class IdentityResolver(Protocol):
     """Adjudicate one bounded pair without exposing provider implementation details."""
 
-    def __call__(self, left: IndividualRecord, right: IndividualRecord) -> Mapping[str, object]: ...
+    def __call__(self, left: IndividualRecord, right: IndividualRecord) -> Mapping[str, object]:
+        """Return bounded identity-resolution evidence for one candidate pair."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +41,9 @@ class QualityResolution:
 class QualityResolver(Protocol):
     """Annotate a deterministic quality report through an application service."""
 
-    def __call__(self, report: QualityReport) -> QualityResolution: ...
+    def __call__(self, report: QualityReport) -> QualityResolution:
+        """Return advisory annotations for the deterministic quality report."""
+        ...
 
 
 __all__ = [

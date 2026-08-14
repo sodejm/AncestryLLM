@@ -32,6 +32,7 @@ class _EmptyRegistry:
 
 
 def contract_app() -> FastAPI:
+    """Build an isolated application used to derive the OpenAPI contract."""
     return create_app(
         settings=ApiSettings(
             bearer_token="O" * 43,
@@ -52,6 +53,7 @@ def contract_app() -> FastAPI:
 
 
 def canonical_openapi(app: FastAPI) -> str:
+    """Generate the deterministic internal API OpenAPI document."""
     return (
         json.dumps(app.openapi(), allow_nan=False, ensure_ascii=False, indent=2, sort_keys=True)
         + "\n"
@@ -59,11 +61,13 @@ def canonical_openapi(app: FastAPI) -> str:
 
 
 def write_openapi(path: Path = OPENAPI_ARTIFACT) -> None:
+    """Persist the canonical OpenAPI document with deterministic formatting."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(canonical_openapi(contract_app()), encoding="utf-8")
 
 
 def check_openapi(path: Path = OPENAPI_ARTIFACT) -> bool:
+    """Compare generated OpenAPI with the committed contract snapshot."""
     try:
         committed = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -72,6 +76,7 @@ def check_openapi(path: Path = OPENAPI_ARTIFACT) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the OpenAPI command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")

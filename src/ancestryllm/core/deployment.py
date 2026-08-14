@@ -122,6 +122,7 @@ class DeploymentProfile:
 
     @classmethod
     def local(cls) -> DeploymentProfile:
+        """Create a deployment profile for local-only execution."""
         return cls(
             DEPLOYMENT_SCHEMA_VERSION,
             DeploymentMode.LOCAL_DESKTOP,
@@ -135,6 +136,7 @@ class DeploymentProfile:
         endpoint_origin: object,
         endpoint_identity_sha256: object,
     ) -> DeploymentProfile:
+        """Create a deployment profile that connects to a remote service."""
         return cls(
             DEPLOYMENT_SCHEMA_VERSION,
             DeploymentMode.CONNECT_REMOTE,
@@ -145,6 +147,7 @@ class DeploymentProfile:
 
     @classmethod
     def host_remote_server(cls) -> DeploymentProfile:
+        """Create a deployment profile that hosts the remote service."""
         return cls(
             DEPLOYMENT_SCHEMA_VERSION,
             DeploymentMode.HOST_REMOTE_SERVER,

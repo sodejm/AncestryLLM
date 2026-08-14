@@ -15,6 +15,8 @@ from ancestryllm.core.errors import AncestryError
 
 @dataclass(frozen=True, slots=True)
 class ApiRequestError(Exception):
+    """Represent an API request error without exposing sensitive runtime details."""
+
     status_code: int
     code: str
     message: str
@@ -103,6 +105,7 @@ _SAFE_PROVIDER_ERROR_TEXT = {
 
 
 def new_correlation_ref() -> str:
+    """Generate an opaque correlation reference for a sanitized API error."""
     return f"api_{secrets.token_hex(16)}"
 
 
@@ -128,6 +131,7 @@ def _http_status(code: str) -> int:
 
 
 def error_envelope(error: Exception, *, correlation_ref: str) -> tuple[int, ErrorEnvelope]:
+    """Build a sanitized API error envelope from a coded application failure."""
     if isinstance(error, ApiRequestError):
         return error.status_code, ErrorEnvelope(
             code=error.code,
@@ -159,6 +163,7 @@ def error_envelope(error: Exception, *, correlation_ref: str) -> tuple[int, Erro
 
 
 def error_response(error: Exception, *, correlation_ref: str | None = None) -> JSONResponse:
+    """Render a sanitized API error envelope as an HTTP response."""
     resolved_ref = correlation_ref or new_correlation_ref()
     status_code, envelope = error_envelope(error, correlation_ref=resolved_ref)
     return JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json"))
@@ -167,6 +172,7 @@ def error_response(error: Exception, *, correlation_ref: str | None = None) -> J
 def request_error(
     status_code: int, code: str, message: str, remediation: str | None = None
 ) -> ApiRequestError:
+    """Convert an application failure into a safe API request error."""
     return ApiRequestError(status_code, code, message, remediation)
 
 

@@ -99,6 +99,8 @@ ErrorScalar: TypeAlias = str | int | float | bool | None  # noqa: UP040 - Pydant
 
 
 class ApiVersion(BaseModel):
+    """Describe the negotiated version of the internal API contract."""
+
     model_config = _STRICT_MODEL
 
     namespace: Literal["/api/v1"] = API_NAMESPACE
@@ -109,6 +111,8 @@ class ApiVersion(BaseModel):
 
 
 class RequestSizePolicy(BaseModel):
+    """Define validated request size policy values for runtime decisions."""
+
     model_config = _STRICT_MODEL
 
     max_body_bytes: Annotated[int, Field(ge=1, le=MAX_BOUNDARY_JSON_BYTES)] = (
@@ -120,6 +124,8 @@ class RequestSizePolicy(BaseModel):
 
 
 class PaginationPolicy(BaseModel):
+    """Define validated pagination policy values for runtime decisions."""
+
     model_config = _STRICT_MODEL
 
     default_limit: Annotated[int, Field(ge=1, le=100)] = 25
@@ -128,6 +134,8 @@ class PaginationPolicy(BaseModel):
 
 
 class PaginationRequest(BaseModel):
+    """Carry validated cursor and page-size inputs for one API listing request."""
+
     model_config = _STRICT_MODEL
 
     limit: Annotated[int, Field(ge=1, le=100)] = 25
@@ -135,6 +143,8 @@ class PaginationRequest(BaseModel):
 
 
 class PageMetadata(BaseModel):
+    """Describe the page boundary and continuation cursor returned by an API listing."""
+
     model_config = _STRICT_MODEL
 
     count: Annotated[int, Field(ge=0, le=100)] = 0
@@ -142,6 +152,8 @@ class PageMetadata(BaseModel):
 
 
 class CapabilityAction(BaseModel):
+    """Describe one command exposed by an internal API capability."""
+
     model_config = _STRICT_MODEL
 
     dispatch_key: Annotated[
@@ -152,6 +164,8 @@ class CapabilityAction(BaseModel):
 
 
 class CapabilityModule(BaseModel):
+    """Group the commands exposed by one internal API capability module."""
+
     model_config = _STRICT_MODEL
 
     module_id: _SafeCode
@@ -161,6 +175,8 @@ class CapabilityModule(BaseModel):
 
 
 class CapabilityManifest(BaseModel):
+    """Describe the internal API capabilities available to a client."""
+
     model_config = _STRICT_MODEL
 
     api: ApiVersion = Field(default_factory=ApiVersion)
@@ -170,6 +186,8 @@ class CapabilityManifest(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Expose sanitized service health and API compatibility metadata."""
+
     model_config = _STRICT_MODEL
 
     status: Literal["ready"] = "ready"
@@ -204,6 +222,7 @@ class StartupDiagnosticComponentResponse(BaseModel):
     @field_validator("message", "remediation")
     @classmethod
     def reject_private_or_control_text(cls, value: str | None) -> str | None:
+        """Reject diagnostic text containing private or control characters."""
         if value is not None and any(marker in value for marker in ("/", "\\", "\n", "\r", "\x00")):
             raise ValueError("startup diagnostic text must be path-free")
         return value
@@ -448,12 +467,14 @@ class ChatMessage(BaseModel):
     @field_validator("content")
     @classmethod
     def reject_blank_or_null_content(cls, value: str) -> str:
+        """Reject blank or NUL-containing chat message content."""
         if not value.strip() or "\x00" in value:
             raise ValueError("chat message content must be non-blank and contain no nulls")
         return value
 
     @classmethod
     def from_application(cls, message: ApplicationChatMessage) -> ChatMessage:
+        """Construct the chat message from application-service data."""
         return cls(role=message.role.value, content=message.content)
 
 
@@ -472,6 +493,7 @@ class ChatSessionCreateRequest(BaseModel):
     @field_validator("provider_profile_name", "model", "consent_name")
     @classmethod
     def reject_blank_or_null_text(cls, value: str | None) -> str | None:
+        """Reject blank or NUL-containing text."""
         if value is not None and (not value.strip() or "\x00" in value):
             raise ValueError("chat selection text must be non-blank and contain no nulls")
         return value
@@ -479,11 +501,13 @@ class ChatSessionCreateRequest(BaseModel):
     @field_validator("data_classes")
     @classmethod
     def reject_duplicate_data_classes(cls, value: list[_DataClass]) -> list[_DataClass]:
+        """Reject consent requests containing duplicate data classes."""
         if len(set(value)) != len(value):
             raise ValueError("chat data classes must not contain duplicates")
         return value
 
     def to_application(self) -> ApplicationChatSessionCreateRequest:
+        """Convert the chat session create request into its application-service request DTO."""
         return ApplicationChatSessionCreateRequest(
             schema_version=self.schema_version,
             provider_profile_name=self.provider_profile_name,
@@ -516,6 +540,7 @@ class ChatSession(BaseModel):
 
     @classmethod
     def from_application(cls, session: ApplicationChatSession) -> ChatSession:
+        """Construct the chat session from application-service data."""
         return cls(
             schema_version=session.schema_version,
             session_id=session.session_id,
@@ -549,11 +574,13 @@ class ChatRunRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def reject_blank_or_null_message(cls, value: str) -> str:
+        """Reject blank or NUL-containing chat request messages."""
         if not value.strip() or "\x00" in value:
             raise ValueError("chat message must be non-blank and contain no nulls")
         return value
 
     def to_application(self) -> ApplicationChatRunRequest:
+        """Convert the chat run request into its application-service request DTO."""
         return ApplicationChatRunRequest(
             schema_version=self.schema_version,
             message=self.message,
@@ -583,6 +610,7 @@ class ChatRunSummary(BaseModel):
 
     @classmethod
     def from_application(cls, summary: ApplicationChatRunSummary) -> ChatRunSummary:
+        """Construct the chat run summary from application-service data."""
         return cls(
             schema_version=summary.schema_version,
             assistant_message=ChatMessage.from_application(summary.assistant_message),
@@ -613,6 +641,7 @@ class ChatEventPayload(BaseModel):
     @field_validator("provider_id", "model")
     @classmethod
     def reject_blank_or_null_text(cls, value: str | None) -> str | None:
+        """Reject blank or NUL-containing text."""
         if value is not None and (not value.strip() or "\x00" in value):
             raise ValueError("chat event text must be non-blank and contain no nulls")
         return value
@@ -620,12 +649,14 @@ class ChatEventPayload(BaseModel):
     @field_validator("text")
     @classmethod
     def reject_empty_or_null_event_text(cls, value: str | None) -> str | None:
+        """Reject event payloads with empty or NUL-containing text."""
         if value is not None and (not value or "\x00" in value):
             raise ValueError("chat event text must be non-empty and contain no nulls")
         return value
 
     @classmethod
     def from_application(cls, payload: ApplicationChatEventPayload) -> ChatEventPayload:
+        """Construct the chat event payload from application-service data."""
         return cls(
             text=payload.text,
             code=payload.code,
@@ -650,6 +681,7 @@ class ChatEvent(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload_shape(self) -> ChatEvent:
+        """Validate the discriminated payload fields for an API event."""
         populated = {
             name
             for name in ("text", "code", "provider_id", "model", "remote", "message_count")
@@ -670,6 +702,7 @@ class ChatEvent(BaseModel):
 
     @classmethod
     def from_application(cls, event: ApplicationChatEvent) -> ChatEvent:
+        """Construct the chat event from application-service data."""
         return cls(
             schema_version=event.schema_version,
             run_id=event.run_id,
@@ -694,6 +727,7 @@ class ChatStreamRun(BaseModel):
 
     @model_validator(mode="after")
     def validate_terminal_state(self) -> ChatStreamRun:
+        """Validate terminal chat state and its required result fields."""
         expected = self.state in {"completed", "interrupted", "failed"}
         if self.terminal is not expected:
             raise ValueError("chat stream terminal status does not match its state")
@@ -701,6 +735,7 @@ class ChatStreamRun(BaseModel):
 
     @classmethod
     def from_application(cls, run: ApplicationChatStreamRun) -> ChatStreamRun:
+        """Construct the chat stream run from application-service data."""
         return cls(
             schema_version=run.schema_version,
             session_id=run.session_id,
@@ -734,6 +769,7 @@ class ChatCapability(BaseModel):
 
     @classmethod
     def from_application(cls, capability: ApplicationChatCapability) -> ChatCapability:
+        """Construct the chat capability from application-service data."""
         return cls(
             schema_version=capability.schema_version,
             max_active_sessions=capability.max_active_sessions,
@@ -868,6 +904,8 @@ class JobStreamFailureResponse(BaseModel):
 
 
 class FailureDetail(BaseModel):
+    """Describe one sanitized validation failure returned by the internal API."""
+
     model_config = _STRICT_MODEL
 
     name: _SafeCode
@@ -876,6 +914,7 @@ class FailureDetail(BaseModel):
     @field_validator("value")
     @classmethod
     def validate_value(cls, value: ErrorScalar) -> ErrorScalar:
+        """Validate a setting value against its declared type and bounds."""
         if isinstance(value, str) and (
             len(value) > 256 or any(marker in value for marker in ("/", "\\", "\n", "\r", "\x00"))
         ):
@@ -886,6 +925,8 @@ class FailureDetail(BaseModel):
 
 
 class ErrorEnvelope(BaseModel):
+    """Wrap a sanitized API error with its opaque correlation reference."""
+
     model_config = _STRICT_MODEL
 
     code: _SafeCode
@@ -897,6 +938,7 @@ class ErrorEnvelope(BaseModel):
     @field_validator("message", "remediation")
     @classmethod
     def reject_control_text(cls, value: str | None) -> str | None:
+        """Reject error text containing unsafe control characters."""
         if value is not None and any(character in value for character in ("\x00", "\r")):
             raise ValueError("error text contains a control character")
         return value

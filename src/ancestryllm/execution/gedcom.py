@@ -29,11 +29,14 @@ _REPORT_MEDIA_TYPE = "text/markdown"
 
 
 class GedcomExecutor:
+    """Dispatch GEDCOM commands through the application service boundary."""
+
     def __init__(self, context: AppContext, ingress: FileIngressPolicy) -> None:
         self._context = context
         self._ingress = ingress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch loss-minimal GEDCOM operations and return serializable artifacts."""
         from ancestryllm.gedcom.service import GedcomService
 
         service = GedcomService(

@@ -20,6 +20,8 @@ Framework = Literal["native", "langchain", "litellm"]
 
 @dataclass(frozen=True)
 class FrameworkAssessment:
+    """Record the measured tradeoffs for one evaluated provider framework."""
+
     framework: Framework
     dependency_footprint: str
     provider_control: str
@@ -92,12 +94,14 @@ def build_report() -> dict[str, object]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the benchmark provider frameworks command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="write the deterministic JSON report")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the benchmark provider frameworks command and return its exit status."""
     report = build_report()
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
     args = build_parser().parse_args(argv)

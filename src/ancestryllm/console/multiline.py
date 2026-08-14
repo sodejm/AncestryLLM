@@ -10,7 +10,11 @@ MAX_MULTILINE_CHARACTERS = 100_000
 
 
 class AsyncPrompt(Protocol):
-    async def prompt_async(self, prompt: str, **kwargs: object) -> str: ...
+    """Define the async prompt boundary used by application adapters."""
+
+    async def prompt_async(self, prompt: str, **kwargs: object) -> str:
+        """Read one prompt response without blocking the event loop."""
+        ...
 
 
 class MultilineEditor:
@@ -26,6 +30,7 @@ class MultilineEditor:
         self.maximum_characters = maximum_characters
 
     async def read(self, prompt: str) -> str:
+        """Load the data required by the multiline editor."""
         try:
             value = await self._session.prompt_async(
                 prompt,

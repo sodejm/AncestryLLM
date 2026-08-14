@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class GeminiProvider:
+    """Adapt Gemini generation and streaming behind the provider contract."""
+
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ProviderError("PROVIDER_KEY_MISSING", "No Gemini key is configured.")
@@ -23,6 +25,7 @@ class GeminiProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the gemini provider."""
         return ProviderCapabilities(
             provider_id="gemini", remote=True, structured_output=True, streaming=True
         )
@@ -57,6 +60,7 @@ class GeminiProvider:
         )
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the gemini provider."""
         contents = "\n".join(
             message.content for message in request.messages if message.role != "system"
         )
@@ -84,6 +88,7 @@ class GeminiProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the gemini provider."""
         stream_started = False
         try:
             client, types = self._client_and_types(request.timeout_seconds)

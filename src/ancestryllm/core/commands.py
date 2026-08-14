@@ -90,6 +90,7 @@ class ArgumentSpec:
 
     @property
     def positional(self) -> bool:
+        """Return whether the command argument is positional."""
         return not self.flags
 
 

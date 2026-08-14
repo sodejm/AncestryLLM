@@ -22,11 +22,14 @@ if TYPE_CHECKING:
 
 
 class PromptsExecutor:
+    """Dispatch saved-prompt commands through the application boundary."""
+
     def __init__(self, context: AppContext, ingress: FileIngressPolicy) -> None:
         self._context = context
         self._ingress = ingress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch prompt listing, storage, retrieval, or rendering."""
         action = invocation.key.action
         if action == "list":
             return CommandOutcome(structured_result(self._context.prompts.list()))

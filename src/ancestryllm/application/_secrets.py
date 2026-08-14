@@ -17,12 +17,16 @@ class SecretGrantRegistry:
         self._lock = threading.Lock()
 
     def issue(self, secret_name: str, value: str) -> SecretGrantRef:
+        """Issue an opaque single-use grant without exposing the credential."""
+
         grant_id = f"sec_{secrets.token_hex(32)}"
         with self._lock:
             self._values[grant_id] = (secret_name, value)
         return SecretGrantRef(grant_id=grant_id, secret_name=secret_name)
 
     def consume(self, grant: SecretGrantRef, secret_name: str) -> str:
+        """Consume a grant exactly once after validating its secret-name scope."""
+
         with self._lock:
             bound = self._values.pop(grant.grant_id, None)
         if bound is None or bound[0] != secret_name or grant.secret_name != secret_name:
@@ -34,6 +38,8 @@ class SecretGrantRegistry:
         return bound[1]
 
     def revoke_all(self) -> None:
+        """Revoke every outstanding in-process secret grant."""
+
         with self._lock:
             self._values.clear()
 

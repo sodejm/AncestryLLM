@@ -194,6 +194,7 @@ def verify_documentation_cutover(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the verify documentation cutover command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
@@ -203,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the verify documentation cutover command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         _verify_repository_inputs(

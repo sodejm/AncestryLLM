@@ -76,6 +76,7 @@ class SuccessResult(CommandResult):
         _validate_text("Success message", self.message)
 
     def to_serializable(self) -> JSONValue:
+        """Convert the success result to its transport-neutral serialized form."""
         return self.message
 
 
@@ -104,6 +105,7 @@ class TableResult(CommandResult):
         object.__setattr__(self, "rows", tuple(normalized_rows))
 
     def to_serializable(self) -> JSONValue:
+        """Convert the table result to its transport-neutral serialized form."""
         return [
             {
                 column: _copy_json(cell, location="table cell")
@@ -124,6 +126,7 @@ class StructuredResult(CommandResult):
         object.__setattr__(self, "value", _copy_json(self.value))
 
     def to_serializable(self) -> JSONValue:
+        """Convert the structured result to its transport-neutral serialized form."""
         return _copy_json(self.value)
 
 
@@ -139,6 +142,7 @@ class MarkdownResult(CommandResult):
         _validate_text("Markdown result", self.markdown)
 
     def to_serializable(self) -> JSONValue:
+        """Convert the markdown result to its transport-neutral serialized form."""
         if self.structured is not None:
             return self.structured.to_serializable()
         return self.markdown
@@ -153,6 +157,7 @@ class FileArtifactResult(CommandResult):
     related_artifacts: tuple[ArtifactRef, ...] = ()
 
     def to_serializable(self) -> JSONValue:
+        """Convert the file artifact result to its transport-neutral serialized form."""
         if self.related_artifacts:
             return {
                 "artifact": self.artifact.to_serializable(),
@@ -180,6 +185,7 @@ class WarningResult(CommandResult):
         _validate_text("Warning message", self.message)
 
     def to_serializable(self) -> JSONValue:
+        """Convert the warning result to its transport-neutral serialized form."""
         return {"code": self.code, "message": self.message}
 
 
@@ -191,6 +197,7 @@ class ErrorResult(CommandResult):
     error: ErrorEnvelope
 
     def to_serializable(self) -> JSONValue:
+        """Convert the error result to its transport-neutral serialized form."""
         return self.error.to_serializable()
 
 

@@ -83,7 +83,9 @@ class CommandOutcome:
 class CommandHandler(Protocol):
     """Execute one transport-neutral command invocation."""
 
-    def __call__(self, invocation: CommandInvocation) -> CommandOutcome: ...
+    def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Handle one transport-neutral invocation and return its coded outcome."""
+        ...
 
 
 class CommandExecutor:

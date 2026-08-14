@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class OpenAIProvider:
+    """Adapt OpenAI generation and streaming behind the provider contract."""
+
     def __init__(
         self,
         api_key: str,
@@ -34,6 +36,7 @@ class OpenAIProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the OpenAI provider."""
         zdr_enforced = self.provider_id == "openrouter" and self.zero_data_retention
         return ProviderCapabilities(
             provider_id=self.provider_id,
@@ -80,6 +83,7 @@ class OpenAIProvider:
         }
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the OpenAI provider."""
         kwargs: dict[str, object] = {
             "model": request.model,
             "messages": [message.model_dump() for message in request.messages],
@@ -113,6 +117,7 @@ class OpenAIProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the OpenAI provider."""
         stream_started = False
         kwargs: dict[str, object] = {
             "model": request.model,

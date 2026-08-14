@@ -285,6 +285,8 @@ def _subtree_aggregate(
 
 
 class GedcomService:
+    """Coordinate GEDCOM operations across the application boundary."""
+
     def __init__(
         self,
         llm: LLMService | None = None,

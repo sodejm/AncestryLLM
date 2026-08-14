@@ -135,6 +135,7 @@ class ReplApplication:
         self.multiline_editor = MultilineEditor(cast("AsyncPrompt", self.multiline_session))
 
     async def run_async(self) -> int:
+        """Run the interactive console loop and return its exit status."""
         try:
             result = await self._run_prompt_loop()
         except BaseException:
@@ -207,6 +208,7 @@ class ReplApplication:
         self.context.close()
 
     async def execute_line(self, command: str) -> bool:
+        """Route and execute one interactive console input line."""
         for value in credential_values(command):
             self.context.secrets.register_sensitive(value)
         try:

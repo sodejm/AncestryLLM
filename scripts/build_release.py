@@ -88,6 +88,7 @@ def _run(*command: str, env: dict[str, str] | None = None) -> str:
 
 
 def project_version() -> str:
+    """Read the project version from the canonical package metadata."""
     with (ROOT / "pyproject.toml").open("rb") as handle:
         value = str(tomllib.load(handle)["project"]["version"])
     if not SEMVER.fullmatch(value):
@@ -96,6 +97,7 @@ def project_version() -> str:
 
 
 def require_clean_checkout() -> None:
+    """Reject a release build when the checkout contains uncommitted changes."""
     status = _run("git", "status", "--porcelain=v1", "--untracked-files=all")
     if status:
         raise RuntimeError(f"release builds require a clean checkout:\n{status}")
@@ -156,6 +158,7 @@ def _wheel_metadata(path: Path) -> tuple[str, str]:
 
 
 def validate_artifacts(directory: Path, version: str) -> dict[str, str]:
+    """Validate release artifacts against the accepted package contract."""
     wheel = directory / f"ancestryllm-{version}-py3-none-any.whl"
     sdist = directory / f"ancestryllm-{version}.tar.gz"
     actual = {item.name for item in directory.iterdir() if item.is_file()}
@@ -249,6 +252,7 @@ def _normalize_sdist(path: Path, *, epoch: int) -> None:
 
 
 def build_release(output: Path) -> dict[str, str]:
+    """Build and verify the complete Python release artifact set."""
     require_clean_checkout()
     version = project_version()
     epoch = _run("git", "show", "-s", "--format=%ct", "HEAD")
@@ -284,6 +288,7 @@ def build_release(output: Path) -> dict[str, str]:
 
 
 def main() -> int:
+    """Run the build release command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()

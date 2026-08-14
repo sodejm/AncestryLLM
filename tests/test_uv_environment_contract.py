@@ -132,6 +132,10 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
             "$(UV_BIN) run --locked --group lint pre-commit install "
             "--hook-type pre-commit --hook-type pre-push"
         ),
+        "code-docs-check": (
+            "$(UV_BIN) run --locked --group lint ruff check src tests scripts "
+            "--select D100,D101,D102,D103,D104,D418,D419"
+        ),
     }
 
     for target_name, expected_command in expected_commands.items():

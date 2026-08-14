@@ -103,6 +103,7 @@ def evaluate_parity(
 
 
 def main() -> int:
+    """Run the check typechecker parity command and return its exit status."""
     failures = evaluate_parity()
     if failures:
         for failure in failures:

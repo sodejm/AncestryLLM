@@ -13,10 +13,13 @@ if TYPE_CHECKING:
 
 
 class PeopleExecutor:
+    """Dispatch people commands through the application service boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._context = context
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch person listing or creation through the research service."""
         value: object
         if invocation.key.action == "list":
             value = self._context.research.list_people(text(invocation, "workspace"))

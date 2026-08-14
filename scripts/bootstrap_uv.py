@@ -194,7 +194,9 @@ class Runner(Protocol):
         *,
         env: Mapping[str, str],
         timeout: float | None,
-    ) -> subprocess.CompletedProcess[str]: ...
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one verified executable with the supplied environment and timeout."""
+        ...
 
 
 class BootstrapError(RuntimeError):
@@ -1756,6 +1758,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the bootstrap uv command and return its exit status."""
     arguments = _parser().parse_args(argv)
     try:
         if arguments.command == "record-failure":

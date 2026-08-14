@@ -23,9 +23,12 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class ResearchRepository:
+    """Persist and retrieve research records through the storage boundary."""
+
     session: Session
 
     def get_or_create_workspace(self, name: str = "default") -> WorkspaceModel:
+        """Return the named workspace or persist it when absent."""
         workspace = self.session.scalar(select(WorkspaceModel).where(WorkspaceModel.name == name))
         if workspace is None:
             workspace = WorkspaceModel(name=name)
@@ -40,6 +43,7 @@ class ResearchRepository:
         notes: str = "",
         workspace: str = "default",
     ) -> PersonModel:
+        """Persist a research person in the selected workspace."""
         target = self.get_or_create_workspace(workspace)
         person = PersonModel(
             workspace_id=target.id,
@@ -52,6 +56,7 @@ class ResearchRepository:
         return person
 
     def list_people(self, workspace: str = "default") -> list[PersonModel]:
+        """Return research people in deterministic display-name order."""
         return list(
             self.session.scalars(
                 select(PersonModel)
@@ -64,6 +69,8 @@ class ResearchRepository:
 
 @dataclass(slots=True)
 class PromptRepository:
+    """Persist and retrieve prompt records through the storage boundary."""
+
     session: Session
 
     def save_version(
@@ -75,6 +82,7 @@ class PromptRepository:
         response_schema: dict[str, object] | None,
         tags: list[str] | None = None,
     ) -> PromptVersionModel:
+        """Persist the next immutable version of a saved prompt template."""
         template = self.session.scalar(
             select(PromptTemplateModel).where(PromptTemplateModel.name == name)
         )
@@ -110,6 +118,7 @@ class PromptRepository:
     def get(
         self, name: str, version: int | None = None
     ) -> tuple[PromptTemplateModel, PromptVersionModel] | None:
+        """Return the requested prompt version, or the latest version when omitted."""
         template = self.session.scalar(
             select(PromptTemplateModel).where(PromptTemplateModel.name == name)
         )
@@ -125,6 +134,7 @@ class PromptRepository:
         return (template, selected) if selected else None
 
     def list_templates(self) -> list[PromptTemplateModel]:
+        """Return saved prompt templates in deterministic name order."""
         return list(
             self.session.scalars(select(PromptTemplateModel).order_by(PromptTemplateModel.name))
         )
@@ -132,24 +142,30 @@ class PromptRepository:
 
 @dataclass(slots=True)
 class ProviderRepository:
+    """Persist and retrieve provider records through the storage boundary."""
+
     session: Session
 
     def list_profiles(self) -> list[ProviderProfileModel]:
+        """Return provider profiles without exposing credential material."""
         return list(
             self.session.scalars(select(ProviderProfileModel).order_by(ProviderProfileModel.name))
         )
 
     def get_profile(self, name: str) -> ProviderProfileModel | None:
+        """Return the named provider profile without credential material."""
         return self.session.scalar(
             select(ProviderProfileModel).where(ProviderProfileModel.name == name)
         )
 
     def list_consents(self) -> list[ConsentProfileModel]:
+        """Return the persisted provider consent grants."""
         return list(
             self.session.scalars(select(ConsentProfileModel).order_by(ConsentProfileModel.name))
         )
 
     def get_consent(self, name: str) -> ConsentProfileModel | None:
+        """Return the named provider consent grant when it exists."""
         return self.session.scalar(
             select(ConsentProfileModel).where(ConsentProfileModel.name == name)
         )

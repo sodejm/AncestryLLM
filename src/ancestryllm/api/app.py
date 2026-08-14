@@ -105,9 +105,13 @@ if TYPE_CHECKING:
 class ApiLifecycle(Protocol):
     """Adapter hook that a later sidecar supervisor can use for orderly startup and shutdown."""
 
-    async def startup(self) -> None: ...
+    async def startup(self) -> None:
+        """Start resources owned by the API lifecycle."""
+        ...
 
-    async def shutdown(self) -> None: ...
+    async def shutdown(self) -> None:
+        """Release resources owned by the API lifecycle."""
+        ...
 
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -469,7 +473,10 @@ def _startup_diagnostics_response(
 
 
 class InternalApiApplication(FastAPI):
+    """Expose the internal API application with canonical OpenAPI generation."""
+
     def openapi(self) -> dict[str, Any]:
+        """Return the canonical OpenAPI schema for the internal API application."""
         if self.openapi_schema is None:
             schema = get_openapi(
                 title=self.title,

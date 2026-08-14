@@ -96,6 +96,7 @@ class _AllowedRoot:
 
 
 def sha256_file(path: Path) -> str:
+    """Compute the SHA-256 digest of a source file without modifying it."""
     digest, _ = FileIngressPolicy().sha256(path, FileKind.ROOTSMAGIC)
     return digest
 
@@ -115,6 +116,8 @@ type JsonValue = JsonScalar | dict[str, str]
 
 @dataclass(frozen=True, slots=True)
 class QueryResult:
+    """Return immutable column names and rows from a validated RootsMagic query."""
+
     columns: tuple[str, ...]
     rows: tuple[tuple[JsonValue, ...], ...]
     sql: str
@@ -138,6 +141,7 @@ class DatabaseSchema:
     tables: tuple[TableSchema, ...]
 
     def as_mapping(self) -> dict[str, tuple[str, ...]]:
+        """Serialize the database schema as a plain mapping."""
         return {table.name: table.columns for table in self.tables}
 
 
@@ -736,6 +740,7 @@ class RootsMagicReader:
             ) from exc
 
     def list_trees(self) -> list[Path]:
+        """Return immutable RootsMagic trees found beneath allowed directories."""
         results: set[Path] = set()
         for root in self._allowed_roots:
             directory = root.path
@@ -767,6 +772,7 @@ class RootsMagicReader:
         return False
 
     def resolve_tree(self, name_or_path: str | Path) -> Path:
+        """Resolve a RootsMagic tree within the configured read-only roots."""
         requested = self.ingress.normalize_path(name_or_path, FileKind.ROOTSMAGIC)
         candidates: list[Path]
         explicit_path = requested.is_absolute()
@@ -1178,6 +1184,7 @@ class RootsMagicReader:
         path: Path,
         expected: FileSnapshot | SourceFingerprint | None = None,
     ) -> Iterator[sqlite3.Connection]:
+        """Open a read-only connection to the immutable RootsMagic database copy."""
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
         active = self._operation_connection.get()
         if active is not None and self._same_path(self._operation_path.get(), selected):
@@ -1341,6 +1348,7 @@ class RootsMagicReader:
         path: Path,
         expected: FileSnapshot | None = None,
     ) -> dict[str, tuple[str, ...]]:
+        """Inspect the RootsMagic schema through the read-only source connection."""
         try:
             with self.connection(path, expected) as connection:
                 return self._schema_from_connection(connection)
@@ -1528,6 +1536,7 @@ class RootsMagicReader:
         )
 
     def validate_sql(self, sql: str, allowed_schema: dict[str, tuple[str, ...]]) -> str:
+        """Validate generated SQL against the read-only RootsMagic query policy."""
         cancellation_checkpoint()
         if not sql.strip() or "\x00" in sql:
             raise SecurityPolicyError("SQL_REJECTED", "The generated SQL is empty or malformed.")
@@ -1621,6 +1630,7 @@ class RootsMagicReader:
         expected: SourceFingerprint | None = None,
         schema: dict[str, tuple[str, ...]] | None = None,
     ) -> QueryResult:
+        """Execute a validated read-only query against the RootsMagic source."""
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
         active = self._operation_connection.get()
         if active is None or not self._same_path(self._operation_path.get(), selected):
@@ -1699,6 +1709,7 @@ class RootsMagicReader:
         expected: FileSnapshot | None = None,
         schema: dict[str, tuple[str, ...]] | None = None,
     ) -> list[dict[str, Any]]:
+        """Read and validate normalized rows from one RootsMagic table."""
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
         active = self._operation_connection.get()
         if active is None or not self._same_path(self._operation_path.get(), selected):

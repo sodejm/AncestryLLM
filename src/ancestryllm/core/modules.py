@@ -88,6 +88,7 @@ class ModuleRegistry:
         self.context = context
 
     def descriptors(self) -> list[ModuleDescriptor]:
+        """Return the descriptors exposed by the module registry."""
         return [
             BUILTIN_MODULES[name]
             for name in sorted(self.context.config.enabled_modules)
@@ -100,11 +101,13 @@ class ModuleRegistry:
         return self.descriptors()
 
     def enable(self, module_id: str) -> None:
+        """Enable a registered module by its stable identifier."""
         if module_id not in BUILTIN_MODULES:
             raise KeyError(module_id)
         self.context.config.enabled_modules.add(module_id)
         self.context.config.save()
 
     def disable(self, module_id: str) -> None:
+        """Disable a registered module by its stable identifier."""
         self.context.config.enabled_modules.discard(module_id)
         self.context.config.save()

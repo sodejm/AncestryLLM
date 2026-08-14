@@ -26,6 +26,7 @@ def _begin_native_sqlite_transaction() -> None:
 
 
 def upgrade() -> None:
+    """Apply this schema migration in the forward direction."""
     _begin_native_sqlite_transaction()
     op.create_table(
         "jobs",
@@ -53,6 +54,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Revert this schema migration to its previous revision."""
     _begin_native_sqlite_transaction()
     op.drop_index("ix_job_events_replay", table_name="job_events")
     op.drop_table("job_events")

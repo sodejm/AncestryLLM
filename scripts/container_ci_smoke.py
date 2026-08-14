@@ -67,6 +67,8 @@ class Docker:
         check: bool = True,
         timeout: int = 120,
     ) -> subprocess.CompletedProcess[str]:
+        """Run a bounded Docker command without invoking a shell."""
+
         try:
             completed = subprocess.run(  # noqa: S603 - resolved Docker binary, no shell
                 [self.executable, *arguments],
@@ -88,6 +90,8 @@ class Docker:
         return completed
 
     def json(self, *arguments: str) -> Any:
+        """Run a Docker inspection command and decode its JSON response."""
+
         raw = self.run(*arguments).stdout
         try:
             return json.loads(raw)
@@ -550,6 +554,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the container ci smoke command and return its exit status."""
     args = _parser().parse_args(argv)
     try:
         run_lifecycle(

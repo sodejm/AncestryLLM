@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 
 class AnthropicProvider:
+    """Adapt Anthropic generation and streaming behind the provider contract."""
+
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ProviderError("PROVIDER_KEY_MISSING", "No Anthropic key is configured.")
@@ -22,6 +24,7 @@ class AnthropicProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the anthropic provider."""
         return ProviderCapabilities(
             provider_id="anthropic", remote=True, structured_output=False, streaming=True
         )
@@ -55,6 +58,7 @@ class AnthropicProvider:
         return "\n".join(systems), messages
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the anthropic provider."""
         system, messages = self._messages(request)
         try:
             with self._client(request.timeout_seconds) as client:
@@ -84,6 +88,7 @@ class AnthropicProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the anthropic provider."""
         system, messages = self._messages(request)
         stream_started = False
         try:

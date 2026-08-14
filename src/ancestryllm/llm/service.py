@@ -57,6 +57,8 @@ MAX_RETRY_DELAY_SECONDS = 60.0
 
 
 class LLMService:
+    """Coordinate LLM operations across the application boundary."""
+
     def __init__(
         self,
         registry: ProviderRegistry,
@@ -387,6 +389,7 @@ class LLMService:
         *,
         enforce_request_bounds: bool = False,
     ) -> GenerationResult:
+        """Generate a response through the LLM service."""
         planned_request, provider = self._prepare(
             request,
             consent,

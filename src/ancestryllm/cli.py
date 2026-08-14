@@ -65,12 +65,14 @@ def dispatch(
 
 
 def run_tokens(context: AppContext, tokens: Sequence[str]) -> int:
+    """Execute parsed CLI tokens through the canonical command boundary."""
     parser = build_parser()
     args = parser.parse_args(list(tokens))
     return dispatch(args, context)
 
 
 def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -> int:
+    """Run the CLI command and return its exit status."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
         repl_options: argparse.Namespace | None = argparse.Namespace(config=None, json=False)

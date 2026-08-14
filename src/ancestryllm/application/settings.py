@@ -25,7 +25,9 @@ class SettingsConfigPort(Protocol):
     query_timeout_seconds: float
     provider_timeout_seconds: float
 
-    def save(self, *, expected_revision: int | None = None) -> bool: ...
+    def save(self, *, expected_revision: int | None = None) -> bool:
+        """Persist validated settings with optimistic revision control and report whether content changed."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +161,7 @@ class SettingsService:
         self._lock = threading.RLock()
 
     def snapshot(self) -> SettingsSnapshot:
+        """Return a consistent snapshot of the settings service state."""
         with self._lock:
             fields = tuple(
                 SettingField(

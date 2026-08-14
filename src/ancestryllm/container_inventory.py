@@ -223,6 +223,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the container inventory command and return its exit status."""
     args = _parser().parse_args(argv)
     payload = json.dumps(build_inventory(), indent=2, sort_keys=True) + "\n"
     args.output.parent.mkdir(parents=True, exist_ok=True)

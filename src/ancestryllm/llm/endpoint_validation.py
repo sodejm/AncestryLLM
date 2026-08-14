@@ -139,6 +139,7 @@ class EndpointValidationService:
         self._probe = probe
 
     def validate(self, provider_id: str, endpoint: str) -> EndpointValidationResult:
+        """Validate input against the endpoint validation service contract."""
         validate_endpoint(provider_id, endpoint)
         parsed = urlparse(endpoint)
         if (

@@ -340,6 +340,8 @@ async def _buffer_bounded_body(receive: Receive, *, maximum_bytes: int) -> Recei
 
 
 class InternalApiMiddleware:
+    """Enforce internal API origin, host, request-size, and response-header policy."""
+
     def __init__(
         self,
         app: ASGIApp,
@@ -352,6 +354,7 @@ class InternalApiMiddleware:
         self._surface = surface
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Apply internal request policy before delegating to the wrapped ASGI app."""
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return

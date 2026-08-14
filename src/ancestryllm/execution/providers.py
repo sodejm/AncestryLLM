@@ -21,10 +21,13 @@ if TYPE_CHECKING:
 
 
 class ProvidersExecutor:
+    """Dispatch provider-configuration commands through the application boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._context = context
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch provider-profile and consent lifecycle commands."""
         action = invocation.key.action
         if action == "list":
             value: object = {

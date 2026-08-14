@@ -253,14 +253,132 @@ _PLACEHOLDER_MARKER_WORDS: Final = frozenset({"fixme", "placeholder", "tbd", "to
 _LICENSE_MARKERS: Final = ("copyright", "spdx-license-identifier", "licensed under")
 
 
-def _has_python_module_docstring(path: Path) -> bool:
-    """Return True when the Python source at *path* has a module-level docstring."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return False
-    docstring = ast.get_docstring(tree, clean=False)
+def _is_overload_declaration(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return whether *node* is an overload signature rather than its implementation."""
+    return any(
+        (isinstance(decorator, ast.Name) and decorator.id == "overload")
+        or (isinstance(decorator, ast.Attribute) and decorator.attr == "overload")
+        for decorator in node.decorator_list
+    )
+
+
+def _has_meaningful_python_docstring(
+    node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    """Return whether *node* owns a meaningful Python docstring."""
+    docstring = ast.get_docstring(node, clean=False)
     return docstring is not None and _is_meaningful_documentation(docstring)
+
+
+def _is_public_method_name(name: str) -> bool:
+    """Return whether *name* identifies a documented public method contract."""
+    return not name.startswith("_") or name == "__call__"
+
+
+def _literal_python_exports(tree: ast.Module) -> frozenset[str]:
+    """Return string names declared by a top-level literal ``__all__`` assignment."""
+    exports: set[str] = set()
+    for statement in tree.body:
+        value: ast.expr | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in statement.targets
+            )
+        ) or (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "__all__"
+        ):
+            value = statement.value
+
+        if value is None:
+            continue
+        try:
+            literal = ast.literal_eval(value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(literal, (list, tuple, set, frozenset)) and all(
+            isinstance(name, str) for name in literal
+        ):
+            exports.update(literal)
+    return frozenset(exports)
+
+
+def _check_public_class_documentation(
+    rel: str,
+    node: ast.ClassDef,
+    *,
+    parent_name: str | None = None,
+) -> list[str]:
+    """Return declaration diagnostics for one public class and its public members."""
+    qualified_name = f"{parent_name}.{node.name}" if parent_name else node.name
+    diagnostics: list[str] = []
+    if not _has_meaningful_python_docstring(node):
+        diagnostics.append(f"{rel}:missing-public-class-docstring:{qualified_name}")
+
+    for member in node.body:
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (
+                _is_public_method_name(member.name)
+                and not _is_overload_declaration(member)
+                and not _has_meaningful_python_docstring(member)
+            ):
+                diagnostics.append(
+                    f"{rel}:missing-public-method-docstring:{qualified_name}.{member.name}"
+                )
+        elif isinstance(member, ast.ClassDef) and not member.name.startswith("_"):
+            diagnostics.extend(
+                _check_public_class_documentation(
+                    rel,
+                    member,
+                    parent_name=qualified_name,
+                )
+            )
+
+    return diagnostics
+
+
+def _check_python_documentation(
+    rel: str,
+    path: Path,
+    *,
+    check_public_declarations: bool,
+) -> list[str]:
+    """Return module and public-declaration diagnostics for one Python source file."""
+    source = _read_source(path)
+    if source is None:
+        return [f"{rel}:missing-module-docstring"]
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return [f"{rel}:missing-module-docstring"]
+
+    diagnostics: list[str] = []
+    if not _has_meaningful_python_docstring(tree):
+        diagnostics.append(f"{rel}:missing-module-docstring")
+
+    if check_public_declarations:
+        exports = _literal_python_exports(tree)
+        for declaration in tree.body:
+            if not isinstance(
+                declaration,
+                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+            ):
+                continue
+            is_public = not declaration.name.startswith("_") or declaration.name in exports
+            if isinstance(declaration, ast.ClassDef) and is_public:
+                diagnostics.extend(_check_public_class_documentation(rel, declaration))
+            elif (
+                isinstance(declaration, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and is_public
+                and not _is_overload_declaration(declaration)
+                and not _has_meaningful_python_docstring(declaration)
+            ):
+                diagnostics.append(f"{rel}:missing-public-function-docstring:{declaration.name}")
+
+    return sorted(diagnostics)
 
 
 def _is_meaningful_documentation(value: str) -> bool:
@@ -437,11 +555,13 @@ def check_file_documentation(rel: str, root: Path) -> list[str]:
     suffix = Path(rel).suffix.lower()
 
     if suffix in PYTHON_EXTENSIONS:
-        if not _has_python_module_docstring(path):
-            return [f"{rel}:missing-module-docstring"]
-    else:
-        if not _has_file_level_comment(path):
-            return [f"{rel}:missing-file-header-comment"]
+        return _check_python_documentation(
+            rel,
+            path,
+            check_public_declarations=classification in {"first-party-code", "first-party-script"},
+        )
+    if not _has_file_level_comment(path):
+        return [f"{rel}:missing-file-header-comment"]
 
     return []
 

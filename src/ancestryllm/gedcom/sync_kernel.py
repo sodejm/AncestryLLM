@@ -830,7 +830,9 @@ class SyncCancelled(SyncStageError):
 class SnapshotStage(Protocol):
     """Capture and verify immutable inputs."""
 
-    def capture(self, request: SyncRequest) -> SyncSnapshotState: ...
+    def capture(self, request: SyncRequest) -> SyncSnapshotState:
+        """Capture the input state required by the snapshot stage."""
+        ...
 
 
 @runtime_checkable
@@ -841,7 +843,9 @@ class ComparisonStage(Protocol):
         self,
         snapshot: SyncSnapshotState,
         options: SyncOptions,
-    ) -> tuple[SyncDelta, ...]: ...
+    ) -> tuple[SyncDelta, ...]:
+        """Compare captured GEDCOM states without mutating either source."""
+        ...
 
 
 @runtime_checkable
@@ -853,14 +857,18 @@ class PlanningStage(Protocol):
         snapshot: SyncSnapshotState,
         deltas: tuple[SyncDelta, ...],
         options: SyncOptions,
-    ) -> SyncPlanningOutput: ...
+    ) -> SyncPlanningOutput:
+        """Build the deterministic loss-minimal GEDCOM synchronization plan."""
+        ...
 
 
 @runtime_checkable
 class DecisionStage(Protocol):
     """Resolve a declared decision through an outer application port."""
 
-    def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection: ...
+    def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection:
+        """Select the next deterministic action for the decision stage."""
+        ...
 
 
 @runtime_checkable
@@ -872,7 +880,9 @@ class ApplicationStage(Protocol):
         snapshot: SyncSnapshotState,
         plan: SyncPlan,
         decisions: tuple[SyncDecisionSelection, ...],
-    ) -> SyncStagedApplication: ...
+    ) -> SyncStagedApplication:
+        """Stage the planned GEDCOM changes without committing them."""
+        ...
 
 
 @runtime_checkable
@@ -883,34 +893,44 @@ class CommitStage(Protocol):
     and must not raise after the publication boundary has been crossed.
     """
 
-    def prepare(self, staged: SyncStagedApplication) -> SyncPublication: ...
+    def prepare(self, staged: SyncStagedApplication) -> SyncPublication:
+        """Prepare the state required by the commit stage."""
+        ...
 
     def commit(
         self,
         staged: SyncStagedApplication,
         publication: SyncPublication,
-    ) -> None: ...
+    ) -> None:
+        """Commit the prepared GEDCOM changes after all safety checks pass."""
+        ...
 
 
 @runtime_checkable
 class RecoveryStage(Protocol):
     """Recover unpublished state while preserving the prior revision."""
 
-    def recover(self, context: SyncRecoveryContext) -> SyncRecoveryMetadata: ...
+    def recover(self, context: SyncRecoveryContext) -> SyncRecoveryMetadata:
+        """Recover the recovery stage after an interrupted operation."""
+        ...
 
 
 @runtime_checkable
 class CancellationStage(Protocol):
     """Check cooperative cancellation at interruptible boundaries."""
 
-    def check_cancelled(self) -> None: ...
+    def check_cancelled(self) -> None:
+        """Raise when cooperative cancellation has been requested."""
+        ...
 
 
 @runtime_checkable
 class EventStage(Protocol):
     """Receive one bounded structural event."""
 
-    def emit(self, event: SyncEvent) -> None: ...
+    def emit(self, event: SyncEvent) -> None:
+        """Publish one bounded synchronization event to the configured observer."""
+        ...
 
 
 class NeverCancelled:
@@ -919,6 +939,7 @@ class NeverCancelled:
     __slots__ = ()
 
     def check_cancelled(self) -> None:
+        """Raise when cooperative cancellation has been requested."""
         return
 
 
@@ -928,6 +949,7 @@ class DiscardEvents:
     __slots__ = ()
 
     def emit(self, event: SyncEvent) -> None:
+        """Discard a synchronization event without side effects."""
         del event
 
 

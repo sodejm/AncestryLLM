@@ -68,6 +68,7 @@ class NeverCancelled:
     __slots__ = ()
 
     def check_cancelled(self) -> None:
+        """Raise when cooperative cancellation has been requested."""
         return
 
 
@@ -77,6 +78,7 @@ class DiscardProgress:
     __slots__ = ()
 
     def emit(self, event: ProgressEvent) -> None:
+        """Discard a progress event without side effects."""
         del event
 
 

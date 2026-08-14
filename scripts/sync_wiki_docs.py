@@ -221,6 +221,7 @@ def sync_wiki_docs(source: Path, destination: Path) -> SyncResult:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the sync wiki docs command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
@@ -238,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the sync wiki docs command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         result = sync_wiki_docs(args.source, args.destination)

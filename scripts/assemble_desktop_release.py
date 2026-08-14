@@ -176,6 +176,7 @@ def _required_gates(target: str, signing_mode: str) -> set[str]:
 
 
 def create_target(args: argparse.Namespace) -> None:
+    """Create a normalized release target from its policy definition."""
     _validate_identity(args.git_head, args.version)
     validate_signing_mode(args.version, args.signing_mode)
     configuration = TARGETS.get(args.target)
@@ -428,6 +429,7 @@ def _validated_environments(
 
 
 def aggregate(args: argparse.Namespace) -> None:
+    """Aggregate validated component artifacts into a desktop release bundle."""
     _validate_identity(args.git_head, args.version)
     evidence_paths = sorted(args.input_dir.rglob("desktop-target-evidence.json"))
     if len(evidence_paths) != len(TARGETS):
@@ -688,6 +690,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run the assemble desktop release command and return its exit status."""
     args = _parser().parse_args()
     try:
         args.handler(args)

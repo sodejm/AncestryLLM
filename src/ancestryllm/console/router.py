@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 
 class RouteKind(StrEnum):
+    """Enumerate the supported route kind values."""
+
     OUTPUT = "output"
     EXECUTE = "execute"
     EXIT = "exit"
@@ -32,6 +34,8 @@ class RouteKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RouteResult:
+    """Describe how one console input line should be dispatched."""
+
     kind: RouteKind
     value: Any = None
     invocation: ParsedInvocation | None = None
@@ -47,13 +51,16 @@ class SessionRouter:
 
     @property
     def prompt(self) -> str:
+        """Return the prompt label for the current console session mode."""
         return f"ancestry({self.active_module}) > " if self.active_module else "ancestry > "
 
     @property
     def enabled_modules(self) -> tuple[str, ...]:
+        """Return the modules enabled for the current console session."""
         return tuple(item.module_id for item in ModuleRegistry(self.context).descriptors())
 
     def route(self, command: str) -> RouteResult:
+        """Classify one console input line without executing it."""
         return self.route_tokens(split_repl_input(command))
 
     def route_tokens(self, tokens: tuple[str, ...]) -> RouteResult:

@@ -95,6 +95,8 @@ def _resolve_tree_ref(service: _TreeLister, selection: str) -> str | Path:
 
 
 class RootsMagicExecutor:
+    """Dispatch read-only RootsMagic commands through the application boundary."""
+
     def __init__(
         self,
         context: AppContext,
@@ -105,6 +107,7 @@ class RootsMagicExecutor:
         self._progress = progress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch immutable RootsMagic inspection and GEDCOM export operations."""
         from ancestryllm.rootsmagic.service import RootsMagicService
 
         service = RootsMagicService(

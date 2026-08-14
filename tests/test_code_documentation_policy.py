@@ -11,6 +11,7 @@ See ``docs/CODE_DOCUMENTATION.md`` for the full policy.
 from __future__ import annotations
 
 import textwrap
+import tomllib
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -390,7 +391,11 @@ class TestCheckFileDocumentation:
     def test_docstring(self, tmp_path: Path) -> None:
         f = tmp_path / "src" / "foo.py"
         f.parent.mkdir(parents=True)
-        f.write_text('"""Purpose of this module."""\n\ndef func() -> None:\n    pass\n')
+        f.write_text(
+            '"""Purpose of this module."""\n\n'
+            "def func() -> None:\n"
+            '    """Perform the representative public operation."""\n'
+        )
         assert check_file_documentation("src/foo.py", tmp_path) == []
 
     def test_python_without_module_docstring_fails(self, tmp_path: Path) -> None:
@@ -435,6 +440,128 @@ class TestCheckFileDocumentation:
         f.parent.mkdir(parents=True)
         f.write_text('"""Entry-point module."""\nimport sys\n')
         assert check_file_documentation("src/__main__.py", tmp_path) == []
+
+    def test_python_public_declarations_require_meaningful_docstrings(self, tmp_path: Path) -> None:
+        f = tmp_path / "src" / "example.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(_fixture_source("invalid_python_public_declarations.txt"))
+
+        assert check_file_documentation("src/example.py", tmp_path) == [
+            "src/example.py:missing-public-class-docstring:PublicService",
+            "src/example.py:missing-public-function-docstring:build_result",
+            "src/example.py:missing-public-method-docstring:PublicService.execute",
+        ]
+
+    def test_python_private_names_exported_through_all_require_docstrings(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "src" / "exported.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(_fixture_source("invalid_python_exported_declarations.txt"))
+
+        assert check_file_documentation("src/exported.py", tmp_path) == [
+            "src/exported.py:missing-public-class-docstring:_ExportedAdapter",
+            "src/exported.py:missing-public-function-docstring:_exported_helper",
+            "src/exported.py:missing-public-method-docstring:_ExportedAdapter.run",
+        ]
+
+    def test_python_placeholder_declaration_docstring_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "example.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(_fixture_source("invalid_python_placeholder_declaration.txt"))
+
+        assert check_file_documentation("scripts/example.py", tmp_path) == [
+            "scripts/example.py:missing-public-function-docstring:main"
+        ]
+
+    def test_python_documented_public_declarations_pass(self, tmp_path: Path) -> None:
+        f = tmp_path / "src" / "example.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(_fixture_source("valid_python_declarations.txt"))
+
+        assert check_file_documentation("src/example.py", tmp_path) == []
+
+    def test_python_tests_use_descriptive_names_without_per_test_docstrings(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "tests" / "test_example.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            '"""Verifies the example behavior with descriptive test names."""\n\n'
+            "class TestPublicBehavior:\n"
+            "    def test_returns_the_normalized_value(self) -> None:\n"
+            "        assert True\n"
+        )
+
+        assert check_file_documentation("tests/test_example.py", tmp_path) == []
+
+    def test_python_protocol_and_abstract_methods_require_contract_docs(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "src" / "contracts.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            '"""Defines callable service boundaries."""\n\n'
+            "from abc import ABC, abstractmethod\n"
+            "from typing import Protocol\n\n"
+            "class Reader(Protocol):\n"
+            '    """Defines the source-reading boundary."""\n\n'
+            "    def read(self) -> str: ...\n\n"
+            "class Worker(ABC):\n"
+            '    """Defines the work execution boundary."""\n\n'
+            "    @abstractmethod\n"
+            "    def execute(self) -> None:\n"
+            "        raise NotImplementedError\n"
+        )
+
+        assert check_file_documentation("src/contracts.py", tmp_path) == [
+            "src/contracts.py:missing-public-method-docstring:Reader.read",
+            "src/contracts.py:missing-public-method-docstring:Worker.execute",
+        ]
+
+    def test_python_overload_stubs_are_not_given_competing_docstrings(self, tmp_path: Path) -> None:
+        f = tmp_path / "src" / "overloads.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(_fixture_source("valid_python_overloads.txt"))
+
+        assert check_file_documentation("src/overloads.py", tmp_path) == []
+
+    def test_python_override_requires_local_contract_documentation(self, tmp_path: Path) -> None:
+        f = tmp_path / "src" / "overrides.py"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            '"""Defines an inherited execution contract."""\n\n'
+            "from typing import override\n\n"
+            "class Parent:\n"
+            '    """Provides the base execution contract."""\n\n'
+            "    def execute(self) -> None:\n"
+            '        """Execute the base operation."""\n\n'
+            "class Child(Parent):\n"
+            '    """Provides the specialized execution contract."""\n\n'
+            "    @override\n"
+            "    def execute(self) -> None:\n"
+            "        pass\n"
+        )
+
+        assert check_file_documentation("src/overrides.py", tmp_path) == [
+            "src/overrides.py:missing-public-method-docstring:Child.execute"
+        ]
+
+    def test_python_migration_entrypoints_require_operation_docs(self, tmp_path: Path) -> None:
+        relative_path = "src/ancestryllm/storage/migrations/versions/revision.py"
+        f = tmp_path / relative_path
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            '"""Migrates the persisted schema for the example revision."""\n\n'
+            "def upgrade() -> None:\n"
+            "    pass\n\n"
+            "def downgrade() -> None:\n"
+            '    """Reverse the example schema revision."""\n'
+        )
+
+        assert check_file_documentation(relative_path, tmp_path) == [
+            f"{relative_path}:missing-public-function-docstring:upgrade"
+        ]
 
     # --- Shell ---
 
@@ -697,3 +824,30 @@ class TestMain:
             main(["--root", str(tmp_path), "--baseline", "baseline.txt"])
 
         assert exc_info.value.code == 2
+
+
+def test_python_declaration_rules_are_explicit_and_test_exceptions_are_narrow() -> None:
+    root = Path(__file__).resolve().parents[1]
+    configuration = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    lint = configuration["tool"]["ruff"]["lint"]
+
+    documentation_rules = {"D100", "D101", "D102", "D103", "D104", "D418", "D419"}
+    assert documentation_rules <= set(lint["select"])
+    assert lint["per-file-ignores"]["tests/**"] == [
+        "D101",
+        "D102",
+        "D103",
+        "RUF003",
+        "RUF059",
+        "S105",
+        "S106",
+        "S108",
+        "S603",
+        "S607",
+    ]
+    assert all(
+        not rule.startswith("D")
+        for pattern, rules in lint["per-file-ignores"].items()
+        if pattern != "tests/**"
+        for rule in rules
+    )

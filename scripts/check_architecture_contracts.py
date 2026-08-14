@@ -257,6 +257,8 @@ CHARACTERIZATION_IMPORT_EXCEPTIONS: Final[tuple[ConsumerImportException, ...]] =
 
 @dataclass(frozen=True, slots=True)
 class ImportReference:
+    """Identify a source import and the architecture layer it targets."""
+
     path: Path
     line: int
     importer: str
@@ -266,12 +268,15 @@ class ImportReference:
 
 @dataclass(frozen=True, slots=True)
 class Violation:
+    """Describe an architecture boundary violation with stable diagnostic fields."""
+
     path: Path
     line: int
     code: str
     message: str
 
     def format(self, root: Path) -> str:
+        """Render the violation as a stable diagnostic string."""
         try:
             display_path = self.path.relative_to(root.parent)
         except ValueError:
@@ -281,11 +286,14 @@ class Violation:
 
 @dataclass(frozen=True, slots=True)
 class ArchitectureReport:
+    """Collect architecture violations and the files checked for a report."""
+
     violations: tuple[Violation, ...]
     used_exceptions: frozenset[DependencyException | ConsumerImportException]
 
     @property
     def passed(self) -> bool:
+        """Return whether the architecture report contains no violations."""
         return not self.violations
 
 
@@ -1284,6 +1292,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Iterable[str] | None = None) -> int:
+    """Run the check architecture contracts command and return its exit status."""
     args = _parser().parse_args(argv)
     source_report = check_tree(args.root)
     repository_root = args.root.resolve().parents[1]

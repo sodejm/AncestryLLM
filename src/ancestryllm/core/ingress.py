@@ -210,6 +210,7 @@ class FileSnapshot:
 
     @classmethod
     def from_stat(cls, value: os.stat_result) -> FileSnapshot:
+        """Construct a stable file snapshot from operating-system metadata."""
         return cls(
             value.st_dev,
             value.st_ino,
@@ -293,6 +294,7 @@ class FileIngressPolicy:
         self.limits = limits or FileIngressLimits()
 
     def limit(self, kind: FileKind) -> FileLimit:
+        """Return the byte limit for the requested ingress file category."""
         return {
             FileKind.CONFIG: self.limits.config,
             FileKind.GEDCOM: self.limits.gedcom,
@@ -720,6 +722,7 @@ class FileIngressPolicy:
         allow_empty: bool = True,
         expected: FileSnapshot | None = None,
     ) -> str:
+        """Read bounded text through the repository file-ingress policy."""
         value = "".join(self.iter_text_lines(path, kind, expected=expected))
         if not allow_empty and not value:
             raise self._error(

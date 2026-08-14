@@ -348,6 +348,7 @@ def candidate_pyproject(source: str) -> str:
 def compare_file_maps(
     baseline: dict[str, bytes], candidate: dict[str, bytes]
 ) -> dict[str, list[str]]:
+    """Compare artifact payload maps by normalized path and digest."""
     baseline_paths = set(baseline)
     candidate_paths = set(candidate)
     return {
@@ -373,6 +374,7 @@ def semantic_message(data: bytes) -> dict[str, Any]:
 
 
 def semantic_entry_points(data: bytes) -> dict[str, dict[str, str]]:
+    """Parse package entry points into a semantic comparison form."""
     parser = configparser.ConfigParser(interpolation=None, strict=True)
     parser.optionxform = str
     try:
@@ -426,6 +428,7 @@ def _record_rows(files: dict[str, bytes]) -> dict[str, tuple[str, str]]:
 
 
 def validate_record(files: dict[str, bytes]) -> list[str]:
+    """Validate a wheel RECORD against its extracted payload."""
     _record_rows(files)
     return sorted(files)
 
@@ -902,6 +905,7 @@ def validate_report(report: Any) -> None:
 
 
 def serialize_report(report: dict[str, Any]) -> str:
+    """Serialize the build comparison report deterministically."""
     validate_report(report)
     _safe_report_value(report)
     return json.dumps(report, indent=2, sort_keys=True) + "\n"
@@ -921,6 +925,7 @@ def _comparison_failures(comparisons: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def evaluate(uv: Path) -> dict[str, Any]:
+    """Evaluate setuptools and uv_build artifacts against the same package contract."""
     status = _run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=ROOT,
@@ -1261,6 +1266,7 @@ def evaluate(uv: Path) -> dict[str, Any]:
 
 
 def main() -> int:
+    """Run the evaluate uv build command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uv", type=Path, default=ROOT / ".tools" / "uv" / "uv")
     parser.add_argument(

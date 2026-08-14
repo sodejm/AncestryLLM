@@ -101,6 +101,8 @@ class RootsMagicExporter(RootsMagicMapper):
         living: str = "exclude",
         report_path: Path | None = None,
     ) -> RootsMagicExportResult:
+        """Export immutable RootsMagic input through a validated atomic GEDCOM write."""
+
         self._validate_mapping_options(
             profile=profile,
             gedcom_version=gedcom_version,

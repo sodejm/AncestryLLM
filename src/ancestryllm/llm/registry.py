@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ProviderRegistry:
+    """Register and resolve provider implementations by stable identifier."""
+
     secrets: SecretStore
     _shared: dict[tuple[str, str, str], LLMProvider] = field(
         default_factory=dict,
@@ -38,6 +40,7 @@ class ProviderRegistry:
         zero_data_retention: bool = True,
         profile_name: str | None = None,
     ) -> LLMProvider:
+        """Create a provider implementation from its registered factory."""
         if provider_id == "none":
             from ancestryllm.llm.providers.none import NoneProvider
 

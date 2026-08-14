@@ -10,10 +10,12 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Run Alembic migrations without opening a database connection."""
     raise RuntimeError("Offline plaintext migration scripts are intentionally unsupported.")
 
 
 def run_migrations_online() -> None:
+    """Run Alembic migrations through a live database connection."""
     connection = context.config.attributes.get("connection")
     if connection is None:
         raise RuntimeError("An authenticated SQLCipher connection is required for migrations.")

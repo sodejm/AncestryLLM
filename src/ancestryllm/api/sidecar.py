@@ -79,6 +79,7 @@ class LaunchFrame:
         self.settings()
 
     def settings(self) -> ApiSettings:
+        """Convert the verified launch frame into validated sidecar settings."""
         return ApiSettings(
             bearer_token=self.bearer_token,
             app_build=self.app_build,

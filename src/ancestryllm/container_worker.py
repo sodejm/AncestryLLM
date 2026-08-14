@@ -39,6 +39,7 @@ def run() -> None:
 
 
 def main() -> int:
+    """Run the container worker command and return its exit status."""
     try:
         run()
     except ContainerRuntimeError as exc:

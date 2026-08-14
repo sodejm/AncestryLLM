@@ -72,6 +72,7 @@ def _decode_payload(body: bytes) -> dict[str, object]:
 
 
 def check_gateway() -> None:
+    """Probe the gateway health endpoint and return its status."""
     status, body = _gateway_request()
     if status != 200:
         raise ContainerRuntimeError(
@@ -113,6 +114,7 @@ def check_gateway_rejection(kind: str) -> None:
 
 
 def check_worker() -> None:
+    """Probe the worker health endpoint and return its status."""
     marker = json.loads(read_private_runtime_file(WORKER_READY_PATH))
     if marker != {"build": __version__, "schema_version": 1, "status": "ready"}:
         raise ContainerRuntimeError(
@@ -122,6 +124,7 @@ def check_worker() -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the container healthcheck command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--expect-rejection", choices=("version", "build"))

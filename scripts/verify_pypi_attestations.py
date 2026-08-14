@@ -253,6 +253,7 @@ def verify_pypi_attestations(
     artifacts: Path,
     evidence: Path,
 ) -> None:
+    """Verify release attestations against the trusted PyPI identity."""
     repository = _validated_repository(repository)
     expected = _read_checksums(checksums)
     for name, digest in expected.items():
@@ -311,6 +312,7 @@ def verify_pypi_attestations(
 
 
 def main() -> int:
+    """Run the verify PyPI attestations command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="ancestryllm")
     parser.add_argument("--version", required=True)

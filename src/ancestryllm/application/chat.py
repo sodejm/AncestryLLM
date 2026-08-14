@@ -140,6 +140,8 @@ def _validate_timestamp(value: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage(BoundaryDTO):
+    """Represent one validated user or assistant message in a chat session."""
+
     role: ChatRole
     content: str
 
@@ -151,6 +153,8 @@ class ChatMessage(BoundaryDTO):
 
 @dataclass(frozen=True, slots=True)
 class ChatSessionCreateRequest(ServiceRequest):
+    """Carry validated inputs for creating an application chat session."""
+
     provider_profile_name: str
     model: str
     purpose: ChatPurpose
@@ -171,6 +175,8 @@ class ChatSessionCreateRequest(ServiceRequest):
 
 @dataclass(frozen=True, slots=True)
 class ChatSession(ServiceResult):
+    """Track the immutable messages and identity of an application chat session."""
+
     session_id: str
     provider_profile_name: str
     provider_id: str
@@ -208,6 +214,8 @@ class ChatSession(ServiceResult):
 
 @dataclass(frozen=True, slots=True)
 class ChatRunRequest(ServiceRequest):
+    """Carry one consent-bound generation request for an existing chat session."""
+
     message: str
     max_output_tokens: int = 1_024
     temperature: float = 0.0
@@ -246,6 +254,8 @@ class ChatRunRequest(ServiceRequest):
 
 @dataclass(frozen=True, slots=True)
 class ChatRunSummary(ServiceResult):
+    """Summarize the terminal state and output of a completed chat run."""
+
     assistant_message: ChatMessage
     provider_id: str
     model: str
@@ -397,6 +407,8 @@ class ChatStreamRun(ServiceResult):
 
 @dataclass(frozen=True, slots=True)
 class ChatCapability(ServiceResult):
+    """Describe provider availability and limits for the chat application service."""
+
     schema_version: int = CHAT_SCHEMA_VERSION
     max_active_sessions: int = CHAT_MAX_ACTIVE_SESSIONS
     max_messages: int = CHAT_MAX_MESSAGES

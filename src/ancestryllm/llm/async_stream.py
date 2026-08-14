@@ -69,6 +69,7 @@ class BoundedAsyncStreamBridge:
         worker.start()
 
     async def receive(self) -> StreamQueueItem:
+        """Receive the next provider stream item with bounded backpressure."""
         queue = self._queue
         if queue is None:
             raise RuntimeError("The asynchronous stream bridge has not started.")

@@ -33,6 +33,7 @@ def is_secret_name(name: str) -> bool:
 
 
 def split_command_safely(command: str) -> list[str]:
+    """Split command text while preserving quoted values and rejecting unsafe syntax."""
     try:
         return shlex.split(command)
     except ValueError:
@@ -128,26 +129,33 @@ class RedactingTextIO:
 
     @property
     def encoding(self) -> str:
+        """Expose the wrapped stream's text encoding."""
         return self._stream.encoding or "utf-8"
 
     @property
     def errors(self) -> str | None:
+        """Expose the wrapped stream's encoding error policy."""
         return self._stream.errors
 
     def fileno(self) -> int:
+        """Return the file descriptor of the wrapped output stream."""
         return self._stream.fileno()
 
     def flush(self) -> None:
+        """Flush pending output through the wrapped stream."""
         if not self._stream.closed:
             self._stream.flush()
 
     def isatty(self) -> bool:
+        """Return whether the wrapped output stream is attached to a terminal."""
         return self._stream.isatty()
 
     def writable(self) -> bool:
+        """Return whether the wrapped output stream accepts writes."""
         return True
 
     def write(self, text: str) -> int:
+        """Redact registered secrets before writing text to the wrapped stream."""
         return self._stream.write(self._context.secrets.redact(text))
 
 

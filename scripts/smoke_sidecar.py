@@ -149,12 +149,14 @@ def smoke(executable: Path) -> None:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the smoke sidecar workflow."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the smoke sidecar command and return its exit status."""
     arguments = parse_args(argv)
     if not arguments.executable.is_file():
         raise FileNotFoundError(arguments.executable)

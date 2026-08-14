@@ -37,6 +37,7 @@ def read_launch_frame() -> dict[str, str]:
 
 
 def main() -> NoReturn:
+    """Run the verification wrong sidecar command and return its exit status."""
     launch = read_launch_frame()
     readiness = {
         "contract": API_CONTRACT,

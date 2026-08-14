@@ -3,6 +3,7 @@
     "schemas": {
       "ApiVersion": {
         "additionalProperties": false,
+        "description": "Describe the negotiated version of the internal API contract.",
         "properties": {
           "application_contract": {
             "const": "ancestryllm.application/0.3",
@@ -28,6 +29,7 @@
       },
       "CapabilityAction": {
         "additionalProperties": false,
+        "description": "Describe one command exposed by an internal API capability.",
         "properties": {
           "dispatch_key": {
             "maxLength": 193,
@@ -60,6 +62,7 @@
       },
       "CapabilityManifest": {
         "additionalProperties": false,
+        "description": "Describe the internal API capabilities available to a client.",
         "properties": {
           "api": {
             "$ref": "#/components/schemas/ApiVersion"
@@ -85,6 +88,7 @@
       },
       "CapabilityModule": {
         "additionalProperties": false,
+        "description": "Group the commands exposed by one internal API capability module.",
         "properties": {
           "actions": {
             "items": {
@@ -1175,6 +1179,7 @@
       },
       "ErrorEnvelope": {
         "additionalProperties": false,
+        "description": "Wrap a sanitized API error with its opaque correlation reference.",
         "properties": {
           "code": {
             "maxLength": 96,
@@ -1227,6 +1232,7 @@
       },
       "FailureDetail": {
         "additionalProperties": false,
+        "description": "Describe one sanitized validation failure returned by the internal API.",
         "properties": {
           "name": {
             "maxLength": 96,
@@ -1278,6 +1284,7 @@
       },
       "HealthResponse": {
         "additionalProperties": false,
+        "description": "Expose sanitized service health and API compatibility metadata.",
         "properties": {
           "api": {
             "$ref": "#/components/schemas/ApiVersion"
@@ -1741,6 +1748,7 @@
       },
       "PageMetadata": {
         "additionalProperties": false,
+        "description": "Describe the page boundary and continuation cursor returned by an API listing.",
         "properties": {
           "count": {
             "default": 0,
@@ -1769,6 +1777,7 @@
       },
       "PaginationPolicy": {
         "additionalProperties": false,
+        "description": "Define validated pagination policy values for runtime decisions.",
         "properties": {
           "default_limit": {
             "default": 25,
@@ -1797,6 +1806,7 @@
       },
       "PaginationRequest": {
         "additionalProperties": false,
+        "description": "Carry validated cursor and page-size inputs for one API listing request.",
         "properties": {
           "cursor": {
             "anyOf": [
@@ -2020,6 +2030,7 @@
       },
       "RequestSizePolicy": {
         "additionalProperties": false,
+        "description": "Define validated request size policy values for runtime decisions.",
         "properties": {
           "max_body_bytes": {
             "default": 1048576,

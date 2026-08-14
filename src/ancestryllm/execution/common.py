@@ -49,10 +49,12 @@ def text(
     name: str,
     default: str | object = _MISSING,
 ) -> str:
+    """Require and return a string argument from a command invocation."""
     return _typed(invocation, name, str, default)
 
 
 def optional_text(invocation: CommandInvocation, name: str) -> str | None:
+    """Return an optional string argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -70,10 +72,12 @@ def integer(
     name: str,
     default: int | object = _MISSING,
 ) -> int:
+    """Require and return an integer argument from a command invocation."""
     return _typed(invocation, name, int, default)
 
 
 def optional_integer(invocation: CommandInvocation, name: str) -> int | None:
+    """Return an optional integer argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -87,6 +91,7 @@ def optional_integer(invocation: CommandInvocation, name: str) -> int | None:
 
 
 def number(invocation: CommandInvocation, name: str) -> float | None:
+    """Require and return a numeric argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -104,6 +109,7 @@ def boolean(
     name: str,
     default: bool | object = _MISSING,
 ) -> bool:
+    """Require and return a boolean argument from a command invocation."""
     return _typed(invocation, name, bool, default)
 
 
@@ -112,6 +118,7 @@ def text_values(
     name: str,
     default: tuple[str, ...] | object = _MISSING,
 ) -> tuple[str, ...]:
+    """Return a validated tuple of string arguments from a command invocation."""
     value = invocation.argument(name, default)
     if not isinstance(value, tuple) or not all(isinstance(item, str) for item in value):
         raise AncestryError(
@@ -123,15 +130,18 @@ def text_values(
 
 
 def path(invocation: CommandInvocation, name: str) -> Path:
+    """Require and return a filesystem path from a command invocation."""
     return Path(text(invocation, name))
 
 
 def optional_path(invocation: CommandInvocation, name: str) -> Path | None:
+    """Return an optional filesystem path from a command invocation."""
     value = optional_text(invocation, name)
     return Path(value) if value is not None else None
 
 
 def key_values(values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeated key-value arguments from a command invocation."""
     result: dict[str, str] = {}
     for raw in values:
         if "=" not in raw:
@@ -142,6 +152,7 @@ def key_values(values: tuple[str, ...]) -> dict[str, str]:
 
 
 def consent(context: AppContext, name: str | None) -> ConsentGrant | None:
+    """Require and return the explicit cloud-consent decision for an invocation."""
     return context.provider_profiles.consent_grant(name) if name else None
 
 

@@ -175,6 +175,7 @@ class PublicJobProgress(BoundaryDTO):
 
     @classmethod
     def from_core(cls, progress: ProgressEvent) -> PublicJobProgress:
+        """Construct the public job progress from a core job snapshot."""
         return cls(
             schema_version=JOB_SCHEMA_VERSION,
             operation=_bounded_text(progress.operation, 512) or "Background work",
@@ -259,6 +260,7 @@ class PublicJobSnapshot(BoundaryDTO):
 
     @classmethod
     def from_core(cls, snapshot: JobSnapshot, *, sequence: int) -> PublicJobSnapshot:
+        """Construct the public job snapshot from a core job snapshot."""
         state = _public_state(snapshot)
         return cls(
             schema_version=JOB_SCHEMA_VERSION,
@@ -412,17 +414,29 @@ class ShutdownAssessment(BoundaryDTO):
 class JobEventRepository(Protocol):
     """Persistence boundary used by the lifecycle service."""
 
-    def record_core(self, snapshot: JobSnapshot) -> JobEvent | None: ...
+    def record_core(self, snapshot: JobSnapshot) -> JobEvent | None:
+        """Persist a normalized core job snapshot as a durable lifecycle event."""
+        ...
 
-    def get(self, job_id: str) -> PublicJobSnapshot: ...
+    def get(self, job_id: str) -> PublicJobSnapshot:
+        """Return the public snapshot for one persisted background job."""
+        ...
 
-    def list(self, *, limit: int = 100) -> tuple[PublicJobSnapshot, ...]: ...
+    def list(self, *, limit: int = 100) -> tuple[PublicJobSnapshot, ...]:
+        """Return newest public job snapshots up to the requested limit."""
+        ...
 
-    def replay(self, job_id: str, *, after: int) -> JobReplay: ...
+    def replay(self, job_id: str, *, after: int) -> JobReplay:
+        """Replay persisted events through the job event repository."""
+        ...
 
-    def reconcile_active(self) -> tuple[JobEvent, ...]: ...
+    def reconcile_active(self) -> tuple[JobEvent, ...]:
+        """Reconcile active jobs after job event repository recovery."""
+        ...
 
-    def next_job_number(self) -> int: ...
+    def next_job_number(self) -> int:
+        """Reserve the next monotonically increasing job number through the job event repository."""
+        ...
 
 
 class MemoryJobEventRepository:
@@ -443,6 +457,7 @@ class MemoryJobEventRepository:
         )
 
     def record_core(self, snapshot: JobSnapshot) -> JobEvent | None:
+        """Persist a normalized core job snapshot as a durable lifecycle event."""
         with self._lock:
             current = self._snapshots.get(snapshot.job_id)
             sequence = 1 if current is None else current.sequence + 1
@@ -475,6 +490,7 @@ class MemoryJobEventRepository:
         return event
 
     def get(self, job_id: str) -> PublicJobSnapshot:
+        """Return one in-memory public job snapshot or raise ``JOB_NOT_FOUND``."""
         _require_job_id(job_id)
         with self._lock:
             snapshot = self._snapshots.get(job_id)
@@ -487,6 +503,7 @@ class MemoryJobEventRepository:
         return snapshot
 
     def list(self, *, limit: int = 100) -> tuple[PublicJobSnapshot, ...]:
+        """Return newest in-memory public job snapshots up to the requested limit."""
         if (
             isinstance(limit, bool)
             or not isinstance(limit, int)
@@ -506,6 +523,7 @@ class MemoryJobEventRepository:
         return tuple(snapshots[:limit])
 
     def replay(self, job_id: str, *, after: int) -> JobReplay:
+        """Replay persisted events through the memory job event repository."""
         _require_job_id(job_id)
         if isinstance(after, bool) or not isinstance(after, int) or not 0 <= after <= 9_999_999_999:
             raise AncestryError(
@@ -553,6 +571,7 @@ class MemoryJobEventRepository:
         raise AssertionError("unreachable")
 
     def reconcile_active(self) -> tuple[JobEvent, ...]:
+        """Reconcile active jobs after memory job event repository recovery."""
         reconciled: list[JobEvent] = []
         with self._lock:
             active = tuple(
@@ -580,6 +599,7 @@ class MemoryJobEventRepository:
         return tuple(reconciled)
 
     def next_job_number(self) -> int:
+        """Reserve the next monotonically increasing job number through the memory job event repository."""
         with self._lock:
             return max((int(job_id[1:]) for job_id in self._snapshots), default=0) + 1
 
@@ -619,6 +639,7 @@ class JobSubscription:
         self._close_callback = close_callback
 
     def next(self, *, timeout: float | None = None) -> JobEvent:
+        """Wait for and return the next event from the job subscription."""
         if self._overflowed.is_set():
             raise AncestryError(
                 "JOB_EVENT_REPLAY_EXPIRED",
@@ -645,6 +666,7 @@ class JobSubscription:
         return event
 
     def close(self) -> None:
+        """Release resources owned by the job subscription."""
         self._close_callback()
 
 
@@ -715,9 +737,11 @@ class JobLifecycleService:
                 self._subscribers.pop(subscriber_id, None)
 
     def get(self, job_id: str) -> PublicJobSnapshot:
+        """Return the current public snapshot for one background job."""
         return self.repository.get(job_id)
 
     def list(self, *, limit: int = 100) -> tuple[PublicJobSnapshot, ...]:
+        """Return newest public job snapshots up to the requested limit."""
         return self.repository.list(limit=limit)
 
     def cancel(self, job_id: str) -> PublicJobSnapshot:
@@ -734,6 +758,7 @@ class JobLifecycleService:
         return self.repository.get(job_id)
 
     def subscribe(self, job_id: str, *, after: int) -> JobSubscription:
+        """Subscribe to future events exposed by the job lifecycle service."""
         with self._lock:
             if self._closed:
                 raise AncestryError(
@@ -819,6 +844,7 @@ class JobLifecycleService:
         )
 
     def close(self) -> None:
+        """Release resources owned by the job lifecycle service."""
         with self._lock:
             if self._closed:
                 return
