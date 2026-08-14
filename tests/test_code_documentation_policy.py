@@ -81,11 +81,17 @@ class TestClassify:
     def test_dockerfile(self) -> None:
         assert classify("containers/Dockerfile") == "first-party-config-exec"
 
+    def test_named_dockerfile(self) -> None:
+        assert classify("containers/docs-terminal-capture.Dockerfile") == "first-party-config-exec"
+
     def test_markdown_doc(self) -> None:
         assert classify("README.md") == "non-code-doc"
 
     def test_docs_markdown(self) -> None:
         assert classify("docs/CODE_DOCUMENTATION.md") == "non-code-doc"
+
+    def test_docs_png(self) -> None:
+        assert classify("docs/assets/screenshots/terminal/cli-help.png") == "non-code-doc"
 
     def test_license_file(self) -> None:
         assert classify("LICENSE") == "non-code-doc"
@@ -197,6 +203,16 @@ class TestCheckInventory:
             NON_COMMENT_FORMAT_MAP["config/dependency-audit-exclusions.json"]
             == "docs/reference/DEPENDENCY_MAINTENANCE.md"
         )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "config/docs-terminal-capture-policy-v1.schema.json",
+            "config/docs-terminal-capture-policy.json",
+        ],
+    )
+    def test_terminal_capture_policy_maps_to_authoring_guidance(self, path: str) -> None:
+        assert NON_COMMENT_FORMAT_MAP[path] == "docs/DOCS_AUTHORING.md"
 
     @pytest.mark.parametrize(
         "path",

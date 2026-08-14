@@ -74,6 +74,7 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         "code-docs-check",
         "docs-screenshots",
         "docs-screenshots-check",
+        "docs-terminal-screenshots",
         "hooks",
     ):
         declaration = re.search(
@@ -113,6 +114,12 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "docs-screenshots-check": (
             "$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py validate "
             "--manifest config/docs-screenshot-manifest.json --repository-root ."
+        ),
+        "docs-terminal-screenshots": (
+            "$(UV_BIN) run --locked python scripts/docs_terminal_capture.py capture "
+            "--manifest config/docs-screenshot-manifest.json "
+            "--policy config/docs-terminal-capture-policy.json "
+            "--repository-root . --output-root . --temporary-root ."
         ),
         "hooks": (
             "$(UV_BIN) run --locked --group lint pre-commit install "

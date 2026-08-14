@@ -1427,6 +1427,19 @@ plugins:
   the application event behavior, production runtime bridge, command registry,
   API, provider, GEDCOM, storage, and packaged Electron boundaries are
   unchanged. Image publication and drift CI remain outside this adapter.
+- `scripts/docs_terminal_capture.py`, `scripts/docs_terminal_pty.py`, and
+  `scripts/docs_terminal_preflight.py` consume the same manifest for the real
+  one-shot CLI and prompt-toolkit/Rich console. A closed schema-v1 policy pins
+  the VHS and uv container images, native image descriptors, renderer tools,
+  font identity, environment, PTY geometry, and scenario timing. The adapter
+  validates those identities, runs a true PTY and VHS renderer in a non-root,
+  read-only, capability-free, network-disabled native Linux container, and
+  requires two byte-identical captures before atomically publishing only the
+  two allowlisted PNGs. All writable application and terminal state lives in a
+  disposable container mount. This repository-only documentation adapter adds
+  no application command, registry, runtime dependency, provider behavior,
+  GEDCOM or storage path, internal API route, or Electron bridge. Documentation
+  embedding and hosted drift enforcement remain #420.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -1463,6 +1476,7 @@ The Make targets are the command contract:
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
 | `make docs-screenshots` | Validate and print the normalized schema-v1 screenshot plan without capturing or changing images. |
 | `make docs-screenshots-check` | Validate the screenshot schemas, fictional fixtures, deterministic controls, documentation references, and exact output allowlist. |
+| `make docs-terminal-screenshots` | Verify the pinned native VHS toolchain and capture the real CLI and interactive console twice through a true PTY, with exact repeatability and isolated network-free state. |
 
 Version 1 security work has a separate repository-governance contract. The
 schema-v1 policy in `config/version-1-security-policy.json` binds the exact

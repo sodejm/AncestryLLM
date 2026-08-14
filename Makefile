@@ -18,10 +18,10 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
 export UV_PYTHON := $(PYTHON)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check docs-terminal-screenshots
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check docs-terminal-screenshots"
 
 desktop-install:
 	@node desktop/scripts/install-locked.mjs
@@ -127,6 +127,9 @@ docs-screenshots: verified-uv
 
 docs-screenshots-check: verified-uv
 	@$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py validate --manifest config/docs-screenshot-manifest.json --repository-root .
+
+docs-terminal-screenshots: verified-uv
+	@$(UV_BIN) run --locked python scripts/docs_terminal_capture.py capture --manifest config/docs-screenshot-manifest.json --policy config/docs-terminal-capture-policy.json --repository-root . --output-root . --temporary-root .
 
 hooks: verified-uv
 	@$(UV_BIN) run --locked --group lint pre-commit install --hook-type pre-commit --hook-type pre-push

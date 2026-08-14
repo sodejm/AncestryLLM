@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "container_image": "ghcr.io/charmbracelet/vhs@sha256:9d5fc3dc0c160b0fb1d2212baff07e6bdf3fa9438c504a3237484567302fcf93",
+  "supported_platforms": {
+    "linux/amd64": "sha256:16b21a3bf7bd13e7fcf60d3ece47c92e561ef594f2c1fca5f1683f11190954b8",
+    "linux/arm64": "sha256:2c34085dea86c69c94bd64a9bde0f8a839aadb6032c97d4c3268fd0aaeb09262"
+  },
+  "uv_image": "ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded",
+  "dockerfile": "containers/docs-terminal-capture.Dockerfile",
+  "toolchain": {
+    "chromium": {
+      "path": "/usr/bin/chromium",
+      "version_arguments": [
+        "--version"
+      ],
+      "version": "Chromium 145.0.7632.159 built on Debian GNU/Linux 13 (trixie)",
+      "comparison": "exact"
+    },
+    "ffmpeg": {
+      "path": "/usr/bin/ffmpeg",
+      "version_arguments": [
+        "-version"
+      ],
+      "version": "ffmpeg version 7.1.3-0+deb13u1",
+      "comparison": "prefix"
+    },
+    "ttyd": {
+      "path": "/usr/bin/ttyd",
+      "version_arguments": [
+        "--version"
+      ],
+      "version": "ttyd version 1.7.7-e2819f2",
+      "comparison": "exact"
+    },
+    "vhs": {
+      "path": "/usr/bin/vhs",
+      "version_arguments": [
+        "--version"
+      ],
+      "version": "vhs version v0.11.0 (c6af91a)",
+      "comparison": "exact"
+    }
+  },
+  "font": {
+    "family": "JetBrains Mono",
+    "path": "/usr/share/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf",
+    "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+  },
+  "locale": {
+    "name": "en_US.UTF-8",
+    "path": "/usr/lib/locale/en_US.UTF-8",
+    "target": "/usr/lib/locale/C.utf8"
+  },
+  "environment": {
+    "ANCESTRYLLM_CONFIG_DIR": "/capture/ancestryllm/config",
+    "ANCESTRYLLM_DATA_DIR": "/capture/ancestryllm/data",
+    "HOME": "/capture/home",
+    "LANG": "en_US.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/local/lib/ancestryllm-docs-terminal:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "TERM": "xterm-256color",
+    "TZ": "UTC",
+    "XDG_CACHE_HOME": "/capture/xdg/cache",
+    "XDG_CONFIG_HOME": "/capture/xdg/config",
+    "XDG_DATA_HOME": "/capture/xdg/data"
+  },
+  "terminal": {
+    "shell": "bash",
+    "font_size": 14,
+    "width": 1200,
+    "height": 720,
+    "columns": 120,
+    "rows": 36,
+    "typing_speed": "1ms",
+    "startup_wait": "2s",
+    "settle_wait": "1s",
+    "final_wait": "1s",
+    "timeout_seconds": 30,
+    "theme": {
+      "background": "#f8fafc",
+      "foreground": "#0f172a",
+      "cursor": "#0f766e"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "terminal-cli-help",
+      "capture_after_step": 0,
+      "interactions": []
+    },
+    {
+      "id": "terminal-interactive-console",
+      "capture_after_step": 2,
+      "interactions": [
+        {
+          "input": "modules",
+          "expect": "ancestry >",
+          "wait_after": "1s"
+        },
+        {
+          "input": "use gedcom",
+          "expect": "ancestry(gedcom) >",
+          "wait_after": "1s"
+        },
+        {
+          "input": "exit",
+          "wait_after": "1s"
+        }
+      ]
+    }
+  ]
+}
