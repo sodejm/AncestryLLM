@@ -55,6 +55,8 @@ def normalize_transcription(text: str) -> str:
 
 
 class OcrService:
+    """Coordinate OCR operations across the application boundary."""
+
     def __init__(self, llm: LLMService) -> None:
         self.llm = llm
 
@@ -66,6 +68,7 @@ class OcrService:
         model: str,
         consent: ConsentGrant | None = None,
     ) -> dict[str, object]:
+        """Extract text from an image through the configured OCR adapter."""
         cancellation_checkpoint()
         cleaned = normalize_transcription(text)
         cancellation_checkpoint()

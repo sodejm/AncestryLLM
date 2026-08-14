@@ -211,10 +211,12 @@ class AppConfig:
 
     @property
     def database_path(self) -> Path:
+        """Resolve the configured application database path."""
         return self.data_dir / "workspace.db"
 
     @classmethod
     def load(cls, path: Path | None = None) -> AppConfig:
+        """Load the data required by the app config."""
         configured_config_dir = os.getenv("ANCESTRYLLM_CONFIG_DIR")
         configured_data_dir = os.getenv("ANCESTRYLLM_DATA_DIR")
         if path is not None:
@@ -389,6 +391,7 @@ class AppConfig:
         )
 
     def save(self, *, expected_revision: int | None = None) -> bool:
+        """Persist validated settings with optimistic revision control and report whether content changed."""
         self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload: dict[str, Any] = {
             "schema_version": self.schema_version,

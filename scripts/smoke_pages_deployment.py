@@ -87,6 +87,7 @@ def smoke(base_url: str, expected_source_sha: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the smoke pages deployment command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="https://sodejm.github.io/AncestryLLM/")
     parser.add_argument("--expected-source-sha", required=True)
@@ -94,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the smoke pages deployment command and return its exit status."""
     args = build_parser().parse_args(argv)
     errors = smoke(args.base_url, args.expected_source_sha)
     if errors:

@@ -29,6 +29,7 @@ def _begin_native_sqlite_transaction() -> None:
 
 
 def upgrade() -> None:
+    """Apply this schema migration in the forward direction."""
     _begin_native_sqlite_transaction()
     op.create_table(
         "workspaces",
@@ -191,6 +192,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Revert this schema migration to its previous revision."""
     _begin_native_sqlite_transaction()
     op.drop_table("llm_runs")
     op.drop_table("consent_profiles")

@@ -62,6 +62,7 @@ def semantic_row_key(
     row: dict[str, Any],
     *identity_columns: str,
 ) -> tuple[tuple[int, int | str, str], ...]:
+    """Build a stable semantic key for a RootsMagic row."""
     lowered = {column.casefold(): value for column, value in row.items()}
     identity = next(
         (lowered[column.casefold()] for column in identity_columns if column.casefold() in lowered),
@@ -80,6 +81,8 @@ def semantic_row_key(
 
 @dataclass(frozen=True, slots=True)
 class AdaptedTable:
+    """Pair a RootsMagic table definition with normalized read-only rows."""
+
     logical_name: str
     actual_name: str
     columns: tuple[str, ...]
@@ -87,6 +90,7 @@ class AdaptedTable:
     rows: tuple[dict[str, Any], ...]
 
     def declared_type(self, *column_names: str) -> str | None:
+        """Return the declared SQL type for the adapted RootsMagic column."""
         by_folded = {name.casefold(): value for name, value in self.declared_types}
         return next(
             (by_folded[name.casefold()] for name in column_names if name.casefold() in by_folded),
@@ -132,14 +136,17 @@ class RootsMagicSchemaAdapter:
         return result
 
     def table(self, logical_name: str) -> AdaptedTable | None:
+        """Return the adapted RootsMagic table with the requested name."""
         return self._tables.get(logical_name)
 
     def rows(self, logical_name: str) -> list[dict[str, Any]]:
+        """Return normalized read-only rows for the requested RootsMagic table."""
         table = self.table(logical_name)
         return list(table.rows) if table is not None else []
 
     @property
     def mapped_tables(self) -> list[str]:
+        """Return the RootsMagic tables covered by the explicit mapping policy."""
         return [
             table.actual_name
             for logical_name in TABLE_ALIASES
@@ -148,6 +155,7 @@ class RootsMagicSchemaAdapter:
 
     @property
     def unmapped_tables(self) -> list[str]:
+        """Return the RootsMagic tables not covered by the mapping policy."""
         mapped = {table.actual_name.casefold() for table in self._tables.values()}
         return sorted(
             (name for name in self._schema if name.casefold() not in mapped),

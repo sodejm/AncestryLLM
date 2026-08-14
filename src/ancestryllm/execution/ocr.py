@@ -13,11 +13,14 @@ if TYPE_CHECKING:
 
 
 class OcrExecutor:
+    """Dispatch OCR commands through the application service boundary."""
+
     def __init__(self, context: AppContext, ingress: FileIngressPolicy) -> None:
         self._context = context
         self._ingress = ingress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Read bounded OCR input and dispatch consent-bound extraction."""
         from ancestryllm.ocr.service import OcrService
 
         source = self._ingress.read_text(path(invocation, "input"), FileKind.OCR)

@@ -56,12 +56,31 @@ class SensitiveValueRedactor:
 
 
 class SecretStore(Protocol):
-    def get(self, name: str) -> str | None: ...
-    def set(self, name: str, value: str) -> None: ...
-    def delete(self, name: str) -> None: ...
-    def present(self, name: str) -> bool: ...
-    def register_sensitive(self, value: str) -> None: ...
-    def redact(self, text: str) -> str: ...
+    """Define the secret store boundary used by application adapters."""
+
+    def get(self, name: str) -> str | None:
+        """Return a secret by name without exposing it through diagnostics."""
+        ...
+
+    def set(self, name: str, value: str) -> None:
+        """Store a secret value without exposing it in diagnostics or output."""
+        ...
+
+    def delete(self, name: str) -> None:
+        """Remove the requested secret and verify that it is no longer present."""
+        ...
+
+    def present(self, name: str) -> bool:
+        """Return whether the requested secret exists without revealing its value."""
+        ...
+
+    def register_sensitive(self, value: str) -> None:
+        """Register a secret value for process-local output redaction."""
+        ...
+
+    def redact(self, text: str) -> str:
+        """Replace registered secret values with safe redaction markers."""
+        ...
 
 
 @dataclass(slots=True)
@@ -87,6 +106,7 @@ class KeyringSecretStore:
         return keyring
 
     def get(self, name: str) -> str | None:
+        """Read a secret from the OS keyring, then the allowed environment fallback."""
         environment_name = self._environment_name(name)
         keyring_error: Exception | None
         try:
@@ -114,6 +134,7 @@ class KeyringSecretStore:
         return None
 
     def set(self, name: str, value: str) -> None:
+        """Store a secret value without exposing it in diagnostics or output."""
         environment_name = self._environment_name(name)
         if self.source_mode is SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK:
             self._reject_environment_managed(environment_name)
@@ -137,6 +158,7 @@ class KeyringSecretStore:
             )
 
     def delete(self, name: str) -> None:
+        """Remove the requested secret and verify that it is no longer present."""
         environment_name = self._environment_name(name)
         if self.source_mode is SecretSourceMode.KEYRING_WITH_ENVIRONMENT_FALLBACK:
             self._reject_environment_managed(environment_name)
@@ -169,12 +191,15 @@ class KeyringSecretStore:
             ) from delete_error
 
     def present(self, name: str) -> bool:
+        """Return whether the requested secret exists without revealing its value."""
         return self.get(name) is not None
 
     def register_sensitive(self, value: str) -> None:
+        """Register a secret value for process-local output redaction."""
         self._redactor.register(value)
 
     def redact(self, text: str) -> str:
+        """Replace registered secret values with safe redaction markers."""
         return self._redactor.redact(text)
 
     @staticmethod
@@ -211,23 +236,29 @@ class MemorySecretStore:
             self.register_sensitive(value)
 
     def get(self, name: str) -> str | None:
+        """Return and register an in-memory secret for output redaction."""
         value = self.values.get(name)
         if value:
             self.register_sensitive(value)
         return value
 
     def set(self, name: str, value: str) -> None:
+        """Store a secret value without exposing it in diagnostics or output."""
         self.register_sensitive(value)
         self.values[name] = value
 
     def delete(self, name: str) -> None:
+        """Remove the requested secret and verify that it is no longer present."""
         self.values.pop(name, None)
 
     def present(self, name: str) -> bool:
+        """Return whether the requested secret exists without revealing its value."""
         return name in self.values
 
     def register_sensitive(self, value: str) -> None:
+        """Register a secret value for process-local output redaction."""
         self._redactor.register(value)
 
     def redact(self, text: str) -> str:
+        """Replace registered secret values with safe redaction markers."""
         return self._redactor.redact(text)

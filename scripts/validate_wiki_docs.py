@@ -281,6 +281,7 @@ def validate_wiki_source(source: Path) -> list[ValidationError]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the validate wiki docs command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
@@ -292,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the validate wiki docs command and return its exit status."""
     args = build_parser().parse_args(argv)
     errors = validate_wiki_source(args.source)
     if errors:

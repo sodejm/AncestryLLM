@@ -12,10 +12,21 @@ from ancestryllm.domain.secrets import SUPPORTED_SECRET_REFERENCES
 class SecretStorePort(Protocol):
     """Write-only credential capabilities required by the application service."""
 
-    def set(self, name: str, value: str) -> None: ...
-    def delete(self, name: str) -> None: ...
-    def present(self, name: str) -> bool: ...
-    def register_sensitive(self, value: str) -> None: ...
+    def set(self, name: str, value: str) -> None:
+        """Store a secret value without exposing it in diagnostics or output."""
+        ...
+
+    def delete(self, name: str) -> None:
+        """Remove the requested secret and verify that it is no longer present."""
+        ...
+
+    def present(self, name: str) -> bool:
+        """Return whether the requested secret exists without revealing its value."""
+        ...
+
+    def register_sensitive(self, value: str) -> None:
+        """Register a secret value for process-local output redaction."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +52,7 @@ class SecretManagementService:
         self._store = store
 
     def status(self, reference: str) -> SecretStatus:
+        """Return secret configuration status without revealing secret values."""
         _validate_reference(reference)
         try:
             present = self._store.present(reference)
@@ -49,12 +61,14 @@ class SecretManagementService:
         return SecretStatus(reference=reference, status="present" if present else "missing")
 
     def set(self, reference: str, value: str) -> SecretStatus:
+        """Store a secret value without exposing it in diagnostics or output."""
         _validate_reference(reference)
         self._store.register_sensitive(value)
         self._store.set(reference, value)
         return SecretStatus(reference=reference, status="present")
 
     def delete(self, reference: str) -> SecretStatus:
+        """Remove the requested secret and verify that it is no longer present."""
         _validate_reference(reference)
         self._store.delete(reference)
         if self._store.present(reference):

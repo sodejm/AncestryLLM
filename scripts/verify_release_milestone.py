@@ -76,6 +76,7 @@ def verify_open_items(
 
 
 def main() -> int:
+    """Run the verify release milestone command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tracker-number", required=True, type=int)
     parser.add_argument("--tracker-label", required=True)

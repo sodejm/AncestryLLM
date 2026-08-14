@@ -296,6 +296,8 @@ def _event_lines(
 
 @dataclass(slots=True)
 class ExportReport:
+    """Summarize deterministic RootsMagic export coverage and loss diagnostics."""
+
     profile: str
     destination: str
     people_read: int
@@ -314,6 +316,7 @@ class ExportReport:
         omitted_records: dict[str, int] | None = None,
         sqlite_snapshot: str,
     ) -> str:
+        """Render the export report as deterministic Markdown."""
         lines = [
             "# RootsMagic GEDCOM Export Report",
             "",
@@ -370,6 +373,7 @@ class RootsMagicUnmappedColumns:
     columns: tuple[str, ...]
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic unmapped columns as a plain mapping."""
         return {"table": self.table, "columns": list(self.columns)}
 
 
@@ -389,6 +393,7 @@ class RootsMagicLossReport:
     omitted_records: tuple[tuple[str, int], ...]
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic loss report as a plain mapping."""
         return {
             "profile": self.profile,
             "destination": self.destination,
@@ -418,6 +423,7 @@ class RootsMagicGedcomDocument:
         return self.document.lines
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic GEDCOM document as a plain mapping."""
         return {
             "source_ref": self.source_ref,
             "document": {
@@ -492,6 +498,8 @@ def _structured_loss_report(
 
 
 class RootsMagicMapper:
+    """Map immutable RootsMagic rows into loss-minimal GEDCOM structures."""
+
     def __init__(self, reader: RootsMagicReader) -> None:
         self.reader = reader
 

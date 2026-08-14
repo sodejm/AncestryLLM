@@ -68,6 +68,7 @@ def build(output_root: Path, expected_target: str | None = None) -> Path:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the build verification sidecar workflow."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-root",
@@ -79,6 +80,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the build verification sidecar command and return its exit status."""
     arguments = parse_args(argv)
     result = build(arguments.output_root, arguments.expected_target)
     print(result.relative_to(ROOT) if result.is_relative_to(ROOT) else result)

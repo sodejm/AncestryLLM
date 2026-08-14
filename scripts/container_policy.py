@@ -518,6 +518,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the container policy command and return its exit status."""
     args = _parser().parse_args(argv)
     runtime_inputs = (args.gateway_image, args.worker_image, args.platform)
     if any(value is not None for value in runtime_inputs):

@@ -96,6 +96,7 @@ class DeploymentExecutor:
         self._service = DeploymentService(context.config)
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch deployment inspection, preview, switch, or recovery."""
         action = invocation.key.action
         value: object
         if action == "modes":

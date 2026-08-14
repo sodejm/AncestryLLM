@@ -256,6 +256,7 @@ def _parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
+    """Run the snapshot credential file command and return its exit status."""
     options = _parse_args(arguments)
     try:
         snapshot_credential_file(

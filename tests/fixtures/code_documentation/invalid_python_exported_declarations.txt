@@ -1,0 +1,12 @@
+"""Exercises private declarations included in the public API."""
+
+__all__ = ["_ExportedAdapter", "_exported_helper"]
+
+
+class _ExportedAdapter:
+    def run(self) -> None:
+        pass
+
+
+def _exported_helper() -> None:
+    pass

@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ResearchPerson:
+    """Represent a person returned by the research application service."""
+
     person_id: str
     display_name: str
     living_status: LivingStatus
@@ -22,6 +24,8 @@ class ResearchPerson:
 
 
 class ResearchService:
+    """Coordinate research operations across the application boundary."""
+
     def __init__(self, database: Database) -> None:
         self.database = database
 
@@ -32,6 +36,7 @@ class ResearchService:
         notes: str = "",
         workspace: str = "default",
     ) -> ResearchPerson:
+        """Persist a research person in the selected workspace."""
         if not display_name.strip():
             raise AncestryError("PERSON_NAME_REQUIRED", "A display name is required.")
         with self.database.session() as session:
@@ -43,6 +48,7 @@ class ResearchService:
         )
 
     def list_people(self, workspace: str = "default") -> list[ResearchPerson]:
+        """Return research people in deterministic display-name order."""
         with self.database.session() as session:
             models = ResearchRepository(session).list_people(workspace)
             return [

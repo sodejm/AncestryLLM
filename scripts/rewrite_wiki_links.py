@@ -174,12 +174,14 @@ def rewrite_wiki_directory(wiki: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the rewrite wiki links command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wiki", type=Path, required=True, help="prepared GitHub Wiki checkout")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the rewrite wiki links command and return its exit status."""
     args = build_parser().parse_args(argv)
     rewrite_wiki_directory(args.wiki)
     return 0

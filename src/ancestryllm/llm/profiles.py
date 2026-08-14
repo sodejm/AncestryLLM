@@ -163,6 +163,8 @@ def _validated_settings(
 
 
 class ProviderProfileService:
+    """Coordinate provider profile operations across the application boundary."""
+
     def __init__(
         self,
         database: Database,
@@ -249,6 +251,7 @@ class ProviderProfileService:
         model: str,
         settings: Mapping[str, object] | None = None,
     ) -> ProviderProfileModel:
+        """Persist a validated provider profile and its reviewed settings."""
         if provider_id not in PROVIDER_IDS or provider_id == "none":
             raise AncestryError(
                 "PROVIDER_UNKNOWN", f"Unsupported configured provider: {provider_id}"
@@ -410,6 +413,7 @@ class ProviderProfileService:
         max_cost_usd: float | None = None,
         retain_payloads: bool = False,
     ) -> ConsentProfileModel:
+        """Persist an explicit provider consent grant after policy validation."""
         with self.database.session() as session:
             repository = ProviderRepository(session)
             profile = repository.get_profile(provider_profile)
@@ -434,6 +438,7 @@ class ProviderProfileService:
             return consent
 
     def consent_grant(self, name: str) -> ConsentGrant:
+        """Return the active consent grant for a provider profile."""
         with self.database.session() as session:
             consent = ProviderRepository(session).get_consent(name)
             if consent is None:
@@ -459,6 +464,7 @@ class ProviderProfileService:
             )
 
     def revoke_consent(self, name: str) -> None:
+        """Revoke an existing provider consent grant."""
         with self.database.session() as session:
             consent = ProviderRepository(session).get_consent(name)
             if consent is None:
@@ -467,9 +473,11 @@ class ProviderProfileService:
             session.commit()
 
     def list_profiles(self) -> list[ProviderProfileModel]:
+        """Return provider profiles without exposing credential material."""
         with self.database.session() as session:
             return ProviderRepository(session).list_profiles()
 
     def list_consents(self) -> list[ConsentProfileModel]:
+        """Return the persisted provider consent grants."""
         with self.database.session() as session:
             return ProviderRepository(session).list_consents()

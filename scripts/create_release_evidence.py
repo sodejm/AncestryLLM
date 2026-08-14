@@ -769,6 +769,7 @@ def _escape(value: str) -> str:
 
 
 def main() -> int:
+    """Run the create release evidence command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)

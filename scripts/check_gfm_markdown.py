@@ -123,6 +123,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the check gfm markdown command and return its exit status."""
     args = _parse_args(argv)
     root = args.root.resolve()
     try:

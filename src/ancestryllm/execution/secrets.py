@@ -24,11 +24,14 @@ _DEFAULT_NAMES = (
 
 
 class SecretsExecutor:
+    """Dispatch secret-management commands without exposing secret values."""
+
     def __init__(self, context: AppContext, grants: SecretGrantRegistry) -> None:
         self._context = context
         self._grants = grants
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch secret writes, deletion, and presence checks without reading values."""
         action = invocation.key.action
         if action == "set":
             name = text(invocation, "name")

@@ -2,9 +2,11 @@
 
 This document defines the repository-wide standard for in-code documentation across all
 first-party source files. The tracked-file inventory and file/module purpose requirements
-are machine-checkable via `make code-docs-check`. Declaration-level requirements remain
-part of issue #256 and will move into scoped Ruff and ESLint enforcement in follow-up
-increments; manual review is not the accepted final enforcement state.
+are machine-checkable via `make code-docs-check`. Python public-declaration requirements
+are enforced by the same target through an AST-based semantic check and an explicit scoped
+Ruff rule set. TypeScript, JavaScript, and Swift declaration enforcement remains part of
+issue #256 and will follow in the desktop increment; manual review is not the accepted final
+enforcement state.
 
 ## Purpose
 
@@ -59,13 +61,22 @@ installation and security guidance.
   - Exception: an `__init__.py` that contains only `from … import …` re-exports with no
     other logic may use a single-sentence summary docstring.
 - Public classes, functions, and methods document semantics, parameters, return values,
-    raised exceptions, side effects, invariants, and security/privacy constraints where
-    those facts are not obvious.
+  raised exceptions, side effects, invariants, and security/privacy constraints where
+  those facts are not obvious. Private-named declarations explicitly listed in a literal
+  top-level `__all__` assignment are treated as public exports by the semantic checker.
 - Non-public code receives declaration-level documentation when its algorithm, invariant,
     state transition, or safety constraint is not obvious.
-- The automated gate currently checks meaningful module-level docstrings. Scoped Ruff
-  pydocstyle rules will enforce the declaration-level requirements in a subsequent #256
-  increment.
+- Protocol and abstract methods document the contract they require implementations to
+  preserve. Overrides own a local docstring rather than relying on inherited prose that may
+  no longer describe specialized behavior.
+- Overload signatures do not carry competing docstrings; the concrete implementation owns
+  the public documentation. Ruff rule `D418` rejects docstrings on overload stubs.
+- Tests use descriptive class and function names as their primary declaration documentation.
+  `D101`, `D102`, and `D103` are therefore narrowly ignored only for `tests/**`; module and
+  package documentation, empty docstrings, and overload ownership remain enforced there.
+- Constructors and magic methods inherit the owning class contract by default, so the
+  style-oriented `D105` and `D107` rules are not selected. A non-obvious constructor or
+  magic-method invariant still requires focused documentation under the manual policy.
 
 ### TypeScript/TSX (`.ts`, `.tsx`)
 
@@ -115,31 +126,36 @@ installation and security guidance.
 
 Run `make code-docs-check` locally or in CI. The command:
 
-1. Classifies every Git-tracked file using `scripts/check_code_documentation.py`.
-2. Verifies that every first-party source file has a meaningful, language-appropriate
+1. Runs Ruff rules `D100`, `D101`, `D102`, `D103`, `D104`, `D418`, and `D419` across
+   `src`, `tests`, and `scripts`, with only the documented test-declaration exception.
+2. Classifies every Git-tracked file using `scripts/check_code_documentation.py`.
+3. Verifies that every first-party source file has a meaningful, language-appropriate
    module/file-level purpose statement: Python docstrings, TSDoc/JSDoc blocks, Swift DocC
    lines, shell/config hash comments, HTML comments, or CSS comments.
-3. Rejects empty or placeholder purpose statements, unknown file extensions in
+4. Verifies meaningful public class, function, and method docstrings in production Python
+   and repository scripts, including literal `__all__` exports plus protocol, abstract,
+   override, and migration contracts.
+5. Rejects empty or placeholder purpose statements, unknown file extensions in
    comment-capable categories, and unmapped non-comment formats.
-4. Rejects any permanent documentation-violation baseline.
-5. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
+6. Rejects any permanent documentation-violation baseline.
+7. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
 
 The check is deterministic, offline, and does not call any provider or upload source. It
 ignores a Git-index entry that has been deleted from the working tree, which lets a deletion
 be validated before commit; exact-checkout CI still evaluates every file present in the
 candidate commit.
 
-The present gate is deliberately limited to inventory and file/module documentation. The
-same issue remains open until public/exported declaration coverage and its language-native
-lint rules are enforced without blanket ignores.
+The Python declaration gate adds no baseline or production-tree ignore. The same issue
+remains open until public/exported declaration coverage for the desktop languages is
+enforced with language-native rules and without blanket ignores.
 
 ## Suppression rules
 
 Suppressions are narrow and justified:
 
-- If a scoped Ruff pydocstyle check is introduced, a `# noqa: D…` comment may suppress a
-  single violation only when the policy explicitly allows it (e.g., trivial `__init__.py`
-  re-exports or self-documenting test functions). The comment must include a rationale.
+- A `# noqa: D…` comment may suppress a single violation only when the policy explicitly
+  allows it and the comment includes a rationale. No standing Python declaration
+  suppression is required by the current source tree.
 - Disabling an entire source or test tree is rejected.
 - ESLint `eslint-disable` comments for TSDoc/JSDoc rules require an inline justification.
 

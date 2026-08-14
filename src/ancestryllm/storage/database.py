@@ -167,6 +167,7 @@ class Database:
                 )
 
     def open(self) -> Database:
+        """Initialize resources owned by the database."""
         if self._engine is not None:
             return self
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -233,11 +234,13 @@ class Database:
 
     @property
     def engine(self) -> Engine:
+        """Return the initialized SQLAlchemy engine for application storage."""
         self.open()
         assert self._engine is not None
         return self._engine
 
     def initialize(self) -> None:
+        """Initialize the application storage schema and migrations."""
         with self.engine.begin() as connection:
             schema_tables = _schema_table_names(connection)
             version_table_exists = "alembic_version" in schema_tables
@@ -295,11 +298,13 @@ class Database:
                 return
 
     def session(self) -> Session:
+        """Open a transactional session for application storage."""
         self.initialize()
         assert self._sessions is not None
         return self._sessions()
 
     def close(self) -> None:
+        """Release resources owned by the database."""
         if self._engine is not None:
             self._engine.dispose()
         self._engine = None

@@ -38,7 +38,7 @@ def render_root_help() -> str:
 
 
 def argument_metavar(specification: ArgumentSpec) -> str:
-    """Return the stable, non-sensitive placeholder for an argument."""
+    """Return the stable, non-sensitive metavar label for an argument."""
 
     return specification.metavar or specification.name.upper()
 

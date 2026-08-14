@@ -24,10 +24,13 @@ _MODULE_COLUMNS = (
 
 
 class ModulesExecutor:
+    """Dispatch module-management commands through the application boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._registry = ModuleRegistry(context)
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch module listing or enablement changes through the registry."""
         action = invocation.key.action
         if action == "list":
             return CommandOutcome(

@@ -88,6 +88,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the ci timeout proof command and return its exit status."""
     arguments = _parser().parse_args()
     if arguments.command == "arm":
         _arm(arguments.output)

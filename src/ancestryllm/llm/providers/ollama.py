@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider:
+    """Adapt local Ollama generation and streaming behind the provider contract."""
+
     def __init__(self, base_url: str = "http://127.0.0.1:11434") -> None:
         validate_endpoint("ollama", base_url)
         self.base_url = base_url
@@ -29,6 +31,7 @@ class OllamaProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the ollama provider."""
         return ProviderCapabilities(
             provider_id="ollama",
             remote=not endpoint_is_loopback(self.base_url),
@@ -75,6 +78,7 @@ class OllamaProvider:
         return {"keep_alive": request.execution.keep_alive}
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the ollama provider."""
         try:
             client = self._client(request.timeout_seconds)
             response = client.chat(
@@ -100,6 +104,7 @@ class OllamaProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the ollama provider."""
         stream_started = False
         iterator: Iterator[Any] | None = None
         try:
@@ -137,6 +142,7 @@ class OllamaProvider:
                     logger.warning("Ollama stream close failed: %s", type(exc).__name__)
 
     def close(self) -> None:
+        """Release resources owned by the ollama provider."""
         with self._lock:
             if self._closed:
                 return

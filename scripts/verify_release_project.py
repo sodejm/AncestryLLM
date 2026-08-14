@@ -843,6 +843,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    """Run the verify release project command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-owner", required=True)
     parser.add_argument("--project-number", required=True, type=int)

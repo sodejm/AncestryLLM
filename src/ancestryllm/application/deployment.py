@@ -31,7 +31,9 @@ class DeploymentConfigPort(Protocol):
     default_provider: str
     deployment: DeploymentProfile
 
-    def save(self, *, expected_revision: int | None = None) -> bool: ...
+    def save(self, *, expected_revision: int | None = None) -> bool:
+        """Persist the configuration when its expected revision still matches."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,9 +209,11 @@ class DeploymentService:
         self._lock = threading.RLock()
 
     def modes(self) -> tuple[DeploymentModeDescriptor, ...]:
+        """Return the deployment modes exposed by the deployment service."""
         return _MODE_DESCRIPTORS
 
     def snapshot(self) -> DeploymentSnapshot:
+        """Return a consistent snapshot of the deployment service state."""
         with self._lock:
             return DeploymentSnapshot(
                 schema_version=DEPLOYMENT_SCHEMA_VERSION,

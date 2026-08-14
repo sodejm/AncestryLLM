@@ -28,6 +28,8 @@ DEFAULT_PROVIDER_ENDPOINTS = {
 
 @dataclass(frozen=True, slots=True)
 class ConsentGrant:
+    """Record explicit user consent for a provider and selected data classes."""
+
     consent_id: str
     provider_id: str
     allowed_modules: frozenset[str]
@@ -56,6 +58,7 @@ def endpoint_is_loopback(endpoint: str) -> bool:
 
 
 def validate_endpoint(provider_id: str, endpoint: str) -> None:
+    """Reject provider endpoints outside the reviewed network policy."""
     parsed = urlparse(endpoint)
     if provider_id == "ollama":
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -90,6 +93,7 @@ class ConsentPolicy:
         capabilities: ProviderCapabilities,
         consent: ConsentGrant | None,
     ) -> None:
+        """Authorize provider data disclosure against an explicit consent grant."""
         if capabilities.provider_id != request.provider_id:
             raise SecurityPolicyError(
                 "PROVIDER_MISMATCH", "The selected provider does not match the request."
@@ -141,4 +145,5 @@ class ConsentPolicy:
 
 
 def default_local_data_classes() -> frozenset[DataClass]:
+    """Return the data classes permitted for local providers by default."""
     return frozenset({DataClass.PUBLIC_GENEALOGY, DataClass.DECEASED_PERSON})

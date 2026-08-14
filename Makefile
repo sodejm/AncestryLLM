@@ -125,6 +125,7 @@ workflow-audit: verified-uv
 	@$(UV_BIN) run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
 code-docs-check: verified-uv
+	@$(UV_BIN) run --locked --group lint ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
 docs-cutover: verified-uv

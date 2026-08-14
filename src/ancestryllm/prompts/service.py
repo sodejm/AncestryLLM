@@ -19,6 +19,8 @@ VARIABLE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
 @dataclass(frozen=True, slots=True)
 class SavedPrompt:
+    """Represent a named, versioned prompt template."""
+
     name: str
     purpose: str
     version: int
@@ -28,6 +30,8 @@ class SavedPrompt:
 
 
 class PromptService:
+    """Coordinate prompt operations across the application boundary."""
+
     def __init__(self, database: Database) -> None:
         self.database = database
 
@@ -40,6 +44,7 @@ class PromptService:
         response_schema: dict[str, Any] | None = None,
         tags: list[str] | None = None,
     ) -> SavedPrompt:
+        """Validate and persist the next immutable version of a prompt template."""
         if not name.strip() or not purpose.strip() or not body.strip():
             raise AncestryError("PROMPT_INVALID", "Prompt name, purpose, and body are required.")
         invalid = [value for value in variables if not VARIABLE_NAME.fullmatch(value)]
@@ -70,6 +75,7 @@ class PromptService:
         )
 
     def get(self, name: str, version: int | None = None) -> SavedPrompt:
+        """Return the selected prompt version or raise ``PROMPT_NOT_FOUND``."""
         with self.database.session() as session:
             result = PromptRepository(session).get(name, version)
             if result is None:
@@ -87,6 +93,7 @@ class PromptService:
             )
 
     def render(self, name: str, values: dict[str, str], version: int | None = None) -> str:
+        """Render a saved prompt version with its validated variable values."""
         prompt = self.get(name, version)
         expected = set(prompt.variables)
         supplied = set(values)
@@ -102,6 +109,7 @@ class PromptService:
         return Template(prompt.body).substitute(values)
 
     def list(self) -> list[tuple[str, str]]:
+        """Return prompt names and purposes in deterministic name order."""
         with self.database.session() as session:
             return [
                 (item.name, item.purpose) for item in PromptRepository(session).list_templates()

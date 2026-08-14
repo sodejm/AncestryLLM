@@ -11,6 +11,7 @@ from ancestryllm.core.errors import ProviderError
 
 
 def validate_structured_output(text: str, schema: dict[str, Any] | None) -> Any | None:
+    """Validate provider output against the requested JSON schema."""
     if schema is None:
         return None
 

@@ -143,6 +143,7 @@ def load_release_configuration(
 
 
 def main() -> int:
+    """Run the verify release configuration command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--version", required=True)

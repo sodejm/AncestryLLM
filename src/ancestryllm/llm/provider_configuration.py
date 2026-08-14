@@ -40,6 +40,8 @@ _CONFIGURATION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$")
 
 @dataclass(frozen=True, slots=True)
 class ProviderProfileSummary:
+    """Summarize a configured provider without exposing credentials."""
+
     name: str
     provider_id: str
     model: str
@@ -51,6 +53,8 @@ class ProviderProfileSummary:
 
 @dataclass(frozen=True, slots=True)
 class ConsentGrantSummary:
+    """Summarize an active provider consent grant for presentation."""
+
     name: str
     provider_profile_name: str
     provider_id: str
@@ -65,6 +69,8 @@ class ConsentGrantSummary:
 
 @dataclass(frozen=True, slots=True)
 class ProviderConfigurationSnapshot:
+    """Capture sanitized provider profiles and consent grants for presentation."""
+
     schema_version: int
     revision: str
     profiles: tuple[ProviderProfileSummary, ...]
@@ -73,6 +79,8 @@ class ProviderConfigurationSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class ConsentPreview:
+    """Describe the data that would be disclosed by a proposed consent grant."""
+
     schema_version: int
     provider_profile_name: str
     provider_id: str
@@ -153,6 +161,7 @@ class ProviderConfigurationService:
         self._mutation_lock = threading.Lock()
 
     def snapshot(self) -> ProviderConfigurationSnapshot:
+        """Return a consistent snapshot of the provider configuration service state."""
         with self._mutation_lock:
             return self._snapshot_unlocked()
 
@@ -222,6 +231,7 @@ class ProviderConfigurationService:
         endpoint: str,
         endpoint_identity_sha256: str,
     ) -> ProviderConfigurationSnapshot:
+        """Persist a validated provider profile and its reviewed settings."""
         with self._mutation_lock:
             name = _validated_name(name, field_name="profile")
             if (
@@ -278,6 +288,7 @@ class ProviderConfigurationService:
         max_cost_usd: float | None,
         retain_payloads: bool,
     ) -> ConsentPreview:
+        """Preview the data disclosure represented by a proposed consent grant."""
         profiles = {item.name: item for item in self.snapshot().profiles}
         profile = profiles.get(provider_profile_name)
         if profile is None:
@@ -322,6 +333,7 @@ class ProviderConfigurationService:
         name: str,
         preview: ConsentPreview,
     ) -> ProviderConfigurationSnapshot:
+        """Persist an explicit provider consent grant after policy validation."""
         with self._mutation_lock:
             name = _validated_name(name, field_name="consent")
             current = self._snapshot_unlocked()
@@ -381,6 +393,7 @@ class ProviderConfigurationService:
         expected_revision: str,
         name: str,
     ) -> ProviderConfigurationSnapshot:
+        """Revoke an existing provider consent grant."""
         with self._mutation_lock:
             name = _validated_name(name, field_name="consent")
             current = self._snapshot_unlocked()

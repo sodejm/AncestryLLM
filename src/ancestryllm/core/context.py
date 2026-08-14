@@ -16,6 +16,8 @@ from ancestryllm.storage.database import Database
 
 @dataclass(slots=True)
 class AppContext:
+    """Own the configured services, adapters, and lifecycle resources for one process."""
+
     config: AppConfig
     secrets: SecretStore
     database: Database
@@ -42,6 +44,7 @@ class AppContext:
     def build(
         cls, config: AppConfig | None = None, secrets_store: SecretStore | None = None
     ) -> AppContext:
+        """Build a fully wired app context from validated configuration."""
         selected_config = config or AppConfig.load()
         selected_secrets = secrets_store or KeyringSecretStore()
         database = Database(selected_config.database_path, selected_secrets)

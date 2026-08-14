@@ -232,6 +232,7 @@ def prepare_pages_source(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the prepare pages source command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source", type=Path, required=True, help="canonical documentation directory"
@@ -246,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the prepare pages source command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         result = prepare_pages_source(args.source, args.destination, source_sha=args.source_sha)

@@ -528,6 +528,7 @@ def run_scan(targets: list[str]) -> int:
 
 
 def main(arguments: list[str] | None = None) -> int:
+    """Run the run pinned semgrep command and return its exit status."""
     parser = argparse.ArgumentParser(
         description=("Run lockfile-pinned Semgrep with content-pinned registry rule bundles.")
     )

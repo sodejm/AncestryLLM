@@ -59,6 +59,8 @@ def _valid_error_code(value: object) -> bool:
 
 
 class JobState(StrEnum):
+    """Enumerate the supported job state values."""
+
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -68,6 +70,8 @@ class JobState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ProgressEvent:
+    """Report a typed progress update for a background job."""
+
     operation: str
     timestamp: str
     completed: int | None = None
@@ -76,6 +80,8 @@ class ProgressEvent:
 
 @dataclass(frozen=True, slots=True)
 class JobSnapshot:
+    """Capture the externally visible state of one background job."""
+
     job_id: str
     name: str
     state: JobState
@@ -119,10 +125,12 @@ class JobReporter:
 
     @property
     def cancellation_requested(self) -> bool:
+        """Return whether cooperative job cancellation was requested."""
         return self._manager._token(self.job_id).requested
 
     @property
     def cancellation_pending(self) -> bool:
+        """Return whether a cancellation request is awaiting completion."""
         return self._manager._token(self.job_id).state.pending
 
     def check_cancelled(self) -> None:
@@ -147,6 +155,7 @@ class JobReporter:
         completed: int | None = None,
         total: int | None = None,
     ) -> None:
+        """Publish a progress update through the job reporter."""
         operation = _validate_bounded_text(
             operation,
             "Progress operation",
@@ -247,6 +256,7 @@ class JobManager:
         *,
         resource_keys: tuple[str, ...] = (),
     ) -> JobSnapshot:
+        """Submit a background job through the job manager."""
         if not callable(function):
             raise ValueError("Background job work must be callable.")
         return self._submit(
@@ -262,6 +272,7 @@ class JobManager:
         *,
         resource_keys: tuple[str, ...] = (),
     ) -> JobSnapshot:
+        """Submit a background job with typed progress reporting through the job manager."""
         return self._submit(name, function, resource_keys=resource_keys)
 
     def _submit(
@@ -631,6 +642,7 @@ class JobManager:
         self._notify(snapshot)
 
     def subscribe(self, listener: Callable[[JobSnapshot], None]) -> Callable[[], None]:
+        """Subscribe to future events exposed by the job manager."""
         with self._lock:
             self._listeners.append(listener)
 
@@ -651,6 +663,7 @@ class JobManager:
                 logger.warning("Job listener failed: %s", type(exc).__name__)
 
     def get(self, job_id: str) -> JobSnapshot:
+        """Return the current snapshot for one job or raise ``JOB_NOT_FOUND``."""
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
@@ -662,6 +675,7 @@ class JobManager:
             return record.snapshot
 
     def list(self, state: JobState | None = None) -> list[JobSnapshot]:
+        """Return current job snapshots, optionally filtered by lifecycle state."""
         with self._lock:
             snapshots = [record.snapshot for record in self._records.values()]
         if state is not None:
@@ -669,6 +683,7 @@ class JobManager:
         return snapshots
 
     def wait(self, job_id: str, timeout: float | None = None) -> JobSnapshot:
+        """Wait for the requested job to reach a terminal state in the job manager."""
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
@@ -749,6 +764,7 @@ class JobManager:
         return self.get(job_id)
 
     def shutdown(self, *, wait: bool = True, cancel: bool = False) -> None:
+        """Release resources owned by the job manager."""
         with self._lock:
             self._closed = True
         if cancel:

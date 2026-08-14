@@ -144,6 +144,7 @@ class SqlJobEventRepository:
         self._lock = threading.RLock()
 
     def record_core(self, snapshot: JobSnapshot) -> JobEvent | None:
+        """Persist a normalized core job snapshot as a durable lifecycle event."""
         job_number = _validate_job_id(snapshot.job_id)
         with self._lock, self.database.session() as session:
             current_row = session.get(JobModel, snapshot.job_id)
@@ -230,6 +231,7 @@ class SqlJobEventRepository:
         return event
 
     def get(self, job_id: str) -> PublicJobSnapshot:
+        """Return one persisted public job snapshot or raise ``JOB_NOT_FOUND``."""
         _validate_job_id(job_id)
         with self._lock, self.database.session() as session:
             row = session.get(JobModel, job_id)
@@ -242,6 +244,7 @@ class SqlJobEventRepository:
             return _decode_snapshot(row.snapshot_json)
 
     def list(self, *, limit: int = 100) -> tuple[PublicJobSnapshot, ...]:
+        """Return newest persisted public job snapshots up to the requested limit."""
         _validate_limit(limit)
         with self._lock, self.database.session() as session:
             rows = tuple(
@@ -250,6 +253,7 @@ class SqlJobEventRepository:
             return tuple(_decode_snapshot(row.snapshot_json) for row in rows)
 
     def replay(self, job_id: str, *, after: int) -> JobReplay:
+        """Replay persisted events through the SQL job event repository."""
         _validate_job_id(job_id)
         _validate_cursor(after)
         with self._lock, self.database.session() as session:
@@ -302,6 +306,7 @@ class SqlJobEventRepository:
             )
 
     def reconcile_active(self) -> tuple[JobEvent, ...]:
+        """Reconcile active jobs after SQL job event repository recovery."""
         reconciled: list[JobEvent] = []
         with self._lock, self.database.session() as session:
             rows = tuple(
@@ -340,6 +345,7 @@ class SqlJobEventRepository:
         return tuple(reconciled)
 
     def next_job_number(self) -> int:
+        """Reserve the next monotonically increasing job number through the SQL job event repository."""
         with self._lock, self.database.session() as session:
             latest = session.scalar(select(func.max(JobModel.job_number)))
             return int(latest or 0) + 1

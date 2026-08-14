@@ -33,6 +33,7 @@ class AncestryError(Exception):
         return self.message
 
     def render(self) -> str:
+        """Render the stable error code, safe message, and optional remediation."""
         lines = [f"[{self.code}] {self.message}"]
         if self.remediation:
             lines.append(f"How to fix: {self.remediation}")

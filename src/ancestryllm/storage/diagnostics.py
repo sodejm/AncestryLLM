@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class StorageDiagnostic:
+    """Describe a stable storage health diagnostic without sensitive payloads."""
+
     code: str
     status: str
     message: str
@@ -65,6 +67,7 @@ class StartupDiagnosticReport:
 
     @property
     def mutations_allowed(self) -> bool:
+        """Return whether the current storage mode permits mutations."""
         return not any(component.blocks_mutations for component in self.components)
 
 

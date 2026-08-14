@@ -517,6 +517,7 @@ def _performance_samples(
 
 
 def performance_snapshot(manifest: dict[str, Any], temporary_root: Path) -> dict[str, Any]:
+    """Measure the characterized core-contract workload."""
     policy = manifest["performance"]
     runs = int(policy["runs"])
     warm_iterations = int(policy["warm_iterations_per_run"])
@@ -551,6 +552,7 @@ def _git_revision() -> str:
 
 
 def capture_report(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Capture the complete core-contract characterization report."""
     inventory = verify_inventory(manifest)
     expected_hashes = fixture_hashes(manifest)
     source_tree_sha256 = _source_tree_digest()
@@ -783,6 +785,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the characterize core contracts command and return its exit status."""
     args = _parser().parse_args(argv)
     try:
         if args.command == "_measure":

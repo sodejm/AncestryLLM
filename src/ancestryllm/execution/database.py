@@ -18,10 +18,13 @@ _DIAGNOSTIC_COLUMNS = ("code", "status", "message", "remediation")
 
 
 class DatabaseExecutor:
+    """Dispatch database commands through the application service boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._context = context
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch database diagnostics or an encrypted backup operation."""
         if invocation.key.action == "diagnose":
             from ancestryllm.storage.diagnostics import diagnose_storage
 

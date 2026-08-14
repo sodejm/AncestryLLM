@@ -76,6 +76,7 @@ def benchmark(iterations: int) -> dict[str, object]:
 
 
 def main() -> int:
+    """Run the benchmark CLI import command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iterations", type=_positive_iterations, default=7)
     arguments = parser.parse_args()

@@ -39,6 +39,7 @@ class _CurrentCancellationAdapter:
         self._source = source
 
     def check_cancelled(self) -> None:
+        """Translate legacy cancellation into the stable coded domain failure."""
         try:
             self._source.check_cancelled()
         except CancellationError as exc:
@@ -54,6 +55,7 @@ class _CurrentProgressAdapter:
         self._reporter = reporter
 
     def emit(self, event: ProgressEvent) -> None:
+        """Forward bounded progress through the legacy reporter contract."""
         self._reporter.update(
             f"{event.operation}.{event.stage}",
             completed=event.completed,

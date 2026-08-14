@@ -17,6 +17,7 @@ def _sha256(path: Path) -> str:
 
 
 def generate_checksums(directory: Path, output_name: str = "SHA256SUMS") -> dict[str, str]:
+    """Generate deterministic SHA-256 entries for release artifacts."""
     directory = directory.resolve()
     if not directory.is_dir():
         raise ValueError(f"release asset directory does not exist: {directory}")
@@ -56,6 +57,7 @@ def generate_checksums(directory: Path, output_name: str = "SHA256SUMS") -> dict
 
 
 def main() -> int:
+    """Run the generate release checksums command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--output-name", default="SHA256SUMS")

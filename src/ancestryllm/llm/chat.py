@@ -72,6 +72,7 @@ class ChatService:
 
     @staticmethod
     def capability() -> ChatCapability:
+        """Describe the chat capability currently available to the caller."""
         return ChatCapability()
 
     @staticmethod
@@ -197,6 +198,7 @@ class ChatService:
                 self._pending_sessions -= 1
 
     def get(self, session_id: str) -> ChatSession:
+        """Return a sanitized immutable snapshot of one open chat session."""
         with self._lock:
             self._require_open()
             state = self._sessions.get(session_id)

@@ -55,9 +55,11 @@ class PresentationAdapter:
 
     @classmethod
     def for_file(cls, file: TextIO) -> PresentationAdapter:
+        """Create a presentation adapter for a generated file artifact."""
         return cls(Console(file=file, force_terminal=False, color_system=None, highlight=False))
 
     def render(self, value: Any, *, json_output: bool = False) -> None:
+        """Render a typed application result for terminal or JSON presentation."""
         if json_output:
             self._print_text(json.dumps(to_plain(value), indent=2, sort_keys=True))
         elif isinstance(value, MarkdownResult):
@@ -80,6 +82,7 @@ class PresentationAdapter:
             self._render_plain(to_plain(value))
 
     def render_error(self, error: AncestryError) -> None:
+        """Render a sanitized coded error through the presentation adapter."""
         self.render(ErrorResult(error_envelope(error)))
 
     def _render_table(self, result: TableResult) -> None:
