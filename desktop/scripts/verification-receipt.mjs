@@ -1,3 +1,4 @@
+/** Produces sanitized, schema-validated receipts for native desktop verification jobs. */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'

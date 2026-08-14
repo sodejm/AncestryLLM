@@ -1,3 +1,4 @@
+/** Defines the versioned, serializable contract shared by all desktop processes. */
 export const DESKTOP_PROTOCOL_VERSION = '1' as const
 
 export type DesktopColorScheme = 'system' | 'light' | 'dark'

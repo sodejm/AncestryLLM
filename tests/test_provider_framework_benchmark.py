@@ -1,3 +1,5 @@
+"""Verify provider-framework benchmark measurements and network-free none-provider use."""
+
 from __future__ import annotations
 
 import importlib.util

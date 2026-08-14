@@ -11,7 +11,8 @@ See ``docs/CODE_DOCUMENTATION.md`` for the full policy.
 from __future__ import annotations
 
 import textwrap
-from typing import TYPE_CHECKING
+from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 from scripts.check_code_documentation import (
@@ -19,11 +20,17 @@ from scripts.check_code_documentation import (
     check_file_documentation,
     check_inventory,
     classify,
+    list_tracked_files,
     main,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "code_documentation"
+
+
+def _fixture_source(name: str) -> str:
+    """Load one checked-in source snippet used by documentation-policy tests."""
+    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # classify() — extension and path-prefix rules
@@ -44,6 +51,9 @@ class TestClassify:
 
     def test_typescript_source(self) -> None:
         assert classify("desktop/src/main/index.ts") == "first-party-code"
+
+    def test_typescript_declaration_file(self) -> None:
+        assert classify("desktop/src/shared-contract/index.d.ts") == "first-party-code"
 
     def test_typescript_test(self) -> None:
         assert classify("desktop/src/main/foo.test.ts") == "first-party-code"
@@ -184,6 +194,15 @@ class TestCheckInventory:
         assert any("unknown-extension" in d for d in diagnostics)
         assert any("src/foo.xyz" in d for d in diagnostics)
 
+    def test_permanent_baseline_is_forbidden(self, tmp_path: Path) -> None:
+        baseline = tmp_path / "docs" / "CODE_DOCUMENTATION_BASELINE.txt"
+        baseline.parent.mkdir(parents=True)
+        baseline.write_text("src/foo.py:missing-module-docstring\n")
+
+        diagnostics = check_inventory(["docs/CODE_DOCUMENTATION_BASELINE.txt"], tmp_path)
+
+        assert diagnostics == ["docs/CODE_DOCUMENTATION_BASELINE.txt:permanent-baseline-forbidden"]
+
     def test_non_comment_format_without_map_entry_fails(self, tmp_path: Path) -> None:
         tracked = ["some/unmapped.json"]
         diagnostics = check_inventory(tracked, tmp_path)
@@ -247,6 +266,50 @@ class TestCheckInventory:
         assert diagnostics == [f"{key}:non-comment-format-map-target-missing"]
 
 
+class TestTrackedFiles:
+    """Tests for the Git-backed working-tree inventory."""
+
+    def test_git_paths_use_nul_delimiters_without_quote_loss(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tracked = ["src/café.py", "src/line\nbreak.py"]
+        for relative_path in tracked:
+            path = tmp_path / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('"""Documents a machine-safe tracked path."""\n')
+
+        def fake_run(*args: object, **kwargs: object) -> CompletedProcess[str]:
+            assert args[0] == ["git", "ls-files", "-z"]
+            return CompletedProcess(
+                args=["git", "ls-files", "-z"],
+                returncode=0,
+                stdout="\0".join(tracked) + "\0",
+                stderr="",
+            )
+
+        monkeypatch.setattr("scripts.check_code_documentation.subprocess.run", fake_run)
+
+        assert list_tracked_files(tmp_path) == tracked
+
+    def test_unstaged_deleted_paths_are_not_checked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kept = tmp_path / "kept.py"
+        kept.write_text('"""Documents the retained module."""\n')
+
+        monkeypatch.setattr(
+            "scripts.check_code_documentation.subprocess.run",
+            lambda *args, **kwargs: CompletedProcess(
+                args=["git", "ls-files", "-z"],
+                returncode=0,
+                stdout="deleted.py\0kept.py\0",
+                stderr="",
+            ),
+        )
+
+        assert list_tracked_files(tmp_path) == ["kept.py"]
+
+
 # ---------------------------------------------------------------------------
 # check_file_documentation() — per-file documentation checks
 # ---------------------------------------------------------------------------
@@ -254,6 +317,73 @@ class TestCheckInventory:
 
 class TestCheckFileDocumentation:
     """Tests for the per-file documentation presence check."""
+
+    @pytest.mark.parametrize(
+        ("relative_path", "fixture_name"),
+        [
+            ("src/example.py", "valid_python.txt"),
+            ("desktop/src/main/example.ts", "valid_typescript.txt"),
+            ("desktop/src/shared-contract/example.d.ts", "valid_typescript_declaration.txt"),
+            ("scripts/example.swift", "valid_swift.txt"),
+            ("scripts/example.sh", "valid_shell.txt"),
+            ("docs/_layouts/example.html", "valid_html.txt"),
+            ("desktop/src/renderer/example.css", "valid_css.txt"),
+        ],
+    )
+    def test_checked_in_positive_fixtures_pass(
+        self, tmp_path: Path, relative_path: str, fixture_name: str
+    ) -> None:
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True)
+        target.write_text(_fixture_source(fixture_name), encoding="utf-8")
+
+        assert check_file_documentation(relative_path, tmp_path) == []
+
+    @pytest.mark.parametrize(
+        ("relative_path", "fixture_name", "expected_rule"),
+        [
+            ("src/example.py", "invalid_python_empty.txt", "missing-module-docstring"),
+            (
+                "desktop/src/main/example.ts",
+                "invalid_typescript_plain_comment.txt",
+                "missing-file-header-comment",
+            ),
+            (
+                "desktop/src/main/example.ts",
+                "invalid_typescript_placeholder.txt",
+                "missing-file-header-comment",
+            ),
+            (
+                "scripts/example.swift",
+                "invalid_swift_plain_comment.txt",
+                "missing-file-header-comment",
+            ),
+            (
+                "docs/_layouts/example.html",
+                "invalid_html_empty.txt",
+                "missing-file-header-comment",
+            ),
+            (
+                "desktop/src/renderer/example.css",
+                "invalid_css_empty.txt",
+                "missing-file-header-comment",
+            ),
+        ],
+    )
+    def test_checked_in_negative_fixtures_fail_closed(
+        self,
+        tmp_path: Path,
+        relative_path: str,
+        fixture_name: str,
+        expected_rule: str,
+    ) -> None:
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True)
+        target.write_text(_fixture_source(fixture_name), encoding="utf-8")
+
+        assert check_file_documentation(relative_path, tmp_path) == [
+            f"{relative_path}:{expected_rule}"
+        ]
 
     # --- Python ---
 
@@ -276,6 +406,15 @@ class TestCheckFileDocumentation:
         f.write_text("")
         diags = check_file_documentation("src/empty.py", tmp_path)
         assert any("missing-module-docstring" in d for d in diags)
+
+    def test_empty_python_docstring_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "src" / "empty_docstring.py"
+        f.parent.mkdir(parents=True)
+        f.write_text('"""   """\n')
+
+        assert check_file_documentation("src/empty_docstring.py", tmp_path) == [
+            "src/empty_docstring.py:missing-module-docstring"
+        ]
 
     def test_python_with_only_comment_fails(self, tmp_path: Path) -> None:
         """A module with only a # comment, not a docstring, must fail."""
@@ -312,6 +451,43 @@ class TestCheckFileDocumentation:
         diags = check_file_documentation("scripts/noheader.sh", tmp_path)
         assert any("missing-file-header-comment" in d for d in diags)
 
+    def test_shell_empty_comment_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "empty-header.sh"
+        f.parent.mkdir(parents=True)
+        f.write_text("#!/usr/bin/env bash\n#\nset -e\n")
+
+        assert check_file_documentation("scripts/empty-header.sh", tmp_path) == [
+            "scripts/empty-header.sh:missing-file-header-comment"
+        ]
+
+    def test_shell_multiline_license_without_separate_purpose_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "licensed.sh"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "#!/usr/bin/env bash\n"
+            "# Copyright 2026 Example\n"
+            "# Permission is hereby granted under the project license.\n"
+            "set -e\n"
+        )
+
+        assert check_file_documentation("scripts/licensed.sh", tmp_path) == [
+            "scripts/licensed.sh:missing-file-header-comment"
+        ]
+
+    def test_shell_multiline_license_may_precede_separate_purpose(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "licensed.sh"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "#!/usr/bin/env bash\n"
+            "# Copyright 2026 Example\n"
+            "# Permission is hereby granted under the project license.\n"
+            "\n"
+            "# Runs the reviewed repository build workflow.\n"
+            "set -e\n"
+        )
+
+        assert check_file_documentation("scripts/licensed.sh", tmp_path) == []
+
     # --- TypeScript ---
 
     def test_typescript_with_jsdoc_passes(self, tmp_path: Path) -> None:
@@ -333,6 +509,51 @@ class TestCheckFileDocumentation:
         f.write_text("import { app } from 'electron';\n")
         diags = check_file_documentation("desktop/src/main/bare.ts", tmp_path)
         assert any("missing-file-header-comment" in d for d in diags)
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            "// Plain comments are not module documentation.\n",
+            "/** */\n",
+            "/** TODO */\n",
+            "/** TODO: add documentation later. */\n",
+        ],
+    )
+    def test_typescript_requires_meaningful_jsdoc_header(self, tmp_path: Path, header: str) -> None:
+        f = tmp_path / "desktop" / "src" / "main" / "bare.ts"
+        f.parent.mkdir(parents=True)
+        f.write_text(f"{header}export const value = 1\n")
+
+        assert check_file_documentation("desktop/src/main/bare.ts", tmp_path) == [
+            "desktop/src/main/bare.ts:missing-file-header-comment"
+        ]
+
+    def test_typescript_license_may_precede_jsdoc_header(self, tmp_path: Path) -> None:
+        f = tmp_path / "desktop" / "src" / "main" / "licensed.ts"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "/* SPDX-License-Identifier: MIT */\n"
+            "/** Defines the licensed desktop module contract. */\n"
+            "export const value = 1\n"
+        )
+
+        assert check_file_documentation("desktop/src/main/licensed.ts", tmp_path) == []
+
+    def test_typescript_license_without_jsdoc_header_fails(self, tmp_path: Path) -> None:
+        f = tmp_path / "desktop" / "src" / "main" / "licensed.ts"
+        f.parent.mkdir(parents=True)
+        f.write_text("/* SPDX-License-Identifier: MIT */\nexport const value = 1\n")
+
+        assert check_file_documentation("desktop/src/main/licensed.ts", tmp_path) == [
+            "desktop/src/main/licensed.ts:missing-file-header-comment"
+        ]
+
+    def test_typescript_declaration_file_with_jsdoc_passes(self, tmp_path: Path) -> None:
+        f = tmp_path / "desktop" / "src" / "shared-contract" / "index.d.ts"
+        f.parent.mkdir(parents=True)
+        f.write_text("/** Defines the desktop ambient contract. */\nexport interface Bridge {}\n")
+
+        assert check_file_documentation("desktop/src/shared-contract/index.d.ts", tmp_path) == []
 
     def test_late_header_fails(self, tmp_path: Path) -> None:
         f = tmp_path / "desktop" / "src" / "main" / "late.ts"
@@ -363,6 +584,62 @@ class TestCheckFileDocumentation:
         f.parent.mkdir(parents=True)
         f.write_text("# Builds the OCI runtime image.\nFROM scratch\n")
         assert check_file_documentation("containers/Dockerfile", tmp_path) == []
+
+    def test_swift_requires_doc_comment(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "helper.swift"
+        f.parent.mkdir(parents=True)
+        f.write_text("// Plain Swift comment.\nimport Foundation\n")
+
+        assert check_file_documentation("scripts/helper.swift", tmp_path) == [
+            "scripts/helper.swift:missing-file-header-comment"
+        ]
+
+    def test_swift_doc_comment_passes(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "helper.swift"
+        f.parent.mkdir(parents=True)
+        f.write_text("/// Exports the reviewed Apple signing identity.\nimport Foundation\n")
+
+        assert check_file_documentation("scripts/helper.swift", tmp_path) == []
+
+    @pytest.mark.parametrize(
+        ("relative_path", "source"),
+        [
+            (
+                "docs/_layouts/documentation.html",
+                "<!-- Renders the documentation navigation layout. -->\n<html></html>\n",
+            ),
+            (
+                "desktop/src/renderer/src/styles.css",
+                "/* Defines the renderer theme and accessible layout. */\n:root {}\n",
+            ),
+        ],
+    )
+    def test_markup_and_stylesheet_headers_pass(
+        self, tmp_path: Path, relative_path: str, source: str
+    ) -> None:
+        f = tmp_path / relative_path
+        f.parent.mkdir(parents=True)
+        f.write_text(source)
+
+        assert check_file_documentation(relative_path, tmp_path) == []
+
+    @pytest.mark.parametrize(
+        ("relative_path", "source"),
+        [
+            ("docs/_layouts/documentation.html", "<!-- -->\n<html></html>\n"),
+            ("desktop/src/renderer/src/styles.css", "/**/\n:root {}\n"),
+        ],
+    )
+    def test_empty_markup_and_stylesheet_headers_fail(
+        self, tmp_path: Path, relative_path: str, source: str
+    ) -> None:
+        f = tmp_path / relative_path
+        f.parent.mkdir(parents=True)
+        f.write_text(source)
+
+        assert check_file_documentation(relative_path, tmp_path) == [
+            f"{relative_path}:missing-file-header-comment"
+        ]
 
     # --- Non-code classifications are skipped ---
 
@@ -415,44 +692,8 @@ class TestMain:
         code = main(["--root", str(tmp_path), "--tracked-files"])
         assert code == 0
 
-    def test_baseline_permits_only_recorded_legacy_violation(self, tmp_path: Path) -> None:
-        legacy = tmp_path / "src" / "legacy.py"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text("def legacy(): pass\n")
-        baseline = tmp_path / "baseline.txt"
-        baseline.write_text("src/legacy.py:missing-module-docstring\n")
+    def test_baseline_argument_is_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--root", str(tmp_path), "--baseline", "baseline.txt"])
 
-        code = main(
-            [
-                "--root",
-                str(tmp_path),
-                "--baseline",
-                str(baseline),
-                "--tracked-files",
-                "src/legacy.py",
-            ]
-        )
-
-        assert code == 0
-
-    def test_baseline_does_not_permit_new_violation(self, tmp_path: Path) -> None:
-        for name in ("legacy.py", "new.py"):
-            f = tmp_path / "src" / name
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text("def missing_docstring(): pass\n")
-        baseline = tmp_path / "baseline.txt"
-        baseline.write_text("src/legacy.py:missing-module-docstring\n")
-
-        code = main(
-            [
-                "--root",
-                str(tmp_path),
-                "--baseline",
-                str(baseline),
-                "--tracked-files",
-                "src/legacy.py",
-                "src/new.py",
-            ]
-        )
-
-        assert code == 1
+        assert exc_info.value.code == 2

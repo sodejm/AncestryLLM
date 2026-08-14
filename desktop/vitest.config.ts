@@ -1,3 +1,4 @@
+/** Configures isolated desktop unit tests and React transforms under Vitest. */
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 

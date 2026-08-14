@@ -1,3 +1,4 @@
+# Runs the canonical test, quality, security, and packaging gates for Python changes.
 name: CI
 
 on:

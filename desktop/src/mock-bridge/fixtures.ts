@@ -1,3 +1,4 @@
+/** Defines immutable fictional desktop bridge fixtures for development and tests. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type AppInfo,

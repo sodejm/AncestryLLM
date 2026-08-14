@@ -1,4 +1,4 @@
-// Verifies bounded native-sidecar cleanup, including Windows process-tree termination.
+/** Verifies bounded native-sidecar cleanup, including Windows process-tree termination. */
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {

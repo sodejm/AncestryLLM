@@ -1,3 +1,4 @@
+/** Configures isolated Electron main, preload, and renderer builds for each lifecycle. */
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'

@@ -1,3 +1,4 @@
+/** Composes the desktop shell, bridge-backed routes, settings, and chat experience. */
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'

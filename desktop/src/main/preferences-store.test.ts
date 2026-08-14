@@ -1,3 +1,4 @@
+/** Verifies preferences persistence is atomic, bounded, private, and conflict safe. */
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

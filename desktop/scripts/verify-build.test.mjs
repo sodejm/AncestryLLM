@@ -1,3 +1,4 @@
+/** Verifies build inspection rejects unsafe content and resolves cross-platform paths. */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

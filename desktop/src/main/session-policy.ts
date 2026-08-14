@@ -1,3 +1,4 @@
+/** Installs the fail-closed permission and download policy on an Electron session. */
 interface PermissionTarget {
   setPermissionRequestHandler(handler: (contents: unknown, permission: unknown, callback: (allowed: boolean) => void) => void): void
   setPermissionCheckHandler(handler: (contents: unknown, permission: unknown, requestingOrigin: string) => boolean): void

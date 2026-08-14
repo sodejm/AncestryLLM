@@ -1,3 +1,4 @@
+/** Discovers packaged application executables and resource roots on supported platforms. */
 import assert from 'node:assert/strict'
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'

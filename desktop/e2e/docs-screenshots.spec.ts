@@ -1,4 +1,4 @@
-// Captures each manifest-declared Electron documentation state twice for exact comparison.
+/** Captures each manifest-declared Electron documentation state twice for exact comparison. */
 
 import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'

@@ -1,3 +1,4 @@
+/** Detects the exact structured log record proving a renderer window is ready. */
 export const WINDOW_READY_RECORD = '{"event":"ancestryllm.desktop.window-ready","version":1}'
 
 export function outputContainsWindowReadyRecord(output: string): boolean {

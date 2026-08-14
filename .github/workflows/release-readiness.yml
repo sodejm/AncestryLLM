@@ -1,3 +1,4 @@
+# Produces fail-closed evidence that a selected commit is ready for release.
 name: Release readiness
 
 on:

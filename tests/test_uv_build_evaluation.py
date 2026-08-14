@@ -157,7 +157,7 @@ def test_candidate_overlay_changes_only_the_reviewed_build_configuration() -> No
         "docs/release-evidence/README.md",
         "docs/release-evidence/issue-10-import-smoke-tests.md",
     ]
-    assert original.startswith('[build-system]\nrequires = ["setuptools>=83"]')
+    assert original.count(evaluation.PRODUCTION_BUILD_SYSTEM) == 1
     assert (ROOT / "pyproject.toml").read_text(encoding="utf-8") == original
 
 

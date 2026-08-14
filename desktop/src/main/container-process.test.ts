@@ -1,4 +1,4 @@
-// Verifies bounded, no-shell Docker process execution and stable fail-closed errors.
+/** Verifies bounded, no-shell Docker process execution and stable fail-closed errors. */
 
 import { describe, expect, it, vi } from 'vitest'
 import {

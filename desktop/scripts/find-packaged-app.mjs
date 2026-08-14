@@ -1,3 +1,4 @@
+/** Prints the platform-specific executable discovered in a packaged application tree. */
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { discoverPackage } from './package-paths.mjs'

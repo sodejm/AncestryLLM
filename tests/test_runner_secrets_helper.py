@@ -1,3 +1,5 @@
+"""Verify runner secret handling uses restrictive files and sanitized subprocess input."""
+
 from __future__ import annotations
 
 import os

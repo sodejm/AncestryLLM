@@ -1,3 +1,4 @@
+/** Implements the authenticated, bounded HTTP client for the native sidecar. */
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { StringDecoder } from 'node:string_decoder'
 import {

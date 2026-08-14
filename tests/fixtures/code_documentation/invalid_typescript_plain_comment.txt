@@ -1,0 +1,2 @@
+// Plain comments do not provide module documentation.
+export const value = 1;

@@ -1,3 +1,4 @@
+/** Verifies the development Electron shell, preload bridge, accessibility, and visual states. */
 import {
   _electron as electron,
   expect,

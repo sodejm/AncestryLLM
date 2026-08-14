@@ -1,3 +1,4 @@
+# Applies repository labels to newly opened issues from their submitted content.
 name: Issue Labeler
 
 on:

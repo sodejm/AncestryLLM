@@ -1,4 +1,4 @@
-// Regression tests for the shell-free packaged Playwright launcher.
+/** Verifies the packaged Playwright launcher preserves arguments without a shell. */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'

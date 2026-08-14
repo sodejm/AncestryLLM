@@ -1,3 +1,4 @@
+# Defines the frozen single-package pnpm workspace and reviewed dependency overrides.
 autoInstallPeers: false
 enablePrePostScripts: false
 engineStrict: true

@@ -1,3 +1,5 @@
+"""Verify terminal presentation renders service results without leaking sensitive data."""
+
 from __future__ import annotations
 
 import json

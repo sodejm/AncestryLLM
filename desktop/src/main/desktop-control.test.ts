@@ -1,3 +1,4 @@
+/** Verifies the main-process desktop control bridge and preferences behavior. */
 import { describe, expect, it, vi } from 'vitest'
 import { createDesktopControlBridge, MemoryPreferencesStore } from './desktop-control'
 import { SidecarClientError, type SidecarClient } from './sidecar-client'

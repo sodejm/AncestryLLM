@@ -1,3 +1,4 @@
+/** Verifies sidecar discovery, launch authentication, compatibility, and recovery. */
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {

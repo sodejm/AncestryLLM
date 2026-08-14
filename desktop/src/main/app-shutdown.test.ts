@@ -1,4 +1,4 @@
-// Verifies Electron quit remains bounded and fails closed while jobs are unsafe.
+/** Verifies Electron quit remains bounded and fails closed while jobs are unsafe. */
 import { describe, expect, it, vi } from 'vitest'
 import { completeAppShutdown, requestVerifiedShutdownBeforeWindowClose } from './app-shutdown'
 

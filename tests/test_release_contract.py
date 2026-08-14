@@ -1,3 +1,5 @@
+"""Enforce release workflow, artifact, and supported-platform contracts."""
+
 from __future__ import annotations
 
 import ast

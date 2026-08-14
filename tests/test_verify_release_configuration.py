@@ -1,3 +1,5 @@
+"""Verify release configuration and workflow inputs remain mutually consistent."""
+
 from __future__ import annotations
 
 import importlib.util

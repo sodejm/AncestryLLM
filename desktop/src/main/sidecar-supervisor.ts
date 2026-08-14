@@ -1,3 +1,4 @@
+/** Supervises trusted sidecar discovery, launch tokens, readiness, and lifecycle. */
 import { randomBytes } from 'node:crypto'
 import { join, posix } from 'node:path'
 import { SidecarIntegrityError } from './sidecar-integrity'

@@ -1,4 +1,4 @@
-// Verifies packaged sidecar manifests and payloads fail closed on integrity drift.
+/** Verifies packaged sidecar manifests and payloads fail closed on integrity drift. */
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

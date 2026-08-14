@@ -1,3 +1,4 @@
+/** Persists local desktop preferences with atomic writes and strict file safety. */
 import { randomUUID } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises'

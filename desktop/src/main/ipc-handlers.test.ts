@@ -1,3 +1,4 @@
+/** Verifies IPC ownership, payload validation, event delivery, and error mapping. */
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import type {

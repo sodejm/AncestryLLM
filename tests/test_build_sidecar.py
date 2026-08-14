@@ -1,3 +1,5 @@
+"""Verify deterministic sidecar packaging and platform-specific executable selection."""
+
 from __future__ import annotations
 
 import json

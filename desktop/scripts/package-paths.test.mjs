@@ -1,3 +1,4 @@
+/** Verifies packaged application discovery across Linux, macOS, and Windows layouts. */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

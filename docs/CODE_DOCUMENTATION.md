@@ -1,9 +1,10 @@
 # In-Code Documentation Policy
 
 This document defines the repository-wide standard for in-code documentation across all
-first-party source files. Its file-level baseline is machine-checkable via
-`make code-docs-check`; declaration-level expectations are reviewed manually against the
-implementation, call sites, and `ARCHITECTURE.md`.
+first-party source files. The tracked-file inventory and file/module purpose requirements
+are machine-checkable via `make code-docs-check`. Declaration-level requirements remain
+part of issue #256 and will move into scoped Ruff and ESLint enforcement in follow-up
+increments; manual review is not the accepted final enforcement state.
 
 ## Purpose
 
@@ -62,13 +63,14 @@ installation and security guidance.
     those facts are not obvious.
 - Non-public code receives declaration-level documentation when its algorithm, invariant,
     state transition, or safety constraint is not obvious.
-- Ruff pydocstyle rules (`D` group) are not currently enabled. The automated gate checks
-  module-level docstrings; the declaration-level expectations above are enforced in review.
+- The automated gate currently checks meaningful module-level docstrings. Scoped Ruff
+  pydocstyle rules will enforce the declaration-level requirements in a subsequent #256
+  increment.
 
 ### TypeScript/TSX (`.ts`, `.tsx`)
 
-- Every module must have a `/** … */` TSDoc block before the first non-import statement
-  that states the module's purpose and primary responsibility.
+- Every module must begin with a meaningful `/** … */` TSDoc block that states the
+  module's purpose and primary responsibility. A leading license block may precede it.
 - Exported functions, classes, interfaces, types, constants, React components, hooks,
   IPC contracts, and security-sensitive internal boundaries require TSDoc-style `/** … */`
   documentation.
@@ -86,7 +88,7 @@ installation and security guidance.
 
 ### Swift (`.swift`)
 
-- Swift DocC-compatible `///` comments for the file's purpose and all callable
+- Swift DocC-compatible `///` comments document the file's purpose and all callable
   declarations.
 - Parameter, return, error, and platform/keychain behaviour documented where applicable.
 
@@ -114,19 +116,22 @@ installation and security guidance.
 Run `make code-docs-check` locally or in CI. The command:
 
 1. Classifies every Git-tracked file using `scripts/check_code_documentation.py`.
-2. Verifies that every first-party source file has a module/file-level purpose statement.
-3. Rejects unknown file extensions in comment-capable categories.
-4. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
+2. Verifies that every first-party source file has a meaningful, language-appropriate
+   module/file-level purpose statement: Python docstrings, TSDoc/JSDoc blocks, Swift DocC
+   lines, shell/config hash comments, HTML comments, or CSS comments.
+3. Rejects empty or placeholder purpose statements, unknown file extensions in
+   comment-capable categories, and unmapped non-comment formats.
+4. Rejects any permanent documentation-violation baseline.
+5. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
 
-The check is deterministic, offline, and does not call any provider or upload source.
+The check is deterministic, offline, and does not call any provider or upload source. It
+ignores a Git-index entry that has been deleted from the working tree, which lets a deletion
+be validated before commit; exact-checkout CI still evaluates every file present in the
+candidate commit.
 
-### Legacy baseline
-
-`docs/CODE_DOCUMENTATION_BASELINE.txt` records the known violations present when
-this first enforcement slice landed. The checker permits only those exact
-`path:rule` diagnostics; any new violation still fails CI. Remove an entry when
-its documented file is brought into compliance. This keeps the gate enforceable
-while the repository is remediated in focused language/path batches.
+The present gate is deliberately limited to inventory and file/module documentation. The
+same issue remains open until public/exported declaration coverage and its language-native
+lint rules are enforced without blanket ignores.
 
 ## Suppression rules
 
@@ -137,6 +142,18 @@ Suppressions are narrow and justified:
   re-exports or self-documenting test functions). The comment must include a rationale.
 - Disabling an entire source or test tree is rejected.
 - ESLint `eslint-disable` comments for TSDoc/JSDoc rules require an inline justification.
+
+## Architecture and security impact
+
+This policy and checker do not change an ancestry application API, CLI command, service
+DTO, provider contract, GEDCOM representation, storage schema, FastAPI contract, or
+Electron boundary. `ARCHITECTURE.md` therefore remains unchanged.
+
+The checker adds no runtime dependency or trust boundary. It reads only tracked paths and
+local source text, runs without network access or credentials, and emits path/rule codes
+rather than source contents. Removing the baseline narrows the audit gap: a missing purpose
+statement, unknown format, or undocumented non-comment file now fails closed instead of
+being permanently allowlisted. The repository threat model is otherwise unchanged.
 
 ## Reviewer expectations
 

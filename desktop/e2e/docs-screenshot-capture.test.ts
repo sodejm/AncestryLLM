@@ -1,4 +1,4 @@
-// Verifies Electron documentation captures fail closed and publish atomically.
+/** Verifies Electron documentation captures fail closed and publish atomically. */
 
 import {
   copyFile,

@@ -1,3 +1,4 @@
+# Proves release-project status checks independently of production release execution.
 name: Release Project gate proof
 
 on:

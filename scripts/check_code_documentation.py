@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import re
 import subprocess
 import sys
 from contextlib import suppress
@@ -246,6 +245,13 @@ def classify(rel: str) -> str:
 # Module/file-level documentation checkers
 # ---------------------------------------------------------------------------
 
+PERMANENT_BASELINE_PATH: Final = "docs/CODE_DOCUMENTATION_BASELINE.txt"
+_PLACEHOLDER_DOCUMENTATION_WORDS: Final = frozenset(
+    {"doc", "docs", "documentation", "fixme", "placeholder", "tbd", "todo"}
+)
+_PLACEHOLDER_MARKER_WORDS: Final = frozenset({"fixme", "placeholder", "tbd", "todo"})
+_LICENSE_MARKERS: Final = ("copyright", "spdx-license-identifier", "licensed under")
+
 
 def _has_python_module_docstring(path: Path) -> bool:
     """Return True when the Python source at *path* has a module-level docstring."""
@@ -253,43 +259,150 @@ def _has_python_module_docstring(path: Path) -> bool:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return False
-    # ast.get_docstring returns None when there is no docstring.
-    return ast.get_docstring(tree) is not None
+    docstring = ast.get_docstring(tree, clean=False)
+    return docstring is not None and _is_meaningful_documentation(docstring)
 
 
-_SHEBANG_RE = re.compile(r"^#!")
+def _is_meaningful_documentation(value: str) -> bool:
+    """Return whether *value* contains a non-placeholder purpose statement."""
+    cleaned_lines = [
+        line.strip().lstrip("#/*<!- ").rstrip("#*/>- ").strip() for line in value.splitlines()
+    ]
+    cleaned = " ".join(part for part in cleaned_lines if part).strip()
+    words = [
+        word.lower() for word in cleaned.replace("_", " ").split() if any(c.isalpha() for c in word)
+    ]
+    normalized_words = {
+        "".join(character for character in word if character.isalnum()) for word in words
+    }
+    return (
+        len(cleaned) >= 12
+        and len(words) >= 2
+        and bool(normalized_words - _PLACEHOLDER_DOCUMENTATION_WORDS)
+        and normalized_words.isdisjoint(_PLACEHOLDER_MARKER_WORDS)
+    )
 
-# Pattern for a standalone-line comment (shell/Python/YAML/TOML/Makefile/TS/Swift).
-_SINGLE_LINE_COMMENT_RE = re.compile(r"^\s*(?:\#[^\n]*|//[^\n]*|///[^\n]*)")
+
+def _is_license_comment(value: str) -> bool:
+    """Return whether *value* is a leading license notice rather than module docs."""
+    lowered = value.lower().strip("#/*<!-> \r\n\t")
+    return lowered.startswith("license:") or any(marker in lowered for marker in _LICENSE_MARKERS)
+
+
+def _read_source(path: Path) -> str | None:
+    """Read *path* as UTF-8-compatible source, returning None on an I/O failure."""
+    try:
+        return path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+
+
+def _without_shebang(text: str) -> str:
+    """Remove one leading shebang while preserving all other source text."""
+    stripped = text.lstrip("\r\n")
+    if stripped.startswith("#!"):
+        _, separator, remainder = stripped.partition("\n")
+        return remainder if separator else ""
+    return stripped
+
+
+def _extract_block_comment(text: str, opener: str, closer: str) -> tuple[str, str] | None:
+    """Return the leading block comment body and remaining text, when present."""
+    stripped = text.lstrip()
+    if not stripped.startswith(opener):
+        return None
+    end = stripped.find(closer, len(opener))
+    if end == -1:
+        return None
+    return stripped[len(opener) : end], stripped[end + len(closer) :]
+
+
+def _skip_leading_license_blocks(text: str, opener: str, closer: str) -> str:
+    """Skip reviewed leading license blocks so the following purpose block is checked."""
+    remainder = text
+    while True:
+        block = _extract_block_comment(remainder, opener, closer)
+        if block is None or not _is_license_comment(block[0]):
+            return remainder
+        remainder = block[1]
+
+
+def _has_jsdoc_header(text: str) -> bool:
+    """Return whether JavaScript-family *text* begins with meaningful JSDoc."""
+    remainder = _without_shebang(text)
+    remainder = _skip_leading_license_blocks(remainder, "/*", "*/")
+    block = _extract_block_comment(remainder, "/**", "*/")
+    return block is not None and _is_meaningful_documentation(block[0])
+
+
+def _has_swift_doc_header(text: str) -> bool:
+    """Return whether Swift *text* begins with a meaningful DocC line block."""
+    lines = _without_shebang(text).splitlines()
+    while lines and (
+        not lines[0].strip()
+        or (lines[0].lstrip().startswith("//") and _is_license_comment(lines[0]))
+    ):
+        lines.pop(0)
+    documentation: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if not stripped.startswith("///"):
+            break
+        documentation.append(stripped[3:])
+    return _is_meaningful_documentation("\n".join(documentation))
+
+
+def _has_hash_header(text: str) -> bool:
+    """Return whether shell/config *text* begins with a meaningful hash-comment block."""
+    lines = _without_shebang(text).splitlines()
+    while True:
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        block_length = 0
+        while block_length < len(lines) and lines[block_length].lstrip().startswith("#"):
+            block_length += 1
+        if block_length == 0 or not _is_license_comment("\n".join(lines[:block_length])):
+            break
+        del lines[:block_length]
+    documentation: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if not stripped.startswith("#"):
+            break
+        documentation.append(stripped[1:])
+    return _is_meaningful_documentation("\n".join(documentation))
+
+
+def _has_markup_header(text: str) -> bool:
+    """Return whether HTML *text* begins with a meaningful comment block."""
+    remainder = _skip_leading_license_blocks(text, "<!--", "-->")
+    block = _extract_block_comment(remainder, "<!--", "-->")
+    return block is not None and _is_meaningful_documentation(block[0])
+
+
+def _has_css_header(text: str) -> bool:
+    """Return whether CSS *text* begins with a meaningful comment block."""
+    remainder = _skip_leading_license_blocks(text, "/*", "*/")
+    block = _extract_block_comment(remainder, "/*", "*/")
+    return block is not None and _is_meaningful_documentation(block[0])
 
 
 def _has_file_level_comment(path: Path) -> bool:
-    """Return True when a text file at *path* has a recognisable file-level comment.
-
-    Checks for any comment-like token in the first meaningful content of the file.
-    A header may follow blank lines and a shebang, but must precede source code.
-    Human review confirms the comment is genuinely useful.
-    """
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    """Return whether *path* starts with meaningful, language-appropriate docs."""
+    text = _read_source(path)
+    if text is None:
         return False
 
-    lines = text.splitlines()
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if _SHEBANG_RE.match(stripped):
-            continue
-        # Single-line comment immediately at the start.
-        if _SINGLE_LINE_COMMENT_RE.match(stripped):
-            return True
-        if stripped.startswith(("/*", "<!--")):
-            return True
-        # Non-empty, non-shebang content without a comment means no file header.
-        break
-    return False
+    suffix = path.suffix.lower()
+    if suffix in {".ts", ".tsx", ".js", ".mjs"}:
+        return _has_jsdoc_header(text)
+    if suffix == ".swift":
+        return _has_swift_doc_header(text)
+    if suffix == ".html":
+        return _has_markup_header(text)
+    if suffix == ".css":
+        return _has_css_header(text)
+    return _has_hash_header(text)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +460,9 @@ def check_inventory(tracked: list[str], root: Path) -> list[str]:
     """
     diagnostics: list[str] = []
     for rel in tracked:
+        if rel == PERMANENT_BASELINE_PATH:
+            diagnostics.append(f"{rel}:permanent-baseline-forbidden")
+            continue
         try:
             classification = classify(rel)
         except ValueError:
@@ -369,26 +485,20 @@ def check_inventory(tracked: list[str], root: Path) -> list[str]:
 
 
 def list_tracked_files(root: Path) -> list[str]:
-    """Return all Git-tracked relative paths under *root*."""
+    """Return Git-tracked relative paths that remain in the working tree."""
     result = subprocess.run(
-        ["git", "ls-files"],  # noqa: S607 — git is a well-known system executable
+        ["git", "ls-files", "-z"],  # noqa: S607 — git is a well-known system executable
         cwd=root,
         capture_output=True,
         text=True,
         check=True,
     )
-    return [line for line in result.stdout.splitlines() if line]
-
-
-def load_baseline(path: Path | None) -> set[str]:
-    """Return approved legacy diagnostics recorded in *path*, if it exists."""
-    if path is None or not path.is_file():
-        return set()
-    return {
-        line.strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    }
+    return [
+        relative_path
+        for relative_path in result.stdout.split("\0")
+        if relative_path
+        and ((root / relative_path).exists() or (root / relative_path).is_symlink())
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -416,20 +526,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Explicit list of tracked paths (overrides git ls-files; for testing).",
     )
-    parser.add_argument(
-        "--baseline",
-        type=Path,
-        default=None,
-        help=(
-            "Approved legacy diagnostics to exclude. Defaults to "
-            "docs/CODE_DOCUMENTATION_BASELINE.txt when that file exists."
-        ),
-    )
     args = parser.parse_args(argv)
     root: Path = args.root
-    baseline_path = args.baseline
-    if baseline_path is None:
-        baseline_path = root / "docs" / "CODE_DOCUMENTATION_BASELINE.txt"
 
     tracked: list[str] = (
         args.tracked_files if args.tracked_files is not None else list_tracked_files(root)
@@ -445,9 +543,6 @@ def main(argv: list[str] | None = None) -> int:
         with suppress(ValueError):
             diagnostics.extend(check_file_documentation(rel, root))
             # Already captured as unknown-extension above.
-
-    baseline = load_baseline(baseline_path)
-    diagnostics = [diag for diag in diagnostics if diag not in baseline]
 
     if diagnostics:
         for diag in sorted(diagnostics):

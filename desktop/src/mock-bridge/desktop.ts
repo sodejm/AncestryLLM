@@ -1,3 +1,4 @@
+/** Implements a deterministic development-only bridge over fictional local fixtures. */
 import {
   DESKTOP_PROTOCOL_VERSION,
   type ApplicationSettingValue,

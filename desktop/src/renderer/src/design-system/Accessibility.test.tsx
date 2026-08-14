@@ -1,4 +1,4 @@
-// Automated accessibility checks for reusable shell and state components.
+/** Runs automated accessibility checks for reusable shell and state components. */
 
 import { render, screen } from '@testing-library/react'
 import axe from 'axe-core'

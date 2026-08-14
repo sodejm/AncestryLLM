@@ -1,3 +1,4 @@
+/** Inspects packaged Electron fuse state and emits deterministic security evidence. */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'

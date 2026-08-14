@@ -1,3 +1,4 @@
+/** Verifies desktop evidence aggregation, coverage gates, and performance policy. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
