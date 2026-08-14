@@ -203,6 +203,13 @@ output must be copied back into the repository or included in a pull request.
 Removing a source page from `docs/` means its managed Wiki page will also be
 removed by synchronization.
 
+From a clean committed head, run `make docs-cutover` before publication. The
+offline gate stages Pages and the flat Wiki twice, proves deterministic and
+idempotent output, validates the exact 40-character source revision, and checks
+that every external-link exception is present, owned, reasoned, and unexpired.
+It does not contact Pages, the Wiki, or external sites, so successful local or
+pull-request evidence does not replace the required post-merge hosted checks.
+
 Documentation screenshots are source-controlled publication assets. Update the
 shared manifest, every owning Markdown reference and meaningful alt text, and
 the image together. Run `make docs-screenshots`, visually review all changed

@@ -368,6 +368,13 @@ contract tests, especially `tests/test_release_contract.py`,
 `tests/test_wiki_validation.py`, `tests/test_wiki_sync.py`, and
 `tests/test_prepare_pages_source.py`.
 
+The source and both publishing targets intentionally cover every tracked page
+under `docs/`. The Python sdist has a different consumer contract: it carries
+only the reviewed transitive CLI and release-verification documentation closure
+declared by `MANIFEST.in` and `scripts/build_release.py`. A publishing cutover
+does not broaden that package allowlist; a new packaged-document requirement
+must be reviewed and tested as a separate artifact-contract change.
+
 ### Issue #261 migration record
 
 Issue #261 completed every one-to-one Reference and Explanation relocation with
@@ -397,7 +404,7 @@ Machine checks and human review are complementary. Run the deterministic source
 and publishing checks after a documentation move or metadata change:
 
 ```console
-.venv/bin/python scripts/validate_wiki_docs.py --source docs
+make docs-cutover
 .venv/bin/python -m pytest tests/test_documentation_architecture_\
 contract.py \
   tests/test_wiki_validation.py tests/test_wiki_sync.py \
@@ -410,16 +417,17 @@ Use the following boundary between machine evidence and human judgment:
 | --- | --- | --- | --- |
 | #257 publishing contract | `.venv/bin/python scripts/validate_wiki_docs.py --source docs`; `tests/test_wiki_validation.py`, `tests/test_wiki_sync.py`, `tests/test_prepare_pages_source.py`, and `tests/test_pages_workflow_contract.py` | Canonical paths and metadata coverage, source-relative links with supported anchors/assets, case-insensitive flat Wiki basenames, deterministic Wiki output, and staged Pages metadata | Useful cross-links, reader purpose, and whether language is clear or honestly frames planned work |
 | #259 architecture contract | The #259 architecture-contract test named in the command above | Every Git-tracked Markdown page has one complete inventory row; landing navigation exposes reader modes; every public Pages metadata entry is complete and unique | Correct Diátaxis classification, audience fit, search wording, terminology, and whether a completed or proposed move or split is sensible |
-| #263 cutover integration (planned) | No new #263-specific command exists yet; run the #257 and #259 checks on the exact integration head, then add any move-specific checks with the change | The inherited publishing and inventory contracts, once run on the exact head | Final row dispositions, rendered discoverability, release and packaging impact, complete navigation, and any exception owner/expiry |
+| #263 cutover integration | `make docs-cutover` on a clean exact head, followed by the focused publishing tests and hosted exact-main checks | Exact Git SHA syntax; repeatable Pages and flat-Wiki manifests; idempotent Wiki synchronization; source links, assets, anchors, metadata, namespace collisions; and owned, reasoned, unexpired external-link exceptions without network access | Final row dispositions, prose and search quality, rendered discoverability, curated package impact, complete navigation, external URL health, and exact-main Pages and Wiki publication evidence |
 
 Current machine checks do **not** enforce sentence case, descriptive link text,
 meaningful alt text, terminology consistency, prose quality, or search intent.
 Review those editorial requirements manually, alongside current-versus-planned
 language and the cross-links above.
 
-Issue #263 is the integration gate that consumes this inventory. It must verify
-the final disposition of every row, run the applicable deterministic Wiki,
-Pages, packaging, and release checks on the exact head, inspect rendered
-discoverability, and record any narrow exception with owner and expiry. This
-authoring contract does not itself change those publishing scripts or workflows;
-it defines the testable rules that keep the inventory complete.
+Issue #263 is the integration gate that consumes this inventory. Its local
+`make docs-cutover` interface verifies repeatable Pages and Wiki staging plus
+the exception registry on the exact integration head. Closing the cutover still
+requires applicable packaging and release checks, editorial review, rendered
+discoverability inspection, external URL health, and successful Pages and Wiki
+publication from the resulting `main` commit. No local or pull-request result is
+silently treated as hosted exact-main evidence.
