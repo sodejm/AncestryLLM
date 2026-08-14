@@ -268,6 +268,29 @@ describe('chat stream controller', () => {
     controller.dispose()
   })
 
+  it('cancels only streams that belong to an explicitly closed session', () => {
+    const source = pendingBridge()
+    const controller = new ChatStreamController(source.bridge, {
+      deliver: vi.fn(),
+      isOwnerActive: () => true,
+    })
+    controller.attach(run)
+
+    controller.disposeSession(sessionId)
+
+    expect(source.bridge.cancelChatStream).toHaveBeenCalledWith({
+      schema_version: 1,
+      session_id: sessionId,
+      run_id: runId,
+    })
+    expect(controller.acknowledge({
+      schema_version: 1,
+      session_id: sessionId,
+      run_id: runId,
+      through_sequence: 1,
+    })).toMatchObject({ ok: false, error: { code: 'CHAT_STREAM_NOT_FOUND' } })
+  })
+
   it('fails closed and cancels on nonmonotonic or oversized output', () => {
     const source = pendingBridge()
     const deliveries: Readonly<ChatEventDelivery>[] = []

@@ -5,12 +5,15 @@ import {
   type AncestryBridge,
   type ApplicationSettingsPatch,
   type ChatEventDelivery,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatStreamAckRequest,
   type ChatStreamCancelRequest,
   type ChatStreamStartRequest,
   type ConsentCreateRequest,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
+  type CopyTextRequest,
   type FileGrantId,
   type JobEventDelivery,
   type JobEventSubscriptionRequest,
@@ -18,6 +21,7 @@ import {
   type JobRequest,
   type LocalRuntimeApplyRequest,
   type LocalRuntimeRequest,
+  type OpenExternalLinkRequest,
   type OpenFileGrantRequest,
   type PreferenceUpdate,
   type ProviderEndpointValidationRequest,
@@ -29,7 +33,12 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseChatCapabilityResult,
   parseChatEventDelivery,
+  parseChatSessionClosureResult,
+  parseChatSessionCreateRequest,
+  parseChatSessionRequest,
+  parseChatSessionResult,
   parseChatStreamAcknowledgementResult,
   parseChatStreamAckRequest,
   parseChatStreamCancelRequest,
@@ -39,6 +48,8 @@ import {
   parseConsentPreviewRequest,
   parseConsentPreviewResult,
   parseConsentRevokeRequest,
+  parseCopyTextRequest,
+  parseCopyTextResult,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
@@ -55,6 +66,8 @@ import {
   parseLocalRuntimeRequest,
   parseLocalRuntimeResult,
   parseLocalRuntimeStatusResult,
+  parseOpenExternalLinkRequest,
+  parseOpenExternalLinkResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
@@ -132,12 +145,36 @@ const ancestry: AncestryBridge = Object.freeze({
   applyLocalRuntime: async (request: LocalRuntimeApplyRequest) => parseLocalRuntimeResult(
     await ipcRenderer.invoke(desktopChannels.applyLocalRuntime, parseLocalRuntimeApplyRequest(request)),
   ),
+  openExternalLink: async (request: OpenExternalLinkRequest) => parseOpenExternalLinkResult(
+    await ipcRenderer.invoke(
+      desktopChannels.openExternalLink,
+      parseOpenExternalLinkRequest(request),
+    ),
+  ),
+  copyText: async (request: CopyTextRequest) => parseCopyTextResult(
+    await ipcRenderer.invoke(desktopChannels.copyText, parseCopyTextRequest(request)),
+  ),
   listJobs: async () => parseJobListResult(await ipcRenderer.invoke(desktopChannels.listJobs)),
   getJob: async (request: JobRequest) => parseJobSnapshotResult(
     await ipcRenderer.invoke(desktopChannels.getJob, parseJobRequest(request)),
   ),
   cancelJob: async (request: JobRequest) => parseJobSnapshotResult(
     await ipcRenderer.invoke(desktopChannels.cancelJob, parseJobRequest(request)),
+  ),
+  getChatCapability: async () => parseChatCapabilityResult(
+    await ipcRenderer.invoke(desktopChannels.getChatCapability),
+  ),
+  createChatSession: async (request: ChatSessionCreateRequest) => parseChatSessionResult(
+    await ipcRenderer.invoke(
+      desktopChannels.createChatSession,
+      parseChatSessionCreateRequest(request),
+    ),
+  ),
+  closeChatSession: async (request: ChatSessionRequest) => parseChatSessionClosureResult(
+    await ipcRenderer.invoke(
+      desktopChannels.closeChatSession,
+      parseChatSessionRequest(request),
+    ),
   ),
   startChatStream: async (request: ChatStreamStartRequest) => parseChatStreamRunResult(
     await ipcRenderer.invoke(

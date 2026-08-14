@@ -132,9 +132,13 @@ def test_navigation_separates_reader_modes_from_supporting_material() -> None:
     assert "Desktop-domain capabilities" in home_text
     assert "presentation-only **Tasks** adapters" in home_text
     assert "source-level synchronous transient-chat API" in home_text
+    assert "transient **Chat** destination over a Main-owned private stream" in home_text
+    assert "renders model Markdown through a closed allowlist" in home_text
+    assert "external-link confirmation in Electron Main" in home_text
     assert (
-        "Electron chat presentation and streaming, genealogy/domain task admission or "
-        "execution, direct artifact access, cloud accounts, and updater flows" in home_text
+        "target-matched packaged and adversarial chat evidence, genealogy/domain task "
+        "admission or execution, direct artifact access, cloud accounts, and updater flows"
+        in home_text
     )
     for page in ("Home.md", "_Sidebar.md"):
         navigation = (DOCS_DIRECTORY / page).read_text(encoding="utf-8")

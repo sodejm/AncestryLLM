@@ -76,7 +76,11 @@ output is never an authority for genealogy facts.
   stage and atomically publish complete release bundles.
 - Provider and model output is untrusted data, is schema-validated when a
   structured result is required, and is never executed. An LLM receives no
-  shell, SQL, filesystem, or other tool capability.
+  shell, SQL, filesystem, or other tool capability. Desktop model text is
+  rendered through a closed CommonMark/GFM component allowlist with raw HTML,
+  images, embeds, implicit autolinks, and executable actions disabled. Copy is
+  plain text only, and opening a visible HTTPS destination requires separate
+  Electron-Main confirmation.
 - Real genealogy records, databases, backups, reports, logs, credentials, and
   prompt or response payloads must not be committed to the repository. Tests
   and reproductions use fictional data.

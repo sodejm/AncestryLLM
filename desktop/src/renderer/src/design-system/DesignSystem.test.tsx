@@ -13,6 +13,7 @@ describe('desktop design-system contracts', () => {
   it('defines the complete bounded navigation contract', () => {
     expect(navigationItems.map(({ route, href, label }) => ({ route, href, label }))).toEqual([
       { route: 'home', href: '#/', label: 'Home' },
+      { route: 'chat', href: '#/chat', label: 'Chat' },
       { route: 'tasks', href: '#/tasks', label: 'Tasks' },
       { route: 'diagnostics', href: '#/diagnostics', label: 'Diagnostics' },
       { route: 'settings', href: '#/settings', label: 'Settings' },

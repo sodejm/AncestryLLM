@@ -4,10 +4,12 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   protocol,
   session,
+  shell,
   type WebContents,
 } from 'electron'
 import {
@@ -17,6 +19,7 @@ import {
   type UnsafeShutdownChoice,
 } from './app-shutdown'
 import { FileGrantBroker } from './file-grant-broker'
+import { externalLinkPrompt, openExternalLinkWithConfirmation } from './external-links'
 import {
   registerDesktopIpcHandlers,
   type BridgeWebContents,
@@ -128,7 +131,18 @@ function registerIpcHandlers(): void {
   if (!bridge) throw new Error('Runtime bridge is unavailable.')
   if (!fileGrantBroker) throw new Error('File-grant broker is unavailable.')
   if (ipcController) throw new Error('Desktop IPC handlers are already registered.')
-  ipcController = registerDesktopIpcHandlers(ipcMain, bridge, fileGrantBroker)
+  ipcController = registerDesktopIpcHandlers(ipcMain, bridge, fileGrantBroker, {
+    nativeActions: Object.freeze({
+      openExternalLink: (destination: string) => openExternalLinkWithConfirmation(destination, {
+        confirm: async (normalized) => {
+          const response = await dialog.showMessageBox(externalLinkPrompt(normalized))
+          return response.response === 1
+        },
+        openExternal: async (normalized) => { await shell.openExternal(normalized) },
+      }),
+      copyText: (text: string) => { clipboard.writeText(text) },
+    }),
+  })
 }
 
 function disposeIpcBoundary(): void {

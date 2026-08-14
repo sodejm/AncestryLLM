@@ -5,7 +5,12 @@ import {
   type ApplicationSettingsPatch,
   type AncestryBridge,
   type BridgeResult,
+  type ChatCapability,
   type ChatEventDelivery,
+  type ChatSession,
+  type ChatSessionClosure,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatStreamAcknowledgement,
   type ChatStreamAckRequest,
   type ChatStreamCancelRequest,
@@ -15,6 +20,8 @@ import {
   type ConsentPreview,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
+  type CopyTextRequest,
+  type CopyTextResult,
   type FileGrant,
   type FileGrantRevocation,
   type JobEventDelivery,
@@ -31,6 +38,8 @@ import {
   type LocalRuntimeResult,
   type LocalRuntimeState,
   type LocalRuntimeStatus,
+  type OpenExternalLinkRequest,
+  type OpenExternalLinkResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderEndpointValidation,
@@ -45,14 +54,18 @@ import {
   parseConsentCreateRequest,
   parseConsentPreviewRequest,
   parseConsentRevokeRequest,
+  parseChatSessionCreateRequest,
+  parseChatSessionRequest,
   parseChatStreamAckRequest,
   parseChatStreamCancelRequest,
   parseChatStreamStartRequest,
+  parseCopyTextRequest,
   parseJobEventSubscriptionRequest,
   parseJobEventUnsubscriptionRequest,
   parseJobRequest,
   parseLocalRuntimeApplyRequest,
   parseLocalRuntimeRequest,
+  parseOpenExternalLinkRequest,
   parsePreferenceUpdate,
   parseProviderEndpointValidationRequest,
   parseProviderProfileCreateRequest,
@@ -88,7 +101,9 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
   const jobEventListeners = new Set<(delivery: Readonly<JobEventDelivery>) => void>()
   const jobSubscriptions = new Map<string, Readonly<{ jobId: string; after: number }>>()
   const chatEventListeners = new Set<(delivery: Readonly<ChatEventDelivery>) => void>()
+  const chatSessions = new Map<string, Readonly<ChatSession>>()
   const chatRuns = new Map<string, Readonly<ChatStreamRun>>()
+  let nextChatSession = 0
   let nextChatRun = 0
   let jobs: readonly Readonly<JobSnapshot>[] = deepFreeze([
     {
@@ -201,6 +216,46 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         ? 'Start a new chat response.'
         : 'Retry the local service or restart AncestryLLM.',
     },
+  })
+  const chatSessionFailure = <T>(
+    code: 'CHAT_SESSION_INVALID' | 'CHAT_SESSION_NOT_FOUND' | 'CHAT_SESSION_LIMIT' | 'CHAT_SESSION_SERVICE_UNAVAILABLE',
+  ): BridgeResult<T> => deepFreeze({
+    ok: false,
+    protocolVersion: DESKTOP_PROTOCOL_VERSION,
+    error: {
+      code,
+      message: code === 'CHAT_SESSION_NOT_FOUND'
+        ? 'The requested chat session is no longer available.'
+        : code === 'CHAT_SESSION_LIMIT'
+          ? 'The maximum number of active chat sessions has been reached.'
+          : code === 'CHAT_SESSION_INVALID'
+            ? 'The provider, model, data classes, or consent do not authorize this chat session.'
+            : 'Chat sessions are temporarily unavailable.',
+      remediation: code === 'CHAT_SESSION_NOT_FOUND'
+        ? 'Start a new transient chat session.'
+        : code === 'CHAT_SESSION_LIMIT'
+          ? 'Close an existing chat session and try again.'
+          : code === 'CHAT_SESSION_INVALID'
+            ? 'Review the provider profile and choose an active consent that exactly covers this request.'
+            : 'Retry the local service or restart AncestryLLM.',
+    },
+  })
+  const chatCapability: Readonly<ChatCapability> = deepFreeze({
+    schema_version: 1,
+    max_active_sessions: 32,
+    max_messages: 32,
+    max_message_characters: 16_384,
+    max_context_characters: 65_536,
+    max_output_tokens: 4_096,
+    max_temperature: 1,
+    max_timeout_seconds: 120,
+    max_safe_retries: 1,
+    transient: true,
+    tools_enabled: false,
+    payload_retention: false,
+    output_is_evidence: false,
+    streaming: true,
+    stream_replay_max_bytes: 262_144,
   })
   const findJob = (jobId: string): Readonly<JobSnapshot> | undefined => (
     jobs.find((job) => job.job_id === jobId)
@@ -633,6 +688,94 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
         code: localRuntimeStatus().code,
       }
       return success(result)
+    },
+    async openExternalLink(input: OpenExternalLinkRequest) {
+      const request = parseOpenExternalLinkRequest(input)
+      const result: OpenExternalLinkResult = {
+        schema_version: 1,
+        destination: request.destination,
+        status: 'cancelled',
+      }
+      return success(result)
+    },
+    async copyText(input: CopyTextRequest) {
+      parseCopyTextRequest(input)
+      const result: CopyTextResult = { schema_version: 1, copied: true }
+      return success(result)
+    },
+    async getChatCapability() {
+      return mode === 'unavailable'
+        ? chatSessionFailure<ChatCapability>('CHAT_SESSION_SERVICE_UNAVAILABLE')
+        : success(chatCapability)
+    },
+    async createChatSession(input: ChatSessionCreateRequest) {
+      const request = parseChatSessionCreateRequest(input)
+      if (mode === 'unavailable') {
+        return chatSessionFailure<ChatSession>('CHAT_SESSION_SERVICE_UNAVAILABLE')
+      }
+      if (chatSessions.size >= chatCapability.max_active_sessions) {
+        return chatSessionFailure<ChatSession>('CHAT_SESSION_LIMIT')
+      }
+      const profile = providerConfiguration.profiles.find((item) => (
+        item.name === request.provider_profile_name
+      ))
+      if (profile === undefined || !profile.enabled || profile.model !== request.model) {
+        return chatSessionFailure<ChatSession>('CHAT_SESSION_INVALID')
+      }
+      if (profile.endpoint_kind === 'loopback' && request.consent_name !== null) {
+        return chatSessionFailure<ChatSession>('CHAT_SESSION_INVALID')
+      }
+      if (profile.endpoint_kind === 'remote') {
+        const consent = providerConfiguration.consents.find((item) => (
+          item.name === request.consent_name
+          && item.active
+          && item.provider_profile_name === profile.name
+          && item.provider_id === profile.provider_id
+        ))
+        if (
+          consent === undefined
+          || !consent.modules.includes('chat')
+          || !consent.purposes.includes(request.purpose)
+          || !consent.models.includes(request.model)
+          || request.data_classes.some((item) => !consent.data_classes.includes(item))
+          || consent.retain_payloads
+        ) return chatSessionFailure<ChatSession>('CHAT_SESSION_INVALID')
+      }
+      nextChatSession += 1
+      const session: Readonly<ChatSession> = deepFreeze({
+        schema_version: 1,
+        session_id: `chat_${nextChatSession.toString(16).padStart(32, '0')}`,
+        provider_profile_name: profile.name,
+        provider_id: profile.provider_id,
+        model: profile.model,
+        purpose: request.purpose,
+        data_classes: request.data_classes,
+        remote: profile.endpoint_kind === 'remote',
+        consent_name: request.consent_name,
+        message_count: 0,
+        transient: true,
+        payload_retention: false,
+      })
+      chatSessions.set(session.session_id, session)
+      return success(session)
+    },
+    async closeChatSession(input: ChatSessionRequest) {
+      const request = parseChatSessionRequest(input)
+      if (mode === 'unavailable') {
+        return chatSessionFailure<ChatSessionClosure>('CHAT_SESSION_SERVICE_UNAVAILABLE')
+      }
+      if (!chatSessions.has(request.session_id)) {
+        return chatSessionFailure<ChatSessionClosure>('CHAT_SESSION_NOT_FOUND')
+      }
+      chatSessions.delete(request.session_id)
+      for (const [runId, run] of chatRuns) {
+        if (run.session_id === request.session_id) chatRuns.delete(runId)
+      }
+      return success<ChatSessionClosure>({
+        schema_version: 1,
+        session_id: request.session_id,
+        closed: true,
+      })
     },
     async startChatStream(input: ChatStreamStartRequest) {
       const request = parseChatStreamStartRequest(input)

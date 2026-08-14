@@ -21,10 +21,11 @@ Unreleased Issue #109 adds a **Tasks** destination to present backend-owned
 work. It remains outside the released 0.5.0 installer claim.
 
 Unreleased Issue #110 adds an internal, synchronous, transient-chat service and
-fixed sidecar routes. Issue #111 adds only the audited source transport: fixed
-stream start, cancellation, acknowledgement, and event contracts owned by
-Electron Main. It does not add a renderer destination, chat presentation, tool
-call, genealogy operation, or generic dispatch surface.
+fixed sidecar routes. Issue #111 adds the audited source transport owned by
+Electron Main. Issue #112 adds the bounded **Chat** destination over six fixed
+chat methods and one event listener. It does not add a tool call, genealogy
+operation, renderer network client, persistent transcript, or generic dispatch
+surface.
 
 These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
@@ -35,10 +36,10 @@ zoomed layouts.
 Unreleased Issue #106 implements the reusable presentation shell for the 0.6
 desktop work. It preserves a persistent primary navigation region, workspace
 header, context-and-help panel, and explicit **Local and offline** status across
-Home, Diagnostics, Settings, and the unreleased Tasks destination. The compact
-layout keeps the current route and local status visible when the window narrows;
-at the 720-by-560 minimum size and 200% zoom, primary actions reflow without
-horizontal clipping.
+Home, Diagnostics, Settings, and the unreleased Tasks and Chat destinations. The
+compact layout keeps the current route and local status visible when the window
+narrows; at the 720-by-560 minimum size and 200% zoom, primary actions reflow
+without horizontal clipping.
 
 The shell exposes one typed route and navigation contract rather than another
 command registry. <kbd>Ctrl</kbd>+<kbd>K</kbd> or
@@ -136,7 +137,9 @@ cannot select a provider. The preload bridge exposes exactly these six methods:
 Unreleased source additions are fixed, separately reviewed contracts and do
 not change that released six-method claim. Issue #109 contributes five task
 request methods and one validated event listener. Issue #111 contributes three
-chat-stream request methods and one validated event listener described below.
+chat-stream request methods and one validated event listener. Issue #112
+contributes three chat-lifecycle methods and two fixed native actions for
+confirmed HTTPS links and plain-text copy.
 
 The renderer receives no Node.js, Electron, network, filesystem, keyring,
 provider, database, shell, or arbitrary-path access. It must never receive the
@@ -230,8 +233,24 @@ outcome if the renderer remains stalled for 15 seconds. One reconnect may
 resume the same run from its last cursor; provider generation is never retried
 after output begins. Shutdown, reload, and startup reconciliation record one
 payload-free terminal audit outcome. Preload exposes only fixed start, cancel,
-acknowledge, and event contracts. Issue #112 separately owns the renderer chat
-destination, model-output allowlisting, and interactive presentation.
+acknowledge, and event contracts.
+
+Issue #112 adds the renderer-owned **Chat** destination. A conversation is
+created only after the user selects a compatible named profile, model, and
+consent. The workspace exposes multiline composition, stop, regenerate, usage
+placeholders, plain-text copy, and one screen-reader announcement path. It holds
+at most 24 visible turns in transient memory and closes its sidecar session on
+teardown; it does not write conversations to renderer storage.
+
+Model text is parsed through `react-markdown` and `remark-gfm` with a closed
+component allowlist. Raw HTML, images, embeds, implicit autolinks, executable
+actions, and renderer-side navigation are disabled. A rendered HTTPS link shows
+its normalized destination and must cross the fixed native action so Electron
+Main can display that exact destination and obtain confirmation. The renderer
+never calls `window.open`; copy writes plain text only. Ordered sequence,
+duplicate, replay, gap, interruption, and owner-mismatch tests keep stream state
+fail closed. Target-matched packaged accessibility, stream-race, and hostile
+content evidence remains Issue #131.
 
 ## Unreleased opaque file-mediation foundation
 
@@ -311,13 +330,13 @@ values are never retained in React state, query caches, bridge fixtures,
 responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
 configuration. The renderer still has no direct keyring or network access.
 Together with the three unreleased file-grant methods, the current development
-bridge therefore contains thirty-one fixed request methods: the six released
-control methods, three opaque file-grant methods, five settings/credential
-methods, six provider-configuration methods, five task-lifecycle methods, three
-local-runtime methods, and three chat-stream methods. Issue #109 adds one fixed,
+bridge therefore contains thirty-six fixed request methods: six released control
+methods, three opaque file-grant methods, five settings/credential methods, six
+provider-configuration methods, five task-lifecycle methods, three local-runtime
+methods, two native actions, and six chat methods. Issue #109 adds one fixed,
 validated `onJobEvent` listener, and Issue #111 adds one fixed, validated
 `onChatEventBatch` listener. There is still no generic send, listen,
-route-selection, or command operation.
+route-selection, clipboard, shell, or command operation.
 
 The unreleased source implements the non-secret, versioned deployment-profile
 control plane accepted by the

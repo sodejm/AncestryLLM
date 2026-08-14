@@ -1,15 +1,26 @@
 export type ExternalLinkResult = Readonly<{ status: 'opened' | 'cancelled' }>
 
-const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com'])
+const MAX_EXTERNAL_LINK_CHARACTERS = 2_048
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u
 
 export function validateExternalLink(value: string): string {
+  if (
+    typeof value !== 'string'
+    || Array.from(value).length < 1
+    || Array.from(value).length > MAX_EXTERNAL_LINK_CHARACTERS
+    || CONTROL_CHARACTER.test(value)
+    || !value.startsWith('https://')
+    || value.trim() !== value
+    || value.includes('\\')
+  ) throw new Error('External link denied')
   let url: URL
   try {
     url = new URL(value)
   } catch {
     throw new Error('External link denied')
   }
-  if (url.protocol !== 'https:' || !ALLOWED_EXTERNAL_HOSTS.has(url.hostname) || url.username || url.password || url.port) {
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.port) {
     throw new Error('External link denied')
   }
   return url.href

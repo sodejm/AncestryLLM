@@ -15,11 +15,12 @@ That service requires an exact named profile and model plus current policy and
 consent. Issue #111 adds fixed stream-start, SSE, and cancellation routes plus a
 source-only Electron Main/preload bridge. Main owns authenticated SSE, strict
 owner and sequence validation, bounded batching, acknowledgement backpressure,
-and cancellation; it exposes no bearer or HTTP authority. These chat boundaries
-add no renderer conversation or Markdown presentation, tools, file or database
+and cancellation; it exposes no bearer or HTTP authority. Issue #112 adds the
+bounded renderer Chat presentation, three fixed chat-lifecycle methods, and two
+fixed native actions. These chat boundaries add no tools, file or database
 access, genealogy operation, job submission, cloud-account, updater, autonomous
-action, or generic command route. The sidecar is not a general domain-data
-transport.
+action, persistent transcript, or generic command route. The sidecar is not a
+general domain-data transport.
 The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
 surface, installation model, and sanitized recovery contract.
 
@@ -209,12 +210,12 @@ buffer to 1 MiB, and fails a stalled connection after three seconds. The rendere
 receives only parsed snapshots, events, and stable coded failures; it receives
 no HTTP or sidecar connection authority.
 
-Issue #111 consumes the #110/#56 chat boundaries through fixed stream-start,
-SSE-event, and cancellation clients. Electron Main rejects redirects, wrong
-content types, wrong owner/run identities, invalid event DTOs, and stale,
-duplicate, or nonmonotonic sequences. Preload exposes only fixed start, cancel,
-acknowledge, and event-delivery contracts; neither preload nor the renderer
-acquires HTTP, bearer, provider, session, or generic route authority.
+Issues #111 and #112 consume the #110/#56 chat boundaries through fixed
+capability, session-lifecycle, stream-start, SSE-event, cancellation, and
+acknowledgement clients. Electron Main rejects redirects, wrong content types,
+wrong owner/run identities, invalid DTOs, and stale, duplicate, or nonmonotonic
+sequences. Neither preload nor the renderer acquires HTTP, bearer, provider,
+sidecar-session, or generic route authority.
 
 The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
@@ -228,9 +229,12 @@ request methods (`listJobs`, `getJob`, `cancelJob`, `subscribeJobEvents`, and
 `unsubscribeJobEvents`) plus the fixed, validated `onJobEvent` listener. Issue
 #111 adds exactly three chat-stream request methods (`startChatStream`,
 `cancelChatStream`, and `acknowledgeChatStream`) plus the fixed, validated
-`onChatEventBatch` listener. There
-is no generic send, listen, route, or channel selection operation. Issue #104's
-shutdown client remains Electron-Main-only.
+`onChatEventBatch` listener. Issue #112 adds exactly three chat-lifecycle methods
+(`getChatCapability`, `createChatSession`, and `closeChatSession`) and two native
+actions (`openExternalLink` and `copyText`). Issue #348 adds exactly three local-
+runtime methods. The resulting unreleased bridge has 36 fixed request methods;
+there is no generic send, listen, route, channel-selection, clipboard, or shell
+operation. Issue #104's shutdown client remains Electron-Main-only.
 Main accepts a call only from the registered
 `WebContents`, its exact current main frame, and the exact trusted
 `app://bundle/index.html` URL. It rechecks those facts on every request.
@@ -277,8 +281,18 @@ acknowledged cursor, but Main never starts or retries provider execution after
 output. Terminal delivery stays owned until acknowledged. Cross-document
 navigation, renderer exit or destruction, sidecar-session loss or replacement,
 bridge disposal, and application shutdown cancel and remove affected streams.
-Issue #112 separately owns renderer conversation state and safe Markdown/XSS
-presentation.
+Issue #112's renderer reduces these events into bounded, owner-scoped transient
+conversation state. It rejects gaps and ownership mismatches, ignores duplicate
+or replayed events, acknowledges accepted batches, exposes explicit stop and
+regenerate controls, and closes its session on teardown. Model text passes
+through a closed CommonMark/GFM component allowlist with raw HTML, images,
+embeds, implicit autolinks, and executable actions disabled.
+
+The two native actions remain narrowly owned by Main. `openExternalLink` accepts
+only normalized HTTPS URLs without credentials, control characters, or a custom
+port and opens only after a native confirmation displays that exact destination.
+`copyText` writes plain text only. The renderer receives no generic shell,
+navigation, or clipboard capability.
 
 Preference updates require the last renderer-visible non-negative revision and
 return a coded conflict when it is stale. Packaged main persists the exact

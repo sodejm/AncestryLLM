@@ -268,6 +268,12 @@ export class ChatStreamController {
     return acknowledgement(request)
   }
 
+  disposeSession(sessionId: string): void {
+    for (const state of [...this.streams.values()]) {
+      if (state.run.session_id === sessionId) this.close(state, true)
+    }
+  }
+
   dispose(): void {
     for (const state of [...this.streams.values()]) this.close(state, true)
   }

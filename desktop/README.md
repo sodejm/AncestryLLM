@@ -10,17 +10,20 @@ preference reads, and optimistic-concurrency preference updates. Unreleased
 Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
 settings and credential methods, Issue #108 adds six fixed provider-profile,
 endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
-request methods and one validated job-event listener, and Issue #348 adds three
-fixed local-runtime status/preview/apply methods. Development uses deterministic
-fictional fixtures; packaged main is the sole authenticated client for the
-fixed sidecar routes. Packaged main stores the bounded local-preference schema in
-`preferences.json` beneath Electron's OS app-data directory. The renderer never
-receives that path and has no storage access.
+request methods and one validated job-event listener, Issue #348 adds three fixed
+local-runtime status/preview/apply methods, Issue #111 adds three fixed chat-stream
+methods and one validated chat-event listener, and Issue #112 adds three fixed
+chat-lifecycle methods plus two fixed native-action methods. Development uses
+deterministic fictional fixtures; packaged main is the sole authenticated client
+for the fixed sidecar routes. Packaged main stores the bounded local-preference
+schema in `preferences.json` beneath Electron's OS app-data directory. The
+renderer never receives that path and has no storage access.
 
-Unreleased Issue #110 adds a fixed synchronous transient-chat contract inside
-the Python sidecar. It adds no `window.ancestry` method, renderer destination,
-chat UI, generic request channel, provider stream, tool surface, file or
-database authority, or genealogy operation.
+Unreleased Issue #110 adds the fixed synchronous transient-chat service, Issue
+#111 adds the Main-owned bounded stream transport, and Issue #112 adds the
+renderer **Chat** destination over those fixed contracts. The combined surface
+adds no generic request channel, renderer network access, tool surface, file or
+database authority, genealogy operation, or persistent conversation store.
 
 The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
@@ -67,14 +70,15 @@ job state, admits no work, receives no sidecar session or artifact path, and
 adds no provider or genealogy operation. Artifact cards display only safe
 metadata; any future open or save action must use Issue #103's grant mediation.
 
-Issue #110's authenticated chat routes remain internal to the sidecar. They
-bind every short-lived session to an exact stored profile and model, recheck
-provider policy and fresh consent before each synchronous run, enforce fixed
-message, context, output, retry, timeout, and session limits before provider
-access, and retain message content only in process memory. The fixed system
-instruction and provider request expose no tools. Audit data contains only
-reviewed identifiers, counters, and content hashes. Electron main does not call
-these routes, and neither preload nor the renderer can reach them.
+Issues #110-#112 keep authenticated chat routes private to Electron Main. Every
+short-lived session is bound to an exact stored profile and model; provider
+policy and fresh consent are rechecked before each run, and fixed message,
+context, output, retry, timeout, and session limits apply before provider access.
+The renderer reaches only six fixed chat methods and one validated event
+listener through preload; it receives no bearer token, HTTP client, endpoint, or
+generic route authority. Messages remain bounded process memory, the fixed
+system instruction exposes no tools, and audit data contains only reviewed
+identifiers, counters, and content hashes.
 
 Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
@@ -166,10 +170,12 @@ renderer exit, sidecar replacement, terminal delivery, and application
 shutdown clean them up. Preload exposes one validated event listener rather
 than generic listen or channel authority.
 
-Issue #110 does not cross this Electron boundary. Its bounded synchronous chat
-service is a Python-sidecar foundation for later fixed presentation work;
-streaming, renderer cancellation, model-output rendering, and chat IPC remain
-separately reviewed work.
+Issues #110-#112 cross this boundary only through the six fixed chat methods and
+one validated event listener. Electron Main owns the authenticated stream,
+renderer ownership, cancellation, acknowledgement, bounded reconnect, and
+teardown. The renderer owns bounded transient presentation state and safe model
+text rendering; it receives no provider, network, sidecar-session, tool, file,
+database, or genealogy authority.
 
 Unreleased Issue #363 adds the Electron-Main-only container-control foundation,
 and Issue #348 wires only its macOS arm64 runtime-acquisition and lifecycle
@@ -206,18 +212,18 @@ checked sanitized macOS arm64 result is recorded in
 it proves only the narrow #363 lifecycle and isolation subset, not container
 runtime availability.
 
-The allowlisted external-link helper is main-process-internal and testable: it accepts only exact `https://github.com` destinations without credentials or a custom port, displays the normalized destination, defaults to cancel, and opens only after explicit confirmation. It is deliberately not part of `window.ancestry`; a renderer-facing external-link workflow requires its own separately reviewed contract.
+The fixed external-link action accepts only normalized HTTPS destinations without credentials, control characters, or a custom port. The renderer displays the exact destination, Electron Main prompts with that same destination, defaults to cancel, and opens it only after explicit confirmation. The fixed copy action writes plain text only; neither action exposes generic shell or clipboard authority.
 
 ## Security evidence
 
 | Control | Evidence | Gate |
 |---|---|---|
 | `TM-R01` | Secure window defaults and weakened-future-window regression cases in `src/main/security-policy.test.ts`; global web-content and session denials in `src/main/index.ts` and `src/main/session-policy.test.ts`; deterministic skip-link, route-heading, and command-dialog focus tests; reduced-motion and forced-color styles; route/theme Chromium accessibility scans; minimum-window 200% zoom assertions; actual fuse and ASAR inspection in `scripts/inspect-package-fuses.mjs`. | `make desktop-check`, `make desktop-e2e`, `pnpm --dir desktop test:accessibility`, `pnpm --dir desktop test:visual`, `make desktop-security` |
-| `TM-R02`, `TM-L02` | Exact route/MIME/CSP and traversal-denial tests in `src/main/security-policy.test.ts`; production runtime fetch, WebSocket, service-worker, and child-window denials in `e2e/shell.spec.ts`; the design-system boundary rejects network primitives, raw HTML rendering, direct bridge use, and production fixture imports; the production verifier separately rejects remote assets and endpoints, the development gallery, and fictional copy. | `make desktop-check`, `make desktop-e2e` |
-| `TM-I01` | The bridge retains its fixed reviewed methods. Main validates sender, request, response, renderer ownership, purpose, access, session, and revocation. The Issue #106 shell consumes versioned responses only through existing hooks; its routes and `CapabilityGate` neither add bridge methods nor grant authority. E2E asserts that no path, resolver, direct filesystem, security-reporting, external-link, or domain method leaks into the renderer bridge. | `make desktop-check`, `make desktop-e2e` |
+| `TM-R02`, `TM-L02` | Exact route/MIME/CSP and traversal-denial tests in `src/main/security-policy.test.ts`; production runtime fetch, WebSocket, service-worker, and child-window denials in `e2e/shell.spec.ts`; the design-system boundary rejects network primitives, raw HTML rendering, direct bridge use, and production fixture imports. Issue #112 renders model text through a closed CommonMark/GFM component allowlist with raw HTML, images, embeds, implicit autolinks, and executable actions disabled; external destinations remain visible and copy emits plain text only. | `make desktop-check`, `make desktop-e2e` |
+| `TM-I01` | The bridge retains fixed reviewed methods. Main validates sender, request, response, renderer ownership, purpose, access, session, and revocation. The #112 Chat destination consumes only six fixed chat methods, one validated event listener, and two fixed native actions; it adds no generic route, direct network, path, resolver, filesystem, sidecar-session, provider, or domain authority. | `make desktop-check`, `make desktop-e2e` |
 | `TM-A02`, `TM-S01`, `TM-D01`, `TM-O01` | Issue #107 validates the fixed startup-diagnostic route and exact four-component schema, requires keyring-only packaged secret selection, blocks affected mutations and capability access while degraded, and exposes one bounded non-repairing retry. Contract and renderer tests reject secrets, host identity, paths, payloads, unknown fields, duplicate initialization, key replacement, plaintext fallback, and misleading recovery. | `make test`, `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
 | `TM-F01`, `TM-F02`, `TM-D01`, `TM-C01`, `TM-O01` | Native-dialog selection validates regular-file/link state, bounded size, purpose-specific format, canonical identity, and fingerprints before issuing a random one-use grant. Redemption revalidates identity, replacement confirmation is native and race-checked, aliases and concurrent output grants fail closed, and stable responses omit paths. Focused broker and dialog tests exercise cancellation, replacement races, revocation, alias rejection, and output locks. A dedicated verification-only packaged adapter exercises native open/save mediation, path-free DTOs, explicit replacement confirmation, and revocation across the hosted platform matrix without entering production builds. Full worker and publication evidence remains #114/#118/#131. | `make desktop-check`, exact-head packaged workflow |
 | `TM-E01`, `TM-D01`, `TM-C01`, `TM-O01` | Issue #104 persists bounded schema-v1 job snapshots and events in SQLCipher, reconciles interrupted non-terminal jobs to one terminal outcome on startup, isolates slow subscribers with coded replay resynchronization, and keeps cancellation cooperative at declared safe points. Electron main obtains a sanitized shutdown assessment and offers native **Wait**, **Request cancellation**, and **Stay open** choices; the renderer receives no job or sidecar authority. | `make test`, `make desktop-check`, `pnpm --dir desktop test` |
 | `TM-I01`, `TM-D01`, `TM-O01`, `TM-F01`, `TM-F02` | Issue #109 validates five fixed task requests and one fixed event listener. Main owns authenticated bounded SSE and at most 32 sender-owned subscriptions. The renderer ignores stale or duplicate events, refreshes gaps, reloads backend snapshots, closes terminal streams, announces meaningful state changes once, renders coded redacted failures, and displays path-free artifact metadata. It adds no job admission or direct artifact action. | `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
-| `TM-L01`, `TM-L02`, `TM-S01`, `TM-D01`, `TM-O01` | Issue #110 keeps its fixed chat routes behind the authenticated sidecar and exposes no Electron bridge or renderer method. Python tests prove exact named-profile/model binding, fresh consent, pre-provider bounds, network-free denial paths, no-tool requests, transient session teardown, and payload-free audit records. | `make test`, `make typecheck`, `make desktop-check` |
+| `TM-L01`, `TM-L02`, `TM-S01`, `TM-D01`, `TM-O01` | Issues #110-#112 keep fixed chat routes behind Electron Main. Python tests prove exact named-profile/model binding, fresh consent, pre-provider bounds, network-free denial paths, no-tool requests, transient session teardown, and payload-free audit records. Renderer tests prove bounded ordered/replay-safe state, explicit profile/model/consent selection, interruption handling, safe Markdown, plain-text copy, and confirmed HTTPS links. | `make test`, `make typecheck`, `make desktop-check`, `make desktop-e2e` |
 | `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.5.0. | `make desktop-security` |

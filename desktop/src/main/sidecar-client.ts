@@ -5,7 +5,12 @@ import {
   type ApplicationSettings,
   type ApplicationSettingsPatch,
   type CapabilityManifest,
+  type ChatCapability,
   type ChatEvent,
+  type ChatSession,
+  type ChatSessionClosure,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatStreamCancelRequest,
   type ChatStreamRun,
   type ChatStreamStartRequest,
@@ -30,7 +35,9 @@ import {
 } from '../shared-contract/desktop'
 import {
   parseCapabilitiesResult,
+  parseChatCapabilityResult,
   parseChatEventResult,
+  parseChatSessionResult,
   parseChatStreamRunResult,
   parseConsentPreviewResult,
   parseJobEventResult,
@@ -54,6 +61,8 @@ const CONSENT_PREVIEW_PATH = '/api/v1/consents/preview' as const
 const CONSENTS_PATH = '/api/v1/consents' as const
 const JOBS_PATH = '/api/v1/jobs' as const
 const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
+const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
+const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -72,9 +81,12 @@ type SidecarPath =
   | typeof CONSENTS_PATH
   | typeof JOBS_PATH
   | typeof JOB_SHUTDOWN_PATH
+  | typeof CHAT_CAPABILITY_PATH
+  | typeof CHAT_SESSIONS_PATH
   | `/api/v1/jobs/${string}`
   | `/api/v1/jobs/${string}/cancel`
   | `/api/v1/jobs/${string}/events`
+  | `/api/v1/chat/sessions/${string}`
   | `/api/v1/chat/sessions/${string}/streams`
   | `/api/v1/chat/sessions/${string}/streams/${string}/cancel`
   | `/api/v1/chat/sessions/${string}/streams/${string}/events`
@@ -105,7 +117,11 @@ export type SidecarClientFailure =
   | 'job_subscriber_limit'
   | 'job_subscription_closed'
   | 'job_event_stream_failed'
+  | 'chat_session_invalid'
   | 'chat_session_not_found'
+  | 'chat_session_limit'
+  | 'chat_session_busy'
+  | 'chat_session_service_unavailable'
   | 'chat_stream_not_found'
   | 'chat_stream_cursor_invalid'
   | 'chat_stream_replay_expired'
@@ -128,7 +144,7 @@ export interface SidecarHttpResponse {
 }
 
 export interface SidecarRequestOptions {
-  method: 'PATCH' | 'POST'
+  method: 'DELETE' | 'PATCH' | 'POST'
   body?: string
 }
 
@@ -171,6 +187,15 @@ export interface SidecarClient {
     listener: (event: Readonly<JobEvent>) => void,
     signal?: AbortSignal,
   ): Promise<void>
+  getChatCapability(signal?: AbortSignal): Promise<Readonly<ChatCapability>>
+  createChatSession(
+    request: ChatSessionCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatSession>>
+  closeChatSession(
+    request: ChatSessionRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatSessionClosure>>
   startChatStream(
     request: ChatStreamStartRequest,
     signal?: AbortSignal,
@@ -318,20 +343,29 @@ function jobPath(jobId: string, suffix: '' | '/cancel' | '/events' = ''): Sideca
   return `/api/v1/jobs/${jobId}${suffix}`
 }
 
-function chatPath(sessionId: string): SidecarPath
-function chatPath(
+function validateChatSessionId(sessionId: string): void {
+  if (!/^chat_[a-f0-9]{32}$/.test(sessionId)) {
+    throw new SidecarClientError('chat_session_not_found')
+  }
+}
+
+function chatSessionPath(sessionId: string): SidecarPath {
+  validateChatSessionId(sessionId)
+  return `/api/v1/chat/sessions/${sessionId}`
+}
+
+function chatStreamPath(sessionId: string): SidecarPath
+function chatStreamPath(
   sessionId: string,
   runId: string,
   suffix: '/cancel' | '/events',
 ): SidecarPath
-function chatPath(
+function chatStreamPath(
   sessionId: string,
   runId?: string,
   suffix?: '/cancel' | '/events',
 ): SidecarPath {
-  if (!/^chat_[a-f0-9]{32}$/.test(sessionId)) {
-    throw new SidecarClientError('chat_session_not_found')
-  }
+  validateChatSessionId(sessionId)
   if (runId === undefined) return `/api/v1/chat/sessions/${sessionId}/streams`
   if (!/^run_[a-f0-9]{32}$/.test(runId)) {
     throw new SidecarClientError('chat_stream_not_found')
@@ -478,6 +512,36 @@ function chatFailure(response: Readonly<SidecarHttpResponse>): SidecarClientErro
     || code === 'CHAT_STREAM_SERVICE_UNAVAILABLE'
     || response.statusCode === 503) {
     return new SidecarClientError('chat_stream_service_unavailable')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function chatSessionFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
+  if (code === 'CHAT_SESSION_NOT_FOUND' || response.statusCode === 404) {
+    return new SidecarClientError('chat_session_not_found')
+  }
+  if (code === 'CHAT_SESSION_BUSY' || response.statusCode === 409) {
+    return new SidecarClientError('chat_session_busy')
+  }
+  if (code === 'CHAT_SESSION_LIMIT' || response.statusCode === 429) {
+    return new SidecarClientError('chat_session_limit')
+  }
+  if (code === 'CHAT_SESSION_SERVICE_CLOSED'
+    || code === 'CHAT_SESSION_SERVICE_NOT_READY'
+    || code === 'CHAT_SESSION_SERVICE_UNAVAILABLE'
+    || response.statusCode === 503) {
+    return new SidecarClientError('chat_session_service_unavailable')
+  }
+  if (code === 'CHAT_SESSION_INVALID'
+    || code?.startsWith('PROVIDER_')
+    || code?.startsWith('CONSENT_')
+    || response.statusCode === 400
+    || response.statusCode === 422) {
+    return new SidecarClientError('chat_session_invalid')
   }
   return new SidecarClientError('request_failed')
 }
@@ -736,7 +800,7 @@ function streamFixedChatEvents(
       return
     }
 
-    const path = chatPath(subscription.session_id, subscription.run_id, '/events')
+    const path = chatStreamPath(subscription.session_id, subscription.run_id, '/events')
     let responseStream: IncomingMessage | undefined
     let settled = false
     let paused = false
@@ -1170,8 +1234,33 @@ export function createSidecarClient(dependencies: Readonly<{
         throw new SidecarClientError('job_event_stream_failed')
       }
     },
+    async getChatCapability(signal?: AbortSignal) {
+      const response = await perform(CHAT_CAPABILITY_PATH, signal)
+      if (response.statusCode !== 200) throw chatSessionFailure(response)
+      return parseJson(response, parseChatCapabilityResult)
+    },
+    async createChatSession(chat: ChatSessionCreateRequest, signal?: AbortSignal) {
+      const response = await perform(CHAT_SESSIONS_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(chat),
+      })
+      if (response.statusCode !== 200) throw chatSessionFailure(response)
+      return parseJson(response, parseChatSessionResult)
+    },
+    async closeChatSession(chat: ChatSessionRequest, signal?: AbortSignal) {
+      const response = await perform(chatSessionPath(chat.session_id), signal, {
+        method: 'DELETE',
+      })
+      if (response.statusCode !== 204) throw chatSessionFailure(response)
+      if (response.body !== '') throw new SidecarClientError('invalid_response')
+      return Object.freeze({
+        schema_version: 1,
+        session_id: chat.session_id,
+        closed: true,
+      })
+    },
     async startChatStream(chat: ChatStreamStartRequest, signal?: AbortSignal) {
-      const response = await perform(chatPath(chat.session_id), signal, {
+      const response = await perform(chatStreamPath(chat.session_id), signal, {
         method: 'POST',
         body: JSON.stringify({
           schema_version: chat.schema_version,
@@ -1187,7 +1276,7 @@ export function createSidecarClient(dependencies: Readonly<{
     },
     async cancelChatStream(chat: ChatStreamCancelRequest, signal?: AbortSignal) {
       const response = await perform(
-        chatPath(chat.session_id, chat.run_id, '/cancel'),
+        chatStreamPath(chat.session_id, chat.run_id, '/cancel'),
         signal,
         { method: 'POST' },
       )

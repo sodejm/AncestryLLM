@@ -25,6 +25,7 @@ import {
   providerIds,
   secretReferences,
 } from '../../shared-contract/desktop'
+import { ChatWorkspace } from './ChatWorkspace'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
 import { TaskCenter } from './TaskCenter'
@@ -1112,6 +1113,10 @@ function Shell() {
         ? 'Your desktop control shell stays local to this device.'
         : 'A calm overview of this desktop shell.',
     },
+    chat: {
+      title: 'Chat',
+      description: 'Work in a transient conversation with an explicit provider and privacy scope.',
+    },
     tasks: {
       title: 'Tasks',
       description: 'Track backend-owned local work and request safe cancellation.',
@@ -1170,7 +1175,7 @@ function Shell() {
           </section>
           <section className="summary-card" aria-labelledby="welcome-scope">
             <h2 id="welcome-scope">What this shell supports</h2>
-            <p>Use Home for local status, Tasks for long-running work, and Diagnostics for startup recovery.</p>
+            <p>Use Home for local status, Chat for transient provider conversations, Tasks for long-running work, and Diagnostics for startup recovery.</p>
           </section>
           <section className="summary-card" aria-labelledby="welcome-recovery">
             <h2 id="welcome-recovery">Recovery and updates</h2>
@@ -1246,6 +1251,8 @@ function Shell() {
       </>}
 
       {route === 'tasks' && <TaskCenter />}
+
+      {route === 'chat' && <ChatWorkspace />}
 
       {route === 'diagnostics' && <>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">

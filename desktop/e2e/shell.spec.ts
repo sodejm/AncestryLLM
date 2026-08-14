@@ -21,7 +21,7 @@ async function launchShell(fixture: 'success' | 'degraded' = 'success') {
 
 async function expectProductionNavigation(page: Page) {
   const navigation = page.getByRole('navigation', { name: 'Primary' })
-  await expect(navigation.getByRole('link')).toHaveText(['Home', 'Tasks', 'Diagnostics', 'Settings'])
+  await expect(navigation.getByRole('link')).toHaveText(['Home', 'Chat', 'Tasks', 'Diagnostics', 'Settings'])
 }
 
 async function expectNoUnsupportedSurfaces(page: Page, allowProviderSettings = false) {
@@ -215,7 +215,7 @@ async function expectBoundedBridgeAndSecurity(app: ElectronApplication, page: Pa
   expect(externalRequests).toEqual([])
 }
 
-test('built shell exposes the bounded production Home, Tasks, Diagnostics, and Settings surfaces', async () => {
+test('built shell exposes the bounded production Home, Chat, Tasks, Diagnostics, and Settings surfaces', async () => {
   const app = await launchShell()
   try {
     const page = await app.firstWindow()

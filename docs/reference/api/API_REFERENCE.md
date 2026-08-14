@@ -229,9 +229,10 @@ transient-chat operations are source-level work for `0.6.0`; they are not a
 released user surface until the applicable desktop packaging, security, and
 exact-head verification gates pass. The job contract has no producer or
 submission route. Issue #111 gives the chat contract fixed streaming routes and
-a source-level Electron Main/preload bridge, but no renderer conversation,
-Markdown presentation, tool surface, or genealogy integration. Issue #112 owns
-that renderer boundary, and Issue #131 owns target-matched packaged evidence.
+a source-level Electron Main/preload bridge. Issue #112 consumes that bridge in
+a bounded renderer conversation with explicit provider/privacy state and safe
+Markdown presentation, while adding no tool surface or genealogy integration.
+Issue #131 owns target-matched packaged evidence.
 Presence in the committed OpenAPI artifact does not enable a public API,
 generic provider call, or genealogy workflow. Consent administration never
 replaces the execution-time policy check.

@@ -63,9 +63,10 @@ shutdown clears the session. Audit output contains identifiers, counters,
 usage, and one-way payload hashes rather than prompts or responses. Issue #110
 itself does not add an Electron renderer or preload bridge, streaming or
 cancellation, safe Markdown presentation, or packaged-network evidence. Issue
-#111 now supplies the bounded private streaming and cancellation transport;
-renderer presentation and packaged-network evidence remain owned by Issues
-#112 and #131.
+#111 supplies the bounded private streaming and cancellation transport, and
+#112 adds the source-level bounded Chat presentation with explicit profile,
+model, purpose, data-class, and consent state. Target-matched packaged network
+and adversarial evidence remains #131.
 
 ## Audited asynchronous provider streams
 
@@ -100,8 +101,10 @@ cancellation routes plus an Electron-Main-owned source bridge. That transport
 strictly validates owner-scoped monotonic events, batches within 16 milliseconds
 or 4 KiB, pauses above 256 KiB of exact unacknowledged data, cancels after a
 15-second acknowledgement stall, and permits one same-run cursor reconnect
-without retrying provider output. Renderer chat state and safe model-output
-presentation remain Issue #112; packaged adversarial evidence remains #131.
+without retrying provider output. Issue #112 consumes that transport through
+ordered owner-scoped renderer state, a closed Markdown component allowlist,
+plain-text copy, and Main-confirmed external HTTPS links. Target-matched
+packaged adversarial evidence remains #131.
 
 ## Application boundary
 

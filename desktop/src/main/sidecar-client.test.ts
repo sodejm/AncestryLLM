@@ -1,6 +1,12 @@
 import { createServer, type ServerResponse } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
-import type { ChatEvent, ChatStreamRun, JobSnapshot } from '../shared-contract/desktop'
+import type {
+  ChatCapability,
+  ChatEvent,
+  ChatSession,
+  ChatStreamRun,
+  JobSnapshot,
+} from '../shared-contract/desktop'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 import {
   SidecarClientError,
@@ -15,6 +21,39 @@ const session: Readonly<AuthenticatedSidecarSession> = Object.freeze({
 
 const chatSessionId = `chat_${'a'.repeat(32)}`
 const chatRunId = `run_${'b'.repeat(32)}`
+
+const chatCapability: Readonly<ChatCapability> = Object.freeze({
+  schema_version: 1,
+  max_active_sessions: 32,
+  max_messages: 32,
+  max_message_characters: 16_384,
+  max_context_characters: 65_536,
+  max_output_tokens: 4_096,
+  max_temperature: 1,
+  max_timeout_seconds: 120,
+  max_safe_retries: 1,
+  transient: true,
+  tools_enabled: false,
+  payload_retention: false,
+  output_is_evidence: false,
+  streaming: true,
+  stream_replay_max_bytes: 262_144,
+})
+
+const chatSession: Readonly<ChatSession> = Object.freeze({
+  schema_version: 1,
+  session_id: chatSessionId,
+  provider_profile_name: 'fictional-local',
+  provider_id: 'ollama',
+  model: 'fictional-model',
+  purpose: 'genealogy_analysis',
+  data_classes: Object.freeze(['deceased_person'] as const),
+  remote: false,
+  consent_name: null,
+  message_count: 0,
+  transient: true,
+  payload_retention: false,
+})
 
 const chatStreamRun = (overrides: Partial<ChatStreamRun> = {}): Readonly<ChatStreamRun> => Object.freeze({
   schema_version: 1,
@@ -223,6 +262,92 @@ describe('main-only sidecar capabilities client', () => {
       new SidecarClientError('startup_mutation_blocked'),
     )
   })
+
+  it('gets, creates, and closes transient chat sessions through fixed authenticated routes', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(chatCapability),
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(chatSession),
+      })
+      .mockResolvedValueOnce({
+        statusCode: 204,
+        contentType: '',
+        body: '',
+      })
+    const client = createSidecarCapabilitiesClient({ session: () => session, request })
+    const create = {
+      schema_version: 1 as const,
+      provider_profile_name: 'fictional-local',
+      model: 'fictional-model',
+      purpose: 'genealogy_analysis' as const,
+      data_classes: ['deceased_person'] as const,
+      consent_name: null,
+    }
+
+    await expect(client.getChatCapability()).resolves.toEqual(chatCapability)
+    await expect(client.createChatSession(create)).resolves.toEqual(chatSession)
+    await expect(client.closeChatSession({
+      schema_version: 1,
+      session_id: chatSessionId,
+    })).resolves.toEqual({
+      schema_version: 1,
+      session_id: chatSessionId,
+      closed: true,
+    })
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      session,
+      '/api/v1/chat/capability',
+      undefined,
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      session,
+      '/api/v1/chat/sessions',
+      undefined,
+      { method: 'POST', body: JSON.stringify(create) },
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      session,
+      `/api/v1/chat/sessions/${chatSessionId}`,
+      undefined,
+      { method: 'DELETE' },
+    )
+  })
+
+  it.each([
+    [422, 'CHAT_SESSION_INVALID', 'chat_session_invalid'],
+    [404, 'CHAT_SESSION_NOT_FOUND', 'chat_session_not_found'],
+    [409, 'CHAT_SESSION_BUSY', 'chat_session_busy'],
+    [429, 'CHAT_SESSION_LIMIT', 'chat_session_limit'],
+    [503, 'CHAT_SESSION_SERVICE_UNAVAILABLE', 'chat_session_service_unavailable'],
+  ] as const)(
+    'preserves stable chat session failures for status %i',
+    async (statusCode, code, reason) => {
+      const request = vi.fn().mockResolvedValue({
+        statusCode,
+        contentType: 'application/json',
+        body: JSON.stringify({ code, message: 'Rejected for a fixture reason.' }),
+      })
+      const client = createSidecarCapabilitiesClient({ session: () => session, request })
+
+      await expect(client.createChatSession({
+        schema_version: 1,
+        provider_profile_name: 'fictional-local',
+        model: 'fictional-model',
+        purpose: 'genealogy_analysis',
+        data_classes: ['deceased_person'],
+        consent_name: null,
+      })).rejects.toEqual(new SidecarClientError(reason))
+    },
+  )
 
   it('starts and cancels chat streams through owner-scoped fixed routes', async () => {
     const request = vi.fn()

@@ -23,9 +23,12 @@ claim the five task requests and validated event listener.
 
 Issue #110 adds source-level service, policy, API, sidecar, shutdown, and
 no-network-before-authorization tests for bounded synchronous transient chat.
-It does not add a preload or renderer method, streaming transport, or expand the
-recorded packaged-network claim. Issues #111, #112, and #131 retain those
-presentation, transport, and target-matched evidence gates.
+Issue #111 adds source-level Main-owned transport tests, and Issue #112 adds
+source-level bridge, bounded renderer-state, accessibility, safe Markdown,
+plain-text copy, and confirmed-link tests. They do not expand the recorded
+packaged-network or exact-six bridge claim. Issue #131 must update the package
+harness and supply target-matched stream-race, accessibility, and hostile-content
+evidence before a packaged application can claim this Chat destination.
 
 ## Exact-head target matrix
 
