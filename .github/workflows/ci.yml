@@ -179,7 +179,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      ANCESTRYLLM_DOCS_SCREENSHOT_REPORT: ${{ runner.temp }}/docs-screenshot-drift-v1.json
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
       TZ: UTC
@@ -219,7 +218,7 @@ jobs:
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
           test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.6"
       - name: Verify deterministic documentation screenshots
-        run: xvfb-run --auto-servernum make docs-screenshots-check
+        run: ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" xvfb-run --auto-servernum make docs-screenshots-check
       - name: Retain sanitized screenshot drift evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()

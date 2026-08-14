@@ -234,6 +234,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "LANG: en_US.UTF-8" in job
     assert "LC_ALL: en_US.UTF-8" in job
     assert "TZ: UTC" in job
+    assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
     assert 'node-version: "26.5.0"' in job
     assert "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8" in job
@@ -244,7 +245,10 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
         "xvfb=2:21.1.12-1ubuntu1.6",
     ):
         assert package in job
-    assert "xvfb-run --auto-servernum make docs-screenshots-check" in job
+    assert (
+        'ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" '
+        "xvfb-run --auto-servernum make docs-screenshots-check"
+    ) in job
 
     assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
     assert desktop_package["packageManager"] == "pnpm@11.9.0"
