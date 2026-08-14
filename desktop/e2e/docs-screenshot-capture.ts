@@ -29,6 +29,7 @@ const SAFE_OUTPUT_PREFIX = 'docs/assets/screenshots/electron/'
 
 type CaptureFailureCode =
   | 'DOCSHOT_BINARY_MISSING'
+  | 'DOCSHOT_BINARY_UNTRUSTED'
   | 'DOCSHOT_CAPTURE_MISMATCH'
   | 'DOCSHOT_FIXTURE_INVALID'
   | 'DOCSHOT_FIXTURE_MISSING'
@@ -142,7 +143,7 @@ export interface ElectronCaptureScenario {
     deviceScaleFactor: number
   }>
   readonly readySignal: Readonly<{ kind: 'text'; value: string }>
-  readonly comparison: ManifestScenario['comparison']
+  readonly comparison: Readonly<{ mode: 'exact' }>
 }
 
 export interface ElectronCapturePlan {
@@ -174,6 +175,95 @@ interface CaptureRuntime {
 }
 
 const captureRuntime = new WeakMap<ElectronCapturePlan, CaptureRuntime>()
+
+export function requireCaptureOutputRoot(value: string | undefined): string {
+  if (value === undefined || value.trim().length === 0) {
+    fail('DOCSHOT_OUTPUT_ROOT_MISSING')
+  }
+  return resolve(value)
+}
+
+export function assertTrustedElectronResolution(value: string | undefined): void {
+  if (value !== undefined) fail('DOCSHOT_BINARY_UNTRUSTED')
+}
+
+export function electronLaunchArguments(
+  geometry: ElectronCaptureScenario['geometry'],
+  userDataDirectory: string,
+): readonly string[] {
+  return Object.freeze([
+    `--force-device-scale-factor=${geometry.deviceScaleFactor}`,
+    '--lang=en-US',
+    `--user-data-dir=${userDataDirectory}`,
+    '.',
+  ])
+}
+
+export function captureDeterminismStyles(
+  font: ElectronCapturePlan['determinism']['font'],
+): string {
+  return `
+      *, *::before, *::after {
+        font-family: ${JSON.stringify(font.family)}, sans-serif !important;
+        font-synthesis: none !important;
+        animation-delay: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        caret-color: transparent !important;
+        scroll-behavior: auto !important;
+        transition-delay: 0s !important;
+        transition-duration: 0s !important;
+      }
+    `
+}
+
+export function captureRuntimeEnvironment(
+  plan: ElectronCapturePlan,
+  scenario: Readonly<ElectronCaptureScenario>,
+  userDataDirectory: string,
+  platform: NodeJS.Platform = process.platform,
+  hostEnvironment: Readonly<Record<string, string | undefined>> = process.env,
+): Readonly<Record<string, string>> {
+  const environment: Record<string, string> = {
+    ANCESTRYLLM_DESKTOP_FIXTURE: scenario.fixture.state,
+    ANCESTRYLLM_DOCS_SCREENSHOT_ID_SEED: plan.determinism.idSeed,
+    ANCESTRYLLM_DOCS_SCREENSHOT_USERNAME: plan.determinism.fixedUsername,
+    HOME: userDataDirectory,
+    LANG: plan.determinism.locale,
+    LC_ALL: plan.determinism.locale,
+    TEMP: userDataDirectory,
+    TMP: userDataDirectory,
+    TMPDIR: userDataDirectory,
+    TZ: plan.determinism.timezone,
+  }
+
+  // Electron needs a few host-owned session locators on Linux and Windows. Keep
+  // that allowlist narrow so credentials and provider configuration never reach
+  // the documentation-capture process.
+  const runtimeKeys = platform === 'linux'
+    ? ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR']
+    : platform === 'win32'
+      ? ['ComSpec', 'SYSTEMROOT', 'SystemRoot', 'WINDIR']
+      : []
+  for (const key of runtimeKeys) {
+    const value = hostEnvironment[key]
+    if (value !== undefined) environment[key] = value
+  }
+  return Object.freeze(environment)
+}
+
+export function declaredFixtureContent(
+  scenario: Readonly<ElectronCaptureScenario>,
+): readonly string[] {
+  const content = scenario.fixture.content
+  return Object.freeze([
+    content.title,
+    content.status,
+    content.prompt,
+    content.response,
+    content.detail,
+  ].filter((value) => value.trim().length > 0))
+}
 
 export async function loadElectronCapturePlan(options: Readonly<{
   repositoryRoot: string
@@ -249,6 +339,7 @@ export async function loadElectronCapturePlan(options: Readonly<{
   }
 
   const electronScenarios: ElectronCaptureScenario[] = []
+  const electronOutputPaths = new Set<string>()
   for (const scenario of payload.scenarios) {
     if (scenario.surface !== 'electron') continue
     if (!sameCommand(scenario.launch, ELECTRON_CAPTURE_COMMAND)) {
@@ -258,6 +349,9 @@ export async function loadElectronCapturePlan(options: Readonly<{
     if (!isSafeDeclaredOutput(scenario.output_path, payload.output_allowlist)) {
       fail('DOCSHOT_OUTPUT_UNDECLARED')
     }
+    if (electronOutputPaths.has(scenario.output_path)) fail('DOCSHOT_MANIFEST_INVALID')
+    electronOutputPaths.add(scenario.output_path)
+    if (scenario.comparison.mode !== 'exact') fail('DOCSHOT_MANIFEST_INVALID')
     const fixture = fixtureById.get(scenario.fixture_id)
     if (fixture === undefined || fixture.state === 'privacy-canary') {
       fail('DOCSHOT_FIXTURE_INVALID')
@@ -283,7 +377,7 @@ export async function loadElectronCapturePlan(options: Readonly<{
         kind: scenario.ready_signal.kind,
         value: scenario.ready_signal.value,
       },
-      comparison: scenario.comparison,
+      comparison: { mode: 'exact' },
     }))
   }
   electronScenarios.sort((left, right) => left.id.localeCompare(right.id, 'en'))
@@ -360,10 +454,11 @@ export async function publishCaptureAtomically(
   if (!isWithin(runtime.outputRoot, destination)) fail('DOCSHOT_OUTPUT_UNDECLARED')
   const parent = dirname(destination)
   try {
-    await mkdir(parent, { recursive: true })
-    await rejectSymlinkComponents(runtime.outputRoot, parent)
-    const parentRealPath = await realpath(parent)
-    if (!isWithin(runtime.outputRootRealPath, parentRealPath)) fail('DOCSHOT_OUTPUT_UNDECLARED')
+    await ensureContainedOutputDirectory(
+      runtime.outputRoot,
+      runtime.outputRootRealPath,
+      parent,
+    )
   } catch (error) {
     if (error instanceof DocsScreenshotCaptureError) throw error
     fail('DOCSHOT_OUTPUT_WRITE_FAILED')
@@ -475,14 +570,36 @@ function isWithin(parent: string, child: string): boolean {
     || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== '..' && !isAbsolute(pathFromParent))
 }
 
-async function rejectSymlinkComponents(root: string, target: string): Promise<void> {
+async function ensureContainedOutputDirectory(
+  root: string,
+  rootRealPath: string,
+  target: string,
+): Promise<void> {
   const pathFromRoot = relative(root, target)
   if (!isWithin(root, target)) fail('DOCSHOT_OUTPUT_UNDECLARED')
+  const rootMetadata = await lstat(root)
+  if (rootMetadata.isSymbolicLink()) fail('DOCSHOT_OUTPUT_UNDECLARED')
+  if (!rootMetadata.isDirectory()) fail('DOCSHOT_OUTPUT_WRITE_FAILED')
+  if (await realpath(root) !== rootRealPath) fail('DOCSHOT_OUTPUT_UNDECLARED')
   let current = root
   for (const component of pathFromRoot.split(sep).filter(Boolean)) {
     current = join(current, component)
-    const metadata = await lstat(current)
+    let metadata: Awaited<ReturnType<typeof lstat>>
+    try {
+      metadata = await lstat(current)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      try {
+        await mkdir(current, { mode: 0o700 })
+      } catch (mkdirError) {
+        if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError
+      }
+      metadata = await lstat(current)
+    }
     if (metadata.isSymbolicLink()) fail('DOCSHOT_OUTPUT_UNDECLARED')
+    if (!metadata.isDirectory()) fail('DOCSHOT_OUTPUT_WRITE_FAILED')
+    const currentRealPath = await realpath(current)
+    if (!isWithin(rootRealPath, currentRealPath)) fail('DOCSHOT_OUTPUT_UNDECLARED')
   }
 }
 

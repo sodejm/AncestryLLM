@@ -6,11 +6,11 @@
   "network": "disabled",
   "fictional": true,
   "content": {
-    "title": "Desktop diagnostics",
-    "status": "Desktop service unavailable",
+    "title": "Diagnostics",
+    "status": "Degraded",
     "prompt": "",
     "response": "",
-    "detail": "The desktop service did not start. Review sanitized diagnostics before retrying."
+    "detail": "The desktop service did not start."
   },
   "privacy_canaries": []
 }

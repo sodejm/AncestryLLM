@@ -6,11 +6,11 @@
   "network": "disabled",
   "fictional": true,
   "content": {
-    "title": "Ready desktop",
+    "title": "Home",
     "status": "Ready",
     "prompt": "",
     "response": "Local desktop shell",
-    "detail": "No cloud provider is selected and no network request is permitted."
+    "detail": "No control capabilities are currently available."
   },
   "privacy_canaries": []
 }

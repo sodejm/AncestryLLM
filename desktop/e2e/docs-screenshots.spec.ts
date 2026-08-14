@@ -15,15 +15,23 @@ import {
   assertExactCapture,
   assertNoUnexpectedNetwork,
   assertPlanCaptureIsPrivate,
+  assertTrustedElectronResolution,
+  captureDeterminismStyles,
+  captureRuntimeEnvironment,
+  declaredFixtureContent,
+  electronLaunchArguments,
   loadElectronCapturePlan,
   publishCaptureAtomically,
+  requireCaptureOutputRoot,
   type ElectronCapturePlan,
   type ElectronCaptureScenario,
 } from './docs-screenshot-capture'
+import { APP_ENTRY_URL as TRUSTED_RENDERER_URL } from '../src/main/security-policy'
 
 const desktopRoot = process.cwd()
 const repositoryRoot = resolve(desktopRoot, '..')
 const loadNodeModule = createRequire(import.meta.url)
+assertTrustedElectronResolution(process.env.ELECTRON_OVERRIDE_DIST_PATH)
 const electronExecutablePath = loadNodeModule('electron') as string
 const fontPath = resolve(
   desktopRoot,
@@ -32,9 +40,8 @@ const fontPath = resolve(
 
 test('captures the declared Electron documentation states deterministically', async () => {
   test.setTimeout(180_000)
-  const outputRoot = resolve(
-    process.env.ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT
-      ?? join(repositoryRoot, '__missing_docs_screenshot_output_root__'),
+  const outputRoot = requireCaptureOutputRoot(
+    process.env.ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT,
   )
   const plan = await loadElectronCapturePlan({
     repositoryRoot,
@@ -44,7 +51,6 @@ test('captures the declared Electron documentation states deterministically', as
   })
 
   for (const scenario of plan.scenarios) {
-    expect(scenario.comparison.mode).toBe('exact')
     const first = await captureScenario(plan, scenario)
     const second = await captureScenario(plan, scenario)
     assertExactCapture(first, second)
@@ -62,13 +68,8 @@ async function captureScenario(
     app = await electron.launch({
       executablePath: electronExecutablePath,
       cwd: desktopRoot,
-      args: [
-        '--force-device-scale-factor=1',
-        '--lang=en-US',
-        `--user-data-dir=${userDataDirectory}`,
-        '.',
-      ],
-      env: captureEnvironment(plan, scenario, userDataDirectory),
+      args: [...electronLaunchArguments(scenario.geometry, userDataDirectory)],
+      env: captureRuntimeEnvironment(plan, scenario, userDataDirectory),
     })
 
     const unexpectedNetwork = new Set<string>()
@@ -76,12 +77,20 @@ async function captureScenario(
     context.on('request', (request) => {
       if (isNetworkUrl(request.url())) unexpectedNetwork.add(request.url())
     })
-    await context.route(/^(?:https?|wss?):\/\//, async (route) => {
+    await context.route(/^https?:\/\//, async (route) => {
       unexpectedNetwork.add(route.request().url())
       await route.abort('blockedbyclient')
     })
+    await context.routeWebSocket(/^wss?:\/\//, async (webSocket) => {
+      unexpectedNetwork.add(webSocket.url())
+      await webSocket.close({
+        code: 1008,
+        reason: 'Documentation capture is network-free.',
+      })
+    })
 
     const page = await app.firstWindow()
+    await page.waitForURL(TRUSTED_RENDERER_URL, { waitUntil: 'load' })
     await configureWindow(app, page, plan, scenario)
     await assertNoNetworkActivity(page, unexpectedNetwork)
 
@@ -89,6 +98,11 @@ async function captureScenario(
       await prepareReadyHome(page, scenario)
     } else {
       await prepareDegradedDiagnostics(page, scenario)
+    }
+
+    const main = page.getByRole('main')
+    for (const value of declaredFixtureContent(scenario)) {
+      await expect(main.getByText(value, { exact: true })).toBeVisible()
     }
 
     await assertNoNetworkActivity(page, unexpectedNetwork)
@@ -124,7 +138,8 @@ async function configureWindow(
   await page.clock.setFixedTime(plan.determinism.fixedTimestamp)
 
   const fontBytes = await readFile(fontPath)
-  await page.evaluate(async ({ fontBase64, font, theme }) => {
+  const determinismStyles = captureDeterminismStyles(plan.determinism.font)
+  await page.evaluate(async ({ determinismStyles, fontBase64, font, theme }) => {
     const binary = atob(fontBase64)
     const bytes = new Uint8Array(binary.length)
     for (let index = 0; index < binary.length; index += 1) {
@@ -139,21 +154,7 @@ async function configureWindow(
 
     const style = document.createElement('style')
     style.dataset.docsScreenshotDeterminism = 'true'
-    style.textContent = `
-      html, body, button, input, select, textarea {
-        font-family: ${JSON.stringify(font.family)}, sans-serif !important;
-        font-synthesis: none !important;
-      }
-      *, *::before, *::after {
-        animation-delay: 0s !important;
-        animation-duration: 0s !important;
-        animation-iteration-count: 1 !important;
-        caret-color: transparent !important;
-        scroll-behavior: auto !important;
-        transition-delay: 0s !important;
-        transition-duration: 0s !important;
-      }
-    `
+    style.textContent = determinismStyles
     document.head.append(style)
     document.documentElement.dataset.theme = theme
     document.documentElement.dataset.reducedMotion = 'true'
@@ -163,6 +164,7 @@ async function configureWindow(
       throw new Error('Bundled documentation capture font did not load.')
     }
   }, {
+    determinismStyles,
     fontBase64: fontBytes.toString('base64'),
     font: plan.determinism.font,
     theme: plan.determinism.theme,
@@ -258,37 +260,4 @@ async function assertNoNetworkActivity(page: Page, observed: ReadonlySet<string>
     ...observed,
     ...rendererResources.filter((url) => isNetworkUrl(url)),
   ])
-}
-
-function captureEnvironment(
-  plan: ElectronCapturePlan,
-  scenario: Readonly<ElectronCaptureScenario>,
-  userDataDirectory: string,
-): Readonly<Record<string, string>> {
-  const environment: Record<string, string> = {
-    ANCESTRYLLM_DESKTOP_FIXTURE: scenario.fixture.state,
-    ANCESTRYLLM_DOCS_SCREENSHOT_ID_SEED: plan.determinism.idSeed,
-    ANCESTRYLLM_DOCS_SCREENSHOT_USERNAME: plan.determinism.fixedUsername,
-    HOME: userDataDirectory,
-    LANG: plan.determinism.locale,
-    LC_ALL: plan.determinism.locale,
-    TEMP: userDataDirectory,
-    TMP: userDataDirectory,
-    TMPDIR: userDataDirectory,
-    TZ: plan.determinism.timezone,
-  }
-
-  // Electron needs a few host-owned session locators on Linux and Windows. Keep
-  // that allowlist narrow so credentials and provider configuration never reach
-  // the documentation-capture process.
-  const runtimeKeys = process.platform === 'linux'
-    ? ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR']
-    : process.platform === 'win32'
-      ? ['ComSpec', 'SYSTEMROOT', 'SystemRoot', 'WINDIR']
-      : []
-  for (const key of runtimeKeys) {
-    const value = process.env[key]
-    if (value !== undefined) environment[key] = value
-  }
-  return Object.freeze(environment)
 }
