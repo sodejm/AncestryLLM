@@ -5,20 +5,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import sys
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 if __package__:
-    from scripts.docs_linking import source_anchors
+    from scripts.docs_linking import source_anchors, split_destination
 else:
-    from docs_linking import source_anchors
+    from docs_linking import source_anchors, split_destination
 
 SCHEMA_VERSION = 1
 _MANIFEST_SCHEMA = "config/docs-screenshot-manifest-v1.schema.json"
@@ -42,6 +44,11 @@ _FORBIDDEN_LAUNCHERS = frozenset(
     }
 )
 _REQUIRED_FIXTURE_STATES = frozenset({"success", "degraded", "privacy-canary"})
+_MARKDOWN_IMAGE = re.compile(
+    r"!\[(?P<alt>[^\]\n]*)\]\((?P<destination>[^)\n]+)\)",
+)
+_GENERIC_ALT_TEXT = frozenset({"figure", "image", "photo", "picture", "screenshot"})
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class ScreenshotManifestError(ValueError):
@@ -416,6 +423,128 @@ def validate_capture_text(manifest: ValidatedManifest, text: str) -> None:
         )
 
 
+def _resolved_markdown_image(
+    documentation_path: PurePosixPath,
+    destination: str,
+) -> str | None:
+    target, _title = split_destination(destination.strip())
+    parsed = urlsplit(target)
+    if parsed.scheme or parsed.netloc or not parsed.path:
+        return None
+    try:
+        decoded = unquote(parsed.path, encoding="utf-8", errors="strict")
+    except UnicodeDecodeError:
+        _fail("DOCSHOT_DOC_IMAGE_UNDECLARED", "screenshot image target is not valid UTF-8")
+    if "\\" in decoded or decoded.startswith("/") or _WINDOWS_DRIVE.match(decoded):
+        _fail("DOCSHOT_DOC_IMAGE_UNDECLARED", "screenshot image target is unsafe")
+    resolved = posixpath.normpath((documentation_path.parent / decoded).as_posix())
+    if resolved == ".." or resolved.startswith("../"):
+        _fail("DOCSHOT_DOC_IMAGE_UNDECLARED", "screenshot image target escapes docs")
+    if not resolved.startswith("docs/assets/screenshots/"):
+        return None
+    return resolved
+
+
+def _meaningful_alt_text(alt_text: str, output_path: str) -> bool:
+    normalized = " ".join(alt_text.split()).strip()
+    if len(normalized) < 12 or len(normalized.split()) < 2:
+        return False
+    casefolded = normalized.casefold()
+    if casefolded in _GENERIC_ALT_TEXT:
+        return False
+    stem = PurePosixPath(output_path).stem.replace("-", " ").replace("_", " ").casefold()
+    return casefolded != stem
+
+
+def validate_published_assets(
+    manifest: ValidatedManifest,
+    *,
+    repository_root: Path,
+) -> None:
+    """Validate declared PNG ownership and every Markdown screenshot reference."""
+    resolved_repository = repository_root.resolve()
+    declared_outputs = {str(scenario["output_path"]) for scenario in manifest.scenarios}
+    allowed_references = {
+        (str(reference["path"]), str(scenario["output_path"]))
+        for scenario in manifest.scenarios
+        for reference in scenario["documentation"]
+    }
+
+    for output_path in sorted(declared_outputs):
+        output = _safe_repository_path(
+            output_path,
+            repository_root=resolved_repository,
+            prefix="docs/assets/screenshots",
+            suffix=".png",
+            code="DOCSHOT_OUTPUT_PATH_UNSAFE",
+        )
+        if output.is_symlink() or not output.is_file():
+            _fail("DOCSHOT_ASSET_MISSING", "a declared screenshot asset is missing")
+        try:
+            content = output.read_bytes()
+        except OSError:
+            _fail("DOCSHOT_ASSET_MISSING", "a declared screenshot asset is unreadable")
+        if not content.startswith(_PNG_SIGNATURE):
+            _fail("DOCSHOT_ASSET_INVALID", "a declared screenshot asset is not a PNG")
+        if any(canary.encode("utf-8") in content for canary in manifest.privacy_canaries):
+            _fail("DOCSHOT_PRIVACY_CANARY_LEAKED", "a published PNG contains a privacy canary")
+
+    screenshot_root = resolved_repository / "docs/assets/screenshots"
+    if screenshot_root.is_symlink():
+        _fail("DOCSHOT_ASSET_ORPHANED", "the screenshot root cannot be a symlink")
+    discovered_outputs = (
+        {
+            path.relative_to(resolved_repository).as_posix()
+            for path in screenshot_root.rglob("*")
+            if path.is_file() or path.is_symlink()
+        }
+        if screenshot_root.is_dir()
+        else set()
+    )
+    if discovered_outputs - declared_outputs:
+        _fail("DOCSHOT_ASSET_ORPHANED", "an unowned screenshot asset is published")
+
+    discovered_references: set[tuple[str, str]] = set()
+    docs_root = resolved_repository / "docs"
+    for documentation in sorted(docs_root.rglob("*.md")):
+        if documentation.is_symlink() or not documentation.is_file():
+            continue
+        relative_documentation = PurePosixPath(
+            documentation.relative_to(resolved_repository).as_posix(),
+        )
+        try:
+            markdown = documentation.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            _fail("DOCSHOT_DOC_NOT_FOUND", "documentation screenshot owner is unreadable")
+        for match in _MARKDOWN_IMAGE.finditer(markdown):
+            resolved_image = _resolved_markdown_image(
+                relative_documentation,
+                match.group("destination"),
+            )
+            if resolved_image is None:
+                continue
+            if resolved_image not in declared_outputs:
+                _fail(
+                    "DOCSHOT_DOC_IMAGE_UNDECLARED",
+                    "Markdown references an undeclared screenshot asset",
+                )
+            if not _meaningful_alt_text(match.group("alt"), resolved_image):
+                _fail("DOCSHOT_DOC_ALT_INVALID", "screenshot alt text is not meaningful")
+            discovered_references.add((relative_documentation.as_posix(), resolved_image))
+
+    undeclared_references = discovered_references - allowed_references
+    if undeclared_references:
+        _fail(
+            "DOCSHOT_DOC_IMAGE_UNDECLARED",
+            "a screenshot embedding is absent from the ownership manifest",
+        )
+    if allowed_references - discovered_references:
+        _fail(
+            "DOCSHOT_DOC_IMAGE_MISSING",
+            "a manifest-owned documentation file does not embed its screenshot",
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "validate"))
@@ -439,6 +568,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plan":
         print(normalized_plan_json(manifest), end="")
     else:
+        try:
+            validate_published_assets(manifest, repository_root=args.repository_root)
+        except ScreenshotManifestError as error:
+            print(error.code, file=sys.stderr)
+            return 2
         print('{"schema_version":1,"status":"valid"}')
     return 0
 

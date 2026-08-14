@@ -200,8 +200,52 @@ class DockerCaptureBackend:
         return completed
 
     @staticmethod
-    def _safe_bind_source(path: Path) -> str:
-        resolved = str(path.resolve())
+    def _safe_bind_source(
+        path: Path,
+        *,
+        host_platform: str | None = None,
+        private_var_root: Path = Path("/private/var"),
+        var_alias_root: Path = Path("/var"),
+    ) -> str:
+        try:
+            resolved_path = path.resolve(strict=True)
+        except OSError:
+            _fail(
+                "DOCSHOT_TERMINAL_TEMP_INVALID",
+                "capture path must be an existing directory",
+            )
+        bind_path = resolved_path
+        platform_name = sys.platform if host_platform is None else host_platform
+        if platform_name == "darwin":
+            try:
+                private_root = private_var_root.resolve(strict=True)
+                relative = resolved_path.relative_to(private_root)
+            except ValueError:
+                pass
+            except OSError:
+                _fail(
+                    "DOCSHOT_TERMINAL_TEMP_INVALID",
+                    "macOS Docker bind roots could not be validated",
+                )
+            else:
+                alias = var_alias_root / relative
+                try:
+                    alias_target = alias.resolve(strict=True)
+                except OSError:
+                    _fail(
+                        "DOCSHOT_TERMINAL_TEMP_INVALID",
+                        "macOS Docker bind alias could not be validated",
+                    )
+                if alias_target != resolved_path:
+                    _fail(
+                        "DOCSHOT_TERMINAL_TEMP_INVALID",
+                        "macOS Docker bind alias does not match the capture path",
+                    )
+                # Colima exposes /var to its VM, while pathlib canonicalizes the
+                # same macOS path through /private/var. Preserve the verified
+                # alias instead of handing Docker the unreachable canonical path.
+                bind_path = alias
+        resolved = str(bind_path)
         if "," in resolved or "\n" in resolved or "\r" in resolved:
             _fail(
                 "DOCSHOT_TERMINAL_TEMP_INVALID",
@@ -703,6 +747,27 @@ def _terminal_scenarios(manifest: ValidatedManifest) -> tuple[dict[str, Any], ..
     )
 
 
+def _select_terminal_scenarios(
+    scenarios: tuple[dict[str, Any], ...],
+    scenario_ids: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    if not scenario_ids:
+        return scenarios
+    normalized = [scenario_id.casefold() for scenario_id in scenario_ids]
+    available = {str(scenario["id"]).casefold() for scenario in scenarios}
+    if (
+        any(not scenario_id for scenario_id in scenario_ids)
+        or len(set(normalized)) != len(normalized)
+        or not set(normalized).issubset(available)
+    ):
+        _fail(
+            "DOCSHOT_TERMINAL_SCENARIO_SELECTION_INVALID",
+            "terminal scenario selection is blank, duplicated, or undeclared",
+        )
+    selected = set(normalized)
+    return tuple(scenario for scenario in scenarios if str(scenario["id"]).casefold() in selected)
+
+
 def _ensure_closed_scenario_contract(
     manifest: ValidatedManifest,
     manifest_scenarios: tuple[dict[str, Any], ...],
@@ -905,8 +970,9 @@ def capture_terminal_screenshots(
     output_root: Path,
     temporary_root: Path,
     backend: CaptureBackend,
+    scenario_ids: tuple[str, ...] = (),
 ) -> tuple[Path, ...]:
-    """Capture every declared terminal scenario twice, then publish validated PNGs."""
+    """Capture selected terminal scenarios twice, then publish validated PNGs."""
     resolved_repository = _require_directory(
         repository_root,
         code="DOCSHOT_TERMINAL_REPOSITORY_INVALID",
@@ -926,6 +992,7 @@ def capture_terminal_screenshots(
     policy = load_capture_policy(policy_path)
     scenarios = _terminal_scenarios(manifest)
     _ensure_closed_scenario_contract(manifest, scenarios, policy)
+    scenarios = _select_terminal_scenarios(scenarios, scenario_ids)
 
     backend.prepare(repository_root=resolved_repository, policy=policy)
     staged: list[tuple[Path, bytes]] = []
@@ -998,6 +1065,7 @@ def _parser() -> argparse.ArgumentParser:
         "--temporary-root",
         type=Path,
     )
+    parser.add_argument("--scenario", action="append", default=[])
     return parser
 
 
@@ -1018,6 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.temporary_root if args.temporary_root is not None else args.repository_root
                 ),
                 backend=DockerCaptureBackend(),
+                scenario_ids=tuple(args.scenario),
             )
             result = {"captured": len(captured), "status": "ok"}
     except (ScreenshotManifestError, TerminalCaptureError) as error:

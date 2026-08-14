@@ -24,6 +24,7 @@ GOVERNED_JOB_TIMEOUTS = {
         "lockfile": 15,
         "test": 20,
         "quality": 20,
+        "docs-screenshots": 40,
         "security": 30,
         "package": 20,
         "install-smoke": 20,
@@ -183,7 +184,15 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
 
     assert "name: lockfile consistency" in lockfile_job
     assert "make lock-check" in lockfile_job
-    for job in ("test", "quality", "security", "package", "container", "workflow-audit"):
+    for job in (
+        "test",
+        "quality",
+        "docs-screenshots",
+        "security",
+        "package",
+        "container",
+        "workflow-audit",
+    ):
         assert "lockfile" in _job(workflow, job).split("runs-on:", maxsplit=1)[0]
 
 
@@ -198,6 +207,7 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
         "lockfile",
         "test",
         "quality",
+        "docs-screenshots",
         "security",
         "package",
         "install-smoke",
@@ -207,9 +217,49 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
     ):
         assert f"      - {dependency}\n" in gate
     assert "CHANGES_RESULT: ${{ needs.changes.result }}" in gate
+    assert "DOCS_SCREENSHOTS_RESULT: ${{ needs.docs-screenshots.result }}" in gate
     assert 'require_success changes "$CHANGES_RESULT"' in gate
+    assert 'require_success docs-screenshots "$DOCS_SCREENSHOTS_RESULT"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "success"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "skipped"' in gate
+
+
+def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    job = _job(workflow, "docs-screenshots")
+    desktop_package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+
+    assert "runs-on: ubuntu-24.04" in job
+    assert "timeout-minutes: 40" in job
+    assert "LANG: en_US.UTF-8" in job
+    assert "LC_ALL: en_US.UTF-8" in job
+    assert "TZ: UTC" in job
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
+    assert 'node-version: "26.5.0"' in job
+    assert "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8" in job
+    assert 'version: "11.9.0"' in job
+    for package in (
+        "locales=2.39-0ubuntu8.8",
+        "xauth=1:1.1.2-1build1",
+        "xvfb=2:21.1.12-1ubuntu1.6",
+    ):
+        assert package in job
+    assert "xvfb-run --auto-servernum make docs-screenshots-check" in job
+
+    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
+    assert desktop_package["packageManager"] == "pnpm@11.9.0"
+    assert desktop_package["devDependencies"]["electron"] == "39.8.10"
+    assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
+    assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
+    assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
+
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1" in job
+    assert "if: failure()" in job
+    assert "path: ${{ runner.temp }}/docs-screenshot-drift-v1.json" in job
+    assert "if-no-files-found: error" in job
+    assert "retention-days: 7" in job
+    assert "docs/assets" not in job
+    assert ".png" not in job
 
 
 def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
@@ -294,7 +344,7 @@ def test_ci_timeout_proof_is_manual_deterministic_and_fail_closed() -> None:
 
 def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:
     expected_counts = {
-        ".github/workflows/ci.yml": 6,
+        ".github/workflows/ci.yml": 7,
         ".github/workflows/release-readiness.yml": 3,
         ".github/workflows/release.yml": 3,
         ".github/workflows/desktop-sidecar.yml": 2,
@@ -314,6 +364,7 @@ def test_verified_uv_calling_jobs_grant_attestation_read_permission() -> None:
             "lockfile",
             "test",
             "quality",
+            "docs-screenshots",
             "security",
             "package",
             "workflow-audit",

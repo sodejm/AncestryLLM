@@ -23,6 +23,7 @@ import {
   loadElectronCapturePlan,
   publishCaptureAtomically,
   requireCaptureOutputRoot,
+  selectElectronCaptureScenarios,
   type ElectronCapturePlan,
   type ElectronCaptureScenario,
 } from './docs-screenshot-capture'
@@ -49,8 +50,12 @@ test('captures the declared Electron documentation states deterministically', as
     electronExecutablePath,
     fontPath,
   })
+  const scenarios = selectElectronCaptureScenarios(
+    plan,
+    process.env.ANCESTRYLLM_DOCS_SCREENSHOT_SCENARIOS,
+  )
 
-  for (const scenario of plan.scenarios) {
+  for (const scenario of scenarios) {
     const first = await captureScenario(plan, scenario)
     const second = await captureScenario(plan, scenario)
     assertExactCapture(first, second)

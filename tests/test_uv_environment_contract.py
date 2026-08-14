@@ -108,18 +108,17 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
             ".github/workflows .github/actions"
         ),
         "docs-screenshots": (
-            "$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py plan "
+            "$(UV_BIN) run --locked python scripts/docs_screenshots.py capture "
             "--manifest config/docs-screenshot-manifest.json --repository-root ."
         ),
         "docs-screenshots-check": (
-            "$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py validate "
+            "$(UV_BIN) run --locked python scripts/docs_screenshots.py check "
             "--manifest config/docs-screenshot-manifest.json --repository-root ."
         ),
         "docs-terminal-screenshots": (
-            "$(UV_BIN) run --locked python scripts/docs_terminal_capture.py capture "
-            "--manifest config/docs-screenshot-manifest.json "
-            "--policy config/docs-terminal-capture-policy.json "
-            "--repository-root . --output-root . --temporary-root ."
+            "$(UV_BIN) run --locked python scripts/docs_screenshots.py capture "
+            "--manifest config/docs-screenshot-manifest.json --repository-root . "
+            "--surface terminal"
         ),
         "hooks": (
             "$(UV_BIN) run --locked --group lint pre-commit install "

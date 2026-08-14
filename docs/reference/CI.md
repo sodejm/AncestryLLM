@@ -66,6 +66,14 @@ group and calls `make lock-check`, whose canonical command is
 | Native desktop sidecar packaging | `desktop-build` only |
 | Release-project proof | `test` only |
 
+The dedicated documentation-screenshot job installs the exact repository
+toolchain, then runs the canonical `make docs-screenshots-check` target under a
+pinned virtual display with fixed locale and timezone. It recaptures all
+Electron and terminal scenarios and performs exact-byte comparison without
+changing the checkout. On failure it retains only the bounded schema-v1
+hash-drift report for seven days; screenshots, DOM text, transcripts, fixtures,
+environment values, and host details are never uploaded as drift evidence.
+
 No quality, security, or build job installs provider extras. After any allowed
 narrow synchronization, workflow jobs call the same canonical Make target used
 locally; they do not restate or vary its command arguments. The Python 3.12
@@ -118,7 +126,7 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |

@@ -1,5 +1,7 @@
 # Command-line reference
 
+![AncestryLLM command-line help for the fictional provider-none environment](../assets/screenshots/terminal/cli-help.png)
+
 This is the canonical reference for the supported `ancestry` command line.
 Run `ancestry --help` or append `--help` to a command family for the exact
 parser help for the installed version. Use `--config PATH` to select a

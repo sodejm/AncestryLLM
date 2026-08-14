@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sodejm/AncestryLLM/config/docs-screenshot-drift-report-v1.schema.json",
+  "title": "AncestryLLM documentation screenshot drift report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "scenarios"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "success",
+        "failure"
+      ]
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{64})?$"
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_sha256",
+        "expected_sha256",
+        "id",
+        "status",
+        "surface"
+      ],
+      "properties": {
+        "captured_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "status": {
+          "enum": [
+            "match",
+            "hash-mismatch",
+            "expected-missing",
+            "captured-missing"
+          ]
+        },
+        "surface": {
+          "enum": [
+            "electron",
+            "terminal"
+          ]
+        }
+      }
+    }
+  }
+}
