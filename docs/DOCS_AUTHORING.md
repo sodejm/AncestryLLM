@@ -63,11 +63,17 @@ rules outside it.
 `scripts/docs_screenshots.py` is the shared publication and drift-check
 orchestrator. `make docs-screenshots` captures all four declared scenarios into
 an isolated staging tree, validates the complete inventory, then replaces the
-published set transactionally. `make docs-screenshots-check` validates the
-committed inventory, captures a fresh set into a temporary tree, compares exact
-PNG bytes, and leaves the repository unchanged. Missing, changed, undeclared,
-or orphaned files; broken or undeclared Markdown references; generic alt text;
-and privacy-canary content fail closed.
+published set transactionally with repository-readable `0644` modes. A failed
+replacement restores both the previous bytes and their modes.
+`make docs-screenshots-check` validates the committed inventory, captures a
+fresh set into a temporary tree, compares exact PNG bytes, and leaves the
+repository unchanged. PNG validation checks the complete chunk stream, chunk
+ordering and CRCs, bounded image-data decompression, scanline filters, and the
+declared image dimensions before an asset can be compared or published.
+Markdown ownership is derived from parsed rendered-image tokens, so examples
+inside code are ignored and reference-style images are enforced. Missing,
+corrupt, changed, undeclared, or orphaned files; broken or undeclared rendered
+Markdown references; generic alt text; and privacy-canary content fail closed.
 
 On drift, the check may write a schema-v1 report to
 `ANCESTRYLLM_DOCS_SCREENSHOT_REPORT`. The report contains only scenario IDs,
@@ -75,11 +81,14 @@ surface identifiers, expected and observed SHA-256 values, per-scenario status,
 and overall status. It contains no pixels, response bodies, transcript,
 environment, host identity, username, absolute path, fixture content, or other
 application data. CI uploads only this bounded JSON report on failure.
+Check mode still emits this report when a committed image is missing or
+structurally corrupt, using the missing or invalid asset as drift evidence
+rather than stopping before comparison.
 
 The Electron adapter runs with `pnpm --dir desktop capture:docs` after the
 exact locked Node, pnpm, Playwright, Electron, and bundled Inter-font identities
 have been installed. The orchestrator creates an isolated tracked-source copy,
-installs from the frozen lock there, and sets
+uses the repository's canonical locked desktop installer there, and sets
 `ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an explicit staging directory. The
 adapter builds the fixture-only desktop bundle, launches a real Electron
 `BrowserWindow` through Playwright, waits for each manifest-declared ready
@@ -143,6 +152,12 @@ to `scripts/docs_screenshots.py`, and optionally repeat `--scenario` with IDs
 from the manifest. Selection is closed: unknown scenarios and a scenario from a
 different surface fail. These selectors are not release evidence; publication
 and CI always execute the complete manifest.
+
+For fixture-level tests, `--manifest` may select another validated manifest.
+The orchestrator forwards that exact manifest to terminal capture and stages it
+at the Electron adapter's fixed manifest path only inside the disposable capture
+workspace, which is discarded without modifying the checkout. A custom manifest
+is never silently replaced by the repository default.
 
 Every publishable scenario must:
 

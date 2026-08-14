@@ -7,7 +7,9 @@ import argparse
 import json
 import posixpath
 import re
+import struct
 import sys
+import zlib
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -16,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
+from markdown_it import MarkdownIt
 
 if __package__:
     from scripts.docs_linking import source_anchors, split_destination
@@ -44,11 +47,26 @@ _FORBIDDEN_LAUNCHERS = frozenset(
     }
 )
 _REQUIRED_FIXTURE_STATES = frozenset({"success", "degraded", "privacy-canary"})
-_MARKDOWN_IMAGE = re.compile(
-    r"!\[(?P<alt>[^\]\n]*)\]\((?P<destination>[^)\n]+)\)",
-)
 _GENERIC_ALT_TEXT = frozenset({"figure", "image", "photo", "picture", "screenshot"})
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_PNG_DECODE_LIMIT = 256 * 1024 * 1024
+_PNG_COLOR_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+_PNG_BIT_DEPTHS = {
+    0: frozenset({1, 2, 4, 8, 16}),
+    2: frozenset({8, 16}),
+    3: frozenset({1, 2, 4, 8}),
+    4: frozenset({8, 16}),
+    6: frozenset({8, 16}),
+}
+_ADAM7_PASSES = (
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+)
 
 
 class ScreenshotManifestError(ValueError):
@@ -84,6 +102,161 @@ class ValidatedManifest:
 
 def _fail(code: str, message: str) -> None:
     raise ScreenshotManifestError(code, message)
+
+
+def _png_fail() -> None:
+    _fail("DOCSHOT_ASSET_INVALID", "a declared screenshot asset is not a valid PNG")
+
+
+def _png_pass_size(length: int, start: int, step: int) -> int:
+    return 0 if length <= start else (length - start + step - 1) // step
+
+
+def _png_scanline_layouts(
+    *,
+    width: int,
+    height: int,
+    bits_per_pixel: int,
+    interlace: int,
+) -> tuple[tuple[int, int], ...]:
+    if interlace == 0:
+        return ((height, (width * bits_per_pixel + 7) // 8),)
+    layouts: list[tuple[int, int]] = []
+    for start_x, start_y, step_x, step_y in _ADAM7_PASSES:
+        pass_width = _png_pass_size(width, start_x, step_x)
+        pass_height = _png_pass_size(height, start_y, step_y)
+        if pass_width and pass_height:
+            layouts.append((pass_height, (pass_width * bits_per_pixel + 7) // 8))
+    return tuple(layouts)
+
+
+def validate_png_bytes(content: bytes) -> None:
+    """Parse and decode a complete PNG, rejecting malformed or trailing data."""
+    if not content.startswith(_PNG_SIGNATURE):
+        _png_fail()
+
+    cursor = len(_PNG_SIGNATURE)
+    width = height = bit_depth = color_type = interlace = None
+    saw_header = saw_palette = saw_image_data = saw_end = False
+    image_data_closed = False
+    image_data = bytearray()
+
+    while cursor < len(content):
+        if len(content) - cursor < 12:
+            _png_fail()
+        chunk_length = struct.unpack_from(">I", content, cursor)[0]
+        chunk_type = content[cursor + 4 : cursor + 8]
+        payload_start = cursor + 8
+        payload_end = payload_start + chunk_length
+        chunk_end = payload_end + 4
+        if (
+            len(chunk_type) != 4
+            or not all(
+                ord("A") <= octet <= ord("Z") or ord("a") <= octet <= ord("z")
+                for octet in chunk_type
+            )
+            or chunk_type[2] & 0x20
+            or chunk_end > len(content)
+        ):
+            _png_fail()
+        payload = content[payload_start:payload_end]
+        recorded_crc = struct.unpack_from(">I", content, payload_end)[0]
+        if recorded_crc != zlib.crc32(chunk_type + payload) & 0xFFFFFFFF:
+            _png_fail()
+        cursor = chunk_end
+
+        if not saw_header and chunk_type != b"IHDR":
+            _png_fail()
+        if chunk_type == b"IHDR":
+            if saw_header or chunk_length != 13:
+                _png_fail()
+            width, height, bit_depth, color_type, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+            if (
+                width == 0
+                or height == 0
+                or color_type not in _PNG_BIT_DEPTHS
+                or bit_depth not in _PNG_BIT_DEPTHS[color_type]
+                or compression != 0
+                or filtering != 0
+                or interlace not in {0, 1}
+            ):
+                _png_fail()
+            saw_header = True
+            continue
+        if chunk_type == b"PLTE":
+            if (
+                saw_palette
+                or saw_image_data
+                or color_type in {0, 4}
+                or chunk_length == 0
+                or chunk_length > 768
+                or chunk_length % 3
+                or (color_type == 3 and chunk_length // 3 > 2**bit_depth)
+            ):
+                _png_fail()
+            saw_palette = True
+            continue
+        if chunk_type == b"IDAT":
+            if image_data_closed or (color_type == 3 and not saw_palette):
+                _png_fail()
+            saw_image_data = True
+            if len(image_data) + chunk_length > _PNG_DECODE_LIMIT:
+                _png_fail()
+            image_data.extend(payload)
+            continue
+        if saw_image_data:
+            image_data_closed = True
+        if chunk_type == b"IEND":
+            if not saw_image_data or chunk_length != 0 or cursor != len(content):
+                _png_fail()
+            saw_end = True
+            break
+        if chunk_type[0] & 0x20 == 0:
+            _png_fail()
+
+    if not saw_end or None in {width, height, bit_depth, color_type, interlace}:
+        _png_fail()
+    assert width is not None
+    assert height is not None
+    assert bit_depth is not None
+    assert color_type is not None
+    assert interlace is not None
+
+    channels = _PNG_COLOR_CHANNELS[color_type]
+    layouts = _png_scanline_layouts(
+        width=width,
+        height=height,
+        bits_per_pixel=channels * bit_depth,
+        interlace=interlace,
+    )
+    decoded_size = sum(rows * (row_bytes + 1) for rows, row_bytes in layouts)
+    if decoded_size <= 0 or decoded_size > _PNG_DECODE_LIMIT:
+        _png_fail()
+    try:
+        decoder = zlib.decompressobj()
+        decoded = decoder.decompress(bytes(image_data), decoded_size + 1)
+        if decoder.unconsumed_tail or len(decoded) > decoded_size:
+            _png_fail()
+        decoded += decoder.flush(decoded_size + 1 - len(decoded))
+    except zlib.error:
+        _png_fail()
+    if (
+        not decoder.eof
+        or decoder.unused_data
+        or decoder.unconsumed_tail
+        or len(decoded) != decoded_size
+    ):
+        _png_fail()
+    cursor = 0
+    for rows, row_bytes in layouts:
+        for _row in range(rows):
+            if decoded[cursor] > 4:
+                _png_fail()
+            cursor += row_bytes + 1
+    if cursor != len(decoded):
+        _png_fail()
 
 
 def _read_json(path: Path, code: str, label: str) -> Any:
@@ -450,10 +623,24 @@ def _meaningful_alt_text(alt_text: str, output_path: str) -> bool:
     if len(normalized) < 12 or len(normalized.split()) < 2:
         return False
     casefolded = normalized.casefold()
-    if casefolded in _GENERIC_ALT_TEXT:
+    words = tuple(re.findall(r"[\w]+", casefolded))
+    if words and all(word in _GENERIC_ALT_TEXT for word in words):
         return False
     stem = PurePosixPath(output_path).stem.replace("-", " ").replace("_", " ").casefold()
     return casefolded != stem
+
+
+def _rendered_markdown_images(markdown: str) -> tuple[tuple[str, str], ...]:
+    images: list[tuple[str, str]] = []
+
+    def collect(tokens: list[Any] | None) -> None:
+        for token in tokens or []:
+            if token.type == "image":
+                images.append((token.content, token.attrGet("src") or ""))
+            collect(token.children)
+
+    collect(MarkdownIt("commonmark").parse(markdown))
+    return tuple(images)
 
 
 def validate_published_assets(
@@ -484,10 +671,9 @@ def validate_published_assets(
             content = output.read_bytes()
         except OSError:
             _fail("DOCSHOT_ASSET_MISSING", "a declared screenshot asset is unreadable")
-        if not content.startswith(_PNG_SIGNATURE):
-            _fail("DOCSHOT_ASSET_INVALID", "a declared screenshot asset is not a PNG")
         if any(canary.encode("utf-8") in content for canary in manifest.privacy_canaries):
             _fail("DOCSHOT_PRIVACY_CANARY_LEAKED", "a published PNG contains a privacy canary")
+        validate_png_bytes(content)
 
     screenshot_root = resolved_repository / "docs/assets/screenshots"
     if screenshot_root.is_symlink():
@@ -516,10 +702,10 @@ def validate_published_assets(
             markdown = documentation.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             _fail("DOCSHOT_DOC_NOT_FOUND", "documentation screenshot owner is unreadable")
-        for match in _MARKDOWN_IMAGE.finditer(markdown):
+        for alt_text, destination in _rendered_markdown_images(markdown):
             resolved_image = _resolved_markdown_image(
                 relative_documentation,
-                match.group("destination"),
+                destination,
             )
             if resolved_image is None:
                 continue
@@ -528,7 +714,7 @@ def validate_published_assets(
                     "DOCSHOT_DOC_IMAGE_UNDECLARED",
                     "Markdown references an undeclared screenshot asset",
                 )
-            if not _meaningful_alt_text(match.group("alt"), resolved_image):
+            if not _meaningful_alt_text(alt_text, resolved_image):
                 _fail("DOCSHOT_DOC_ALT_INVALID", "screenshot alt text is not meaningful")
             discovered_references.add((relative_documentation.as_posix(), resolved_image))
 

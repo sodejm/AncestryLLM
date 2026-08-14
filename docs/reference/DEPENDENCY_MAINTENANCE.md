@@ -21,7 +21,7 @@ The dependency groups are:
 
 | Group | Purpose | Canonical consumers |
 |---|---|---|
-| `lint` | Ruff, pre-commit, GFM Markdown validation, and repository checks | `make lint`, `make markdown-check`, `make hooks`, and CI quality jobs |
+| `lint` | Ruff, pre-commit, rendered-Markdown and GFM validation, and repository checks | `make lint`, `make markdown-check`, `make hooks`, and CI quality jobs |
 | `typecheck` | Strict mypy, third-party type information, and exact ty advisory evaluation | `make typecheck`, `make typecheck-ty`, and CI quality jobs |
 | `test` | Pytest and coverage | `make test`, Python test matrices, and release-project proof jobs |
 | `security` | Dependency audit, SBOM, and workflow audit tools | `make security`, `make sbom`, `make workflow-audit`, and matching workflow jobs |
@@ -34,6 +34,12 @@ graph. Canonical gates use exact `uv run --locked --group ...` commands. A
 purpose-specific workflow may first synchronize a smaller profile with
 `--no-default-groups`, but it then invokes the same Make target without changing
 the actual command or flags.
+
+`markdown-it-py>=4,<5` is declared directly in `lint` because the screenshot
+manifest validator parses rendered Markdown image tokens, including reference
+images, while deliberately ignoring fenced and inline code examples. The
+validator must not rely on Rich or another runtime package to install that
+parser transitively.
 
 `ty==0.0.69` is deliberately exact because the 0.6 work is a reproducible
 advisory evaluation, not a floating checker migration. `make typecheck-ty`

@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,7 @@ if __package__:
         ScreenshotManifestError,
         ValidatedManifest,
         load_manifest,
+        validate_png_bytes,
         validate_published_assets,
     )
     from scripts.docs_terminal_capture import (
@@ -35,6 +37,7 @@ else:
         ScreenshotManifestError,
         ValidatedManifest,
         load_manifest,
+        validate_png_bytes,
         validate_published_assets,
     )
     from docs_terminal_capture import (
@@ -44,13 +47,14 @@ else:
     )
 
 SCHEMA_VERSION = 1
-PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 SUPPORTED_SURFACES = frozenset({"electron", "terminal"})
+_DEFAULT_MANIFEST_PATH = Path("config/docs-screenshot-manifest.json")
 _DRIFT_REPORT_SCHEMA = "config/docs-screenshot-drift-report-v1.schema.json"
 _ELECTRON_COMMAND_TIMEOUT_SECONDS = 600
 _ELECTRON_RUNTIME_ENVIRONMENT = frozenset(
     {
         "CI",
+        "COMSPEC",
         "ComSpec",
         "DBUS_SESSION_BUS_ADDRESS",
         "DISPLAY",
@@ -94,6 +98,7 @@ class CaptureRunner(Protocol):
         output_root: Path,
         temporary_root: Path,
         repository_root: Path,
+        manifest_path: Path,
     ) -> None:
         """Capture only the selected scenarios beneath ``output_root``."""
 
@@ -216,6 +221,7 @@ def _run_electron_command(
             cwd=repository_root,
             env=environment,
             text=True,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
             timeout=_ELECTRON_COMMAND_TIMEOUT_SECONDS,
@@ -226,6 +232,40 @@ def _run_electron_command(
         _fail("DOCSHOT_ELECTRON_CAPTURE_FAILED", "Electron capture exited nonzero")
 
 
+def _pnpm_command(
+    arguments: tuple[str, ...],
+    *,
+    host_platform: str = sys.platform,
+    environment: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    if host_platform == "win32":
+        values = environment or {}
+        command_prompt = values.get("ComSpec") or values.get("COMSPEC") or "cmd.exe"
+        return (command_prompt, "/d", "/s", "/c", "pnpm.cmd", *arguments)
+    return ("pnpm", *arguments)
+
+
+def _selected_manifest_path(manifest_path: Path | None, *, repository_root: Path) -> Path:
+    selected = manifest_path or _DEFAULT_MANIFEST_PATH
+    if not selected.is_absolute():
+        selected = repository_root / selected
+    return selected
+
+
+def _stage_electron_manifest(manifest_path: Path, *, workspace: Path) -> None:
+    try:
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            _fail("DOCSHOT_ELECTRON_CAPTURE_FAILED", "selected manifest is not a regular file")
+        content = manifest_path.read_bytes()
+        destination = workspace / _DEFAULT_MANIFEST_PATH
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+            _fail("DOCSHOT_ELECTRON_CAPTURE_FAILED", "staged manifest destination is unsafe")
+        destination.write_bytes(content)
+    except OSError:
+        _fail("DOCSHOT_ELECTRON_CAPTURE_FAILED", "selected manifest could not be staged")
+
+
 def _default_capture_runner(
     *,
     surface: str,
@@ -233,10 +273,11 @@ def _default_capture_runner(
     output_root: Path,
     temporary_root: Path,
     repository_root: Path,
+    manifest_path: Path,
 ) -> None:
     if surface == "terminal":
         capture_terminal_screenshots(
-            manifest_path=Path("config/docs-screenshot-manifest.json"),
+            manifest_path=manifest_path,
             policy_path=repository_root / "config/docs-terminal-capture-policy.json",
             repository_root=repository_root,
             output_root=output_root,
@@ -250,16 +291,20 @@ def _default_capture_runner(
 
     workspace = temporary_root / "electron-workspace"
     _copy_repository_snapshot(repository_root, workspace)
+    _stage_electron_manifest(manifest_path, workspace=workspace)
     environment = _electron_build_environment(temporary_root)
     environment["ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT"] = str(output_root)
     environment["ANCESTRYLLM_DOCS_SCREENSHOT_SCENARIOS"] = ",".join(scenario_ids)
     _run_electron_command(
-        ("pnpm", "--dir", "desktop", "install", "--frozen-lockfile"),
+        ("node", "desktop/scripts/install-locked.mjs"),
         repository_root=workspace,
         environment=environment,
     )
     _run_electron_command(
-        ("pnpm", "--dir", "desktop", "capture:docs"),
+        _pnpm_command(
+            ("--dir", "desktop", "capture:docs"),
+            environment=environment,
+        ),
         repository_root=workspace,
         environment=environment,
     )
@@ -295,10 +340,12 @@ def _validate_staged_outputs(
             content = image.read_bytes()
         except OSError:
             _fail("DOCSHOT_CAPTURE_INVENTORY_MISMATCH", "staged screenshot is unreadable")
-        if not content.startswith(PNG_SIGNATURE):
-            _fail("DOCSHOT_CAPTURE_INVALID", "staged screenshot is not a PNG")
         if any(canary.encode("utf-8") in content for canary in manifest.privacy_canaries):
             _fail("DOCSHOT_PRIVACY_CANARY_LEAKED", "staged screenshot contains a canary")
+        try:
+            validate_png_bytes(content)
+        except ScreenshotManifestError:
+            _fail("DOCSHOT_CAPTURE_INVALID", "staged screenshot is not a valid PNG")
 
 
 def _sha256(path: Path) -> str:
@@ -393,6 +440,7 @@ def _capture_to_stage(
     output_root: Path,
     temporary_root: Path,
     repository_root: Path,
+    manifest_path: Path,
     capture_runner: CaptureRunner,
 ) -> None:
     for surface in sorted({str(scenario["surface"]) for scenario in scenarios}):
@@ -405,6 +453,7 @@ def _capture_to_stage(
             output_root=output_root,
             temporary_root=temporary_root,
             repository_root=repository_root,
+            manifest_path=manifest_path,
         )
 
 
@@ -413,13 +462,21 @@ def check_screenshots(
     *,
     repository_root: Path,
     temporary_root: Path,
+    manifest_path: Path | None = None,
     report_path: Path | None = None,
     surfaces: tuple[str, ...] = (),
     scenario_ids: tuple[str, ...] = (),
     capture_runner: CaptureRunner = _default_capture_runner,
 ) -> dict[str, Any]:
     """Capture into temporary storage and compare without changing the repository."""
-    validate_published_assets(manifest, repository_root=repository_root)
+    published_error: ScreenshotManifestError | None = None
+    try:
+        validate_published_assets(manifest, repository_root=repository_root)
+    except ScreenshotManifestError as error:
+        if error.code not in {"DOCSHOT_ASSET_INVALID", "DOCSHOT_ASSET_MISSING"}:
+            raise
+        published_error = error
+    selected_manifest = _selected_manifest_path(manifest_path, repository_root=repository_root)
     selected = select_scenarios(
         manifest,
         surfaces=surfaces,
@@ -435,6 +492,7 @@ def check_screenshots(
             output_root=stage,
             temporary_root=Path(name),
             repository_root=repository_root,
+            manifest_path=selected_manifest,
             capture_runner=capture_runner,
         )
         _validate_staged_outputs(manifest, selected, output_root=stage)
@@ -446,6 +504,8 @@ def check_screenshots(
         _write_report(report, report_path)
         if report["status"] != "success":
             _fail("DOCSHOT_DRIFT_DETECTED", "captured screenshot hashes differ")
+        if published_error is not None:
+            raise published_error
         return report
 
 
@@ -456,7 +516,7 @@ def _publish_atomically(
     repository_root: Path,
     captured_root: Path,
 ) -> tuple[Path, ...]:
-    backups: dict[Path, bytes | None] = {}
+    backups: dict[Path, tuple[bytes, int] | None] = {}
     published: list[Path] = []
     try:
         for scenario in scenarios:
@@ -466,7 +526,14 @@ def _publish_atomically(
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.is_symlink() or (destination.exists() and not destination.is_file()):
                 _fail("DOCSHOT_OUTPUT_UNDECLARED", "published destination is not a file")
-            backups[destination] = destination.read_bytes() if destination.exists() else None
+            backups[destination] = (
+                (
+                    destination.read_bytes(),
+                    stat.S_IMODE(destination.stat().st_mode),
+                )
+                if destination.exists()
+                else None
+            )
             descriptor, temporary_name = tempfile.mkstemp(
                 prefix=f".{destination.name}.",
                 dir=destination.parent,
@@ -477,6 +544,7 @@ def _publish_atomically(
                     handle.write(source.read_bytes())
                     handle.flush()
                     os.fsync(handle.fileno())
+                temporary_path.chmod(0o644)
                 temporary_path.replace(destination)
             finally:
                 temporary_path.unlink(missing_ok=True)
@@ -488,7 +556,9 @@ def _publish_atomically(
             if previous is None:
                 destination.unlink(missing_ok=True)
             else:
-                destination.write_bytes(previous)
+                previous_content, previous_mode = previous
+                destination.write_bytes(previous_content)
+                destination.chmod(previous_mode)
         raise
     return tuple(published)
 
@@ -498,11 +568,13 @@ def regenerate_screenshots(
     *,
     repository_root: Path,
     temporary_root: Path,
+    manifest_path: Path | None = None,
     surfaces: tuple[str, ...] = (),
     scenario_ids: tuple[str, ...] = (),
     capture_runner: CaptureRunner = _default_capture_runner,
 ) -> tuple[Path, ...]:
     """Capture selected screenshots in isolation, then publish them transactionally."""
+    selected_manifest = _selected_manifest_path(manifest_path, repository_root=repository_root)
     selected = select_scenarios(
         manifest,
         surfaces=surfaces,
@@ -518,6 +590,7 @@ def regenerate_screenshots(
             output_root=stage,
             temporary_root=Path(name),
             repository_root=repository_root,
+            manifest_path=selected_manifest,
             capture_runner=capture_runner,
         )
         _validate_staged_outputs(manifest, selected, output_root=stage)
@@ -584,12 +657,17 @@ def main(argv: list[str] | None = None) -> int:
     if report_path is None and os.environ.get("ANCESTRYLLM_DOCS_SCREENSHOT_REPORT"):
         report_path = Path(os.environ["ANCESTRYLLM_DOCS_SCREENSHOT_REPORT"])
     try:
-        manifest = load_manifest(args.manifest, repository_root=args.repository_root)
+        manifest_path = _selected_manifest_path(
+            args.manifest,
+            repository_root=args.repository_root,
+        )
+        manifest = load_manifest(manifest_path, repository_root=args.repository_root)
         if args.command == "capture":
             captured = regenerate_screenshots(
                 manifest,
                 repository_root=args.repository_root,
                 temporary_root=temporary_root,
+                manifest_path=manifest_path,
                 surfaces=tuple(args.surface),
                 scenario_ids=tuple(args.scenario),
             )
@@ -599,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest,
                 repository_root=args.repository_root,
                 temporary_root=temporary_root,
+                manifest_path=manifest_path,
                 report_path=report_path,
                 surfaces=tuple(args.surface),
                 scenario_ids=tuple(args.scenario),

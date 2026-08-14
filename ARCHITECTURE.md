@@ -1411,14 +1411,17 @@ plugins:
 - `scripts/docs_screenshot_manifest.py` validates the closed schema-v1
   documentation screenshot inventory, fictional offline fixtures, tokenized
   launch plans, deterministic environment controls, documentation anchors, and
-  repository-relative output allowlist, published PNG inventory, meaningful
-  Markdown ownership, and privacy-canary boundary. `scripts/docs_screenshots.py`
-  coordinates the Electron and terminal adapters through isolated staging,
-  transactional publication, exact-byte drift comparison, and a closed,
-  hash-only failure report. Check mode uses a temporary source snapshot and
-  leaves the repository unchanged. This is repository tooling only: it adds no
-  application command, UI registry, provider behavior, GEDCOM or storage path,
-  internal API route, or Electron bridge.
+  repository-relative output allowlist, structurally decoded PNG inventory,
+  rendered Markdown image ownership, and privacy-canary boundary.
+  `scripts/docs_screenshots.py` coordinates the Electron and terminal adapters
+  through isolated staging, forwards the selected manifest across both adapter
+  boundaries, uses the canonical locked desktop installer, publishes complete
+  sets transactionally with stable repository-readable modes, performs
+  exact-byte drift comparison, and emits a closed hash-only failure report even
+  when a committed asset is missing or invalid. Check mode uses a temporary
+  source snapshot and leaves the repository unchanged. This is repository
+  tooling only: it adds no application command, UI registry, provider behavior,
+  GEDCOM or storage path, internal API route, or Electron bridge.
 - `desktop/e2e/docs-screenshot-capture.ts` and
   `desktop/e2e/docs-screenshots.spec.ts` consume that shared contract for the
   Electron surface. The adapter builds the existing fixture-only desktop
