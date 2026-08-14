@@ -109,7 +109,8 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         ),
         "docs-screenshots": (
             "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture "
-            "--manifest config/docs-screenshot-manifest.json --repository-root ."
+            "--manifest config/docs-screenshot-manifest.json --repository-root . "
+            '"$${selection[@]}"'
         ),
         "docs-screenshots-check": (
             "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py check "

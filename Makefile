@@ -7,6 +7,10 @@ DIST_DIR ?= dist
 UV_BUILD_REPORT ?= build/uv-build-evaluation.json
 SBOM_OUTPUT ?= sbom.json
 export PYTEST_ADDOPTS ?= --cov --cov-report=term-missing
+override DOCS_SCREENSHOT_SURFACE := $(value DOCS_SCREENSHOT_SURFACE)
+override DOCS_SCREENSHOT_SCENARIO := $(value DOCS_SCREENSHOT_SCENARIO)
+export DOCS_SCREENSHOT_SURFACE
+export DOCS_SCREENSHOT_SCENARIO
 ifeq ($(OS),Windows_NT)
 PYTHON ?= python
 UV_BIN := $(UV_TOOL_DIR)/uv.exe
@@ -123,7 +127,10 @@ code-docs-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
 docs-screenshots: verified-uv
-	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root .
+	@selection=(); \
+		if [[ -n "$$DOCS_SCREENSHOT_SURFACE" ]]; then selection+=(--surface "$$DOCS_SCREENSHOT_SURFACE"); fi; \
+		if [[ -n "$$DOCS_SCREENSHOT_SCENARIO" ]]; then selection+=(--scenario "$$DOCS_SCREENSHOT_SCENARIO"); fi; \
+		$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root . "$${selection[@]}"
 
 docs-screenshots-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py check --manifest config/docs-screenshot-manifest.json --repository-root .
