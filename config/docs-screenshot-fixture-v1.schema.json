@@ -102,6 +102,7 @@
       "then": {
         "properties": {
           "privacy_canaries": {
+            "type": "array",
             "minItems": 1
           }
         }
@@ -109,6 +110,7 @@
       "else": {
         "properties": {
           "privacy_canaries": {
+            "type": "array",
             "maxItems": 0
           }
         }

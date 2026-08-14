@@ -6,10 +6,10 @@
   "network": "disabled",
   "fictional": true,
   "content": {
-    "title": "Private chat",
-    "status": "Ready for a fictional offline demonstration",
-    "prompt": "Summarize the fictional Harborside household notes.",
-    "response": "The fictional household contains two adults and one child.",
+    "title": "Ready desktop",
+    "status": "Ready",
+    "prompt": "",
+    "response": "Local desktop shell",
     "detail": "No cloud provider is selected and no network request is permitted."
   },
   "privacy_canaries": []

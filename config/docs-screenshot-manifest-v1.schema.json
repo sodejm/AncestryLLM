@@ -263,6 +263,24 @@
         }
       }
     },
+    "ready_signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "const": "text"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
     "exact_comparison": {
       "type": "object",
       "additionalProperties": false,
@@ -308,6 +326,7 @@
         "launch",
         "fixture_id",
         "geometry",
+        "ready_signal",
         "output_path",
         "documentation",
         "comparison"
@@ -346,6 +365,9 @@
               "$ref": "#/$defs/terminal_geometry"
             }
           ]
+        },
+        "ready_signal": {
+          "$ref": "#/$defs/ready_signal"
         },
         "output_path": {
           "type": "string",

@@ -1415,6 +1415,18 @@ plugins:
   no capture or publication. This is repository tooling only: it adds no
   application command, UI registry, provider behavior, GEDCOM or storage path,
   internal API route, or Electron bridge.
+- `desktop/e2e/docs-screenshot-capture.ts` and
+  `desktop/e2e/docs-screenshots.spec.ts` consume that shared contract for the
+  Electron surface. The adapter builds the existing fixture-only desktop
+  lifecycle, launches the real Electron `BrowserWindow`, drives the normal
+  renderer and typed bridge, waits on declared UI text, denies renderer network
+  requests, checks privacy canaries, requires two byte-identical captures, and
+  atomically writes only allowlisted destinations below an explicit caller
+  output root. The success flow confirms the existing fixture bridge reports
+  `provider=none` with no profiles before it drives the ordinary Home surface;
+  the application event behavior, production runtime bridge, command registry,
+  API, provider, GEDCOM, storage, and packaged Electron boundaries are
+  unchanged. Image publication and drift CI remain outside this adapter.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns

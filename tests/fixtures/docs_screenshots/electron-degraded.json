@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "fixture_id": "electron-degraded",
+  "state": "degraded",
+  "provider": "none",
+  "network": "disabled",
+  "fictional": true,
+  "content": {
+    "title": "Desktop diagnostics",
+    "status": "Desktop service unavailable",
+    "prompt": "",
+    "response": "",
+    "detail": "The desktop service did not start. Review sanitized diagnostics before retrying."
+  },
+  "privacy_canaries": []
+}
