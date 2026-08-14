@@ -1,0 +1,2 @@
+/// Exports a representative reviewed Apple signing identity.
+import Foundation

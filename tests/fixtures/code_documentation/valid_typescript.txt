@@ -1,0 +1,2 @@
+/** Defines the representative desktop implementation fixture. */
+export const value = 1;

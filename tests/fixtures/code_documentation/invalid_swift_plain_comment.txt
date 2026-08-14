@@ -1,0 +1,2 @@
+// Plain Swift comments do not provide DocC documentation.
+import Foundation

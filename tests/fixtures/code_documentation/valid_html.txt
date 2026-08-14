@@ -1,0 +1,2 @@
+<!-- Renders the representative documentation layout fixture. -->
+<!doctype html>
