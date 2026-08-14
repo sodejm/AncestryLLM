@@ -1422,6 +1422,12 @@ plugins:
   source snapshot and leaves the repository unchanged. This is repository
   tooling only: it adds no application command, UI registry, provider behavior,
   GEDCOM or storage path, internal API route, or Electron bridge.
+- `.agents/skills/docs-screenshot-regeneration/SKILL.md` is repository tooling only
+  and adds a maintainer-facing orchestration layer over that existing manifest
+  and Make boundary. It preflights one requested scenario or surface, preserves
+  unrelated work, invokes the focused canonical capture, and always follows it
+  with the unfiltered drift check. It adds no application runtime surface or
+  independent capture implementation.
 - `desktop/e2e/docs-screenshot-capture.ts` and
   `desktop/e2e/docs-screenshots.spec.ts` consume that shared contract for the
   Electron surface. The adapter builds the existing fixture-only desktop
@@ -1482,7 +1488,7 @@ The Make targets are the command contract:
 | `make package` | Locked build-group construction and artifact validation. |
 | `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
-| `make docs-screenshots` | Capture every schema-v1 Electron and terminal scenario into isolated staging, validate the publication contract, and replace the complete allowlisted PNG set transactionally. |
+| `make docs-screenshots` | Capture every schema-v1 scenario by default, or one declared scenario or surface through quoted maintainer selectors; validate the publication contract and replace only the selected allowlisted PNG set transactionally. |
 | `make docs-screenshots-check` | Recapture all scenarios in temporary state and compare exact PNG bytes without changing the repository; emit only an optional sanitized hash report on failure. |
 | `make docs-terminal-screenshots` | Run the shared orchestrator for the terminal surface, verify the pinned native VHS toolchain, and capture the real CLI and console twice through a true PTY. |
 
@@ -1563,7 +1569,8 @@ Tests are intentionally split by risk:
 - Documentation tests cover Pages staging, Wiki validation, deterministic
   mirroring, deletion, no-op behavior, commits, workflow structure, and the
   deterministic screenshot manifest, publication inventory, nonmutating drift
-  checks, documentation ownership, and privacy-canary contract;
+  checks, focused agent orchestration, worktree safety, documentation ownership,
+  and privacy-canary contract;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
 The import-only compatibility façades and their physical owner modules are

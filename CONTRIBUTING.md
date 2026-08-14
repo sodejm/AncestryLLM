@@ -209,6 +209,10 @@ the image together. Run `make docs-screenshots`, visually review all changed
 fictional images, then run `make docs-screenshots-check` twice from a clean tree.
 Check mode must retain no repository changes; a missing capture, changed pixel,
 privacy canary, broken reference, or incomplete platform result is a failure.
+For a maintainer-requested focused regeneration, follow the repository-local
+[documentation screenshot agent workflow](.agents/skills/docs-screenshot-regeneration/SKILL.md).
+It may select one declared scenario or surface, but it still requires the full
+unfiltered drift check and does not grant Git or GitHub write authority.
 
 Do not edit a managed GitHub Wiki page directly. A direct edit is allowed only
 when a documented recovery procedure explicitly requires it; reproduce any

@@ -60,6 +60,13 @@ manifest and schemas. The Electron and terminal capture adapters consume that
 contract but must not invent scenarios, destinations, fixtures, or comparison
 rules outside it.
 
+The repository-local
+[documentation screenshot regeneration workflow](https://github.com/sodejm/AncestryLLM/blob/main/.agents/skills/docs-screenshot-regeneration/SKILL.md)
+provides the maintainer-facing preflight, focused selection, worktree-safety,
+visual-review, and final-report procedure. It delegates all capture and
+validation to the canonical Make targets and never authorizes staging, commits,
+pushes, or pull requests.
+
 `scripts/docs_screenshots.py` is the shared publication and drift-check
 orchestrator. `make docs-screenshots` captures all four declared scenarios into
 an isolated staging tree, validates the complete inventory, then replaces the
@@ -147,11 +154,12 @@ reported PNG hashes, and visually review both fictional outputs. Never
 substitute a mutable tag, alternate image, host executable, mirror, or relaxed
 preflight check.
 
-For a narrow local diagnosis, pass `--surface electron` or `--surface terminal`
-to `scripts/docs_screenshots.py`, and optionally repeat `--scenario` with IDs
-from the manifest. Selection is closed: unknown scenarios and a scenario from a
-different surface fail. These selectors are not release evidence; publication
-and CI always execute the complete manifest.
+For a narrow local diagnosis, run
+`make docs-screenshots DOCS_SCREENSHOT_SURFACE=<surface>` or
+`make docs-screenshots DOCS_SCREENSHOT_SCENARIO=<scenario-id>`. Selection is
+closed: unknown scenarios and a scenario from a different surface fail. These
+selectors are not release evidence; `make docs-screenshots-check`, release
+validation, and CI always execute the complete manifest.
 
 For fixture-level tests, `--manifest` may select another validated manifest.
 The orchestrator forwards that exact manifest to terminal capture and stages it
