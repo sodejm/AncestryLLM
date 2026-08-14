@@ -1,3 +1,4 @@
+/** Verifies HTTPS-only external-link validation and explicit user confirmation. */
 import { describe, expect, it, vi } from 'vitest'
 import { externalLinkPrompt, openExternalLinkWithConfirmation, validateExternalLink } from './external-links'
 

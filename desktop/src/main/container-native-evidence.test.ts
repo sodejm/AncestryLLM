@@ -1,3 +1,4 @@
+/** Verifies native Docker evidence helpers and bounded host process execution. */
 // @vitest-environment node
 
 import { lstat } from 'node:fs/promises'

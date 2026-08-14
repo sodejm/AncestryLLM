@@ -1,3 +1,5 @@
+"""Verify the release-verification sidecar builder's arguments and output paths."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

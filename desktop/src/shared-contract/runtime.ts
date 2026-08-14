@@ -1,3 +1,4 @@
+/** Implements fail-closed runtime guards for the versioned desktop bridge contract. */
 import {
   CHAT_STREAM_BATCH_MAX_BYTES,
   DESKTOP_PROTOCOL_VERSION,

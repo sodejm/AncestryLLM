@@ -1,3 +1,5 @@
+"""Verify snapshot credential files are private, ephemeral, and redacted from output."""
+
 from __future__ import annotations
 
 import importlib.util

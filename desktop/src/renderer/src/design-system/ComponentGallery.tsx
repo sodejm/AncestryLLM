@@ -1,4 +1,4 @@
-// Development-only gallery for reviewing fictional reusable component states.
+/** Renders a development-only gallery of fictional reusable component states. */
 
 import { AsyncState as AsyncStateView } from './AsyncState'
 import type { AsyncState } from './contracts'

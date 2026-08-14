@@ -1,3 +1,4 @@
+# Collects reproducible bug reports with the evidence required for regression testing.
 name: Bug report
 description: Report a reproducible problem and define its regression test
 title: "[Bug]: "

@@ -1,3 +1,4 @@
+/** Rejects prohibited files, secrets, and development-only behavior in desktop builds. */
 import { readdir, readFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'

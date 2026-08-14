@@ -1,3 +1,4 @@
+/** Exposes the narrow versioned Electron bridge through the isolated preload world. */
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   desktopChannels,

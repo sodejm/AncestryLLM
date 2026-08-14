@@ -1,3 +1,4 @@
+/** Installs bounded keyboard zoom controls for Electron renderer contents. */
 export type KeyboardZoomInput = Readonly<{
   type: string
   key: string

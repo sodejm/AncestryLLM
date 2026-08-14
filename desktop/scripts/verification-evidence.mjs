@@ -1,3 +1,4 @@
+/** Aggregates platform verification receipts into deterministic release evidence. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'

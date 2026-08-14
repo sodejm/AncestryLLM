@@ -1,3 +1,4 @@
+# Configures signed installer artifacts and release-only packaging metadata.
 appId: org.ancestryllm.desktop
 productName: AncestryLLM
 executableName: ancestryllm

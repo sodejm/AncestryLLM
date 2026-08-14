@@ -1,3 +1,4 @@
+/** Verifies single-instance locking restores the existing application window. */
 import { describe, expect, it, vi } from 'vitest'
 import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 

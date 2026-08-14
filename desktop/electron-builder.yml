@@ -1,3 +1,4 @@
+# Configures the hardened desktop application package and bundled sidecar resources.
 appId: org.ancestryllm.desktop
 productName: AncestryLLM
 executableName: ancestryllm

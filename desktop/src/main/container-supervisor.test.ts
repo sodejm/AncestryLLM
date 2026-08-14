@@ -1,4 +1,4 @@
-// Verifies exact host container policy validation and owned-resource lifecycle behavior.
+/** Verifies exact host container policy validation and owned-resource lifecycle behavior. */
 
 import { chmod, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { createServer } from 'node:net'

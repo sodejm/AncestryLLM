@@ -1,3 +1,4 @@
+/** Verifies the desktop workspace uses frozen installs and reviewed packaging inputs. */
 import assert from 'node:assert/strict'
 import { access, readFile } from 'node:fs/promises'
 import test from 'node:test'

@@ -1,3 +1,5 @@
+"""Verify release evidence schemas, identities, and fail-closed aggregation."""
+
 from __future__ import annotations
 
 import hashlib

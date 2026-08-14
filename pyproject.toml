@@ -1,3 +1,4 @@
+# Configures the Python package, locked tooling, and canonical quality policies.
 [build-system]
 requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"

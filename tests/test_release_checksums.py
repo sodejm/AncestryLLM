@@ -1,3 +1,5 @@
+"""Verify release checksum manifests are complete, deterministic, and tamper evident."""
+
 from __future__ import annotations
 
 import hashlib

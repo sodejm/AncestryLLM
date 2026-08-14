@@ -1,4 +1,4 @@
-// Owns the host-only Docker control-plane policy, validation, and lifecycle reconciliation.
+/** Owns the host-only Docker control-plane policy, validation, and lifecycle reconciliation. */
 
 import { randomBytes } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'

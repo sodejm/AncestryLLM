@@ -1,3 +1,4 @@
+/** Verifies sidecar checks fail closed for tampering and unsupported target layouts. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'

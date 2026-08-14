@@ -1,3 +1,4 @@
+# Publishes reviewed documentation changes to the repository wiki mirror.
 name: Sync Wiki
 
 on:

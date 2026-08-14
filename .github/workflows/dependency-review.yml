@@ -1,3 +1,4 @@
+# Blocks pull requests that introduce dependencies outside the reviewed risk policy.
 name: Dependency review
 
 on:

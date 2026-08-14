@@ -1,4 +1,4 @@
-// Typed routes, navigation metadata, async states, and focus contracts.
+/** Defines typed routes, navigation metadata, asynchronous states, and focus contracts. */
 
 export type AppRoute = 'home' | 'chat' | 'tasks' | 'diagnostics' | 'settings'
 

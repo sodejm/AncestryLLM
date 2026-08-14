@@ -1,3 +1,4 @@
+/** Composes the authenticated sidecar, local runtime, preferences, and desktop bridge. */
 import { app } from 'electron'
 import { createDesktopControlBridge } from './desktop-control'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'

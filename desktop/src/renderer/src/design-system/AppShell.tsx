@@ -1,4 +1,4 @@
-// Reusable accessible application layout and navigation shell.
+/** Provides the reusable accessible application layout and navigation shell. */
 
 import { CircleCheck, Command, Heart, Home, ListTodo, MessageSquareText, Settings, Stethoscope } from 'lucide-react'
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'

@@ -1,3 +1,5 @@
+"""Verify the Semgrep runner authenticates, hashes, and invokes the pinned release."""
+
 from __future__ import annotations
 
 import hashlib

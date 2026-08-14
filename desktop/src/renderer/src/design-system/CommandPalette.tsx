@@ -1,4 +1,4 @@
-// Keyboard-first route navigation dialog with deterministic focus restoration.
+/** Provides keyboard-first route navigation with deterministic focus restoration. */
 
 import { Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react'

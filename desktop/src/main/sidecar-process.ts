@@ -1,3 +1,4 @@
+/** Launches, authenticates, probes, and terminates the native sidecar process. */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'

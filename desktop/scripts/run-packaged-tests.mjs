@@ -1,4 +1,4 @@
-// Launches the packaged Playwright suite with exact argv and no command shell.
+/** Launches the packaged Playwright suite with exact argv and no command shell. */
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'

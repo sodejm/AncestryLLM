@@ -1,3 +1,4 @@
+/** Verifies renderer protocol, CSP, navigation, and web-preference security policy. */
 import { describe, expect, it, vi } from 'vitest'
 import {
   APP_ASSET_MANIFEST,

@@ -1,4 +1,4 @@
-// Semantic presentation for the shared asynchronous state contract.
+/** Presents the shared asynchronous state contract with accessible semantics. */
 
 import {
   AlertCircle,

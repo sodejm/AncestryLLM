@@ -1,3 +1,4 @@
+# Builds, verifies, signs, and publishes artifacts for a semantic-version release tag.
 name: Release
 
 on:

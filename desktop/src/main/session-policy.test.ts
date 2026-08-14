@@ -1,3 +1,4 @@
+/** Verifies the default Electron session denies permissions, devices, and downloads. */
 import { describe, expect, it, vi } from 'vitest'
 import { installSessionPolicy } from './session-policy'
 

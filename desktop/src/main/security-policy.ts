@@ -1,3 +1,4 @@
+/** Defines the trusted app protocol, CSP, navigation, and window security policy. */
 export const APP_ENTRY_URL = 'app://bundle/index.html' as const
 export const APP_ENTRY_ROUTE_HASHES = Object.freeze([
   '#/',

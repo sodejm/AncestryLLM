@@ -1,4 +1,4 @@
-// Sanitized stable-code error presentation with bounded recovery actions.
+/** Presents sanitized stable-code errors with bounded recovery actions. */
 
 import { AlertTriangle } from 'lucide-react'
 import type { RefObject } from 'react'

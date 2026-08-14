@@ -1,4 +1,4 @@
-// Runs the exact Docker and Compose command allowlist under bounded host-only process controls.
+/** Runs the exact Docker and Compose command allowlist under bounded host-only process controls. */
 
 import {
   spawn,

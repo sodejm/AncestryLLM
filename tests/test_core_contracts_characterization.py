@@ -1,3 +1,5 @@
+"""Characterize core command, provider, GEDCOM, and storage boundary contracts."""
+
 from __future__ import annotations
 
 import argparse

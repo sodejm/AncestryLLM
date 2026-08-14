@@ -1,3 +1,5 @@
+"""Enforce canonical commands and fail-closed security contracts in CI workflows."""
+
 from __future__ import annotations
 
 import json
@@ -559,8 +561,11 @@ def test_tracked_text_avoids_provider_key_shaped_identifiers() -> None:
         if not relative_bytes:
             continue
         relative = relative_bytes.decode("utf-8")
+        tracked_path = ROOT / relative
+        if not tracked_path.is_file():
+            continue
         try:
-            lines = (ROOT / relative).read_text(encoding="utf-8").splitlines()
+            lines = tracked_path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             continue
         matches.extend(

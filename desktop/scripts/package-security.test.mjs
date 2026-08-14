@@ -1,3 +1,4 @@
+/** Verifies package fuse inspection, integrity evidence, and report serialization. */
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

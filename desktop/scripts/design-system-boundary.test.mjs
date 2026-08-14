@@ -1,4 +1,4 @@
-// Enforce the renderer design system's presentation-only trust boundary.
+/** Enforces the renderer design system's presentation-only trust boundary. */
 
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'

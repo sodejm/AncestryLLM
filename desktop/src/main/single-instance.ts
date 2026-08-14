@@ -1,3 +1,4 @@
+/** Enforces one Electron application instance and focuses the existing window. */
 export interface SingleInstanceWindow {
   isMinimized(): boolean
   restore(): void

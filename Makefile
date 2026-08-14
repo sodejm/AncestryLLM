@@ -1,3 +1,4 @@
+# Defines the canonical local and CI commands for building and validating AncestryLLM.
 SHELL := /bin/bash
 
 VENV_DIR ?= .venv

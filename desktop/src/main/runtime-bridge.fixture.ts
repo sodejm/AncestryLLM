@@ -1,3 +1,4 @@
+/** Supplies deterministic main-process bridge fixtures for IPC contract tests. */
 import { createMockAncestryBridge } from '../mock-bridge/desktop'
 import type { JobEvent, JobEventSubscriptionRequest } from '../shared-contract/desktop'
 import type { MainDesktopBridge } from './ipc-handlers'

@@ -1,3 +1,5 @@
+"""Verify CodeQL SARIF validation and release-evidence result handling."""
+
 from __future__ import annotations
 
 import importlib.util

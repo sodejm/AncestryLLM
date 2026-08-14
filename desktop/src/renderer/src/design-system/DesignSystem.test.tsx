@@ -1,4 +1,4 @@
-// Behavioral contracts for navigation, states, gates, errors, and dialog focus.
+/** Verifies navigation, state, gate, error, and dialog-focus design contracts. */
 
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

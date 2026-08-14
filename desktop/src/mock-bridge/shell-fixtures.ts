@@ -1,4 +1,4 @@
-// Fictional development-only states for the isolated component gallery.
+/** Provides fictional development-only states for the isolated component gallery. */
 
 import type { AsyncState } from '../renderer/src/design-system/contracts'
 import { deepFreeze } from './fixtures'

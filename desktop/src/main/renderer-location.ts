@@ -1,3 +1,4 @@
+/** Resolves the trusted development or packaged renderer target under policy. */
 import { APP_ENTRY_URL } from './security-policy'
 
 interface RendererPolicy {

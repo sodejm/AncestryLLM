@@ -1,3 +1,4 @@
+/** Verifies packaged sidecar identity, manifest integrity, permissions, and containment. */
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import {

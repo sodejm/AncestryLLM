@@ -1,3 +1,4 @@
+/** Validates and opens external HTTPS links only after explicit confirmation. */
 export type ExternalLinkResult = Readonly<{ status: 'opened' | 'cancelled' }>
 
 const MAX_EXTERNAL_LINK_CHARACTERS = 2_048

@@ -1,3 +1,4 @@
+/** Verifies the development mock bridge mirrors the versioned desktop contract. */
 import { describe, expect, it, vi } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 

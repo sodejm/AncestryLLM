@@ -1,4 +1,4 @@
-// Presentation-only capability branching without granting runtime authority.
+/** Presents capability-dependent content without granting runtime authority. */
 
 import type { ReactNode } from 'react'
 

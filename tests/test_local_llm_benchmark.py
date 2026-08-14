@@ -1,3 +1,5 @@
+"""Verify the local-provider benchmark emits deterministic, sanitized measurements."""
+
 from __future__ import annotations
 
 import importlib.util

@@ -1,3 +1,4 @@
+# Performs CodeQL analysis for the repository's supported source languages.
 name: CodeQL
 
 on:

@@ -1,3 +1,4 @@
+/// Exports an Apple signing identity for the isolated macOS release keychain.
 import Foundation
 import Security
 

@@ -1,3 +1,4 @@
+/** Defines blocking lint rules for the desktop TypeScript and React workspace. */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

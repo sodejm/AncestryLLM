@@ -1,4 +1,4 @@
-// Ensure bounded accessibility and visual-review commands select checked-in scenarios.
+/** Ensures accessibility and visual-review commands select checked-in scenarios. */
 
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
