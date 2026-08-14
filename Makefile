@@ -123,13 +123,13 @@ code-docs-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
 docs-screenshots: verified-uv
-	@$(UV_BIN) run --locked python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root .
+	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root .
 
 docs-screenshots-check: verified-uv
-	@$(UV_BIN) run --locked python scripts/docs_screenshots.py check --manifest config/docs-screenshot-manifest.json --repository-root .
+	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py check --manifest config/docs-screenshot-manifest.json --repository-root .
 
 docs-terminal-screenshots: verified-uv
-	@$(UV_BIN) run --locked python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root . --surface terminal
+	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root . --surface terminal
 
 hooks: verified-uv
 	@$(UV_BIN) run --locked --group lint pre-commit install --hook-type pre-commit --hook-type pre-push

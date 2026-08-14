@@ -184,9 +184,9 @@ def test_make_profiles_select_only_their_declared_groups() -> None:
         "evaluate-uv-build": {"build"},
         "workflow-audit": {"security"},
         "code-docs-check": {"lint"},
-        "docs-screenshots": set(),
-        "docs-screenshots-check": set(),
-        "docs-terminal-screenshots": set(),
+        "docs-screenshots": {"lint"},
+        "docs-screenshots-check": {"lint"},
+        "docs-terminal-screenshots": {"lint"},
         "hooks": {"lint"},
     }
 

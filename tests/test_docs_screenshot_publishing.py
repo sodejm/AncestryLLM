@@ -9,9 +9,11 @@ import stat
 import struct
 import subprocess
 import zlib
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 from scripts import docs_screenshots
@@ -24,6 +26,7 @@ from scripts.docs_screenshots import (
     DocsScreenshotError,
     _copy_repository_snapshot,
     _default_capture_runner,
+    _drift_report,
     _pnpm_command,
     _publish_atomically,
     check_screenshots,
@@ -64,6 +67,7 @@ def _manifest(
                 {
                     "id": "terminal-example",
                     "surface": "terminal",
+                    "comparison": {"mode": "exact"},
                     "output_path": "docs/assets/screenshots/terminal/example.png",
                     "documentation": [
                         {"path": documentation_path, "anchor": "example"},
@@ -171,6 +175,34 @@ def test_published_assets_parse_rendered_reference_images_and_ignore_code(
 
 
 @pytest.mark.parametrize(
+    "raw_html",
+    (
+        (
+            '<img src="assets/screenshots/terminal/example.png" '
+            'alt="Ancestry terminal showing fictional example output">'
+        ),
+        ('<picture><source srcset="assets/screenshots/terminal/example.png 1x"></picture>'),
+    ),
+)
+def test_published_assets_reject_raw_html_screenshot_embeds(
+    tmp_path: Path,
+    raw_html: str,
+) -> None:
+    manifest = _manifest()
+    _write_published_contract(tmp_path)
+    documentation = tmp_path / "docs/guide.md"
+    documentation.write_text(
+        f"# Guide\n\n## Example\n\n{raw_html}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ScreenshotManifestError) as exc_info:
+        validate_published_assets(manifest, repository_root=tmp_path)
+
+    assert exc_info.value.code == "DOCSHOT_DOC_IMAGE_UNDECLARED"
+
+
+@pytest.mark.parametrize(
     "malformed",
     (
         b"\x89PNG\r\n\x1a\ntruncated",
@@ -231,31 +263,93 @@ def test_scenario_selection_is_closed_and_surface_scoped() -> None:
     assert exc_info.value.code == "DOCSHOT_SCENARIO_SURFACE_MISMATCH"
 
 
-@pytest.mark.parametrize(
-    ("explicit", "runner_temp", "host_platform", "expected"),
-    (
-        (Path("explicit"), "/runner", "darwin", Path("explicit")),
-        (None, "/runner", "darwin", Path("repository")),
-        (None, "/runner", "linux", Path("/runner")),
-        (None, None, "linux", Path("system-temporary")),
-    ),
-)
-def test_temporary_root_selection_keeps_docker_binds_visible(
-    explicit: Path | None,
-    runner_temp: str | None,
-    host_platform: str,
-    expected: Path,
-) -> None:
-    assert (
-        docs_screenshots.resolve_temporary_root(
-            repository_root=Path("repository"),
-            explicit=explicit,
-            runner_temp=runner_temp,
-            host_platform=host_platform,
-            system_temp=Path("system-temporary"),
+def test_drift_report_rejects_non_exact_comparison(tmp_path: Path) -> None:
+    scenario = dict(_manifest().scenarios[0])
+    scenario["comparison"] = {"mode": "tolerance", "threshold": 0.01}
+
+    with pytest.raises(DocsScreenshotError) as exc_info:
+        _drift_report(
+            (scenario,),
+            repository_root=tmp_path,
+            captured_root=tmp_path,
         )
-        == expected
+
+    assert exc_info.value.code == "DOCSHOT_COMPARISON_UNSUPPORTED"
+
+
+def test_temporary_root_selection_keeps_docker_binds_visible(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    explicit = tmp_path / "explicit"
+    runner = tmp_path / "runner"
+    system_temporary = tmp_path / "system-temporary"
+    for directory in (repository, explicit, runner, system_temporary):
+        directory.mkdir()
+
+    cases = (
+        (explicit, str(runner), "darwin", explicit),
+        (None, str(runner), "darwin", repository),
+        (None, str(runner), "linux", runner),
+        (None, None, "linux", system_temporary),
     )
+    for selected, runner_temp, host_platform, expected in cases:
+        assert (
+            docs_screenshots.resolve_temporary_root(
+                repository_root=repository,
+                explicit=selected,
+                runner_temp=runner_temp,
+                host_platform=host_platform,
+                system_temp=system_temporary,
+            )
+            == expected
+        )
+
+
+@pytest.mark.parametrize("kind", ("missing", "file"))
+def test_temporary_root_rejects_invalid_paths(tmp_path: Path, kind: str) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    invalid = tmp_path / kind
+    if kind == "file":
+        invalid.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(DocsScreenshotError) as exc_info:
+        docs_screenshots.resolve_temporary_root(
+            repository_root=repository,
+            explicit=invalid,
+            runner_temp=None,
+            host_platform="linux",
+            system_temp=tmp_path,
+        )
+
+    assert exc_info.value.code == "DOCSHOT_TEMPORARY_ROOT_INVALID"
+
+
+def test_cli_sanitizes_invalid_temporary_root_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    invalid = tmp_path / "private-host-path"
+
+    assert (
+        docs_screenshots.main(
+            [
+                "check",
+                "--repository-root",
+                str(repository),
+                "--temporary-root",
+                str(invalid),
+            ],
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "DOCSHOT_TEMPORARY_ROOT_INVALID\n"
+    assert str(invalid) not in captured.err
 
 
 def test_check_is_non_mutating_when_capture_matches(tmp_path: Path) -> None:

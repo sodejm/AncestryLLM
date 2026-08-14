@@ -293,30 +293,6 @@
         }
       }
     },
-    "tolerance_comparison": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode",
-        "max_differing_pixels",
-        "rationale"
-      ],
-      "properties": {
-        "mode": {
-          "const": "tolerance"
-        },
-        "max_differing_pixels": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100
-        },
-        "rationale": {
-          "type": "string",
-          "minLength": 20,
-          "maxLength": 500
-        }
-      }
-    },
     "scenario": {
       "type": "object",
       "additionalProperties": false,
@@ -381,14 +357,7 @@
           }
         },
         "comparison": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/exact_comparison"
-            },
-            {
-              "$ref": "#/$defs/tolerance_comparison"
-            }
-          ]
+          "$ref": "#/$defs/exact_comparison"
         }
       }
     }

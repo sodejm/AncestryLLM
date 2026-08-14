@@ -12,6 +12,7 @@ import sys
 import zlib
 from copy import deepcopy
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -630,17 +631,58 @@ def _meaningful_alt_text(alt_text: str, output_path: str) -> bool:
     return casefolded != stem
 
 
-def _rendered_markdown_images(markdown: str) -> tuple[tuple[str, str], ...]:
+class _RawHtmlImageParser(HTMLParser):
+    """Collect image destinations that bypass CommonMark image tokens."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.destinations: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        if tag.casefold() not in {"img", "source"}:
+            return
+        attributes = {name.casefold(): value for name, value in attrs if value is not None}
+        source = attributes.get("src")
+        if source:
+            self.destinations.append(source)
+        source_set = attributes.get("srcset")
+        if source_set:
+            for candidate in source_set.split(","):
+                destination = candidate.strip().split(maxsplit=1)[0]
+                if destination:
+                    self.destinations.append(destination)
+
+    def handle_startendtag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        self.handle_starttag(tag, attrs)
+
+
+def _rendered_markdown_images(
+    markdown: str,
+) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
     images: list[tuple[str, str]] = []
+    raw_html_destinations: list[str] = []
 
     def collect(tokens: list[Any] | None) -> None:
         for token in tokens or []:
             if token.type == "image":
                 images.append((token.content, token.attrGet("src") or ""))
+            elif token.type in {"html_block", "html_inline"}:
+                parser = _RawHtmlImageParser()
+                parser.feed(token.content)
+                parser.close()
+                raw_html_destinations.extend(parser.destinations)
             collect(token.children)
 
     collect(MarkdownIt("commonmark").parse(markdown))
-    return tuple(images)
+    return tuple(images), tuple(raw_html_destinations)
 
 
 def validate_published_assets(
@@ -702,7 +744,14 @@ def validate_published_assets(
             markdown = documentation.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             _fail("DOCSHOT_DOC_NOT_FOUND", "documentation screenshot owner is unreadable")
-        for alt_text, destination in _rendered_markdown_images(markdown):
+        rendered_images, raw_html_destinations = _rendered_markdown_images(markdown)
+        for destination in raw_html_destinations:
+            if _resolved_markdown_image(relative_documentation, destination) is not None:
+                _fail(
+                    "DOCSHOT_DOC_IMAGE_UNDECLARED",
+                    "raw HTML screenshot embeddings are not permitted",
+                )
+        for alt_text, destination in rendered_images:
             resolved_image = _resolved_markdown_image(
                 relative_documentation,
                 destination,

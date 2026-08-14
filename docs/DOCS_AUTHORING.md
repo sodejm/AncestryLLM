@@ -171,9 +171,9 @@ Every publishable scenario must:
    the output allowlist.
 4. Name each documentation page and heading that owns the image so renamed or
    retired destinations fail validation.
-5. Use exact comparison by default. A pixel-tolerance budget is exceptional and
-   requires a narrow reviewed maximum plus a written reason explaining why the
-   variance cannot be eliminated.
+5. Use exact comparison. Schema v1 does not implement pixel-tolerance budgets and
+   rejects them fail closed; adding tolerance requires a new reviewed schema,
+   comparison implementation, and evidence contract.
 
 The manifest fixes locale, timezone, theme, fonts, animation behavior,
 timestamps, usernames, paths, identifiers, volatile values, and network policy.

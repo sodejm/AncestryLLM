@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, Never, Protocol
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
@@ -103,7 +103,7 @@ class CaptureRunner(Protocol):
         """Capture only the selected scenarios beneath ``output_root``."""
 
 
-def _fail(code: str, message: str) -> None:
+def _fail(code: str, message: str) -> Never:
     raise DocsScreenshotError(code, message)
 
 
@@ -363,6 +363,11 @@ def _drift_report(
 ) -> dict[str, Any]:
     results: list[dict[str, str]] = []
     for scenario in scenarios:
+        if scenario.get("comparison") != {"mode": "exact"}:
+            _fail(
+                "DOCSHOT_COMPARISON_UNSUPPORTED",
+                "schema v1 supports exact screenshot comparison only",
+            )
         relative = _relative_output(str(scenario["output_path"]))
         expected_sha256 = _sha256(repository_root / relative)
         captured_sha256 = _sha256(captured_root / relative)
@@ -457,6 +462,21 @@ def _capture_to_stage(
         )
 
 
+def _temporary_directory(
+    *,
+    prefix: str,
+    root: Path,
+) -> tempfile.TemporaryDirectory[str]:
+    """Create capture staging with a stable failure for invalid host roots."""
+    try:
+        return tempfile.TemporaryDirectory(prefix=prefix, dir=root)
+    except OSError:
+        _fail(
+            "DOCSHOT_TEMPORARY_ROOT_INVALID",
+            "temporary staging directory could not be created",
+        )
+
+
 def check_screenshots(
     manifest: ValidatedManifest,
     *,
@@ -482,8 +502,9 @@ def check_screenshots(
         surfaces=surfaces,
         scenario_ids=scenario_ids,
     )
-    with tempfile.TemporaryDirectory(
-        prefix="ancestryllm-docshot-check-", dir=temporary_root
+    with _temporary_directory(
+        prefix="ancestryllm-docshot-check-",
+        root=temporary_root,
     ) as name:
         stage = Path(name) / "output"
         stage.mkdir()
@@ -580,8 +601,9 @@ def regenerate_screenshots(
         surfaces=surfaces,
         scenario_ids=scenario_ids,
     )
-    with tempfile.TemporaryDirectory(
-        prefix="ancestryllm-docshot-capture-", dir=temporary_root
+    with _temporary_directory(
+        prefix="ancestryllm-docshot-capture-",
+        root=temporary_root,
     ) as name:
         stage = Path(name) / "output"
         stage.mkdir()
@@ -633,30 +655,43 @@ def resolve_temporary_root(
 ) -> Path:
     """Select a capture root whose Docker bind is visible on the host platform."""
     if explicit is not None:
-        return explicit
-    if host_platform == "darwin":
+        selected = explicit
+    elif host_platform == "darwin":
         # Colima does not expose macOS's /private/var or /var temporary tree by
         # default. The checked-out repository is already an approved bind root.
-        return repository_root
-    if runner_temp:
-        return Path(runner_temp)
-    return system_temp
+        selected = repository_root
+    elif runner_temp:
+        selected = Path(runner_temp)
+    else:
+        selected = system_temp
+    try:
+        if selected.is_symlink() or not selected.is_dir():
+            _fail(
+                "DOCSHOT_TEMPORARY_ROOT_INVALID",
+                "temporary root must be an existing directory",
+            )
+    except OSError:
+        _fail(
+            "DOCSHOT_TEMPORARY_ROOT_INVALID",
+            "temporary root could not be validated",
+        )
+    return selected
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the repository-level screenshot publication contract."""
     args = _parser().parse_args(argv)
-    temporary_root = resolve_temporary_root(
-        repository_root=args.repository_root,
-        explicit=args.temporary_root,
-        runner_temp=os.environ.get("RUNNER_TEMP"),
-        host_platform=sys.platform,
-        system_temp=Path(tempfile.gettempdir()),
-    )
     report_path = args.report
     if report_path is None and os.environ.get("ANCESTRYLLM_DOCS_SCREENSHOT_REPORT"):
         report_path = Path(os.environ["ANCESTRYLLM_DOCS_SCREENSHOT_REPORT"])
     try:
+        temporary_root = resolve_temporary_root(
+            repository_root=args.repository_root,
+            explicit=args.temporary_root,
+            runner_temp=os.environ.get("RUNNER_TEMP"),
+            host_platform=sys.platform,
+            system_temp=Path(tempfile.gettempdir()),
+        )
         manifest_path = _selected_manifest_path(
             args.manifest,
             repository_root=args.repository_root,

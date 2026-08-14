@@ -289,25 +289,16 @@ def test_documentation_references_must_exist_with_valid_anchors() -> None:
     _assert_error(missing_anchor, "DOCSHOT_DOC_ANCHOR_MISSING")
 
 
-def test_comparison_tolerance_requires_an_explicit_reviewed_budget() -> None:
-    missing_rationale = _payload()
-    scenarios = missing_rationale["scenarios"]
-    assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
-    scenarios[0]["comparison"] = {
-        "mode": "tolerance",
-        "max_differing_pixels": 1,
-    }
-    _assert_error(missing_rationale, "DOCSHOT_SCHEMA_INVALID")
-
-    reviewed = _payload()
-    scenarios = reviewed["scenarios"]
+def test_schema_v1_rejects_unimplemented_tolerance_comparison() -> None:
+    tolerance = _payload()
+    scenarios = tolerance["scenarios"]
     assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
     scenarios[0]["comparison"] = {
         "mode": "tolerance",
         "max_differing_pixels": 1,
         "rationale": "One reviewed rasterization pixel cannot be eliminated.",
     }
-    _validate(reviewed)
+    _assert_error(tolerance, "DOCSHOT_SCHEMA_INVALID")
 
 
 def test_make_exposes_publication_and_nonmutating_drift_targets() -> None:
@@ -319,6 +310,8 @@ def test_make_exposes_publication_and_nonmutating_drift_targets() -> None:
     assert re.search(r"(?m)^docs-screenshots-check:.*verified-uv", makefile)
     assert "scripts/docs_screenshots.py capture" in capture_target
     assert "scripts/docs_screenshots.py check" in check_target
+    assert "$(UV_BIN) run --locked --group lint" in capture_target
+    assert "$(UV_BIN) run --locked --group lint" in check_target
     assert "--repository-root ." in capture_target
     assert "--repository-root ." in check_target
 
