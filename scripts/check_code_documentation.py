@@ -39,7 +39,7 @@ FIRST_PARTY_CODE_EXTENSIONS: Final = frozenset(
 )
 
 # Makefile and comment-capable config formats that require file-level purpose comments.
-EXEC_CONFIG_EXTENSIONS: Final = frozenset({".graphql", ".yml", ".yaml", ".toml"})
+EXEC_CONFIG_EXTENSIONS: Final = frozenset({".dockerfile", ".graphql", ".yml", ".yaml", ".toml"})
 
 # Extensions that identify generated/vendored or lock files — excluded from
 # documentation requirements but must be explicitly classified.
@@ -57,7 +57,7 @@ GENERATED_VENDOR_PATHS: Final = frozenset({"desktop/patches/electron@39.8.10.pat
 TEST_DATA_FIXTURE_EXTENSIONS: Final = frozenset({".ged", ".gedcom", ".gitkeep"})
 
 # Extensions for non-code human-readable documentation.
-NON_CODE_DOC_EXTENSIONS: Final = frozenset({".md", ".rst", ".txt"})
+NON_CODE_DOC_EXTENSIONS: Final = frozenset({".md", ".png", ".rst", ".txt"})
 
 # Formats that do not safely permit comments.  Their semantics must be
 # explained in NON_COMMENT_FORMAT_MAP below.
@@ -141,6 +141,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "config/docs-screenshot-fixture-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-screenshot-manifest-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-screenshot-manifest.json": "docs/DOCS_AUTHORING.md",
+    "config/docs-terminal-capture-policy-v1.schema.json": "docs/DOCS_AUTHORING.md",
+    "config/docs-terminal-capture-policy.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/degraded.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/electron-degraded.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/privacy-canary.json": "docs/DOCS_AUTHORING.md",

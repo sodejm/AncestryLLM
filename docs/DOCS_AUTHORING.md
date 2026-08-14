@@ -80,10 +80,54 @@ reports unexpected renderer networking, scans the rendered document for every
 privacy canary, and atomically writes only the two declared Electron PNG paths
 below the caller's output root.
 
-This adapter does not commit or publish those PNGs, add screenshot CI, or
-change the plan-only Make target. Terminal capture remains owned by #419;
-committed image assets, documentation embedding, drift comparison, and CI
-enforcement remain owned by #420.
+The terminal adapter runs with `make docs-terminal-screenshots`. It validates
+`config/docs-terminal-capture-policy.json`, builds a native Linux container
+from exact digest-pinned VHS and uv images, verifies the expected VHS, ttyd,
+Chromium, FFmpeg, and JetBrains Mono identities, and then drives the real
+`.venv/bin/ancestry` one-shot CLI and interactive console through a true PTY.
+Each manifest scenario is rendered twice with fixed shell, geometry, theme,
+font, locale, timezone, prompt, timing, fictional state, and `provider=none`.
+The two PNGs must be byte-identical before they are atomically published to
+their exact allowlisted repository paths.
+
+Capture execution is non-root, read-only, capability-free, and network-free.
+Only an isolated temporary capture directory is writable; `HOME`, XDG,
+application config, and application data all resolve inside it. Policy-owned
+environment values are supplied explicitly without inheriting the host
+environment, privacy canaries are scanned from the transcript, the real command
+status is preserved, and temporary state must be empty after either success or
+failure. The container receives no host home directory, repository credentials,
+provider keys, Docker socket, or ordinary network access.
+
+The shared manifest's `en_US.UTF-8` locale identity is backed by the pinned
+image's immutable `C.utf8` locale data through an exact container-local alias.
+The terminal output is intentionally ASCII-only; preflight verifies the alias,
+target, selected locale name, and matching `LANG` and `LC_ALL` values before any
+capture. This avoids a mutable locale-package installation while keeping the
+shared Electron and terminal determinism contract unchanged.
+
+For local macOS capture, install and start Docker Desktop (or another engine
+that can run native Linux containers), run `make setup`, then run
+`make docs-screenshots-check` and `make docs-terminal-screenshots`. Host copies
+of VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono are neither used nor
+supported by this contract. The reference CI setup is the same target on a
+Linux amd64 or arm64 runner with Docker Engine available; the capture policy
+selects and verifies the corresponding native image descriptor. #420 owns
+wiring this command into CI, comparing committed drift, and embedding the
+images in their owning documentation pages.
+
+To update the terminal toolchain, change the VHS image index digest, both
+reviewed native descriptor digests, uv image digest, exact preflight version
+strings, and font path and SHA-256 together in the policy and its closed schema.
+Review the upstream release and native manifests, run the policy and focused
+terminal-capture tests, capture twice from a clean checkout, compare the
+reported PNG hashes, and visually review both fictional outputs. Never
+substitute a mutable tag, alternate image, host executable, mirror, or relaxed
+preflight check.
+
+The Electron adapter does not commit or publish its PNGs or add screenshot CI.
+Terminal capture commits only the two manifest-declared PNG assets; documentation
+embedding, drift comparison, and CI enforcement remain owned by #420.
 
 Every publishable scenario must:
 

@@ -27,10 +27,10 @@ script enforces this at every CI run.
 | `first-party-code` | Production source maintained as code | `src/**/*.py`, `desktop/src/**/*.ts` |
 | `first-party-test` | Test source maintained as code | `tests/**/*.py`, `desktop/src/**/*.test.ts` |
 | `first-party-script` | Build/release/tooling scripts | `scripts/*.py`, `scripts/*.sh` |
-| `first-party-config-exec` | Executable/behaviour-defining config | `*.yml`, `*.yaml`, `Makefile`, `pyproject.toml` |
+| `first-party-config-exec` | Executable/behaviour-defining config | `*.yml`, `*.Dockerfile`, `Makefile`, `pyproject.toml` |
 | `generated-vendor` | Generated or vendored output and exact reviewed vendor patch inputs | `uv.lock`, `pnpm-lock.yaml`, the allowlisted Electron patch |
 | `test-data-fixture` | Fictional test data | `tests/fixtures/**/*.ged` |
-| `non-code-doc` | Human-readable documentation/content | `docs/**/*.md`, `README.md`, `LICENSE` |
+| `non-code-doc` | Human-readable documentation/content and reviewed documentation images | `docs/**/*.md`, `docs/**/*.png`, `README.md`, `LICENSE` |
 | `non-comment-format` | Formats or strict parser contracts that do not safely permit comments | `*.json`, `*.plist`, strict-JSON Compose manifests |
 | `ide-config` | Editor/IDE configuration | `.vscode/**` |
 

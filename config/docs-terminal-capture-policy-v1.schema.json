@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sodejm/AncestryLLM/config/docs-terminal-capture-policy-v1.schema.json",
+  "title": "AncestryLLM terminal documentation capture policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "container_image",
+    "supported_platforms",
+    "uv_image",
+    "dockerfile",
+    "toolchain",
+    "font",
+    "locale",
+    "environment",
+    "terminal",
+    "scenarios"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "container_image": {
+      "const": "ghcr.io/charmbracelet/vhs@sha256:9d5fc3dc0c160b0fb1d2212baff07e6bdf3fa9438c504a3237484567302fcf93"
+    },
+    "supported_platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "properties": {
+        "linux/amd64": {
+          "const": "sha256:16b21a3bf7bd13e7fcf60d3ece47c92e561ef594f2c1fca5f1683f11190954b8"
+        },
+        "linux/arm64": {
+          "const": "sha256:2c34085dea86c69c94bd64a9bde0f8a839aadb6032c97d4c3268fd0aaeb09262"
+        }
+      }
+    },
+    "uv_image": {
+      "const": "ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded"
+    },
+    "dockerfile": {
+      "const": "containers/docs-terminal-capture.Dockerfile"
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chromium",
+        "ffmpeg",
+        "ttyd",
+        "vhs"
+      ],
+      "properties": {
+        "chromium": {
+          "$ref": "#/$defs/tool"
+        },
+        "ffmpeg": {
+          "$ref": "#/$defs/tool"
+        },
+        "ttyd": {
+          "$ref": "#/$defs/tool"
+        },
+        "vhs": {
+          "$ref": "#/$defs/tool"
+        }
+      }
+    },
+    "font": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "family": {
+          "const": "JetBrains Mono"
+        },
+        "path": {
+          "const": "/usr/share/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"
+        },
+        "sha256": {
+          "const": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+        }
+      }
+    },
+    "locale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path",
+        "target"
+      ],
+      "properties": {
+        "name": {
+          "const": "en_US.UTF-8"
+        },
+        "path": {
+          "const": "/usr/lib/locale/en_US.UTF-8"
+        },
+        "target": {
+          "const": "/usr/lib/locale/C.utf8"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ANCESTRYLLM_CONFIG_DIR",
+        "ANCESTRYLLM_DATA_DIR",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "NO_COLOR",
+        "PATH",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONHASHSEED",
+        "TERM",
+        "TZ",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME"
+      ],
+      "properties": {
+        "ANCESTRYLLM_CONFIG_DIR": {
+          "const": "/capture/ancestryllm/config"
+        },
+        "ANCESTRYLLM_DATA_DIR": {
+          "const": "/capture/ancestryllm/data"
+        },
+        "HOME": {
+          "const": "/capture/home"
+        },
+        "LANG": {
+          "const": "en_US.UTF-8"
+        },
+        "LC_ALL": {
+          "const": "en_US.UTF-8"
+        },
+        "NO_COLOR": {
+          "const": "1"
+        },
+        "PATH": {
+          "const": "/usr/local/lib/ancestryllm-docs-terminal:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        },
+        "PYTHONDONTWRITEBYTECODE": {
+          "const": "1"
+        },
+        "PYTHONHASHSEED": {
+          "const": "0"
+        },
+        "TERM": {
+          "const": "xterm-256color"
+        },
+        "TZ": {
+          "const": "UTC"
+        },
+        "XDG_CACHE_HOME": {
+          "const": "/capture/xdg/cache"
+        },
+        "XDG_CONFIG_HOME": {
+          "const": "/capture/xdg/config"
+        },
+        "XDG_DATA_HOME": {
+          "const": "/capture/xdg/data"
+        }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shell",
+        "font_size",
+        "width",
+        "height",
+        "columns",
+        "rows",
+        "typing_speed",
+        "startup_wait",
+        "settle_wait",
+        "final_wait",
+        "timeout_seconds",
+        "theme"
+      ],
+      "properties": {
+        "shell": {
+          "const": "bash"
+        },
+        "font_size": {
+          "const": 14
+        },
+        "width": {
+          "const": 1200
+        },
+        "height": {
+          "const": 720
+        },
+        "columns": {
+          "const": 120
+        },
+        "rows": {
+          "const": 36
+        },
+        "typing_speed": {
+          "const": "1ms"
+        },
+        "startup_wait": {
+          "const": "2s"
+        },
+        "settle_wait": {
+          "const": "1s"
+        },
+        "final_wait": {
+          "const": "1s"
+        },
+        "timeout_seconds": {
+          "const": 30
+        },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "background",
+            "foreground",
+            "cursor"
+          ],
+          "properties": {
+            "background": {
+              "const": "#f8fafc"
+            },
+            "foreground": {
+              "const": "#0f172a"
+            },
+            "cursor": {
+              "const": "#0f766e"
+            }
+          }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "version_arguments",
+        "version",
+        "comparison"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._/-]+$"
+        },
+        "version_arguments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "pattern": "^--?[A-Za-z0-9-]+$"
+          }
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "comparison": {
+          "enum": [
+            "exact",
+            "prefix"
+          ]
+        }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "wait_after"
+      ],
+      "properties": {
+        "input": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9 ./_-]+$"
+        },
+        "expect": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "wait_after": {
+          "enum": [
+            "1s",
+            "2s"
+          ]
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "capture_after_step",
+        "interactions"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "terminal-cli-help",
+            "terminal-interactive-console"
+          ]
+        },
+        "capture_after_step": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "interactions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/interaction"
+          }
+        }
+      }
+    }
+  }
+}

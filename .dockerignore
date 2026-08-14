@@ -5,3 +5,11 @@
 !uv.lock
 !src/
 !src/**
+!containers/
+containers/**
+!containers/docs-terminal-capture.Dockerfile
+!scripts/
+scripts/**
+!scripts/docs_terminal_preflight.py
+!scripts/docs_terminal_pty.py
+!scripts/docs_terminal_shell.sh

@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "launch_allowlist": [
-    ".tools/uv/uv",
+    ".venv/bin/ancestry",
     "pnpm"
   ],
   "output_allowlist": [
     "docs/assets/screenshots/electron/degraded-diagnostics.png",
     "docs/assets/screenshots/electron/ready-home.png",
+    "docs/assets/screenshots/terminal/cli-help.png",
     "docs/assets/screenshots/terminal/interactive-console.png"
   ],
   "determinism": {
@@ -133,15 +134,13 @@
       }
     },
     {
-      "id": "terminal-interactive-console",
+      "id": "terminal-cli-help",
       "surface": "terminal",
       "launch": [
-        ".tools/uv/uv",
-        "run",
-        "--locked",
-        "ancestry"
+        ".venv/bin/ancestry",
+        "--help"
       ],
-      "fixture_id": "degraded",
+      "fixture_id": "success",
       "geometry": {
         "kind": "terminal",
         "columns": 120,
@@ -149,7 +148,34 @@
       },
       "ready_signal": {
         "kind": "text",
-        "value": "Registered offline GEDCOM commands remain available."
+        "value": "usage: ancestry"
+      },
+      "output_path": "docs/assets/screenshots/terminal/cli-help.png",
+      "documentation": [
+        {
+          "path": "docs/reference/CLI.md",
+          "anchor": "command-line-reference"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      }
+    },
+    {
+      "id": "terminal-interactive-console",
+      "surface": "terminal",
+      "launch": [
+        ".venv/bin/ancestry"
+      ],
+      "fixture_id": "success",
+      "geometry": {
+        "kind": "terminal",
+        "columns": 120,
+        "rows": 36
+      },
+      "ready_signal": {
+        "kind": "text",
+        "value": "ancestry >"
       },
       "output_path": "docs/assets/screenshots/terminal/interactive-console.png",
       "documentation": [
