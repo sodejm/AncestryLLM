@@ -53,7 +53,9 @@ The accepted desktop design is
 applicable OWASP ASVS 5.0.0 requirements, and NIST SP 800-218 secure-development
 practices. The desktop is not a browser service: it launches with no in-app
 authentication for the signed-in OS user, and its internal API binds only to
-loopback with per-launch authentication.
+loopback with per-launch authentication. It is not a public or LAN API. The
+[data-flow threat model](../THREAT_MODEL.md) remains authoritative for the
+corresponding controls and residual risks.
 
 The sandboxed renderer is untrusted. It must never receive a provider or
 SQLCipher secret, keyring value, internal API bearer/port, unrestricted path,
@@ -61,6 +63,13 @@ raw crash data, or direct database/provider/filesystem/network capability.
 Secret operations are set, delete, and presence only; Python `SecretStore` and
 the OS keyring remain the sole authority. File choices become scoped opaque
 grants, not renderer-visible paths.
+
+The [desktop first-run tutorial](../tutorials/desktop-first-run.md), focused
+[provider and consent guide](../how-to/desktop-provider-consent.md),
+[file-access guide](../how-to/desktop-file-access.md), and
+[desktop reference](../reference/DESKTOP.md) translate these boundaries into
+the exact source-level labels and recovery actions. They do not add renderer
+authority, weaken explicit consent, or change the 0.5.0 release boundary.
 
 The unreleased Issue #105 source contract exposes only the reviewed non-secret
 settings schema and the exact credential references owned by `SecretStore`.

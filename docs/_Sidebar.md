@@ -6,12 +6,18 @@
 
 ### Tutorials
 
+- [Desktop first run](tutorials/desktop-first-run.md)
 - [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
 
 ### How-to guides
 
 - [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md)
 - [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
+- [Recover with desktop diagnostics](how-to/desktop-diagnostics.md)
+- [Grant desktop file access](how-to/desktop-file-access.md)
+- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
+- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md)
+- [Use transient desktop chat](how-to/desktop-chat.md)
 - [Interactive console guide](CONSOLE.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md)
@@ -19,6 +25,7 @@
 
 ### Reference
 
+- [Desktop reference](reference/DESKTOP.md)
 - [CLI reference](reference/CLI.md)
 - [Provider guide](reference/PROVIDERS.md)
 - [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)

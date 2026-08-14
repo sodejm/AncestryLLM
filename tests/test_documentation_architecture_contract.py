@@ -32,6 +32,7 @@ MIGRATED_READER_DOCS = {
     "VERSIONING.md": "reference/VERSIONING.md",
     "api/API_REFERENCE.md": "reference/api/API_REFERENCE.md",
 }
+CREATED_READER_DOCS = {"reference/DESKTOP.md"}
 
 
 def _inventory_rows() -> list[list[str]]:
@@ -89,15 +90,15 @@ def test_inventory_covers_every_canonical_markdown_page() -> None:
     )
 
 
-def test_reference_and_explanation_inventory_is_fully_migrated() -> None:
-    """Issue #261 moves every assigned reader page and finalizes its disposition."""
+def test_reference_and_explanation_inventory_records_migration_or_creation() -> None:
+    """Reader pages record their reviewed migration or creation disposition."""
     inventory = {row[0].strip("`"): row for row in _inventory_rows()}
     migrated_paths = set(MIGRATED_READER_DOCS.values())
     reader_rows = {
         path: row for path, row in inventory.items() if row[1] in {"Reference", "Explanation"}
     }
 
-    assert set(reader_rows) == migrated_paths
+    assert set(reader_rows) == migrated_paths | CREATED_READER_DOCS
     assert (DOCS_DIRECTORY / "api" / "openapi-v1.json").is_file()
 
     for legacy_path, migrated_path in MIGRATED_READER_DOCS.items():
@@ -108,6 +109,14 @@ def test_reference_and_explanation_inventory_is_fully_migrated() -> None:
         assert row[3] == "Moved in #261 with git mv"
         assert "Wiki basename retained" in row[11]
         assert "Pages route moved" in row[11]
+
+    for created_path in CREATED_READER_DOCS:
+        assert (DOCS_DIRECTORY / created_path).is_file()
+        row = inventory[created_path]
+        assert row[2] == f"`docs/{created_path}`"
+        assert row[3] == "Create in #262; retain basename"
+        assert "Retain unique basename" in row[11]
+        assert "validated in flat Wiki namespace" in row[11]
 
 
 def test_navigation_separates_reader_modes_from_supporting_material() -> None:

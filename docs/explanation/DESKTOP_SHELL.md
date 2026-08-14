@@ -4,6 +4,21 @@ AncestryLLM 0.5.0 is a bounded, offline Electron control shell. It does not
 move the genealogy-capable CLI or console into the desktop application and it
 does not introduce a second command or domain layer.
 
+The [desktop architecture decision, ADR-0025](../ADR-0025-electron-fastapi-desktop.md)
+owns the process boundary, and the [data-flow threat model](../THREAT_MODEL.md)
+owns its security controls. The sidecar's authenticated loopback channel is
+not a public or LAN API. Electron Main keeps the launch secret and OS keyring
+operations outside the sandboxed renderer, turns user-selected files into
+opaque grants, and lets backend-owned cancellation finish at a declared safe
+point.
+
+For a source-level v0.6 learning path, start with
+[Desktop first run](../tutorials/desktop-first-run.md), use the focused
+[desktop how-to guides](../Home.md#how-to-guides), and keep the
+[desktop reference](../reference/DESKTOP.md) open for exact states and stable
+codes. These pages describe the current source contracts; they do not expand
+the released 0.5.0 installer claim below.
+
 ## Supported surface
 
 ![AncestryLLM desktop Home view showing the fictional provider-none ready state](../assets/screenshots/electron/ready-home.png)

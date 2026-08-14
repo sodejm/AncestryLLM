@@ -66,6 +66,8 @@ silently grant provider, network, filesystem, or genealogy authority.
 
 Learn a complete, safe workflow with fictional data:
 
+- [Desktop first run](tutorials/desktop-first-run.md) — reach a verified,
+  network-free Home state and choose the next supported surface
 - [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
   — produce a rooted GEDCOM 5.5.5 file and quality report with `provider=none`
   and no network calls.
@@ -78,6 +80,16 @@ Task-oriented guidance for common goals:
   the public fictional fixtures, verify the results, and recover from failure
 - [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
   — inspect the implemented prompt-toolkit/Rich REPL safely
+- [Recover with desktop diagnostics](how-to/desktop-diagnostics.md) — interpret
+  sanitized startup state and retry the private desktop service
+- [Grant desktop file access](how-to/desktop-file-access.md) — understand
+  scoped opaque grants and the immutable-input boundary
+- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
+  — test an endpoint, review exact disclosure scope, and revoke consent
+- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md) — follow
+  backend-owned progress and cancellation safe points
+- [Use transient desktop chat](how-to/desktop-chat.md) — work with the bounded,
+  unsaved advisory conversation surface
 - [Interactive console guide](CONSOLE.md) — start and use the REPL
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md) — create and restore backups
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md) — troubleshoot setup
@@ -91,6 +103,8 @@ later `git mv` cutover that will update those consumers together.
 
 Factual, accurate information to look up:
 
+- [Desktop reference](reference/DESKTOP.md) — routes, states, stable codes,
+  platform behavior, accessibility, and recovery
 - [CLI reference](reference/CLI.md) — commands, options, and exit codes
 - [Provider guide](reference/PROVIDERS.md) — provider policy, profiles, and capabilities
 - [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)
