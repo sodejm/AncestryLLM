@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "fixture_id": "privacy-canary",
+  "state": "privacy-canary",
+  "provider": "none",
+  "network": "disabled",
+  "fictional": true,
+  "content": {
+    "title": "Unpublishable privacy sentinel",
+    "status": "Validation-only fixture",
+    "prompt": "Never publish this fictional sentinel.",
+    "response": "SCREENSHOT-PRIVATE-CANARY-7F4C",
+    "detail": "A capture adapter must reject any textual output containing the sentinel."
+  },
+  "privacy_canaries": [
+    "SCREENSHOT-PRIVATE-CANARY-7F4C"
+  ]
+}

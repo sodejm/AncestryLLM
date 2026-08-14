@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "launch_allowlist": [
+    ".tools/uv/uv",
+    "pnpm"
+  ],
+  "output_allowlist": [
+    "docs/assets/screenshots/electron/private-chat.png",
+    "docs/assets/screenshots/terminal/interactive-console.png"
+  ],
+  "determinism": {
+    "locale": "en_US.UTF-8",
+    "timezone": "UTC",
+    "theme": "light",
+    "fonts": {
+      "electron": {
+        "family": "Inter",
+        "size_px": 16,
+        "weight": 400,
+        "source_policy": "capture-adapter-bundled"
+      },
+      "terminal": {
+        "family": "JetBrains Mono",
+        "size_px": 14,
+        "weight": 400,
+        "source_policy": "capture-adapter-bundled"
+      }
+    },
+    "animations": "disabled",
+    "fixed_timestamp": "2040-01-02T03:04:05Z",
+    "fixed_username": "Fictional Researcher",
+    "path_policy": "fixture-relative",
+    "id_seed": "ancestryllm-docs-v1",
+    "volatile_data": "fixture-only",
+    "network": "deny"
+  },
+  "fixtures": [
+    {
+      "id": "success",
+      "state": "success",
+      "path": "tests/fixtures/docs_screenshots/success.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
+      "id": "degraded",
+      "state": "degraded",
+      "path": "tests/fixtures/docs_screenshots/degraded.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
+      "id": "privacy-canary",
+      "state": "privacy-canary",
+      "path": "tests/fixtures/docs_screenshots/privacy-canary.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "electron-private-chat",
+      "surface": "electron",
+      "launch": [
+        "pnpm",
+        "--dir",
+        "desktop",
+        "dev:gallery"
+      ],
+      "fixture_id": "success",
+      "geometry": {
+        "kind": "viewport",
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 1
+      },
+      "output_path": "docs/assets/screenshots/electron/private-chat.png",
+      "documentation": [
+        {
+          "path": "docs/explanation/DESKTOP_SHELL.md",
+          "anchor": "unreleased-transient-chat-foundation"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      }
+    },
+    {
+      "id": "terminal-interactive-console",
+      "surface": "terminal",
+      "launch": [
+        ".tools/uv/uv",
+        "run",
+        "--locked",
+        "ancestry"
+      ],
+      "fixture_id": "degraded",
+      "geometry": {
+        "kind": "terminal",
+        "columns": 120,
+        "rows": 36
+      },
+      "output_path": "docs/assets/screenshots/terminal/interactive-console.png",
+      "documentation": [
+        {
+          "path": "docs/how-to/explore-the-interactive-console.md",
+          "anchor": "inspect-the-supported-gedcom-commands"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      }
+    }
+  ]
+}

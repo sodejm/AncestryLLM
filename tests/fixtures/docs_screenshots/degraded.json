@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "fixture_id": "degraded",
+  "state": "degraded",
+  "provider": "none",
+  "network": "disabled",
+  "fictional": true,
+  "content": {
+    "title": "Interactive console",
+    "status": "Provider unavailable by design",
+    "prompt": "show actions",
+    "response": "Registered offline GEDCOM commands remain available.",
+    "detail": "Choose a provider explicitly before requesting a cloud operation."
+  },
+  "privacy_canaries": []
+}

@@ -72,6 +72,8 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         "package",
         "workflow-audit",
         "code-docs-check",
+        "docs-screenshots",
+        "docs-screenshots-check",
         "hooks",
     ):
         declaration = re.search(
@@ -103,6 +105,14 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "workflow-audit": (
             "$(UV_BIN) run --locked --group security zizmor --persona=pedantic "
             ".github/workflows .github/actions"
+        ),
+        "docs-screenshots": (
+            "$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py plan "
+            "--manifest config/docs-screenshot-manifest.json --repository-root ."
+        ),
+        "docs-screenshots-check": (
+            "$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py validate "
+            "--manifest config/docs-screenshot-manifest.json --repository-root ."
         ),
         "hooks": (
             "$(UV_BIN) run --locked --group lint pre-commit install "

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sodejm/AncestryLLM/config/docs-screenshot-fixture-v1.schema.json",
+  "title": "AncestryLLM documentation screenshot fixture v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "state",
+    "provider",
+    "network",
+    "fictional",
+    "content",
+    "privacy_canaries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "state": {
+      "enum": [
+        "success",
+        "degraded",
+        "privacy-canary"
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "network": {
+      "enum": [
+        "disabled",
+        "enabled"
+      ]
+    },
+    "fictional": {
+      "type": "boolean"
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "status",
+        "prompt",
+        "response",
+        "detail"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "response": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "privacy_canaries": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 16,
+        "maxLength": 128
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "privacy-canary"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "privacy_canaries": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "privacy_canaries": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}
