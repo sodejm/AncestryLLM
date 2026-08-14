@@ -289,45 +289,37 @@ def test_documentation_references_must_exist_with_valid_anchors() -> None:
     _assert_error(missing_anchor, "DOCSHOT_DOC_ANCHOR_MISSING")
 
 
-def test_comparison_tolerance_requires_an_explicit_reviewed_budget() -> None:
-    missing_rationale = _payload()
-    scenarios = missing_rationale["scenarios"]
-    assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
-    scenarios[0]["comparison"] = {
-        "mode": "tolerance",
-        "max_differing_pixels": 1,
-    }
-    _assert_error(missing_rationale, "DOCSHOT_SCHEMA_INVALID")
-
-    reviewed = _payload()
-    scenarios = reviewed["scenarios"]
+def test_schema_v1_rejects_unimplemented_tolerance_comparison() -> None:
+    tolerance = _payload()
+    scenarios = tolerance["scenarios"]
     assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
     scenarios[0]["comparison"] = {
         "mode": "tolerance",
         "max_differing_pixels": 1,
         "rationale": "One reviewed rasterization pixel cannot be eliminated.",
     }
-    _validate(reviewed)
+    _assert_error(tolerance, "DOCSHOT_SCHEMA_INVALID")
 
 
-def test_make_reserves_validation_and_plan_targets_without_capture_or_ci() -> None:
+def test_make_exposes_publication_and_nonmutating_drift_targets() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    plan_target = _target_body(makefile, "docs-screenshots")
+    capture_target = _target_body(makefile, "docs-screenshots")
     check_target = _target_body(makefile, "docs-screenshots-check")
 
     assert re.search(r"(?m)^docs-screenshots:.*verified-uv", makefile)
     assert re.search(r"(?m)^docs-screenshots-check:.*verified-uv", makefile)
-    assert "docs_screenshot_manifest.py plan" in plan_target
-    assert "docs_screenshot_manifest.py validate" in check_target
-    assert "playwright" not in plan_target.casefold()
-    assert "vhs" not in plan_target.casefold()
-    assert "capture" not in plan_target.casefold()
+    assert "scripts/docs_screenshots.py capture" in capture_target
+    assert "scripts/docs_screenshots.py check" in check_target
+    assert "$(UV_BIN) run --locked --group lint" in capture_target
+    assert "$(UV_BIN) run --locked --group lint" in check_target
+    assert "--repository-root ." in capture_target
+    assert "--repository-root ." in check_target
 
     workflows = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
     )
-    assert "docs-screenshots" not in workflows
+    assert "make docs-screenshots-check" in workflows
 
 
 def test_contract_ownership_and_impact_are_documented() -> None:
@@ -339,14 +331,16 @@ def test_contract_ownership_and_impact_are_documented() -> None:
     assert "## Deterministic screenshot contract" in authoring
     assert "config/docs-screenshot-manifest.json" in authoring
     assert "make docs-screenshots-check" in authoring
-    assert "does not capture" in authoring
+    assert "make docs-screenshots" in authoring
     assert "pnpm --dir desktop capture:docs" in authoring
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT" in authoring
+    assert "scripts/docs_screenshots.py" in architecture
     assert "scripts/docs_screenshot_manifest.py" in architecture
     assert "desktop/e2e/docs-screenshot-capture.ts" in architecture
     assert "repository tooling only" in architecture
-    assert "## Deterministic documentation capture" in desktop_shell
-    assert "pnpm --dir desktop capture:docs" in desktop_shell
+    assert "ready-home.png" in desktop_shell
+    assert "degraded-diagnostics.png" in desktop_shell
     assert "Issue #417 deterministic screenshot-contract evidence" in threat_model
     assert "Issue #418 deterministic Electron-capture evidence" in threat_model
+    assert "Issue #420 screenshot-publication evidence" in threat_model
     assert "privacy-canary" in threat_model

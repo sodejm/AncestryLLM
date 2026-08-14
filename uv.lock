@@ -89,6 +89,7 @@ build = [
     { name = "wheel" },
 ]
 lint = [
+    { name = "markdown-it-py" },
     { name = "pre-commit" },
     { name = "ruff" },
 ]
@@ -154,6 +155,7 @@ build = [
     { name = "wheel", specifier = ">=0.45,<1" },
 ]
 lint = [
+    { name = "markdown-it-py", specifier = ">=4,<5" },
     { name = "pre-commit", specifier = ">=4.5,<5" },
     { name = "ruff", specifier = ">=0.15,<1" },
 ]

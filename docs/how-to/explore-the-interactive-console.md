@@ -13,6 +13,8 @@ or send a network request.
 
 ## Inspect the supported GEDCOM commands
 
+![Interactive AncestryLLM console showing fictional provider-none commands](../assets/screenshots/terminal/interactive-console.png)
+
 Start the supported interactive console:
 
 ```console

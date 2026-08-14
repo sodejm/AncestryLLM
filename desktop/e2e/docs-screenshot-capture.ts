@@ -42,6 +42,7 @@ type CaptureFailureCode =
   | 'DOCSHOT_OUTPUT_WRITE_FAILED'
   | 'DOCSHOT_PRIVACY_CANARY_LEAKED'
   | 'DOCSHOT_READY_SIGNAL_INVALID'
+  | 'DOCSHOT_SCENARIO_SELECTION_INVALID'
   | 'DOCSHOT_SCHEMA_INVALID'
   | 'DOCSHOT_SCHEMA_MISSING'
 
@@ -263,6 +264,27 @@ export function declaredFixtureContent(
     content.response,
     content.detail,
   ].filter((value) => value.trim().length > 0))
+}
+
+export function selectElectronCaptureScenarios(
+  plan: ElectronCapturePlan,
+  rawSelection: string | undefined,
+): readonly Readonly<ElectronCaptureScenario>[] {
+  if (rawSelection === undefined || rawSelection.length === 0) return plan.scenarios
+
+  const requested = rawSelection.split(',')
+  if (
+    requested.some((scenarioId) => scenarioId.trim().length === 0 || scenarioId !== scenarioId.trim())
+    || new Set(requested).size !== requested.length
+  ) fail('DOCSHOT_SCENARIO_SELECTION_INVALID')
+
+  const requestedIds = new Set(requested)
+  if (requestedIds.size === 0 || requestedIds.size > plan.scenarios.length) {
+    fail('DOCSHOT_SCENARIO_SELECTION_INVALID')
+  }
+  const selected = plan.scenarios.filter(({ id }) => requestedIds.has(id))
+  if (selected.length !== requestedIds.size) fail('DOCSHOT_SCENARIO_SELECTION_INVALID')
+  return Object.freeze(selected)
 }
 
 export async function loadElectronCapturePlan(options: Readonly<{

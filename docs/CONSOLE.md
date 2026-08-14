@@ -13,6 +13,8 @@ logic path.
 
 ## Navigation and controls
 
+![Interactive AncestryLLM console showing fictional provider-none commands](assets/screenshots/terminal/interactive-console.png)
+
 At the root prompt, use `modules` to inspect available modules or `use MODULE`
 to enter a module context. The active-module prompt makes the current context
 visible:

@@ -96,6 +96,10 @@
         {
           "path": "docs/explanation/DESKTOP_SHELL.md",
           "anchor": "supported-surface"
+        },
+        {
+          "path": "docs/Home.md",
+          "anchor": "v06-desktop-learning-path"
         }
       ],
       "comparison": {
@@ -182,6 +186,10 @@
         {
           "path": "docs/how-to/explore-the-interactive-console.md",
           "anchor": "inspect-the-supported-gedcom-commands"
+        },
+        {
+          "path": "docs/CONSOLE.md",
+          "anchor": "navigation-and-controls"
         }
       ],
       "comparison": {

@@ -344,6 +344,43 @@ def test_capture_runs_each_real_terminal_scenario_twice_and_publishes_only_pngs(
     assert {path.suffix for path in (tmp_path / "output").rglob("*") if path.is_file()} == {".png"}
 
 
+def test_capture_can_select_one_declared_scenario_after_full_contract_validation(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    temporary_root = tmp_path / "temporary"
+    output_root.mkdir()
+    temporary_root.mkdir()
+    backend = FakeCaptureBackend()
+
+    captured = capture_terminal_screenshots(
+        manifest_path=MANIFEST,
+        policy_path=POLICY,
+        repository_root=ROOT,
+        output_root=output_root,
+        temporary_root=temporary_root,
+        backend=backend,
+        scenario_ids=("terminal-cli-help",),
+    )
+
+    assert backend.calls == [
+        ("terminal-cli-help", 1),
+        ("terminal-cli-help", 2),
+    ]
+    assert tuple(path.name for path in captured) == ("cli-help.png",)
+    with pytest.raises(TerminalCaptureError) as caught:
+        capture_terminal_screenshots(
+            manifest_path=MANIFEST,
+            policy_path=POLICY,
+            repository_root=ROOT,
+            output_root=output_root,
+            temporary_root=temporary_root,
+            backend=FakeCaptureBackend(),
+            scenario_ids=("terminal-not-declared",),
+        )
+    assert caught.value.code == "DOCSHOT_TERMINAL_SCENARIO_SELECTION_INVALID"
+
+
 @pytest.mark.parametrize(
     ("backend", "expected_code"),
     [
@@ -451,6 +488,26 @@ def test_native_host_platform_is_supported_by_the_checked_in_policy() -> None:
     expected_machine = "arm64" if host_machine.casefold() in {"arm64", "aarch64"} else "amd64"
     policy = load_capture_policy(POLICY)
     assert f"linux/{expected_machine}" in policy.supported_platforms
+
+
+def test_macos_bind_source_preserves_the_colima_visible_var_alias(
+    tmp_path: Path,
+) -> None:
+    private_var_root = tmp_path / "private" / "var"
+    capture_root = private_var_root / "folders" / "capture"
+    capture_root.mkdir(parents=True)
+    var_alias_root = tmp_path / "var"
+    var_alias_root.symlink_to(private_var_root, target_is_directory=True)
+
+    source = DockerCaptureBackend._safe_bind_source(
+        capture_root,
+        host_platform="darwin",
+        private_var_root=private_var_root,
+        var_alias_root=var_alias_root,
+    )
+
+    assert source == str(var_alias_root / "folders" / "capture")
+    assert Path(source).resolve(strict=True) == capture_root.resolve(strict=True)
 
 
 class RecordingDockerRunner:
@@ -619,11 +676,12 @@ def test_capture_container_and_true_pty_scripts_are_closed_and_pinned() -> None:
     assert 'exec /bin/bash "$@"' in shell
 
 
-def test_make_exposes_opt_in_terminal_capture_without_changing_plan_targets() -> None:
+def test_make_routes_opt_in_terminal_capture_through_shared_orchestrator() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "docs-terminal-screenshots" in makefile
-    assert "scripts/docs_terminal_capture.py capture" in makefile
+    assert "scripts/docs_screenshots.py capture" in makefile
+    assert "--surface terminal" in makefile
     assert "docs-terminal-screenshots:" not in "\n".join(
         line for line in makefile.splitlines() if line.startswith("docs-screenshots:")
     )
@@ -639,10 +697,8 @@ def test_terminal_capture_operations_and_security_disposition_are_documented() -
     assert "For local macOS capture" in authoring
     assert "The reference CI setup" in authoring
     assert "To update the terminal toolchain" in authoring
-    assert (
-        "documentation embedding, drift comparison, and CI enforcement remain owned by #420"
-        in normalized_authoring
-    )
+    assert "documentation embedding, drift comparison, and CI enforcement" in normalized_authoring
+    assert "make docs-screenshots-check" in authoring
     assert "scripts/docs_terminal_capture.py" in architecture
     assert "true PTY" in architecture
     assert "Issue #419 deterministic terminal-capture evidence" in threat_model

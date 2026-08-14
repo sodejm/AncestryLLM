@@ -27,6 +27,7 @@ import {
   loadElectronCapturePlan,
   publishCaptureAtomically,
   requireCaptureOutputRoot,
+  selectElectronCaptureScenarios,
 } from './docs-screenshot-capture'
 
 const repositoryRoot = resolve(process.cwd(), '..')
@@ -107,6 +108,31 @@ describe('Electron documentation screenshot capture contract', () => {
     ])
     expect(JSON.stringify(plan)).not.toContain('SCREENSHOT-PRIVATE-CANARY-7F4C')
     expect(JSON.stringify(plan)).not.toContain(repositoryRoot)
+  })
+
+  test('selects declared Electron scenarios in manifest order and fails closed', async () => {
+    const root = await temporaryRoot()
+    const dependencies = await fixtureDependencies(root)
+    const plan = await loadElectronCapturePlan({ repositoryRoot, ...dependencies })
+
+    expect(selectElectronCaptureScenarios(plan, undefined)).toEqual(plan.scenarios)
+    expect(selectElectronCaptureScenarios(plan, '')).toEqual(plan.scenarios)
+    expect(selectElectronCaptureScenarios(
+      plan,
+      'electron-ready-home,electron-degraded-diagnostics',
+    ).map(({ id }) => id)).toEqual([
+      'electron-degraded-diagnostics',
+      'electron-ready-home',
+    ])
+    for (const selection of [
+      'electron-ready-home,',
+      'electron-ready-home,electron-ready-home',
+      'electron-not-declared',
+    ]) {
+      expect(() => selectElectronCaptureScenarios(plan, selection)).toThrowError(
+        expect.objectContaining({ code: 'DOCSHOT_SCENARIO_SELECTION_INVALID' }),
+      )
+    }
   })
 
   test('derives the Electron scale factor and universal font from the capture plan', async () => {

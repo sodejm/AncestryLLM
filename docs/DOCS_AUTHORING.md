@@ -60,32 +60,51 @@ manifest and schemas. The Electron and terminal capture adapters consume that
 contract but must not invent scenarios, destinations, fixtures, or comparison
 rules outside it.
 
-`make docs-screenshots-check` validates the manifest, fixture documents,
-documentation destinations and anchors, launch allowlist, geometry, output
-allowlist, and deterministic environment controls. `make docs-screenshots`
-prints the normalized capture plan for adapters and reviewers. Despite its
-reserved name, it does not capture, modify, or publish an image.
+`scripts/docs_screenshots.py` is the shared publication and drift-check
+orchestrator. `make docs-screenshots` captures all four declared scenarios into
+an isolated staging tree, validates the complete inventory, then replaces the
+published set transactionally with repository-readable `0644` modes. A failed
+replacement restores both the previous bytes and their modes.
+`make docs-screenshots-check` validates the committed inventory, captures a
+fresh set into a temporary tree, compares exact PNG bytes, and leaves the
+repository unchanged. PNG validation checks the complete chunk stream, chunk
+ordering and CRCs, bounded image-data decompression, scanline filters, and the
+declared image dimensions before an asset can be compared or published.
+Markdown ownership is derived from parsed rendered-image tokens, so examples
+inside code are ignored and reference-style images are enforced. Missing,
+corrupt, changed, undeclared, or orphaned files; broken or undeclared rendered
+Markdown references; generic alt text; and privacy-canary content fail closed.
+
+On drift, the check may write a schema-v1 report to
+`ANCESTRYLLM_DOCS_SCREENSHOT_REPORT`. The report contains only scenario IDs,
+surface identifiers, expected and observed SHA-256 values, per-scenario status,
+and overall status. It contains no pixels, response bodies, transcript,
+environment, host identity, username, absolute path, fixture content, or other
+application data. CI uploads only this bounded JSON report on failure.
+Check mode still emits this report when a committed image is missing or
+structurally corrupt, using the missing or invalid asset as drift evidence
+rather than stopping before comparison.
 
 The Electron adapter runs with `pnpm --dir desktop capture:docs` after the
-locked desktop dependencies and Electron binary have been installed. The
-caller must set `ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an existing,
-explicit output directory. The adapter builds the fixture-only desktop bundle,
-launches a real Electron `BrowserWindow` through Playwright, waits for each
-manifest-declared ready signal, and captures both the fictional provider-none
-Home/Ready state and sanitized degraded-diagnostics state twice. It requires
-byte-identical repeats under the manifest viewport, device scale, light theme,
-UTC clock, locale, bundled Inter font, and disabled animation controls. It
-inherits only the narrow host session variables Electron needs, blocks and
-reports unexpected renderer networking, scans the rendered document for every
-privacy canary, and atomically writes only the two declared Electron PNG paths
-below the caller's output root.
+exact locked Node, pnpm, Playwright, Electron, and bundled Inter-font identities
+have been installed. The orchestrator creates an isolated tracked-source copy,
+uses the repository's canonical locked desktop installer there, and sets
+`ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an explicit staging directory. The
+adapter builds the fixture-only desktop bundle, launches a real Electron
+`BrowserWindow` through Playwright, waits for each manifest-declared ready
+signal, and captures the fictional provider-none Home/Ready state and sanitized
+degraded-diagnostics state twice. It requires byte-identical repeats under the
+manifest viewport, device scale, light theme, UTC clock, locale, bundled Inter
+font, and disabled animation controls. It inherits only a narrow environment
+allowlist, blocks unexpected renderer networking, scans the rendered document
+for every privacy canary, and writes only the two selected allowlisted paths.
 
-The terminal adapter runs with `make docs-terminal-screenshots`. It validates
+The terminal adapter runs through `make docs-terminal-screenshots`. It validates
 `config/docs-terminal-capture-policy.json`, builds a native Linux container
 from exact digest-pinned VHS and uv images, verifies the expected VHS, ttyd,
 Chromium, FFmpeg, and JetBrains Mono identities, and then drives the real
 `.venv/bin/ancestry` one-shot CLI and interactive console through a true PTY.
-Each manifest scenario is rendered twice with fixed shell, geometry, theme,
+Each selected terminal scenario is rendered twice with fixed shell, geometry, theme,
 font, locale, timezone, prompt, timing, fictional state, and `provider=none`.
 The two PNGs must be byte-identical before they are atomically published to
 their exact allowlisted repository paths.
@@ -108,13 +127,16 @@ shared Electron and terminal determinism contract unchanged.
 
 For local macOS capture, install and start Docker Desktop (or another engine
 that can run native Linux containers), run `make setup`, then run
-`make docs-screenshots-check` and `make docs-terminal-screenshots`. Host copies
-of VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono are neither used nor
-supported by this contract. The reference CI setup is the same target on a
-Linux amd64 or arm64 runner with Docker Engine available; the capture policy
-selects and verifies the corresponding native image descriptor. #420 owns
-wiring this command into CI, comparing committed drift, and embedding the
-images in their owning documentation pages.
+`make docs-screenshots-check`. Host copies of VHS, ttyd, Chromium, FFmpeg, and
+JetBrains Mono are neither used nor supported by this contract. The reference CI setup
+uses a hosted Linux runner with exact Node 26.5.0 and pnpm 11.9.0, the frozen desktop
+lock, the digest-pinned native terminal images, the manifest-owned locale,
+timezone, viewport, fonts, and animation settings, and a pinned virtual display
+package. A missing engine, dependency, architecture result, or capture is an
+incomplete failure rather than a passing comparison.
+
+Issue #420 owns documentation embedding, drift comparison, and CI enforcement
+through this shared manifest and orchestrator.
 
 To update the terminal toolchain, change the VHS image index digest, both
 reviewed native descriptor digests, uv image digest, exact preflight version
@@ -125,9 +147,17 @@ reported PNG hashes, and visually review both fictional outputs. Never
 substitute a mutable tag, alternate image, host executable, mirror, or relaxed
 preflight check.
 
-The Electron adapter does not commit or publish its PNGs or add screenshot CI.
-Terminal capture commits only the two manifest-declared PNG assets; documentation
-embedding, drift comparison, and CI enforcement remain owned by #420.
+For a narrow local diagnosis, pass `--surface electron` or `--surface terminal`
+to `scripts/docs_screenshots.py`, and optionally repeat `--scenario` with IDs
+from the manifest. Selection is closed: unknown scenarios and a scenario from a
+different surface fail. These selectors are not release evidence; publication
+and CI always execute the complete manifest.
+
+For fixture-level tests, `--manifest` may select another validated manifest.
+The orchestrator forwards that exact manifest to terminal capture and stages it
+at the Electron adapter's fixed manifest path only inside the disposable capture
+workspace, which is discarded without modifying the checkout. A custom manifest
+is never silently replaced by the repository default.
 
 Every publishable scenario must:
 
@@ -141,9 +171,9 @@ Every publishable scenario must:
    the output allowlist.
 4. Name each documentation page and heading that owns the image so renamed or
    retired destinations fail validation.
-5. Use exact comparison by default. A pixel-tolerance budget is exceptional and
-   requires a narrow reviewed maximum plus a written reason explaining why the
-   variance cannot be eliminated.
+5. Use exact comparison. Schema v1 does not implement pixel-tolerance budgets and
+   rejects them fail closed; adding tolerance requires a new reviewed schema,
+   comparison implementation, and evidence contract.
 
 The manifest fixes locale, timezone, theme, fonts, animation behavior,
 timestamps, usernames, paths, identifiers, volatile values, and network policy.
@@ -154,8 +184,12 @@ syntax, unknown schema field, undeclared output, or unapproved network behavior
 fails closed with a stable `DOCSHOT_*` code.
 
 To add a screenshot, first add or reuse a fictional fixture, then add the
-scenario, output allowlist entry, and owning documentation reference in one
-change. Run both Make targets and the focused manifest tests before capture.
+scenario, output allowlist entry, every owning documentation reference, and
+meaningful alt text in one change. Run focused manifest and publication tests,
+run `make docs-screenshots`, visually review every changed fictional image, run
+`make docs-screenshots-check`, then repeat the full capture and check from a
+clean tree. Both cycles must produce identical hashes and no retained check-mode
+changes.
 To retire one, remove its scenario and output allowlist entry together, remove
 the image only after every owning page stops referencing it, and confirm the
 normalized plan contains no orphaned destination. Keep the success, degraded,

@@ -11,7 +11,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_GROUPS = {
-    "lint": ["ruff>=0.15,<1", "pre-commit>=4.5,<5"],
+    "lint": ["markdown-it-py>=4,<5", "ruff>=0.15,<1", "pre-commit>=4.5,<5"],
     "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.69"],
     "test": [
         "coverage[toml]>=7.12,<8",
@@ -75,6 +75,7 @@ OLD_DEV_DEPENDENCIES = {
 }
 NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.69"}
 NEW_BUILD_EVALUATION_DEPENDENCIES = {"uv_build>=0.12.0,<0.13"}
+NEW_DOCS_SCREENSHOT_DEPENDENCIES = {"markdown-it-py>=4,<5"}
 
 
 def _project() -> dict[str, Any]:
@@ -122,7 +123,10 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
     retained_as_extra = set(extras["desktop-build"])
 
     assert moved | deliberately_removed | retained_as_extra == (
-        OLD_DEV_DEPENDENCIES | NEW_ADVISORY_DEPENDENCIES | NEW_BUILD_EVALUATION_DEPENDENCIES
+        OLD_DEV_DEPENDENCIES
+        | NEW_ADVISORY_DEPENDENCIES
+        | NEW_BUILD_EVALUATION_DEPENDENCIES
+        | NEW_DOCS_SCREENSHOT_DEPENDENCIES
     )
     assert moved >= NEW_ADVISORY_DEPENDENCIES
     assert moved >= NEW_BUILD_EVALUATION_DEPENDENCIES
@@ -180,9 +184,9 @@ def test_make_profiles_select_only_their_declared_groups() -> None:
         "evaluate-uv-build": {"build"},
         "workflow-audit": {"security"},
         "code-docs-check": {"lint"},
-        "docs-screenshots": set(),
-        "docs-screenshots-check": set(),
-        "docs-terminal-screenshots": set(),
+        "docs-screenshots": {"lint"},
+        "docs-screenshots-check": {"lint"},
+        "docs-terminal-screenshots": {"lint"},
         "hooks": {"lint"},
     }
 

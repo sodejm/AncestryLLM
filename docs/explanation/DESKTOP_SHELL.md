@@ -6,6 +6,8 @@ does not introduce a second command or domain layer.
 
 ## Supported surface
 
+![AncestryLLM desktop Home view showing the fictional provider-none ready state](../assets/screenshots/electron/ready-home.png)
+
 The supported desktop destinations are deliberately small:
 
 - **Home** identifies the application, its offline posture, and sanitized
@@ -508,6 +510,8 @@ checksum and version-required platform signature still verify.
 
 ## Sanitized diagnostics and recovery
 
+![AncestryLLM desktop Diagnostics view showing a fictional sanitized startup failure](../assets/screenshots/electron/degraded-diagnostics.png)
+
 When startup is degraded, use the reviewed remediation beside the affected
 configuration, SQLCipher, keyring, or workspace code. The report never includes
 a username, hostname, full path, environment value, record, prompt, payload,
@@ -533,21 +537,20 @@ details.
 
 ## Deterministic documentation capture
 
-Maintainers can exercise the reviewed Electron documentation states with
-`pnpm --dir desktop capture:docs`. Set
-`ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an existing temporary output
-directory first; the adapter will not infer a destination or fall back to the
-repository. It launches the real Electron shell through Playwright and drives
-the ordinary Home and Diagnostics destinations using only checked-in fictional,
-network-disabled fixtures. The provider-none Home/Ready view and sanitized
-degraded view each wait for a declared visible ready signal and must produce two
-byte-identical PNGs under the fixed manifest controls.
+The four reviewed desktop and terminal screenshots are published from the
+shared manifest. `make docs-screenshots` captures every declared scenario into
+an isolated staging tree, validates its ownership and privacy contract, and
+publishes the complete set transactionally. `make docs-screenshots-check`
+recaptures into a temporary tree and fails on any missing, changed, undeclared,
+or orphaned asset without modifying the checkout.
 
-The capture blocks unexpected renderer networking, scans rendered text for the
-privacy canary, and atomically writes only the Electron paths declared by the
-shared screenshot manifest. It does not commit, embed, or publish the images.
-Issue #420 owns reviewed committed assets, documentation placement, drift
-comparison, and CI; terminal capture is separately owned by #419.
+The Electron adapter launches the real shell through Playwright and drives the
+ordinary Home and Diagnostics destinations using only checked-in fictional,
+network-disabled fixtures. It blocks unexpected renderer networking, scans
+rendered text for the privacy canary, and waits for each declared visible ready
+signal under the fixed viewport, font, locale, timezone, and theme controls.
+See the [documentation authoring guide](../DOCS_AUTHORING.md#deterministic-screenshot-contract)
+for selective capture, drift evidence, review, and update procedures.
 
 ## Verification boundary
 

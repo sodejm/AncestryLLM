@@ -203,6 +203,13 @@ output must be copied back into the repository or included in a pull request.
 Removing a source page from `docs/` means its managed Wiki page will also be
 removed by synchronization.
 
+Documentation screenshots are source-controlled publication assets. Update the
+shared manifest, every owning Markdown reference and meaningful alt text, and
+the image together. Run `make docs-screenshots`, visually review all changed
+fictional images, then run `make docs-screenshots-check` twice from a clean tree.
+Check mode must retain no repository changes; a missing capture, changed pixel,
+privacy canary, broken reference, or incomplete platform result is a failure.
+
 Do not edit a managed GitHub Wiki page directly. A direct edit is allowed only
 when a documented recovery procedure explicitly requires it; reproduce any
 lasting correction in `docs/` immediately so the next synchronization does not

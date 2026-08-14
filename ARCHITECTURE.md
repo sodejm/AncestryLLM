@@ -1411,10 +1411,17 @@ plugins:
 - `scripts/docs_screenshot_manifest.py` validates the closed schema-v1
   documentation screenshot inventory, fictional offline fixtures, tokenized
   launch plans, deterministic environment controls, documentation anchors, and
-  repository-relative output allowlist. It emits a normalized plan but performs
-  no capture or publication. This is repository tooling only: it adds no
-  application command, UI registry, provider behavior, GEDCOM or storage path,
-  internal API route, or Electron bridge.
+  repository-relative output allowlist, structurally decoded PNG inventory,
+  rendered Markdown image ownership, and privacy-canary boundary.
+  `scripts/docs_screenshots.py` coordinates the Electron and terminal adapters
+  through isolated staging, forwards the selected manifest across both adapter
+  boundaries, uses the canonical locked desktop installer, publishes complete
+  sets transactionally with stable repository-readable modes, performs
+  exact-byte drift comparison, and emits a closed hash-only failure report even
+  when a committed asset is missing or invalid. Check mode uses a temporary
+  source snapshot and leaves the repository unchanged. This is repository
+  tooling only: it adds no application command, UI registry, provider behavior,
+  GEDCOM or storage path, internal API route, or Electron bridge.
 - `desktop/e2e/docs-screenshot-capture.ts` and
   `desktop/e2e/docs-screenshots.spec.ts` consume that shared contract for the
   Electron surface. The adapter builds the existing fixture-only desktop
@@ -1426,7 +1433,8 @@ plugins:
   `provider=none` with no profiles before it drives the ordinary Home surface;
   the application event behavior, production runtime bridge, command registry,
   API, provider, GEDCOM, storage, and packaged Electron boundaries are
-  unchanged. Image publication and drift CI remain outside this adapter.
+  unchanged. Publication and hosted drift enforcement are owned by the shared
+  orchestrator rather than this adapter.
 - `scripts/docs_terminal_capture.py`, `scripts/docs_terminal_pty.py`, and
   `scripts/docs_terminal_preflight.py` consume the same manifest for the real
   one-shot CLI and prompt-toolkit/Rich console. A closed schema-v1 policy pins
@@ -1439,7 +1447,7 @@ plugins:
   disposable container mount. This repository-only documentation adapter adds
   no application command, registry, runtime dependency, provider behavior,
   GEDCOM or storage path, internal API route, or Electron bridge. Documentation
-  embedding and hosted drift enforcement remain #420.
+  embedding and hosted drift enforcement use the shared orchestrator.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -1474,9 +1482,9 @@ The Make targets are the command contract:
 | `make package` | Locked build-group construction and artifact validation. |
 | `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
-| `make docs-screenshots` | Validate and print the normalized schema-v1 screenshot plan without capturing or changing images. |
-| `make docs-screenshots-check` | Validate the screenshot schemas, fictional fixtures, deterministic controls, documentation references, and exact output allowlist. |
-| `make docs-terminal-screenshots` | Verify the pinned native VHS toolchain and capture the real CLI and interactive console twice through a true PTY, with exact repeatability and isolated network-free state. |
+| `make docs-screenshots` | Capture every schema-v1 Electron and terminal scenario into isolated staging, validate the publication contract, and replace the complete allowlisted PNG set transactionally. |
+| `make docs-screenshots-check` | Recapture all scenarios in temporary state and compare exact PNG bytes without changing the repository; emit only an optional sanitized hash report on failure. |
+| `make docs-terminal-screenshots` | Run the shared orchestrator for the terminal surface, verify the pinned native VHS toolchain, and capture the real CLI and console twice through a true PTY. |
 
 Version 1 security work has a separate repository-governance contract. The
 schema-v1 policy in `config/version-1-security-policy.json` binds the exact
@@ -1554,7 +1562,8 @@ Tests are intentionally split by risk:
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
 - Documentation tests cover Pages staging, Wiki validation, deterministic
   mirroring, deletion, no-op behavior, commits, workflow structure, and the
-  deterministic screenshot manifest and privacy-canary contract;
+  deterministic screenshot manifest, publication inventory, nonmutating drift
+  checks, documentation ownership, and privacy-canary contract;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
 The import-only compatibility façades and their physical owner modules are
