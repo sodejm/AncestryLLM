@@ -85,8 +85,10 @@ import {
   unavailableFixture,
 } from './fixtures'
 
+/** Selects the ready, degraded, or unavailable offline bridge response set. */
 export type DesktopFixtureMode = 'success' | 'degraded' | 'unavailable'
 
+/** Creates a stateful, network-free preload bridge for renderer tests and previews. */
 export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'success'): AncestryBridge {
   let mode = initialMode
   let preferences = preferencesFixture.data

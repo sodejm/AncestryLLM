@@ -9,6 +9,9 @@ interface FixtureRuntimeBridge {
   prepareJobShutdown?: never
 }
 
+/**
+ * Starts the fixture bridge with injected controls so tests exercise the production framing contract.
+ */
 export async function startRuntimeBridge(
   _onSupervisorOwned?: (supervisor: never, prepareJobShutdown: never) => void,
   _options: unknown = {},

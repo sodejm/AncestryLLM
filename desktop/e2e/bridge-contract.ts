@@ -42,4 +42,5 @@ const bridgeMethodSet = {
   applyLocalRuntime: true,
 } as const satisfies Readonly<Record<keyof AncestryBridge, true>>
 
+/** Lists the sorted preload bridge methods required by packaged contract tests. */
 export const bridgeMethods = Object.freeze(Object.keys(bridgeMethodSet).sort())

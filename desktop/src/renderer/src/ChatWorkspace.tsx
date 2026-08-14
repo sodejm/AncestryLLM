@@ -22,6 +22,7 @@ import {
   type ChatResponseState,
 } from './chat-state'
 
+/** Maximum retained chat turns; older completed responses are removed from the rendered transcript. */
 export const MAX_VISIBLE_CHAT_TURNS = 24
 const MAX_PENDING_EVENT_RUNS = 32
 const MAX_PENDING_DELIVERIES_PER_RUN = 8

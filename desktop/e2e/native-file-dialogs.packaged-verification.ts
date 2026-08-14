@@ -6,6 +6,7 @@ const verificationMarker = 'ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION'
 const openPathVariable = 'ANCESTRYLLM_FILE_GRANT_OPEN_PATH'
 const savePathVariable = 'ANCESTRYLLM_FILE_GRANT_SAVE_PATH'
 
+/** Normalizes an absolute platform path, returning `null` for unsafe or unsupported input. */
 export function normalizeVerificationSelection(
   value: string,
   platform: NodeJS.Platform = process.platform,
@@ -34,6 +35,10 @@ function selectedPath(variable: string): string {
   return selection
 }
 
+/**
+ * Creates the opt-in packaged-test dialog adapter backed by explicit environment selections.
+ * Access fails while the verification marker is disabled or a selected path is invalid.
+ */
 export function createNativeFileDialogPort(): NativeFileDialogPort {
   return Object.freeze({
     async selectOpenFile() {

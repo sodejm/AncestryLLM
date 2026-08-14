@@ -1,7 +1,13 @@
 /** Coordinates safe Electron shutdown with active sidecar jobs. */
 import type { JobShutdownAction } from './sidecar-client'
 
+/**
+ * Represents the user's explicit response when active jobs make shutdown unsafe.
+ */
 export type UnsafeShutdownChoice = JobShutdownAction | 'stay'
+/**
+ * Records whether active jobs have already reached a safe terminal state across shutdown retries.
+ */
 export type AppShutdownProgress = { jobsPrepared: boolean }
 
 type WindowCloseEvent = { preventDefault: () => void }

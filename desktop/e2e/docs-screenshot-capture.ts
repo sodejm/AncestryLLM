@@ -130,6 +130,7 @@ interface ManifestPayload {
   readonly scenarios: readonly ManifestScenario[]
 }
 
+/** Describes one reviewed Electron screenshot, its fixture, geometry, and comparison policy. */
 export interface ElectronCaptureScenario {
   readonly id: string
   readonly outputPath: string
@@ -147,6 +148,7 @@ export interface ElectronCaptureScenario {
   readonly comparison: Readonly<{ mode: 'exact' }>
 }
 
+/** Contains the validated deterministic settings and scenarios used for documentation captures. */
 export interface ElectronCapturePlan {
   readonly schemaVersion: 1
   readonly determinism: Readonly<{
@@ -177,6 +179,7 @@ interface CaptureRuntime {
 
 const captureRuntime = new WeakMap<ElectronCapturePlan, CaptureRuntime>()
 
+/** Resolves the required capture root or fails with `DOCSHOT_OUTPUT_ROOT_MISSING`. */
 export function requireCaptureOutputRoot(value: string | undefined): string {
   if (value === undefined || value.trim().length === 0) {
     fail('DOCSHOT_OUTPUT_ROOT_MISSING')
@@ -184,10 +187,12 @@ export function requireCaptureOutputRoot(value: string | undefined): string {
   return resolve(value)
 }
 
+/** Rejects environment-based Electron binary overrides so captures use the pinned dependency. */
 export function assertTrustedElectronResolution(value: string | undefined): void {
   if (value !== undefined) fail('DOCSHOT_BINARY_UNTRUSTED')
 }
 
+/** Builds the fixed-scale, fixed-locale Electron arguments for an isolated capture profile. */
 export function electronLaunchArguments(
   geometry: ElectronCaptureScenario['geometry'],
   userDataDirectory: string,
@@ -200,6 +205,7 @@ export function electronLaunchArguments(
   ])
 }
 
+/** Returns CSS that fixes fonts and disables animation sources of screenshot drift. */
 export function captureDeterminismStyles(
   font: ElectronCapturePlan['determinism']['font'],
 ): string {
@@ -218,6 +224,7 @@ export function captureDeterminismStyles(
     `
 }
 
+/** Builds a minimal capture environment without forwarding credentials or provider settings. */
 export function captureRuntimeEnvironment(
   plan: ElectronCapturePlan,
   scenario: Readonly<ElectronCaptureScenario>,
@@ -253,6 +260,7 @@ export function captureRuntimeEnvironment(
   return Object.freeze(environment)
 }
 
+/** Returns the non-empty manifest text that must appear in a scenario capture. */
 export function declaredFixtureContent(
   scenario: Readonly<ElectronCaptureScenario>,
 ): readonly string[] {
@@ -266,6 +274,7 @@ export function declaredFixtureContent(
   ].filter((value) => value.trim().length > 0))
 }
 
+/** Selects unique declared scenario ids, rejecting whitespace, duplicates, and unknown ids. */
 export function selectElectronCaptureScenarios(
   plan: ElectronCapturePlan,
   rawSelection: string | undefined,
@@ -287,6 +296,10 @@ export function selectElectronCaptureScenarios(
   return Object.freeze(selected)
 }
 
+/**
+ * Loads and validates the screenshot manifest, fixtures, trusted Electron binary, font, and
+ * output allowlist before returning an immutable capture plan.
+ */
 export async function loadElectronCapturePlan(options: Readonly<{
   repositoryRoot: string
   outputRoot: string
@@ -441,26 +454,34 @@ export async function loadElectronCapturePlan(options: Readonly<{
   return plan
 }
 
+/** Rejects rendered text containing any configured privacy canary. */
 export function assertCaptureIsPrivate(text: string, canaries: readonly string[]): void {
   if (canaries.some((canary) => canary.length > 0 && text.includes(canary))) {
     fail('DOCSHOT_PRIVACY_CANARY_LEAKED')
   }
 }
 
+/** Applies the validated plan's private canaries to captured text. */
 export function assertPlanCaptureIsPrivate(plan: ElectronCapturePlan, text: string): void {
   const runtime = captureRuntime.get(plan)
   if (runtime === undefined) fail('DOCSHOT_MANIFEST_INVALID')
   assertCaptureIsPrivate(text, runtime.privacyCanaries)
 }
 
+/** Fails a capture when the browser observed any network request. */
 export function assertNoUnexpectedNetwork(urls: readonly string[]): void {
   if (urls.length > 0) fail('DOCSHOT_NETWORK_UNEXPECTED')
 }
 
+/** Requires two screenshot byte sequences to be exactly identical. */
 export function assertExactCapture(first: Uint8Array, second: Uint8Array): void {
   if (!Buffer.from(first).equals(Buffer.from(second))) fail('DOCSHOT_CAPTURE_MISMATCH')
 }
 
+/**
+ * Atomically publishes bytes only to an allowlisted path contained by the validated output root.
+ * Returns the final absolute destination for the packaged test harness.
+ */
 export async function publishCaptureAtomically(
   plan: ElectronCapturePlan,
   outputPath: string,

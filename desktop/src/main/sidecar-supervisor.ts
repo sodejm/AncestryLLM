@@ -3,21 +3,28 @@ import { randomBytes } from 'node:crypto'
 import { join, posix } from 'node:path'
 import { SidecarIntegrityError } from './sidecar-integrity'
 
+/** Exact protocol identifier required in sidecar readiness frames and authenticated requests. */
 export const API_CONTRACT = 'ancestryllm.internal-api/1'
+/** Reviewed path marker permitted only for isolated Linux keyring verification roots. */
 export const LINUX_KEYRING_VERIFICATION_SWITCH = 'ancestryllm-linux-keyring-verification-root'
 
+/** Single bounded readiness frame emitted by the launched sidecar on standard output. */
 export interface SidecarReadyFrame {
   contract: string
   sidecar_build: string
   port: number
 }
 
+/** Process handle exposed to the supervisor after a trusted sidecar launch. */
 export interface RunningSidecar {
   ready: Promise<SidecarReadyFrame>
   terminate: () => Promise<void>
   once(event: 'exit', listener: (code: number | null) => void): this
 }
 
+/**
+ * Verified executable, minimal environment, and one secret-bearing launch frame for a sidecar.
+ */
 export interface SidecarLaunchRequest {
   executablePath: string
   environment: NodeJS.ProcessEnv
@@ -48,6 +55,7 @@ interface SidecarSupervisorOptions {
   onFatal?: (diagnostics: SidecarDiagnostics) => void
 }
 
+/** Observable supervisor states from pre-launch through terminal shutdown. */
 export type SidecarLifecycleState =
   | 'idle'
   | 'starting'
@@ -57,12 +65,14 @@ export type SidecarLifecycleState =
   | 'stopping'
   | 'stopped'
 
+/** Stable startup and crash-loop failures safe to expose in desktop diagnostics. */
 export type SidecarFailure =
   | 'startup_failed'
   | 'startup_timeout'
   | 'incompatible_build'
   | 'crash_loop'
 
+/** Sanitized supervisor state and remaining retry budgets for renderer diagnostics. */
 export interface SidecarDiagnostics {
   state: SidecarLifecycleState
   failure: SidecarFailure | null
@@ -80,6 +90,9 @@ export interface AuthenticatedSidecarSession {
   bearerToken: string
 }
 
+/**
+ * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
+ */
 export class SidecarCompatibilityError extends Error {
   constructor() {
     super('The packaged sidecar is incompatible with this application build.')
@@ -108,6 +121,7 @@ class SidecarShutdownTimeoutError extends Error {
   }
 }
 
+/** Creates a 256-bit, base64url launch secret from a length-checked cryptographic source. */
 export function createLaunchToken(
   randomSource: (size: number) => Buffer = randomBytes,
 ): string {
@@ -116,6 +130,12 @@ export function createLaunchToken(
   return token.toString('base64url')
 }
 
+/**
+ * Builds the platform-specific sidecar environment without forwarding provider keys or user state.
+ *
+ * Linux keyring variables are derived from the user runtime directory, except for the explicit
+ * verification-root mode used by isolated packaged tests.
+ */
 export function minimalSidecarEnvironment(
   platform: NodeJS.Platform,
   source: NodeJS.ProcessEnv,
@@ -162,6 +182,10 @@ function linuxUserRuntimeDirectory(userId: number | undefined): string {
   return posix.join('/run/user', String(userId))
 }
 
+/**
+ * Restricts the test-only keyring verification root to an explicit absolute
+ * Linux path so it cannot silently alter production behavior on other hosts.
+ */
 function validateLinuxKeyringVerificationRoot(
   platform: NodeJS.Platform,
   root: string | undefined,
@@ -175,6 +199,9 @@ function validateLinuxKeyringVerificationRoot(
   }
 }
 
+/**
+ * Resolves sidecar executable deterministically under authenticated local sidecar lifecycle and process isolation.
+ */
 export function resolveSidecarExecutable(
   resourcesPath: string,
   platform: NodeJS.Platform,
@@ -185,6 +212,9 @@ export function resolveSidecarExecutable(
   return join(targetRoot, 'ancestryllm-sidecar', executable)
 }
 
+/**
+ * Resolves sidecar target root deterministically under authenticated local sidecar lifecycle and process isolation.
+ */
 export function resolveSidecarTargetRoot(
   resourcesPath: string,
   platform: NodeJS.Platform,
@@ -220,6 +250,10 @@ function withTimeout<T>(
   })
 }
 
+/**
+ * Rejects a sidecar unless its API contract, build identity, and loopback port
+ * are all compatible before an authenticated session can be exposed.
+ */
 function requireCompatible(ready: SidecarReadyFrame, appBuild: string): void {
   if (
     ready.contract !== API_CONTRACT
@@ -232,6 +266,9 @@ function requireCompatible(ready: SidecarReadyFrame, appBuild: string): void {
   }
 }
 
+/**
+ * Owns sidecar supervisor state transitions while enforcing authenticated local sidecar lifecycle and process isolation.
+ */
 export class SidecarSupervisor {
   private current: RunningSidecar | undefined
   private readonly pending = new Set<RunningSidecar>()

@@ -256,6 +256,9 @@ function deepFreeze<T>(value: T): Readonly<T> {
   return value
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable color scheme contract.
+ */
 export function parseColorScheme(value: unknown): DesktopColorScheme {
   if (typeof value !== 'string' || !colorSchemes.includes(value as DesktopColorScheme)) {
     throw new Error('Invalid color scheme')
@@ -263,6 +266,9 @@ export function parseColorScheme(value: unknown): DesktopColorScheme {
   return value as DesktopColorScheme
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable preference update contract.
+ */
 export function parsePreferenceUpdate(value: unknown): PreferenceUpdate {
   const keys = ['expectedRevision', 'colorScheme', 'reducedMotion', 'onboardingCompleted'] as const
   if (!record(value) || !owns(value, 'expectedRevision') || Object.keys(value).length < 2 || !onlyKeys(value, keys)) {
@@ -290,6 +296,9 @@ function validSettingValue(key: ApplicationSettingKey, value: unknown): boolean 
   return value >= 1 && value <= 600
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable settings patch contract.
+ */
 export function parseSettingsPatch(value: unknown): ApplicationSettingsPatch {
   if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'changes'])
     || value.schema_version !== 1 || !integer(value.expected_revision, 0, Number.MAX_SAFE_INTEGER)
@@ -317,11 +326,17 @@ function parseSecretReference(value: unknown): SecretReference {
   return value as SecretReference
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable secret reference request contract.
+ */
 export function parseSecretReferenceRequest(value: unknown): SecretReferenceRequest {
   if (!record(value) || !exactKeys(value, ['reference'])) throw new Error('Invalid secret reference request')
   return deepFreeze({ reference: parseSecretReference(value.reference) })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable secret set request contract.
+ */
 export function parseSecretSetRequest(value: unknown): SecretSetRequest {
   if (!record(value) || !exactKeys(value, ['reference', 'value'])) throw new Error('Invalid secret set request')
   let reference: SecretReference
@@ -404,6 +419,9 @@ function parseCost(value: unknown, message: string): number | null {
   return value
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable provider profile create request contract.
+ */
 export function parseProviderProfileCreateRequest(value: unknown): ProviderProfileCreateRequest {
   const message = 'Invalid provider profile request'
   if (!record(value) || !exactKeys(value, [
@@ -421,6 +439,9 @@ export function parseProviderProfileCreateRequest(value: unknown): ProviderProfi
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable provider endpoint validation request contract.
+ */
 export function parseProviderEndpointValidationRequest(value: unknown): ProviderEndpointValidationRequest {
   const message = 'Invalid provider endpoint request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'provider_id', 'endpoint'])
@@ -432,6 +453,9 @@ export function parseProviderEndpointValidationRequest(value: unknown): Provider
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable consent preview request contract.
+ */
 export function parseConsentPreviewRequest(value: unknown): ConsentPreviewRequest {
   const message = 'Invalid consent preview request'
   if (!record(value) || !exactKeys(value, [
@@ -472,6 +496,9 @@ function parseConsentPreviewPayload(value: unknown, message: string): Readonly<C
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable consent create request contract.
+ */
 export function parseConsentCreateRequest(value: unknown): ConsentCreateRequest {
   const message = 'Invalid consent creation request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'name', 'preview'])
@@ -484,6 +511,9 @@ export function parseConsentCreateRequest(value: unknown): ConsentCreateRequest 
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable consent revoke request contract.
+ */
 export function parseConsentRevokeRequest(value: unknown): ConsentRevokeRequest {
   const message = 'Invalid consent revocation request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'expected_revision', 'name'])
@@ -495,6 +525,9 @@ export function parseConsentRevokeRequest(value: unknown): ConsentRevokeRequest 
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable open file grant request contract.
+ */
 export function parseOpenFileGrantRequest(value: unknown): OpenFileGrantRequest {
   if (!record(value) || !exactKeys(value, ['purpose'])
     || (value.purpose !== 'gedcom-read' && value.purpose !== 'rootsmagic-read')) {
@@ -503,6 +536,9 @@ export function parseOpenFileGrantRequest(value: unknown): OpenFileGrantRequest 
   return deepFreeze({ purpose: value.purpose })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable save file grant request contract.
+ */
 export function parseSaveFileGrantRequest(value: unknown): SaveFileGrantRequest {
   if (!record(value) || !exactKeys(value, ['purpose', 'suggestedName'])
     || (value.purpose !== 'gedcom-write' && value.purpose !== 'json-write' && value.purpose !== 'markdown-write')
@@ -521,6 +557,9 @@ function parseLocalRuntimeOperation(value: unknown): LocalRuntimeOperation {
   return value as LocalRuntimeOperation
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable local runtime request contract.
+ */
 export function parseLocalRuntimeRequest(value: unknown): LocalRuntimeRequest {
   if (
     !record(value)
@@ -535,6 +574,9 @@ export function parseLocalRuntimeRequest(value: unknown): LocalRuntimeRequest {
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable local runtime apply request contract.
+ */
 export function parseLocalRuntimeApplyRequest(value: unknown): LocalRuntimeApplyRequest {
   if (
     !record(value)
@@ -560,6 +602,9 @@ export function parseLocalRuntimeApplyRequest(value: unknown): LocalRuntimeApply
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable file grant id contract.
+ */
 export function parseFileGrantId(value: unknown): FileGrantId {
   if (typeof value !== 'string' || !fileGrantIdPattern.test(value)) throw new Error('Invalid file-grant ID')
   return value as FileGrantId
@@ -612,6 +657,9 @@ function parseExternalLinkDestination(value: unknown, message: string): string {
   return destination.href
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable open external link request contract.
+ */
 export function parseOpenExternalLinkRequest(value: unknown): OpenExternalLinkRequest {
   const message = 'Invalid external-link request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'destination'])
@@ -622,6 +670,9 @@ export function parseOpenExternalLinkRequest(value: unknown): OpenExternalLinkRe
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable copy text request contract.
+ */
 export function parseCopyTextRequest(value: unknown): CopyTextRequest {
   const message = 'Invalid copy-text request'
   if (
@@ -662,6 +713,9 @@ function parseNullableProfileName(value: unknown, message: string): string | nul
   return parseProfileName(value, message)
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat session create request contract.
+ */
 export function parseChatSessionCreateRequest(value: unknown): ChatSessionCreateRequest {
   const message = 'Invalid chat session request'
   if (!record(value) || !exactKeys(value, [
@@ -682,6 +736,9 @@ export function parseChatSessionCreateRequest(value: unknown): ChatSessionCreate
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat session request contract.
+ */
 export function parseChatSessionRequest(value: unknown): ChatSessionRequest {
   const message = 'Invalid chat session request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'session_id'])
@@ -735,6 +792,9 @@ function utf8ByteLength(value: string): number {
   return bytes
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat stream start request contract.
+ */
 export function parseChatStreamStartRequest(value: unknown): ChatStreamStartRequest {
   const message = 'Invalid chat-stream start request'
   if (!record(value) || !exactKeys(value, [
@@ -762,6 +822,9 @@ export function parseChatStreamStartRequest(value: unknown): ChatStreamStartRequ
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat stream cancel request contract.
+ */
 export function parseChatStreamCancelRequest(value: unknown): ChatStreamCancelRequest {
   const message = 'Invalid chat-stream cancellation request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'session_id', 'run_id'])
@@ -773,6 +836,9 @@ export function parseChatStreamCancelRequest(value: unknown): ChatStreamCancelRe
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat stream ack request contract.
+ */
 export function parseChatStreamAckRequest(value: unknown): ChatStreamAckRequest {
   const message = 'Invalid chat-stream acknowledgement request'
   if (!record(value) || !exactKeys(value, [
@@ -950,6 +1016,9 @@ function parseChatSessionClosure(value: unknown): Readonly<ChatSessionClosure> {
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable chat event delivery contract.
+ */
 export function parseChatEventDelivery(value: unknown): Readonly<ChatEventDelivery> {
   if (!record(value) || !exactKeys(value, [
     'schema_version',
@@ -1210,6 +1279,9 @@ function parseJobEventUnsubscription(value: unknown): Readonly<JobEventUnsubscri
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable job request contract.
+ */
 export function parseJobRequest(value: unknown): JobRequest {
   const message = 'Invalid job request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'job_id'])
@@ -1217,6 +1289,9 @@ export function parseJobRequest(value: unknown): JobRequest {
   return deepFreeze({ schema_version: 1, job_id: parseJobId(value.job_id, message) })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable job event subscription request contract.
+ */
 export function parseJobEventSubscriptionRequest(value: unknown): JobEventSubscriptionRequest {
   const message = 'Invalid job-event subscription request'
   if (!record(value) || !exactKeys(value, [
@@ -1232,6 +1307,9 @@ export function parseJobEventSubscriptionRequest(value: unknown): JobEventSubscr
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable job event unsubscription request contract.
+ */
 export function parseJobEventUnsubscriptionRequest(value: unknown): JobEventUnsubscriptionRequest {
   const message = 'Invalid job-event unsubscription request'
   if (!record(value) || !exactKeys(value, ['schema_version', 'subscription_id'])
@@ -1242,6 +1320,9 @@ export function parseJobEventUnsubscriptionRequest(value: unknown): JobEventUnsu
   })
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable job event delivery contract.
+ */
 export function parseJobEventDelivery(value: unknown): Readonly<JobEventDelivery> {
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'kind', 'subscription_id', 'job_id', 'event', 'error',
@@ -1305,6 +1386,9 @@ function parseStartupDiagnosticComponent(value: unknown, expectedComponent: stri
   return value as unknown as StartupDiagnosticComponent
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable startup diagnostic report contract.
+ */
 export function parseStartupDiagnosticReport(value: unknown): Readonly<StartupDiagnosticReport> {
   if (!record(value)
     || !exactKeys(value, ['schema_version', 'status', 'platform', 'components'])
@@ -1618,6 +1702,9 @@ function parseFileGrant(value: unknown): FileGrant {
   return value as unknown as FileGrant
 }
 
+/**
+ * Validates untrusted bridge data and returns an immutable artifact ref contract.
+ */
 export function parseArtifactRef(value: unknown): Readonly<ArtifactRef> {
   if (!record(value) || !exactKeys(value, ['artifact_id', 'artifact_type', 'media_type', 'sha256', 'size_bytes', 'status'])
     || typeof value.artifact_id !== 'string' || !artifactIdPattern.test(value.artifact_id)
@@ -1922,30 +2009,111 @@ function parseBridgeResult<T>(value: unknown, parseData: Parser<T>): BridgeResul
   return deepFreeze(value as unknown as BridgeResult<T>)
 }
 
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is app info.
+ */
 export const parseAppInfoResult = (value: unknown): BridgeResult<AppInfo> => parseBridgeResult(value, parseAppInfo)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is startup diagnostics.
+ */
 export const parseStartupDiagnosticsResult = (value: unknown): BridgeResult<StartupDiagnostics> => parseBridgeResult(value, parseStartupDiagnostics)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is capabilities.
+ */
 export const parseCapabilitiesResult = (value: unknown): BridgeResult<CapabilityManifest> => parseBridgeResult(value, parseCapabilityManifest)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is preferences.
+ */
 export const parsePreferencesResult = (value: unknown): BridgeResult<LocalPreferences> => parseBridgeResult(value, parsePreferences)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is settings.
+ */
 export const parseSettingsResult = (value: unknown): BridgeResult<ApplicationSettings> => parseBridgeResult(value, parseSettings)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is secret status.
+ */
 export const parseSecretStatusResult = (value: unknown): BridgeResult<SecretStatus> => parseBridgeResult(value, parseSecretStatus)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is provider configuration.
+ */
 export const parseProviderConfigurationResult = (value: unknown): BridgeResult<ProviderConfiguration> => parseBridgeResult(value, parseProviderConfiguration)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is provider endpoint validation.
+ */
 export const parseProviderEndpointValidationResult = (value: unknown): BridgeResult<ProviderEndpointValidation> => parseBridgeResult(value, parseProviderEndpointValidation)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is consent preview.
+ */
 export const parseConsentPreviewResult = (value: unknown): BridgeResult<ConsentPreview> => parseBridgeResult(value, parseConsentPreview)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is file grant.
+ */
 export const parseFileGrantResult = (value: unknown): BridgeResult<FileGrant | null> => parseBridgeResult(value, parseNullableFileGrant)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is file grant revocation.
+ */
 export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<FileGrantRevocation> => parseBridgeResult(value, parseFileGrantRevocation)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is local runtime status.
+ */
 export const parseLocalRuntimeStatusResult = (value: unknown): BridgeResult<LocalRuntimeStatus> => parseBridgeResult(value, parseLocalRuntimeStatus)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is local runtime preview.
+ */
 export const parseLocalRuntimePreviewResult = (value: unknown): BridgeResult<LocalRuntimePreview> => parseBridgeResult(value, parseLocalRuntimePreview)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is local runtime.
+ */
 export const parseLocalRuntimeResult = (value: unknown): BridgeResult<LocalRuntimeResult> => parseBridgeResult(value, parseLocalRuntimeOutcome)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is open external link.
+ */
 export const parseOpenExternalLinkResult = (value: unknown): BridgeResult<OpenExternalLinkResult> => parseBridgeResult(value, parseOpenExternalLinkOutcome)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is copy text.
+ */
 export const parseCopyTextResult = (value: unknown): BridgeResult<CopyTextResult> => parseBridgeResult(value, parseCopyTextOutcome)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat capability.
+ */
 export const parseChatCapabilityResult = (value: unknown): BridgeResult<ChatCapability> => parseBridgeResult(value, parseChatCapability)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat session.
+ */
 export const parseChatSessionResult = (value: unknown): BridgeResult<ChatSession> => parseBridgeResult(value, parseChatSession)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat session closure.
+ */
 export const parseChatSessionClosureResult = (value: unknown): BridgeResult<ChatSessionClosure> => parseBridgeResult(value, parseChatSessionClosure)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat stream run.
+ */
 export const parseChatStreamRunResult = (value: unknown): BridgeResult<ChatStreamRun> => parseBridgeResult(value, parseChatStreamRun)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat event.
+ */
 export const parseChatEventResult = (value: unknown): BridgeResult<ChatEvent> => parseBridgeResult(value, parseChatEvent)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is chat stream acknowledgement.
+ */
 export const parseChatStreamAcknowledgementResult = (value: unknown): BridgeResult<ChatStreamAcknowledgement> => parseBridgeResult(value, parseChatStreamAcknowledgement)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is job list.
+ */
 export const parseJobListResult = (value: unknown): BridgeResult<JobList> => parseBridgeResult(value, parseJobList)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is job snapshot.
+ */
 export const parseJobSnapshotResult = (value: unknown): BridgeResult<JobSnapshot> => parseBridgeResult(value, parseJobSnapshot)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is job event.
+ */
 export const parseJobEventResult = (value: unknown): BridgeResult<JobEvent> => parseBridgeResult(value, parseJobEvent)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is job event subscription.
+ */
 export const parseJobEventSubscriptionResult = (value: unknown): BridgeResult<JobEventSubscription> => parseBridgeResult(value, parseJobEventSubscription)
+/**
+ * Validates an untrusted bridge result envelope whose successful payload is job event unsubscription.
+ */
 export const parseJobEventUnsubscriptionResult = (value: unknown): BridgeResult<JobEventUnsubscription> => parseBridgeResult(value, parseJobEventUnsubscription)

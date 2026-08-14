@@ -37,6 +37,12 @@ async function walk(root) {
   }
   return output
 }
+/**
+ * Scans a packaged desktop tree and rejects prohibited names, content, secrets, and debug-only capabilities.
+ * @param {string} root - Packaged artifact tree to inspect without mutation.
+ * @param {{allowFixtures?: boolean, allowPackagedNativeVerification?: boolean, allowPackagedFileGrants?: boolean}} [options] - Narrow exceptions used only by dedicated verification packages.
+ * @returns {Promise<number>} Number of non-empty packaged files inspected.
+ */
 export async function inspectBuild(
   root,
   {
@@ -74,6 +80,12 @@ export async function inspectBuild(
   if ((await files(root)).length === 0 && all.length === 0) throw new Error('Build output is empty')
   return all.length
 }
+/**
+ * Resolves the desktop build-output directory relative to a module URL.
+ * @param {string | URL} moduleUrl - Module location used as the trusted path anchor.
+ * @param {{windows?: boolean}} [options] - Optional Node URL conversion behavior for cross-platform tests.
+ * @returns {string} Absolute path to the adjacent desktop output directory.
+ */
 export function resolveBuildOutputPath(moduleUrl, options) {
   return fileURLToPath(new URL('../out', moduleUrl), options)
 }

@@ -507,12 +507,23 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
-    assert _job(ci, "quality").count("make lint") == 1
-    assert _job(readiness, "quality").count("make lint") == 1
+    ci_quality = _job(ci, "quality")
+    readiness_quality = _job(readiness, "quality")
+    setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    setup_pnpm = "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093"
+
+    for quality_job in (ci_quality, readiness_quality):
+        assert quality_job.count("make lint") == 1
+        assert quality_job.count("make code-docs-check") == 1
+        assert setup_node in quality_job
+        assert 'node-version: "26.5.0"' in quality_job
+        assert setup_pnpm in quality_job
+        assert 'version: "11.9.0"' in quality_job
     assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
     assert makefile.count("check_code_documentation.py") == 2, (
         "Makefile code-docs-check target must invoke check_code_documentation.py"
     )
+    assert "pnpm --dir desktop docs:check" in makefile
 
 
 def test_secret_scans_use_commit_ranges_or_exact_candidate_trees() -> None:

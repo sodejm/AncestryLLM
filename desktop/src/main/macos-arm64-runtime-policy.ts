@@ -27,9 +27,18 @@ const REVIEWED_LICENSES = new Set(['Apache-2.0', 'MIT'])
 const MAX_COMPONENT_BYTES = 512 * 1024 * 1024
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 
+/**
+ * Restricts installation to the exact reviewed runtime component set.
+ */
 export type RuntimeComponentName = typeof COMPONENT_NAMES[number]
+/**
+ * Limits component packaging to directly hashed binaries or reviewed gzip-compressed tar archives.
+ */
 export type RuntimeArchiveFormat = 'binary' | 'tar.gz'
 
+/**
+ * Maps one verified archive member to its bounded app-owned destination and executable mode.
+ */
 export interface RuntimeInstallEntry {
   readonly sourcePath: string
   readonly installPath: string
@@ -38,12 +47,18 @@ export interface RuntimeInstallEntry {
   readonly executable: boolean
 }
 
+/**
+ * Records a reviewed symlink that must be omitted rather than followed during extraction.
+ */
 export interface RuntimeExcludedArchiveMember {
   readonly sourcePath: string
   readonly type: 'symlink'
   readonly linkTarget: string
 }
 
+/**
+ * Binds an exact release asset URL, digest, size, format, and extraction allowlist.
+ */
 export interface RuntimeArtifactPolicy {
   readonly assetName: string
   readonly url: string
@@ -54,6 +69,9 @@ export interface RuntimeArtifactPolicy {
   readonly excludedMembers: readonly RuntimeExcludedArchiveMember[]
 }
 
+/**
+ * Binds each component to a reviewed SPDX license document and digest.
+ */
 export interface RuntimeLicensePolicy {
   readonly spdxId: 'Apache-2.0' | 'MIT'
   readonly url: string
@@ -61,6 +79,9 @@ export interface RuntimeLicensePolicy {
   readonly sizeBytes: number
 }
 
+/**
+ * Joins a component's trusted source identity and version to its license and release artifact.
+ */
 export interface RuntimeComponentPolicy {
   readonly name: RuntimeComponentName
   readonly version: string
@@ -69,6 +90,9 @@ export interface RuntimeComponentPolicy {
   readonly artifact: RuntimeArtifactPolicy
 }
 
+/**
+ * Pins the exact ARM64 VM image provenance, filename, size, and dual digests.
+ */
 export interface RuntimeVmImagePolicy {
   readonly version: string
   readonly repository: 'abiosoft/colima-core'
@@ -79,6 +103,9 @@ export interface RuntimeVmImagePolicy {
   readonly sizeBytes: number
 }
 
+/**
+ * Defines the complete reviewed trust root, host constraints, ownership namespace, and resource bounds.
+ */
 export interface MacosArm64RuntimePolicy {
   readonly schemaVersion: 1
   readonly target: Readonly<{
@@ -102,6 +129,9 @@ export interface MacosArm64RuntimePolicy {
   readonly components: readonly RuntimeComponentPolicy[]
 }
 
+/**
+ * Reports a stable coded failure from reviewed macOS ARM64 runtime artifact installation without leaking sensitive host details.
+ */
 export class RuntimePolicyError extends Error {
   readonly code: string
 
@@ -150,6 +180,7 @@ function digest512(value: unknown): string {
   return parsed
 }
 
+/** Accepts only normalized POSIX-relative archive paths without traversal or drive roots. */
 function safeRelativePath(value: unknown): string {
   const parsed = exactString(value)
   if (
@@ -340,6 +371,9 @@ function parseVmImage(value: unknown): RuntimeVmImagePolicy {
   }
 }
 
+/**
+ * Parses macos arm64 runtime policy deterministically under reviewed macOS ARM64 runtime artifact installation.
+ */
 export function parseMacosArm64RuntimePolicy(value: unknown): MacosArm64RuntimePolicy {
   const input = record(value)
   exactKeys(input, [
@@ -404,10 +438,14 @@ export function parseMacosArm64RuntimePolicy(value: unknown): MacosArm64RuntimeP
   }
 }
 
+/**
+ * Computes the SHA-256 identity of the canonical reviewed runtime policy JSON.
+ */
 export function runtimePolicyDigest(policy: MacosArm64RuntimePolicy): string {
   return createHash('sha256').update(JSON.stringify(policy)).digest('hex')
 }
 
+/** Compares archive bytes with the reviewed SHA-256 digest in constant time. */
 function checkedDigest(bytes: Buffer, expected: string): boolean {
   const actual = createHash('sha256').update(bytes).digest()
   return timingSafeEqual(actual, Buffer.from(expected, 'hex'))
@@ -446,6 +484,7 @@ function tarMemberPath(value: string): string {
   return safeRelativePath(value.startsWith('./') ? value.slice(2) : value)
 }
 
+/** Parses a bounded gzip tar while rejecting malformed headers and unsafe member types. */
 function parseTar(archive: Buffer): readonly TarMember[] {
   let tar: Buffer
   try {
@@ -491,6 +530,7 @@ function parseTar(archive: Buffer): readonly TarMember[] {
   return members
 }
 
+/** Resolves an extraction root only when it is an existing non-symlink directory. */
 async function verifiedOutputRoot(root: string): Promise<string> {
   const resolved = resolve(root)
   const status = await lstat(resolved).catch(() => undefined)
@@ -498,6 +538,7 @@ async function verifiedOutputRoot(root: string): Promise<string> {
   return resolved
 }
 
+/** Creates extraction parents while rejecting any symlink introduced beneath the root. */
 async function ensureParents(root: string, destination: string): Promise<void> {
   const relative = destination.slice(root.length + 1)
   const segments = relative.split(sep).slice(0, -1)
@@ -513,6 +554,9 @@ async function ensureParents(root: string, destination: string): Promise<void> {
   }
 }
 
+/**
+ * Extracts only policy-allowlisted regular files and rejects missing, duplicate, linked, or unexpected members.
+ */
 export async function extractReviewedTarGzip(
   archive: Buffer,
   install: readonly RuntimeInstallEntry[],

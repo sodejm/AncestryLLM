@@ -1,7 +1,13 @@
 /** Defines typed routes, navigation metadata, asynchronous states, and focus contracts. */
 
+/**
+ * Defines the renderer-only app route contract shared by accessible design-system components.
+ */
 export type AppRoute = 'home' | 'chat' | 'tasks' | 'diagnostics' | 'settings'
 
+/**
+ * Defines the renderer-only navigation item contract shared by accessible design-system components.
+ */
 export interface NavigationItem {
   readonly route: AppRoute
   readonly href: '#/' | '#/chat' | '#/tasks' | '#/diagnostics' | '#/settings'
@@ -10,6 +16,9 @@ export interface NavigationItem {
   readonly shortcut: string
 }
 
+/**
+ * Defines the renderer-only async state kind contract shared by accessible design-system components.
+ */
 export type AsyncStateKind =
   | 'loading'
   | 'empty'
@@ -19,6 +28,9 @@ export type AsyncStateKind =
   | 'success'
   | 'permission-denied'
 
+/**
+ * Defines the renderer-only async state contract shared by accessible design-system components.
+ */
 export interface AsyncState {
   readonly kind: AsyncStateKind
   readonly label: string
@@ -27,6 +39,7 @@ export interface AsyncState {
   readonly code?: string
 }
 
+/** Defines focus restoration and first-focus selectors for accessible modal dialogs. */
 export interface DialogFocusContract {
   readonly initialFocus: 'filter'
   readonly closeOnEscape: true
@@ -34,6 +47,7 @@ export interface DialogFocusContract {
   readonly focusRouteHeadingOnSelection: true
 }
 
+/** Focus selectors used when the command palette opens and closes. */
 export const commandPaletteFocusContract: DialogFocusContract = Object.freeze({
   initialFocus: 'filter',
   closeOnEscape: true,
@@ -41,6 +55,7 @@ export const commandPaletteFocusContract: DialogFocusContract = Object.freeze({
   focusRouteHeadingOnSelection: true,
 })
 
+/** Ordered application navigation labels and keyboard shortcuts. */
 export const navigationItems: readonly NavigationItem[] = Object.freeze([
   Object.freeze({
     route: 'home',
@@ -79,6 +94,7 @@ export const navigationItems: readonly NavigationItem[] = Object.freeze([
   }),
 ])
 
+/** Maps a location hash to a known route, falling back to `home`. */
 export function routeFromHash(hash: string): AppRoute {
   if (hash === '#/chat') return 'chat'
   if (hash === '#/tasks') return 'tasks'

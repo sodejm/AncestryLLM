@@ -17,6 +17,9 @@ import type {
   SaveFileGrantRequest,
 } from '../shared-contract/desktop'
 
+/**
+ * Enumerates sanitized failures for selection, validation, redemption, and revocation of file grants.
+ */
 export type FileGrantFailureCode =
   | 'FILE_SELECTION_INVALID'
   | 'FILE_TOO_LARGE'
@@ -26,6 +29,9 @@ export type FileGrantFailureCode =
   | 'FILE_GRANT_CONFLICT'
   | 'FILE_DIALOG_FAILED'
 
+/**
+ * Carries a stable filesystem-capability error code without exposing the underlying host path.
+ */
 export class FileGrantBrokerError extends Error {
   readonly code: FileGrantFailureCode
 
@@ -36,6 +42,9 @@ export class FileGrantBrokerError extends Error {
   }
 }
 
+/**
+ * Defines trusted native-dialog operations that return paths only to the main-process grant broker.
+ */
 export interface NativeFileDialogPort {
   selectOpenFile(owner: object, purpose: FileReadPurpose, signal?: AbortSignal): Promise<string | null>
   selectSaveFile(
@@ -47,6 +56,9 @@ export interface NativeFileDialogPort {
   confirmReplacement(owner: object, displayName: string, signal?: AbortSignal): Promise<boolean>
 }
 
+/**
+ * Resolves an opaque grant to a main-process-only path and its exact access and size bounds.
+ */
 export interface ResolvedFileGrant {
   readonly grantId: FileGrantId
   readonly purpose: FileGrantPurpose
@@ -118,6 +130,7 @@ function safeName(value: string): boolean {
   return safeNamePattern.test(value) && value !== '.' && value !== '..'
 }
 
+/** Normalizes a user-selected absolute path only after rejecting unsafe names and aliases. */
 function selectedPath(value: string): string {
   if (!isAbsolute(value) || value.includes('\0') || normalize(value) !== value) {
     fail('FILE_SELECTION_INVALID')
@@ -157,6 +170,7 @@ function sameIdentity(left: Fingerprint | null, right: Fingerprint | null): bool
   return left !== null && right !== null && left.dev === right.dev && left.ino === right.ino
 }
 
+/** Captures the identity of a bounded single-link regular file for later race detection. */
 function validateRegularFile(stat: Stats, maxBytes: number): Fingerprint {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) fail('FILE_SELECTION_INVALID')
   if (!Number.isSafeInteger(stat.size) || stat.size < 0) fail('FILE_SELECTION_INVALID')
@@ -186,6 +200,7 @@ function isGedcom(prefix: Buffer): boolean {
   return /^0[ \t]+HEAD(?:[ \t\r\n]|$)/.test(text)
 }
 
+/** Opens and fingerprints a permitted input without following links or trusting its extension alone. */
 async function inspectInput(path: string, policy: PurposePolicy): Promise<Readonly<{ fingerprint: Fingerprint; canonicalPath: string }>> {
   if (!hasExpectedExtension(path, policy)) fail('FILE_SELECTION_INVALID')
   let before: Stats
@@ -231,6 +246,7 @@ async function inspectInput(path: string, policy: PurposePolicy): Promise<Readon
   return { fingerprint: expected, canonicalPath }
 }
 
+/** Validates an output path and its parent identity before issuing a time-limited file grant. */
 async function inspectOutput(path: string, policy: PurposePolicy): Promise<Readonly<{
   fingerprint: Fingerprint | null
   parentFingerprint: Fingerprint
@@ -298,6 +314,9 @@ function publicGrant(binding: Binding, sizeBytes: number, validation: FileValida
   })
 }
 
+/**
+ * Owns file grant broker state transitions while enforcing capability-scoped filesystem access without exposing raw paths.
+ */
 export class FileGrantBroker {
   private readonly dialogs: NativeFileDialogPort
   private readonly bindings = new Map<FileGrantId, Binding>()

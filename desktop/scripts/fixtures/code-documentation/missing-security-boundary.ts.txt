@@ -1,0 +1,9 @@
+/** Defines a fixture security policy with reviewed internal enforcement boundaries. */
+const responseHeaders = (): Record<string, string> => ({
+  'Content-Security-Policy': "default-src 'none'",
+})
+
+/** Lists the immutable renderer preferences required by the fixture security policy. */
+const requiredPreferences = {
+  sandbox: true,
+} as const

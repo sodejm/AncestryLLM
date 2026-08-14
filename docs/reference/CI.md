@@ -21,7 +21,9 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
 0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
 the checked-in GFM structural checks to every tracked Markdown file, whether
-or not a contributor installed the hooks.
+or not a contributor installed the hooks. `make code-docs-check` is the
+separate, canonical declaration-documentation gate for Python, Swift, and the
+desktop TypeScript/JavaScript tree.
 
 `make setup` first runs the
 [verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
@@ -60,6 +62,7 @@ group and calls `make lock-check`, whose canonical command is
 | Local full setup | All application extras and every dependency group, including `release-verifier` |
 | Python test matrix | `test` plus `all-llm` |
 | Quality | `lint` plus `typecheck`; exact ty is installed only for its visible advisory step |
+| Declaration documentation | `lint` plus the frozen desktop workspace under exact Node 26.5.0 and pnpm 11.9.0 |
 | Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
 | Package and release construction | `build`; release construction also installs `security` only for SBOM generation |
 | Production PyPI artifact verification | `release-verifier` only |
@@ -84,6 +87,14 @@ depending on packages left behind by another profile. The exact profiles and
 maintenance procedure are documented in [Dependency
 maintenance](DEPENDENCY_MAINTENANCE.md).
 
+The Python 3.12 quality job and its release-readiness counterpart install exact
+Node 26.5.0 and pnpm 11.9.0 before calling `make code-docs-check`. That Make
+target owns the Ruff declaration subset, the tracked-file and Swift DocC
+classifier, the TypeScript compiler-AST export/security-boundary check, and the
+exact-pinned `eslint-plugin-jsdoc` syntax and description rules. The desktop
+workspace is installed with the frozen lockfile; the checker itself reads only
+the candidate tree and performs no network or provider calls.
+
 The Python 3.12 quality job keeps `make typecheck` as the blocking strict-mypy
 gate. A separate `make typecheck-ty` step runs exact `ty 0.0.69` over
 `src/ancestryllm` with `continue-on-error: true`; it does not use `|| true`, so
@@ -100,6 +111,8 @@ output through `RUFF_OUTPUT_FORMAT=github` and still invoke the canonical
 `make lint` target without restating its flags. The enabled rule families,
 reviewed diagnostic batches, provider-import contract, and cold-start evidence
 are recorded in the [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md).
+Declaration documentation remains a distinct gate so changes to the normal
+lint surface cannot silently weaken its cross-language contract.
 
 Production package and release jobs continue to call `make package` with
 setuptools as the authoritative backend. `make evaluate-uv-build` is a
@@ -126,10 +139,10 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
-| Release readiness | The exhaustive release-candidate gate. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
+| Release readiness | The exhaustive release-candidate gate, including declaration documentation on the Python 3.12 quality row. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
 
 The container matrix uses `ubuntu-24.04` for amd64 and

@@ -22,6 +22,7 @@ const stateIcons: Readonly<Record<AsyncStateKind, ReactNode>> = {
   'permission-denied': <Ban aria-hidden="true" />,
 }
 
+/** Presents one shared async state with state-specific iconography and live-region semantics. */
 export function AsyncState({ state }: Readonly<{ state: AsyncStateContract }>) {
   const liveRole = state.kind === 'loading' ? 'status' : state.kind === 'error' ? 'alert' : undefined
 

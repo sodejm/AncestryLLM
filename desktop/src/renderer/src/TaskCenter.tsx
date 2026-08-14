@@ -69,6 +69,12 @@ interface TaskCenterProps {
   readonly bridge?: AncestryBridge
 }
 
+/**
+ * Loads durable jobs and maintains acknowledged event subscriptions through the preload bridge.
+ *
+ * Stream interruptions are recovered from the last accepted cursor; cancellation and artifact
+ * access remain explicit, coded renderer actions.
+ */
 export function TaskCenter({ bridge: suppliedBridge }: TaskCenterProps) {
   const bridge = suppliedBridge ?? bridgeFromWindow()
   const [state, dispatch] = useReducer(taskCenterReducer, initialTaskCenterState)

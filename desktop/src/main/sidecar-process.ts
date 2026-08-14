@@ -40,6 +40,7 @@ type WorkingDirectoryRemover = (
   options: { recursive: true; force: true },
 ) => Promise<void>
 
+/** Signals and probes the detached POSIX process group owned by one sidecar launch. */
 export interface PosixProcessGroupController {
   signal: (pid: number, signal: NodeJS.Signals) => void
   exists: (pid: number) => boolean
@@ -47,6 +48,7 @@ export interface PosixProcessGroupController {
 
 type ProcessKill = (pid: number, signal?: string | number) => boolean
 
+/** Creates a controller that targets a detached process group rather than only its leader. */
 export function createPosixProcessGroupController(
   kill: ProcessKill = process.kill,
 ): PosixProcessGroupController {
@@ -102,6 +104,7 @@ function waitForChildExit(
   })
 }
 
+/** Invokes the fixed Windows process-tree terminator without a command shell. */
 const executeWindowsTreeKill: WindowsTreeKillExecutor = (
   file,
   args,
@@ -111,6 +114,7 @@ const executeWindowsTreeKill: WindowsTreeKillExecutor = (
   execFile(file, args, options, (error) => callback(error))
 }
 
+/** Terminates the Windows sidecar tree with fixed `taskkill.exe` arguments and no shell. */
 export function terminateWindowsProcessTree(
   pid: number,
   execute: WindowsTreeKillExecutor = executeWindowsTreeKill,
@@ -125,6 +129,12 @@ export function terminateWindowsProcessTree(
   })
 }
 
+/**
+ * Terminates the complete platform process tree and fails if descendants survive the deadlines.
+ *
+ * POSIX launches receive TERM then KILL at their detached process group. Windows launches use
+ * the fixed tree terminator and the packaged Job Object as a second containment boundary.
+ */
 export async function terminateNativeSidecarProcess(
   child: ChildProcessWithoutNullStreams,
   platform: NodeJS.Platform = process.platform,
@@ -183,6 +193,7 @@ export async function terminateNativeSidecarProcess(
   }
 }
 
+/** Returns the no-shell, hidden, piped spawn contract used for one native sidecar launch. */
 export function nativeSidecarSpawnOptions(
   workingDirectory: string,
   environment: NodeJS.ProcessEnv,
@@ -198,6 +209,7 @@ export function nativeSidecarSpawnOptions(
   }
 }
 
+/** Parses the sidecar's single bounded readiness frame using an exact schema. */
 function parseReadyFrame(line: string): SidecarReadyFrame {
   let value: unknown
   try {
@@ -224,6 +236,10 @@ function parseReadyFrame(line: string): SidecarReadyFrame {
   }
 }
 
+/**
+ * Accepts exactly one size-bounded readiness line and rejects early exit,
+ * launch failure, malformed metadata, or additional startup output.
+ */
 function readiness(child: ChildProcessWithoutNullStreams): Promise<SidecarReadyFrame> {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -259,6 +275,9 @@ function readiness(child: ChildProcessWithoutNullStreams): Promise<SidecarReadyF
   })
 }
 
+/**
+ * Owns native running sidecar state transitions while enforcing authenticated local sidecar lifecycle and process isolation.
+ */
 export class NativeRunningSidecar extends EventEmitter implements RunningSidecar {
   readonly ready: Promise<SidecarReadyFrame>
   private termination: Promise<void> | undefined
@@ -294,6 +313,9 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
   }
 }
 
+/**
+ * Launches native sidecar within the limits and validation required by authenticated local sidecar lifecycle and process isolation.
+ */
 export async function launchNativeSidecar(
   requestDetails: SidecarLaunchRequest,
 ): Promise<RunningSidecar> {
@@ -322,12 +344,16 @@ interface HealthDocument {
   readiness_proof: string
 }
 
+/** Binds sidecar readiness to the launch secret, API contract, and both build identities. */
 function expectedProof(token: string, appBuild: string, sidecarBuild: string): string {
   return createHmac('sha256', token)
     .update(`${API_CONTRACT}\n${appBuild}\n${sidecarBuild}`)
     .digest('hex')
 }
 
+/**
+ * Authenticates the loopback health response against the launch secret, API contract, and build identities.
+ */
 export async function probeNativeSidecar(
   ready: SidecarReadyFrame,
   bearerToken: string,

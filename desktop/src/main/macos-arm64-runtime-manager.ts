@@ -49,8 +49,14 @@ const ENGINE_IDENTITY_FILE = 'engine-identity.json'
 const RECEIPT_FILE = 'verification-receipt.json'
 const INSTALLATION_OVERHEAD_BYTES = 64 * 1024 ** 2
 
+/**
+ * Reuses the renderer-visible operation vocabulary for the native runtime manager.
+ */
 export type MacosRuntimeOperation = LocalRuntimeOperation
 
+/**
+ * Enumerates fail-closed installation, ownership, integrity, and health failures.
+ */
 export type MacosRuntimeErrorCode =
   | 'RUNTIME_REQUEST_INVALID'
   | 'RUNTIME_HOST_UNSUPPORTED'
@@ -82,6 +88,9 @@ const ERROR_MESSAGES: Readonly<Record<MacosRuntimeErrorCode, string>> = {
   RUNTIME_HEALTH_FAILED: 'The app-owned local runtime failed its health check.',
 }
 
+/**
+ * Reports a stable coded failure from reviewed macOS ARM64 runtime artifact installation without leaking sensitive host details.
+ */
 export class MacosRuntimeError extends Error {
   constructor(readonly code: MacosRuntimeErrorCode) {
     super(ERROR_MESSAGES[code])
@@ -89,6 +98,9 @@ export class MacosRuntimeError extends Error {
   }
 }
 
+/**
+ * Reports the host capacity and virtualization facts used to accept or reject an install plan.
+ */
 export interface MacosRuntimeHostInspection {
   readonly macosMajor: number
   readonly virtualizationAvailable: boolean
@@ -98,12 +110,18 @@ export interface MacosRuntimeHostInspection {
   readonly existingDockerContexts: number
 }
 
+/**
+ * Supplies the platform identity and bounded capacity inspection required before installation.
+ */
 export interface MacosRuntimeHost {
   readonly platform: string
   readonly architecture: string
   inspect(signal?: AbortSignal): Promise<MacosRuntimeHostInspection>
 }
 
+/**
+ * Describes one resumable transfer of the policy-selected macOS runtime artifact.
+ */
 export interface DownloadRuntimeFileRequest {
   readonly sourceUrl: string
   readonly targetPath: string
@@ -112,12 +130,27 @@ export interface DownloadRuntimeFileRequest {
   readonly signal?: AbortSignal
 }
 
+/**
+ * Transfers one reviewed artifact into a resumable temporary file without interpreting its contents.
+ */
 export type DownloadRuntimeFile = (request: DownloadRuntimeFileRequest) => Promise<void>
 
+/**
+ * Reuses the transport-neutral status returned to the renderer after local verification.
+ */
 export type MacosRuntimeStatus = LocalRuntimeStatus
+/**
+ * Reuses the transport-neutral preview containing the exact policy digest and planned changes.
+ */
 export type MacosRuntimePreview = LocalRuntimePreview
+/**
+ * Reuses the transport-neutral result emitted after a verified runtime operation.
+ */
 export type MacosRuntimeResult = LocalRuntimeResult
 
+/**
+ * Supplies the reviewed policy, storage root, and injectable host operations for runtime installation.
+ */
 export interface RuntimeManagerOptions {
   readonly rootDirectory: string
   readonly policy: MacosArm64RuntimePolicy
@@ -290,6 +323,7 @@ function sha256(bytes: Buffer | string): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+/** Compares a downloaded artifact digest against policy without timing-dependent equality. */
 function digestMatches(bytes: Buffer, expected: string): boolean {
   return timingSafeEqual(
     createHash('sha256').update(bytes).digest(),
@@ -362,6 +396,7 @@ async function verifiedFile(
   return valid256 && valid512
 }
 
+/** Restricts runtime ownership to the normalized dedicated macOS ARM64 storage root. */
 function safeRoot(rootDirectory: string): string {
   if (
     !isAbsolute(rootDirectory)
@@ -376,6 +411,7 @@ function safeRoot(rootDirectory: string): string {
   return rootDirectory
 }
 
+/** Rejects symlinks and boundary escapes anywhere in a runtime storage ancestry. */
 async function safeDirectory(path: string, boundary: string = path): Promise<void> {
   const resolvedPath = resolve(path)
   const resolvedBoundary = resolve(boundary)
@@ -422,6 +458,7 @@ async function existingDirectoryAtOrAbove(path: string): Promise<string> {
   }
 }
 
+/** Persists runtime ownership evidence through a private temporary file and atomic rename. */
 async function atomicJson(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`
   const serialized = `${JSON.stringify(value)}\n`
@@ -503,6 +540,7 @@ function statusHost(
   }
 }
 
+/** Accepts ownership evidence only when its exact schema and policy identities are valid. */
 function parseOwnership(value: unknown, policy: MacosArm64RuntimePolicy): OwnershipMarker | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const input = value as Record<string, unknown>
@@ -559,6 +597,7 @@ function parseEngineIdentity(
   return input as unknown as EngineIdentity
 }
 
+/** Allows HTTPS redirects only within an origin or from GitHub to reviewed asset hosts. */
 function allowedRedirect(source: URL, destination: URL): boolean {
   if (destination.protocol !== 'https:') return false
   if (source.origin === destination.origin) return true
@@ -569,6 +608,7 @@ function allowedRedirect(source: URL, destination: URL): boolean {
     )
 }
 
+/** Starts one cancellable HTTPS artifact request with bounded resume semantics. */
 function requestDownload(
   source: URL,
   offsetBytes: number,
@@ -610,6 +650,7 @@ function requestDownload(
   })
 }
 
+/** Follows a bounded chain of allowlisted HTTPS redirects for a runtime artifact. */
 async function downloadResponse(
   sourceUrl: string,
   offsetBytes: number,
@@ -635,6 +676,9 @@ async function downloadResponse(
   return runtimeFail('RUNTIME_DOWNLOAD_FAILED')
 }
 
+/**
+ * Downloads or resumes the exact pinned artifact while enforcing status, size, cancellation, and fsync.
+ */
 export const downloadPinnedRuntimeFile: DownloadRuntimeFile = async ({
   sourceUrl,
   targetPath,
@@ -691,6 +735,9 @@ export const downloadPinnedRuntimeFile: DownloadRuntimeFile = async ({
   }
 }
 
+/**
+ * Creates the macOS host adapter that invokes fixed system tools through the bounded process runner.
+ */
 export function createMacosRuntimeHost(
   storageDirectory: string,
   runProcess: RunHostProcess = runBoundedHostProcess,
@@ -746,6 +793,9 @@ export function createMacosRuntimeHost(
   return { platform: process.platform, architecture: process.arch, inspect }
 }
 
+/**
+ * Owns macos arm64 runtime manager state transitions while enforcing reviewed macOS ARM64 runtime artifact installation.
+ */
 export class MacosArm64RuntimeManager {
   private readonly root: string
   private readonly storageBoundary: string

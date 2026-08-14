@@ -1,0 +1,15 @@
+/** Defines documented JavaScript export forms for the policy fixture. */
+
+/**
+ * Returns the stable JavaScript fixture value.
+ * @returns {string} Stable fixture value.
+ */
+export default function documentedDefault() {
+  return 'documented'
+}
+
+/** Re-exports a named contract from the fixture dependency. */
+export { documentedValue } from './dependency.mjs'
+
+/** Re-exports the remaining contracts from the fixture dependency. */
+export * from './dependency.mjs'

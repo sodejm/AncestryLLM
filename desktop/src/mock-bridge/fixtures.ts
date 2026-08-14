@@ -10,6 +10,7 @@ import {
   type StartupDiagnostics,
 } from '../shared-contract/desktop'
 
+/** Recursively freezes fixture objects so renderer tests cannot mutate shared state. */
 export function deepFreeze<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value)
@@ -26,12 +27,14 @@ const success = <T>(data: T): BridgeSuccess<T> => deepFreeze({
   data,
 }) as BridgeSuccess<T>
 
+/** Successful application identity response used by the offline bridge. */
 export const appInfoFixture = success<AppInfo>({
   applicationName: 'AncestryLLM',
   appVersion: '0.5.0-dev',
   buildChannel: 'development',
 })
 
+/** Startup report for a ready local sidecar with all required checks passing. */
 export const readyStartupReportFixture = deepFreeze<StartupDiagnosticReport>({
   schema_version: 1,
   status: 'ready',
@@ -76,6 +79,7 @@ export const readyStartupReportFixture = deepFreeze<StartupDiagnosticReport>({
   ],
 })
 
+/** Successful startup-diagnostics response derived from the ready report. */
 export const readyDiagnosticsFixture = success<StartupDiagnostics>({
   state: 'ready',
   failure: null,
@@ -84,6 +88,7 @@ export const readyDiagnosticsFixture = success<StartupDiagnostics>({
   report: readyStartupReportFixture,
 })
 
+/** Degraded startup-diagnostics response used to exercise recovery UI. */
 export const degradedDiagnosticsFixture = success<StartupDiagnostics>({
   state: 'degraded',
   failure: 'startup_failed',
@@ -92,6 +97,7 @@ export const degradedDiagnosticsFixture = success<StartupDiagnostics>({
   report: null,
 })
 
+/** Stable capability manifest exposed by the offline renderer bridge. */
 export const capabilitiesFixture = success<CapabilityManifest>({
   api: {
     namespace: '/api/v1',
@@ -112,6 +118,7 @@ export const capabilitiesFixture = success<CapabilityManifest>({
   },
 })
 
+/** Provider and consent settings used by offline settings views. */
 export const settingsFixture = success<ApplicationSettings>({
   schema_version: 1,
   revision: 0,
@@ -178,6 +185,7 @@ export const settingsFixture = success<ApplicationSettings>({
   ],
 })
 
+/** Local user-interface preferences used by offline renderer views. */
 export const preferencesFixture = success<LocalPreferences>({
   colorScheme: 'system',
   reducedMotion: false,
@@ -186,6 +194,7 @@ export const preferencesFixture = success<LocalPreferences>({
   revision: 0,
 })
 
+/** Fail-closed capability response used when the local sidecar is unavailable. */
 export const unavailableFixture: BridgeResult<CapabilityManifest> = deepFreeze({
   ok: false,
   protocolVersion: DESKTOP_PROTOCOL_VERSION,

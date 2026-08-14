@@ -27,6 +27,12 @@ const SUPPORTED_TARGETS = new Set([
   'linux-x64',
 ])
 
+/**
+ * Normalizes a Node platform and architecture into a supported sidecar target.
+ * @param {string} platform - Node platform identifier.
+ * @param {string} architecture - Node process architecture.
+ * @returns {string} Allowlisted `<platform>-<architecture>` target; unsupported pairs throw.
+ */
 export function nativeTarget(platform, architecture) {
   const target = `${platform}-${architecture}`
   if (!SUPPORTED_TARGETS.has(target)) {
@@ -35,6 +41,12 @@ export function nativeTarget(platform, architecture) {
   return target
 }
 
+/**
+ * Derives the only executable path permitted for an allowlisted sidecar target.
+ * @param {string} root - Root containing per-target sidecar payloads.
+ * @param {string} target - Allowlisted native target.
+ * @returns {string} Expected platform-specific sidecar executable path.
+ */
 export function sidecarExecutable(root, target) {
   if (!SUPPORTED_TARGETS.has(target)) {
     throw new Error(`Unsupported desktop target: ${target}`)
@@ -154,6 +166,13 @@ async function verifyManifestEntry(targetRoot, entry) {
   }
 }
 
+/**
+ * Verifies a sidecar manifest, complete payload inventory, containment, digests, links, and executable access.
+ * @param {string} root - Root containing per-target sidecar payloads.
+ * @param {string} target - Allowlisted native target to verify.
+ * @param {string} appBuild - Application version required in the manifest.
+ * @returns {Promise<string>} Verified native sidecar executable path.
+ */
 export async function verifySidecar(root, target, appBuild = PACKAGE_BUILD) {
   if (!SUPPORTED_TARGETS.has(target)) {
     throw new Error(`Unsupported desktop target: ${target}`)
@@ -193,6 +212,13 @@ async function findNamedFiles(root, basename) {
   return matches
 }
 
+/**
+ * Finds exactly one sidecar manifest inside a packaged Resources tree and verifies its payload.
+ * @param {string} releaseRoot - Packaged application tree to search.
+ * @param {string} target - Allowlisted native target to verify.
+ * @param {string} appBuild - Application version required in the manifest.
+ * @returns {Promise<string>} Verified packaged sidecar executable path.
+ */
 export async function verifyPackagedSidecar(releaseRoot, target, appBuild = PACKAGE_BUILD) {
   const suffix = ['sidecar', target, MANIFEST_NAME]
   const matches = (await findNamedFiles(releaseRoot, MANIFEST_NAME))

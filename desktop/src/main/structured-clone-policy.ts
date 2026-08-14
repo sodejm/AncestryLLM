@@ -1,4 +1,7 @@
 /** Rejects oversized or prototype-bearing values before bridge-specific parsing. */
+/**
+ * Bounds encoded bytes, nesting, collection entries, and string length at an IPC boundary.
+ */
 export interface StructuredCloneLimits {
   maxBytes: number
   maxDepth: number
@@ -6,8 +9,12 @@ export interface StructuredCloneLimits {
   maxStringCharacters: number
 }
 
+/** Measures strings by encoded IPC payload size rather than JavaScript code units. */
 const byteLength = (value: string): number => Buffer.byteLength(value, 'utf8')
 
+/**
+ * Rejects input that violates bounded structured-clone validation at IPC entry points before any privileged action occurs.
+ */
 export function validateStructuredClone(
   value: unknown,
   limits: Readonly<StructuredCloneLimits>,

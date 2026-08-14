@@ -27,6 +27,9 @@ const DEFAULT_ACTIVE_STREAM_LIMIT = 4
 
 type Timeout = ReturnType<typeof setTimeout>
 
+/**
+ * Exposes only cancellation and flow-controlled event delivery to the renderer stream controller.
+ */
 export interface ChatStreamBridge {
   cancelChatStream(
     request: ChatStreamCancelRequest,
@@ -39,6 +42,9 @@ export interface ChatStreamBridge {
   ): Promise<void>
 }
 
+/**
+ * Configures delivery, ownership, byte limits, deadlines, and retries for one renderer's chat streams.
+ */
 export interface ChatStreamControllerOptions {
   readonly deliver: (delivery: Readonly<ChatEventDelivery>) => void
   readonly isOwnerActive: () => boolean

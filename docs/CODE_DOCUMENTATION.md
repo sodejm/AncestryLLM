@@ -2,11 +2,10 @@
 
 This document defines the repository-wide standard for in-code documentation across all
 first-party source files. The tracked-file inventory and file/module purpose requirements
-are machine-checkable via `make code-docs-check`. Python public-declaration requirements
-are enforced by the same target through an AST-based semantic check and an explicit scoped
-Ruff rule set. TypeScript, JavaScript, and Swift declaration enforcement remains part of
-issue #256 and will follow in the desktop increment; manual review is not the accepted final
-enforcement state.
+are machine-checkable via `make code-docs-check`. Python, TypeScript, JavaScript, and Swift
+declaration requirements are enforced by the same target through language-aware semantic
+checks, an explicit scoped Ruff rule set, and exact-pinned JSDoc validation. Human review
+remains necessary for accuracy, but it is not the enforcement mechanism.
 
 ## Purpose
 
@@ -135,19 +134,29 @@ Run `make code-docs-check` locally or in CI. The command:
 4. Verifies meaningful public class, function, and method docstrings in production Python
    and repository scripts, including literal `__all__` exports plus protocol, abstract,
    override, and migration contracts.
-5. Rejects empty or placeholder purpose statements, unknown file extensions in
+5. Uses the TypeScript compiler AST to require meaningful TSDoc/JSDoc on exported desktop
+   declarations, default exports, re-exports, declaration files, React components, and
+   hooks, while checking an explicit reviewed map of security-sensitive internal
+   declarations.
+6. Runs exact-pinned `eslint-plugin-jsdoc` rules across JavaScript, MJS, TypeScript, and TSX
+   to reject malformed documentation syntax, unknown tags, and missing descriptions.
+7. Requires Swift DocC on every callable declaration in addition to the Swift file-purpose
+   header.
+8. Rejects empty or placeholder purpose statements, unknown file extensions in
    comment-capable categories, and unmapped non-comment formats.
-6. Rejects any permanent documentation-violation baseline.
-7. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
+9. Rejects any permanent documentation-violation baseline.
+10. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
 
 The check is deterministic, offline, and does not call any provider or upload source. It
 ignores a Git-index entry that has been deleted from the working tree, which lets a deletion
 be validated before commit; exact-checkout CI still evaluates every file present in the
 candidate commit.
 
-The Python declaration gate adds no baseline or production-tree ignore. The same issue
-remains open until public/exported declaration coverage for the desktop languages is
-enforced with language-native rules and without blanket ignores.
+The declaration gates add no baseline or production-tree ignore. Desktop tests receive only
+a declaration-level exemption because descriptive test names are their primary contract;
+their module headers remain required. Focused fixtures cover missing, malformed, and
+placeholder documentation, declaration files, React exports, and security-boundary map
+drift.
 
 ## Suppression rules
 
@@ -158,18 +167,25 @@ Suppressions are narrow and justified:
   suppression is required by the current source tree.
 - Disabling an entire source or test tree is rejected.
 - ESLint `eslint-disable` comments for TSDoc/JSDoc rules require an inline justification.
+- Security-sensitive desktop internals are listed by path and declaration name in
+  `SECURITY_BOUNDARY_DECLARATIONS`. Removing or renaming a reviewed boundary without
+  updating that map fails closed, and additions require review rather than a broad pattern
+  exemption.
 
 ## Architecture and security impact
 
 This policy and checker do not change an ancestry application API, CLI command, service
 DTO, provider contract, GEDCOM representation, storage schema, FastAPI contract, or
-Electron boundary. `ARCHITECTURE.md` therefore remains unchanged.
+Electron boundary. They add `make code-docs-check` to the repository verification
+architecture; the runtime application architecture remains unchanged.
 
-The checker adds no runtime dependency or trust boundary. It reads only tracked paths and
-local source text, runs without network access or credentials, and emits path/rule codes
-rather than source contents. Removing the baseline narrows the audit gap: a missing purpose
-statement, unknown format, or undocumented non-comment file now fails closed instead of
-being permanently allowlisted. The repository threat model is otherwise unchanged.
+The checker adds no runtime dependency or application trust boundary. After the locked
+development environment is installed, it reads only tracked paths and local source text,
+runs without provider calls or credentials, and emits path/rule codes rather than source
+contents. `eslint-plugin-jsdoc` is an exact-pinned, lockfile-verified development dependency
+and never ships in the desktop application. The explicit internal-boundary map prevents a
+security-sensitive declaration from silently losing documentation. These controls narrow
+the audit gap without changing the repository's runtime threat model.
 
 ## Reviewer expectations
 

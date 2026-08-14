@@ -1481,6 +1481,7 @@ The Make targets are the command contract:
 | `make lock-check` | Verify `uv` and prove `uv.lock` matches project metadata without installing a group. |
 | `make test` | Pytest regression and characterization suite. |
 | `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
+| `make code-docs-check` | Enforce meaningful Python, TypeScript/JavaScript, and Swift file and declaration documentation, including reviewed desktop security boundaries. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
 | `make typecheck-ty` | Exact ty advisory evaluation over the complete `ancestryllm` source tree, preserving its real status. |
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |

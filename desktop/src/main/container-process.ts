@@ -50,6 +50,9 @@ const CONTAINER_INSPECTION_FORMAT = [
 ].join('')
 const NETWORK_INSPECTION_FORMAT = '{"name":{{json .Name}},"internal":{{json .Internal}}}'
 
+/**
+ * Enumerates stable failures returned by the bounded Docker and Compose process runner.
+ */
 export type HostContainerProcessErrorCode =
   | 'PROCESS_REQUEST_INVALID'
   | 'PROCESS_INPUT_LIMIT'
@@ -69,6 +72,9 @@ const PROCESS_ERROR_MESSAGES: Readonly<Record<HostContainerProcessErrorCode, str
   PROCESS_RESPONSE_INVALID: 'The bounded host process returned an invalid response.',
 }
 
+/**
+ * Reports a stable coded failure from bounded Docker Compose process execution and immutable family-tree mounts without leaking sensitive host details.
+ */
 export class HostContainerProcessError extends Error {
   constructor(readonly code: HostContainerProcessErrorCode) {
     super(PROCESS_ERROR_MESSAGES[code])
@@ -76,6 +82,9 @@ export class HostContainerProcessError extends Error {
   }
 }
 
+/**
+ * Contains the complete prevalidated spawn contract, including resource limits and cancellation.
+ */
 export interface HostProcessRequest {
   readonly executablePath: string
   readonly arguments: readonly string[]
@@ -88,10 +97,16 @@ export interface HostProcessRequest {
   readonly signal?: AbortSignal
 }
 
+/**
+ * Returns only bounded standard output; standard error is retained solely for failure classification.
+ */
 export interface HostProcessResult {
   readonly stdout: string
 }
 
+/**
+ * Runs one validated host request and returns bounded output or a stable coded failure.
+ */
 export type RunHostProcess = (request: HostProcessRequest) => Promise<HostProcessResult>
 
 function processFail(code: HostContainerProcessErrorCode): never {
@@ -102,6 +117,7 @@ function isPositiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0
 }
 
+/** Accepts only a bounded plain environment map without control characters or accessors. */
 function validEnvironment(environment: NodeJS.ProcessEnv): boolean {
   try {
     if (environment === null || typeof environment !== 'object') return false
@@ -127,6 +143,7 @@ function validEnvironment(environment: NodeJS.ProcessEnv): boolean {
   }
 }
 
+/** Rejects malformed or over-limit host process requests before any executable is launched. */
 function validateRequest(request: HostProcessRequest): void {
   if (
     typeof request.executablePath !== 'string'
@@ -150,6 +167,9 @@ function validateRequest(request: HostProcessRequest): void {
   ) processFail('PROCESS_REQUEST_INVALID')
 }
 
+/**
+ * Builds a minimal environment allowlist for bounded Docker Compose process execution and immutable family-tree mounts.
+ */
 export function minimalDockerEnvironment(
   platform: NodeJS.Platform,
   source: NodeJS.ProcessEnv,
@@ -175,6 +195,9 @@ export function minimalDockerEnvironment(
   return environment
 }
 
+/**
+ * Pins Docker subprocesses to no shell, ignored stdin, and captured output for bounded execution.
+ */
 export function dockerProcessSpawnOptions(
   workingDirectory: string,
   environment: NodeJS.ProcessEnv,
@@ -190,6 +213,9 @@ export function dockerProcessSpawnOptions(
   }
 }
 
+/**
+ * Runs one allowlisted host command with bounded output, timeout and cancellation, without invoking a shell.
+ */
 export function runBoundedHostProcess(request: HostProcessRequest): Promise<HostProcessResult> {
   validateRequest(request)
   const input = request.standardInput ?? ''
@@ -400,6 +426,7 @@ function inspectionStrings(value: unknown): string[] {
   return inspectionArray(value, 64).map(inspectionString)
 }
 
+/** Converts untrusted Docker inspection JSON into the bounded realized-container contract. */
 function parseRealizedContainer(value: string): HostRealizedContainer {
   const record = inspectionRecord(value, [
     'containerName', 'image', 'user', 'readOnly', 'capDrop', 'capAdd',
@@ -468,6 +495,7 @@ function parseRealizedContainer(value: string): HostRealizedContainer {
   }
 }
 
+/** Converts untrusted Docker inspection JSON into the exact realized-network contract. */
 function parseRealizedNetwork(value: string): HostRealizedNetwork {
   const record = inspectionRecord(value, ['name', 'internal'])
   return {
@@ -554,6 +582,9 @@ function sortedValue(value: unknown): unknown {
   return value
 }
 
+/**
+ * Serializes the reviewed Compose plan with deterministic key ordering for stdin-only execution.
+ */
 export function serializeHostComposePlan(plan: HostComposePlan): string {
   const labels = { ...plan.labels }
   const services = Object.fromEntries(Object.entries(plan.services).map(([name, service]) => [
@@ -610,6 +641,9 @@ interface DockerCliHostControlOptions {
   readonly platform?: NodeJS.Platform
 }
 
+/**
+ * Owns docker cli host control state transitions while enforcing bounded Docker Compose process execution and immutable family-tree mounts.
+ */
 export class DockerCliHostControl implements HostContainerControlPort {
   private readonly run: RunHostProcess
   private readonly sourceEnvironment: NodeJS.ProcessEnv

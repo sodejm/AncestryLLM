@@ -94,6 +94,7 @@ type SidecarPath =
   | `/api/v1/consents/${string}/revoke`
   | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
+/** Stable failures that may cross from the authenticated sidecar client to main-process callers. */
 export type SidecarClientFailure =
   | 'unavailable'
   | 'request_failed'
@@ -131,6 +132,9 @@ export type SidecarClientFailure =
   | 'chat_event_stream_interrupted'
   | 'chat_event_stream_failed'
 
+/**
+ * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
+ */
 export class SidecarClientError extends Error {
   constructor(readonly reason: SidecarClientFailure) {
     super(reason)
@@ -138,17 +142,24 @@ export class SidecarClientError extends Error {
   }
 }
 
+/** Bounded response captured from one authenticated loopback request. */
 export interface SidecarHttpResponse {
   statusCode: number
   contentType: string
   body: string
 }
 
+/** Method and optional serialized JSON body for an allowlisted sidecar route. */
 export interface SidecarRequestOptions {
   method: 'DELETE' | 'PATCH' | 'POST'
   body?: string
 }
 
+/**
+ * Main-process transport for an authenticated request to the fixed `SidecarPath` set.
+ *
+ * Implementations must preserve the supplied abort signal and return only bounded response data.
+ */
 export type SidecarRequest = (
   session: Readonly<AuthenticatedSidecarSession>,
   path: SidecarPath,
@@ -156,6 +167,11 @@ export type SidecarRequest = (
   options?: Readonly<SidecarRequestOptions>,
 ) => Promise<SidecarHttpResponse>
 
+/**
+ * Typed main-process API over the authenticated loopback sidecar session.
+ *
+ * Every response is schema-validated before it is returned to the desktop-control boundary.
+ */
 export interface SidecarClient {
   getStartupDiagnostics(signal?: AbortSignal): Promise<Readonly<StartupDiagnosticReport>>
   getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest>
@@ -212,6 +228,7 @@ export interface SidecarClient {
   ): Promise<void>
 }
 
+/** Identifies the exact chat run and cursor from which authenticated event delivery resumes. */
 export interface ChatEventStreamRequest {
   readonly schema_version: 1
   readonly session_id: string
@@ -225,14 +242,24 @@ export interface ChatEventFlowControl {
   resume(): void
 }
 
+/** Sidecar shutdown preparation choice: wait for active work or request safe cancellation. */
 export type JobShutdownAction = 'wait' | 'cancel'
 
+/** Successful sidecar acknowledgement that no active jobs block application shutdown. */
 export interface JobShutdownAssessment {
   readonly schema_version: 1
   readonly safe_to_quit: true
   readonly active_jobs: readonly []
 }
 
+/**
+ * Sends one bounded, authenticated request to an allowlisted sidecar route.
+ *
+ * The caller supplies a `SidecarPath`, so arbitrary renderer-controlled URLs
+ * cannot reach this transport. Request and response sizes, deadlines, aborts,
+ * and loopback authority headers are enforced before data crosses the process
+ * boundary.
+ */
 function requestFixedRoute(
   sidecar: Readonly<AuthenticatedSidecarSession>,
   path: SidecarPath,
@@ -376,11 +403,16 @@ function chatStreamPath(
   throw new SidecarClientError('chat_stream_not_found')
 }
 
+/** Accepts only bounded response bodies explicitly labelled as JSON. */
 function validJsonResponse(response: Readonly<SidecarHttpResponse>): boolean {
   return /^application\/json(?:\s*;|$)/i.test(response.contentType)
     && Buffer.byteLength(response.body, 'utf8') <= MAX_RESPONSE_BYTES
 }
 
+/**
+ * Parses an authenticated sidecar response through its exact shared-contract
+ * validator and collapses malformed or unexpected data to a stable error.
+ */
 function parseJson<T>(
   response: Readonly<SidecarHttpResponse>,
   parse: (value: unknown) => { ok: boolean; data?: Readonly<T> },
@@ -567,6 +599,10 @@ function parseJobStreamFailure(payload: unknown): SidecarClientError {
   return new SidecarClientError('job_event_replay_expired')
 }
 
+/**
+ * Streams a single authenticated job-event route with bounded buffering,
+ * monotonic sequence validation, inactivity deadlines, and terminal framing.
+ */
 function streamFixedJobEvents(
   sidecar: Readonly<AuthenticatedSidecarSession>,
   subscription: JobEventSubscriptionRequest,
@@ -782,6 +818,10 @@ function streamFixedJobEvents(
   })
 }
 
+/**
+ * Streams a single authenticated chat-event route while enforcing bounded
+ * framing, monotonic cursors, backpressure, cancellation, and terminal state.
+ */
 function streamFixedChatEvents(
   sidecar: Readonly<AuthenticatedSidecarSession>,
   subscription: Readonly<ChatEventStreamRequest>,
@@ -1052,6 +1092,12 @@ function parseJobShutdownAssessment(
   }
 }
 
+/**
+ * Binds the typed client to a current authenticated session and fixed-route transport.
+ *
+ * The client applies request cancellation, response schema checks, stable error mapping, and
+ * bounded inactivity deadlines before returning data to main-process callers.
+ */
 export function createSidecarClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
@@ -1309,6 +1355,7 @@ export function createSidecarClient(dependencies: Readonly<{
   })
 }
 
+/** Backwards-compatible factory for the full authenticated sidecar client contract. */
 export function createSidecarCapabilitiesClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest

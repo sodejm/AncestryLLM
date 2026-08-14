@@ -120,15 +120,26 @@ function parseCommand(arguments_: readonly string[]): LocalRuntimeCliRequest {
   throw new Error('Invalid local runtime command')
 }
 
+/**
+ * Rejects input that violates the privileged local runtime control boundary before any privileged action occurs.
+ */
 export function isLocalRuntimeCliRequest(arguments_: readonly string[]): boolean {
   return arguments_.includes(commandMarker)
 }
 
+/**
+ * Writes the stable JSON failure for a second local-runtime process and returns status 1.
+ */
 export function writeConcurrentLocalRuntimeCliFailure(write: (line: string) => void): number {
   write(`${JSON.stringify(concurrentProcessError())}\n`)
   return 1
 }
 
+/**
+ * Parses one privileged local-runtime request, writes exactly one JSON result, and returns a stable CLI status.
+ *
+ * Status 0 denotes success, 1 denotes an operational failure, and 2 denotes invalid arguments.
+ */
 export async function runLocalRuntimeCli(
   arguments_: readonly string[],
   control: LocalRuntimeControlPort,

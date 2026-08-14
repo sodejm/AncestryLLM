@@ -87,7 +87,7 @@ record the initial expected failure as evidence rather than committing a
 deliberately failing test.
 
 Before a pull request run
-`make test lint typecheck security sbom package workflow-audit`. Describe
+`make test code-docs-check lint typecheck security sbom package workflow-audit`. Describe
 scope, privacy impact, threat-model changes, migration impact, and exact test
 evidence. Do not commit real GEDCOM, RootsMagic, database, backup, report, log,
 prompt/response, secrets, or person details; use clearly fictional fixtures.

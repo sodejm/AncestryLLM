@@ -9,6 +9,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const require = createRequire(import.meta.url)
 const defaultDesktopRoot = fileURLToPath(new URL('../', import.meta.url))
 
+/**
+ * Constructs a no-shell Playwright invocation limited to the packaged desktop suite.
+ * @param {string[]} argv - Additional Playwright arguments passed without shell interpretation.
+ * @param {{cliPath?: string, desktopRoot?: string, executable?: string}} [options] - Injectable executable and paths for tests.
+ * @returns {Readonly<{executable: string, args: readonly string[], cwd: string, shell: false}>} Validated child-process contract.
+ */
 export function packagedTestInvocation(argv, {
   cliPath = require.resolve('@playwright/test/cli'),
   desktopRoot = defaultDesktopRoot,
@@ -29,6 +35,12 @@ export function packagedTestInvocation(argv, {
   })
 }
 
+/**
+ * Runs the packaged Playwright suite without a shell and preserves its actual exit status.
+ * @param {string[]} argv - Additional Playwright arguments passed verbatim.
+ * @param {{spawnSyncImpl?: Function, cliPath?: string, desktopRoot?: string, executable?: string}} [options] - Injectable runner and invocation paths for tests.
+ * @returns {number} Integer child-process exit code; spawn and signal failures throw.
+ */
 export function runPackagedTests(argv, {
   spawnSyncImpl = spawnSync,
   ...invocationOptions

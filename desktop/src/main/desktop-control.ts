@@ -36,14 +36,26 @@ import {
   type SidecarClient,
 } from './sidecar-client'
 
+/**
+ * Re-exports the in-memory preference adapter and its optimistic-concurrency error for tests.
+ */
 export { MemoryPreferencesStore, PreferencesConflictError } from './preferences-store'
+/**
+ * Re-exports the preference persistence port consumed by the desktop control bridge.
+ */
 export type { PreferencesStore } from './preferences-store'
 
+/**
+ * Defines the narrow supervisor operations exposed to desktop control orchestration.
+ */
 export interface SidecarControlPort {
   diagnostics(): Readonly<SidecarDiagnostics>
   retry(): Promise<boolean>
 }
 
+/**
+ * Exposes sidecar-backed desktop operations while reserving local-runtime control for its dedicated adapter.
+ */
 export type SidecarDesktopBridge = Omit<
   MainDesktopBridge,
   'getLocalRuntimeStatus' | 'previewLocalRuntime' | 'applyLocalRuntime'
@@ -155,6 +167,11 @@ function chatFailure<T>(cause: unknown): BridgeResult<T> {
   return failure('CHAT_STREAM_SERVICE_UNAVAILABLE', 'Chat streaming is unavailable.', 'Retry the private service or restart AncestryLLM.')
 }
 
+/**
+ * Creates the main-process application bridge and translates sidecar failures into sanitized renderer results.
+ *
+ * Mutating calls remain blocked until startup diagnostics prove every required component ready.
+ */
 export function createDesktopControlBridge(dependencies: Readonly<{
   appInfo: Readonly<AppInfo>
   supervisor: SidecarControlPort

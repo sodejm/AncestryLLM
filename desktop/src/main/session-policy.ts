@@ -7,6 +7,9 @@ interface PermissionTarget {
   on(event: 'will-download', handler: (event: { preventDefault(): void }, item: { cancel(): void }) => void): void
 }
 
+/**
+ * Denies renderer permissions, device access, display capture, and downloads for the lifetime of the session.
+ */
 export function installSessionPolicy(target: PermissionTarget): void {
   target.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   target.setPermissionCheckHandler(() => false)

@@ -1,11 +1,29 @@
 /** Defines the versioned, serializable contract shared by all desktop processes. */
+/**
+ * Identifies the cross-process protocol compatibility revision required by both sides of the bridge.
+ */
 export const DESKTOP_PROTOCOL_VERSION = '1' as const
 
+/**
+ * Constrains desktop color scheme values exchanged for the versioned desktop IPC protocol.
+ */
 export type DesktopColorScheme = 'system' | 'light' | 'dark'
+/**
+ * Maps the versioned desktop IPC protocol operations to stable Electron IPC channel names.
+ */
 export type DesktopBuildChannel = 'development' | 'packaged'
+/**
+ * Constrains startup state values exchanged for desktop startup readiness and diagnostics.
+ */
 export type StartupState = 'starting' | 'ready' | 'degraded' | 'stopped'
+/**
+ * Constrains the stable startup failure taxonomy exposed for desktop startup readiness and diagnostics.
+ */
 export type StartupFailure = 'startup_failed' | 'startup_timeout' | 'incompatible_build' | 'crash_loop' | null
 
+/**
+ * Lists the allowlisted startup diagnostic components accepted by desktop startup readiness and diagnostics.
+ */
 export const startupDiagnosticComponents = Object.freeze([
   'configuration',
   'sqlcipher',
@@ -13,12 +31,30 @@ export const startupDiagnosticComponents = Object.freeze([
   'workspace',
 ] as const)
 
+/**
+ * Defines the serializable startup diagnostic component name snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export type StartupDiagnosticComponentName = typeof startupDiagnosticComponents[number]
+/**
+ * Defines the serializable startup diagnostic component status snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export type StartupDiagnosticComponentStatus = 'ready' | 'warning' | 'blocked'
+/**
+ * Defines the serializable startup diagnostic report status snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export type StartupDiagnosticReportStatus = 'ready' | 'degraded'
+/**
+ * Constrains startup operating system values exchanged for desktop startup readiness and diagnostics.
+ */
 export type StartupOperatingSystem = 'linux' | 'macos' | 'windows' | 'unsupported'
+/**
+ * Constrains startup architecture values exchanged for desktop startup readiness and diagnostics.
+ */
 export type StartupArchitecture = 'x64' | 'arm64' | 'unsupported'
 
+/**
+ * Defines the serializable startup diagnostic component snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export interface StartupDiagnosticComponent {
   component: StartupDiagnosticComponentName
   status: StartupDiagnosticComponentStatus
@@ -29,6 +65,9 @@ export interface StartupDiagnosticComponent {
   blocks_mutations: boolean
 }
 
+/**
+ * Defines the serializable startup diagnostic report snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export interface StartupDiagnosticReport {
   schema_version: 1
   status: StartupDiagnosticReportStatus
@@ -39,12 +78,18 @@ export interface StartupDiagnosticReport {
   components: readonly StartupDiagnosticComponent[]
 }
 
+/**
+ * Constrains app info values exchanged for the versioned desktop IPC protocol.
+ */
 export interface AppInfo {
   applicationName: 'AncestryLLM'
   appVersion: string
   buildChannel: DesktopBuildChannel
 }
 
+/**
+ * Defines the serializable startup diagnostics snapshot exposed for desktop startup readiness and diagnostics.
+ */
 export interface StartupDiagnostics {
   state: StartupState
   failure: StartupFailure
@@ -53,12 +98,18 @@ export interface StartupDiagnostics {
   report: Readonly<StartupDiagnosticReport> | null
 }
 
+/**
+ * Constrains capability action values exchanged for advertised application capabilities.
+ */
 export interface CapabilityAction {
   dispatch_key: string
   name: string
   summary: string
 }
 
+/**
+ * Constrains capability module values exchanged for advertised application capabilities.
+ */
 export interface CapabilityModule {
   module_id: string
   name: string
@@ -66,6 +117,9 @@ export interface CapabilityModule {
   actions: readonly CapabilityAction[]
 }
 
+/**
+ * Defines the serializable capability manifest snapshot exposed for advertised application capabilities.
+ */
 export interface CapabilityManifest {
   api: Readonly<{
     namespace: '/api/v1'
@@ -86,6 +140,9 @@ export interface CapabilityManifest {
   }>
 }
 
+/**
+ * Lists the allowlisted local preferences accepted by local desktop preferences.
+ */
 export interface LocalPreferences {
   colorScheme: DesktopColorScheme
   reducedMotion: boolean
@@ -94,6 +151,9 @@ export interface LocalPreferences {
   revision: number
 }
 
+/**
+ * Constrains preference update values exchanged for local desktop preferences.
+ */
 export type PreferenceUpdate = Readonly<{
   expectedRevision: number
   colorScheme?: DesktopColorScheme
@@ -101,6 +161,9 @@ export type PreferenceUpdate = Readonly<{
   onboardingCompleted?: boolean
 }>
 
+/**
+ * Lists the allowlisted application setting keys accepted by validated application settings.
+ */
 export const applicationSettingKeys = Object.freeze([
   'providers.default',
   'limits.max_query_rows',
@@ -109,16 +172,31 @@ export const applicationSettingKeys = Object.freeze([
   'limits.provider_timeout_seconds',
 ] as const)
 
+/**
+ * Constrains application setting key values exchanged for validated application settings.
+ */
 export type ApplicationSettingKey = typeof applicationSettingKeys[number]
+/**
+ * Constrains application setting value values exchanged for validated application settings.
+ */
 export type ApplicationSettingValue = string | number
+/**
+ * Constrains application setting type values exchanged for validated application settings.
+ */
 export type ApplicationSettingType = 'string' | 'integer' | 'number'
 
+/**
+ * Constrains application setting validation values exchanged for validated application settings.
+ */
 export interface ApplicationSettingValidation {
   allowed_values: readonly string[]
   minimum: number | null
   maximum: number | null
 }
 
+/**
+ * Constrains application setting values exchanged for validated application settings.
+ */
 export interface ApplicationSetting {
   key: ApplicationSettingKey
   label: string
@@ -131,18 +209,27 @@ export interface ApplicationSetting {
   sensitive: false
 }
 
+/**
+ * Defines the serializable application settings snapshot exposed for validated application settings.
+ */
 export interface ApplicationSettings {
   schema_version: 1
   revision: number
   fields: readonly ApplicationSetting[]
 }
 
+/**
+ * Defines the serializable application settings patch snapshot exposed for validated application settings.
+ */
 export type ApplicationSettingsPatch = Readonly<{
   schema_version: 1
   expected_revision: number
   changes: Readonly<Partial<Record<ApplicationSettingKey, ApplicationSettingValue>>>
 }>
 
+/**
+ * Lists the allowlisted secret references accepted by keyring-backed secret references without exposing secret values.
+ */
 export const secretReferences = Object.freeze([
   'openai.api_key',
   'anthropic.api_key',
@@ -152,14 +239,29 @@ export const secretReferences = Object.freeze([
   'database.master_key',
 ] as const)
 
+/**
+ * Constrains secret reference values exchanged for keyring-backed secret references without exposing secret values.
+ */
 export type SecretReference = typeof secretReferences[number]
+/**
+ * Defines the validated secret reference request payload accepted for keyring-backed secret references without exposing secret values.
+ */
 export type SecretReferenceRequest = Readonly<{ reference: SecretReference }>
+/**
+ * Defines the validated secret set request payload accepted for keyring-backed secret references without exposing secret values.
+ */
 export type SecretSetRequest = Readonly<{ reference: SecretReference; value: string }>
+/**
+ * Defines the serializable secret status snapshot exposed for keyring-backed secret references without exposing secret values.
+ */
 export interface SecretStatus {
   reference: SecretReference
   status: 'present' | 'missing' | 'unavailable'
 }
 
+/**
+ * Lists the allowlisted provider ids accepted by provider configuration and explicit cloud selection.
+ */
 export const providerIds = Object.freeze([
   'ollama',
   'openai',
@@ -168,8 +270,14 @@ export const providerIds = Object.freeze([
   'openrouter',
 ] as const)
 
+/**
+ * Defines an opaque provider id that may cross the bridge without exposing host paths.
+ */
 export type ProviderId = typeof providerIds[number]
 
+/**
+ * Constrains provider data classes values exchanged for provider configuration and explicit cloud selection.
+ */
 export const providerDataClasses = Object.freeze([
   'public_genealogy',
   'deceased_person',
@@ -180,20 +288,35 @@ export const providerDataClasses = Object.freeze([
   'government_identifier',
 ] as const)
 
+/**
+ * Constrains provider data class values exchanged for provider configuration and explicit cloud selection.
+ */
 export type ProviderDataClass = typeof providerDataClasses[number]
 
+/**
+ * Lists the allowlisted chat purposes accepted by flow-controlled chat sessions and events.
+ */
 export const chatPurposes = Object.freeze([
   'genealogy_analysis',
   'source_analysis',
   'writing_assistance',
 ] as const)
 
+/**
+ * Constrains chat purpose values exchanged for flow-controlled chat sessions and events.
+ */
 export type ChatPurpose = typeof chatPurposes[number]
+/**
+ * Constrains the stable consent warning code taxonomy exposed for explicit cloud-data consent.
+ */
 export type ConsentWarningCode =
   | 'LIVING_PERSON_DATA_INCLUDED'
   | 'REMOTE_PROVIDER_SELECTED'
   | 'REMOTE_RETENTION_ENABLED'
 
+/**
+ * Constrains provider profile summary values exchanged for provider configuration and explicit cloud selection.
+ */
 export interface ProviderProfileSummary {
   name: string
   provider_id: ProviderId
@@ -204,6 +327,9 @@ export interface ProviderProfileSummary {
   enabled: boolean
 }
 
+/**
+ * Constrains consent grant summary values exchanged for explicit cloud-data consent.
+ */
 export interface ConsentGrantSummary {
   name: string
   provider_profile_name: string
@@ -217,6 +343,9 @@ export interface ConsentGrantSummary {
   active: boolean
 }
 
+/**
+ * Defines the serializable provider configuration snapshot exposed for provider configuration and explicit cloud selection.
+ */
 export interface ProviderConfiguration {
   schema_version: 1
   revision: string
@@ -224,6 +353,9 @@ export interface ProviderConfiguration {
   consents: readonly ConsentGrantSummary[]
 }
 
+/**
+ * Defines the validated provider profile create request payload accepted for provider configuration and explicit cloud selection.
+ */
 export type ProviderProfileCreateRequest = Readonly<{
   schema_version: 1
   expected_revision: string
@@ -234,12 +366,18 @@ export type ProviderProfileCreateRequest = Readonly<{
   endpoint_identity_sha256: string
 }>
 
+/**
+ * Defines the validated provider endpoint validation request payload accepted for provider configuration and explicit cloud selection.
+ */
 export type ProviderEndpointValidationRequest = Readonly<{
   schema_version: 1
   provider_id: ProviderId
   endpoint: string
 }>
 
+/**
+ * Constrains provider endpoint validation values exchanged for provider configuration and explicit cloud selection.
+ */
 export interface ProviderEndpointValidation {
   schema_version: 1
   status: 'reachable'
@@ -248,6 +386,9 @@ export interface ProviderEndpointValidation {
   destination_digest: string
 }
 
+/**
+ * Defines the validated consent preview request payload accepted for explicit cloud-data consent.
+ */
 export type ConsentPreviewRequest = Readonly<{
   schema_version: 1
   provider_profile_name: string
@@ -259,6 +400,9 @@ export type ConsentPreviewRequest = Readonly<{
   retain_payloads: boolean
 }>
 
+/**
+ * Defines the serializable consent preview snapshot exposed for explicit cloud-data consent.
+ */
 export interface ConsentPreview {
   schema_version: 1
   provider_profile_name: string
@@ -272,6 +416,9 @@ export interface ConsentPreview {
   warning_codes: readonly ConsentWarningCode[]
 }
 
+/**
+ * Defines the validated consent create request payload accepted for explicit cloud-data consent.
+ */
 export type ConsentCreateRequest = Readonly<{
   schema_version: 1
   expected_revision: string
@@ -279,12 +426,18 @@ export type ConsentCreateRequest = Readonly<{
   preview: Readonly<ConsentPreview>
 }>
 
+/**
+ * Defines the validated consent revoke request payload accepted for explicit cloud-data consent.
+ */
 export type ConsentRevokeRequest = Readonly<{
   schema_version: 1
   expected_revision: string
   name: string
 }>
 
+/**
+ * Lists the allowlisted file grant purposes accepted by capability-scoped local file access.
+ */
 export const fileGrantPurposes = Object.freeze([
   'gedcom-read',
   'rootsmagic-read',
@@ -293,14 +446,38 @@ export const fileGrantPurposes = Object.freeze([
   'markdown-write',
 ] as const)
 
+/**
+ * Constrains file grant purpose values exchanged for capability-scoped local file access.
+ */
 export type FileGrantPurpose = typeof fileGrantPurposes[number]
+/**
+ * Constrains file read purpose values exchanged for validated local file metadata and formats.
+ */
 export type FileReadPurpose = Extract<FileGrantPurpose, 'gedcom-read' | 'rootsmagic-read'>
+/**
+ * Constrains file write purpose values exchanged for validated local file metadata and formats.
+ */
 export type FileWritePurpose = Exclude<FileGrantPurpose, FileReadPurpose>
+/**
+ * Constrains file grant access values exchanged for capability-scoped local file access.
+ */
 export type FileGrantAccess = 'read' | 'write'
+/**
+ * Constrains file format values exchanged for validated local file metadata and formats.
+ */
 export type FileFormat = 'gedcom' | 'rootsmagic' | 'json' | 'markdown'
+/**
+ * Constrains file validation values exchanged for validated local file metadata and formats.
+ */
 export type FileValidation = 'validated-input' | 'new-output' | 'replacement-confirmed'
+/**
+ * Defines an opaque file grant id that may cross the bridge without exposing host paths.
+ */
 export type FileGrantId = `grt_${string}`
 
+/**
+ * Constrains file metadata values exchanged for validated local file metadata and formats.
+ */
 export interface FileMetadata {
   displayName: string
   format: FileFormat
@@ -308,12 +485,18 @@ export interface FileMetadata {
   validation: FileValidation
 }
 
+/**
+ * Constrains file grant scope values exchanged for capability-scoped local file access.
+ */
 export interface FileGrantScope {
   originatingWindow: 'requesting-window'
   lifetime: 'app-session'
   redemption: 'single-use'
 }
 
+/**
+ * Constrains file grant values exchanged for capability-scoped local file access.
+ */
 export interface FileGrant {
   grantId: FileGrantId
   purpose: FileGrantPurpose
@@ -322,8 +505,17 @@ export interface FileGrant {
   metadata: Readonly<FileMetadata>
 }
 
+/**
+ * Defines the validated open file grant request payload accepted for capability-scoped local file access.
+ */
 export interface OpenFileGrantRequest { purpose: FileReadPurpose }
+/**
+ * Defines the validated save file grant request payload accepted for capability-scoped local file access.
+ */
 export interface SaveFileGrantRequest { purpose: FileWritePurpose; suggestedName: string }
+/**
+ * Constrains file grant revocation values exchanged for capability-scoped local file access.
+ */
 export interface FileGrantRevocation { revoked: true }
 
 /** Mirrors the transport-neutral Python application artifact contract. */
@@ -364,6 +556,9 @@ export interface ChatCapability {
   stream_replay_max_bytes: 262_144
 }
 
+/**
+ * Defines the validated chat session create request payload accepted for flow-controlled chat sessions and events.
+ */
 export type ChatSessionCreateRequest = Readonly<{
   schema_version: 1
   provider_profile_name: string
@@ -373,11 +568,17 @@ export type ChatSessionCreateRequest = Readonly<{
   consent_name: string | null
 }>
 
+/**
+ * Defines the validated chat session request payload accepted for flow-controlled chat sessions and events.
+ */
 export type ChatSessionRequest = Readonly<{
   schema_version: 1
   session_id: string
 }>
 
+/**
+ * Constrains chat session values exchanged for flow-controlled chat sessions and events.
+ */
 export interface ChatSession {
   schema_version: 1
   session_id: string
@@ -393,12 +594,18 @@ export interface ChatSession {
   payload_retention: false
 }
 
+/**
+ * Constrains chat session closure values exchanged for flow-controlled chat sessions and events.
+ */
 export interface ChatSessionClosure {
   schema_version: 1
   session_id: string
   closed: true
 }
 
+/**
+ * Lists the allowlisted chat event types accepted by flow-controlled chat sessions and events.
+ */
 export const chatEventTypes = Object.freeze([
   'active',
   'first-token',
@@ -409,9 +616,18 @@ export const chatEventTypes = Object.freeze([
   'failed',
 ] as const)
 
+/**
+ * Constrains chat event type values exchanged for flow-controlled chat sessions and events.
+ */
 export type ChatEventType = typeof chatEventTypes[number]
+/**
+ * Constrains chat stream state values exchanged for flow-controlled chat sessions and events.
+ */
 export type ChatStreamState = 'active' | 'cancelling' | 'completed' | 'interrupted' | 'failed'
 
+/**
+ * Constrains chat event payload values exchanged for flow-controlled chat sessions and events.
+ */
 export interface ChatEventPayload {
   text: string | null
   code: string | null
@@ -431,6 +647,9 @@ export interface ChatEvent {
   payload: Readonly<ChatEventPayload>
 }
 
+/**
+ * Defines the validated chat stream start request payload accepted for flow-controlled chat sessions and events.
+ */
 export type ChatStreamStartRequest = Readonly<{
   schema_version: 1
   session_id: string
@@ -441,12 +660,18 @@ export type ChatStreamStartRequest = Readonly<{
   max_safe_retries: number
 }>
 
+/**
+ * Defines the validated chat stream cancel request payload accepted for flow-controlled chat sessions and events.
+ */
 export type ChatStreamCancelRequest = Readonly<{
   schema_version: 1
   session_id: string
   run_id: string
 }>
 
+/**
+ * Defines the validated chat stream ack request payload accepted for flow-controlled chat sessions and events.
+ */
 export type ChatStreamAckRequest = Readonly<{
   schema_version: 1
   session_id: string
@@ -454,6 +679,9 @@ export type ChatStreamAckRequest = Readonly<{
   through_sequence: number
 }>
 
+/**
+ * Constrains chat stream run values exchanged for flow-controlled chat sessions and events.
+ */
 export interface ChatStreamRun {
   schema_version: 1
   session_id: string
@@ -463,6 +691,9 @@ export interface ChatStreamRun {
   terminal: boolean
 }
 
+/**
+ * Defines an ordered chat stream acknowledgement message used for flow-controlled chat sessions and events.
+ */
 export interface ChatStreamAcknowledgement {
   schema_version: 1
   session_id: string
@@ -471,6 +702,9 @@ export interface ChatStreamAcknowledgement {
   acknowledged: true
 }
 
+/**
+ * Defines an ordered chat event delivery message used for flow-controlled chat sessions and events.
+ */
 export type ChatEventDelivery =
   | Readonly<{
     schema_version: 1
@@ -495,6 +729,9 @@ export type ChatEventDelivery =
     error: Readonly<BridgeError>
   }>
 
+/**
+ * Lists the allowlisted job states accepted by long-running job progress and cancellation.
+ */
 export const jobStates = Object.freeze([
   'queued',
   'running',
@@ -505,9 +742,18 @@ export const jobStates = Object.freeze([
   'cancelled',
 ] as const)
 
+/**
+ * Constrains job state values exchanged for long-running job progress and cancellation.
+ */
 export type JobState = typeof jobStates[number]
+/**
+ * Constrains job event kind values exchanged for long-running job progress and cancellation.
+ */
 export type JobEventKind = 'snapshot' | 'progress' | 'cancellation' | 'terminal'
 
+/**
+ * Constrains job progress values exchanged for long-running job progress and cancellation.
+ */
 export interface JobProgress {
   schema_version: 1
   operation: string
@@ -526,6 +772,9 @@ export interface JobArtifactRef {
   sha256: string | null
 }
 
+/**
+ * Constrains job snapshot values exchanged for long-running job progress and cancellation.
+ */
 export interface JobSnapshot {
   schema_version: 1
   sequence: number
@@ -547,6 +796,9 @@ export interface JobSnapshot {
   cancellation_deferred_by: string | null
 }
 
+/**
+ * Defines an ordered job event message used for long-running job progress and cancellation.
+ */
 export interface JobEvent {
   schema_version: 1
   sequence: number
@@ -555,16 +807,25 @@ export interface JobEvent {
   snapshot: Readonly<JobSnapshot>
 }
 
+/**
+ * Constrains job list values exchanged for long-running job progress and cancellation.
+ */
 export interface JobList {
   schema_version: 1
   jobs: readonly Readonly<JobSnapshot>[]
 }
 
+/**
+ * Defines the validated job request payload accepted for long-running job progress and cancellation.
+ */
 export type JobRequest = Readonly<{
   schema_version: 1
   job_id: string
 }>
 
+/**
+ * Defines the validated job event subscription request payload accepted for long-running job progress and cancellation.
+ */
 export type JobEventSubscriptionRequest = Readonly<{
   schema_version: 1
   subscription_id: string
@@ -572,11 +833,17 @@ export type JobEventSubscriptionRequest = Readonly<{
   after: number
 }>
 
+/**
+ * Defines the validated job event unsubscription request payload accepted for long-running job progress and cancellation.
+ */
 export type JobEventUnsubscriptionRequest = Readonly<{
   schema_version: 1
   subscription_id: string
 }>
 
+/**
+ * Constrains job event subscription values exchanged for long-running job progress and cancellation.
+ */
 export interface JobEventSubscription {
   schema_version: 1
   subscription_id: string
@@ -584,12 +851,18 @@ export interface JobEventSubscription {
   subscribed: true
 }
 
+/**
+ * Constrains job event unsubscription values exchanged for long-running job progress and cancellation.
+ */
 export interface JobEventUnsubscription {
   schema_version: 1
   subscription_id: string
   unsubscribed: true
 }
 
+/**
+ * Defines an ordered job event delivery message used for long-running job progress and cancellation.
+ */
 export type JobEventDelivery =
   | Readonly<{
     schema_version: 1
@@ -608,6 +881,9 @@ export type JobEventDelivery =
     error: Readonly<BridgeError>
   }>
 
+/**
+ * Lists the allowlisted local runtime operations accepted by reviewed local runtime lifecycle operations.
+ */
 export const localRuntimeOperations = Object.freeze([
   'setup',
   'start',
@@ -617,20 +893,35 @@ export const localRuntimeOperations = Object.freeze([
   'uninstall-delete',
 ] as const)
 
+/**
+ * Constrains local runtime operation values exchanged for reviewed local runtime lifecycle operations.
+ */
 export type LocalRuntimeOperation = typeof localRuntimeOperations[number]
+/**
+ * Constrains local runtime state values exchanged for reviewed local runtime lifecycle operations.
+ */
 export type LocalRuntimeState = 'not-installed' | 'stopped' | 'ready' | 'unhealthy'
 
+/**
+ * Defines the validated local runtime request payload accepted for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeRequest {
   schema_version: 1
   operation: LocalRuntimeOperation
   offline: boolean
 }
 
+/**
+ * Defines the validated local runtime apply request payload accepted for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeApplyRequest extends LocalRuntimeRequest {
   plan_revision: string
   confirmation: string
 }
 
+/**
+ * Defines the serializable local runtime status snapshot exposed for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeStatus {
   schema_version: 1
   state: LocalRuntimeState
@@ -660,6 +951,9 @@ export interface LocalRuntimeStatus {
   }>
 }
 
+/**
+ * Defines the serializable local runtime artifact review snapshot exposed for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeArtifactReview {
   name: string
   version: string
@@ -673,6 +967,9 @@ export interface LocalRuntimeArtifactReview {
   license_sha256: string
 }
 
+/**
+ * Defines the serializable local runtime review snapshot exposed for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeReview {
   artifacts: readonly Readonly<LocalRuntimeArtifactReview>[]
   vm_image: Readonly<{
@@ -697,6 +994,9 @@ export interface LocalRuntimeReview {
   }>
 }
 
+/**
+ * Defines the serializable local runtime preview snapshot exposed for reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimePreview {
   schema_version: 1
   operation: LocalRuntimeOperation
@@ -710,6 +1010,9 @@ export interface LocalRuntimePreview {
   review: Readonly<LocalRuntimeReview>
 }
 
+/**
+ * Defines the serializable local runtime result returned after reviewed local runtime lifecycle operations.
+ */
 export interface LocalRuntimeResult {
   schema_version: 1
   operation: LocalRuntimeOperation
@@ -717,27 +1020,42 @@ export interface LocalRuntimeResult {
   code: string
 }
 
+/**
+ * Defines the validated open external link request payload accepted for user-confirmed external navigation.
+ */
 export type OpenExternalLinkRequest = Readonly<{
   schema_version: 1
   destination: string
 }>
 
+/**
+ * Defines the serializable open external link result returned after user-confirmed external navigation.
+ */
 export interface OpenExternalLinkResult {
   schema_version: 1
   destination: string
   status: 'opened' | 'cancelled'
 }
 
+/**
+ * Defines the validated copy text request payload accepted for explicit clipboard writes.
+ */
 export type CopyTextRequest = Readonly<{
   schema_version: 1
   text: string
 }>
 
+/**
+ * Defines the serializable copy text result returned after explicit clipboard writes.
+ */
 export interface CopyTextResult {
   schema_version: 1
   copied: true
 }
 
+/**
+ * Defines the callable bridge error code surface exposed by the isolated preload boundary.
+ */
 export type BridgeErrorCode =
   | 'INVALID_REQUEST'
   | 'UNAUTHORIZED_SENDER'
@@ -808,16 +1126,25 @@ export type BridgeErrorCode =
   | 'CHAT_STREAM_EVENT_INVALID'
   | 'INTERNAL_ERROR'
 
+/**
+ * Constrains the stable bridge error taxonomy exposed for the versioned preload bridge contract.
+ */
 export interface BridgeError {
   code: BridgeErrorCode
   message: string
   remediation: string
 }
 
+/**
+ * Defines the serializable bridge result returned after the versioned preload bridge contract.
+ */
 export type BridgeResult<T> =
   | Readonly<{ ok: true; protocolVersion: typeof DESKTOP_PROTOCOL_VERSION; data: Readonly<T> }>
   | Readonly<{ ok: false; protocolVersion: typeof DESKTOP_PROTOCOL_VERSION; error: Readonly<BridgeError> }>
 
+/**
+ * Defines the callable ancestry bridge surface exposed by the isolated preload boundary.
+ */
 export interface AncestryBridge {
   getAppInfo(): Promise<BridgeResult<AppInfo>>
   getStartupDiagnostics(): Promise<BridgeResult<StartupDiagnostics>>
@@ -859,6 +1186,9 @@ export interface AncestryBridge {
   onJobEvent(listener: (delivery: Readonly<JobEventDelivery>) => void): () => void
 }
 
+/**
+ * Maps the versioned desktop IPC protocol operations to stable Electron IPC channel names.
+ */
 export const desktopChannels = Object.freeze({
   getAppInfo: 'ancestry:desktop:get-app-info',
   getStartupDiagnostics: 'ancestry:desktop:get-startup-diagnostics',
@@ -898,6 +1228,9 @@ export const desktopChannels = Object.freeze({
   unsubscribeJobEvents: 'ancestry:desktop:unsubscribe-job-events',
 } as const)
 
+/**
+ * Maps the versioned desktop IPC protocol operations to stable Electron IPC channel names.
+ */
 export const desktopEventChannels = Object.freeze({
   chatEventBatch: 'ancestry:desktop:chat-event-batch',
   jobEvent: 'ancestry:desktop:job-event',

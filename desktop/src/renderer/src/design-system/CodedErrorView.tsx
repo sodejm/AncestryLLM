@@ -19,6 +19,7 @@ function normalizedErrorCode(code: string): string {
   return STABLE_CODE.test(code) ? code : 'UNEXPECTED_ERROR'
 }
 
+/** Renders a live-region error with a normalized public code and an optional recovery action. */
 export function CodedErrorView({ code, title, recovery, actionLabel, onAction, focusRef }: CodedErrorViewProps) {
   return <div ref={focusRef} tabIndex={focusRef ? -1 : undefined} role="alert" className="error coded-error">
     <AlertTriangle aria-hidden="true" />

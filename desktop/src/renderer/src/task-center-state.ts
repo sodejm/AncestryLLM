@@ -4,6 +4,7 @@ import type { JobEvent, JobSnapshot, JobState } from '../../shared-contract/desk
 
 const terminalStates: ReadonlySet<JobState> = new Set(['completed', 'failed', 'cancelled'])
 
+/** Immutable job snapshot, selection, and event-subscription state for the task center. */
 export interface TaskCenterState {
   jobs: Readonly<Record<string, Readonly<JobSnapshot>>>
   order: readonly string[]
@@ -12,11 +13,13 @@ export interface TaskCenterState {
   announcement: string | null
 }
 
+/** Reducer actions produced by job snapshots, deliveries, selection, and subscription changes. */
 export type TaskCenterAction =
   | Readonly<{ type: 'loaded'; jobs: readonly Readonly<JobSnapshot>[] }>
   | Readonly<{ type: 'refreshed'; snapshot: Readonly<JobSnapshot> }>
   | Readonly<{ type: 'event'; event: Readonly<JobEvent> }>
 
+/** Empty task-center state before the first job snapshot is loaded. */
 export const initialTaskCenterState: Readonly<TaskCenterState> = Object.freeze({
   jobs: Object.freeze({}),
   order: Object.freeze([]),
@@ -129,6 +132,9 @@ const replaceSnapshot = (
   }
 }
 
+/**
+ * Applies deterministic task center reducer transitions without performing bridge side effects.
+ */
 export const taskCenterReducer = (
   state: Readonly<TaskCenterState>,
   action: TaskCenterAction,

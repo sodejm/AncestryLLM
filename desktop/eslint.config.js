@@ -1,14 +1,26 @@
 /** Defines blocking lint rules for the desktop TypeScript and React workspace. */
 import js from '@eslint/js'
 import globals from 'globals'
+import jsdoc from 'eslint-plugin-jsdoc'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
+/** Enforces the shared desktop lint, React, TypeScript, and declaration-documentation policy. */
 export default tseslint.config(
   { ignores: ['out/**', 'release/**', 'node_modules/**', 'sbom.cdx.json'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ['**/*.{js,mjs,ts,tsx}'],
+    plugins: { jsdoc },
+    settings: { jsdoc: { mode: 'typescript' } },
+    rules: {
+      'jsdoc/check-syntax': 'error',
+      'jsdoc/check-tag-names': 'error',
+      'jsdoc/require-description': 'error',
+    },
+  },
   {
     files: ['src/**/*.{ts,tsx}'],
     rules: {

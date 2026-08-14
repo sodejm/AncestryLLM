@@ -1,0 +1,10 @@
+/** Declares the complete ambient documentation-policy fixture. */
+
+/** Describes values exposed by the fixture module. */
+export interface AmbientDocumentedValue {
+  /** Stores the stable fixture identifier. */
+  identifier: string
+}
+
+/** Creates a documented ambient value. */
+export declare function createAmbientValue(identifier: string): AmbientDocumentedValue
