@@ -4,6 +4,9 @@ import { createReadStream } from 'node:fs'
 import { lstat, readFile, readdir, readlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+/**
+ * Defines an immutable input to fail-closed packaged sidecar integrity verification.
+ */
 export const MANIFEST_SCHEMA = 'ancestryllm.sidecar-payload/1'
 const MANIFEST_NAME = 'sidecar-manifest.json'
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024
@@ -38,6 +41,9 @@ interface SidecarIntegrityOptions {
   appBuild: string
 }
 
+/**
+ * Reports a stable coded failure from fail-closed packaged sidecar integrity verification without leaking sensitive host details.
+ */
 export class SidecarIntegrityError extends Error {
   constructor() {
     super('The packaged sidecar failed integrity verification.')
@@ -53,6 +59,7 @@ function exactKeys(value: Record<string, unknown>, expected: string[]): boolean 
   return Object.keys(value).sort().join(',') === [...expected].sort().join(',')
 }
 
+/** Accepts only normalized forward-slash paths confined beneath the payload root. */
 function safeRelativePath(path: unknown): path is string {
   if (typeof path !== 'string' || path.length === 0 || path.includes('\\')) return false
   if (isAbsolute(path)) return false
@@ -86,6 +93,10 @@ function parseEntry(value: unknown): ManifestEntry {
   return fail()
 }
 
+/**
+ * Parses the signed-hash-bound payload manifest with an exact schema, ordered
+ * unique paths, and no tolerated extension fields.
+ */
 function parseManifest(bytes: Buffer): PayloadManifest {
   let value: unknown
   try {
@@ -131,6 +142,7 @@ async function digestFile(path: string): Promise<string> {
   })
 }
 
+/** Determines whether a resolved path remains inside the packaged target root. */
 function withinTarget(targetRoot: string, path: string): boolean {
   const fromTarget = relative(targetRoot, path)
   return fromTarget !== '..'
@@ -138,6 +150,10 @@ function withinTarget(targetRoot: string, path: string): boolean {
     && !isAbsolute(fromTarget)
 }
 
+/**
+ * Inventories only files and symbolic links beneath the target, rejecting
+ * device nodes and other unexpected filesystem entry types.
+ */
 async function inventory(root: string, targetRoot: string): Promise<string[]> {
   const entries: string[] = []
   for (const name of (await readdir(root)).sort()) {
@@ -156,6 +172,10 @@ async function inventory(root: string, targetRoot: string): Promise<string[]> {
   return entries
 }
 
+/**
+ * Verifies one manifest entry without following file symlinks and confines
+ * declared symbolic-link targets to the packaged payload root.
+ */
 async function verifyEntry(
   targetRoot: string,
   entry: ManifestEntry,
@@ -184,6 +204,10 @@ async function verifyEntry(
   if (!withinTarget(targetRoot, resolvedTarget)) return fail()
 }
 
+/**
+ * Fails closed unless the manifest digest, target identity, complete file
+ * inventory, byte counts, file hashes, and symlink targets all match policy.
+ */
 async function verifyPayload(
   options: SidecarIntegrityOptions,
 ): Promise<void> {
@@ -226,6 +250,9 @@ async function verifyPayload(
   }
 }
 
+/**
+ * Rejects input that violates fail-closed packaged sidecar integrity verification before any privileged action occurs.
+ */
 export async function verifySidecarPayload(
   options: SidecarIntegrityOptions,
 ): Promise<void> {

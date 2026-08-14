@@ -8,6 +8,7 @@ function readableSize(bytes: number): string {
   return `${Math.round(bytes / 1_000_000_000)} GB`
 }
 
+/** Displays only the sanitized metadata and access intent carried by an opaque file grant. */
 export function FileGrantCard({ grant }: Readonly<{ grant: Readonly<FileGrant> }>) {
   return (
     <article aria-label={`Selected file ${grant.metadata.displayName}`} className="rounded-lg border border-slate-300 p-4">

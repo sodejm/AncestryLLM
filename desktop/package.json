@@ -18,7 +18,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:gallery": "electron-vite dev --mode gallery",
-    "lint": "eslint . --max-warnings=0",
+    "docs:check": "node scripts/check-code-documentation.mjs && eslint . --max-warnings=0",
+    "lint": "pnpm docs:check",
     "typecheck": "tsc -p tsconfig.shared.json --pretty false && tsc -p tsconfig.main.json --pretty false && tsc -p tsconfig.preload.json --pretty false && tsc -p tsconfig.renderer.json --pretty false && tsc -p tsconfig.test.json --pretty false",
     "test": "vitest run && node --test scripts/*.test.mjs",
     "test:accessibility": "vitest run src/renderer/src/design-system/Accessibility.test.tsx && pnpm build:e2e && playwright test e2e/shell.spec.ts --grep 'automated WCAG checks'",
@@ -116,6 +117,7 @@
     "electron-builder-squirrel-windows": "26.15.7",
     "electron-vite": "3.1.0",
     "eslint": "9.39.5",
+    "eslint-plugin-jsdoc": "64.1.0",
     "eslint-plugin-react-hooks": "5.2.0",
     "eslint-plugin-react-refresh": "0.4.26",
     "globals": "15.15.0",

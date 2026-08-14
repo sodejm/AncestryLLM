@@ -12,6 +12,9 @@ interface CommandPaletteProps {
   readonly onNavigate: (item: NavigationItem) => void
 }
 
+/**
+ * Filters and selects renderer routes in a modal dialog, restoring focus after dismissal.
+ */
 export function CommandPalette({ open, items, restoreFocusTo, onOpenChange, onNavigate }: CommandPaletteProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const filterRef = useRef<HTMLInputElement>(null)

@@ -20,6 +20,9 @@ const IMAGE = /^[a-z0-9][a-z0-9._/-]*(?::[a-z0-9._-]+)?@sha256:[a-f0-9]{64}$/
 const SAFE_OPTION = /^[A-Za-z0-9][A-Za-z0-9._=,:/-]{0,255}$/
 const CPU_LIMIT = /^(?:0\.[1-9]|[1-7](?:\.[0-9])?|8(?:\.0)?)$/
 
+/**
+ * Enumerates fail-closed policy, endpoint, engine, resource, authorization, and control failures.
+ */
 export type HostContainerControlErrorCode =
   | 'INVALID_POLICY'
   | 'INVALID_PLAN'
@@ -41,6 +44,9 @@ const CONTROL_ERROR_MESSAGES: Readonly<Record<HostContainerControlErrorCode, str
   CONTROL_FAILED: 'The bounded host container operation failed.',
 }
 
+/**
+ * Reports a stable coded failure from bounded Docker Compose process execution and immutable family-tree mounts without leaking sensitive host details.
+ */
 export class HostContainerControlError extends Error {
   constructor(readonly code: HostContainerControlErrorCode) {
     super(CONTROL_ERROR_MESSAGES[code])
@@ -48,12 +54,18 @@ export class HostContainerControlError extends Error {
   }
 }
 
+/**
+ * Carries the ownership labels required on every app-managed Docker resource.
+ */
 export interface HostContainerLabels {
   readonly 'com.ancestryllm.owner': string
   readonly 'com.ancestryllm.profile': string
   readonly 'com.ancestryllm.project': string
 }
 
+/**
+ * Describes a named-volume mount; family-tree bind mounts are intentionally unrepresentable.
+ */
 export interface HostContainerMount {
   readonly kind: 'volume'
   readonly source: string
@@ -61,6 +73,9 @@ export interface HostContainerMount {
   readonly readOnly: boolean
 }
 
+/**
+ * Restricts published service ports to loopback TCP.
+ */
 export interface HostContainerPort {
   readonly hostIp: '127.0.0.1'
   readonly published: number
@@ -68,12 +83,18 @@ export interface HostContainerPort {
   readonly protocol: 'tcp'
 }
 
+/**
+ * Caps Docker's local log storage for an app-managed service.
+ */
 export interface HostContainerLogging {
   readonly driver: 'local'
   readonly maxSize: string
   readonly maxFiles: number
 }
 
+/**
+ * Describes a hardened service with a read-only root, no capabilities, and bounded resources.
+ */
 export interface HostContainerService {
   readonly containerName: string
   readonly image: string
@@ -91,14 +112,23 @@ export interface HostContainerService {
   readonly ports: readonly HostContainerPort[]
 }
 
+/**
+ * Requires the app-owned Compose network to remain internal.
+ */
 export interface HostContainerNetwork {
   readonly internal: true
 }
 
+/**
+ * Marks app-owned data volumes for preservation unless deletion is explicitly authorized.
+ */
 export interface HostContainerVolume {
   readonly preserveOnUninstall: true
 }
 
+/**
+ * Captures the exact app-owned Compose model before serialization.
+ */
 export interface HostComposeModel {
   readonly projectName: string
   readonly labels: HostContainerLabels
@@ -107,6 +137,9 @@ export interface HostComposeModel {
   readonly volumes: Readonly<Record<string, HostContainerVolume>>
 }
 
+/**
+ * Binds trusted executables, socket identity, engine identity, and Compose model to one ARM64 policy.
+ */
 export interface HostContainerPolicy {
   readonly schemaVersion: 1
   readonly platform: 'darwin'
@@ -136,11 +169,17 @@ export interface HostContainerPolicy {
   readonly compose: HostComposeModel
 }
 
+/**
+ * Carries the policy-derived Compose plan authorized for one local runtime profile.
+ */
 export interface HostComposePlan extends HostComposeModel {
   readonly schemaVersion: 1
   readonly runtimeProfile: string
 }
 
+/**
+ * Records socket identity used to detect ownership or inode changes between verification and execution.
+ */
 export interface HostEndpointObservation {
   readonly scheme: 'unix'
   readonly path: string
@@ -152,6 +191,9 @@ export interface HostEndpointObservation {
   readonly kind: 'socket'
 }
 
+/**
+ * Reports the selected Docker context and engine identity for comparison with policy.
+ */
 export interface HostRuntimeObservation {
   readonly runtimeProfile: string
   readonly dockerContext: string
@@ -164,12 +206,18 @@ export interface HostRuntimeObservation {
   readonly securityOptions: readonly string[]
 }
 
+/**
+ * Represents inventory metadata used to reject unlabeled or conflicting Docker resources.
+ */
 export interface HostOwnedResource {
   readonly kind: 'container' | 'network' | 'volume'
   readonly name: string
   readonly labels: Readonly<Record<string, string>>
 }
 
+/**
+ * Captures an engine-inspected mount for comparison with the named-volume-only plan.
+ */
 export interface HostRealizedContainerMount {
   readonly kind: string
   readonly source: string
@@ -177,6 +225,9 @@ export interface HostRealizedContainerMount {
   readonly readOnly: boolean
 }
 
+/**
+ * Captures an engine-inspected port binding for comparison with the loopback-only plan.
+ */
 export interface HostRealizedContainerPort {
   readonly hostIp: string
   readonly published: number
@@ -184,11 +235,17 @@ export interface HostRealizedContainerPort {
   readonly protocol: string
 }
 
+/**
+ * Captures the engine-inspected logging driver and retention options.
+ */
 export interface HostRealizedContainerLogging {
   readonly driver: string
   readonly options: Readonly<Record<string, string>>
 }
 
+/**
+ * Records the complete engine-inspected service state checked against the hardened plan.
+ */
 export interface HostRealizedContainer {
   readonly containerName: string
   readonly image: string
@@ -211,16 +268,25 @@ export interface HostRealizedContainer {
   readonly ports: readonly HostRealizedContainerPort[]
 }
 
+/**
+ * Records whether an engine-inspected app network remains internal.
+ */
 export interface HostRealizedNetwork {
   readonly name: string
   readonly internal: boolean
 }
 
+/**
+ * Groups the inspected container and network facts used for post-operation verification.
+ */
 export interface HostRealizedState {
   readonly containers: readonly HostRealizedContainer[]
   readonly networks: readonly HostRealizedNetwork[]
 }
 
+/**
+ * Lists lifecycle mutations available through the host-control authorization boundary.
+ */
 export type HostContainerOperation =
   | 'start'
   | 'stop'
@@ -228,6 +294,9 @@ export type HostContainerOperation =
   | 'uninstall-preserve'
   | 'uninstall-delete'
 
+/**
+ * Abstracts bounded Docker observation, inspection, and application so policy is verified before mutation.
+ */
 export interface HostContainerControlPort {
   observe: (policy: HostContainerPolicy) => Promise<HostRuntimeObservation>
   inventory: (policy: HostContainerPolicy) => Promise<readonly HostOwnedResource[]>
@@ -242,11 +311,17 @@ export interface HostContainerControlPort {
   ) => Promise<void>
 }
 
+/**
+ * Binds a short-lived opaque consent token to one destructive host operation.
+ */
 export interface HostOperationAuthorization {
   readonly token: string
   readonly operation: Exclude<HostContainerOperation, 'stop'>
 }
 
+/**
+ * Returns a sanitized verification result without socket paths or engine identifiers.
+ */
 export interface HostContainerDiagnostics {
   readonly status: 'verified'
   readonly operation: HostContainerOperation | 'inspect'
@@ -259,6 +334,7 @@ function fail(code: HostContainerControlErrorCode): never {
   throw new HostContainerControlError(code)
 }
 
+/** Applies the bounded structured-clone policy before inspecting renderer-derived values. */
 function validateClone(value: unknown): void {
   validateStructuredClone(value, POLICY_LIMITS)
 }
@@ -312,6 +388,7 @@ function requiredArray(value: unknown, maximum = 128): unknown[] {
   return value
 }
 
+/** Accepts only normalized absolute paths without control characters for host operations. */
 function safeAbsolutePath(value: unknown): string {
   const path = requiredString(value)
   if (
@@ -348,6 +425,7 @@ function parseLabels(value: unknown, runtimeProfile: string, projectName: string
   return labels
 }
 
+/** Parses the generated Compose model and enforces project-scoped names and security policy. */
 function parseCompose(value: unknown, runtimeProfile: string): HostComposeModel {
   const record = exactRecord(value, ['projectName', 'labels', 'services', 'networks', 'volumes'])
   const projectName = requiredString(record.projectName, IDENTIFIER)
@@ -522,6 +600,9 @@ function canonical(value: unknown): string {
   return encoded
 }
 
+/**
+ * Parses host container policy deterministically under bounded Docker Compose process execution and immutable family-tree mounts.
+ */
 export function parseHostContainerPolicy(value: unknown): HostContainerPolicy {
   try {
     validateClone(value)
@@ -605,6 +686,9 @@ export function parseHostContainerPolicy(value: unknown): HostContainerPolicy {
   }
 }
 
+/**
+ * Parses host compose plan deterministically under bounded Docker Compose process execution and immutable family-tree mounts.
+ */
 export function parseHostComposePlan(value: unknown, policy: HostContainerPolicy): HostComposePlan {
   try {
     validateClone(value)
@@ -628,6 +712,9 @@ export function parseHostComposePlan(value: unknown, policy: HostContainerPolicy
   }
 }
 
+/**
+ * Inspects a canonical Unix socket without following aliases and records its identity for TOCTOU checks.
+ */
 export async function inspectUnixSocketEndpoint(path: string): Promise<HostEndpointObservation> {
   try {
     if (!isAbsolute(path) || normalize(path) !== path) throw new Error('path')
@@ -697,6 +784,7 @@ function assertSameEndpoint(
   ) fail('ENDPOINT_CHANGED')
 }
 
+/** Validates that the observed container engine still matches the trusted runtime policy. */
 function validateRuntimeObservation(value: unknown, policy: HostContainerPolicy): HostRuntimeObservation {
   try {
     validateClone(value)
@@ -734,6 +822,7 @@ function validateRuntimeObservation(value: unknown, policy: HostContainerPolicy)
   }
 }
 
+/** Confines the discovered resource inventory to the exact project-owned resource set. */
 function validateInventory(
   value: unknown,
   policy: HostContainerPolicy,
@@ -794,6 +883,7 @@ function observationStringRecord(value: unknown): Readonly<Record<string, string
   ]).sort((left, right) => left[0].localeCompare(right[0])))
 }
 
+/** Verifies realized containers and networks against the accepted Compose security contract. */
 function validateRealizedResources(
   value: unknown,
   policy: HostContainerPolicy,
@@ -925,6 +1015,7 @@ function validateRealizedResources(
   }
 }
 
+/** Fails closed unless post-operation resources exactly match the requested lifecycle outcome. */
 function assertExpectedPostOperationResources(
   resources: readonly HostOwnedResource[],
   policy: HostContainerPolicy,
@@ -946,6 +1037,9 @@ function assertExpectedPostOperationResources(
 
 type AuthorizationOperation = Exclude<HostContainerOperation, 'stop'>
 
+/**
+ * Returns the exact consent phrase required before a mutating host-container operation.
+ */
 export function confirmationPhrase(operation: AuthorizationOperation, projectName: string): string {
   switch (operation) {
     case 'start': return `AUTHORIZE ${projectName} HOST CONTROL`
@@ -955,6 +1049,9 @@ export function confirmationPhrase(operation: AuthorizationOperation, projectNam
   }
 }
 
+/**
+ * Injects the reviewed policy and plan plus bounded endpoint, token, and clock seams.
+ */
 export interface HostContainerSupervisorOptions {
   readonly policy: unknown
   readonly plan: unknown
@@ -970,6 +1067,9 @@ interface VerifiedState {
   readonly resources: readonly HostOwnedResource[]
 }
 
+/**
+ * Owns host container supervisor state transitions while enforcing bounded Docker Compose process execution and immutable family-tree mounts.
+ */
 export class HostContainerSupervisor {
   private readonly policy: HostContainerPolicy
   private readonly plan: HostComposePlan

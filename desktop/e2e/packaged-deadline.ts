@@ -1,4 +1,5 @@
 /** Bounds asynchronous packaged-application operations with a contextual timeout. */
+/** Runs an asynchronous operation within a deadline and always clears its timeout handle. */
 export async function withinDeadline<T>(
   operation: string,
   timeoutMs: number,

@@ -11,7 +11,15 @@ const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
 const ARTIFACT_NAME = /^[A-Za-z][A-Za-z0-9]*$/
 
+/**
+ * Selects the only verification-receipt schema emitted and accepted by current jobs.
+ * @type {number}
+ */
 export const RECEIPT_SCHEMA_VERSION = 2
+/**
+ * Enumerates the exact native-target gate names that receipts may claim.
+ * @type {readonly string[]}
+ */
 export const TARGET_RECEIPT_GATES = Object.freeze([
   'packageRuntimePassed',
   'sidecarProcessTreeGuardPassed',
@@ -24,6 +32,10 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
   'packagedSidecarRestartExhaustionQuitPassed',
   'packagedSidecarIntegritySubstitutionPassed',
 ])
+/**
+ * Enumerates the exact security gate names that receipts may claim.
+ * @type {readonly string[]}
+ */
 export const SECURITY_RECEIPT_GATES = Object.freeze([
   'auditPassed',
   'secretsPassed',
@@ -102,6 +114,12 @@ function validateWorkspace(value) {
   return value
 }
 
+/**
+ * Validates an exact-schema, successful receipt and all of its head, command, digest, and workspace bindings.
+ * @param {Record<string, any>} value - Untrusted parsed receipt document.
+ * @param {string} [requestedHead] - Optional full Git commit the receipt must prove.
+ * @returns {Record<string, any>} The original document after fail-closed validation.
+ */
 export function validateVerificationReceipt(value, requestedHead) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
@@ -242,6 +260,14 @@ async function captureWorkspaceState(repositoryRoot, allowedOutputs) {
   })
 }
 
+/**
+ * Captures a stable repository-state digest while excluding only reviewed output paths.
+ * @param {string} repositoryRoot - Repository whose exact head and dirty state are measured.
+ * @param {string} expectedHead - Full Git commit the stable snapshot must retain.
+ * @param {string[]} allowedOutputs - Repository-relative outputs permitted to differ.
+ * @param {Function} [capture] - Injectable state capture used by deterministic tests.
+ * @returns {Promise<Readonly<{digest: {sha256: string, bytes: number}, dirty: boolean}>>} Stable workspace digest and dirty-state result.
+ */
 export async function workspaceSnapshot(
   repositoryRoot,
   expectedHead,
@@ -333,6 +359,12 @@ async function existingArtifactDigests(repositoryRoot, artifacts) {
   return Object.freeze(digests)
 }
 
+/**
+ * Builds the serialized no-shell command identity stored in verification receipts.
+ * @param {string} executable - Exact executable invoked by the gate.
+ * @param {string[]} args - Arguments passed directly without shell interpretation.
+ * @returns {Readonly<{executable: string, args: readonly string[], shell: false}>} Sanitized command identity.
+ */
 export function verificationCommandInvocation(executable, args) {
   assert.equal(typeof executable === 'string' && executable.length > 0, true, 'command executable is required')
   assert.equal(Array.isArray(args), true, 'command arguments must be an array')
@@ -380,6 +412,11 @@ function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
   })
 }
 
+/**
+ * Runs a gate only in a clean exact-head workspace and exclusively writes its validated receipt.
+ * @param {Record<string, any>} options - Exact head, output, gate, artifact, allowed-output, command, and test-injection options.
+ * @returns {Promise<Readonly<Record<string, unknown>>>} Schema-v2 receipt bound to command output, artifacts, and unchanged workspace state.
+ */
 export async function runVerificationCommand({
   gitHead: requestedHead,
   outputPath,
@@ -476,6 +513,12 @@ async function jsonFiles(root) {
   return output
 }
 
+/**
+ * Recursively loads valid receipt documents and binds each file digest to the requested head.
+ * @param {string} root - Evidence directory searched for JSON receipts.
+ * @param {string} requestedHead - Full Git commit every accepted receipt must match.
+ * @returns {Promise<readonly Readonly<Record<string, unknown>>[]>} Validated receipt records with source paths and file digests.
+ */
 export async function loadVerificationReceipts(root, requestedHead) {
   const records = []
   for (const path of await jsonFiles(root)) {
@@ -498,6 +541,11 @@ export async function loadVerificationReceipts(root, requestedHead) {
   return Object.freeze(records)
 }
 
+/**
+ * Parses strict receipt options and the no-shell command separated by `--`.
+ * @param {string[]} argv - CLI arguments after the script name.
+ * @returns {Record<string, any>} Validated gate, artifact, exact-head, output, and command options.
+ */
 export function parseReceiptArguments(argv) {
   const separator = argv.indexOf('--')
   assert.notEqual(separator, -1, 'Receipt command must be separated from options by --')

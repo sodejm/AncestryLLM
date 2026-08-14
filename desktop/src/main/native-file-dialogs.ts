@@ -79,6 +79,7 @@ function requireActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw signal.reason ?? new Error('File dialog request was cancelled.')
 }
 
+/** Preserves cancellation while translating native dialog failures into a stable coded error. */
 async function invokeDialog<T>(signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
   requireActive(signal)
   try {
@@ -92,12 +93,18 @@ async function invokeDialog<T>(signal: AbortSignal | undefined, operation: () =>
   }
 }
 
+/** Resolves a dialog owner only when it maps to a live trusted application window. */
 function ownerWindow(dependencies: NativeDialogDependencies, owner: object): object {
   const window = dependencies.windowFromOwner(owner)
   if (window === null) throw new FileGrantBrokerError('FILE_DIALOG_FAILED')
   return window
 }
 
+/**
+ * Creates the trusted-window dialog adapter used to issue path-free file capabilities.
+ *
+ * Dialog cancellation remains distinct from operational failure, and untrusted owners fail closed.
+ */
 export function createNativeFileDialogPort(
   dependencies: NativeDialogDependencies = electronDependencies,
 ): NativeFileDialogPort {

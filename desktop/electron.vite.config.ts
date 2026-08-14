@@ -34,6 +34,7 @@ const sidecarManifestSha256 = existsSync(sidecarManifest)
   ? createHash('sha256').update(readFileSync(sidecarManifest)).digest('hex')
   : null
 
+/** Builds isolated main, preload, and renderer bundles with reviewed externals and no source maps. */
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],

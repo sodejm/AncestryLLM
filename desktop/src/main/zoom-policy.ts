@@ -1,4 +1,7 @@
 /** Installs bounded keyboard zoom controls for Electron renderer contents. */
+/**
+ * Captures only the modifier and key fields needed to recognize trusted zoom shortcuts.
+ */
 export type KeyboardZoomInput = Readonly<{
   type: string
   key: string
@@ -8,6 +11,9 @@ export type KeyboardZoomInput = Readonly<{
   alt: boolean
 }>
 
+/**
+ * Limits zoom integration to pre-input observation and bounded zoom-factor access.
+ */
 export type KeyboardZoomTarget = Readonly<{
   on(
     event: 'before-input-event',
@@ -45,6 +51,9 @@ function adjacentZoom(current: number, direction: 'in' | 'out'): number {
     ?? MINIMUM_ZOOM
 }
 
+/**
+ * Installs platform-native zoom shortcuts and clamps renderer zoom to the reviewed 50–200% scale.
+ */
 export function installKeyboardZoom(
   target: KeyboardZoomTarget,
   platform: NodeJS.Platform = process.platform,

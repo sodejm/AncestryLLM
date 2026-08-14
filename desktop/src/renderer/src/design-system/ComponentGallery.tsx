@@ -7,6 +7,7 @@ interface ComponentGalleryProps {
   readonly states: readonly AsyncState[]
 }
 
+/** Renders every fictional async-state fixture for visual and accessibility review. */
 export function ComponentGallery({ states }: ComponentGalleryProps) {
   return <main className="component-gallery" aria-labelledby="component-gallery-title">
     <div className="gallery-header">

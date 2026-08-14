@@ -9,6 +9,9 @@ const PREFERENCES_FILE_NAME = 'preferences.json'
 const MAX_PREFERENCES_BYTES = 8_192
 const pendingByFile = new Map<string, Promise<void>>()
 
+/**
+ * Enumerates sanitized preference load, migration, conflict, safety, and persistence outcomes.
+ */
 export type PreferencesDiagnosticCode =
   | 'PREFERENCES_FILE_MISSING'
   | 'PREFERENCES_MIGRATED'
@@ -19,14 +22,26 @@ export type PreferencesDiagnosticCode =
   | 'PREFERENCES_IO_ERROR'
   | 'PREFERENCES_INVALID_UPDATE'
 
+/**
+ * Carries one stable preference diagnostic without file paths or stored values.
+ */
 export type PreferencesDiagnostic = Readonly<{ code: PreferencesDiagnosticCode }>
+/**
+ * Receives non-sensitive preference diagnostics for startup reporting.
+ */
 export type PreferencesDiagnosticSink = (diagnostic: PreferencesDiagnostic) => void
 
+/**
+ * Reads and atomically updates revisioned local preferences through optimistic concurrency.
+ */
 export interface PreferencesStore {
   get(): Promise<Readonly<LocalPreferences>>
   update(update: PreferenceUpdate): Promise<Readonly<LocalPreferences>>
 }
 
+/**
+ * Reports a stable coded failure from atomic local preference persistence and conflict handling without leaking sensitive host details.
+ */
 export class PreferencesConflictError extends Error {
   constructor() {
     super('Preference revision conflict.')
@@ -34,6 +49,9 @@ export class PreferencesConflictError extends Error {
   }
 }
 
+/**
+ * Reports a stable coded failure from atomic local preference persistence and conflict handling without leaking sensitive host details.
+ */
 export class PreferencesStorageError extends Error {
   readonly code: PreferencesDiagnosticCode
 
@@ -44,6 +62,9 @@ export class PreferencesStorageError extends Error {
   }
 }
 
+/**
+ * Defines the immutable first-run preference document at schema version 1 and revision 0.
+ */
 export const DEFAULT_PREFERENCES: Readonly<LocalPreferences> = Object.freeze({
   colorScheme: 'system',
   reducedMotion: false,
@@ -77,6 +98,7 @@ function validRevision(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
+/** Parses only the exact current preferences schema into an immutable value. */
 function currentPreferences(value: unknown): Readonly<LocalPreferences> | undefined {
   if (!record(value) || !exactKeys(value, ['colorScheme', 'reducedMotion', 'onboardingCompleted', 'schemaVersion', 'revision'])) {
     return undefined
@@ -99,6 +121,7 @@ function currentPreferences(value: unknown): Readonly<LocalPreferences> | undefi
   })
 }
 
+/** Migrates the exact legacy preferences schema without accepting unknown fields. */
 function legacyPreferences(value: unknown): Readonly<LocalPreferences> | undefined {
   if (!record(value) || !exactKeys(value, ['colorScheme', 'reducedMotion', 'schemaVersion', 'revision'])) return undefined
   if (
@@ -126,6 +149,7 @@ function unsupportedSchema(value: unknown): boolean {
     && value.schemaVersion !== 1
 }
 
+/** Validates a revision-bound preferences update and rejects undeclared properties. */
 function validUpdate(value: unknown): value is PreferenceUpdate {
   if (!record(value)) return false
   const allowed = ['expectedRevision', 'colorScheme', 'reducedMotion', 'onboardingCompleted']
@@ -136,6 +160,9 @@ function validUpdate(value: unknown): value is PreferenceUpdate {
   return !('onboardingCompleted' in value) || typeof value.onboardingCompleted === 'boolean'
 }
 
+/**
+ * Owns memory preferences store state transitions while enforcing atomic local preference persistence and conflict handling.
+ */
 export class MemoryPreferencesStore implements PreferencesStore {
   private current: Readonly<LocalPreferences> = DEFAULT_PREFERENCES
 
@@ -171,6 +198,7 @@ function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.ino !== 0n && right.ino !== 0n && left.dev === right.dev && left.ino === right.ino
 }
 
+/** Serializes all reads and writes for one preferences file to prevent local races. */
 function serializeFileOperation<T>(file: string, operation: () => Promise<T>): Promise<T> {
   const previous = pendingByFile.get(file) ?? Promise.resolve()
   const result = previous.then(operation, operation)
@@ -182,6 +210,9 @@ function serializeFileOperation<T>(file: string, operation: () => Promise<T>): P
   return result
 }
 
+/**
+ * Owns file preferences store state transitions while enforcing atomic local preference persistence and conflict handling.
+ */
 export class FilePreferencesStore implements PreferencesStore {
   private readonly directory: string
   private readonly file: string

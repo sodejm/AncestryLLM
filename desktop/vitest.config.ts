@@ -2,6 +2,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
+/** Configures jsdom unit tests, shared setup, coverage thresholds, and reviewed exclusions. */
 export default defineConfig({
   plugins: [react()],
   test: {

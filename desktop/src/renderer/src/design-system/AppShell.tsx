@@ -22,6 +22,11 @@ interface AppShellProps {
   readonly children: ReactNode
 }
 
+/**
+ * Renders the persistent desktop layout, accessible route navigation, and command palette.
+ *
+ * Route changes remain renderer-local and cannot grant provider or filesystem authority.
+ */
 export function AppShell({ route, title, description, headingRef, onNavigate, children }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const paletteButton = useRef<HTMLButtonElement>(null)

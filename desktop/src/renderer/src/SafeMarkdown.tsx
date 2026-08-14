@@ -3,6 +3,7 @@ import { Children, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+/** Maximum model-output characters accepted by the bounded Markdown renderer. */
 export const MAX_RENDERED_CHAT_CHARACTERS = 16_384
 
 const allowedElements = Object.freeze([
@@ -59,6 +60,7 @@ function explicitPublicHttpsDestination(href: string | undefined, label: string)
   }
 }
 
+/** Inputs for rendering bounded Markdown and delegating reviewed external-link confirmation. */
 export interface SafeMarkdownProps {
   readonly content: string
   readonly onOpenExternal: (destination: string) => void | Promise<void>

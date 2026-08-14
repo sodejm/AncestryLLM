@@ -1,0 +1,34 @@
+/** Defines a complete TypeScript documentation-policy fixture. */
+
+/** Configures a documented operation. */
+export interface DocumentedOptions {
+  /** Selects whether the operation is enabled. */
+  enabled: boolean
+}
+
+/** Identifies the supported operation modes. */
+export type DocumentedMode = 'local' | 'offline'
+
+/** Names the default operation mode. */
+export const DEFAULT_MODE: DocumentedMode = 'offline'
+
+/** Returns the selected operation mode. */
+export function selectMode(options: DocumentedOptions): DocumentedMode {
+  return options.enabled ? 'local' : DEFAULT_MODE
+}
+
+/** Stores the selected mode for a documented operation. */
+export class DocumentedOperation {
+  /** Creates an operation with the selected mode. */
+  constructor(readonly mode: DocumentedMode) {}
+}
+
+/** Renders the documented fixture component. */
+export function DocumentedComponent(): null {
+  return null
+}
+
+/** Returns the documented fixture hook state. */
+export function useDocumentedMode(): DocumentedMode {
+  return DEFAULT_MODE
+}

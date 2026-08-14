@@ -1,0 +1,3 @@
+/** Defines a fixture with an undocumented exported declaration. */
+
+export const undocumentedBoundary = 'missing declaration documentation'

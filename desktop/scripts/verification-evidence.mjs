@@ -28,6 +28,10 @@ const METRIC_NAMES = Object.freeze([
   'rendererOutboundRequests',
 ])
 
+/**
+ * Identifies the immutable performance-threshold contract used by release evidence.
+ * @type {string}
+ */
 export const PERFORMANCE_POLICY_VERSION = 'desktop-unpacked-v1'
 
 function ceilings(coldLaunchMs, warmLaunchMs, readyMs, rssBytes) {
@@ -43,6 +47,10 @@ function ceilings(coldLaunchMs, warmLaunchMs, readyMs, rssBytes) {
 const macAndLinuxCeilings = ceilings(30_000, 20_000, 45_000, 1_610_612_736)
 const windowsCeilings = ceilings(45_000, 30_000, 60_000, 2_147_483_648)
 
+/**
+ * Defines the exact native runner, architecture, operating-system, and performance rows accepted as release evidence.
+ * @type {Readonly<Record<string, Readonly<Record<string, unknown>>>>}
+ */
 export const TARGET_ROWS = Object.freeze({
   'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
   'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
@@ -334,6 +342,11 @@ function validateTargetRow(input) {
   return expected
 }
 
+/**
+ * Derives one native-target evidence record from exact-head receipts and downloaded artifacts.
+ * @param {Record<string, any>} input - Runner identity, receipts, metrics, fuse inspection, file-grant, and fault evidence.
+ * @returns {Readonly<Record<string, unknown>>} Schema-v2 target evidence with independently derived gate results and artifact digests.
+ */
 export function createTargetEvidence(input) {
   const gitHead = exactHead(input.gitHead)
   const expected = validateTargetRow(input)
@@ -404,6 +417,11 @@ export function createTargetEvidence(input) {
   })
 }
 
+/**
+ * Derives the security evidence record from exact-head security receipts and the bound SBOM.
+ * @param {Record<string, any>} input - Exact Git head, receipt records, and SBOM bytes.
+ * @returns {Readonly<Record<string, unknown>>} Schema-v2 security evidence with derived gates and SBOM digest.
+ */
 export function createSecurityEvidence(input) {
   const gitHead = exactHead(input.gitHead)
   const derived = deriveReceiptGates(input.receiptRecords, SECURITY_RECEIPT_GATES, gitHead)
@@ -541,6 +559,12 @@ function validateSecurityEvidence(value, gitHead, receiptRecords, files) {
   return value
 }
 
+/**
+ * Validates and aggregates exactly six target rows plus one security row from downloaded evidence.
+ * @param {string} root - Directory containing receipts, evidence JSON, and referenced artifacts.
+ * @param {string} requestedHead - Full Git commit that every record must match.
+ * @returns {Promise<Readonly<Record<string, unknown>>>} Deterministically ordered schema-v2 release evidence.
+ */
 export async function aggregateEvidence(root, requestedHead) {
   const gitHead = exactHead(requestedHead)
   const evidence = []
@@ -626,6 +650,11 @@ async function assertCurrentHead(root, requestedHead) {
   assert.equal(await currentHead(root), requestedHead, 'evidence command is not running at the requested exact head')
 }
 
+/**
+ * Executes the target, security, or aggregate evidence CLI with exact-head race checks.
+ * @param {string[]} values - Subcommand and strict `--name value` arguments supplied by the caller.
+ * @returns {Promise<void>} Completion after exclusively writing the requested evidence file.
+ */
 export async function runCli([command, ...args]) {
   const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url))
   const common = new Set(['git-head', 'output'])

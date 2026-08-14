@@ -3,6 +3,7 @@
 import type { AsyncState } from '../renderer/src/design-system/contracts'
 import { deepFreeze } from './fixtures'
 
+/** Representative loading, empty, error, success, and permission states for component previews. */
 export const componentStateFixtures = deepFreeze({
   loading: {
     kind: 'loading',

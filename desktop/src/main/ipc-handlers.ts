@@ -114,9 +114,18 @@ import {
 import { validateStructuredClone } from './structured-clone-policy'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
+/**
+ * Registers one privileged request handler under an exact reviewed channel name.
+ */
 export interface IpcRegistrar { handle(channel: string, handler: IpcHandler): void }
 
+/**
+ * Exposes the current main-frame URL used to revalidate the renderer owner before every request.
+ */
 export interface BridgeFrame { readonly url: string }
+/**
+ * Provides the lifecycle and delivery operations required to bind IPC authorization to one renderer.
+ */
 export interface BridgeWebContents {
   readonly mainFrame: BridgeFrame
   isDestroyed(): boolean
@@ -125,6 +134,9 @@ export interface BridgeWebContents {
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown
 }
 
+/**
+ * Narrows the desktop bridge to abortable main-process operations and privileged event streams.
+ */
 export interface MainDesktopBridge extends Omit<
   AncestryBridge,
   | 'getProviderConfiguration'
@@ -228,6 +240,9 @@ export interface MainDesktopBridge extends Omit<
   ): Promise<void>
 }
 
+/**
+ * Issues and revokes opaque file capabilities scoped to the authorized renderer owner.
+ */
 export interface MainFileGrantBroker {
   requestOpenGrant(
     owner: object,
@@ -245,11 +260,17 @@ export interface MainFileGrantBroker {
   dispose(): void
 }
 
+/**
+ * Restricts renderer-requested native actions to confirmed links and bounded clipboard text.
+ */
 export interface MainNativeActions {
   openExternalLink(destination: string): Promise<Readonly<{ status: 'opened' | 'cancelled' }>>
   copyText(text: string): Promise<void> | void
 }
 
+/**
+ * Owns renderer authorization, sidecar-session invalidation, and bridge teardown.
+ */
 export interface DesktopIpcController {
   authorizeWebContents(
     contents: BridgeWebContents,
@@ -259,6 +280,9 @@ export interface DesktopIpcController {
   dispose(): void
 }
 
+/**
+ * Supplies the trusted owner, bridge ports, deadlines, and registrars used to install privileged IPC routes.
+ */
 export interface RegistrationOptions {
   readonly operationTimeoutMs?: number
   readonly fileDialogTimeoutMs?: number
@@ -429,6 +453,7 @@ async function fileGrantOperation<T>(operation: () => Promise<T> | T): Promise<B
   }
 }
 
+/** Reads only the sender fields needed to authorize an otherwise untrusted IPC event. */
 function eventParts(event: unknown): Readonly<{ sender: unknown; senderFrame: unknown }> | undefined {
   if (typeof event !== 'object' || event === null) return undefined
   try {
@@ -439,6 +464,7 @@ function eventParts(event: unknown): Readonly<{ sender: unknown; senderFrame: un
   }
 }
 
+/** Bounds and parses a bridge response, mapping malformed values to a coded failure. */
 function safeResponse<T>(
   response: unknown,
   parse: (value: unknown) => BridgeResult<T>,
@@ -451,6 +477,7 @@ function safeResponse<T>(
   }
 }
 
+/** Executes one authorized operation with cancellation, timeout, and response validation. */
 function runOperation<T>(
   state: Authorization,
   timeoutMs: number,
@@ -497,6 +524,7 @@ function pump(state: Authorization): void {
   }
 }
 
+/** Enforces concurrency, queue, generation, and deadline limits for authorized IPC work. */
 function schedule<T>(
   state: Authorization,
   timeoutMs: number,
@@ -550,6 +578,7 @@ function schedule<T>(
   })
 }
 
+/** Revokes all renderer-scoped sessions, streams, controllers, queues, and file grants. */
 function invalidate(
   state: Authorization,
   bridge: MainDesktopBridge,
@@ -742,6 +771,7 @@ function removeAuthorization(
   fileGrants.revokeOwner(state.contents)
 }
 
+/** Registers a zero-argument IPC route that authorizes its sender before scheduling work. */
 function registerNoArgumentHandler<T>(
   ipc: IpcRegistrar,
   channel: string,
@@ -758,6 +788,9 @@ function registerNoArgumentHandler<T>(
   })
 }
 
+/**
+ * Registers the versioned IPC surface with sender authorization, exact argument parsing, bounded concurrency, and cleanup.
+ */
 export function registerDesktopIpcHandlers(
   ipc: IpcRegistrar,
   bridge: MainDesktopBridge,

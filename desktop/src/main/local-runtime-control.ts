@@ -23,12 +23,18 @@ import {
   type MacosArm64RuntimePolicy,
 } from './macos-arm64-runtime-policy'
 
+/**
+ * Defines the manager operations that inspect, preview, and apply host runtime changes.
+ */
 export interface LocalRuntimeManagerPort {
   status(signal?: AbortSignal): Promise<LocalRuntimeStatus>
   preview(request: LocalRuntimeRequest, signal?: AbortSignal): Promise<LocalRuntimePreview>
   apply(request: LocalRuntimeApplyRequest, signal?: AbortSignal): Promise<LocalRuntimeResult>
 }
 
+/**
+ * Defines the serialized control surface shared by IPC and non-interactive CLI adapters.
+ */
 export interface LocalRuntimeControlPort {
   getLocalRuntimeStatus(signal?: AbortSignal): Promise<BridgeResult<LocalRuntimeStatus>>
   previewLocalRuntime(
@@ -41,6 +47,9 @@ export interface LocalRuntimeControlPort {
   ): Promise<BridgeResult<LocalRuntimeResult>>
 }
 
+/**
+ * Supplies the manager, lock path, and injectable locking primitives for serialized runtime control.
+ */
 export interface LocalRuntimeControlOptions {
   readonly policyFilePath: string
   readonly rootDirectory: string
@@ -154,6 +163,9 @@ function runtimeFailure<T>(cause: unknown): BridgeResult<T> {
   return failure('INTERNAL_ERROR', 'The local runtime operation could not be completed.')
 }
 
+/**
+ * Creates a control port that validates requests and holds the cross-process lock around every operation.
+ */
 export function createLocalRuntimeControl(options: LocalRuntimeControlOptions): LocalRuntimeControlPort {
   let managerPromise: Promise<LocalRuntimeManagerPort> | undefined
   const manager = (): Promise<LocalRuntimeManagerPort> => {
@@ -197,6 +209,9 @@ export function createLocalRuntimeControl(options: LocalRuntimeControlOptions): 
   })
 }
 
+/**
+ * Creates the packaged control port from the reviewed runtime policy and repository-local runtime manager.
+ */
 export function createPackagedLocalRuntimeControl(
   resourcesDirectory: string,
   userDataDirectory: string,

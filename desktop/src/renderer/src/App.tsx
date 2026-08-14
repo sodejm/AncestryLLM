@@ -1360,6 +1360,7 @@ function Shell() {
   </AppShell>
 }
 
+/** Mounts the desktop shell inside the shared query client and top-level coded error boundary. */
 export function App() {
   const [client] = useState(() => new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },

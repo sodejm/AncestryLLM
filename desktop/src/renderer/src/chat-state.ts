@@ -1,6 +1,7 @@
 /** Reduces owner-scoped chat events without weakening ordering or terminal state. */
 import type { ChatEvent, ChatEventDelivery } from '../../shared-contract/desktop'
 
+/** Lifecycle states for one locally tracked chat response. */
 export type ChatResponseStatus =
   | 'starting'
   | 'streaming'
@@ -9,6 +10,7 @@ export type ChatResponseStatus =
   | 'interrupted'
   | 'failed'
 
+/** Immutable response text, sequencing, and terminal-state metadata for one chat turn. */
 export interface ChatResponseState {
   readonly sessionId: string
   readonly runId: string
@@ -22,6 +24,7 @@ export interface ChatResponseState {
   readonly failureCode: string | null
 }
 
+/** Result of applying a sequenced delivery, including whether the stream must be cancelled. */
 export interface AppliedChatDelivery {
   readonly state: Readonly<ChatResponseState>
   readonly acknowledgeThrough: number | null
@@ -31,6 +34,7 @@ function frozenState(state: ChatResponseState): Readonly<ChatResponseState> {
   return Object.freeze(state)
 }
 
+/** Creates the initial response state for a new client-side chat turn. */
 export function createChatResponseState(
   sessionId: string,
   runId: string,
@@ -97,6 +101,7 @@ function applyEvent(
   }
 }
 
+/** Applies one ordered delivery without side effects and flags gaps or invalid transitions. */
 export function applyChatDelivery(
   state: Readonly<ChatResponseState>,
   delivery: Readonly<ChatEventDelivery>,

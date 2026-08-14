@@ -189,6 +189,7 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
             "make lint",
             "make typecheck",
             "make typecheck-ty",
+            "make code-docs-check",
         ),
         (".github/workflows/ci.yml", "security"): (
             "make dependency-audit",
@@ -201,6 +202,7 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
             "make test",
             "make lint",
             "make typecheck",
+            "make code-docs-check",
         ),
         (".github/workflows/release-readiness.yml", "security"): (
             "make dependency-audit",

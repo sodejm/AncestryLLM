@@ -13,12 +13,18 @@ import {
   SidecarSupervisor,
 } from './sidecar-supervisor'
 
+/**
+ * Returns the composed bridge plus the sidecar lifecycle hooks owned by the Electron main process.
+ */
 export interface RuntimeBridge {
   bridge: MainDesktopBridge
   supervisor?: SidecarSupervisor
   prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
 }
 
+/**
+ * Supplies the local-runtime control port and optional stream/process adapters for bridge execution.
+ */
 export interface RuntimeBridgeOptions {
   linuxKeyringVerificationRoot?: string | undefined
 }
@@ -28,6 +34,9 @@ type OwnSidecarSupervisor = (
   prepareJobShutdown: (action: JobShutdownAction) => Promise<void>,
 ) => void
 
+/**
+ * Reads one bounded stdin frame, validates the privileged request, and emits one newline-delimited JSON result.
+ */
 export async function startRuntimeBridge(
   onSupervisorOwned?: OwnSidecarSupervisor,
   options: RuntimeBridgeOptions = {},

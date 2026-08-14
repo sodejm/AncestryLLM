@@ -11,9 +11,15 @@ interface RendererTrustPolicy extends RendererPolicy {
   senderUrl: string
 }
 
+/**
+ * Identifies the single reviewed URL that Electron may load for the current runtime mode.
+ */
 export type RendererTarget =
   { kind: 'url'; value: string }
 
+/**
+ * Resolves renderer target deterministically under trusted renderer location selection.
+ */
 export function resolveRendererTarget(policy: RendererPolicy): RendererTarget {
   void policy.rendererPath
   if (!policy.isPackaged && policy.developmentUrl) {
@@ -22,6 +28,9 @@ export function resolveRendererTarget(policy: RendererPolicy): RendererTarget {
   return { kind: 'url', value: APP_ENTRY_URL }
 }
 
+/**
+ * Rejects input that violates trusted renderer location selection before any privileged action occurs.
+ */
 export function isTrustedRendererUrl(policy: RendererTrustPolicy): boolean {
   let candidate: URL
   try {

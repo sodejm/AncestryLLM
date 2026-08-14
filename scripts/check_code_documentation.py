@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import subprocess
 import sys
 from contextlib import suppress
@@ -251,6 +252,24 @@ _PLACEHOLDER_DOCUMENTATION_WORDS: Final = frozenset(
 )
 _PLACEHOLDER_MARKER_WORDS: Final = frozenset({"fixme", "placeholder", "tbd", "todo"})
 _LICENSE_MARKERS: Final = ("copyright", "spdx-license-identifier", "licensed under")
+_SWIFT_ATTRIBUTE_LINE: Final = re.compile(r"^\s*@[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?\s*$")
+_SWIFT_CALLABLE_DECLARATION: Final = re.compile(
+    r"""(?x)
+    ^\s*
+    (?:(?:
+        @[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?
+        | public | private | fileprivate | internal | open
+        | static | class | final | override | required | convenience
+        | mutating | nonmutating | nonisolated | distributed
+        | borrowing | consuming | prefix | postfix | infix
+    )\s+)*
+    (?:
+        func\s+(?P<function>`?[A-Za-z_][A-Za-z0-9_]*`?|[+\-*/%=!<>?&|^~]+)
+        | (?P<initializer>init[!?]?)\s*\(
+        | (?P<subscript>subscript)\s*(?:<[^>]*>\s*)?\(
+    )
+    """
+)
 
 
 def _is_overload_declaration(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -453,21 +472,80 @@ def _has_jsdoc_header(text: str) -> bool:
     return block is not None and _is_meaningful_documentation(block[0])
 
 
-def _has_swift_doc_header(text: str) -> bool:
-    """Return whether Swift *text* begins with a meaningful DocC line block."""
-    lines = _without_shebang(text).splitlines()
-    while lines and (
-        not lines[0].strip()
-        or (lines[0].lstrip().startswith("//") and _is_license_comment(lines[0]))
+def _swift_file_doc_block(lines: list[str]) -> tuple[int, int, str] | None:
+    """Return the leading Swift file-purpose DocC block and its line bounds."""
+    cursor = 0
+    while cursor < len(lines) and (
+        not lines[cursor].strip()
+        or (lines[cursor].lstrip().startswith("//") and _is_license_comment(lines[cursor]))
     ):
-        lines.pop(0)
+        cursor += 1
+    start = cursor
     documentation: list[str] = []
-    for line in lines:
-        stripped = line.lstrip()
+    while cursor < len(lines):
+        stripped = lines[cursor].lstrip()
         if not stripped.startswith("///"):
             break
         documentation.append(stripped[3:])
-    return _is_meaningful_documentation("\n".join(documentation))
+        cursor += 1
+    if not documentation:
+        return None
+    return start, cursor, "\n".join(documentation)
+
+
+def _has_swift_doc_header(text: str) -> bool:
+    """Return whether Swift *text* begins with a meaningful DocC line block."""
+    block = _swift_file_doc_block(_without_shebang(text).splitlines())
+    return block is not None and _is_meaningful_documentation(block[2])
+
+
+def _swift_doc_block_before(lines: list[str], line_index: int) -> tuple[int, int, str] | None:
+    """Return the DocC block immediately attached to a Swift declaration."""
+    cursor = line_index - 1
+    while cursor >= 0 and _SWIFT_ATTRIBUTE_LINE.fullmatch(lines[cursor]):
+        cursor -= 1
+    end = cursor + 1
+    documentation: list[str] = []
+    while cursor >= 0:
+        stripped = lines[cursor].lstrip()
+        if not stripped.startswith("///"):
+            break
+        documentation.append(stripped[3:])
+        cursor -= 1
+    if not documentation:
+        return None
+    documentation.reverse()
+    return cursor + 1, end, "\n".join(documentation)
+
+
+def _check_swift_documentation(rel: str, path: Path) -> list[str]:
+    """Return file-purpose and callable DocC diagnostics for one Swift source file."""
+    source = _read_source(path)
+    if source is None:
+        return [f"{rel}:missing-file-header-comment"]
+
+    lines = _without_shebang(source).splitlines()
+    file_block = _swift_file_doc_block(lines)
+    diagnostics: list[str] = []
+    if file_block is None or not _is_meaningful_documentation(file_block[2]):
+        diagnostics.append(f"{rel}:missing-file-header-comment")
+
+    for line_index, line in enumerate(lines):
+        match = _SWIFT_CALLABLE_DECLARATION.match(line)
+        if match is None:
+            continue
+        callable_name = (
+            match.group("function") or match.group("initializer") or match.group("subscript")
+        )
+        declaration_block = _swift_doc_block_before(lines, line_index)
+        if declaration_block is None or (
+            file_block is not None and declaration_block[:2] == file_block[:2]
+        ):
+            diagnostics.append(f"{rel}:missing-swift-callable-documentation:{callable_name}")
+        elif not _is_meaningful_documentation(declaration_block[2]):
+            diagnostics.append(f"{rel}:placeholder-swift-callable-documentation:{callable_name}")
+
+    return sorted(diagnostics)
 
 
 def _has_hash_header(text: str) -> bool:
@@ -560,6 +638,8 @@ def check_file_documentation(rel: str, root: Path) -> list[str]:
             path,
             check_public_declarations=classification in {"first-party-code", "first-party-script"},
         )
+    if suffix == ".swift":
+        return _check_swift_documentation(rel, path)
     if not _has_file_level_comment(path):
         return [f"{rel}:missing-file-header-comment"]
 

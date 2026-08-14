@@ -728,6 +728,58 @@ class TestCheckFileDocumentation:
 
         assert check_file_documentation("scripts/helper.swift", tmp_path) == []
 
+    def test_swift_callable_requires_docc(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "helper.swift"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "/// Exports the reviewed Apple signing identity.\n"
+            "import Foundation\n\n"
+            "private func fail(_ message: String) -> Never {\n"
+            "    fatalError(message)\n"
+            "}\n"
+        )
+
+        assert check_file_documentation("scripts/helper.swift", tmp_path) == [
+            "scripts/helper.swift:missing-swift-callable-documentation:fail"
+        ]
+
+    def test_swift_callable_rejects_placeholder_docc(self, tmp_path: Path) -> None:
+        f = tmp_path / "scripts" / "helper.swift"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "/// Exports the reviewed Apple signing identity.\n"
+            "import Foundation\n\n"
+            "/// TODO: document this helper.\n"
+            "private func fail(_ message: String) -> Never {\n"
+            "    fatalError(message)\n"
+            "}\n"
+        )
+
+        assert check_file_documentation("scripts/helper.swift", tmp_path) == [
+            "scripts/helper.swift:placeholder-swift-callable-documentation:fail"
+        ]
+
+    def test_swift_callable_docc_covers_attributes_initializers_and_subscripts(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "scripts" / "helper.swift"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "/// Defines documented Swift callable examples.\n"
+            "import Foundation\n\n"
+            "/// Returns the supplied value for release-script validation.\n"
+            "@discardableResult\n"
+            "private func checked(_ value: Int) -> Int { value }\n\n"
+            "private struct Values {\n"
+            "    /// Creates an empty value collection.\n"
+            "    init() {}\n\n"
+            "    /// Returns the deterministic value at the requested index.\n"
+            "    subscript(index: Int) -> Int { index }\n"
+            "}\n"
+        )
+
+        assert check_file_documentation("scripts/helper.swift", tmp_path) == []
+
     @pytest.mark.parametrize(
         ("relative_path", "source"),
         [
