@@ -49,6 +49,7 @@ def _copy_contract_tree(tmp_path: Path) -> Path:
         "config/docs-screenshot-fixture-v1.schema.json",
         "tests/fixtures/docs_screenshots/success.json",
         "tests/fixtures/docs_screenshots/degraded.json",
+        "tests/fixtures/docs_screenshots/electron-degraded.json",
         "tests/fixtures/docs_screenshots/privacy-canary.json",
         "docs/explanation/DESKTOP_SHELL.md",
         "docs/how-to/explore-the-interactive-console.md",
@@ -95,6 +96,44 @@ def test_checked_in_manifest_is_valid_complete_and_deterministic() -> None:
     assert "SCREENSHOT-PRIVATE-CANARY-7F4C" not in first_plan
 
 
+def test_electron_capture_contract_declares_success_and_degraded_states() -> None:
+    manifest = load_manifest(MANIFEST, repository_root=ROOT)
+    electron_scenarios = [
+        scenario for scenario in manifest.scenarios if scenario["surface"] == "electron"
+    ]
+    fixture_state_by_id = {fixture["id"]: fixture["state"] for fixture in manifest.fixtures}
+
+    assert {scenario["id"] for scenario in electron_scenarios} == {
+        "electron-degraded-diagnostics",
+        "electron-ready-home",
+    }
+    assert {fixture_state_by_id[scenario["fixture_id"]] for scenario in electron_scenarios} == {
+        "degraded",
+        "success",
+    }
+    assert all(
+        scenario["launch"] == ["pnpm", "--dir", "desktop", "capture:docs"]
+        for scenario in electron_scenarios
+    )
+    assert all(
+        scenario["ready_signal"]
+        == {
+            "kind": "text",
+            "value": (
+                "The desktop service did not start."
+                if scenario["id"] == "electron-degraded-diagnostics"
+                else "Local desktop shell"
+            ),
+        }
+        for scenario in electron_scenarios
+    )
+
+    package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+    assert package["scripts"]["capture:docs"] == (
+        "pnpm build:e2e && playwright test e2e/docs-screenshots.spec.ts"
+    )
+
+
 def test_manifest_schema_rejects_unknown_and_missing_fields() -> None:
     unknown = _payload()
     unknown["unexpected"] = True
@@ -105,6 +144,12 @@ def test_manifest_schema_rejects_unknown_and_missing_fields() -> None:
     assert isinstance(determinism, dict)
     del determinism["timezone"]
     _assert_error(missing, "DOCSHOT_SCHEMA_INVALID")
+
+    missing_ready_signal = _payload()
+    scenarios = missing_ready_signal["scenarios"]
+    assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
+    del scenarios[0]["ready_signal"]
+    _assert_error(missing_ready_signal, "DOCSHOT_SCHEMA_INVALID")
 
 
 def test_manifest_rejects_duplicate_ids_and_destinations() -> None:
@@ -288,13 +333,20 @@ def test_make_reserves_validation_and_plan_targets_without_capture_or_ci() -> No
 def test_contract_ownership_and_impact_are_documented() -> None:
     authoring = (ROOT / "docs/DOCS_AUTHORING.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    desktop_shell = (ROOT / "docs/explanation/DESKTOP_SHELL.md").read_text(encoding="utf-8")
     threat_model = (ROOT / "docs/THREAT_MODEL.md").read_text(encoding="utf-8")
 
     assert "## Deterministic screenshot contract" in authoring
     assert "config/docs-screenshot-manifest.json" in authoring
     assert "make docs-screenshots-check" in authoring
     assert "does not capture" in authoring
+    assert "pnpm --dir desktop capture:docs" in authoring
+    assert "ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT" in authoring
     assert "scripts/docs_screenshot_manifest.py" in architecture
+    assert "desktop/e2e/docs-screenshot-capture.ts" in architecture
     assert "repository tooling only" in architecture
+    assert "## Deterministic documentation capture" in desktop_shell
+    assert "pnpm --dir desktop capture:docs" in desktop_shell
     assert "Issue #417 deterministic screenshot-contract evidence" in threat_model
+    assert "Issue #418 deterministic Electron-capture evidence" in threat_model
     assert "privacy-canary" in threat_model

@@ -64,9 +64,26 @@ rules outside it.
 documentation destinations and anchors, launch allowlist, geometry, output
 allowlist, and deterministic environment controls. `make docs-screenshots`
 prints the normalized capture plan for adapters and reviewers. Despite its
-reserved name, it does not capture, modify, or publish an image. Electron and
-terminal capture execution, image assets, drift checks, and CI integration are
-owned by the follow-on screenshot issues.
+reserved name, it does not capture, modify, or publish an image.
+
+The Electron adapter runs with `pnpm --dir desktop capture:docs` after the
+locked desktop dependencies and Electron binary have been installed. The
+caller must set `ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an existing,
+explicit output directory. The adapter builds the fixture-only desktop bundle,
+launches a real Electron `BrowserWindow` through Playwright, waits for each
+manifest-declared ready signal, and captures both the fictional provider-none
+Home/Ready state and sanitized degraded-diagnostics state twice. It requires
+byte-identical repeats under the manifest viewport, device scale, light theme,
+UTC clock, locale, bundled Inter font, and disabled animation controls. It
+inherits only the narrow host session variables Electron needs, blocks and
+reports unexpected renderer networking, scans the rendered document for every
+privacy canary, and atomically writes only the two declared Electron PNG paths
+below the caller's output root.
+
+This adapter does not commit or publish those PNGs, add screenshot CI, or
+change the plan-only Make target. Terminal capture remains owned by #419;
+committed image assets, documentation embedding, drift comparison, and CI
+enforcement remain owned by #420.
 
 Every publishable scenario must:
 

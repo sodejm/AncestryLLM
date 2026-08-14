@@ -531,6 +531,24 @@ Generic recovery text is part of the security boundary: the capability summary
 and diagnostics must not turn private runtime state into renderer-visible
 details.
 
+## Deterministic documentation capture
+
+Maintainers can exercise the reviewed Electron documentation states with
+`pnpm --dir desktop capture:docs`. Set
+`ANCESTRYLLM_DOCS_SCREENSHOT_OUTPUT_ROOT` to an existing temporary output
+directory first; the adapter will not infer a destination or fall back to the
+repository. It launches the real Electron shell through Playwright and drives
+the ordinary Home and Diagnostics destinations using only checked-in fictional,
+network-disabled fixtures. The provider-none Home/Ready view and sanitized
+degraded view each wait for a declared visible ready signal and must produce two
+byte-identical PNGs under the fixed manifest controls.
+
+The capture blocks unexpected renderer networking, scans rendered text for the
+privacy canary, and atomically writes only the Electron paths declared by the
+shared screenshot manifest. It does not commit, embed, or publish the images.
+Issue #420 owns reviewed committed assets, documentation placement, drift
+comparison, and CI; terminal capture is separately owned by #419.
+
 ## Verification boundary
 
 `make desktop-e2e` builds the production renderer and launches it in Electron

@@ -26,6 +26,7 @@
     "test:native-container": "vitest run src/main/container-native-evidence.test.ts",
     "build": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs",
     "build:e2e": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --fixture",
+    "capture:docs": "pnpm build:e2e && playwright test e2e/docs-screenshots.spec.ts",
     "build:packaged-native-verification": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification",
     "build:packaged-file-grants": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification --packaged-file-grants",
     "test:e2e": "pnpm build:e2e && playwright test e2e/shell.spec.ts",
@@ -96,6 +97,7 @@
   "devDependencies": {
     "@electron/fuses": "2.1.2",
     "@eslint/js": "9.39.5",
+    "@fontsource/inter": "5.3.0",
     "@playwright/test": "1.62.0",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/dom": "10.4.1",
@@ -107,6 +109,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "4.7.0",
     "axe-core": "4.13.0",
+    "ajv": "8.20.0",
     "corepack": "0.34.0",
     "electron": "39.8.10",
     "electron-builder": "26.15.7",

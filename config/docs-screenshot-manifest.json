@@ -5,7 +5,8 @@
     "pnpm"
   ],
   "output_allowlist": [
-    "docs/assets/screenshots/electron/private-chat.png",
+    "docs/assets/screenshots/electron/degraded-diagnostics.png",
+    "docs/assets/screenshots/electron/ready-home.png",
     "docs/assets/screenshots/terminal/interactive-console.png"
   ],
   "determinism": {
@@ -52,6 +53,14 @@
       "fictional": true
     },
     {
+      "id": "electron-degraded",
+      "state": "degraded",
+      "path": "tests/fixtures/docs_screenshots/electron-degraded.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
       "id": "privacy-canary",
       "state": "privacy-canary",
       "path": "tests/fixtures/docs_screenshots/privacy-canary.json",
@@ -62,13 +71,13 @@
   ],
   "scenarios": [
     {
-      "id": "electron-private-chat",
+      "id": "electron-ready-home",
       "surface": "electron",
       "launch": [
         "pnpm",
         "--dir",
         "desktop",
-        "dev:gallery"
+        "capture:docs"
       ],
       "fixture_id": "success",
       "geometry": {
@@ -77,11 +86,46 @@
         "height": 900,
         "device_scale_factor": 1
       },
-      "output_path": "docs/assets/screenshots/electron/private-chat.png",
+      "ready_signal": {
+        "kind": "text",
+        "value": "Local desktop shell"
+      },
+      "output_path": "docs/assets/screenshots/electron/ready-home.png",
       "documentation": [
         {
           "path": "docs/explanation/DESKTOP_SHELL.md",
-          "anchor": "unreleased-transient-chat-foundation"
+          "anchor": "supported-surface"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      }
+    },
+    {
+      "id": "electron-degraded-diagnostics",
+      "surface": "electron",
+      "launch": [
+        "pnpm",
+        "--dir",
+        "desktop",
+        "capture:docs"
+      ],
+      "fixture_id": "electron-degraded",
+      "geometry": {
+        "kind": "viewport",
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 1
+      },
+      "ready_signal": {
+        "kind": "text",
+        "value": "The desktop service did not start."
+      },
+      "output_path": "docs/assets/screenshots/electron/degraded-diagnostics.png",
+      "documentation": [
+        {
+          "path": "docs/explanation/DESKTOP_SHELL.md",
+          "anchor": "sanitized-diagnostics-and-recovery"
         }
       ],
       "comparison": {
@@ -102,6 +146,10 @@
         "kind": "terminal",
         "columns": 120,
         "rows": 36
+      },
+      "ready_signal": {
+        "kind": "text",
+        "value": "Registered offline GEDCOM commands remain available."
       },
       "output_path": "docs/assets/screenshots/terminal/interactive-console.png",
       "documentation": [
