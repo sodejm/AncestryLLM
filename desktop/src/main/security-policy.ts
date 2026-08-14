@@ -1,6 +1,7 @@
 export const APP_ENTRY_URL = 'app://bundle/index.html' as const
 export const APP_ENTRY_ROUTE_HASHES = Object.freeze([
   '#/',
+  '#/chat',
   '#/tasks',
   '#/diagnostics',
   '#/settings',

@@ -11,6 +11,10 @@ import {
   type CapabilityManifest,
   type ChatEvent,
   type ChatEventDelivery,
+  type ChatSession,
+  type ChatSessionClosure,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatStreamAcknowledgement,
   type ChatStreamAckRequest,
   type ChatStreamCancelRequest,
@@ -20,6 +24,8 @@ import {
   type ConsentPreview,
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
+  type CopyTextRequest,
+  type CopyTextResult,
   type FileGrant,
   type FileGrantId,
   type FileGrantRevocation,
@@ -34,6 +40,8 @@ import {
   type JobRequest,
   type JobSnapshot,
   type OpenFileGrantRequest,
+  type OpenExternalLinkRequest,
+  type OpenExternalLinkResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderEndpointValidation,
@@ -47,6 +55,11 @@ import {
 import {
   parseAppInfoResult,
   parseCapabilitiesResult,
+  parseChatCapabilityResult,
+  parseChatSessionClosureResult,
+  parseChatSessionCreateRequest,
+  parseChatSessionRequest,
+  parseChatSessionResult,
   parseChatStreamAcknowledgementResult,
   parseChatStreamAckRequest,
   parseChatStreamCancelRequest,
@@ -56,6 +69,8 @@ import {
   parseConsentPreviewRequest,
   parseConsentPreviewResult,
   parseConsentRevokeRequest,
+  parseCopyTextRequest,
+  parseCopyTextResult,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
@@ -73,6 +88,8 @@ import {
   parseJobRequest,
   parseJobSnapshotResult,
   parseOpenFileGrantRequest,
+  parseOpenExternalLinkRequest,
+  parseOpenExternalLinkResult,
   parsePreferenceUpdate,
   parsePreferencesResult,
   parseProviderConfigurationResult,
@@ -122,6 +139,11 @@ export interface MainDesktopBridge extends Omit<
   | 'getLocalRuntimeStatus'
   | 'previewLocalRuntime'
   | 'applyLocalRuntime'
+  | 'openExternalLink'
+  | 'copyText'
+  | 'getChatCapability'
+  | 'createChatSession'
+  | 'closeChatSession'
   | 'startChatStream'
   | 'cancelChatStream'
   | 'acknowledgeChatStream'
@@ -174,6 +196,15 @@ export interface MainDesktopBridge extends Omit<
     request: LocalRuntimeApplyRequest,
     signal?: AbortSignal,
   ): ReturnType<AncestryBridge['applyLocalRuntime']>
+  getChatCapability(signal?: AbortSignal): ReturnType<AncestryBridge['getChatCapability']>
+  createChatSession(
+    request: ChatSessionCreateRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['createChatSession']>
+  closeChatSession(
+    request: ChatSessionRequest,
+    signal?: AbortSignal,
+  ): ReturnType<AncestryBridge['closeChatSession']>
   startChatStream(
     request: ChatStreamStartRequest,
     signal?: AbortSignal,
@@ -214,6 +245,11 @@ export interface MainFileGrantBroker {
   dispose(): void
 }
 
+export interface MainNativeActions {
+  openExternalLink(destination: string): Promise<Readonly<{ status: 'opened' | 'cancelled' }>>
+  copyText(text: string): Promise<void> | void
+}
+
 export interface DesktopIpcController {
   authorizeWebContents(
     contents: BridgeWebContents,
@@ -227,12 +263,15 @@ export interface RegistrationOptions {
   readonly operationTimeoutMs?: number
   readonly fileDialogTimeoutMs?: number
   readonly runtimeOperationTimeoutMs?: number
+  readonly nativeActionTimeoutMs?: number
+  readonly nativeActions?: MainNativeActions
 }
 interface Authorization {
   readonly contents: BridgeWebContents
   readonly trustedUrl: (url: string) => boolean
   readonly controllers: Set<AbortController>
   readonly queue: QueueEntry[]
+  readonly chatSessionIds: Set<string>
   readonly jobSubscriptions: Map<string, JobSubscription>
   readonly removeLifecycleListeners: () => void
   active: number
@@ -290,6 +329,7 @@ const MAX_JOB_SUBSCRIPTIONS = 32
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
 const DEFAULT_FILE_DIALOG_TIMEOUT_MS = 300_000
 const DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
+const DEFAULT_NATIVE_ACTION_TIMEOUT_MS = 300_000
 const CANCELLED = Symbol('bridge-request-cancelled')
 const TIMED_OUT = Symbol('bridge-request-timed-out')
 
@@ -350,6 +390,12 @@ const cancelled = <T>(): BridgeResult<T> =>
   error('REQUEST_CANCELLED', 'The desktop request was cancelled.', 'Retry from the current AncestryLLM window.')
 const timedOut = <T>(): BridgeResult<T> =>
   error('REQUEST_TIMEOUT', 'The desktop request timed out.', 'Try again or restart AncestryLLM.')
+const chatSessionNotOwned = <T>(): BridgeResult<T> =>
+  error(
+    'CHAT_SESSION_NOT_FOUND',
+    'The selected chat session is no longer available.',
+    'Start a new conversation from the current AncestryLLM window.',
+  )
 
 function success<T>(data: T): BridgeResult<T> {
   return Object.freeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data })
@@ -504,10 +550,22 @@ function schedule<T>(
   })
 }
 
-function invalidate(state: Authorization, notifyJobStreams = false): void {
+function invalidate(
+  state: Authorization,
+  bridge: MainDesktopBridge,
+  notifyJobStreams = false,
+): void {
+  const chatSessionIds = [...state.chatSessionIds]
+  state.chatSessionIds.clear()
   const chatStreams = state.chatStreams
   delete state.chatStreams
   chatStreams?.dispose()
+  for (const sessionId of chatSessionIds) {
+    void bridge.closeChatSession(Object.freeze({
+      schema_version: 1,
+      session_id: sessionId,
+    })).catch(() => undefined)
+  }
   const subscriptions = [...state.jobSubscriptions.values()]
   if (notifyJobStreams) {
     for (const subscription of subscriptions) {
@@ -530,6 +588,19 @@ function activeChatOwner(state: Authorization, generation: number): boolean {
   } catch {
     return false
   }
+}
+
+function matchesChatSessionRequest(
+  session: Readonly<ChatSession>,
+  request: Readonly<ChatSessionCreateRequest>,
+): boolean {
+  return session.provider_profile_name === request.provider_profile_name
+    && session.model === request.model
+    && session.purpose === request.purpose
+    && session.consent_name === request.consent_name
+    && session.message_count === 0
+    && session.data_classes.length === request.data_classes.length
+    && session.data_classes.every((item, index) => item === request.data_classes[index])
 }
 
 function chatStreamsFor(
@@ -661,12 +732,13 @@ function capabilityRequest(
 function removeAuthorization(
   authorizations: Map<BridgeWebContents, Authorization>,
   state: Authorization,
+  bridge: MainDesktopBridge,
   fileGrants: MainFileGrantBroker,
 ): void {
   if (authorizations.get(state.contents) !== state) return
   authorizations.delete(state.contents)
   state.removeLifecycleListeners()
-  invalidate(state)
+  invalidate(state, bridge)
   fileGrants.revokeOwner(state.contents)
 }
 
@@ -696,6 +768,7 @@ export function registerDesktopIpcHandlers(
   const fileDialogTimeoutMs = options.fileDialogTimeoutMs ?? DEFAULT_FILE_DIALOG_TIMEOUT_MS
   const runtimeOperationTimeoutMs = options.runtimeOperationTimeoutMs
     ?? DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS
+  const nativeActionTimeoutMs = options.nativeActionTimeoutMs ?? DEFAULT_NATIVE_ACTION_TIMEOUT_MS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error('Desktop IPC operation timeout must be positive.')
   }
@@ -704,6 +777,9 @@ export function registerDesktopIpcHandlers(
   }
   if (!Number.isFinite(runtimeOperationTimeoutMs) || runtimeOperationTimeoutMs <= 0) {
     throw new Error('Desktop IPC runtime operation timeout must be positive.')
+  }
+  if (!Number.isFinite(nativeActionTimeoutMs) || nativeActionTimeoutMs <= 0) {
+    throw new Error('Desktop IPC native-action timeout must be positive.')
   }
   const authorizations = new Map<BridgeWebContents, Authorization>()
   let disposed = false
@@ -1027,6 +1103,135 @@ export function registerDesktopIpcHandlers(
       parseLocalRuntimeResult,
     )
   })
+  ipc.handle(desktopChannels.openExternalLink, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<OpenExternalLinkResult>()
+    if (args.length !== 1 || !options.nativeActions) return invalidRequest<OpenExternalLinkResult>()
+    let request: OpenExternalLinkRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseOpenExternalLinkRequest(args[0])
+    } catch {
+      return invalidRequest<OpenExternalLinkResult>()
+    }
+    return schedule(
+      state,
+      nativeActionTimeoutMs,
+      async () => {
+        const outcome = await options.nativeActions?.openExternalLink(request.destination)
+        if (!outcome) throw new Error('Native action unavailable')
+        return success({
+          schema_version: 1,
+          destination: request.destination,
+          status: outcome.status,
+        })
+      },
+      parseOpenExternalLinkResult,
+    )
+  })
+  ipc.handle(desktopChannels.copyText, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<CopyTextResult>()
+    if (args.length !== 1 || !options.nativeActions) return invalidRequest<CopyTextResult>()
+    let request: CopyTextRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseCopyTextRequest(args[0])
+    } catch {
+      return invalidRequest<CopyTextResult>()
+    }
+    return schedule(
+      state,
+      nativeActionTimeoutMs,
+      async () => {
+        await options.nativeActions?.copyText(request.text)
+        return success({ schema_version: 1, copied: true })
+      },
+      parseCopyTextResult,
+    )
+  })
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.getChatCapability,
+    authorize,
+    (signal) => bridge.getChatCapability(signal),
+    parseChatCapabilityResult,
+    timeoutMs,
+  )
+  ipc.handle(desktopChannels.createChatSession, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ChatSession>()
+    if (args.length !== 1) return invalidRequest<ChatSession>()
+    let request: ChatSessionCreateRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseChatSessionCreateRequest(args[0])
+    } catch {
+      return invalidRequest<ChatSession>()
+    }
+    const generation = state.generation
+    const response = await schedule(
+      state,
+      timeoutMs,
+      async (signal) => {
+        const raw = await bridge.createChatSession(request, signal)
+        const parsed = safeResponse(raw, parseChatSessionResult)
+        if (parsed.ok && !activeChatOwner(state, generation)) {
+          void bridge.closeChatSession(Object.freeze({
+            schema_version: 1,
+            session_id: parsed.data.session_id,
+          })).catch(() => undefined)
+        }
+        return raw
+      },
+      parseChatSessionResult,
+    )
+    if (!response.ok) return response
+    if (!matchesChatSessionRequest(response.data, request)) {
+      void bridge.closeChatSession(Object.freeze({
+        schema_version: 1,
+        session_id: response.data.session_id,
+      })).catch(() => undefined)
+      return invalidResponse<ChatSession>()
+    }
+    if (!activeChatOwner(state, generation)) {
+      void bridge.closeChatSession(Object.freeze({
+        schema_version: 1,
+        session_id: response.data.session_id,
+      })).catch(() => undefined)
+      return cancelled<ChatSession>()
+    }
+    state.chatSessionIds.add(response.data.session_id)
+    return response
+  })
+  ipc.handle(desktopChannels.closeChatSession, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized<ChatSessionClosure>()
+    if (args.length !== 1) return invalidRequest<ChatSessionClosure>()
+    let request: ChatSessionRequest
+    try {
+      validateStructuredClone(args[0], chatRequestLimits)
+      request = parseChatSessionRequest(args[0])
+    } catch {
+      return invalidRequest<ChatSessionClosure>()
+    }
+    if (!state.chatSessionIds.has(request.session_id)) {
+      return chatSessionNotOwned<ChatSessionClosure>()
+    }
+    const response = await schedule(
+      state,
+      timeoutMs,
+      (signal) => bridge.closeChatSession(request, signal),
+      parseChatSessionClosureResult,
+    )
+    if (!response.ok) return response
+    if (response.data.session_id !== request.session_id) {
+      return invalidResponse<ChatSessionClosure>()
+    }
+    state.chatSessionIds.delete(request.session_id)
+    state.chatStreams?.disposeSession(request.session_id)
+    return response
+  })
   ipc.handle(desktopChannels.startChatStream, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<ChatStreamRun>()
@@ -1038,6 +1243,9 @@ export function registerDesktopIpcHandlers(
     } catch {
       return invalidRequest<ChatStreamRun>()
     }
+    if (!state.chatSessionIds.has(request.session_id)) {
+      return chatSessionNotOwned<ChatStreamRun>()
+    }
     const generation = state.generation
     const response = await schedule(
       state,
@@ -1046,7 +1254,16 @@ export function registerDesktopIpcHandlers(
       parseChatStreamRunResult,
     )
     if (!response.ok) return response
-    if (!activeChatOwner(state, generation)) {
+    if (response.data.session_id !== request.session_id) {
+      void bridge.cancelChatStream(Object.freeze({
+        schema_version: 1,
+        session_id: response.data.session_id,
+        run_id: response.data.run_id,
+      })).catch(() => undefined)
+      return invalidResponse<ChatStreamRun>()
+    }
+    if (!activeChatOwner(state, generation)
+      || !state.chatSessionIds.has(request.session_id)) {
       void bridge.cancelChatStream(Object.freeze({
         schema_version: 1,
         session_id: response.data.session_id,
@@ -1075,12 +1292,21 @@ export function registerDesktopIpcHandlers(
     } catch {
       return invalidRequest<ChatStreamRun>()
     }
-    return schedule(
+    if (!state.chatSessionIds.has(request.session_id)) {
+      return chatSessionNotOwned<ChatStreamRun>()
+    }
+    const response = await schedule(
       state,
       timeoutMs,
       (signal) => bridge.cancelChatStream(request, signal),
       parseChatStreamRunResult,
     )
+    if (!response.ok) return response
+    if (response.data.session_id !== request.session_id
+      || response.data.run_id !== request.run_id) {
+      return invalidResponse<ChatStreamRun>()
+    }
+    return response
   })
   ipc.handle(desktopChannels.acknowledgeChatStream, async (event, ...args) => {
     const state = authorize(event)
@@ -1092,6 +1318,9 @@ export function registerDesktopIpcHandlers(
       request = parseChatStreamAckRequest(args[0])
     } catch {
       return invalidRequest<ChatStreamAcknowledgement>()
+    }
+    if (!state.chatSessionIds.has(request.session_id)) {
+      return chatSessionNotOwned<ChatStreamAcknowledgement>()
     }
     const response = state.chatStreams?.acknowledge(request) ?? error(
       'CHAT_STREAM_NOT_FOUND',
@@ -1253,14 +1482,14 @@ export function registerDesktopIpcHandlers(
     ): () => void {
       if (disposed || contents.isDestroyed()) throw new Error('Cannot authorize unavailable WebContents.')
       const previous = authorizations.get(contents)
-      if (previous) removeAuthorization(authorizations, previous, fileGrants)
-      const revoke = () => removeAuthorization(authorizations, state, fileGrants)
+      if (previous) removeAuthorization(authorizations, previous, bridge, fileGrants)
+      const revoke = () => removeAuthorization(authorizations, state, bridge, fileGrants)
       const navigate = (event: unknown) => {
         const details = parseNavigationStartDetails(event)
         if (details?.isMainFrame === false) return
         if (details?.isSameDocument === true) return
         state.navigating = true
-        invalidate(state)
+        invalidate(state, bridge)
         fileGrants.revokeOwner(state.contents)
       }
       const commitNavigation = (
@@ -1278,6 +1507,7 @@ export function registerDesktopIpcHandlers(
         trustedUrl,
         controllers: new Set(),
         queue: [],
+        chatSessionIds: new Set(),
         jobSubscriptions: new Map(),
         active: 0,
         generation: 0,
@@ -1300,17 +1530,19 @@ export function registerDesktopIpcHandlers(
       return () => {
         if (unsubscribed) return
         unsubscribed = true
-        removeAuthorization(authorizations, state, fileGrants)
+        removeAuthorization(authorizations, state, bridge, fileGrants)
       }
     },
     invalidateSidecarSession(): void {
       fileGrants.revokeAll()
-      for (const state of authorizations.values()) invalidate(state, true)
+      for (const state of authorizations.values()) invalidate(state, bridge, true)
     },
     dispose(): void {
       if (disposed) return
       disposed = true
-      for (const state of [...authorizations.values()]) removeAuthorization(authorizations, state, fileGrants)
+      for (const state of [...authorizations.values()]) {
+        removeAuthorization(authorizations, state, bridge, fileGrants)
+      }
       fileGrants.dispose()
     },
   })

@@ -165,6 +165,14 @@ Vite environment values. Privileged IPC, sidecar routes, file grants, secrets,
 events, plugins, and update paths must use strict versioned DTOs, size limits,
 deny-by-default behavior, and the negative tests named by the threat ledger.
 
+Treat model text as hostile display data. Chat presentation must use the closed
+CommonMark/GFM component allowlist and must not add `innerHTML`, `rehype-raw`,
+raw HTML, remote images, embeds, implicit autolinks, executable model actions,
+`window.open`, or HTML clipboard content. External HTTPS links must display the
+normalized destination and use the fixed Electron-Main confirmation action;
+copy is plain text only. Keep renderer conversation state owner-scoped, bounded,
+transient, replay-safe, and cleared during teardown.
+
 Renderer file selection must use the opaque grant broker, never user-supplied
 or returned paths. Grant DTOs remain path-free; Electron main owns native
 dialogs, the path map, lifecycle revocation, and trusted internal resolution. A

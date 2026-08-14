@@ -28,12 +28,15 @@ budgets, race detection, output alias rejection, and transactional publication.
 
 The released bounded Electron desktop control shell uses the authenticated
 health/capability sidecar. Unreleased source also includes explicitly bounded
-file-grant, provider-configuration, presentation-only **Tasks** adapters, and a
-source-level synchronous transient-chat API. That chat boundary requires an
-exact stored profile and model plus current policy and consent, keeps bounded
-content only in memory, and grants no tools or domain authority. Desktop-domain
-capabilities such as Electron chat presentation and streaming, genealogy/domain
-task admission or execution, direct artifact access, cloud accounts, and updater
+file-grant, provider-configuration, presentation-only **Tasks** adapters, a
+source-level synchronous transient-chat API, and a transient **Chat**
+destination over a Main-owned private stream. That chat boundary requires an
+exact stored profile and model plus current policy and compatible consent,
+keeps bounded content only in memory, grants no tools or domain authority,
+renders model Markdown through a closed allowlist, and keeps external-link
+confirmation in Electron Main. Desktop-domain capabilities such
+as target-matched packaged and adversarial chat evidence, genealogy/domain task
+admission or execution, direct artifact access, cloud accounts, and updater
 flows remain planned or incomplete. The current desktop records distinguish
 released control surfaces
 from Unreleased source and the verification needed for later expansion; they

@@ -14,7 +14,7 @@ import {
 describe('production renderer security policy', () => {
   it('uses only the minimum custom-scheme privileges and a network-denying CSP', () => {
     expect(APP_ENTRY_URL).toBe('app://bundle/index.html')
-    expect(APP_ENTRY_ROUTE_HASHES).toEqual(['#/', '#/tasks', '#/diagnostics', '#/settings'])
+    expect(APP_ENTRY_ROUTE_HASHES).toEqual(['#/', '#/chat', '#/tasks', '#/diagnostics', '#/settings'])
     expect(APP_SCHEME_PRIVILEGES).toEqual({
       standard: true,
       secure: true,
@@ -49,7 +49,7 @@ describe('production renderer security policy', () => {
     expect(readAsset).toHaveBeenCalledWith('index.html')
   })
 
-  it.each(['#/', '#/tasks', '#/diagnostics', '#/settings'])(
+  it.each(['#/', '#/chat', '#/tasks', '#/diagnostics', '#/settings'])(
     'serves the entry document when Electron reloads the reviewed renderer route %s',
     async (route) => {
       const readAsset = vi.fn(async (file: string) => new TextEncoder().encode(file))

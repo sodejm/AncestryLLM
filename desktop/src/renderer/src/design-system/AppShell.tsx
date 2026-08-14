@@ -1,12 +1,13 @@
 // Reusable accessible application layout and navigation shell.
 
-import { CircleCheck, Command, Heart, Home, ListTodo, Settings, Stethoscope } from 'lucide-react'
+import { CircleCheck, Command, Heart, Home, ListTodo, MessageSquareText, Settings, Stethoscope } from 'lucide-react'
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { CommandPalette } from './CommandPalette'
 import { navigationItems, type AppRoute, type NavigationItem } from './contracts'
 
 const routeIcons = {
   home: Home,
+  chat: MessageSquareText,
   tasks: ListTodo,
   diagnostics: Stethoscope,
   settings: Settings,
@@ -50,7 +51,7 @@ export function AppShell({ route, title, description, headingRef, onNavigate, ch
     <header className="app-header">
       <div className="brand"><Heart aria-hidden="true" /> <span>AncestryLLM</span></div>
       <div className="header-actions">
-        <span className="local-state"><CircleCheck aria-hidden="true" />Local and offline</span>
+        <span className="local-state"><CircleCheck aria-hidden="true" />Local control channel</span>
         <button
           ref={paletteButton}
           type="button"
@@ -79,7 +80,7 @@ export function AppShell({ route, title, description, headingRef, onNavigate, ch
           <span>{item.label}</span>
         </a>
       })}
-      <p className="navigation-note">This shell presents local state only.</p>
+      <p className="navigation-note">Provider access is explicit and consent-scoped.</p>
     </nav>
     <main id="workspace-content" tabIndex={-1} aria-labelledby="workspace-title">
       <div className="workspace-header">

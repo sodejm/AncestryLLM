@@ -3,6 +3,7 @@ import {
   DESKTOP_PROTOCOL_VERSION,
   applicationSettingKeys,
   chatEventTypes,
+  chatPurposes,
   jobStates,
   providerDataClasses,
   providerIds,
@@ -19,6 +20,12 @@ import {
   type ChatEvent,
   type ChatEventDelivery,
   type ChatEventPayload,
+  type ChatCapability,
+  type ChatPurpose,
+  type ChatSession,
+  type ChatSessionClosure,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatStreamAcknowledgement,
   type ChatStreamAckRequest,
   type ChatStreamCancelRequest,
@@ -30,6 +37,8 @@ import {
   type ConsentPreviewRequest,
   type ConsentRevokeRequest,
   type ConsentWarningCode,
+  type CopyTextRequest,
+  type CopyTextResult,
   type DesktopColorScheme,
   type ArtifactRef,
   type FileFormat,
@@ -58,6 +67,8 @@ import {
   type JobRequest,
   type JobSnapshot,
   type OpenFileGrantRequest,
+  type OpenExternalLinkRequest,
+  type OpenExternalLinkResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderDataClass,
@@ -136,7 +147,11 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'JOB_SUBSCRIPTION_CLOSED',
   'JOB_SUBSCRIPTION_CONFLICT',
   'JOB_EVENT_STREAM_FAILED',
+  'CHAT_SESSION_INVALID',
   'CHAT_SESSION_NOT_FOUND',
+  'CHAT_SESSION_LIMIT',
+  'CHAT_SESSION_BUSY',
+  'CHAT_SESSION_SERVICE_UNAVAILABLE',
   'CHAT_STREAM_NOT_FOUND',
   'CHAT_STREAM_CURSOR_INVALID',
   'CHAT_STREAM_REPLAY_EXPIRED',
@@ -549,9 +564,131 @@ export function parseFileGrantId(value: unknown): FileGrantId {
   return value as FileGrantId
 }
 
+// External navigation is deliberately narrower than a general URL parser: only
+// bounded, credential-free HTTPS destinations may reach main-process confirmation.
+// eslint-disable-next-line no-control-regex
+const externalLinkControlPattern = /[\u0000-\u001f\u007f]/u
+// Plain-text clipboard writes permit layout whitespace but no hidden controls.
+// eslint-disable-next-line no-control-regex
+const copyTextControlPattern = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u
+
+interface ParsedExternalLink {
+  readonly href: string
+  readonly protocol: string
+  readonly hostname: string
+  readonly username: string
+  readonly password: string
+  readonly port: string
+}
+
+type ExternalLinkParser = new (value: string) => ParsedExternalLink
+
+function parseExternalLinkDestination(value: unknown, message: string): string {
+  if (
+    typeof value !== 'string'
+    || Array.from(value).length < 1
+    || Array.from(value).length > 2_048
+    || externalLinkControlPattern.test(value)
+    || !value.startsWith('https://')
+    || value.trim() !== value
+    || value.includes('\\')
+  ) throw new Error(message)
+  const ExternalLink = (globalThis as unknown as { URL?: ExternalLinkParser }).URL
+  if (ExternalLink === undefined) throw new Error(message)
+  let destination: ParsedExternalLink
+  try {
+    destination = new ExternalLink(value)
+  } catch {
+    throw new Error(message)
+  }
+  if (
+    destination.protocol !== 'https:'
+    || !destination.hostname
+    || destination.username
+    || destination.password
+    || destination.port
+  ) throw new Error(message)
+  return destination.href
+}
+
+export function parseOpenExternalLinkRequest(value: unknown): OpenExternalLinkRequest {
+  const message = 'Invalid external-link request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'destination'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    destination: parseExternalLinkDestination(value.destination, message),
+  })
+}
+
+export function parseCopyTextRequest(value: unknown): CopyTextRequest {
+  const message = 'Invalid copy-text request'
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'text'])
+    || value.schema_version !== 1
+    || typeof value.text !== 'string'
+    || Array.from(value.text).length < 1
+    || Array.from(value.text).length > 16_384
+    || copyTextControlPattern.test(value.text)
+  ) throw new Error(message)
+  return deepFreeze({ schema_version: 1, text: value.text })
+}
+
 function parseChatSessionId(value: unknown, message: string): string {
   if (typeof value !== 'string' || !chatSessionIdPattern.test(value)) throw new Error(message)
   return value
+}
+
+function parseChatPurpose(value: unknown, message: string): ChatPurpose {
+  if (typeof value !== 'string' || !chatPurposes.includes(value as ChatPurpose)) {
+    throw new Error(message)
+  }
+  return value as ChatPurpose
+}
+
+function parseUniqueChatDataClasses(
+  value: unknown,
+  message: string,
+): readonly ProviderDataClass[] {
+  const dataClasses = parseDataClasses(value, message)
+  if (new Set(dataClasses).size !== dataClasses.length) throw new Error(message)
+  return dataClasses
+}
+
+function parseNullableProfileName(value: unknown, message: string): string | null {
+  if (value === null) return null
+  return parseProfileName(value, message)
+}
+
+export function parseChatSessionCreateRequest(value: unknown): ChatSessionCreateRequest {
+  const message = 'Invalid chat session request'
+  if (!record(value) || !exactKeys(value, [
+    'schema_version',
+    'provider_profile_name',
+    'model',
+    'purpose',
+    'data_classes',
+    'consent_name',
+  ]) || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    provider_profile_name: parseProfileName(value.provider_profile_name, message),
+    model: parseModel(value.model, message),
+    purpose: parseChatPurpose(value.purpose, message),
+    data_classes: parseUniqueChatDataClasses(value.data_classes, message),
+    consent_name: parseNullableProfileName(value.consent_name, message),
+  })
+}
+
+export function parseChatSessionRequest(value: unknown): ChatSessionRequest {
+  const message = 'Invalid chat session request'
+  if (!record(value) || !exactKeys(value, ['schema_version', 'session_id'])
+    || value.schema_version !== 1) throw new Error(message)
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, message),
+  })
 }
 
 function parseChatRunId(value: unknown, message: string): string {
@@ -733,6 +870,82 @@ function parseChatStreamAcknowledgement(value: unknown): Readonly<ChatStreamAckn
     run_id: parseChatRunId(value.run_id, 'Invalid bridge response'),
     through_sequence: value.through_sequence,
     acknowledged: true,
+  })
+}
+
+function parseChatCapability(value: unknown): Readonly<ChatCapability> {
+  const expected = {
+    schema_version: 1,
+    max_active_sessions: 32,
+    max_messages: 32,
+    max_message_characters: 16_384,
+    max_context_characters: 65_536,
+    max_output_tokens: 4_096,
+    max_temperature: 1,
+    max_timeout_seconds: 120,
+    max_safe_retries: 1,
+    transient: true,
+    tools_enabled: false,
+    payload_retention: false,
+    output_is_evidence: false,
+    streaming: true,
+    stream_replay_max_bytes: 262_144,
+  } as const satisfies ChatCapability
+  if (!record(value) || !exactKeys(value, Object.keys(expected))) invalidResponse()
+  for (const [key, item] of Object.entries(expected)) {
+    if (value[key] !== item) invalidResponse()
+  }
+  return deepFreeze({ ...expected })
+}
+
+function parseChatSession(value: unknown): Readonly<ChatSession> {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version',
+    'session_id',
+    'provider_profile_name',
+    'provider_id',
+    'model',
+    'purpose',
+    'data_classes',
+    'remote',
+    'consent_name',
+    'message_count',
+    'transient',
+    'payload_retention',
+  ]) || value.schema_version !== 1
+    || typeof value.remote !== 'boolean'
+    || !integer(value.message_count, 0, 32)
+    || value.transient !== true
+    || value.payload_retention !== false) invalidResponse()
+  try {
+    const consentName = parseNullableProfileName(value.consent_name, 'Invalid bridge response')
+    if (value.remote && consentName === null) invalidResponse()
+    return deepFreeze({
+      schema_version: 1,
+      session_id: parseChatSessionId(value.session_id, 'Invalid bridge response'),
+      provider_profile_name: parseProfileName(value.provider_profile_name, 'Invalid bridge response'),
+      provider_id: parseProviderId(value.provider_id, 'Invalid bridge response'),
+      model: parseModel(value.model, 'Invalid bridge response'),
+      purpose: parseChatPurpose(value.purpose, 'Invalid bridge response'),
+      data_classes: parseUniqueChatDataClasses(value.data_classes, 'Invalid bridge response'),
+      remote: value.remote,
+      consent_name: consentName,
+      message_count: value.message_count,
+      transient: true,
+      payload_retention: false,
+    })
+  } catch {
+    return invalidResponse()
+  }
+}
+
+function parseChatSessionClosure(value: unknown): Readonly<ChatSessionClosure> {
+  if (!record(value) || !exactKeys(value, ['schema_version', 'session_id', 'closed'])
+    || value.schema_version !== 1 || value.closed !== true) invalidResponse()
+  return deepFreeze({
+    schema_version: 1,
+    session_id: parseChatSessionId(value.session_id, 'Invalid bridge response'),
+    closed: true,
   })
 }
 
@@ -1667,6 +1880,33 @@ function parseLocalRuntimeOutcome(value: unknown): LocalRuntimeResult {
   return deepFreeze(value as unknown as LocalRuntimeResult)
 }
 
+function parseOpenExternalLinkOutcome(value: unknown): OpenExternalLinkResult {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'destination', 'status'])
+    || value.schema_version !== 1
+    || (value.status !== 'opened' && value.status !== 'cancelled')
+  ) invalidResponse()
+  let destination: string
+  try {
+    destination = parseExternalLinkDestination(value.destination, 'Invalid bridge response')
+  } catch {
+    return invalidResponse()
+  }
+  if (destination !== value.destination) invalidResponse()
+  return deepFreeze({ schema_version: 1, destination, status: value.status })
+}
+
+function parseCopyTextOutcome(value: unknown): CopyTextResult {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'copied'])
+    || value.schema_version !== 1
+    || value.copied !== true
+  ) invalidResponse()
+  return deepFreeze({ schema_version: 1, copied: true })
+}
+
 function parseBridgeResult<T>(value: unknown, parseData: Parser<T>): BridgeResult<T> {
   if (!record(value) || value.protocolVersion !== DESKTOP_PROTOCOL_VERSION || typeof value.ok !== 'boolean') invalidResponse()
   if (value.ok) {
@@ -1695,6 +1935,11 @@ export const parseFileGrantRevocationResult = (value: unknown): BridgeResult<Fil
 export const parseLocalRuntimeStatusResult = (value: unknown): BridgeResult<LocalRuntimeStatus> => parseBridgeResult(value, parseLocalRuntimeStatus)
 export const parseLocalRuntimePreviewResult = (value: unknown): BridgeResult<LocalRuntimePreview> => parseBridgeResult(value, parseLocalRuntimePreview)
 export const parseLocalRuntimeResult = (value: unknown): BridgeResult<LocalRuntimeResult> => parseBridgeResult(value, parseLocalRuntimeOutcome)
+export const parseOpenExternalLinkResult = (value: unknown): BridgeResult<OpenExternalLinkResult> => parseBridgeResult(value, parseOpenExternalLinkOutcome)
+export const parseCopyTextResult = (value: unknown): BridgeResult<CopyTextResult> => parseBridgeResult(value, parseCopyTextOutcome)
+export const parseChatCapabilityResult = (value: unknown): BridgeResult<ChatCapability> => parseBridgeResult(value, parseChatCapability)
+export const parseChatSessionResult = (value: unknown): BridgeResult<ChatSession> => parseBridgeResult(value, parseChatSession)
+export const parseChatSessionClosureResult = (value: unknown): BridgeResult<ChatSessionClosure> => parseBridgeResult(value, parseChatSessionClosure)
 export const parseChatStreamRunResult = (value: unknown): BridgeResult<ChatStreamRun> => parseBridgeResult(value, parseChatStreamRun)
 export const parseChatEventResult = (value: unknown): BridgeResult<ChatEvent> => parseBridgeResult(value, parseChatEvent)
 export const parseChatStreamAcknowledgementResult = (value: unknown): BridgeResult<ChatStreamAcknowledgement> => parseBridgeResult(value, parseChatStreamAcknowledgement)

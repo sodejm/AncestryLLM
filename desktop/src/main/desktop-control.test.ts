@@ -57,6 +57,56 @@ const runningJob = {
   cancellation_deferred_by: null,
 } as const
 
+const chatSessionId = `chat_${'c'.repeat(32)}`
+const chatCapability = {
+  schema_version: 1 as const,
+  max_active_sessions: 32 as const,
+  max_messages: 32 as const,
+  max_message_characters: 16_384 as const,
+  max_context_characters: 65_536 as const,
+  max_output_tokens: 4_096 as const,
+  max_temperature: 1 as const,
+  max_timeout_seconds: 120 as const,
+  max_safe_retries: 1 as const,
+  transient: true as const,
+  tools_enabled: false as const,
+  payload_retention: false as const,
+  output_is_evidence: false as const,
+  streaming: true as const,
+  stream_replay_max_bytes: 262_144 as const,
+}
+const chatCreateRequest = {
+  schema_version: 1 as const,
+  provider_profile_name: 'local-ollama',
+  model: 'llama3.2',
+  purpose: 'genealogy_analysis' as const,
+  data_classes: ['deceased_person'] as const,
+  consent_name: null,
+}
+const chatSession = {
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+  provider_profile_name: chatCreateRequest.provider_profile_name,
+  provider_id: 'ollama' as const,
+  model: chatCreateRequest.model,
+  purpose: chatCreateRequest.purpose,
+  data_classes: chatCreateRequest.data_classes,
+  remote: false,
+  consent_name: null,
+  message_count: 0,
+  transient: true as const,
+  payload_retention: false as const,
+}
+const chatCloseRequest = {
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+}
+const chatClosure = {
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+  closed: true as const,
+}
+
 const sidecarClient = (
   overrides: Partial<SidecarClient> = {},
 ): SidecarClient => ({
@@ -73,6 +123,9 @@ const sidecarClient = (
   getSecretStatus: vi.fn(),
   setSecret: vi.fn(),
   deleteSecret: vi.fn(),
+  getChatCapability: vi.fn().mockResolvedValue(chatCapability),
+  createChatSession: vi.fn().mockResolvedValue(chatSession),
+  closeChatSession: vi.fn().mockResolvedValue(chatClosure),
   startChatStream: vi.fn(),
   cancelChatStream: vi.fn(),
   streamChatEvents: vi.fn().mockResolvedValue(undefined),
@@ -181,6 +234,7 @@ describe('desktop control bridge', () => {
       updateSettings: vi.fn(),
       setSecret: vi.fn(),
       deleteSecret: vi.fn(),
+      createChatSession: vi.fn(),
     })
     const bridge = createDesktopControlBridge({
       appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'packaged' },
@@ -193,10 +247,64 @@ describe('desktop control bridge', () => {
     await expect(bridge.updateSettings({ schema_version: 1, expected_revision: 0, changes: { 'providers.default': 'none' } })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
     await expect(bridge.setSecret({ reference: 'openai.api_key', value: 'never-written' })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
     await expect(bridge.deleteSecret({ reference: 'openai.api_key' })).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
+    await expect(bridge.createChatSession(chatCreateRequest)).resolves.toMatchObject({ ok: false, error: { code: 'STARTUP_MUTATION_BLOCKED' } })
     await expect(bridge.getPreferences()).resolves.toMatchObject({ ok: true, data: { revision: 0, colorScheme: 'system' } })
     expect(client.updateSettings).not.toHaveBeenCalled()
     expect(client.setSecret).not.toHaveBeenCalled()
     expect(client.deleteSecret).not.toHaveBeenCalled()
+    expect(client.createChatSession).not.toHaveBeenCalled()
+  })
+
+  it('routes transient chat capability and session lifecycle through the authenticated sidecar client', async () => {
+    const client = sidecarClient()
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+    const signal = new AbortController().signal
+
+    await expect(bridge.getChatCapability(signal)).resolves.toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: chatCapability,
+    })
+    await expect(bridge.createChatSession(chatCreateRequest, signal)).resolves.toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: chatSession,
+    })
+    await expect(bridge.closeChatSession(chatCloseRequest, signal)).resolves.toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: chatClosure,
+    })
+    expect(client.getChatCapability).toHaveBeenCalledWith(signal)
+    expect(client.createChatSession).toHaveBeenCalledWith(chatCreateRequest, signal)
+    expect(client.closeChatSession).toHaveBeenCalledWith(chatCloseRequest, signal)
+  })
+
+  it.each([
+    ['chat_session_invalid', 'CHAT_SESSION_INVALID'],
+    ['chat_session_not_found', 'CHAT_SESSION_NOT_FOUND'],
+    ['chat_session_limit', 'CHAT_SESSION_LIMIT'],
+    ['chat_session_busy', 'CHAT_SESSION_BUSY'],
+    ['chat_session_service_unavailable', 'CHAT_SESSION_SERVICE_UNAVAILABLE'],
+  ] as const)('maps %s to the stable renderer code %s', async (reason, code) => {
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: sidecarClient({
+        createChatSession: vi.fn().mockRejectedValue(new SidecarClientError(reason)),
+      }),
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.createChatSession(chatCreateRequest)).resolves.toMatchObject({
+      ok: false,
+      error: { code },
+    })
   })
 
   it('routes job snapshots and cancellation through the authenticated sidecar client', async () => {

@@ -95,8 +95,9 @@ file, database, shell, plugin, genealogy, or autonomous authority, and labels
 provider output as advisory rather than evidence. Content is bounded and held
 only in process memory; failed runs retain nothing, deletion and shutdown clear
 the session, and audit records contain only identifiers, counters, usage, and
-one-way payload hashes. No Electron chat surface, streaming transport, or safe
-renderer presentation is included yet.
+one-way payload hashes. Issue #111 adds the Main-owned bounded stream transport;
+Issue #112 adds the bounded renderer Chat presentation without adding persistent
+conversation storage, renderer network access, or provider authority.
 
 Unreleased Issue #56 adds only a service-internal asynchronous adapter for an
 already-authorized provider stream. The existing profile, endpoint, credential,
@@ -126,7 +127,11 @@ classes, retention, and active consent again before any disclosure. Model
 output and Markdown remain untrusted display data and cannot gain tools or
 renderer privileges. The source-level chat service does not weaken this rule:
 it rejects `provider=none` for generation while leaving the offline profile
-socket-free and cannot be reached through the renderer.
+socket-free. The renderer reaches only fixed chat contracts and explicitly shows
+the selected profile, model, and consent near the composer. Conversation state
+is bounded and transient; model text uses a closed CommonMark/GFM allowlist,
+copy writes plain text only, and an external HTTPS destination must remain
+visible and receive separate Electron Main confirmation before opening.
 
 ## Deployment-profile privacy boundary
 

@@ -5,6 +5,8 @@ import {
   type ApplicationSettingsPatch,
   type BridgeErrorCode,
   type BridgeResult,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
   type ChatEvent,
   type ChatStreamCancelRequest,
   type ChatStreamStartRequest,
@@ -123,8 +125,20 @@ function jobFailure<T>(cause: unknown): BridgeResult<T> {
 function chatFailure<T>(cause: unknown): BridgeResult<T> {
   const reason = cause instanceof SidecarClientError ? cause.reason : null
   if (reason === 'startup_mutation_blocked') return startupMutationBlocked()
+  if (reason === 'chat_session_invalid') {
+    return failure('CHAT_SESSION_INVALID', 'The chat session request is invalid.', 'Review the provider, model, purpose, and privacy selections and try again.')
+  }
   if (reason === 'chat_session_not_found') {
     return failure('CHAT_SESSION_NOT_FOUND', 'The selected chat session is no longer available.', 'Refresh the conversation and try again.')
+  }
+  if (reason === 'chat_session_limit') {
+    return failure('CHAT_SESSION_LIMIT', 'The active chat session limit has been reached.', 'Close another conversation and try again.')
+  }
+  if (reason === 'chat_session_busy') {
+    return failure('CHAT_SESSION_BUSY', 'The selected chat session is busy.', 'Stop the active response before trying again.')
+  }
+  if (reason === 'chat_session_service_unavailable') {
+    return failure('CHAT_SESSION_SERVICE_UNAVAILABLE', 'Chat sessions are unavailable.', 'Retry the private service or restart AncestryLLM.')
   }
   if (reason === 'chat_stream_not_found') {
     return failure('CHAT_STREAM_NOT_FOUND', 'The selected chat response is no longer available.', 'Start a new response from the current conversation.')
@@ -416,6 +430,40 @@ export function createDesktopControlBridge(dependencies: Readonly<{
           return failure('CONSENT_INVALID', 'The consent could not be revoked.', 'Reload provider settings and select an active consent.')
         }
         return failure('PROVIDER_CONFIGURATION_UNAVAILABLE', 'The consent could not be revoked.', 'Retry the private service or restart AncestryLLM.')
+      }
+    },
+    async getChatCapability(signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const capability = await dependencies.sidecarClient.getChatCapability(signal)
+        requireActive(signal)
+        return success(capability)
+      } catch (cause) {
+        requireActive(signal)
+        return chatFailure(cause)
+      }
+    },
+    async createChatSession(request: ChatSessionCreateRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        if (!await mutationsAllowed(signal)) return startupMutationBlocked()
+        const session = await dependencies.sidecarClient.createChatSession(request, signal)
+        requireActive(signal)
+        return success(session)
+      } catch (cause) {
+        requireActive(signal)
+        return chatFailure(cause)
+      }
+    },
+    async closeChatSession(request: ChatSessionRequest, signal?: AbortSignal) {
+      try {
+        requireActive(signal)
+        const closure = await dependencies.sidecarClient.closeChatSession(request, signal)
+        requireActive(signal)
+        return success(closure)
+      } catch (cause) {
+        requireActive(signal)
+        return chatFailure(cause)
       }
     },
     async startChatStream(request: ChatStreamStartRequest, signal?: AbortSignal) {

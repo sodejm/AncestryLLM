@@ -180,6 +180,14 @@ export const providerDataClasses = Object.freeze([
 ] as const)
 
 export type ProviderDataClass = typeof providerDataClasses[number]
+
+export const chatPurposes = Object.freeze([
+  'genealogy_analysis',
+  'source_analysis',
+  'writing_assistance',
+] as const)
+
+export type ChatPurpose = typeof chatPurposes[number]
 export type ConsentWarningCode =
   | 'LIVING_PERSON_DATA_INCLUDED'
   | 'REMOTE_PROVIDER_SELECTED'
@@ -335,6 +343,60 @@ export const CHAT_STREAM_BATCH_MAX_BYTES = 4_096
 
 /** Maximum batching delay before available token events are delivered. */
 export const CHAT_STREAM_BATCH_WINDOW_MS = 16
+
+/** Fail-closed capabilities exposed by the transient chat service. */
+export interface ChatCapability {
+  schema_version: 1
+  max_active_sessions: 32
+  max_messages: 32
+  max_message_characters: 16_384
+  max_context_characters: 65_536
+  max_output_tokens: 4_096
+  max_temperature: 1
+  max_timeout_seconds: 120
+  max_safe_retries: 1
+  transient: true
+  tools_enabled: false
+  payload_retention: false
+  output_is_evidence: false
+  streaming: true
+  stream_replay_max_bytes: 262_144
+}
+
+export type ChatSessionCreateRequest = Readonly<{
+  schema_version: 1
+  provider_profile_name: string
+  model: string
+  purpose: ChatPurpose
+  data_classes: readonly ProviderDataClass[]
+  consent_name: string | null
+}>
+
+export type ChatSessionRequest = Readonly<{
+  schema_version: 1
+  session_id: string
+}>
+
+export interface ChatSession {
+  schema_version: 1
+  session_id: string
+  provider_profile_name: string
+  provider_id: ProviderId
+  model: string
+  purpose: ChatPurpose
+  data_classes: readonly ProviderDataClass[]
+  remote: boolean
+  consent_name: string | null
+  message_count: number
+  transient: true
+  payload_retention: false
+}
+
+export interface ChatSessionClosure {
+  schema_version: 1
+  session_id: string
+  closed: true
+}
 
 export const chatEventTypes = Object.freeze([
   'active',
@@ -654,6 +716,27 @@ export interface LocalRuntimeResult {
   code: string
 }
 
+export type OpenExternalLinkRequest = Readonly<{
+  schema_version: 1
+  destination: string
+}>
+
+export interface OpenExternalLinkResult {
+  schema_version: 1
+  destination: string
+  status: 'opened' | 'cancelled'
+}
+
+export type CopyTextRequest = Readonly<{
+  schema_version: 1
+  text: string
+}>
+
+export interface CopyTextResult {
+  schema_version: 1
+  copied: true
+}
+
 export type BridgeErrorCode =
   | 'INVALID_REQUEST'
   | 'UNAUTHORIZED_SENDER'
@@ -709,7 +792,11 @@ export type BridgeErrorCode =
   | 'JOB_SUBSCRIPTION_CLOSED'
   | 'JOB_SUBSCRIPTION_CONFLICT'
   | 'JOB_EVENT_STREAM_FAILED'
+  | 'CHAT_SESSION_INVALID'
   | 'CHAT_SESSION_NOT_FOUND'
+  | 'CHAT_SESSION_LIMIT'
+  | 'CHAT_SESSION_BUSY'
+  | 'CHAT_SESSION_SERVICE_UNAVAILABLE'
   | 'CHAT_STREAM_NOT_FOUND'
   | 'CHAT_STREAM_CURSOR_INVALID'
   | 'CHAT_STREAM_REPLAY_EXPIRED'
@@ -754,6 +841,11 @@ export interface AncestryBridge {
   getLocalRuntimeStatus(): Promise<BridgeResult<LocalRuntimeStatus>>
   previewLocalRuntime(request: LocalRuntimeRequest): Promise<BridgeResult<LocalRuntimePreview>>
   applyLocalRuntime(request: LocalRuntimeApplyRequest): Promise<BridgeResult<LocalRuntimeResult>>
+  openExternalLink(request: OpenExternalLinkRequest): Promise<BridgeResult<OpenExternalLinkResult>>
+  copyText(request: CopyTextRequest): Promise<BridgeResult<CopyTextResult>>
+  getChatCapability(): Promise<BridgeResult<ChatCapability>>
+  createChatSession(request: ChatSessionCreateRequest): Promise<BridgeResult<ChatSession>>
+  closeChatSession(request: ChatSessionRequest): Promise<BridgeResult<ChatSessionClosure>>
   startChatStream(request: ChatStreamStartRequest): Promise<BridgeResult<ChatStreamRun>>
   cancelChatStream(request: ChatStreamCancelRequest): Promise<BridgeResult<ChatStreamRun>>
   acknowledgeChatStream(request: ChatStreamAckRequest): Promise<BridgeResult<ChatStreamAcknowledgement>>
@@ -790,6 +882,11 @@ export const desktopChannels = Object.freeze({
   getLocalRuntimeStatus: 'ancestry:desktop:get-local-runtime-status',
   previewLocalRuntime: 'ancestry:desktop:preview-local-runtime',
   applyLocalRuntime: 'ancestry:desktop:apply-local-runtime',
+  openExternalLink: 'ancestry:desktop:open-external-link',
+  copyText: 'ancestry:desktop:copy-text',
+  getChatCapability: 'ancestry:desktop:get-chat-capability',
+  createChatSession: 'ancestry:desktop:create-chat-session',
+  closeChatSession: 'ancestry:desktop:close-chat-session',
   startChatStream: 'ancestry:desktop:start-chat-stream',
   cancelChatStream: 'ancestry:desktop:cancel-chat-stream',
   acknowledgeChatStream: 'ancestry:desktop:acknowledge-chat-stream',

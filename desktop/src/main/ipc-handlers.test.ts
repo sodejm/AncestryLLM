@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   BridgeResult,
   CapabilityManifest,
+  ChatCapability,
   ChatEvent,
+  ChatSession,
   ChatStreamRun,
   ConsentPreview,
   FileGrant,
@@ -23,6 +25,8 @@ import {
   registerDesktopIpcHandlers,
   type MainDesktopBridge,
   type MainFileGrantBroker,
+  type MainNativeActions,
+  type RegistrationOptions,
 } from './ipc-handlers'
 
 const result = <T>(data: T) => ({ ok: true as const, protocolVersion: '1' as const, data })
@@ -218,6 +222,54 @@ const progressEvent = Object.freeze({
 const subscriptionId = `sub_${'a'.repeat(32)}`
 const chatSessionId = `chat_${'c'.repeat(32)}`
 const chatRunId = `run_${'d'.repeat(32)}`
+const chatCapability = Object.freeze({
+  schema_version: 1,
+  max_active_sessions: 32,
+  max_messages: 32,
+  max_message_characters: 16_384,
+  max_context_characters: 65_536,
+  max_output_tokens: 4_096,
+  max_temperature: 1,
+  max_timeout_seconds: 120,
+  max_safe_retries: 1,
+  transient: true,
+  tools_enabled: false,
+  payload_retention: false,
+  output_is_evidence: false,
+  streaming: true,
+  stream_replay_max_bytes: 262_144,
+} satisfies ChatCapability)
+const chatCreateRequest = Object.freeze({
+  schema_version: 1 as const,
+  provider_profile_name: 'local-test',
+  model: 'fictional-model',
+  purpose: 'genealogy_analysis' as const,
+  data_classes: Object.freeze(['public_genealogy', 'deceased_person'] as const),
+  consent_name: null,
+})
+const chatSession = Object.freeze({
+  schema_version: 1,
+  session_id: chatSessionId,
+  provider_profile_name: chatCreateRequest.provider_profile_name,
+  provider_id: 'ollama',
+  model: chatCreateRequest.model,
+  purpose: chatCreateRequest.purpose,
+  data_classes: chatCreateRequest.data_classes,
+  remote: false,
+  consent_name: null,
+  message_count: 0,
+  transient: true,
+  payload_retention: false,
+} satisfies ChatSession)
+const chatSessionRequest = Object.freeze({
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+})
+const chatClosure = Object.freeze({
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+  closed: true as const,
+})
 const activeChatRun = Object.freeze({
   schema_version: 1,
   session_id: chatSessionId,
@@ -292,6 +344,9 @@ const bridge = (): MainDesktopBridge => ({
     state: 'ready',
     code: 'RUNTIME_READY',
   })),
+  getChatCapability: vi.fn().mockResolvedValue(result(chatCapability)),
+  createChatSession: vi.fn().mockResolvedValue(result(chatSession)),
+  closeChatSession: vi.fn().mockResolvedValue(result(chatClosure)),
   startChatStream: vi.fn().mockResolvedValue(result(activeChatRun)),
   cancelChatStream: vi.fn().mockResolvedValue(result(interruptedChatRun)),
   streamChatEvents: vi.fn().mockResolvedValue(undefined),
@@ -332,6 +387,16 @@ const fileGrantBroker = (): MainFileGrantBroker => ({
   revokeAll: vi.fn(),
   dispose: vi.fn(),
 })
+
+function nativeActionHarness() {
+  const openExternalLink = vi.fn().mockResolvedValue(Object.freeze({ status: 'opened' as const }))
+  const copyText = vi.fn().mockResolvedValue(undefined)
+  return {
+    actions: Object.freeze({ openExternalLink, copyText }) satisfies MainNativeActions,
+    copyText,
+    openExternalLink,
+  }
+}
 
 class FakeWebContents extends EventEmitter {
   readonly id: number
@@ -395,7 +460,7 @@ function deferred<T>() {
 
 function harness(
   control = bridge(),
-  options: Readonly<{ operationTimeoutMs?: number; fileDialogTimeoutMs?: number }> = {},
+  options: Readonly<RegistrationOptions> = {},
   fileGrants = fileGrantBroker(),
 ) {
   const handlers = new Map<string, Handler>()
@@ -423,7 +488,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the thirty-one declared static channels', () => {
+  it('registers exactly the thirty-six declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -431,7 +496,92 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(31)
+    expect(handlers.size).toBe(36)
+  })
+
+  it('routes strict native actions through the authorized main-process adapter', async () => {
+    const native = nativeActionHarness()
+    const { event, handlers } = harness(bridge(), { nativeActions: native.actions })
+    const destination = 'https://example.org/research?q=family'
+
+    await expect(handlers.get(desktopChannels.openExternalLink)?.(event(), {
+      schema_version: 1,
+      destination,
+    })).resolves.toEqual(result({
+      schema_version: 1,
+      destination,
+      status: 'opened',
+    }))
+    await expect(handlers.get(desktopChannels.copyText)?.(event(), {
+      schema_version: 1,
+      text: 'First line\nSecond line',
+    })).resolves.toEqual(result({ schema_version: 1, copied: true }))
+    expect(native.openExternalLink).toHaveBeenCalledWith(destination)
+    expect(native.copyText).toHaveBeenCalledWith('First line\nSecond line')
+
+    await expect(handlers.get(desktopChannels.openExternalLink)?.(event(), {
+      schema_version: 1,
+      destination: 'javascript:alert(1)',
+    })).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    await expect(handlers.get(desktopChannels.copyText)?.(event(), {
+      schema_version: 1,
+      text: 'visible',
+      html: '<strong>visible</strong>',
+    })).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    expect(native.openExternalLink).toHaveBeenCalledTimes(1)
+    expect(native.copyText).toHaveBeenCalledTimes(1)
+  })
+
+  it('binds chat sessions and their streams to the renderer that created them', async () => {
+    const control = bridge()
+    vi.mocked(control.streamChatEvents).mockImplementation((_request, _next, signal) => (
+      new Promise((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    ))
+    const { controller, event, handlers } = harness(control)
+    const otherContents = new FakeWebContents(2)
+    const releaseOther = controller.authorizeWebContents(
+      otherContents,
+      (url) => url === 'app://bundle/index.html',
+    )
+    const otherEvent = { sender: otherContents, senderFrame: otherContents.mainFrame }
+
+    await expect(handlers.get(desktopChannels.getChatCapability)?.(event())).resolves.toEqual(
+      result(chatCapability),
+    )
+    await expect(handlers.get(desktopChannels.createChatSession)?.(
+      event(),
+      chatCreateRequest,
+    )).resolves.toEqual(result(chatSession))
+    await expect(handlers.get(desktopChannels.startChatStream)?.(
+      otherEvent,
+      chatStartRequest,
+    )).resolves.toMatchObject({ ok: false, error: { code: 'CHAT_SESSION_NOT_FOUND' } })
+    expect(control.startChatStream).not.toHaveBeenCalled()
+
+    await expect(handlers.get(desktopChannels.startChatStream)?.(
+      event(),
+      chatStartRequest,
+    )).resolves.toEqual(result(activeChatRun))
+    await expect(handlers.get(desktopChannels.closeChatSession)?.(
+      event(),
+      chatSessionRequest,
+    )).resolves.toEqual(result(chatClosure))
+    await expect(handlers.get(desktopChannels.startChatStream)?.(
+      event(),
+      chatStartRequest,
+    )).resolves.toMatchObject({ ok: false, error: { code: 'CHAT_SESSION_NOT_FOUND' } })
+
+    expect(control.createChatSession).toHaveBeenCalledWith(
+      chatCreateRequest,
+      expect.any(AbortSignal),
+    )
+    expect(control.closeChatSession).toHaveBeenCalledWith(
+      chatSessionRequest,
+      expect.any(AbortSignal),
+    )
+    expect(control.startChatStream).toHaveBeenCalledTimes(1)
+    releaseOther()
+    controller.dispose()
   })
 
   it('binds chat streams to one renderer and accepts exact delivered-batch acknowledgements', async () => {
@@ -448,6 +598,7 @@ describe('desktop IPC handlers', () => {
     })
     const { contents, event, handlers } = harness(control)
 
+    await handlers.get(desktopChannels.createChatSession)?.(event(), chatCreateRequest)
     await expect(handlers.get(desktopChannels.startChatStream)?.(
       event(),
       chatStartRequest,
@@ -504,6 +655,7 @@ describe('desktop IPC handlers', () => {
     })
     const { contents, event, handlers } = harness(control)
 
+    await handlers.get(desktopChannels.createChatSession)?.(event(), chatCreateRequest)
     await handlers.get(desktopChannels.startChatStream)?.(event(), chatStartRequest)
     contents.startNavigation('https://attacker.invalid/')
 
@@ -512,6 +664,9 @@ describe('desktop IPC handlers', () => {
       session_id: chatSessionId,
       run_id: chatRunId,
     }))
+    await vi.waitFor(() => expect(control.closeChatSession).toHaveBeenCalledWith(
+      chatSessionRequest,
+    ))
     expect(streamSignal?.aborted).toBe(true)
   })
 

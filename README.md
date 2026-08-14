@@ -54,6 +54,16 @@ timeout, and cancellation each produce one privacy-minimal audit outcome. This
 is source-level groundwork only: it adds no Electron bridge, chat UI, public
 streaming transport, or network path for `provider=none`.
 
+Unreleased Issues #110-#112 add a bounded transient-chat path and a **Chat**
+destination to the desktop source. Each short-lived conversation binds an exact
+stored provider profile, model, purpose, data class, and compatible current
+consent; message content remains process-memory-only. Electron Main owns the
+authenticated stream and native external-link confirmation. The renderer
+accepts only ordered, validated events, renders model Markdown through a closed
+element allowlist with raw HTML, images, embeds, and executable actions
+disabled, and copies plain text only. This remains an unreleased source surface
+until the target-matched packaged and adversarial release gates pass.
+
 The unreleased desktop first run now recommends **Local Desktop** and keeps
 **Connect Remote** and **Host Remote** visible but unavailable. Before it
 enables settings or credential changes, the shell checks a sanitized schema-v1
