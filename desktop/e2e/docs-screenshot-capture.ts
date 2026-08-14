@@ -231,9 +231,12 @@ export async function loadElectronCapturePlan(options: Readonly<{
     if (
       fixturePayload.fixture_id !== descriptor.id
       || fixturePayload.state !== descriptor.state
-      || fixturePayload.provider !== descriptor.provider
-      || fixturePayload.network !== descriptor.network
-      || fixturePayload.fictional !== descriptor.fictional
+    ) fail('DOCSHOT_FIXTURE_INVALID')
+    // Enforce the offline, fictional-data boundary on both independently parsed files.
+    if (
+      descriptor.provider !== 'none'
+      || descriptor.network !== 'disabled'
+      || !descriptor.fictional
       || fixturePayload.provider !== 'none'
       || fixturePayload.network !== 'disabled'
       || !fixturePayload.fictional
@@ -284,6 +287,8 @@ export async function loadElectronCapturePlan(options: Readonly<{
     }))
   }
   electronScenarios.sort((left, right) => left.id.localeCompare(right.id, 'en'))
+  // Issue #418 deliberately freezes one ready and one degraded Electron capture.
+  // Adding another Electron surface requires an explicit manifest-contract revision.
   if (
     electronScenarios.length !== 2
     || new Set(electronScenarios.map(({ fixture }) => fixture.state)).size !== 2
@@ -402,7 +407,7 @@ async function loadJson(
 async function requireDirectory(path: string, code: CaptureFailureCode): Promise<void> {
   try {
     const metadata = await lstat(path)
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) fail(code)
+    if (!metadata.isDirectory()) fail(code)
   } catch (error) {
     if (error instanceof DocsScreenshotCaptureError) throw error
     fail(code)
@@ -416,7 +421,7 @@ async function requireFile(
 ): Promise<void> {
   try {
     const metadata = await lstat(path)
-    if (!metadata.isFile() || metadata.isSymbolicLink()) fail(code)
+    if (!metadata.isFile()) fail(code)
     if (executable) await access(path, constants.X_OK)
   } catch (error) {
     if (error instanceof DocsScreenshotCaptureError) throw error
