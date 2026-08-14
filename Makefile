@@ -22,10 +22,10 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
 export UV_PYTHON := $(PYTHON)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check docs-terminal-screenshots
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-cutover docs-screenshots docs-screenshots-check docs-terminal-screenshots
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check docs-terminal-screenshots"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-cutover docs-screenshots docs-screenshots-check docs-terminal-screenshots"
 
 desktop-install:
 	@node desktop/scripts/install-locked.mjs
@@ -125,6 +125,9 @@ workflow-audit: verified-uv
 
 code-docs-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
+
+docs-cutover: verified-uv
+	@$(UV_BIN) run --locked --group test python scripts/verify_documentation_cutover.py --repository-root . --source docs --source-sha "$$(git rev-parse HEAD)" --exceptions docs/_data/external_link_exceptions.json
 
 docs-screenshots: verified-uv
 	@selection=(); \

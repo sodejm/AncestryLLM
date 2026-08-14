@@ -72,6 +72,7 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         "package",
         "workflow-audit",
         "code-docs-check",
+        "docs-cutover",
         "docs-screenshots",
         "docs-screenshots-check",
         "docs-terminal-screenshots",
@@ -106,6 +107,12 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "workflow-audit": (
             "$(UV_BIN) run --locked --group security zizmor --persona=pedantic "
             ".github/workflows .github/actions"
+        ),
+        "docs-cutover": (
+            "$(UV_BIN) run --locked --group test python "
+            "scripts/verify_documentation_cutover.py --repository-root . --source docs "
+            '--source-sha "$$(git rev-parse HEAD)" '
+            "--exceptions docs/_data/external_link_exceptions.json"
         ),
         "docs-screenshots": (
             "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture "
