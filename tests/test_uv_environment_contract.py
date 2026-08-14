@@ -110,7 +110,7 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         ),
         "docs-cutover": (
             "$(UV_BIN) run --locked --group test python "
-            "scripts/verify_documentation_cutover.py --source docs "
+            "scripts/verify_documentation_cutover.py --repository-root . --source docs "
             '--source-sha "$$(git rev-parse HEAD)" '
             "--exceptions docs/_data/external_link_exceptions.json"
         ),

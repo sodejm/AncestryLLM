@@ -205,8 +205,9 @@ removed by synchronization.
 
 From a clean committed head, run `make docs-cutover` before publication. The
 offline gate stages Pages and the flat Wiki twice, proves deterministic and
-idempotent output, validates the exact 40-character source revision, and checks
-that every external-link exception is present, owned, reasoned, and unexpired.
+idempotent output, rejects tracked, untracked, or ignored publishing inputs that
+differ from the reported exact 40-character source revision, and checks that
+every external-link exception is present, owned, reasoned, and unexpired.
 It does not contact Pages, the Wiki, or external sites, so successful local or
 pull-request evidence does not replace the required post-merge hosted checks.
 

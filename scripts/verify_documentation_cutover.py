@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -56,10 +57,73 @@ def _load_exceptions(path: Path, links: set[str]) -> list[object]:
     except (json.JSONDecodeError, OSError, UnicodeError) as error:
         raise DocumentationCutoverError("DOCSCUTOVER_EXCEPTIONS_INVALID") from error
     records = document.get("exceptions") if isinstance(document, Mapping) else None
-    if validate_exception_records(records, links):
+    try:
+        issues = validate_exception_records(records, links)
+    except ValueError as error:
+        raise DocumentationCutoverError("DOCSCUTOVER_EXCEPTIONS_INVALID") from error
+    if issues:
         raise DocumentationCutoverError("DOCSCUTOVER_EXCEPTIONS_INVALID")
     assert isinstance(records, list)
     return records
+
+
+def _run_git(repository_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(  # noqa: S603 - fixed Git command; no shell is used
+            [  # noqa: S607 - Git is a required repository tool on PATH
+                "git",
+                "--literal-pathspecs",
+                "-C",
+                str(repository_root),
+                *arguments,
+            ],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="strict",
+        )
+    except (OSError, UnicodeError) as error:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_UNVERIFIED") from error
+
+
+def _verify_repository_inputs(
+    *,
+    repository_root: Path,
+    source: Path,
+    source_sha: str,
+    exceptions_path: Path,
+) -> None:
+    """Prove the publishing inputs are exactly the reported repository head."""
+    if _SOURCE_SHA.fullmatch(source_sha) is None:
+        raise DocumentationCutoverError("DOCSCUTOVER_SHA_INVALID")
+
+    root = repository_root.resolve()
+    try:
+        source_path = source.resolve().relative_to(root).as_posix()
+        exceptions = exceptions_path.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError) as error:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_UNVERIFIED") from error
+
+    head = _run_git(root, "rev-parse", "--verify", "HEAD^{commit}")
+    if head.returncode != 0:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_UNVERIFIED")
+    if head.stdout.strip() != source_sha:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_REVISION_MISMATCH")
+
+    status = _run_git(
+        root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignored=matching",
+        "--",
+        source_path,
+        exceptions,
+    )
+    if status.returncode != 0:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_UNVERIFIED")
+    if status.stdout:
+        raise DocumentationCutoverError("DOCSCUTOVER_SOURCE_DIRTY")
 
 
 def _prepare_pages(
@@ -131,6 +195,7 @@ def verify_documentation_cutover(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--exceptions", type=Path, required=True)
@@ -140,6 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        _verify_repository_inputs(
+            repository_root=args.repository_root,
+            source=args.source,
+            source_sha=args.source_sha,
+            exceptions_path=args.exceptions,
+        )
         result = verify_documentation_cutover(
             source=args.source,
             source_sha=args.source_sha,

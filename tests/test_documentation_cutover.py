@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,7 +41,42 @@ def _write_docs(source: Path) -> None:
 
 
 def _write_exceptions(path: Path, payload: str = '{"exceptions": []}\n') -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(payload, encoding="utf-8")
+
+
+def _committed_repository(tmp_path: Path) -> tuple[Path, Path, Path, str]:
+    repository = tmp_path / "repository"
+    source = repository / "docs"
+    exceptions = source / "_data" / "external_link_exceptions.json"
+    repository.mkdir()
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    _write_docs(source)
+    _write_exceptions(exceptions)
+    subprocess.run(["git", "-C", str(repository), "add", "docs"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Documentation Cutover Test",
+            "-c",
+            "user.email=docs-cutover@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test fixture",
+        ],
+        check=True,
+    )
+    source_sha = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return repository, source, exceptions, source_sha
 
 
 def test_cutover_repeats_pages_and_wiki_staging_without_network(tmp_path: Path) -> None:
@@ -161,6 +197,89 @@ def test_cutover_rejects_unowned_external_link_exceptions(tmp_path: Path) -> Non
     assert caught.value.code == "DOCSCUTOVER_EXCEPTIONS_INVALID"
 
 
+def test_cutover_sanitizes_a_malformed_exception_url(tmp_path: Path) -> None:
+    cutover = _load_cutover()
+    source = tmp_path / "docs"
+    exceptions = tmp_path / "exceptions.json"
+    _write_docs(source)
+    _write_exceptions(
+        exceptions,
+        '{"exceptions": [{"url": "http://[", "owner": "docs", '
+        '"reason": "test", "expires": "2999-01-01"}]}\n',
+    )
+
+    with pytest.raises(cutover.DocumentationCutoverError) as caught:
+        cutover.verify_documentation_cutover(
+            source=source,
+            source_sha=SOURCE_SHA,
+            exceptions_path=exceptions,
+        )
+
+    assert caught.value.code == "DOCSCUTOVER_EXCEPTIONS_INVALID"
+
+
+@pytest.mark.parametrize("change_kind", ["modified", "untracked", "ignored"])
+def test_cutover_cli_rejects_inputs_that_are_not_in_the_reported_head(
+    tmp_path: Path,
+    capsys,
+    change_kind: str,
+) -> None:
+    cutover = _load_cutover()
+    repository, source, exceptions, source_sha = _committed_repository(tmp_path)
+    if change_kind == "modified":
+        (source / "Guide.md").write_text("# Uncommitted change\n", encoding="utf-8")
+    elif change_kind == "untracked":
+        (source / "Uncommitted.md").write_text("# Uncommitted page\n", encoding="utf-8")
+    else:
+        (repository / ".git" / "info" / "exclude").write_text(
+            "docs/Ignored.md\n",
+            encoding="utf-8",
+        )
+        (source / "Ignored.md").write_text("# Ignored page\n", encoding="utf-8")
+
+    result = cutover.main(
+        [
+            "--repository-root",
+            str(repository),
+            "--source",
+            str(source),
+            "--source-sha",
+            source_sha,
+            "--exceptions",
+            str(exceptions),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert captured.err == "DOCSCUTOVER_SOURCE_DIRTY\n"
+    assert str(repository) not in captured.err
+
+
+def test_cutover_cli_rejects_a_different_reported_head(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    cutover = _load_cutover()
+    repository, source, exceptions, _source_sha = _committed_repository(tmp_path)
+
+    result = cutover.main(
+        [
+            "--repository-root",
+            str(repository),
+            "--source",
+            str(source),
+            "--source-sha",
+            "b" * 40,
+            "--exceptions",
+            str(exceptions),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert captured.err == "DOCSCUTOVER_SOURCE_REVISION_MISMATCH\n"
+
+
 def test_cutover_cli_emits_only_a_stable_error_code(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     cutover = _load_cutover()
     private_path = tmp_path / "private-user-path"
@@ -169,6 +288,8 @@ def test_cutover_cli_emits_only_a_stable_error_code(tmp_path: Path, capsys) -> N
 
     result = cutover.main(
         [
+            "--repository-root",
+            str(tmp_path),
             "--source",
             str(private_path),
             "--source-sha",
@@ -181,5 +302,5 @@ def test_cutover_cli_emits_only_a_stable_error_code(tmp_path: Path, capsys) -> N
     captured = capsys.readouterr()
     assert result == 1
     assert captured.out == ""
-    assert captured.err == "DOCSCUTOVER_PAGES_FAILED\n"
+    assert captured.err == "DOCSCUTOVER_SOURCE_UNVERIFIED\n"
     assert str(private_path) not in captured.err

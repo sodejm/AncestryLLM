@@ -127,7 +127,7 @@ code-docs-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
 docs-cutover: verified-uv
-	@$(UV_BIN) run --locked --group test python scripts/verify_documentation_cutover.py --source docs --source-sha "$$(git rev-parse HEAD)" --exceptions docs/_data/external_link_exceptions.json
+	@$(UV_BIN) run --locked --group test python scripts/verify_documentation_cutover.py --repository-root . --source docs --source-sha "$$(git rev-parse HEAD)" --exceptions docs/_data/external_link_exceptions.json
 
 docs-screenshots: verified-uv
 	@selection=(); \

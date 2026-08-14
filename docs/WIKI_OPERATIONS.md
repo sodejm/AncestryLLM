@@ -40,10 +40,12 @@ It resolves page, image, and asset links from the canonical file that contains
 them, checks the complete metadata sidecar, rejects unsafe or ambiguous paths
 and both hierarchical and flattened-namespace collisions, stages Pages twice,
 and synchronizes two fresh flat-Wiki trees twice each. The command fails when
-the output is nondeterministic or non-idempotent, the source revision is not an
-exact lowercase Git SHA, or an external-link exception is unowned, expired, or
-unreferenced. It performs no network requests. The Pages and Wiki workflows
-repeat the applicable source validation before staging or remote mutation.
+the output is nondeterministic or non-idempotent, the source revision is not the
+current exact lowercase Git SHA, any tracked, untracked, or ignored publishing
+input differs from that commit, or an external-link exception is malformed,
+unowned, expired, or unreferenced. It performs no network requests. The Pages
+and Wiki workflows repeat the applicable source validation before staging or
+remote mutation.
 
 The Pages workflow embeds `${{ github.sha }}` in the generated artifact and
 then runs `validate_rendered_docs.py`. That post-Jekyll gate checks metadata,
