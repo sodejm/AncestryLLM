@@ -18,10 +18,10 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
 export UV_PYTHON := $(PYTHON)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-screenshots docs-screenshots-check"
 
 desktop-install:
 	@node desktop/scripts/install-locked.mjs
@@ -121,6 +121,12 @@ workflow-audit: verified-uv
 
 code-docs-check: verified-uv
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
+
+docs-screenshots: verified-uv
+	@$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py plan --manifest config/docs-screenshot-manifest.json --repository-root .
+
+docs-screenshots-check: verified-uv
+	@$(UV_BIN) run --locked python scripts/docs_screenshot_manifest.py validate --manifest config/docs-screenshot-manifest.json --repository-root .
 
 hooks: verified-uv
 	@$(UV_BIN) run --locked --group lint pre-commit install --hook-type pre-commit --hook-type pre-push

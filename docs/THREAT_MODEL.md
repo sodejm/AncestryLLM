@@ -534,6 +534,12 @@ produced the required evidence.
 |---|---|---|
 | `TM-U01`, `TM-U03` | Exact-commit upstream Ruff and uv hooks match the locked tool versions; local system gitleaks and the canonical pre-push gates remain. The locked dependency auditor exports every extra and group, proves normalized lock/export parity against a closed-schema allowlist, and fails before pip-audit on omissions or unknown exclusions. All tracked Markdown receives deterministic GFM structural validation, and editor settings keep strict mypy authoritative while ty remains advisory. | These are repository-tooling controls only. They add no application runtime dependency, provider import, network path, credential exposure, genealogy data flow, or CLI/API/storage/FastAPI/Electron boundary. Ruff hooks cannot apply fixes, the dependency audit does not replace Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL, and the `provider=none`, RootsMagic, GEDCOM, and release fail-closed properties remain unchanged. |
 
+### Issue #417 deterministic screenshot-contract evidence
+
+| Control | Source and test evidence | Security and architecture disposition |
+|---|---|---|
+| `TM-F02`, `TM-L01`, `TM-O01` | A closed schema-v1 manifest admits only tokenized allowlisted launch plans, exact repository-relative PNG destinations, matching surface geometry, fixed deterministic environment controls, and fictional fixtures with `provider=none` plus networking disabled. Path validation rejects traversal, absolute or drive-qualified paths, symlink components, undeclared and duplicate destinations, unknown schemas, shell syntax, URLs, and missing documentation anchors. The privacy-canary fixture cannot be selected for publication, and capture-text validation fails with a stable code if its canary appears. | This issue defines and validates plans only: it launches no application, captures or publishes no image, changes no workflow, and opens no network connection. It adds no runtime dependency, credential or genealogy data flow, application API or CLI command, UI registry, provider contract, GEDCOM representation, storage schema, FastAPI route, or Electron boundary. Electron and terminal adapters must preserve these controls when #418 and #419 add execution; broader image drift and publication remain #420. |
+
 ### Issue #366 backup-path redaction evidence
 
 | Control | Source and runtime evidence | Residual ownership |

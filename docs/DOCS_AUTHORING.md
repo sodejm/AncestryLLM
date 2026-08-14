@@ -49,6 +49,58 @@ access, cloud accounts, and updater flows remain planned or incomplete. State
 the released boundary, each marked Unreleased adapter, and the remaining scope
 near desktop material; never present a later capability as a current tutorial.
 
+## Deterministic screenshot contract
+
+The schema-v1 contract in `config/docs-screenshot-manifest.json` is the single
+reviewed inventory for documentation screenshots. Its closed schemas live in
+`config/docs-screenshot-manifest-v1.schema.json` and
+`config/docs-screenshot-fixture-v1.schema.json`; its inputs live only below
+`tests/fixtures/docs_screenshots/`. The documentation maintainers own the
+manifest and schemas. The Electron and terminal capture adapters consume that
+contract but must not invent scenarios, destinations, fixtures, or comparison
+rules outside it.
+
+`make docs-screenshots-check` validates the manifest, fixture documents,
+documentation destinations and anchors, launch allowlist, geometry, output
+allowlist, and deterministic environment controls. `make docs-screenshots`
+prints the normalized capture plan for adapters and reviewers. Despite its
+reserved name, it does not capture, modify, or publish an image. Electron and
+terminal capture execution, image assets, drift checks, and CI integration are
+owned by the follow-on screenshot issues.
+
+Every publishable scenario must:
+
+1. Use a tokenized, allowlisted launch command and the geometry for its declared
+   `electron` or `terminal` surface.
+2. Use a checked-in fictional fixture with `provider=none` and networking
+   disabled. Never use a real genealogy record, credential, username, hostname,
+   local path, prompt, response, or environment-derived value.
+3. Declare one normalized repository-relative PNG destination below
+   `docs/assets/screenshots/`; the exact same destination must appear once in
+   the output allowlist.
+4. Name each documentation page and heading that owns the image so renamed or
+   retired destinations fail validation.
+5. Use exact comparison by default. A pixel-tolerance budget is exceptional and
+   requires a narrow reviewed maximum plus a written reason explaining why the
+   variance cannot be eliminated.
+
+The manifest fixes locale, timezone, theme, fonts, animation behavior,
+timestamps, usernames, paths, identifiers, volatile values, and network policy.
+The `privacy-canary` fixture is validation-only: no publishable scenario may
+select it, and adapters must reject captured text containing any of its canary
+values. A missing determinism control, unsafe or symlinked path, shell or URL
+syntax, unknown schema field, undeclared output, or unapproved network behavior
+fails closed with a stable `DOCSHOT_*` code.
+
+To add a screenshot, first add or reuse a fictional fixture, then add the
+scenario, output allowlist entry, and owning documentation reference in one
+change. Run both Make targets and the focused manifest tests before capture.
+To retire one, remove its scenario and output allowlist entry together, remove
+the image only after every owning page stops referencing it, and confirm the
+normalized plan contains no orphaned destination. Keep the success, degraded,
+and unpublishable privacy-canary fixture states even when an individual scenario
+is retired.
+
 ## Complete migration inventory
 
 `Current path` is the canonical source location. `Intended path` is the reviewed

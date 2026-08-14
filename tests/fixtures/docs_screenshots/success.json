@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "fixture_id": "success",
+  "state": "success",
+  "provider": "none",
+  "network": "disabled",
+  "fictional": true,
+  "content": {
+    "title": "Private chat",
+    "status": "Ready for a fictional offline demonstration",
+    "prompt": "Summarize the fictional Harborside household notes.",
+    "response": "The fictional household contains two adults and one child.",
+    "detail": "No cloud provider is selected and no network request is permitted."
+  },
+  "privacy_canaries": []
+}

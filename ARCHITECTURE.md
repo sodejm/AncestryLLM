@@ -1408,6 +1408,13 @@ plugins:
   invokes the locked dependency auditor. `scripts/check_gfm_markdown.py`
   applies the repository's deterministic GFM structural checks to every
   tracked Markdown file.
+- `scripts/docs_screenshot_manifest.py` validates the closed schema-v1
+  documentation screenshot inventory, fictional offline fixtures, tokenized
+  launch plans, deterministic environment controls, documentation anchors, and
+  repository-relative output allowlist. It emits a normalized plan but performs
+  no capture or publication. This is repository tooling only: it adds no
+  application command, UI registry, provider behavior, GEDCOM or storage path,
+  internal API route, or Electron bridge.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -1442,6 +1449,8 @@ The Make targets are the command contract:
 | `make package` | Locked build-group construction and artifact validation. |
 | `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
+| `make docs-screenshots` | Validate and print the normalized schema-v1 screenshot plan without capturing or changing images. |
+| `make docs-screenshots-check` | Validate the screenshot schemas, fictional fixtures, deterministic controls, documentation references, and exact output allowlist. |
 
 Version 1 security work has a separate repository-governance contract. The
 schema-v1 policy in `config/version-1-security-policy.json` binds the exact
@@ -1518,7 +1527,8 @@ Tests are intentionally split by risk:
   the operation modules, owned publication adapters, and preservation behavior;
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
 - Documentation tests cover Pages staging, Wiki validation, deterministic
-  mirroring, deletion, no-op behavior, commits, and workflow structure;
+  mirroring, deletion, no-op behavior, commits, workflow structure, and the
+  deterministic screenshot manifest and privacy-canary contract;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
 The import-only compatibility façades and their physical owner modules are
