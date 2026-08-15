@@ -83,6 +83,9 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
+    windows_close_start = source.index("async function requestWindowsPackagedWindowClose")
+    windows_close_end = source.index("\nasync function requestMacPackagedQuit", windows_close_start)
+    windows_close_source = source[windows_close_start:windows_close_end]
     retry_start = source.index("async function requestMacPackagedQuit")
     retry_end = source.index("\nasync function forceClosePackaged", retry_start)
     retry_source = source[retry_start:retry_end]
@@ -97,8 +100,16 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     retry_index = close_source.index(
         "processExit = requestMacPackagedQuit(result.process)", platform_index
     )
+    process_exit_index = close_source.index(
+        "processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)",
+        retry_index,
+    )
+    windows_platform_index = close_source.index("process.platform === 'win32'", process_exit_index)
+    windows_close_index = close_source.index(
+        "requestWindowsPackagedWindowClose(result.process)", windows_platform_index
+    )
     window_close_index = close_source.index(
-        "result.page.close({ runBeforeUnload: true })", platform_index
+        "result.page.close({ runBeforeUnload: true })", windows_close_index
     )
     browser_close_index = close_source.index("result.browser.close()", window_close_index)
     status_index = close_source.index("const status = await processExit", browser_close_index)
@@ -112,6 +123,20 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "result.page.evaluate" not in close_source
     assert "result.process.kill('SIGKILL')" not in close_source
     assert "child.kill('SIGKILL')" not in retry_source
+    assert "Number.isSafeInteger(pid)" in windows_close_source
+    assert "pid <= 0" in windows_close_source
+    assert "powershell.exe" in windows_close_source
+    assert "-NoProfile" in windows_close_source
+    assert "-NonInteractive" in windows_close_source
+    assert "[System.Diagnostics.Process]::GetProcessById" in windows_close_source
+    assert "$target.CloseMainWindow()" in windows_close_source
+    assert "windowsHide: true" in windows_close_source
+    assert "taskkill.exe" not in windows_close_source
+    assert "/F" not in windows_close_source
+    assert "SIGKILL" not in windows_close_source
+    assert "Browser.close" not in windows_close_source
+    assert "window.close()" not in windows_close_source
+    assert "page.close" not in windows_close_source
     assert re.search(
         r"const initialExit = waitForProcessExit\(child, packagedQuitRetryDelayMs\)\s*"
         r"requestQuit\('initial', initialExit\)\s*"
@@ -139,8 +164,9 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
     assert "const packagedWindowCloseTimeoutMs = 20_000" in source
-    assert platform_index < retry_index < browser_close_index
-    assert platform_index < window_close_index < browser_close_index
+    assert platform_index < retry_index < process_exit_index
+    assert process_exit_index < windows_platform_index < windows_close_index
+    assert windows_close_index < window_close_index < browser_close_index
     assert browser_close_index < status_index
     assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
     assert "const requestVerifiedAppQuit = (): void => { app.quit() }" in main_source

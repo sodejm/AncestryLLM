@@ -254,6 +254,35 @@ function waitForProcessExit(
   })
 }
 
+async function requestWindowsPackagedWindowClose(
+  child: ChildProcessWithoutNullStreams,
+): Promise<void> {
+  const pid = child.pid
+  if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error('Packaged app has no valid Windows process identifier.')
+  }
+  const command = [
+    `$target = [System.Diagnostics.Process]::GetProcessById(${String(pid)})`,
+    '$target.Refresh()',
+    "if (-not $target.CloseMainWindow()) { throw 'native-window-close-rejected' }",
+  ].join('; ')
+  try {
+    await execFileAsync(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+      {
+        encoding: 'utf8',
+        timeout: packagedWindowCloseTimeoutMs,
+        windowsHide: true,
+      },
+    )
+  } catch (error) {
+    throw new Error('Packaged app native Windows window-close request failed.', {
+      cause: error,
+    })
+  }
+}
+
 async function requestMacPackagedQuit(
   child: ChildProcessWithoutNullStreams,
 ): Promise<ExitStatus> {
@@ -332,15 +361,31 @@ async function closePackaged(result: LaunchResult): Promise<void> {
     processExit = requestMacPackagedQuit(result.process)
   } else {
     processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
-    // Page.close is the Chromium-native window-close request when unload runs.
-    // It returns once that request is in flight, so release the CDP client next
-    // and let Electron's production window-all-closed/app.quit lifecycle prove
-    // the sidecar stopped before the already-armed process exit can succeed.
-    await withinDeadline(
-      'closing packaged application window',
-      packagedWindowCloseTimeoutMs,
-      () => result.page.close({ runBeforeUnload: true }),
-    )
+    if (process.platform === 'win32') {
+      // Ask Windows to close the real top-level application window. This
+      // exercises Electron's production BrowserWindow close veto and verified
+      // sidecar shutdown without a renderer or raw-CDP shortcut.
+      try {
+        await withinDeadline(
+          'closing packaged application window',
+          packagedWindowCloseTimeoutMs,
+          () => requestWindowsPackagedWindowClose(result.process),
+        )
+      } catch (error) {
+        void processExit.catch(() => undefined)
+        throw error
+      }
+    } else {
+      // Page.close is the Chromium-native window-close request when unload
+      // runs on Linux. It returns once that request is in flight, so release
+      // the CDP client next and let Electron's production lifecycle prove the
+      // sidecar stopped before the already-armed process exit can succeed.
+      await withinDeadline(
+        'closing packaged application window',
+        packagedWindowCloseTimeoutMs,
+        () => result.page.close({ runBeforeUnload: true }),
+      )
+    }
   }
   await withinDeadline(
     'closing packaged browser automation',
