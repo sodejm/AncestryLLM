@@ -43,6 +43,11 @@ import {
   secureWebPreferences,
 } from './security-policy'
 import { installSessionPolicy } from './session-policy'
+import {
+  APP_SHUTDOWN_DIAGNOSTICS,
+  appShutdownFailureDiagnostic,
+  writeAppShutdownDiagnostic,
+} from './shutdown-diagnostics'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
 import type { JobShutdownAction } from './sidecar-client'
@@ -265,16 +270,19 @@ if (localRuntimeCliRequested && !primaryInstance) {
     if (!shutdownPromise && sidecarSupervisor) {
       const supervisor = sidecarSupervisor
       const prepareJobs = prepareJobShutdown
+      writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.requested)
       shutdownPromise = completeAppShutdown(
         async (action) => {
           if (!prepareJobs) throw new Error('Job shutdown preparation is unavailable.')
           await prepareJobs(action)
+          writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.jobsPrepared)
         },
         chooseUnsafeShutdownAction,
         async () => {
           await supervisor.stop()
+          writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.sidecarStopped)
         },
-        () => console.error('Background jobs or sidecar shutdown could not be verified.'),
+        (failure) => writeAppShutdownDiagnostic(appShutdownFailureDiagnostic(failure)),
         () => {
           disposeIpcBoundary()
           sidecarSupervisor = undefined
@@ -283,6 +291,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
           // The normal quit lifecycle has already been vetoed while the
           // sidecar was owned. Once shutdown is verified, exit directly so
           // Electron cannot re-enter a platform-specific window-close cycle.
+          writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.exitAuthorized)
           app.exit(0)
         },
         () => supervisor.isExplicitSafeEmpty(),

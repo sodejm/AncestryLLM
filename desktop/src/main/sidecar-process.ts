@@ -23,6 +23,8 @@ const MAX_HEALTH_BYTES = 8192
 const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
 const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
+const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
+const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
 
 type WindowsTreeKillExecutor = (
@@ -38,7 +40,12 @@ type NativeProcessTerminator = (
 ) => Promise<void>
 type WorkingDirectoryRemover = (
   path: string,
-  options: { recursive: true; force: true },
+  options: {
+    recursive: true
+    force: true
+    maxRetries?: number
+    retryDelay?: number
+  },
 ) => Promise<void>
 
 /** Signals and probes the detached POSIX process group owned by one sidecar launch. */
@@ -292,6 +299,7 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
     private readonly workingDirectory: string,
     private readonly terminateProcess: NativeProcessTerminator = terminateNativeSidecarProcess,
     private readonly removeWorkingDirectory: WorkingDirectoryRemover = rm,
+    private readonly platform: NodeJS.Platform = process.platform,
   ) {
     super()
     this.ready = readiness(child)
@@ -314,6 +322,12 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
     await this.removeWorkingDirectory(this.workingDirectory, {
       recursive: true,
       force: true,
+      ...(this.platform === 'win32'
+        ? {
+            maxRetries: WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES,
+            retryDelay: WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS,
+          }
+        : {}),
     })
   }
 }

@@ -149,7 +149,11 @@ Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
 leader. Installed Windows builds allow up to five seconds after `taskkill.exe`
 returns for Node to observe that leader exit; failure to observe it still fails
-closed. No sidecar is started by the development mock shell.
+closed. Only after process-tree termination is verified does Electron remove the
+private working directory. Windows removal retries transient filesystem errors
+at most five times with a 100-millisecond linear delay; a persistent cleanup
+failure still vetoes application exit. No sidecar is started by the development
+mock shell.
 
 Electron bounds the complete supervisor stop to 15 seconds, including any
 launch already in flight and all verified process-tree termination. Exceeding
@@ -188,6 +192,13 @@ The first `app.quit()` lifecycle is vetoed during that assessment. After IPC
 disposal and verified sidecar stop release every owned resource, the authorized
 completion callback uses `app.exit(0)` rather than re-entering
 platform-specific window closure.
+Packaged release verification retains only exact, newline-framed shutdown phase
+and failure codes emitted by Electron Main. It discards decorated, partial,
+overlong, and all other process output, and keeps at most the latest 16 accepted
+records. A close timeout therefore identifies the last verified lifecycle phase
+without exposing bearer values, response bodies, environment values, or local
+paths. These records are release-gate diagnostics and do not change the public
+application, bridge, or sidecar contracts.
 Issue #111's chat stream service is registered for orderly drain before its
 routes are enabled. Other future provider streams and database sessions must do
 the same.

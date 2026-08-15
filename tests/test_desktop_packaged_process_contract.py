@@ -98,12 +98,16 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
     platform_index = close_source.index("process.platform === 'darwin'")
     retry_index = close_source.index(
-        "processExit = requestMacPackagedQuit(result.process)", platform_index
+        "processExit = requestMacPackagedQuit(result.process, result.shutdownDiagnostics)",
+        platform_index,
     )
-    process_exit_index = close_source.index(
-        "processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)",
-        retry_index,
+    process_exit_match = re.search(
+        r"processExit = waitForProcessExit\(\s*result\.process,\s*"
+        r"packagedQuitTimeoutMs,\s*result\.shutdownDiagnostics,\s*\)",
+        close_source[retry_index:],
     )
+    assert process_exit_match is not None
+    process_exit_index = retry_index + process_exit_match.start()
     windows_platform_index = close_source.index("process.platform === 'win32'", process_exit_index)
     windows_close_index = close_source.index(
         "requestWindowsPackagedWindowClose(result.process)", windows_platform_index
@@ -156,10 +160,11 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "window.close()" not in windows_close_source
     assert "page.close" not in windows_close_source
     assert re.search(
-        r"const initialExit = waitForProcessExit\(child, packagedQuitRetryDelayMs\)\s*"
+        r"const initialExit = waitForProcessExit\(\s*child,\s*"
+        r"packagedQuitRetryDelayMs,\s*shutdownDiagnostics,\s*\)\s*"
         r"requestQuit\('initial', initialExit\)\s*"
         r"try \{\s*return await initialExit\s*\} catch \{.*?"
-        r"const retryExit = waitForProcessExit\(child, packagedQuitTimeoutMs\)\s*"
+        r"const retryExit = waitForProcessExit\(child, packagedQuitTimeoutMs, shutdownDiagnostics\)\s*"
         r"requestQuit\('retry', retryExit\)\s*return retryExit",
         retry_source,
         re.DOTALL,
