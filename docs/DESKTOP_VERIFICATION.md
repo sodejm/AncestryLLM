@@ -238,9 +238,12 @@ still fails the packaged test; force termination is reserved for test cleanup.
 On Windows and Linux the harness arms the native process-exit listener before
 requesting the final native window close under a bounded deadline. Windows
 validates the packaged process identifier, enumerates desktop top-level windows,
-and retains only visible unowned handles whose owner PID exactly matches the
-launched package. It requires exactly one such handle before posting `WM_CLOSE`;
-zero or multiple matches fail the gate. Linux uses Playwright's Chromium-native
+and retains only handles whose owner PID exactly matches the launched package
+and whose caption is exactly the application-controlled `AncestryLLM` title.
+It requires exactly one such handle before posting `WM_CLOSE`; zero or multiple
+matches fail the gate. The lookup does not depend on taskbar visibility or
+main-window heuristics, which are not stable on hosted Windows. Linux uses
+Playwright's Chromium-native
 page-close request with unload handling enabled. The harness then releases the
 Playwright connection and requires a normal zero-code native process exit,
 proving the final-window path without a broadcast, renderer `window.close()`,

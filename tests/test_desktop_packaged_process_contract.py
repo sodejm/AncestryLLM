@@ -130,13 +130,17 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "-NonInteractive" in windows_close_source
     assert "EnumWindows" in windows_close_source
     assert "GetWindowThreadProcessId" in windows_close_source
-    assert "IsWindowVisible" in windows_close_source
-    assert "GetWindow" in windows_close_source
-    assert "GW_OWNER" in windows_close_source
+    assert "GetWindowText" in windows_close_source
+    assert 'EntryPoint = "GetWindowTextW"' in windows_close_source
+    assert "expectedWindowTitle" in windows_close_source
+    assert "StringComparison.Ordinal" in windows_close_source
+    assert "IsWindowVisible" not in windows_close_source
+    assert "GetWindow(" not in windows_close_source
+    assert "GW_OWNER" not in windows_close_source
     assert "WM_CLOSE" in windows_close_source
     assert "PostMessage" in windows_close_source
     assert "targetProcessId" in windows_close_source
-    assert "RequestClose([uint32]${String(pid)})" in windows_close_source
+    assert "RequestClose([uint32]${String(pid)}, 'AncestryLLM')" in windows_close_source
     assert "$matchedWindowCount -ne 1" in windows_close_source
     assert "[System.Diagnostics.Process]::GetProcessById" not in windows_close_source
     assert "CloseMainWindow" not in windows_close_source

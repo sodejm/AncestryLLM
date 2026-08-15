@@ -266,12 +266,12 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AncestryLLM.DesktopVerification
 {
     public static class NativeWindowClose
     {
-        private const uint GW_OWNER = 4;
         private const uint WM_CLOSE = 0x0010;
 
         private delegate bool EnumWindowsCallback(IntPtr windowHandle, IntPtr parameter);
@@ -289,12 +289,17 @@ namespace AncestryLLM.DesktopVerification
             out uint processId
         );
 
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool IsWindowVisible(IntPtr windowHandle);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr GetWindow(IntPtr windowHandle, uint relationship);
+        [DllImport(
+            "user32.dll",
+            CharSet = CharSet.Unicode,
+            EntryPoint = "GetWindowTextW",
+            SetLastError = true
+        )]
+        private static extern int GetWindowText(
+            IntPtr windowHandle,
+            StringBuilder text,
+            int maxCount
+        );
 
         [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -305,20 +310,43 @@ namespace AncestryLLM.DesktopVerification
             IntPtr longParameter
         );
 
-        public static int RequestClose(uint targetProcessId)
+        public static int RequestClose(uint targetProcessId, string expectedWindowTitle)
         {
+            if (String.IsNullOrEmpty(expectedWindowTitle))
+            {
+                throw new ArgumentException(
+                    "native-window-title-invalid",
+                    "expectedWindowTitle"
+                );
+            }
             List<IntPtr> matchingWindows = new List<IntPtr>();
             EnumWindowsCallback callback = delegate(IntPtr windowHandle, IntPtr parameter)
             {
                 uint windowProcessId;
                 if (
                     GetWindowThreadProcessId(windowHandle, out windowProcessId) != 0 &&
-                    windowProcessId == targetProcessId &&
-                    IsWindowVisible(windowHandle) &&
-                    GetWindow(windowHandle, GW_OWNER) == IntPtr.Zero
+                    windowProcessId == targetProcessId
                 )
                 {
-                    matchingWindows.Add(windowHandle);
+                    StringBuilder windowTitle = new StringBuilder(
+                        expectedWindowTitle.Length + 1
+                    );
+                    int titleLength = GetWindowText(
+                        windowHandle,
+                        windowTitle,
+                        windowTitle.Capacity
+                    );
+                    if (
+                        titleLength > 0 &&
+                        String.Equals(
+                            windowTitle.ToString(),
+                            expectedWindowTitle,
+                            StringComparison.Ordinal
+                        )
+                    )
+                    {
+                        matchingWindows.Add(windowHandle);
+                    }
                 }
                 return true;
             };
@@ -355,7 +383,7 @@ namespace AncestryLLM.DesktopVerification
     "$ErrorActionPreference = 'Stop'",
     `$nativeSource = @'\n${nativeWindowCloseSource}\n'@`,
     'Add-Type -TypeDefinition $nativeSource -Language CSharp',
-    `$matchedWindowCount = [AncestryLLM.DesktopVerification.NativeWindowClose]::RequestClose([uint32]${String(pid)})`,
+    `$matchedWindowCount = [AncestryLLM.DesktopVerification.NativeWindowClose]::RequestClose([uint32]${String(pid)}, 'AncestryLLM')`,
     "if ($matchedWindowCount -ne 1) { throw ('native-window-match-count:' + [string]$matchedWindowCount) }",
   ].join('\n')
   try {

@@ -451,8 +451,11 @@ still requires its distribution and target-assurance gates to pass.
   arms the process-exit listener before requesting the final native window
   close. Windows sends an operating-system main-window close message through
   a PID-bound top-level-window lookup: it enumerates desktop windows, retains
-  only visible unowned handles whose owning process is the launched package,
-  requires exactly one match, and posts `WM_CLOSE` to that handle. Linux uses
+  only handles whose owning process is the launched package and whose caption
+  exactly matches the application-controlled `AncestryLLM` title, requires
+  exactly one match, and posts `WM_CLOSE` to that handle. This avoids relying
+  on taskbar visibility heuristics that are not stable on hosted Windows.
+  Linux uses
   Playwright's page-close request with unload handling enabled. The harness
   releases the automation connection only after the request is in flight and
   accepts only a normal zero-code Electron exit. It does not use a broadcast,
