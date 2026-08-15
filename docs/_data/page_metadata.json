@@ -147,11 +147,11 @@
   },
   "explanation/DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
-    "description": "Released v0.5.0 Electron Home, Diagnostics, Settings, and capability onboarding plus clearly marked Unreleased bounded Tasks and private Chat presentation; task admission and domain authority remain excluded."
+    "description": "Released bounded v0.6.0 Electron Home, Diagnostics, Settings, and capability onboarding plus source-level gated bounded Tasks and private Chat presentation; task admission and domain authority remain excluded."
   },
   "reference/DESKTOP_SIDECAR.md": {
     "title": "Packaged desktop sidecar — AncestryLLM",
-    "description": "Released private FastAPI control sidecar plus clearly marked Unreleased fixed job-lifecycle, transient-chat transport, and bounded renderer contracts; it excludes task admission, genealogy, arbitrary provider selection, cloud, and updater authority."
+    "description": "Released bounded v0.6.0 private FastAPI control sidecar plus source-level gated fixed job-lifecycle, transient-chat transport, and bounded renderer contracts; it excludes task admission, genealogy, arbitrary provider selection, cloud, and updater authority."
   },
   "DESKTOP_VERIFICATION.md": {
     "title": "Desktop verification — AncestryLLM",
@@ -223,6 +223,6 @@
   },
   "release-notes/0.6.0.md": {
     "title": "AncestryLLM 0.6.0 release notes",
-    "description": "Planned changes, compatibility notes, and validation requirements for the future AncestryLLM 0.6.0 release."
+    "description": "Scope, compatibility limitations, installation guidance, and validation requirements for the AncestryLLM 0.6.0 release."
   }
 }

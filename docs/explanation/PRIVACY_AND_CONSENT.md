@@ -69,9 +69,9 @@ The [desktop first-run tutorial](../tutorials/desktop-first-run.md), focused
 [file-access guide](../how-to/desktop-file-access.md), and
 [desktop reference](../reference/DESKTOP.md) translate these boundaries into
 the exact source-level labels and recovery actions. They do not add renderer
-authority, weaken explicit consent, or change the 0.5.0 release boundary.
+authority, weaken explicit consent, or change the supported 0.6.0 release boundary.
 
-The unreleased Issue #105 source contract exposes only the reviewed non-secret
+The source-level gated Issue #105 contract exposes only the reviewed non-secret
 settings schema and the exact credential references owned by `SecretStore`.
 Credential status is limited to `present`, `missing`, or `unavailable`; no
 route, bridge response, mock fixture, or renderer state can read a value.
@@ -86,7 +86,7 @@ configuration, and any parallel Node-side credential store are not permitted.
 Editing a default-provider setting does not activate a provider or grant cloud
 consent; the normal explicit provider and consent checks still apply.
 
-Unreleased Issue #108 adds the explicit desktop administration path for those
+The 0.6.0 source from Issue #108 adds the explicit desktop administration path for those
 checks. Provider endpoints must be tested before profile save, and the test
 returns only a redacted destination digest. A consent preview lists the exact
 provider, profile, model, allowed modules, purposes, data classes, retention,
@@ -95,7 +95,7 @@ and remote retention receive explicit warnings. Creation requires the current
 optimistic revision and the exact preview; revocation is a separate explicit
 action. The surface does not execute a provider request or genealogy workflow.
 
-Unreleased Issue #110 adds a separate source-level transient-chat execution
+The 0.6.0 source from Issue #110 adds a separate source-level transient-chat execution
 boundary behind the authenticated private API. It accepts only an exact stored
 profile and model, rejects direct or ambient provider selection, and rechecks
 endpoint, credential, policy, and current consent before every run. Its fixed
@@ -108,7 +108,7 @@ one-way payload hashes. Issue #111 adds the Main-owned bounded stream transport;
 Issue #112 adds the bounded renderer Chat presentation without adding persistent
 conversation storage, renderer network access, or provider authority.
 
-Unreleased Issue #56 adds only a service-internal asynchronous adapter for an
+The 0.6.0 source from Issue #56 adds only a service-internal asynchronous adapter for an
 already-authorized provider stream. The existing profile, endpoint, credential,
 policy, and consent checks complete before its worker starts, and streaming
 capability is required. A bounded queue, byte-bounded chunks, an absolute
@@ -144,7 +144,7 @@ visible and receive separate Electron Main confirmation before opening.
 
 ## Deployment-profile privacy boundary
 
-The unreleased source implements the versioned, non-secret deployment-profile
+The `0.6.0` source implements the versioned, non-secret deployment-profile
 control plane accepted by
 [ADR-0026](../ADR-0026-local-first-container-remote-deployment.md). Local Desktop
 is the safe default and recommended choice. Connect Remote and Host Remote are

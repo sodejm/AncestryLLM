@@ -6,8 +6,8 @@ behavior and does not access files, databases, provider credentials, the
 network, or operating-system services from the renderer. The versioned
 `window.ancestry` bridge retains the six 0.5 control methods for application
 information, startup diagnostics, capabilities, bounded sidecar retry,
-preference reads, and optimistic-concurrency preference updates. Unreleased
-Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
+preference reads, and optimistic-concurrency preference updates. Source-level
+gated Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
 settings and credential methods, Issue #108 adds six fixed provider-profile,
 endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
 request methods and one validated job-event listener, Issue #348 adds three fixed
@@ -19,15 +19,15 @@ for the fixed sidecar routes. Packaged main stores the bounded local-preference
 schema in `preferences.json` beneath Electron's OS app-data directory. The
 renderer never receives that path and has no storage access.
 
-Unreleased Issue #110 adds the fixed synchronous transient-chat service, Issue
+Source-level gated Issue #110 adds the fixed synchronous transient-chat service, Issue
 #111 adds the Main-owned bounded stream transport, and Issue #112 adds the
 renderer **Chat** destination over those fixed contracts. The combined surface
 adds no generic request channel, renderer network access, tool surface, file or
 database authority, genealogy operation, or persistent conversation store.
 
-The supported 0.5.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
+The supported 0.6.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
-Unreleased Issue #106 adds the reusable, responsive presentation shell for the
+Source-level gated Issue #106 adds the reusable, responsive presentation shell for the
 0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
 `AsyncState`, `CodedErrorView`, and dialog-focus contracts provide persistent
 navigation, a workspace header, context help, deterministic keyboard focus,
@@ -37,7 +37,7 @@ filesystem, sidecar, or Electron APIs and do not grant capabilities or decide
 service policy. Development and review use only the versioned bridge plus
 fictional fixtures.
 
-Unreleased Issue #107 makes that first-run surface explicitly local-only and
+Source-level gated Issue #107 makes that first-run surface explicitly local-only and
 fail closed. **Local Desktop** is the recommended and only available choice;
 Connect Remote and Host Remote remain visibly advanced but unavailable. A
 schema-v1 startup report covers configuration, SQLCipher, keyring, and workspace
@@ -46,7 +46,7 @@ keeps settings, credentials, and capabilities read-only. The one manual retry
 rechecks existing state without initializing a database, overwriting a key,
 falling back to plaintext, or widening a listener.
 
-Unreleased Issue #108 adds separate **Local Providers**, **Cloud Providers**,
+Source-level gated Issue #108 adds separate **Local Providers**, **Cloud Providers**,
 and **Consent & Privacy** sections without adding provider execution. The
 renderer may request an explicit endpoint test, save a profile only against the
 tested endpoint identity and current revision, preview the complete consent
@@ -54,14 +54,14 @@ scope, create that exact preview, and revoke consent. Secrets remain blank,
 write-only fields managed through Issue #105's credential boundary; presence of
 a stored key cannot select a provider or grant consent.
 
-Unreleased Issue #104 adds a main-process-only safe-shutdown preflight and a
+Source-level gated Issue #104 adds a main-process-only safe-shutdown preflight and a
 Python-owned, UI-neutral job lifecycle. It adds no renderer bridge method,
 event listener, supported job screen, or job-submission surface. During an
 application quit, Electron main can present the native choices **Wait**,
 **Request cancellation**, and **Stay open** without exposing the authenticated
 sidecar session or job event stream to the renderer.
 
-Unreleased Issue #109 adds a **Tasks** destination over that lifecycle. Five
+Source-level gated Issue #109 adds a **Tasks** destination over that lifecycle. Five
 fixed requests list, inspect, cancel, subscribe, and unsubscribe, while one
 validated event listener receives only the main-owned subscription's events.
 The renderer rebuilds state from backend snapshots after reload, resynchronizes
@@ -80,7 +80,7 @@ generic route authority. Messages remain bounded process memory, the fixed
 system instruction exposes no tools, and audit data contains only reviewed
 identifiers, counters, and content hashes.
 
-Issue #103 is an Unreleased security foundation, not a new 0.5 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
+Issue #103 is a source-level gated security foundation, not a supported 0.6 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
 The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
 
@@ -156,7 +156,7 @@ same-document application routes retain the existing renderer identity. In
 packaged builds, main privately starts and verifies the fixed-route native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
-details never enter IPC or the preload bridge. The Unreleased Issue #104
+details never enter IPC or the preload bridge. The source-level gated Issue #104
 shutdown preflight is likewise main-process-only: it asks the sidecar whether
 active jobs are safe to drain, wait for, or cancel before the IPC boundary is
 disposed. See
@@ -177,7 +177,7 @@ teardown. The renderer owns bounded transient presentation state and safe model
 text rendering; it receives no provider, network, sidecar-session, tool, file,
 database, or genealogy authority.
 
-Unreleased Issue #363 adds the Electron-Main-only container-control foundation,
+Source-level gated Issue #363 adds the Electron-Main-only container-control foundation,
 and Issue #348 wires only its macOS arm64 runtime-acquisition and lifecycle
 surface through three fixed methods. Settings can inspect a sanitized status,
 review an exact policy-bound plan, and explicitly install, start, stop, repair,
@@ -226,4 +226,4 @@ The fixed external-link action accepts only normalized HTTPS destinations withou
 | `TM-E01`, `TM-D01`, `TM-C01`, `TM-O01` | Issue #104 persists bounded schema-v1 job snapshots and events in SQLCipher, reconciles interrupted non-terminal jobs to one terminal outcome on startup, isolates slow subscribers with coded replay resynchronization, and keeps cancellation cooperative at declared safe points. Electron main obtains a sanitized shutdown assessment and offers native **Wait**, **Request cancellation**, and **Stay open** choices; the renderer receives no job or sidecar authority. | `make test`, `make desktop-check`, `pnpm --dir desktop test` |
 | `TM-I01`, `TM-D01`, `TM-O01`, `TM-F01`, `TM-F02` | Issue #109 validates five fixed task requests and one fixed event listener. Main owns authenticated bounded SSE and at most 32 sender-owned subscriptions. The renderer ignores stale or duplicate events, refreshes gaps, reloads backend snapshots, closes terminal streams, announces meaningful state changes once, renders coded redacted failures, and displays path-free artifact metadata. It adds no job admission or direct artifact action. | `make desktop-check`, `make desktop-e2e`, `make desktop-security` |
 | `TM-L01`, `TM-L02`, `TM-S01`, `TM-D01`, `TM-O01` | Issues #110-#112 keep fixed chat routes behind Electron Main. Python tests prove exact named-profile/model binding, fresh consent, pre-provider bounds, network-free denial paths, no-tool requests, transient session teardown, and payload-free audit records. Renderer tests prove bounded ordered/replay-safe state, explicit profile/model/consent selection, interruption handling, safe Markdown, plain-text copy, and confirmed HTTPS links. | `make test`, `make typecheck`, `make desktop-check`, `make desktop-e2e` |
-| `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.5.0. | `make desktop-security` |
+| `TM-U01` | Static package-policy tests in `scripts/package-security.test.mjs`; packaged `app.asar`, fuse, and supported integrity inspection in `scripts/inspect-package-fuses.mjs`. Provenance, target execution, and installation remain `0.x` release gates; trusted signing and notarization become mandatory at v1.0.0. Updater behavior is excluded from 0.6.0. | `make desktop-security` |

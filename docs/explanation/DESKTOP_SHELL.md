@@ -1,6 +1,6 @@
 # Desktop shell
 
-AncestryLLM 0.5.0 is a bounded, offline Electron control shell. It does not
+AncestryLLM 0.6.0 includes a bounded, offline Electron control shell. It does not
 move the genealogy-capable CLI or console into the desktop application and it
 does not introduce a second command or domain layer.
 
@@ -17,7 +17,7 @@ For a source-level v0.6 learning path, start with
 [desktop how-to guides](../Home.md#how-to-guides), and keep the
 [desktop reference](../reference/DESKTOP.md) open for exact states and stable
 codes. These pages describe the current source contracts; they do not expand
-the released 0.5.0 installer claim below.
+the supported 0.6.0 installer claim below.
 
 ## Supported surface
 
@@ -34,15 +34,15 @@ The supported desktop destinations are deliberately small:
 - **Settings** stores local visual preferences only: color scheme and reduced
   motion. The internal onboarding flag is not a user-facing setting.
 
-Unreleased Issue #109 adds a **Tasks** destination to present backend-owned
-work. It remains outside the released 0.5.0 installer claim.
+The 0.6.0 source from Issue #109 adds a **Tasks** destination to present
+backend-owned work. It remains outside the supported 0.6.0 installer claim.
 
-Unreleased Issue #110 adds an internal, synchronous, transient-chat service and
-fixed sidecar routes. Issue #111 adds the audited source transport owned by
-Electron Main. Issue #112 adds the bounded **Chat** destination over six fixed
-chat methods and one event listener. It does not add a tool call, genealogy
-operation, renderer network client, persistent transcript, or generic dispatch
-surface.
+The 0.6.0 source from Issue #110 adds an internal, synchronous, transient-chat
+service and fixed sidecar routes. Issue #111 adds the audited source transport
+owned by Electron Main. Issue #112 adds the bounded **Chat** destination over
+six fixed chat methods and one event listener. It does not add a tool call,
+genealogy operation, renderer network client, persistent transcript, or generic
+dispatch surface.
 
 These destinations must remain usable with keyboard navigation and assistive
 technology, and in loading, empty, degraded, failure, narrow-window, and
@@ -50,13 +50,13 @@ zoomed layouts.
 
 ## Accessible design-system shell
 
-Unreleased Issue #106 implements the reusable presentation shell for the 0.6
-desktop work. It preserves a persistent primary navigation region, workspace
+The 0.6.0 source from Issue #106 implements the reusable presentation shell for
+the desktop work. It preserves a persistent primary navigation region, workspace
 header, context-and-help panel, and explicit **Local and offline** status across
-Home, Diagnostics, Settings, and the unreleased Tasks and Chat destinations. The
-compact layout keeps the current route and local status visible when the window
-narrows; at the 720-by-560 minimum size and 200% zoom, primary actions reflow
-without horizontal clipping.
+Home, Diagnostics, Settings, and the source-level gated Tasks and Chat
+destinations. The compact layout keeps the current route and local status
+visible when the window narrows; at the 720-by-560 minimum size and 200% zoom,
+primary actions reflow without horizontal clipping.
 
 The shell exposes one typed route and navigation contract rather than another
 command registry. <kbd>Ctrl</kbd>+<kbd>K</kbd> or
@@ -89,8 +89,8 @@ shipping renderer.
 
 ## First run and revisit
 
-The current unreleased 0.6 first launch opens a bounded welcome on **Home** and
-presents three explicit deployment intents:
+The `0.6.0` source-level gated first launch opens a bounded welcome on **Home**
+and presents three explicit deployment intents:
 
 - **Local Desktop (Recommended)** is the only available choice. It uses the
   private loopback sidecar and offline-first defaults on this device.
@@ -130,7 +130,8 @@ preference. Keyboard focus begins on the welcome heading, reduced-motion
 preferences are respected, and degraded runtime state does not block navigation
 to **Diagnostics** or its bounded retry.
 
-The 0.5.0 shell has no genealogy, file or folder, GEDCOM or RootsMagic, job,
+The supported 0.6.0 shell has no genealogy, file or folder, GEDCOM or
+RootsMagic, job,
 chat, provider or credential, cloud or account, domain-dispatch, updater, or
 background-channel surface. Those exclusions apply to navigation and hidden
 controls as well as visible content.
@@ -151,8 +152,8 @@ cannot select a provider. The preload bridge exposes exactly these six methods:
 - `getPreferences`
 - `updatePreferences`
 
-Unreleased source additions are fixed, separately reviewed contracts and do
-not change that released six-method claim. Issue #109 contributes five task
+The source-level gated 0.6.0 additions are fixed, separately reviewed contracts
+and do not change that supported six-method claim. Issue #109 contributes five task
 request methods and one validated event listener. Issue #111 contributes three
 chat-stream request methods and one validated event listener. Issue #112
 contributes three chat-lifecycle methods and two fixed native actions for
@@ -166,7 +167,7 @@ stderr, raw sidecar or bridge errors, or stack traces. See the
 [desktop ADR](../ADR-0025-electron-fastapi-desktop.md) for the underlying process
 and architecture controls.
 
-## Unreleased task center and safe shutdown
+## Source-level gated task center and safe shutdown
 
 Issue #104 supplies the UI-neutral Python lifecycle: strict schema-v1 snapshots
 and events, increasing per-job sequence numbers, bounded persistence and
@@ -215,7 +216,7 @@ drains any launch already in flight. Losing a previously exposed session never
 restores the empty shortcut. The IPC boundary remains intact when sidecar
 shutdown fails, allowing a subsequent bounded recovery attempt.
 
-## Unreleased transient-chat foundation
+## Source-level gated transient-chat foundation
 
 Issue #110 defines one schema-v1 Python service contract for short-lived chat
 sessions and one fixed synchronous run operation. Session creation accepts an
@@ -269,10 +270,10 @@ duplicate, replay, gap, interruption, and owner-mismatch tests keep stream state
 fail closed. Target-matched packaged accessibility, stream-race, and hostile
 content evidence remains Issue #131.
 
-## Unreleased opaque file-mediation foundation
+## Source-level gated opaque file-mediation foundation
 
 Issue #103 adds a security boundary for later genealogy workflows without
-expanding the supported 0.5.0 domain surface. The bridge gains only three
+expanding the supported 0.6.0 domain surface. The bridge gains only three
 strict, asynchronous methods:
 
 - `requestOpenFileGrant`
@@ -306,12 +307,12 @@ reopens and revalidates the source under its own bounded policy before parsing
 or publication. Until that adapter ships, the grant broker provides no GEDCOM,
 RootsMagic, import, export, or report workflow.
 
-## Unreleased settings and credential-management foundation
+## Source-level gated settings and credential-management foundation
 
-Issue #105 adds the source-level settings and credential-management boundary
-planned for 0.6.0. It does not expand the released 0.5.0 shell and does not
-enable provider execution, cloud consent, genealogy operations, or arbitrary
-sidecar access.
+Issue #105 adds the 0.6.0 source-level settings and credential-management
+boundary. It does not expand the supported 0.6.0 shell and does not enable
+provider execution, cloud consent, genealogy operations, or arbitrary sidecar
+access.
 
 The renderer can read the complete versioned settings catalog and submit one
 exact optimistic-revision patch. The catalog exposes only five reviewed,
@@ -346,16 +347,17 @@ asynchronous request begins and again after every success or failure. Secret
 values are never retained in React state, query caches, bridge fixtures,
 responses, logs, local storage, IndexedDB, Electron `safeStorage`, or plaintext
 configuration. The renderer still has no direct keyring or network access.
-Together with the three unreleased file-grant methods, the current development
-bridge therefore contains thirty-six fixed request methods: six released control
-methods, three opaque file-grant methods, five settings/credential methods, six
+Together with the three source-level gated file-grant methods, the `0.6.0`
+source bridge therefore contains thirty-six fixed request methods: six
+supported control methods, three opaque file-grant methods, five
+settings/credential methods, six
 provider-configuration methods, five task-lifecycle methods, three local-runtime
 methods, two native actions, and six chat methods. Issue #109 adds one fixed,
 validated `onJobEvent` listener, and Issue #111 adds one fixed, validated
 `onChatEventBatch` listener. There is still no generic send, listen,
 route-selection, clipboard, shell, or command operation.
 
-The unreleased source implements the non-secret, versioned deployment-profile
+The `0.6.0` source implements the non-secret, versioned deployment-profile
 control plane accepted by the
 [deployment-profile ADR](../ADR-0026-local-first-container-remote-deployment.md).
 Local Desktop is preselected and recommended. The shared Python service owns
@@ -370,12 +372,12 @@ implemented and independently gated.
 
 Selecting or inspecting a profile does not open a listener, start a container,
 discover a service, move genealogy data, select a provider, or grant cloud
-consent. The released 0.5 shell still has no supported container, remote, LAN,
+consent. The supported 0.6.0 shell still has no supported container, remote, LAN,
 browser, or public-service surface. Future presentation keeps the renderer
 sandbox and fixed typed bridge, while authority remains in the shared service
 contracts and Electron Main's narrow adapter.
 
-## Unreleased provider configuration and consent
+## Source-level gated provider configuration and consent
 
 Issue #108 adds separate **Local Providers**, **Cloud Providers**, and
 **Consent & Privacy** sections. It remains an administrative surface: it does
@@ -405,8 +407,8 @@ explicit. Secret values remain in the Issue #105 write-only keyring boundary:
 provider configuration returns presence only, and a stored key alone cannot
 select a provider or grant consent.
 
-Unreleased Issue #363 adds the host-only control foundation inside Electron
-Main. Its closed schema-v1 policy and plan bind an app-owned Docker context,
+The 0.6.0 source from Issue #363 adds the host-only control foundation inside
+Electron Main. Its closed schema-v1 policy and plan bind an app-owned Docker context,
 Unix socket, runtime profile, Engine identity, exact resource labels, immutable
 images, and hardened Compose settings to bounded lifecycle operations. Issue
 #348 wires only acquisition and lifecycle of the local macOS arm64 tool
@@ -498,7 +500,7 @@ pass.
 
 ## Installation and updates
 
-The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
+The supported 0.6.0 targets are macOS 15 and 26 on arm64 and x64, Windows 11
 on arm64, and Ubuntu 24.04 on x64. A supported release is a manually installed
 installer that has passed the target-specific release and packaged assurance
 gates in the [release runbook](../RELEASING.md). Full production/trusted binary
@@ -508,8 +510,8 @@ unsigned.
 
 Unpacked CI artifacts and development builds are verification inputs, not
 supported releases or evidence of installation. For an install or upgrade,
-quit AncestryLLM; download the
-target-matched full installer and `SHA256SUMS` from the same immutable release;
+quit AncestryLLM; download the target-matched full installer and `SHA256SUMS`
+from the same immutable release;
 verify its digest and declared `binarySigningMode`; install it over the current
 application; relaunch; and confirm the version and healthy Diagnostics. A
 `0.x` binary may produce an unknown-publisher or equivalent operating-system
@@ -518,7 +520,7 @@ Ubuntu then requires the adjacent `.deb.asc` detached GPG signature.
 Application files are replaced while OS-managed AncestryLLM data and
 configuration directories are retained.
 
-Version 0.5.0 has no updater feed, no background update, no staged rollout, and
+Version 0.6.0 has no updater feed, no background update, no staged rollout, and
 no automatic rollback. It publishes no `latest*.yml` or blockmap. Updating and
 rolling back mean manually installing an appropriate complete installer whose
 checksum and version-required platform signature still verify.

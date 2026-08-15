@@ -17,7 +17,7 @@ number or version string.
 
 The published v0.4.0 release continues to use its preserved milestone/tracker
 evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
-iteration, currently `v0.5.0 — Foundation`, is authoritative for future
+iteration, currently `v0.6.0 — Usable desktop core`, is authoritative for
 release readiness.
 
 ## Future deployment-runtime release gate
@@ -151,9 +151,9 @@ an unpublished fuse-mutated test bundle on a hosted runner; that bundle must
 never be distributed, imported into a release, or accepted as release-signing
 evidence.
 
-## v0.5.0 supported offline shell
+## v0.6.0 supported offline shell
 
-v0.5.0 is a supported offline three-OS Electron shell. Its installer matrix is
+v0.6.0 is a supported offline three-OS Electron shell. Its installer matrix is
 macOS 15 arm64, macOS 15 x64, Windows 11 ARM64, and Ubuntu 24.04 x64. The
 matching-architecture DMGs cover the supported macOS 15/26 range. Its release
 scope is Home, Diagnostics, Settings, capability onboarding, and a private
@@ -351,7 +351,7 @@ and installer evidence.
 
 The tag workflow is the only installer publisher. The installers are built and
 validated by a manually dispatched pre-tag run, but cannot be
-published until the v0.4.0 release is complete and the v0.5.0 tag gates pass.
+published until the v0.5.0 release is complete and the v0.6.0 tag gates pass.
 Before the final release distribution can be assembled or any release asset can be published, it
 requires all four installer rows. The `Required native verification` column is
 version-aware: `0.x` requires installation and installed-runtime execution but
@@ -500,7 +500,7 @@ configuration directories. Confirm the displayed version and healthy
 Diagnostics after relaunch. Recovery or rollback uses the same process with a
 previous full installer whose checksum and version-required signature still verify.
 
-v0.5.0 has no updater feed, no background update, no staged rollout, and no
+v0.6.0 has no updater feed, no background update, no staged rollout, and no
 automatic rollback. Do not publish `latest*.yml`, blockmaps, or another update
 channel, and do not represent manual reinstall behavior as an updater.
 

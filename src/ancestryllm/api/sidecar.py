@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from ancestryllm.core.secrets import SecretStore
     from ancestryllm.storage.diagnostics import StartupDiagnosticReport
 
-SIDECAR_BUILD = "0.5.0"
+SIDECAR_BUILD = "0.6.0"
 MAX_LAUNCH_FRAME_BYTES = 4096
 STARTUP_TIMEOUT_SECONDS = 10.0
 WINDOWS_KILL_ON_JOB_CLOSE = 0x00002000

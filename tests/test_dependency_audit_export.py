@@ -238,7 +238,7 @@ def test_repository_export_covers_every_group_extra_and_transitive() -> None:
         "pypi-attestations",  # release-verifier group
         "urllib3",  # representative transitive dependency
     } <= names
-    assert prepared.excluded_pairs == {("ancestryllm", "0.5.0")}
+    assert prepared.excluded_pairs == {("ancestryllm", "0.6.0")}
 
 
 def test_make_runs_exact_export_then_hash_locked_pip_audit() -> None:

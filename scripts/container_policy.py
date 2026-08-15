@@ -93,7 +93,7 @@ _DOCKERFILE_INSTRUCTIONS = (
         "--output /opt/ancestryllm/package-inventory.json",
     ),
     ("FROM", "${PYTHON_IMAGE} AS runtime"),
-    ("ARG", "APP_VERSION=0.5.0"),
+    ("ARG", "APP_VERSION=0.6.0"),
     (
         "LABEL",
         'org.opencontainers.image.source="https://github.com/sodejm/AncestryLLM" '

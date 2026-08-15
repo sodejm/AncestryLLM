@@ -2,8 +2,9 @@
 
 ## Implementation status
 
-The 0.5.0 tree implements the one-shot CLI and prompt-toolkit/Rich REPL over
-shared command, application-service, and genealogy-core contracts. Its Issue
+The `0.6.0` release tree implements the one-shot CLI and prompt-toolkit/Rich
+REPL over shared command, application-service, and genealogy-core contracts.
+Its Issue
 #11 slice adds authenticated FastAPI health and capability routes,
 strict version/error contracts, fail-closed loopback server configuration, and
 a deterministic OpenAPI artifact. Issue #225 adds private-stdin bootstrap,
@@ -13,29 +14,34 @@ verification, bounded crash recovery, full-process-tree termination, and drain
 of the resources the current sidecar actually owns. Issue #101 implements the
 exact six-method typed bridge with per-call sender/frame/origin authorization,
 strict clone/schema limits, bounded concurrency and queues, single-flight
-capability reads, deadlines, cancellation, and lifecycle cleanup. Unreleased
-Issue #103 adds three path-free renderer methods over a main-owned opaque
+capability reads, deadlines, cancellation, and lifecycle cleanup. The `0.6.0`
+source-level Issue #103 implementation adds three path-free renderer methods
+over a main-owned opaque
 file-grant broker with native dialogs, purpose and format checks, bounded
 single-use grants, lifecycle revocation, fingerprint revalidation, replacement
 confirmation, alias denial, and output locks. It does not implement domain API
-routes. Unreleased Issue #105 adds optimistic-revision non-secret settings plus
+routes. The `0.6.0` source-level Issue #105 implementation adds
+optimistic-revision non-secret settings plus
 write-only OS-keyring credential status/set/delete through fixed authenticated
 routes and five fixed bridge methods. Credential values are never returned,
 persisted in renderer state, or represented in status DTOs, generated clients,
 logs, or fixtures. It does not implement provider execution, parser workers,
-signed installers, plugins, or an update channel. Unreleased Issue #106 adds a
+signed installers, plugins, or an update channel. The `0.6.0` source-level
+Issue #106 implementation adds a
 responsive presentation-only shell, fixed navigation and interaction contracts,
 deterministic focus behavior, seven semantic async states, and a fictional
 development-only review gallery. It adds no IPC, network, filesystem, provider,
 consent, or domain authority, and the production verifier excludes the gallery.
-Unreleased Issue #107 adds a local-only first-run choice and a schema-v1 startup
+The `0.6.0` source-level Issue #107 implementation adds a local-only first-run
+choice and a schema-v1 startup
 diagnostic report over the existing fixed bridge. Packaged desktop secret
 resolution is keyring-only; blocking configuration, SQLCipher, keyring, or
 workspace failures keep affected mutations disabled and expose only sanitized
 recovery guidance plus one bounded retry. Diagnostics never initialize or
 repair storage, replace a key, fall back to plaintext, discover a remote host,
 or widen a listener.
-Unreleased Issue #108 adds six fixed provider-configuration and consent methods
+The `0.6.0` source-level Issue #108 implementation adds six fixed
+provider-configuration and consent methods
 and authenticated routes without adding provider execution. Endpoint tests use
 direct numeric-address connections, normal TLS hostname verification, no proxy
 or redirect following, repeated DNS resolution, and a redacted identity digest.
@@ -43,7 +49,8 @@ Profile persistence, consent issuance, and execution recheck the tested
 identity. Exact-revision consent previews disclose provider, profile, model,
 purposes, data classes, retention, cost, and living-person and remote-retention
 warnings before an atomic grant; a stored credential cannot enable a provider.
-Unreleased Issue #109 adds a presentation-only task center over the existing
+The `0.6.0` source-level Issue #109 implementation adds a presentation-only
+task center over the existing
 backend-owned job lifecycle. Five fixed request methods and one validated event
 listener expose strict sanitized snapshots and events; Electron Main owns the
 authenticated stream, caps sender-bound subscriptions, removes them on terminal
@@ -53,7 +60,8 @@ cancelling, pending-safe-point, cancelled, and terminal outcomes, and presents
 only coded redacted errors plus path-free artifact metadata. It admits no task,
 executes no provider or genealogy operation, retains no job state, and grants no
 artifact authority.
-Unreleased Issue #110 adds five fixed authenticated operations for synchronous,
+The `0.6.0` source-level Issue #110 implementation adds five fixed
+authenticated operations for synchronous,
 transient chat behind a source-level `ChatService`. Every run uses the session's
 exact named profile and model, rechecks endpoint identity, credentials, policy,
 and consent before provider construction, and applies fixed message, context,
@@ -67,7 +75,8 @@ provider route. Issue #111 consumes it through fixed authenticated stream-start,
 SSE, and cancellation routes plus a fixed Main/preload source bridge. Issue #112
 adds the bounded renderer presentation and fixed Main-owned native actions;
 target-matched packaged adversarial evidence remains #131.
-Unreleased Issue #56 adds only a service-internal asynchronous adapter for
+The `0.6.0` source-level Issue #56 implementation adds only a service-internal
+asynchronous adapter for
 existing synchronous provider iterators. Profile, endpoint, credential,
 policy, consent, and stream-capability checks complete before the worker starts.
 The context-preserving off-loop bridge bounds queued items and UTF-8 chunk
@@ -78,13 +87,14 @@ adds no API, Electron, renderer, or public stream surface. Issue #111 supplies
 the bounded private chat transport, and Issue #112 supplies its source-level
 renderer presentation. Target-matched packaged adversarial evidence remains
 #131.
-Unreleased Issue #347 adds a
+The `0.6.0` source-level Issue #347 implementation adds a
 strict schema-v1, non-secret deployment profile with a safe Local Desktop
 default, reviewed mode descriptions, revision-bound previews, explicit
 confirmation, atomic local recovery, fail-closed runtime diagnostics, and
 redacted backup/support metadata. It does not start containers, enroll a
 remote client, host a server, widen a listener, or move genealogy data. The
-Unreleased Issue #363 adds the Electron-Main-only host container-control
+`0.6.0` source-level Issue #363 implementation adds the Electron-Main-only
+host container-control
 foundation. Issue #348 wires only macOS arm64 runtime acquisition and lifecycle
 through a policy-bound status/review/apply interface. It validates an app-owned
 local Docker endpoint and exact hardened plans, ignores ambient daemon
@@ -96,10 +106,9 @@ two-service Compose topology for probe and lifecycle validation. The topology
 publishes no host port, loads no provider or genealogy workload, keeps its
 placeholder data volume read-only, and disables schema migration. The diagrams,
 controls, abuse cases, and gates below define this runtime-tool and probe-only
-substrate plus accepted later-roadmap requirements;
-implementation alone is not evidence that every packaged assurance control has
-passed. Each
-adapter must reuse the implemented service contracts and complete its named
+substrate plus accepted later-roadmap requirements; implementation alone is not
+evidence that every packaged assurance control has passed. Each adapter must
+reuse the implemented service contracts and complete its named
 verification before a planned control can be treated as effective.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
@@ -111,8 +120,9 @@ implements the host-control subset of `TM-H01`, `TM-B01`, `TM-O01`, and
 `TM-K01`, `TM-N01`, and `TM-V01`; Issue #349 implements the probe-only source
 and native-evidence portions of `TM-K01`, `TM-N01`, `TM-O01`, and `TM-B01`.
 No workload-capable AncestryLLM application container or remote runtime is
-implemented or supported. The deployment diagrams, remaining controls, `STR-H-*` through
-`STR-M-*` and `STR-B-*`, AB-11 through AB-22, and G5 through G7 below remain
+implemented or supported. The deployment diagrams, remaining controls,
+`STR-H-*` through `STR-M-*` and `STR-B-*`, AB-11 through AB-22, and G5 through
+G7 below remain
 requirements for planned work. The #363 native macOS arm64 receipt supports its
 narrow evidence disposition below, but no deployment risk rating is reduced
 until the owning runtime issues provide complete native-platform,
@@ -122,13 +132,15 @@ negative-test, and independent-review evidence at their named gates.
 
 Sensitive assets are genealogy records, living-person status, notes, provider
 credentials, SQLCipher keys, prompts/responses, consent grants, RootsMagic
-source files, Unreleased opaque desktop file grants, and internal API bootstrap
-material. Later desktop assets additionally include event streams and plugin
-packages, update metadata, release signatures, support evidence, OCI images and digests,
+source files, `0.6.0` source-level opaque desktop file grants, and internal API
+bootstrap material. Later desktop assets additionally include event streams
+and plugin packages, update metadata, release signatures, support evidence,
+OCI images and digests,
 generated Compose configuration, Docker contexts and sockets, workload
 credentials, remote-enrollment material, encrypted application volumes, and
 backups. The non-secret deployment profile and its redacted endpoint-identity
-and support/backup evidence are current control-plane assets. Data crosses boundaries at
+and support/backup evidence are current control-plane assets. Data crosses
+boundaries at
 prompt-toolkit/Rich REPL input, one-shot CLI input, GEDCOM/RootsMagic parsing,
 the OS keyring, encrypted database, configured provider endpoints, and exported
 files. The desktop runtime adds crossings through a sandboxed Electron renderer,
@@ -584,7 +596,7 @@ produced the required evidence.
 
 ### Issue #11 and Issue #102 source-level evidence
 
-The isolated 0.5.0 foundation implements and tests the source-level subset of
+The `0.6.0` release tree incorporates and tests the source-level subset of
 `TM-A01`, `TM-A02`, `TM-A03`, `TM-D01`, `TM-I01`, `TM-O02`, and `TM-U01`
 owned by Issues #11 and #102:
 

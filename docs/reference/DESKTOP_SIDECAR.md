@@ -4,10 +4,10 @@ Issue #225 adds the control-only native sidecar used by the packaged Electron
 main process. Issue #102 hardens its payload verification and process-tree
 supervision. Issue #226 adds the narrow typed bridge that lets the renderer
 read sanitized control state without becoming a sidecar client. Issue #105 adds
-an unreleased 0.6 source boundary for atomic non-secret settings and write-only
+a source-level gated 0.6.0 boundary for atomic non-secret settings and write-only
 credential management. Issue #107 adds a sanitized schema-v1 startup report,
 keyring-only packaged secret resolution, and fail-closed mutation gating for
-local first run. Issue #104 adds an unreleased UI-neutral job-lifecycle and
+local first run. Issue #104 adds a source-level gated UI-neutral job-lifecycle and
 safe-shutdown boundary. Issue #109 adds its bounded Tasks presentation through
 five fixed request methods and one validated event listener. Issue #110 adds a
 fixed, synchronous, transient chat service behind authenticated internal routes.
@@ -21,7 +21,7 @@ fixed native actions. These chat boundaries add no tools, file or database
 access, genealogy operation, job submission, cloud-account, updater, autonomous
 action, persistent transcript, or generic command route. The sidecar is not a
 general domain-data transport.
-The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.5.0 user
+The [desktop shell guide](../explanation/DESKTOP_SHELL.md) defines the supported 0.6.0 user
 surface, installation model, and sanitized recovery contract.
 
 ## Native targets and release evidence
@@ -61,7 +61,7 @@ the exact packaged resource afterwards. A system Python installation is not
 used at runtime. CI output is an unsigned, unpacked verification artifact, not
 a supported release. Supported distribution requires a manually installed
 installer plus provenance, installation, target-execution, and packaged
-assurance gates. Version 0.5.0 has no updater, update feed, background update
+assurance gates. Version 0.6.0 has no updater, update feed, background update
 channel, or staged rollout.
 
 On Ubuntu, the packaged-runtime and installer checks exercise the production
@@ -114,9 +114,9 @@ does not add a production credential fallback or weaken keyring-only startup.
    output, or diagnostics.
 5. The sidecar starts from the network-free `provider=none` default, binds IPv4
    `127.0.0.1` on port `0`, and exposes authenticated fixed routes only. Ambient
-   provider credentials remain excluded from the packaged process. The released
-   0.5.0 composition has
-   `/api/v1/health` and `/api/v1/capabilities`; the unreleased #105 source adds
+   provider credentials remain excluded from the packaged process. The supported
+   0.6.0 composition has
+   `/api/v1/health` and `/api/v1/capabilities`; the source-level gated #105 code adds
    `/api/v1/settings` plus fixed status, set, and delete operations beneath
    `/api/v1/secrets/{reference}`. Issue #107 adds the read-only
    `/api/v1/startup-diagnostics` route. Issue #104 adds fixed job list, status,
@@ -217,9 +217,9 @@ wrong owner/run identities, invalid DTOs, and stale, duplicate, or nonmonotonic
 sequences. Neither preload nor the renderer acquires HTTP, bearer, provider,
 sidecar-session, or generic route authority.
 
-The released 0.5.0 `window.ancestry` surface contains exactly `getAppInfo`,
+The supported 0.6.0 `window.ancestry` surface contains exactly `getAppInfo`,
 `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`, `getPreferences`,
-and `updatePreferences`. The current unreleased source adds three opaque
+and `updatePreferences`. The 0.6.0 source-level gated surface adds three opaque
 file-grant methods, exactly five settings/credential methods (`getSettings`,
 `updateSettings`, `getSecretStatus`, `setSecret`, and `deleteSecret`), and
 exactly six provider/consent methods (`getProviderConfiguration`,
@@ -232,7 +232,7 @@ request methods (`listJobs`, `getJob`, `cancelJob`, `subscribeJobEvents`, and
 `onChatEventBatch` listener. Issue #112 adds exactly three chat-lifecycle methods
 (`getChatCapability`, `createChatSession`, and `closeChatSession`) and two native
 actions (`openExternalLink` and `copyText`). Issue #348 adds exactly three local-
-runtime methods. The resulting unreleased bridge has 36 fixed request methods;
+runtime methods. The resulting source-level gated bridge has 36 fixed request methods;
 there is no generic send, listen, route, channel-selection, clipboard, or shell
 operation. Issue #104's shutdown client remains Electron-Main-only.
 Main accepts a call only from the registered
@@ -392,6 +392,6 @@ node desktop/scripts/verify-sidecar.mjs darwin-arm64 desktop/release
 ```
 
 Choose the exact native target; cross-built sidecars are rejected. A desktop
-support or `0.5.0` release claim also requires the release tracker, declared
+support or `0.6.0` release claim also requires the release tracker, declared
 binary-signing mode, platform execution, installation, and packaged assurance
 gates to pass. Unpacked CI artifacts do not satisfy those gates.

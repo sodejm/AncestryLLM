@@ -163,7 +163,7 @@ def _write_security_dependency_report(tmp_path: Path, payload: dict[str, Any]) -
     return path
 
 
-@pytest.mark.parametrize("version", ["0.2.0", "0.3.0", "0.4.0", "0.5.0"])
+@pytest.mark.parametrize("version", ["0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0"])
 def test_versioned_release_evidence_records_are_valid(version: str) -> None:
     root = Path(__file__).parents[1] / "docs" / "release-evidence" / version
     findings = json.loads((root / "findings.json").read_text(encoding="utf-8"))
@@ -174,7 +174,7 @@ def test_versioned_release_evidence_records_are_valid(version: str) -> None:
     assert {vendor["status"] for vendor in vendors} == {"unverified"}
 
 
-@pytest.mark.parametrize("version", ["0.2.0", "0.3.0", "0.4.0", "0.5.0"])
+@pytest.mark.parametrize("version", ["0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0"])
 def test_curated_release_notes_distinguish_unverified_interoperability(
     version: str,
 ) -> None:

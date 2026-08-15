@@ -8,7 +8,7 @@ hosted application deployment.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 future Local Desktop container profile plus explicit Connect Remote and Host
-Remote profiles. Unreleased 0.6 source implements the shared profile control
+Remote profiles. The 0.6.0 source implements the shared profile control
 plane and a separate macOS arm64 manager for app-owned Colima/Lima, Docker
 Engine, and Compose tools. Issue #349 also supplies a probe-only OCI and Compose
 verification topology, but neither component activates a deployment profile or
@@ -50,7 +50,7 @@ service or provide a current Host Remote runbook.
 
 ## Host control and macOS arm64 runtime tools
 
-Unreleased 0.6 source contains the #363 Electron-Main-only container-control
+The 0.6.0 source contains the #363 Electron-Main-only container-control
 foundation and the #348 macOS arm64 runtime-tool manager. Packaged Settings and
 the packaged executable expose only fixed status, review, and apply operations.
 The renderer receives no Docker socket, executable path, Docker context,

@@ -94,7 +94,7 @@ details; no schema values, question text, or provider request are emitted.
 
 ## Electron opaque file grants
 
-Unreleased Issue #103 places native desktop file selection behind the same
+The 0.6.0 source from Issue #103 places native desktop file selection behind the same
 fail-closed design. The sandboxed renderer may call only
 `requestOpenFileGrant`, `requestSaveFileGrant`, and `revokeFileGrant`. A
 successful response contains a random `FileGrantId` and path-free

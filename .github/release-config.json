@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
-  "release": "0.5.0",
+  "release": "0.6.0",
   "project": {
     "owner": "sodejm",
     "number": 2,
     "title": "AncestryLLM Feature Releases",
-    "iteration": "v0.5.0 — Foundation",
+    "iteration": "v0.6.0 — Usable desktop core",
     "priority": "P0",
     "status": "Done",
     "validation": "Verified"

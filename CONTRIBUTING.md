@@ -134,11 +134,11 @@ must be synthetic and source files must remain hash-identical after tests.
 
 ## Secure desktop development
 
-The current 0.5.0 foundation includes authenticated FastAPI health and
-capability routes plus a bounded Electron shell, renderer, preload bridge, and
-unpublished package-verification path. Unreleased Issue #103 adds opaque native
-file-grant mediation, but it does not yet add domain API routes, parser workers,
-or end-user file workflows. Later adapters must consume the existing
+The bounded 0.6.0 release includes authenticated FastAPI health and capability
+routes plus an Electron shell, renderer, preload bridge, and unpublished
+package-verification path. Source-level gated Issue #103 adds opaque native
+file-grant mediation, but it does not add domain API routes, parser workers, or
+end-user file workflows. Later adapters must consume the existing
 application-service surface without redefining command or genealogy behavior.
 
 Desktop work is governed by

@@ -19,6 +19,8 @@ ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
 PYPROJECT = ROOT / "pyproject.toml"
 RELEASE_CONFIG = ROOT / ".github" / "release-config.json"
 SIDECAR_MODULE = ROOT / "src" / "ancestryllm" / "api" / "sidecar.py"
+CONTAINER_DOCKERFILE = ROOT / "containers" / "Dockerfile"
+CONTAINER_POLICY = ROOT / "scripts" / "container_policy.py"
 
 
 def test_release_sources_share_the_exact_stable_build_identity() -> None:
@@ -42,6 +44,8 @@ def test_release_sources_share_the_exact_stable_build_identity() -> None:
     assert sidecar_builds == [expected]
     assert python_version == expected
     assert desktop_version == expected
+    assert f"ARG APP_VERSION={expected}" in CONTAINER_DOCKERFILE.read_text(encoding="utf-8")
+    assert f'("ARG", "APP_VERSION={expected}")' in CONTAINER_POLICY.read_text(encoding="utf-8")
 
 
 def test_release_request_validates_every_build_identity_before_pretag_exit() -> None:
@@ -521,7 +525,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
         in normalized
     )
     assert (
-        "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
+        "The supported 0.6.0 targets are macOS 15 and 26 on arm64 and x64, "
         "Windows 11 on arm64, and Ubuntu 24.04 on x64." in normalized_shell
     )
     assert 'binarySigningMode: "unsigned"' in releasing
