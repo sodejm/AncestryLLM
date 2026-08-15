@@ -20,7 +20,7 @@ async function writeFixture(sidecarRoot, target = 'darwin-arm64') {
   await writeFile(executable, payload)
   await chmod(executable, 0o700)
   await writeFile(join(sidecarRoot, target, 'sidecar-manifest.json'), `${JSON.stringify({
-    app_build: '0.5.0',
+    app_build: '0.6.0',
     files: [{
       bytes: payload.length,
       path: `ancestryllm-sidecar/${target.startsWith('win32-') ? 'ancestryllm-sidecar.exe' : 'ancestryllm-sidecar'}`,

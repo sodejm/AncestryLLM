@@ -16,7 +16,7 @@ provider or initiate a request.
 
 ## Desktop provider settings
 
-Unreleased Issue #108 adds a provider-configuration and consent administration
+The 0.6.0 source from Issue #108 adds a provider-configuration and consent administration
 surface to the desktop shell. It does not expose provider execution. Local
 Ollama profiles accept only an explicitly tested loopback endpoint. Cloud
 profiles use the exact built-in HTTPS endpoint for the selected provider; the
@@ -40,7 +40,7 @@ enable a provider, choose a profile, or grant consent.
 
 ## Transient chat execution
 
-Unreleased Issue #110 adds a source-level, synchronous transient-chat boundary
+The 0.6.0 source from Issue #110 adds a source-level, synchronous transient-chat boundary
 behind the authenticated private API. A session names one stored operational
 profile and its exact model, purpose, and data classes. Direct provider
 identifiers, `provider=none`, missing or incompatible profiles, and conflicting
@@ -70,7 +70,7 @@ and adversarial evidence remains #131.
 
 ## Audited asynchronous provider streams
 
-Unreleased Issue #56 adds `LLMService.async_stream()` as an internal adapter
+The 0.6.0 source from Issue #56 adds `LLMService.async_stream()` as an internal adapter
 for provider SDKs whose stream iterators are synchronous. Named-profile
 planning, endpoint and credential policy, consent, and streaming-capability
 checks finish before the provider worker starts. Requests with a response

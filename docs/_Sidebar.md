@@ -48,7 +48,7 @@
 
 - [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md)
 - [REPL architecture](explanation/REPL_ARCHITECTURE.md)
-- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — Tasks and transient-chat source boundaries
+- [Desktop shell (released bounded v0.6.0 plus marked source-level gates)](explanation/DESKTOP_SHELL.md) — Tasks and transient-chat source boundaries
 
 ### Supporting records and publishing
 
@@ -57,7 +57,7 @@
 - [Security response checklist](SECURITY_RESPONSE.md)
 - [Verified uv bootstrap](security/verified-uv-bootstrap.md)
 - [Documentation authoring guide](DOCS_AUTHORING.md)
-- [Release notes (planned v0.6)](release-notes/0.6.0.md)
+- [Release notes for v0.6.0](release-notes/0.6.0.md)
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md)
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md)
 - [Release evidence index](release-evidence/README.md)

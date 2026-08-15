@@ -152,7 +152,7 @@ def test_navigation_separates_reader_modes_from_supporting_material() -> None:
     for page in ("Home.md", "_Sidebar.md"):
         navigation = (DOCS_DIRECTORY / page).read_text(encoding="utf-8")
         assert (
-            "[Desktop shell (released bounded v0.5.0 plus marked Unreleased source)]"
+            "[Desktop shell (released bounded v0.6.0 plus marked source-level gates)]"
             "(explanation/DESKTOP_SHELL.md)" in navigation
         )
         assert (
@@ -193,7 +193,7 @@ def test_architecture_authority_and_migration_controls_are_explicit() -> None:
         in authoring_guide
     )
     assert (
-        "Released bounded 0.5.0 shell; clearly marked Unreleased Tasks presentation"
+        "Released bounded 0.6.0 shell; clearly marked source-level gated Tasks presentation"
         in authoring_guide
     )
     assert (

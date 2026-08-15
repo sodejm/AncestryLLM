@@ -6,16 +6,43 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-14
+
 ### Added
 
-- Unreleased desktop Tasks destination backed by strict job snapshots, bounded
+- Desktop Tasks destination backed by strict job snapshots, bounded
   sender-owned event subscriptions, cooperative cancellation, coded redacted
   errors, reload resynchronization, and grant-mediated artifact presentation.
-- Unreleased synchronous transient-chat service and authenticated private API
+- Synchronous transient-chat service and authenticated private API
   with exact named-profile/model selection, fresh policy and consent checks,
   strict resource limits, memory-only content, privacy-minimal audit metadata,
   and no tool, filesystem, database, shell, plugin, genealogy, or autonomous
   authority.
+- Verified repository-local `uv` bootstrap, purpose-specific PEP 735 dependency
+  groups, system-Python-only environment ownership, and advisory `ty` evidence
+  alongside authoritative strict mypy checking.
+- Source-level desktop settings, provider-consent, task-lifecycle, transient-chat,
+  local-runtime, and container-control foundations with fixed Main-owned
+  boundaries and explicit packaged-runtime gates.
+
+### Changed
+
+- Hardened packaged sidecar integrity, startup, shutdown, SQLCipher migration,
+  process-tree supervision, and native Windows ARM64 and Linux verification.
+- Expanded Ruff 0.16.1 rules in reviewed batches while retaining provider-import,
+  Pydantic, GEDCOM, cross-platform, and cancellation regression contracts.
+- Completed the Diátaxis documentation cutover, deterministic Pages and Wiki
+  publishing contracts, and fictional provider-none screenshot evidence.
+- Retained setuptools after the `uv_build` evaluation found artifact drift, and
+  retained mypy after the `ty` advisory failed the complete cutover gate.
+
+### Security
+
+- Preserved network-free `provider=none`, explicit provider consent, immutable
+  RootsMagic inputs, loss-minimal GEDCOM behavior, and fail-closed release gates.
+- Kept application containers, remote hosting, publisher signing, automatic
+  updating, and unsupported packaged desktop surfaces unavailable pending their
+  separately documented evidence gates.
 
 ## [0.5.0] - 2026-08-04
 
@@ -160,7 +187,8 @@ All notable changes to AncestryLLM are recorded here. The project follows
   SHM files without a WAL; and bounds schema-assisted query prompts with the stable
   `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
-[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sodejm/AncestryLLM/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sodejm/AncestryLLM/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...v0.3.0

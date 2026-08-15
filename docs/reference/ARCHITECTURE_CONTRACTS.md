@@ -1,6 +1,6 @@
 # Architecture ownership and dependency contracts
 
-Status: executable in the 0.4.0 Unreleased development tree.
+Status: executable in the `0.6.0` release tree.
 `ARCHITECTURE.md` is the repository-wide source of truth; this page explains
 the checks that enforce its public façades, ownership boundaries, and
 current-versus-target graph.
@@ -11,17 +11,19 @@ The repository distinguishes four states deliberately:
 
 | State | Meaning |
 |---|---|
-| Implemented | Present in this tree and protected by tests or an executable gate. |
-| Unreleased 0.4.0 candidate | Implemented or proposed work that has not passed a dedicated 0.4.0 release process. |
-| Isolated 0.5.0 foundation | Source-level work that may proceed independently but cannot be promoted before the 0.4.0 release gate completes. |
-| Later roadmap | Accepted or proposed direction outside the next release; no runtime may depend on it yet. |
+| Implemented `0.6.0` source | Present in this release tree and protected by tests or an executable gate. |
+| Supported `0.6.0` surface | Included in the bounded release claim after its named release-assurance gates pass. |
+| Source-level gated | Implemented in `0.6.0`, but a positive packaged-support claim still requires named target-matched or adversarial evidence. |
+| Later roadmap | Accepted or proposed direction outside this release; no runtime may depend on it yet. |
 
 The shared command specifications, transport-neutral application contracts,
 shared `CommandExecutor`, and service-owned genealogy aggregate (#44) are
-implemented. The isolated Issue #11 slice implements authenticated FastAPI
-health and capability discovery over those contracts. Issue #225 packages and
-supervises that control-only sidecar from Electron main. The renderer's domain
-bridge and FastAPI domain routers remain later-roadmap adapters.
+implemented. Issue #11 implements authenticated FastAPI health and capability
+discovery over those contracts. Issue #225 packages and supervises that
+control-only sidecar from Electron main. The fixed `0.6.0` source-level
+settings, provider, task, and chat routes remain bounded by their named release
+evidence; a general renderer domain bridge and general FastAPI domain routers
+remain later-roadmap adapters.
 
 ## Dependency graph and owners
 
@@ -38,8 +40,8 @@ flowchart TB
     Aggregate["Genealogy aggregate and\ndeterministic results\n#44 implemented"]
     Domain["Framework-independent domain"]
     Infra["Storage, provider, and file infrastructure"]
-    ControlAPI["FastAPI control adapter\n#11 isolated 0.5.0 foundation"]
-    Future["Electron and domain API adapters\nlater roadmap"]
+    ControlAPI["FastAPI control adapter\n0.6.0 fixed authenticated routes"]
+    Future["General Electron domain bridge and API routers\nlater roadmap"]
 
     CLI --> Specs
     REPL --> Specs
@@ -67,7 +69,7 @@ flowchart TB
 | Request/result DTOs, operation inventory, ports, opaque artifact and secret references, stable error envelopes | `ancestryllm.application` and `ancestryllm.domain.errors` (#161) |
 | Executable dependency direction, public-façade allowlists, and architecture-state documentation | `scripts/check_architecture_contracts.py`, this page, and `ARCHITECTURE.md` (#162) |
 | Shared use-case dispatch and CLI/REPL adapter translation | `ancestryllm.application.executor`, `ancestryllm.terminal`, and `ancestryllm.execution` (#42 implemented) |
-| Internal API versioning, strict schemas, authenticated control routes, capability projection, safe error mapping, and deterministic OpenAPI | `ancestryllm.api` (#11 isolated `0.5.0` foundation) |
+| Internal API versioning, strict schemas, authenticated control routes, capability projection, safe error mapping, and deterministic OpenAPI | `ancestryllm.api` (`0.6.0` source, beginning with #11) |
 | Identity, provenance, deterministic changes/conflicts, quality findings, and genealogy result semantics | `ancestryllm.application.genealogy` over `ancestryllm.domain.genealogy` (#44 implemented) |
 | GEDCOM document model, bounded path parser, validator, deterministic line serializer, graph, identity, quality, service, synchronization, and publication seams | pure document modules plus physically owned parser, serialization, graph, identity, quality, synchronization-contract, algorithm, manifest, publication/recovery, operation, and legacy-argument modules behind declared façades; `engine` and `incremental` are import-only compatibility façades (#163-#166) |
 | RootsMagic immutable source/schema, typed query orchestration, and GEDCOM mapping/export seams | `ancestryllm.rootsmagic.core`, `ancestryllm.application._rootsmagic` behind the `.query` façade, and `ancestryllm.rootsmagic.export`; private compatibility access is limited by `PRIVATE_MODULE_GATEWAYS` |

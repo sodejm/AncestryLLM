@@ -64,17 +64,17 @@ def test_package_version_is_one_stable_semver_value() -> None:
     )
 
 
-def test_release_configuration_names_the_project_native_v0_5_control_plane() -> None:
+def test_release_configuration_names_the_project_native_v0_6_control_plane() -> None:
     configuration = _release_configuration()
 
     assert configuration == {
         "schema_version": 2,
-        "release": "0.5.0",
+        "release": "0.6.0",
         "project": {
             "owner": "sodejm",
             "number": 2,
             "title": "AncestryLLM Feature Releases",
-            "iteration": "v0.5.0 — Foundation",
+            "iteration": "v0.6.0 — Usable desktop core",
             "priority": "P0",
             "status": "Done",
             "validation": "Verified",
@@ -147,7 +147,7 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
         "`Release readiness` and the tag workflow continue to use the strict live gate"
         in normalized_releasing
     )
-    assert "v0.5.0 — Foundation" in releasing
+    assert "v0.6.0 — Usable desktop core" in releasing
     assert "P0 is reserved for work that must complete before publication" in releasing
     assert "verifier has no issue-number exception" in releasing
     assert "macOS 15/26" in releasing

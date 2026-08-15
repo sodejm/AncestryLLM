@@ -27,7 +27,7 @@ All user-selected files are governed by the shared
 budgets, race detection, output alias rejection, and transactional publication.
 
 The released bounded Electron desktop control shell uses the authenticated
-health/capability sidecar. Unreleased source also includes explicitly bounded
+health/capability sidecar. The 0.6.0 source also includes explicitly bounded
 file-grant, provider-configuration, presentation-only **Tasks** adapters, a
 source-level synchronous transient-chat API, and a transient **Chat**
 destination over a Main-owned private stream. That chat boundary requires an
@@ -38,8 +38,8 @@ confirmation in Electron Main. Desktop-domain capabilities such
 as target-matched packaged and adversarial chat evidence, genealogy/domain task
 admission or execution, direct artifact access, cloud accounts, and updater
 flows remain planned or incomplete. The current desktop records distinguish
-released control surfaces
-from Unreleased source and the verification needed for later expansion; they
+the supported packaged control surface from source-level gated adapters and
+the verification needed for later expansion; they
 are not a current journey for excluded domain capabilities.
 
 The accepted deployment architecture now has a source-level profile control
@@ -128,7 +128,7 @@ Concepts, rationale, and design context:
 
 - [Privacy and consent](explanation/PRIVACY_AND_CONSENT.md) — local-first boundaries and consent model
 - [REPL architecture](explanation/REPL_ARCHITECTURE.md) — internal session and dispatch design
-- [Desktop shell (released bounded v0.5.0 plus marked Unreleased source)](explanation/DESKTOP_SHELL.md) — released Home, Diagnostics, Settings, and onboarding plus bounded Unreleased Tasks presentation and transient-chat source contracts
+- [Desktop shell (released bounded v0.6.0 plus marked source-level gates)](explanation/DESKTOP_SHELL.md) — supported Home, Diagnostics, Settings, and onboarding plus source-level gated Tasks presentation and transient-chat contracts
 
 ## Supporting records and publishing
 
@@ -137,7 +137,7 @@ Concepts, rationale, and design context:
 - [Security response checklist](SECURITY_RESPONSE.md)
 - [Verified uv bootstrap](security/verified-uv-bootstrap.md) — executable trust policy, receipts, and reviewed updates
 - [Documentation authoring guide](DOCS_AUTHORING.md) — Diátaxis map and authoring rules
-- [Release notes (planned v0.6)](release-notes/0.6.0.md) — release preparation, not a current release
+- [Release notes for v0.6.0](release-notes/0.6.0.md) — release scope, limitations, installation, and verification
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md) — exact-head verification, not release approval
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md) — installer publication and app-owned macOS arm64 runtime-tool controls, not a hosted application
 - [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md) — implemented profile and macOS arm64 runtime-tool boundaries plus future application-runtime gates

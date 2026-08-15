@@ -1,33 +1,31 @@
 # Internal API contract
 
 Issue #11 established the source-level control-plane contract released with the
-first Electron shell in `0.5.0`. Issue #105 adds the unreleased 0.6 contract for
-atomic non-secret settings and write-only credential management. Issue #107
-adds the read-only startup-diagnostics contract and fail-closed mutation gate.
-Issue #108 adds the provider-profile, endpoint-test, and consent-administration
-contract. Issue #104 adds the unreleased, UI-neutral job-lifecycle contract.
-Issue #110 adds a bounded, transient chat contract that can execute only through
-an exact named profile, model, and current policy grant. Issue #111 adds its
-owner-scoped, audited streaming lifecycle and bounded replay transport.
+first Electron shell in `0.5.0`. The `0.6.0` release tree adds source-level
+gated contracts for atomic non-secret settings and write-only credential
+management (#105), read-only startup diagnostics and fail-closed mutation
+gating (#107), provider profiles, endpoint tests, and consent administration
+(#108), UI-neutral job lifecycle (#104), bounded transient chat (#110), and its
+owner-scoped audited streaming lifecycle and bounded replay transport (#111).
 This remains a private, authenticated, IPv4-loopback FastAPI adapter over
 transport-neutral application contracts. It is not a public, LAN, browser, or
 multi-user API.
 
-The released foundation exposes two read-only routes:
+The supported packaged foundation exposes two read-only routes:
 
 - `GET /api/v1/health` verifies the private bearer, API contract, paired app
   build, and token-derived readiness proof.
 - `GET /api/v1/capabilities` projects only enabled `ModuleDescriptor` actions
   that also have a registered `CommandExecutor` handler.
 
-The unreleased #107 source adds one read-only path:
+The source-level gated #107 code adds one read-only path:
 
 - `GET /api/v1/startup-diagnostics` returns schema-v1 configuration,
   SQLCipher, keyring, and workspace status with stable codes, reviewed
   remediation, restart and mutation-blocking flags, and normalized platform
   labels.
 
-The unreleased #105 source adds four fixed path shapes and five operations:
+The source-level gated #105 code adds four fixed path shapes and five operations:
 
 - `GET /api/v1/settings` returns the complete versioned five-setting catalog
   and current optimistic revision.
@@ -37,7 +35,8 @@ The unreleased #105 source adds four fixed path shapes and five operations:
 - `POST /api/v1/secrets/{reference}/set` accepts one write-only value.
 - `POST /api/v1/secrets/{reference}/delete` deletes and verifies absence.
 
-The unreleased #108 source adds six fixed path shapes and operations:
+The `0.6.0` source-level gated #108 code adds six fixed path shapes and
+operations:
 
 - `GET /api/v1/provider-configuration` returns provider metadata, safe endpoint
   defaults, profile summaries, consent summaries, secret presence, and both
@@ -52,7 +51,8 @@ The unreleased #108 source adds six fixed path shapes and operations:
   current consent revision.
 - `POST /api/v1/consents/{name}/revoke` explicitly revokes a named grant.
 
-The unreleased #104 source adds five fixed job-lifecycle path templates:
+The `0.6.0` source-level gated #104 code adds five fixed job-lifecycle path
+templates:
 
 - `GET /api/v1/jobs` returns bounded schema-v1 snapshots.
 - `GET /api/v1/jobs/{job_id}` returns one current snapshot.
@@ -62,8 +62,8 @@ The unreleased #104 source adds five fixed job-lifecycle path templates:
   and supports `Last-Event-ID` replay.
 - `POST /api/v1/jobs/shutdown` performs the main-process safe-quit preflight.
 
-The unreleased #110 source adds four fixed transient-chat path templates and
-five operations:
+The `0.6.0` source-level gated #110 code adds four fixed transient-chat path
+templates and five operations:
 
 - `GET /api/v1/chat/capability` returns the exact schema-v1 limits and disabled
   capabilities.
@@ -77,8 +77,8 @@ five operations:
   synchronous policy-enforced generation and commits history only after a
   successful provider result.
 
-The unreleased #111 source adds three fixed transient-chat stream path
-templates and operations:
+The `0.6.0` source-level gated #111 code adds three fixed transient-chat stream
+path templates and operations:
 
 - `POST /api/v1/chat/sessions/{session_id}/streams` starts one owner-scoped
   streaming run after the same profile, policy, credential, and consent
@@ -222,12 +222,12 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 
 ## Release boundary
 
-The health and capability contract shipped with the bounded `0.5.0` control
+The health and capability contract remains in the bounded `0.6.0` control
 shell. The settings, credential-management, startup-diagnostic,
 provider-profile, endpoint-test, consent-administration, job-lifecycle, and
-transient-chat operations are source-level work for `0.6.0`; they are not a
-released user surface until the applicable desktop packaging, security, and
-exact-head verification gates pass. The job contract has no producer or
+transient-chat operations are source-level gated work in `0.6.0`; they are not
+part of the supported packaged surface without the applicable desktop
+packaging, security, and exact-head verification evidence. The job contract has no producer or
 submission route. Issue #111 gives the chat contract fixed streaming routes and
 a source-level Electron Main/preload bridge. Issue #112 consumes that bridge in
 a bounded renderer conversation with explicit provider/privacy state and safe

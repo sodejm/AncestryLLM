@@ -4,7 +4,7 @@ AncestryLLM is a local-first toolset for people researching family history. It
 helps you work with RootsMagic and GEDCOM data using predictable local tools,
 with optional AI assistance only when you choose it.
 
-The implemented product surfaces in 0.5.0 are the command-line interface (CLI),
+The implemented product surfaces in 0.6.0 are the command-line interface (CLI),
 an interactive prompt, and a deliberately small desktop control shell. Your
 research remains yours: use fictional data while learning, and never put real
 family-tree files, reports, or credentials in this repository.
@@ -18,20 +18,20 @@ family-tree files, reports, or credentials in this repository.
 - Install the released desktop control shell, which provides Home, Diagnostics,
   Settings, and capability onboarding.
 
-The released 0.5 desktop shell is not a desktop genealogy application. It does
+The supported 0.6.0 desktop shell is not a desktop genealogy application. It does
 not include desktop genealogy or domain routes, files, jobs, providers, cloud
 accounts, or updater flows. Desktop genealogy workflows are not available yet;
 use the CLI or interactive prompt for supported genealogy work.
 
-The current unreleased 0.6 source adds a narrow desktop settings and credential
+The 0.6.0 source includes a narrow desktop settings and credential
 management foundation. It can update five reviewed non-secret settings and can
 set, delete, or report only the presence of allowlisted credentials through the
 OS keyring. It cannot read credential values, select consent on your behalf,
 make a provider call, or run a genealogy workflow. This development surface is
-not part of the released 0.5.0 installer until its packaged verification gates
-pass.
+outside the supported packaged shell until its target-matched verification
+gates pass.
 
-Unreleased 0.6 source also adds separate Local Providers, Cloud Providers, and
+The 0.6.0 source also includes separate Local Providers, Cloud Providers, and
 Consent & Privacy settings. Saving a provider profile requires an explicit
 endpoint test and an optimistic-revision match. Creating consent requires a
 complete preview of the provider, profile, model, purpose, data classes,
@@ -39,14 +39,14 @@ retention, warnings, and optional budget; living-person and remote-retention
 choices receive explicit warnings. A stored key alone cannot enable a provider,
 and this configuration surface does not execute provider requests.
 
-Unreleased Issue #109 adds a **Tasks** destination for backend-owned work. It
+The 0.6.0 source includes a **Tasks** destination for backend-owned work. It
 reloads sanitized snapshots, follows bounded monotonic events, distinguishes
 cancelling, pending-safe-point, cancelled, and terminal outcomes, and displays
 only safe artifact metadata. The renderer stores no job state and receives no
 path or artifact authority. This surface admits no work and adds no provider or
 genealogy operation.
 
-Unreleased Issue #56 adds an internal asynchronous adapter for already
+The 0.6.0 source includes an internal asynchronous adapter for already
 authorized provider streams. Consent and capability checks complete before its
 provider worker starts; a bounded queue, per-chunk byte limit, absolute
 deadline, and cooperative cancellation constrain the stream. Success, failure,
@@ -54,17 +54,17 @@ timeout, and cancellation each produce one privacy-minimal audit outcome. This
 is source-level groundwork only: it adds no Electron bridge, chat UI, public
 streaming transport, or network path for `provider=none`.
 
-Unreleased Issues #110-#112 add a bounded transient-chat path and a **Chat**
+The 0.6.0 source includes a bounded transient-chat path and a **Chat**
 destination to the desktop source. Each short-lived conversation binds an exact
 stored provider profile, model, purpose, data class, and compatible current
 consent; message content remains process-memory-only. Electron Main owns the
 authenticated stream and native external-link confirmation. The renderer
 accepts only ordered, validated events, renders model Markdown through a closed
 element allowlist with raw HTML, images, embeds, and executable actions
-disabled, and copies plain text only. This remains an unreleased source surface
-until the target-matched packaged and adversarial release gates pass.
+disabled, and copies plain text only. This remains outside the supported
+packaged shell until the target-matched packaged and adversarial gates pass.
 
-The unreleased desktop first run now recommends **Local Desktop** and keeps
+The 0.6.0 desktop source recommends **Local Desktop** on first run and keeps
 **Connect Remote** and **Host Remote** visible but unavailable. Before it
 enables settings or credential changes, the shell checks a sanitized schema-v1
 startup report for configuration, SQLCipher, keyring, and workspace readiness.
@@ -74,7 +74,7 @@ configuration, initialize a database, replace a key, or fall back to plaintext.
 The packaged sidecar reads credentials only from the OS keyring. The documented
 environment fallback remains limited to explicit CLI and headless use.
 
-Unreleased 0.6 source also introduces the deployment-profile control plane.
+The 0.6.0 source also includes the deployment-profile control plane.
 Local Desktop is the preselected, recommended mode. The CLI can inspect,
 preview, diagnose, and explicitly recover the versioned profile without
 discovering a mode from the network, environment, Docker, or ambient services.
@@ -82,8 +82,8 @@ Connect to Remote and Host Remote Server remain advanced, unavailable runtime
 choices until their separate enrollment, host-bootstrap, and release gates
 pass; selecting a profile never starts a listener or moves genealogy data.
 
-Unreleased Issue #348 adds a user-visible macOS arm64 local-runtime manager on
-top of that host-only control foundation. After explicit review and
+Issue #348 adds a user-visible macOS arm64 local-runtime manager to the 0.6.0
+source on top of that host-only control foundation. After explicit review and
 confirmation it can acquire exact checksum-pinned Colima/Lima, Docker CLI,
 Compose, and Buildx artifacts into an app-owned profile and context, then
 start, stop, repair, or remove that substrate. Docker Desktop remains optional

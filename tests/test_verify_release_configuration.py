@@ -32,12 +32,12 @@ def _configuration() -> dict[str, object]:
 def _project_configuration() -> dict[str, object]:
     return {
         "schema_version": 2,
-        "release": "0.5.0",
+        "release": "0.6.0",
         "project": {
             "owner": "sodejm",
             "number": 2,
             "title": "AncestryLLM Feature Releases",
-            "iteration": "v0.5.0 — Foundation",
+            "iteration": "v0.6.0 — Usable desktop core",
             "priority": "P0",
             "status": "Done",
             "validation": "Verified",
@@ -61,13 +61,13 @@ def test_accepts_exact_release_control_configuration() -> None:
 def test_accepts_project_native_release_configuration() -> None:
     configuration = verifier.validate_release_configuration(
         _project_configuration(),
-        expected_version="0.5.0",
+        expected_version="0.6.0",
     )
 
-    assert configuration.release == "0.5.0"
+    assert configuration.release == "0.6.0"
     assert configuration.project_owner == "sodejm"
     assert configuration.project_number == 2
-    assert configuration.project_iteration == "v0.5.0 — Foundation"
+    assert configuration.project_iteration == "v0.6.0 — Usable desktop core"
     assert configuration.project_priority == "P0"
     assert configuration.project_status == "Done"
     assert configuration.project_validation == "Verified"
@@ -111,7 +111,7 @@ def test_rejects_mismatched_or_malformed_configuration(
                     "owner": "sodejm",
                     "number": 2,
                     "title": "AncestryLLM Feature Releases",
-                    "iteration": "v0.5.0 — Foundation",
+                    "iteration": "v0.6.0 — Usable desktop core",
                     "priority": "P0",
                     "status": "Done",
                     "validation": "Verified\n",
@@ -128,7 +128,7 @@ def test_rejects_malformed_project_native_configuration(
     configuration.update(mutation)
 
     with pytest.raises(ValueError, match=message):
-        verifier.validate_release_configuration(configuration, expected_version="0.5.0")
+        verifier.validate_release_configuration(configuration, expected_version="0.6.0")
 
 
 def test_cli_rejects_invalid_json(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ FastAPI sidecar. Issue #346 asks whether later releases may reuse that service
 surface in containers and, only after an explicit operator decision, across a
 remote boundary.
 
-This ADR accepts the target architecture. Unreleased Issue #347 implements the
+This ADR accepts the target architecture. The 0.6.0 source from Issue #347 implements the
 shared, non-secret deployment-profile control plane: the schema, Local Desktop
 default, reviewed mode copy, explicit previews, confirmation-bound local
 recovery, diagnostics, and redacted backup/support metadata. Issue #363 adds a

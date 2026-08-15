@@ -1,7 +1,7 @@
 # Desktop verification
 
 The `Desktop gate` is the always-reported aggregate for changes that can affect
-the bounded 0.5.0 Electron shell. It binds source, security, native sidecar, and
+the bounded 0.6.0 Electron shell. It binds source, security, native sidecar, and
 unpublished packaged-runtime evidence to one exact commit. Push executions bind
 that commit to protected `main`; an authorized manual dispatch can select an
 immutable same-repository branch commit to provide pre-merge native evidence.
