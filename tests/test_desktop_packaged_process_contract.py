@@ -98,7 +98,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         "processExit = requestMacPackagedQuit(result.process)", platform_index
     )
     window_close_index = close_source.index(
-        "result.page.close({ runBeforeUnload: false })", platform_index
+        "result.page.close({ runBeforeUnload: true })", platform_index
     )
     browser_close_index = close_source.index("result.browser.close()", window_close_index)
     status_index = close_source.index("const status = await processExit", browser_close_index)
@@ -108,6 +108,8 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "newBrowserCDPSession" not in close_source
     assert "session.send('Browser.close')" not in close_source
     assert "result.page.keyboard.press('Meta+Q')" not in close_source
+    assert "window.close()" not in close_source
+    assert "result.page.evaluate" not in close_source
     assert "result.process.kill('SIGKILL')" not in close_source
     assert "child.kill('SIGKILL')" not in retry_source
     assert re.search(
@@ -130,9 +132,10 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert re.search(
         r"await withinDeadline\(\s*'closing packaged application window',\s*"
         r"packagedWindowCloseTimeoutMs,\s*"
-        r"\(\) => result\.page\.close\(\{ runBeforeUnload: false \}\),\s*\)",
+        r"\(\) => result\.page\.close\(\{ runBeforeUnload: true \}\),\s*\)",
         close_source,
     )
+    assert "runBeforeUnload: false" not in close_source
     assert "'closing packaged browser automation'" in close_source
     assert "packagedCleanupTimeoutMs" in close_source
     assert "const packagedWindowCloseTimeoutMs = 20_000" in source

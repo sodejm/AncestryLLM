@@ -332,10 +332,14 @@ async function closePackaged(result: LaunchResult): Promise<void> {
     processExit = requestMacPackagedQuit(result.process)
   } else {
     processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
+    // Page.close is the Chromium-native window-close request when unload runs.
+    // It returns once that request is in flight, so release the CDP client next
+    // and let Electron's production window-all-closed/app.quit lifecycle prove
+    // the sidecar stopped before the already-armed process exit can succeed.
     await withinDeadline(
       'closing packaged application window',
       packagedWindowCloseTimeoutMs,
-      () => result.page.close({ runBeforeUnload: false }),
+      () => result.page.close({ runBeforeUnload: true }),
     )
   }
   await withinDeadline(
