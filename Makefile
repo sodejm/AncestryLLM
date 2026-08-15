@@ -100,7 +100,7 @@ pre-push:
 	@$(MAKE) security
 
 sbom: verified-uv
-	@$(UV_BIN) run --locked --group security cyclonedx-py environment --output-file $(SBOM_OUTPUT) $(VENV_PYTHON)
+	@$(UV_BIN) run --locked --group security python scripts/generate_sbom.py --python $(VENV_PYTHON) --output $(SBOM_OUTPUT) --project pyproject.toml
 
 package: verified-uv
 	@$(UV_BIN) run --locked --group build python scripts/build_release.py --output-dir $(DIST_DIR)

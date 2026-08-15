@@ -1487,7 +1487,7 @@ The Make targets are the command contract:
 | `make typecheck` | Strict mypy over `ancestryllm`. |
 | `make typecheck-ty` | Exact ty advisory evaluation over the complete `ancestryllm` source tree, preserving its real status. |
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
-| `make sbom` | CycloneDX environment SBOM. |
+| `make sbom` | Locked CycloneDX generation plus fail-closed canonicalization into one deterministic project root, an exact dependency graph, and path-free atomic evidence. |
 | `make package` | Locked build-group construction and artifact validation. |
 | `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |

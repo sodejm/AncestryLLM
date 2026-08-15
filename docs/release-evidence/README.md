@@ -11,6 +11,19 @@ Release evidence contains fictional or aggregate test data only. It must never
 contain genealogy payloads, credentials, databases, backups, local paths, logs,
 prompt/response bodies, or secret values.
 
+`make sbom` invokes the locked CycloneDX environment generator in reproducible
+mode through the checked-in release-SBOM canonicalizer. The canonicalizer
+removes only the reviewed editable-project distribution reference, merges only
+semantically equivalent project components into the canonical PyPI identity,
+strips the document serial number and metadata timestamp, and requires the
+component references to exactly match a complete dependency graph. It sorts the
+result deterministically and publishes it with an atomic replacement.
+
+Schema drift, conflicting project components, an incomplete or dangling graph,
+or any remaining file URI or absolute local path fails with a stable code before
+the destination is replaced. CI, release readiness, and final release workflows
+must call this same Make interface rather than invoking `cyclonedx-py` directly.
+
 A gate is recorded as `verified`, `failed`, `unavailable`, or `unverified`.
 Only `verified` supports a positive compatibility claim. `unavailable` and
 `unverified` remain visible limitations in the release notes.
