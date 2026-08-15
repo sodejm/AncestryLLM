@@ -155,18 +155,22 @@ export async function terminateNativeSidecarProcess(
     // The packaged sidecar also owns a kill-on-close Job Object. If its leader
     // already exited, Windows closes that handle and terminates its descendants.
     if (child.exitCode !== null || child.signalCode !== null) return
+    let treeTerminationFailed = false
     try {
       await terminateWindowsTree(child.pid)
     } catch {
+      treeTerminationFailed = true
+    }
+    // Installed Windows builds can report taskkill completion, or a
+    // process-not-found race, before Node observes the leader exit. A confirmed
+    // leader exit also closes its kill-on-close Job Object. Keep that
+    // independent observation bounded beneath the supervisor's 15-second
+    // shutdown deadline and continue to fail closed if the leader stays live.
+    if (await waitForChildExit(child, windowsTreeExitTimeoutMs)) return
+    if (treeTerminationFailed) {
       throw new Error('The sidecar process group could not be terminated.')
     }
-    // Installed Windows builds can report taskkill completion before Node
-    // observes the leader exit. Keep that observation bounded beneath the
-    // supervisor's 15-second shutdown deadline and continue to fail closed.
-    if (!(await waitForChildExit(child, windowsTreeExitTimeoutMs))) {
-      throw new Error('The sidecar process group did not terminate.')
-    }
-    return
+    throw new Error('The sidecar process group did not terminate.')
   }
 
   if (platform !== 'win32' && child.pid !== undefined) {

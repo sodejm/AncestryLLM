@@ -148,12 +148,13 @@ non-inheritable, kill-on-close Job Object before reading bootstrap input, while
 Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
 leader. Installed Windows builds allow up to five seconds after `taskkill.exe`
-returns for Node to observe that leader exit; failure to observe it still fails
-closed. Only after process-tree termination is verified does Electron remove the
-private working directory. Windows removal retries transient filesystem errors
-at most five times with a 100-millisecond linear delay; a persistent cleanup
-failure still vetoes application exit. No sidecar is started by the development
-mock shell.
+settles for Node to observe that leader exit, including when `taskkill.exe`
+reports that the leader exited first. The command result alone is never treated
+as proof: failure to observe the leader exit still fails closed. Only after
+process-tree termination is verified does Electron remove the private working
+directory. Windows removal retries transient filesystem errors at most five
+times with a 100-millisecond linear delay; a persistent cleanup failure still
+vetoes application exit. No sidecar is started by the development mock shell.
 
 Electron bounds the complete supervisor stop to 15 seconds, including any
 launch already in flight and all verified process-tree termination. Exceeding
