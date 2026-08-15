@@ -328,16 +328,14 @@ namespace AncestryLLM.DesktopVerification
                     windowProcessId == targetProcessId
                 )
                 {
-                    StringBuilder windowTitle = new StringBuilder(
-                        expectedWindowTitle.Length + 1
-                    );
+                    StringBuilder windowTitle = new StringBuilder(512);
                     int titleLength = GetWindowText(
                         windowHandle,
                         windowTitle,
                         windowTitle.Capacity
                     );
                     if (
-                        titleLength > 0 &&
+                        titleLength == expectedWindowTitle.Length &&
                         String.Equals(
                             windowTitle.ToString(),
                             expectedWindowTitle,

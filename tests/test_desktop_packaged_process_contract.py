@@ -133,6 +133,8 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "GetWindowText" in windows_close_source
     assert 'EntryPoint = "GetWindowTextW"' in windows_close_source
     assert "expectedWindowTitle" in windows_close_source
+    assert "new StringBuilder(512)" in windows_close_source
+    assert "titleLength == expectedWindowTitle.Length" in windows_close_source
     assert "StringComparison.Ordinal" in windows_close_source
     assert "IsWindowVisible" not in windows_close_source
     assert "GetWindow(" not in windows_close_source
