@@ -51,7 +51,7 @@ describe('Electron app shutdown', () => {
 
     expect(stopSidecar).not.toHaveBeenCalled()
     expect(reportFailure).toHaveBeenCalledOnce()
-    expect(reportFailure).toHaveBeenCalledWith()
+    expect(reportFailure).toHaveBeenCalledWith('jobs-preparation')
     expect(authorizeAndExit).not.toHaveBeenCalled()
     expect(JSON.stringify(reportFailure.mock.calls)).not.toContain(privateFailure)
   })
@@ -111,7 +111,7 @@ describe('Electron app shutdown', () => {
 
     expect(prepareJobs).not.toHaveBeenCalled()
     expect(reportFailure).toHaveBeenCalledOnce()
-    expect(reportFailure).toHaveBeenCalledWith()
+    expect(reportFailure).toHaveBeenCalledWith('sidecar-termination')
     expect(authorizeAndExit).not.toHaveBeenCalled()
   })
 
@@ -172,7 +172,7 @@ describe('Electron app shutdown', () => {
     )).resolves.toBe(false)
 
     expect(reportFailure).toHaveBeenCalledOnce()
-    expect(reportFailure).toHaveBeenCalledWith()
+    expect(reportFailure).toHaveBeenCalledWith('sidecar-termination')
     expect(authorizeAndExit).not.toHaveBeenCalled()
   })
 

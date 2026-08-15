@@ -46,6 +46,51 @@ describe('native sidecar process termination', () => {
     expect(removeWorkingDirectory).toHaveBeenCalledOnce()
   })
 
+  it('retries transient working-directory cleanup failures on Windows', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn().mockResolvedValue(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      'C:\\Users\\runner\\AppData\\Local\\Temp\\ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+      'win32',
+    )
+
+    await expect(sidecar.terminate()).resolves.toBeUndefined()
+
+    expect(removeWorkingDirectory).toHaveBeenCalledWith(
+      'C:\\Users\\runner\\AppData\\Local\\Temp\\ancestryllm-sidecar-sensitive',
+      {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      },
+    )
+  })
+
+  it('does not apply Windows cleanup retries on POSIX', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn().mockResolvedValue(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      '/private/ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+      'linux',
+    )
+
+    await expect(sidecar.terminate()).resolves.toBeUndefined()
+
+    expect(removeWorkingDirectory).toHaveBeenCalledWith(
+      '/private/ancestryllm-sidecar-sensitive',
+      { recursive: true, force: true },
+    )
+  })
+
   it('targets the negative POSIX process-group id', () => {
     const kill = vi.fn(() => true)
     const controller = createPosixProcessGroupController(kill)

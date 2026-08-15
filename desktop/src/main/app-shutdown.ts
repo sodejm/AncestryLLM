@@ -9,6 +9,8 @@ export type UnsafeShutdownChoice = JobShutdownAction | 'stay'
  * Records whether active jobs have already reached a safe terminal state across shutdown retries.
  */
 export type AppShutdownProgress = { jobsPrepared: boolean }
+/** Identifies the verified shutdown phase that failed without exposing private details. */
+export type AppShutdownFailure = 'jobs-preparation' | 'sidecar-termination'
 
 type WindowCloseEvent = { preventDefault: () => void }
 
@@ -29,7 +31,7 @@ export async function completeAppShutdown(
   prepareJobs: (action: JobShutdownAction) => Promise<void>,
   chooseUnsafeAction: () => Promise<UnsafeShutdownChoice>,
   stopSidecar: () => Promise<void>,
-  reportFailure: () => void,
+  reportFailure: (failure: AppShutdownFailure) => void,
   authorizeAndExit: () => void,
   isExplicitSafeEmpty: () => boolean = () => false,
   progress: AppShutdownProgress = { jobsPrepared: false },
@@ -42,7 +44,7 @@ export async function completeAppShutdown(
         progress.jobsPrepared = true
         break
       } catch {
-        reportFailure()
+        reportFailure('jobs-preparation')
         let choice: UnsafeShutdownChoice
         try {
           choice = await chooseUnsafeAction()
@@ -59,7 +61,7 @@ export async function completeAppShutdown(
   try {
     await stopSidecar()
   } catch {
-    reportFailure()
+    reportFailure('sidecar-termination')
     return false
   }
   authorizeAndExit()

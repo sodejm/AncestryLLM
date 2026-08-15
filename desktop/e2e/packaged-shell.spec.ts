@@ -19,6 +19,7 @@ import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { withinDeadline } from './packaged-deadline'
+import { ShutdownDiagnosticCapture } from './shutdown-diagnostic-capture'
 
 const executablePath = process.env.ANCESTRYLLM_PACKAGED_APP
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -58,6 +59,7 @@ type LaunchResult = Readonly<{
   launchMs: number
   readyMs: number
   userData: string
+  shutdownDiagnostics: ShutdownDiagnosticCapture
 }>
 
 type ExitStatus = Readonly<{
@@ -167,7 +169,10 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
   return environment
 }
 
-function waitForDevToolsEndpoint(child: ChildProcessWithoutNullStreams): Promise<string> {
+function waitForDevToolsEndpoint(
+  child: ChildProcessWithoutNullStreams,
+  shutdownDiagnostics: ShutdownDiagnosticCapture,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = ''
     let settled = false
@@ -177,7 +182,11 @@ function waitForDevToolsEndpoint(child: ChildProcessWithoutNullStreams): Promise
       reject(new Error(`Timed out waiting for packaged CDP endpoint.\n${output}`))
     }, 20_000)
 
-    const consume = (chunk: Buffer): void => {
+    const consume = (
+      stream: 'stdout' | 'stderr',
+      chunk: Buffer,
+    ): void => {
+      shutdownDiagnostics.consume(stream, chunk)
       output = `${output}${chunk.toString('utf8')}`.slice(-32_768)
       const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/)
       if (!match?.[1] || settled) return
@@ -185,8 +194,8 @@ function waitForDevToolsEndpoint(child: ChildProcessWithoutNullStreams): Promise
       clearTimeout(timeout)
       resolve(match[1])
     }
-    child.stdout.on('data', consume)
-    child.stderr.on('data', consume)
+    child.stdout.on('data', (chunk: Buffer) => consume('stdout', chunk))
+    child.stderr.on('data', (chunk: Buffer) => consume('stderr', chunk))
     child.once('error', (error) => {
       if (settled) return
       settled = true
@@ -237,6 +246,7 @@ async function verifiedDevToolsEndpoint(loggedEndpoint: string): Promise<string>
 function waitForProcessExit(
   child: ChildProcessWithoutNullStreams,
   timeoutMs: number,
+  shutdownDiagnostics?: ShutdownDiagnosticCapture,
 ): Promise<ExitStatus> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve({ code: child.exitCode, signal: child.signalCode })
@@ -244,7 +254,12 @@ function waitForProcessExit(
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       child.off('exit', onExit)
-      reject(new Error(`Packaged app PID ${String(child.pid)} did not exit within ${String(timeoutMs)}ms.`))
+      const context = shutdownDiagnostics
+        ? ` ${shutdownDiagnostics.timeoutContext()}`
+        : ''
+      reject(new Error(
+        `Packaged app PID ${String(child.pid)} did not exit within ${String(timeoutMs)}ms.${context}`,
+      ))
     }, timeoutMs)
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       clearTimeout(timer)
@@ -403,6 +418,7 @@ namespace AncestryLLM.DesktopVerification
 
 async function requestMacPackagedQuit(
   child: ChildProcessWithoutNullStreams,
+  shutdownDiagnostics: ShutdownDiagnosticCapture,
 ): Promise<ExitStatus> {
   const requestQuit = (
     attempt: 'initial' | 'retry',
@@ -417,7 +433,11 @@ async function requestMacPackagedQuit(
     }
   }
 
-  const initialExit = waitForProcessExit(child, packagedQuitRetryDelayMs)
+  const initialExit = waitForProcessExit(
+    child,
+    packagedQuitRetryDelayMs,
+    shutdownDiagnostics,
+  )
   requestQuit('initial', initialExit)
   try {
     return await initialExit
@@ -425,7 +445,7 @@ async function requestMacPackagedQuit(
     // Production bounds a sidecar stop at 15 seconds and deliberately leaves a
     // rejected shutdown retryable. Wait beyond that boundary, then exercise the
     // later native quit request that must start a fresh verified stop attempt.
-    const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs)
+    const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs, shutdownDiagnostics)
     requestQuit('retry', retryExit)
     return retryExit
   }
@@ -476,9 +496,13 @@ async function closePackaged(result: LaunchResult): Promise<void> {
     // close on macOS. Exercise Electron's production SIGTERM-to-app.quit path,
     // including its one bounded later-request retry, then release automation
     // before awaiting verified shutdown.
-    processExit = requestMacPackagedQuit(result.process)
+    processExit = requestMacPackagedQuit(result.process, result.shutdownDiagnostics)
   } else {
-    processExit = waitForProcessExit(result.process, packagedQuitTimeoutMs)
+    processExit = waitForProcessExit(
+      result.process,
+      packagedQuitTimeoutMs,
+      result.shutdownDiagnostics,
+    )
     if (process.platform === 'win32') {
       // Ask Windows to close the real top-level application window. This
       // exercises Electron's production BrowserWindow close veto and verified
@@ -523,6 +547,7 @@ async function launchPackaged(
 ): Promise<LaunchResult> {
   if (!applicationExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const startedAt = Date.now()
+  const shutdownDiagnostics = new ShutdownDiagnosticCapture()
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
   const child = spawn(applicationExecutable, [
     ...automationArguments,
@@ -540,7 +565,7 @@ async function launchPackaged(
   let browser: Browser | undefined
   try {
     return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs, async () => {
-      const loggedEndpoint = await waitForDevToolsEndpoint(child)
+      const loggedEndpoint = await waitForDevToolsEndpoint(child, shutdownDiagnostics)
       const endpoint = await verifiedDevToolsEndpoint(loggedEndpoint)
       try {
         // A deliberately unavailable sidecar consumes the supervisor's bounded
@@ -570,6 +595,7 @@ async function launchPackaged(
         launchMs,
         readyMs,
         userData: root,
+        shutdownDiagnostics,
       }
     })
   } catch (error) {
