@@ -337,7 +337,7 @@ describe('native sidecar process termination', () => {
     const execute = vi.fn((
       _file: string,
       _args: string[],
-      _options: { windowsHide: boolean },
+      _options: { windowsHide: boolean; timeout: number },
       callback: (error: Error | null) => void,
     ) => callback(null))
 
@@ -350,7 +350,63 @@ describe('native sidecar process termination', () => {
     const [file, args, options, callback] = call
     expect(file).toBe('taskkill.exe')
     expect(args).toEqual(['/PID', '4242', '/T', '/F'])
-    expect(options).toEqual({ windowsHide: true })
+    expect(options).toEqual({ windowsHide: true, timeout: 4_000 })
     expect(typeof callback).toBe('function')
+  })
+
+  it('fails boundedly when the taskkill executor never settles', async () => {
+    vi.useFakeTimers()
+    try {
+      const execute = vi.fn(() => undefined)
+      const outcome = Promise.race([
+        terminateWindowsProcessTree(4242, execute).then(
+          () => 'resolved',
+          (error: unknown) => error instanceof Error ? error.message : 'rejected',
+        ),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve('still-pending'), 4_001)
+        }),
+      ])
+
+      await vi.advanceTimersByTimeAsync(4_001)
+
+      await expect(outcome).resolves.toBe(
+        'The Windows process-tree terminator timed out.',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores a taskkill callback that arrives after the independent deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let complete: ((error: Error | null) => void) | undefined
+      const execute = vi.fn((
+        _file: string,
+        _args: string[],
+        _options: { windowsHide: boolean; timeout: number },
+        callback: (error: Error | null) => void,
+      ) => {
+        complete = callback
+      })
+      const termination = terminateWindowsProcessTree(4242, execute, 5)
+      const outcome = termination.then(
+        () => 'resolved',
+        (error: unknown) => error instanceof Error ? error.message : 'rejected',
+      )
+
+      await vi.advanceTimersByTimeAsync(5)
+      await expect(outcome).resolves.toBe(
+        'The Windows process-tree terminator timed out.',
+      )
+
+      complete?.(null)
+      await expect(outcome).resolves.toBe(
+        'The Windows process-tree terminator timed out.',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

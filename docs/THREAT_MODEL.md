@@ -625,9 +625,13 @@ owned by Issues #11 and #102:
   recovery uses the separately bounded manual retry.
 - POSIX launch isolates a process group and verifies bounded full-group
   `SIGTERM`/`SIGKILL` cleanup. On Windows, the sidecar enters a kill-on-close Job
-  Object and Electron main requests full-tree termination. The native Job Object
-  behavior is proved only by the hosted exact-head Windows test; other rows
-  record the intentional no-op/skip rather than emulating that proof.
+  Object and Electron main requests full-tree termination. The no-shell
+  `taskkill.exe` child process and its adapter each have a four-second deadline;
+  success still requires a separate bounded observation of the sidecar leader
+  exit, so a command timeout neither stalls shutdown indefinitely nor weakens
+  the termination proof. The native Job Object behavior is proved only by the
+  hosted exact-head Windows test; other rows record the intentional no-op/skip
+  rather than emulating that proof.
 - The current shutdown path drains the Uvicorn listener/server, stdio, complete
   sidecar process tree, temporary launch directory, and Issue #104's admitted
   jobs through a bounded wait or cooperative cancellation assessment backed by

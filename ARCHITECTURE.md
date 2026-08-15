@@ -429,6 +429,10 @@ still requires its distribution and target-assurance gates to pass.
 - POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
   escalation over the complete group. The Windows sidecar joins a
   kill-on-close Job Object and Electron main requests full-tree termination.
+  The no-shell `taskkill.exe` helper has both a four-second child-process
+  timeout and an independent four-second adapter deadline; helper completion,
+  failure, or timeout is followed by a separate bounded leader-exit check, and
+  only the observed exit proves termination.
   Closing the final desktop window requests `app.quit()` on every supported OS,
   including macOS, so the sidecar never remains resident without a visible
   application window. Electron main installs its `SIGTERM`-to-`app.quit()`

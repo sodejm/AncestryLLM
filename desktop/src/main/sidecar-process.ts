@@ -22,6 +22,7 @@ const MAX_READINESS_BYTES = 1024
 const MAX_HEALTH_BYTES = 8192
 const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
+const WINDOWS_TREE_COMMAND_TIMEOUT_MS = 4_000
 const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
 const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
 const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
@@ -30,7 +31,7 @@ const PROCESS_GROUP_POLL_INTERVAL_MS = 50
 type WindowsTreeKillExecutor = (
   file: string,
   args: string[],
-  options: { windowsHide: boolean },
+  options: { windowsHide: boolean; timeout: number },
   callback: (error: Error | null) => void,
 ) => void
 
@@ -126,14 +127,32 @@ const executeWindowsTreeKill: WindowsTreeKillExecutor = (
 export function terminateWindowsProcessTree(
   pid: number,
   execute: WindowsTreeKillExecutor = executeWindowsTreeKill,
+  timeoutMs: number = WINDOWS_TREE_COMMAND_TIMEOUT_MS,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    execute(
-      'taskkill.exe',
-      ['/PID', String(pid), '/T', '/F'],
-      { windowsHide: true },
-      (error) => error ? reject(error) : resolve(),
-    )
+    let settled = false
+    const settle = (error: Error | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => {
+      settle(new Error('The Windows process-tree terminator timed out.'))
+    }, timeoutMs)
+    try {
+      execute(
+        'taskkill.exe',
+        ['/PID', String(pid), '/T', '/F'],
+        { windowsHide: true, timeout: timeoutMs },
+        settle,
+      )
+    } catch (error) {
+      settle(error instanceof Error
+        ? error
+        : new Error('The Windows process-tree terminator failed.'))
+    }
   })
 }
 
