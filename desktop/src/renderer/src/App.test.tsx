@@ -278,7 +278,7 @@ describe('accessible desktop shell', () => {
 
     expect(await screen.findByRole('heading', { name: 'Home' })).toBeVisible()
     expect(await screen.findByRole('heading', { name: 'Application' })).toBeVisible()
-    expect(screen.getByText('0.5.0-dev')).toBeVisible()
+    expect(screen.getByText('0.6.0-dev')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Offline posture' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Startup state' })).toBeVisible()
     expect(screen.getByText('Ready')).toBeVisible()

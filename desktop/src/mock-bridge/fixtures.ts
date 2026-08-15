@@ -30,7 +30,7 @@ const success = <T>(data: T): BridgeSuccess<T> => deepFreeze({
 /** Successful application identity response used by the offline bridge. */
 export const appInfoFixture = success<AppInfo>({
   applicationName: 'AncestryLLM',
-  appVersion: '0.5.0-dev',
+  appVersion: '0.6.0-dev',
   buildChannel: 'development',
 })
 

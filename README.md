@@ -18,10 +18,14 @@ family-tree files, reports, or credentials in this repository.
 - Install the released desktop control shell, which provides Home, Diagnostics,
   Settings, and capability onboarding.
 
-The supported 0.6.0 desktop shell is not a desktop genealogy application. It does
-not include desktop genealogy or domain routes, files, jobs, providers, cloud
-accounts, or updater flows. Desktop genealogy workflows are not available yet;
-use the CLI or interactive prompt for supported genealogy work.
+The supported 0.6.0 desktop core is not a desktop genealogy application. It
+provides Home, Diagnostics, Settings, and capability onboarding. The installed
+shell also packages separately labeled provider and consent configuration, Tasks
+and Chat source-level surfaces; those surfaces remain unsupported until their
+named target-matched gates pass. They add no supported desktop genealogy or
+domain routes, file workflows, task admission, provider requests, cloud account
+use, or updater flow. Desktop genealogy workflows are not available yet; use the
+CLI or interactive prompt for supported genealogy work.
 
 The 0.6.0 source includes a narrow desktop settings and credential
 management foundation. It can update five reviewed non-secret settings and can

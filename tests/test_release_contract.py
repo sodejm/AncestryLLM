@@ -64,6 +64,13 @@ def test_package_version_is_one_stable_semver_value() -> None:
     )
 
 
+def test_desktop_mock_bridge_displays_the_release_development_identity() -> None:
+    version = str(_project()["version"])
+    fixtures = (ROOT / "desktop/src/mock-bridge/fixtures.ts").read_text(encoding="utf-8")
+
+    assert f"appVersion: '{version}-dev'" in fixtures
+
+
 def test_release_configuration_names_the_project_native_v0_6_control_plane() -> None:
     configuration = _release_configuration()
 
@@ -200,6 +207,12 @@ def test_readme_orients_new_readers_to_the_released_product_boundary() -> None:
     assert "interactive prompt" in prose
     assert "Home, Diagnostics, Settings, and capability onboarding" in prose
     assert "not a desktop genealogy application" in prose
+    assert "packages separately labeled provider and consent configuration" in prose
+    assert "Tasks and Chat source-level surfaces" in prose
+    assert "remain unsupported until their named target-matched gates pass" in prose
+    assert (
+        "does not include desktop genealogy or domain routes, files, jobs, providers" not in prose
+    )
     assert "Desktop genealogy workflows are not available yet" in prose
     assert "target-matched full installer and `SHA256SUMS`" in prose
     assert "declared `binarySigningMode`" in prose
