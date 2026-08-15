@@ -35,6 +35,16 @@ purpose-specific workflow may first synchronize a smaller profile with
 `--no-default-groups`, but it then invokes the same Make target without changing
 the actual command or flags.
 
+`make sbom` is the only supported release-SBOM interface. It executes the locked
+CycloneDX tool from `security` in reproducible mode, then passes its output
+through the standard-library-only canonicalizer before atomically publishing
+the result. The canonicalizer removes the reviewed editable-project local
+distribution reference, emits one canonical project root, proves exact
+component/dependency-node coverage, and rejects any residual local path,
+conflicting duplicate, unknown schema, or malformed graph with a stable code.
+CI, release readiness, and release jobs must not duplicate or narrow this
+command by invoking `cyclonedx-py` directly.
+
 `markdown-it-py>=4,<5` is declared directly in `lint` because the screenshot
 manifest validator parses rendered Markdown image tokens, including reference
 images, while deliberately ignoring fenced and inline code examples. The

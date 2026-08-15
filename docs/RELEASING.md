@@ -378,6 +378,20 @@ complete `release-evidence.md`, create the one `SHA256SUMS` file, and attest
 wheel and sdist together with every desktop installer, any required detached signature,
 combined SBOM, desktop manifest, and exact-head evidence document.
 
+Before accepting a readiness artifact or authorizing a tag, independently
+inspect the combined SBOM and confirm all of the following:
+
+- exactly one `ancestryllm` component exists with the candidate version, the
+  `ancestryllm==<version>` reference, and the canonical PyPI package URL;
+- component references exactly equal dependency-node references, and every
+  dependency edge names a known component; and
+- no file URI, absolute local path, top-level `serialNumber`, or metadata
+  `timestamp` remains.
+
+Any failure blocks tagging and publication. Fix the source, rerun release
+readiness for the new exact `main` head, and review the replacement artifact;
+never reuse the rejected artifact as release evidence.
+
 ## Tag and publish
 
 From a clean checkout whose `HEAD` is the approved `main` commit, derive the

@@ -38,6 +38,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Security
 
+- Sanitized and canonicalized release SBOM evidence so it contains one project
+  root, a complete deterministic dependency graph, and no local runner path or
+  volatile document identity.
 - Preserved network-free `provider=none`, explicit provider consent, immutable
   RootsMagic inputs, loss-minimal GEDCOM behavior, and fail-closed release gates.
 - Kept application containers, remote hosting, publisher signing, automatic
