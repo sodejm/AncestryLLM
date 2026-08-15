@@ -128,8 +128,20 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     assert "powershell.exe" in windows_close_source
     assert "-NoProfile" in windows_close_source
     assert "-NonInteractive" in windows_close_source
-    assert "[System.Diagnostics.Process]::GetProcessById" in windows_close_source
-    assert "$target.CloseMainWindow()" in windows_close_source
+    assert "EnumWindows" in windows_close_source
+    assert "GetWindowThreadProcessId" in windows_close_source
+    assert "IsWindowVisible" in windows_close_source
+    assert "GetWindow" in windows_close_source
+    assert "GW_OWNER" in windows_close_source
+    assert "WM_CLOSE" in windows_close_source
+    assert "PostMessage" in windows_close_source
+    assert "targetProcessId" in windows_close_source
+    assert "RequestClose([uint32]${String(pid)})" in windows_close_source
+    assert "$matchedWindowCount -ne 1" in windows_close_source
+    assert "[System.Diagnostics.Process]::GetProcessById" not in windows_close_source
+    assert "CloseMainWindow" not in windows_close_source
+    assert "HWND_BROADCAST" not in windows_close_source
+    assert "SendMessage" not in windows_close_source
     assert "windowsHide: true" in windows_close_source
     assert "taskkill.exe" not in windows_close_source
     assert "/F" not in windows_close_source

@@ -261,11 +261,103 @@ async function requestWindowsPackagedWindowClose(
   if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) {
     throw new Error('Packaged app has no valid Windows process identifier.')
   }
+  const nativeWindowCloseSource = String.raw`
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+namespace AncestryLLM.DesktopVerification
+{
+    public static class NativeWindowClose
+    {
+        private const uint GW_OWNER = 4;
+        private const uint WM_CLOSE = 0x0010;
+
+        private delegate bool EnumWindowsCallback(IntPtr windowHandle, IntPtr parameter);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumWindows(
+            EnumWindowsCallback callback,
+            IntPtr parameter
+        );
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(
+            IntPtr windowHandle,
+            out uint processId
+        );
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr windowHandle);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr GetWindow(IntPtr windowHandle, uint relationship);
+
+        [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostMessage(
+            IntPtr windowHandle,
+            uint message,
+            IntPtr wordParameter,
+            IntPtr longParameter
+        );
+
+        public static int RequestClose(uint targetProcessId)
+        {
+            List<IntPtr> matchingWindows = new List<IntPtr>();
+            EnumWindowsCallback callback = delegate(IntPtr windowHandle, IntPtr parameter)
+            {
+                uint windowProcessId;
+                if (
+                    GetWindowThreadProcessId(windowHandle, out windowProcessId) != 0 &&
+                    windowProcessId == targetProcessId &&
+                    IsWindowVisible(windowHandle) &&
+                    GetWindow(windowHandle, GW_OWNER) == IntPtr.Zero
+                )
+                {
+                    matchingWindows.Add(windowHandle);
+                }
+                return true;
+            };
+
+            if (!EnumWindows(callback, IntPtr.Zero))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "native-window-enumeration-failed"
+                );
+            }
+            if (matchingWindows.Count != 1)
+            {
+                return matchingWindows.Count;
+            }
+            if (!PostMessage(
+                matchingWindows[0],
+                WM_CLOSE,
+                IntPtr.Zero,
+                IntPtr.Zero
+            ))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "native-window-close-post-failed"
+                );
+            }
+            return matchingWindows.Count;
+        }
+    }
+}
+`
   const command = [
-    `$target = [System.Diagnostics.Process]::GetProcessById(${String(pid)})`,
-    '$target.Refresh()',
-    "if (-not $target.CloseMainWindow()) { throw 'native-window-close-rejected' }",
-  ].join('; ')
+    "$ErrorActionPreference = 'Stop'",
+    `$nativeSource = @'\n${nativeWindowCloseSource}\n'@`,
+    'Add-Type -TypeDefinition $nativeSource -Language CSharp',
+    `$matchedWindowCount = [AncestryLLM.DesktopVerification.NativeWindowClose]::RequestClose([uint32]${String(pid)})`,
+    "if ($matchedWindowCount -ne 1) { throw ('native-window-match-count:' + [string]$matchedWindowCount) }",
+  ].join('\n')
   try {
     await execFileAsync(
       'powershell.exe',

@@ -450,11 +450,14 @@ still requires its distribution and target-assurance gates to pass.
   cleanup as a successful exit. On packaged Windows and Linux, verification
   arms the process-exit listener before requesting the final native window
   close. Windows sends an operating-system main-window close message through
-  `Process.CloseMainWindow()`; Linux uses Playwright's page-close request with
-  unload handling enabled. The harness releases the automation connection only
-  after the request is in flight and accepts only a normal zero-code Electron
-  exit. It does not use a renderer close shortcut, raw CDP browser shutdown, or
-  a verifier-only production backdoor. The implemented drain covers the Uvicorn server
+  a PID-bound top-level-window lookup: it enumerates desktop windows, retains
+  only visible unowned handles whose owning process is the launched package,
+  requires exactly one match, and posts `WM_CLOSE` to that handle. Linux uses
+  Playwright's page-close request with unload handling enabled. The harness
+  releases the automation connection only after the request is in flight and
+  accepts only a normal zero-code Electron exit. It does not use a broadcast,
+  renderer close shortcut, raw CDP browser shutdown, or a verifier-only
+  production backdoor. The implemented drain covers the Uvicorn server
   and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative
   cancellation or bounded wait, and encrypted snapshot/event repository.
