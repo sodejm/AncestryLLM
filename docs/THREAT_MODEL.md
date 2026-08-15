@@ -645,7 +645,12 @@ owned by Issues #11 and #102:
   failing closed. The initial quit is vetoed while cleanup runs; only the
   authorized completion callback calls
   `app.exit(0)`, after the IPC boundary and verified sidecar ownership have been
-  released. Issue #111's chat stream registers its cancellation, payload-free
+  released. The packaged Windows and Linux verifier first arms native-process
+  exit, sends Chromium's native final-window close request with unload handling
+  enabled, releases automation after that request is in flight, and then
+  requires a normal zero-code Electron exit. Renderer-executed close shortcuts,
+  raw CDP browser shutdown, force termination, and verifier-only production
+  backdoors do not satisfy that evidence. Issue #111's chat stream registers its cancellation, payload-free
   terminal audit, and restart-reconciliation drain before exposing its routes.
   Other future provider streams and database sessions must register their own
   drains before their routes ship.
