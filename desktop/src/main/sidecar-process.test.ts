@@ -246,6 +246,59 @@ describe('native sidecar process termination', () => {
     }
   })
 
+  it('accepts a taskkill race only after Windows leader exit is confirmed', async () => {
+    vi.useFakeTimers()
+    try {
+      const child = new FakeChild()
+      const terminateTree = vi.fn(async () => {
+        setTimeout(() => {
+          child.exitCode = 0
+          child.emit('exit', 0, null)
+        }, 100)
+        throw new Error('The process exited before taskkill completed.')
+      })
+
+      const termination = terminateNativeSidecarProcess(
+        child as never,
+        'win32',
+        terminateTree,
+      )
+      let settled = false
+      void termination.finally(() => { settled = true })
+      const expectation = expect(termination).resolves.toBeUndefined()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(100)
+      await expectation
+
+      expect(settled).toBe(true)
+      expect(terminateTree).toHaveBeenCalledWith(4242)
+      expect(child.kill).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails closed when taskkill errors and the Windows leader stays live', async () => {
+    const child = new FakeChild()
+    const terminateTree = vi.fn(async () => {
+      throw new Error('Access denied while terminating the process tree.')
+    })
+
+    await expect(terminateNativeSidecarProcess(
+      child as never,
+      'win32',
+      terminateTree,
+      undefined,
+      0,
+      0,
+    )).rejects.toThrow('The sidecar process group could not be terminated.')
+
+    expect(terminateTree).toHaveBeenCalledWith(4242)
+    expect(child.kill).not.toHaveBeenCalled()
+  })
+
   it('fails closed when Windows tree cleanup cannot confirm leader exit', async () => {
     const child = new FakeChild()
     const terminateTree = vi.fn(async () => undefined)
