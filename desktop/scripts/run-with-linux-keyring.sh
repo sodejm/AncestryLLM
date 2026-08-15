@@ -13,6 +13,39 @@ fail() {
   exit "$status"
 }
 
+session_bus_responds() {
+  dbus-send \
+    --session \
+    --dest=org.freedesktop.DBus \
+    --type=method_call \
+    --print-reply \
+    /org/freedesktop/DBus \
+    org.freedesktop.DBus.ListNames >/dev/null 2>&1
+}
+
+query_secret_service_owner() {
+  dbus-send \
+    --session \
+    --dest=org.freedesktop.DBus \
+    --type=method_call \
+    --print-reply \
+    /org/freedesktop/DBus \
+    org.freedesktop.DBus.NameHasOwner \
+    string:org.freedesktop.secrets
+}
+
+require_secret_service_unowned() {
+  local owner_reply
+  owner_reply="$(query_secret_service_owner 2>/dev/null)" || \
+    fail "D-Bus endpoint could not report Secret Service ownership" "$startup_error"
+  if grep -Fq 'boolean true' <<< "$owner_reply"; then
+    fail "Secret Service endpoint is already occupied" "$startup_error"
+  fi
+  grep -Fq 'boolean false' <<< "$owner_reply" || \
+    fail "D-Bus endpoint returned an invalid Secret Service ownership reply" \
+      "$startup_error"
+}
+
 stop_keyring() {
   if [[ -n "${keyring_pid:-}" ]]; then
     kill "$keyring_pid" 2>/dev/null || true
@@ -46,6 +79,7 @@ run_inside_session() {
   export XDG_CONFIG_HOME="$keyring_home/.config"
   export XDG_DATA_HOME="$keyring_home/.local/share"
   export XDG_RUNTIME_DIR="$session_runtime"
+  require_secret_service_unowned
   gnome-keyring-daemon \
     --foreground \
     --unlock \
@@ -61,14 +95,7 @@ run_inside_session() {
     if ! kill -0 "$keyring_pid" 2>/dev/null; then
       fail "native Secret Service exited during startup" "$startup_error"
     fi
-    if dbus-send \
-      --session \
-      --dest=org.freedesktop.DBus \
-      --type=method_call \
-      --print-reply \
-      /org/freedesktop/DBus \
-      org.freedesktop.DBus.NameHasOwner \
-      string:org.freedesktop.secrets 2>/dev/null | grep -Fq 'boolean true'; then
+    if query_secret_service_owner 2>/dev/null | grep -Fq 'boolean true'; then
       ready=true
       break
     fi
@@ -126,6 +153,7 @@ production_runtime_directory=
 production_runtime_created=false
 production_socket_owned=false
 production_socket_identity=
+reuse_existing_production_bus=false
 session_runtime_directory="$keyring_root/runtime"
 session_socket="$session_runtime_directory/bus"
 cleanup_root() {
@@ -134,7 +162,7 @@ cleanup_root() {
     wait "$dbus_pid" 2>/dev/null || true
   fi
   if [[ "$production_runtime_bus" == true ]]; then
-    if [[ "$production_socket_owned" == true && -S "$session_socket" ]]; then
+    if [[ "$production_socket_owned" == true && ! -L "$session_socket" && -S "$session_socket" ]]; then
       current_socket_identity="$(stat -c '%d:%i' -- "$session_socket" 2>/dev/null || true)"
       if [[ "$current_socket_identity" == "$production_socket_identity" ]]; then
         rm -f -- "$session_socket"
@@ -173,44 +201,68 @@ if [[ "$production_runtime_bus" == true ]]; then
       "$startup_error"
   session_runtime_directory="$production_runtime_directory"
   session_socket="$production_runtime_directory/bus"
-  [[ ! -e "$session_socket" && ! -L "$session_socket" ]] || \
-    fail "production D-Bus endpoint is already occupied" "$startup_error"
 fi
 
 session_address="unix:path=$session_socket"
 export DBUS_SESSION_BUS_ADDRESS="$session_address"
 
-dbus-daemon \
-  --session \
-  --nofork \
-  --address="$session_address" \
-  > "$bus_log" 2>&1 &
-dbus_pid=$!
-
-bus_ready=false
-for ((attempt = 0; attempt < 100; attempt += 1)); do
-  if ! kill -0 "$dbus_pid" 2>/dev/null; then
-    fail "private D-Bus session exited during startup" "$startup_error"
-  fi
-  if dbus-send \
-    --session \
-    --dest=org.freedesktop.DBus \
-    --type=method_call \
-    --print-reply \
-    /org/freedesktop/DBus \
-    org.freedesktop.DBus.ListNames >/dev/null 2>&1; then
-    bus_ready=true
-    break
-  fi
-  sleep 0.1
-done
-[[ "$bus_ready" == true ]] || fail "private D-Bus session did not become ready" "$startup_error"
 if [[ "$production_runtime_bus" == true ]]; then
-  [[ -S "$session_socket" ]] || \
-    fail "production D-Bus endpoint is not a socket" "$startup_error"
-  production_socket_identity="$(stat -c '%d:%i' -- "$session_socket")" || \
-    fail "production D-Bus endpoint metadata is unavailable" "$startup_error"
-  production_socket_owned=true
+  if [[ -e "$session_socket" || -L "$session_socket" ]]; then
+    [[ ! -L "$session_socket" && -S "$session_socket" ]] || \
+      fail "production D-Bus endpoint must be a current-user Unix socket" "$startup_error"
+    production_socket_metadata="$(stat -c '%u:%g:%d:%i' -- "$session_socket")" || \
+      fail "production D-Bus endpoint metadata is unavailable" "$startup_error"
+    IFS=: read -r socket_user_id socket_group_id socket_device socket_inode \
+      <<< "$production_socket_metadata"
+    [[ "$socket_user_id" == "$user_id" && "$socket_group_id" == "$user_group_id" ]] || \
+      fail "production D-Bus endpoint must be a current-user Unix socket" "$startup_error"
+    production_socket_identity="$socket_device:$socket_inode"
+    session_bus_responds || \
+      fail "production D-Bus endpoint is not a working session bus" "$startup_error"
+    require_secret_service_unowned
+    [[ ! -L "$session_socket" && -S "$session_socket" ]] || \
+      fail "production D-Bus endpoint changed during validation" "$startup_error"
+    current_socket_metadata="$(stat -c '%u:%g:%d:%i' -- "$session_socket")" || \
+      fail "production D-Bus endpoint changed during validation" "$startup_error"
+    [[ "$current_socket_metadata" == "$production_socket_metadata" ]] || \
+      fail "production D-Bus endpoint changed during validation" "$startup_error"
+    reuse_existing_production_bus=true
+  fi
+fi
+
+if [[ "$reuse_existing_production_bus" != true ]]; then
+  dbus-daemon \
+    --session \
+    --nofork \
+    --address="$session_address" \
+    > "$bus_log" 2>&1 &
+  dbus_pid=$!
+
+  bus_ready=false
+  for ((attempt = 0; attempt < 100; attempt += 1)); do
+    if ! kill -0 "$dbus_pid" 2>/dev/null; then
+      fail "private D-Bus session exited during startup" "$startup_error"
+    fi
+    if session_bus_responds; then
+      bus_ready=true
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$bus_ready" == true ]] || fail "private D-Bus session did not become ready" "$startup_error"
+  if [[ "$production_runtime_bus" == true ]]; then
+    [[ ! -L "$session_socket" && -S "$session_socket" ]] || \
+      fail "production D-Bus endpoint is not a socket" "$startup_error"
+    production_socket_metadata="$(stat -c '%u:%g:%d:%i' -- "$session_socket")" || \
+      fail "production D-Bus endpoint metadata is unavailable" "$startup_error"
+    IFS=: read -r socket_user_id socket_group_id socket_device socket_inode \
+      <<< "$production_socket_metadata"
+    [[ "$socket_user_id" == "$user_id" && "$socket_group_id" == "$user_group_id" ]] || \
+      fail "production D-Bus endpoint must be owned by the current user and group" \
+        "$startup_error"
+    production_socket_identity="$socket_device:$socket_inode"
+    production_socket_owned=true
+  fi
 fi
 
 set +e

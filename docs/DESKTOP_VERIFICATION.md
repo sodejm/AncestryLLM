@@ -83,12 +83,17 @@ service fails the row.
 The Ubuntu release-installer checks exercise the installed production package,
 not the unpublished verifier adapter. They select the launcher's
 `--production-runtime-bus` mode, which validates or creates the owner-only
-`/run/user/<uid>` directory, refuses an occupied or linked `bus` endpoint, and
-binds the disposable D-Bus daemon to the exact endpoint production Electron
-Main derives from the process user ID. Secret Service storage remains isolated
-under the temporary verifier root. This proves that an installed production
-sidecar can reach the native service without accepting an environment-selected
-endpoint or compiling the verifier switch into the shipped package.
+`/run/user/<uid>` directory and uses the exact endpoint production Electron
+Main derives from the process user ID. When `bus` is absent, the launcher binds
+an owned private D-Bus daemon there and removes only that identity during
+cleanup. When it already exists, reuse requires a current-user-and-group,
+non-symlink Unix socket, a responsive session bus, no existing
+`org.freedesktop.secrets` owner, and unchanged device/inode and ownership
+metadata across validation. A reused bus is neither killed nor removed. Secret
+Service storage remains isolated under the temporary verifier root in both
+paths. This proves that an installed production sidecar can reach the native
+service without accepting an environment-selected endpoint or compiling the
+verifier switch into the shipped package.
 
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.

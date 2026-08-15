@@ -314,8 +314,31 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert 'export DBUS_SESSION_BUS_ADDRESS="$session_address"' in runner
     assert 'production_runtime_directory="/run/user/$user_id"' in runner
     assert 'session_socket="$production_runtime_directory/bus"' in runner
-    assert '[[ ! -e "$session_socket" && ! -L "$session_socket" ]]' in runner
-    assert 'production_socket_identity="$(stat -c \'%d:%i\' -- "$session_socket")"' in runner
+    assert 'if [[ -e "$session_socket" || -L "$session_socket" ]]; then' in runner
+    assert '[[ ! -L "$session_socket" && -S "$session_socket" ]]' in runner
+    assert "production D-Bus endpoint must be a current-user Unix socket" in runner
+    assert "stat -c '%u:%g:%d:%i' -- \"$session_socket\"" in runner
+    assert (
+        '[[ "$socket_user_id" == "$user_id" && "$socket_group_id" == "$user_group_id" ]]' in runner
+    )
+    assert "session_bus_responds" in runner
+    assert "production D-Bus endpoint is not a working session bus" in runner
+    assert "Secret Service endpoint is already occupied" in runner
+    assert "production D-Bus endpoint changed during validation" in runner
+    assert "reuse_existing_production_bus=true" in runner
+    assert 'if [[ "$reuse_existing_production_bus" != true ]]; then' in runner
+    assert 'production_socket_identity="$socket_device:$socket_inode"' in runner
+    reuse_branch = runner[
+        runner.index('if [[ -e "$session_socket" || -L "$session_socket" ]]; then') : runner.index(
+            'if [[ "$reuse_existing_production_bus" != true ]]; then'
+        )
+    ]
+    assert "production_socket_owned=true" not in reuse_branch
+    assert runner.count("production_socket_owned=true") == 1
+    assert (
+        'if [[ "$production_socket_owned" == true && ! -L "$session_socket" '
+        '&& -S "$session_socket" ]]; then'
+    ) in runner
     assert '[[ "$current_socket_identity" == "$production_socket_identity" ]]' in runner
     assert "gnome-keyring-daemon" in runner
     assert "--components=secrets" in runner

@@ -84,12 +84,17 @@ provider credential and `PATH` values. Normal launches also exclude home,
 cache, configuration, and data values; they ignore ambient D-Bus and XDG
 runtime selectors and bind to `unix:path=/run/user/<uid>/bus` using the
 kernel-reported process user ID. Release-installer verification runs the
-installed production package and binds its disposable D-Bus daemon to that same
-production-derived endpoint. The launcher requires an owner-only runtime
-directory owned by the current user and fails if the endpoint already exists or
-is a link; only the Secret Service data stays under its temporary root. The
-launcher preserves the packaged command's real exit status and removes the
-state afterward. No mock or alternate Python
+installed production package against that same production-derived endpoint.
+The launcher requires an owner-only runtime directory owned by the current
+user. If the endpoint is absent, it creates a private D-Bus daemon, records the
+socket identity, and removes only that owned endpoint. If the canonical
+endpoint already exists, the launcher requires a current-user-and-group,
+non-symlink Unix socket, proves that it is a live session bus with no existing
+Secret Service owner, and rechecks its exact metadata before reuse. It never
+kills or removes a reused bus. In either path, the verifier starts its own GNOME
+Secret Service with only disposable home, configuration, data, and control
+storage. The launcher preserves the packaged command's real exit status and
+removes the disposable state afterward. No mock or alternate Python
 keyring backend is permitted. This is verification infrastructure only; it
 does not add a production credential fallback or weaken keyring-only startup.
 
