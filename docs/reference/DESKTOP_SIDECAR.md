@@ -141,13 +141,15 @@ Contract or build mismatch fails closed without restart. Startup and probe
 work are bounded to 10 seconds. Other launch failures and unexpected crashes
 receive at most two restart attempts for the application lifetime. Application
 quit allows up to 12 seconds for Uvicorn's configured 10-second graceful
-shutdown, then force-kills and performs one final one-second wait. POSIX
-launches use a detached process group and signal the full group even if its
-leader already exited. On Windows, the sidecar assigns itself to a
+shutdown, then force-kills and performs a bounded final exit-observation wait.
+POSIX launches use a detached process group and signal the full group even if
+its leader already exited. On Windows, the sidecar assigns itself to a
 non-inheritable, kill-on-close Job Object before reading bootstrap input, while
 Electron uses `taskkill.exe /T /F` for a live tree. Closing the sidecar owner
 therefore terminates descendants even when Electron cannot observe the original
-leader. No sidecar is started by the development mock shell.
+leader. Installed Windows builds allow up to five seconds after `taskkill.exe`
+returns for Node to observe that leader exit; failure to observe it still fails
+closed. No sidecar is started by the development mock shell.
 
 Electron bounds the complete supervisor stop to 15 seconds, including any
 launch already in flight and all verified process-tree termination. Exceeding

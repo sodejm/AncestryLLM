@@ -172,6 +172,35 @@ describe('native sidecar process termination', () => {
     expect(child.kill).not.toHaveBeenCalled()
   })
 
+  it('allows bounded Windows leader-exit observation after taskkill returns', async () => {
+    vi.useFakeTimers()
+    try {
+      const child = new FakeChild()
+      const terminateTree = vi.fn(async () => {
+        setTimeout(() => {
+          child.signalCode = 'SIGKILL'
+          child.emit('exit', null, 'SIGKILL')
+        }, 1_100)
+      })
+
+      const termination = terminateNativeSidecarProcess(
+        child as never,
+        'win32',
+        terminateTree,
+      )
+      const expectation = expect(termination).resolves.toBeUndefined()
+      await Promise.resolve()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(1_100)
+      await expectation
+
+      expect(terminateTree).toHaveBeenCalledWith(4242)
+      expect(child.kill).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('fails closed when Windows tree cleanup cannot confirm leader exit', async () => {
     const child = new FakeChild()
     const terminateTree = vi.fn(async () => undefined)
@@ -181,6 +210,7 @@ describe('native sidecar process termination', () => {
       'win32',
       terminateTree,
       undefined,
+      0,
       0,
     )).rejects.toThrow('The sidecar process group did not terminate.')
 

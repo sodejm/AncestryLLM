@@ -22,6 +22,7 @@ const MAX_READINESS_BYTES = 1024
 const MAX_HEALTH_BYTES = 8192
 const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
+const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
 
 type WindowsTreeKillExecutor = (
@@ -141,6 +142,7 @@ export async function terminateNativeSidecarProcess(
   terminateWindowsTree: WindowsTreeTerminator = terminateWindowsProcessTree,
   posixGroup: PosixProcessGroupController = createPosixProcessGroupController(),
   gracefulTimeoutMs: number = TERMINATION_TIMEOUT_MS,
+  windowsTreeExitTimeoutMs: number = WINDOWS_TREE_EXIT_TIMEOUT_MS,
 ): Promise<void> {
   if (platform === 'win32' && child.pid !== undefined) {
     // The packaged sidecar also owns a kill-on-close Job Object. If its leader
@@ -151,7 +153,10 @@ export async function terminateNativeSidecarProcess(
     } catch {
       throw new Error('The sidecar process group could not be terminated.')
     }
-    if (!(await waitForChildExit(child, FORCE_TERMINATION_TIMEOUT_MS))) {
+    // Installed Windows builds can report taskkill completion before Node
+    // observes the leader exit. Keep that observation bounded beneath the
+    // supervisor's 15-second shutdown deadline and continue to fail closed.
+    if (!(await waitForChildExit(child, windowsTreeExitTimeoutMs))) {
       throw new Error('The sidecar process group did not terminate.')
     }
     return
