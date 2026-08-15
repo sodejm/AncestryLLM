@@ -647,11 +647,15 @@ owned by Issues #11 and #102:
   `app.exit(0)`, after the IPC boundary and verified sidecar ownership have been
   released. The packaged Windows and Linux verifier first arms native-process
   exit, then requests the final native window close. Windows sends an
-  operating-system main-window close message through
-  `Process.CloseMainWindow()`; Linux sends Chromium's page-close request with
-  unload handling enabled. The harness releases automation after the request is
-  in flight and then requires a normal zero-code Electron exit.
-  Renderer-executed close shortcuts, raw CDP browser shutdown, force
+  operating-system close message only after enumerating desktop top-level
+  windows, binding a handle to both the launched package PID and the exact
+  application-controlled `AncestryLLM` caption, and requiring that handle to be
+  unique; it then posts `WM_CLOSE` to that exact handle. This avoids the hosted
+  runner's unstable taskbar-visibility and main-window heuristics. Linux sends
+  Chromium's page-close request with unload handling
+  enabled. The harness releases automation after the request is in flight and
+  then requires a normal zero-code Electron exit. Broadcast close messages,
+  renderer-executed close shortcuts, raw CDP browser shutdown, force
   termination, and verifier-only production backdoors do not satisfy that
   evidence. Issue #111's chat stream registers its cancellation, payload-free
   terminal audit, and restart-reconciliation drain before exposing its routes.
