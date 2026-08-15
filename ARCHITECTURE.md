@@ -448,9 +448,11 @@ still requires its distribution and target-assurance gates to pass.
   fully verified stop. The packaged macOS matrix exercises that later-request
   recovery under independent bounded deadlines and never treats force-kill
   cleanup as a successful exit. On packaged Windows and Linux, verification
-  arms the process-exit listener before sending Chromium's native window-close
-  request with unload handling enabled, releases the automation connection only
-  after that request is in flight, and accepts only a normal zero-code Electron
+  arms the process-exit listener before requesting the final native window
+  close. Windows sends an operating-system main-window close message through
+  `Process.CloseMainWindow()`; Linux uses Playwright's page-close request with
+  unload handling enabled. The harness releases the automation connection only
+  after the request is in flight and accepts only a normal zero-code Electron
   exit. It does not use a renderer close shortcut, raw CDP browser shutdown, or
   a verifier-only production backdoor. The implemented drain covers the Uvicorn server
   and listener, stdio, process tree, temporary

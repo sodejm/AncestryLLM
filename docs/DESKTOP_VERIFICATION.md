@@ -235,13 +235,15 @@ boundary—the harness sends one later `SIGTERM` and waits under a separate 30-s
 This exercises the production contract that a failed stop remains fail-closed
 but does not leave a rejected shutdown promise cached forever. A second failure
 still fails the packaged test; force termination is reserved for test cleanup.
-On Windows and Linux the harness arms the native process-exit listener, then
-uses Playwright's Chromium-native page-close request with unload handling
-enabled under a bounded deadline. That call returns after the close request is
-in flight instead of waiting for the renderer target to disappear. The harness
-then releases the Playwright connection and requires a normal zero-code native
-process exit, proving the final-window path without a renderer `window.close()`,
-raw CDP `Browser.close`, or verifier-only production backdoor. A source contract
+On Windows and Linux the harness arms the native process-exit listener before
+requesting the final native window close under a bounded deadline. Windows
+validates the packaged process identifier and uses the operating system's
+`Process.CloseMainWindow()` path to send the close message to the real top-level
+window. Linux uses Playwright's Chromium-native page-close request with unload
+handling enabled. The harness then releases the Playwright connection and
+requires a normal zero-code native process exit, proving the final-window path
+without a renderer `window.close()`, raw CDP `Browser.close`, force termination,
+or verifier-only production backdoor. A source contract
 test also proves that Electron owns the supervisor and job preflight before
 payload verification or process launch can yield. Both platform paths request
 `app.quit()` and are vetoed while the
