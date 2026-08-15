@@ -67,8 +67,10 @@ def test_package_version_is_one_stable_semver_value() -> None:
 def test_desktop_mock_bridge_displays_the_release_development_identity() -> None:
     version = str(_project()["version"])
     fixtures = (ROOT / "desktop/src/mock-bridge/fixtures.ts").read_text(encoding="utf-8")
+    shell_e2e = (ROOT / "desktop/e2e/shell.spec.ts").read_text(encoding="utf-8")
 
     assert f"appVersion: '{version}-dev'" in fixtures
+    assert f"getByText('{version}-dev', {{ exact: true }})" in shell_e2e
 
 
 def test_release_configuration_names_the_project_native_v0_6_control_plane() -> None:

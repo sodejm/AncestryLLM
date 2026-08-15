@@ -233,7 +233,7 @@ test('built shell exposes the bounded production Home, Chat, Tasks, Diagnostics,
     await expect(page.getByRole('heading', { name: 'Home' })).toBeFocused()
     await expect(main.getByRole('heading', { name: 'Application' })).toBeVisible()
     await expect(main.getByText('AncestryLLM', { exact: true })).toBeVisible()
-    await expect(main.getByText('0.5.0-dev', { exact: true })).toBeVisible()
+    await expect(main.getByText('0.6.0-dev', { exact: true })).toBeVisible()
     await expect(main.getByRole('heading', { name: 'Offline posture' })).toBeVisible()
     await expect(main.getByRole('heading', { name: 'Startup state' })).toBeVisible()
     await expect(main.getByText('Ready', { exact: true })).toBeVisible()
