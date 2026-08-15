@@ -964,8 +964,14 @@ never inherited from the packaged process environment. Provider credentials
 and `PATH` remain excluded from the child environment. Release-installer
 verification instead runs the installed production package while staging its
 disposable native service at the owner-only conventional
-`/run/user/<uid>/bus` endpoint that production Main derives; it refuses an
-occupied or linked endpoint and does not enable the verifier adapter.
+`/run/user/<uid>/bus` endpoint that production Main derives. An absent endpoint
+receives an identity-tracked private D-Bus daemon that the verifier removes. An
+existing endpoint is reused only when it is a current-user-and-group,
+non-symlink Unix socket, responds as a session bus, has no Secret Service owner,
+and retains identical device, inode, owner, and group metadata across
+validation. The verifier neither kills nor unlinks a reused bus. Its Secret
+Service home, configuration, data, and control state remain disposable, and
+the production package still does not enable the verifier adapter.
 Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
 or `unavailable`, never values.
 
