@@ -442,7 +442,7 @@ async function requestMacPackagedQuit(
   try {
     return await initialExit
   } catch {
-    // Production bounds a sidecar stop at 15 seconds and deliberately leaves a
+    // Production bounds a sidecar stop at 20 seconds and deliberately leaves a
     // rejected shutdown retryable. Wait beyond that boundary, then exercise the
     // later native quit request that must start a fresh verified stop attempt.
     const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs, shutdownDiagnostics)

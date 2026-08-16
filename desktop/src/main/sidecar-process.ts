@@ -24,6 +24,7 @@ const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
 const WINDOWS_TREE_COMMAND_TIMEOUT_MS = 4_000
 const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
+const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 3_000
 const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
 const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
@@ -183,7 +184,7 @@ export async function terminateNativeSidecarProcess(
     // Installed Windows builds can report taskkill completion, or a
     // process-not-found race, before Node observes the leader exit. A confirmed
     // leader exit also closes its kill-on-close Job Object. Keep that
-    // independent observation bounded beneath the supervisor's 15-second
+    // independent observation bounded beneath the supervisor's configured
     // shutdown deadline and continue to fail closed if the leader stays live.
     if (await waitForChildExit(child, windowsTreeExitTimeoutMs)) return
     if (treeTerminationFailed) {
@@ -323,6 +324,7 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
     private readonly terminateProcess: NativeProcessTerminator = terminateNativeSidecarProcess,
     private readonly removeWorkingDirectory: WorkingDirectoryRemover = rm,
     private readonly platform: NodeJS.Platform = process.platform,
+    private readonly gracefulShutdownExitTimeoutMs: number = GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS,
   ) {
     super()
     this.ready = readiness(child)
@@ -330,9 +332,9 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
     child.once('exit', (code) => this.emit('exit', code))
   }
 
-  terminate(): Promise<void> {
+  terminate(requestGracefulShutdown?: () => Promise<void>): Promise<void> {
     if (this.termination) return this.termination
-    const termination = this.terminateOnce()
+    const termination = this.terminateOnce(requestGracefulShutdown)
     this.termination = termination
     void termination.catch(() => {
       if (this.termination === termination) this.termination = undefined
@@ -340,8 +342,24 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
     return termination
   }
 
-  private async terminateOnce(): Promise<void> {
+  private async terminateOnce(requestGracefulShutdown?: () => Promise<void>): Promise<void> {
+    if (requestGracefulShutdown !== undefined) {
+      try {
+        await requestGracefulShutdown()
+      } catch {
+        // The observed process exit remains authoritative. If the request fails,
+        // the bounded process-tree terminator below preserves fail-closed cleanup.
+      }
+      if (await waitForChildExit(this.child, this.gracefulShutdownExitTimeoutMs)) {
+        await this.removeOwnedWorkingDirectory()
+        return
+      }
+    }
     await this.terminateProcess(this.child)
+    await this.removeOwnedWorkingDirectory()
+  }
+
+  private async removeOwnedWorkingDirectory(): Promise<void> {
     await this.removeWorkingDirectory(this.workingDirectory, {
       recursive: true,
       force: true,

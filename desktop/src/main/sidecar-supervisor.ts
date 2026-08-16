@@ -18,7 +18,7 @@ export interface SidecarReadyFrame {
 /** Process handle exposed to the supervisor after a trusted sidecar launch. */
 export interface RunningSidecar {
   ready: Promise<SidecarReadyFrame>
-  terminate: () => Promise<void>
+  terminate: (requestGracefulShutdown?: () => Promise<void>) => Promise<void>
   once(event: 'exit', listener: (code: number | null) => void): this
 }
 
@@ -44,6 +44,9 @@ interface SidecarSupervisorOptions {
   verify: () => Promise<void>
   launch: LaunchSidecar
   probe: ProbeSidecar
+  requestShutdown?: (
+    session: Readonly<AuthenticatedSidecarSession>,
+  ) => Promise<void>
   tokenFactory?: () => string
   startupTimeoutMs: number
   shutdownTimeoutMs?: number
@@ -412,12 +415,20 @@ export class SidecarSupervisor {
     this.transition('stopping', null)
     this.resolveStopRequested()
     const active = this.current
+    const activeSession = this.activeSession
+    const requestShutdown = this.options.requestShutdown
     this.current = undefined
     this.setActiveSession(undefined)
     const processes = new Set(this.pending)
     if (active) processes.add(active)
     for (const failed of this.failedTerminations) processes.add(failed)
-    const terminations = [...processes].map((process) => this.terminateOnce(process))
+    const gracefulShutdown = active && activeSession && requestShutdown
+      ? () => requestShutdown(activeSession)
+      : undefined
+    const terminations = [...processes].map((process) => this.terminateOnce(
+      process,
+      process === active ? gracefulShutdown : undefined,
+    ))
     const initialTerminationResults = Promise.allSettled(terminations)
     const launches = [...this.inFlightLaunches]
     const attempt = this.finishStop(launches, initialTerminationResults, processes)
@@ -566,10 +577,13 @@ export class SidecarSupervisor {
     this.lastFailure = failure
   }
 
-  private terminateOnce(sidecar: RunningSidecar): Promise<void> {
+  private terminateOnce(
+    sidecar: RunningSidecar,
+    requestGracefulShutdown?: () => Promise<void>,
+  ): Promise<void> {
     const existing = this.terminationRequests.get(sidecar)
     if (existing) return existing
-    const termination = sidecar.terminate()
+    const termination = sidecar.terminate(requestGracefulShutdown)
     this.terminationRequests.set(sidecar, termination)
     void termination.then(
       () => { this.failedTerminations.delete(sidecar) },

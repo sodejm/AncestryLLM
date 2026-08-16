@@ -519,6 +519,7 @@ def create_app(
     chat_streaming_service: ChatStreamingService | None = None,
     job_service: Callable[[], JobLifecycleService] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
+    runtime_shutdown: Callable[[], None] | None = None,
     lifecycle: ApiLifecycle | None = None,
     startup_diagnostics: Callable[[], StartupDiagnosticReport] | None = None,
     mutations_allowed: Callable[[], bool] | None = None,
@@ -807,6 +808,17 @@ def create_app(
         return _job_shutdown_response(
             prepare_jobs_for_shutdown(request.action, request.timeout_seconds)
         )
+
+    if runtime_shutdown is not None:
+
+        @app.post(
+            f"{API_NAMESPACE}/runtime/shutdown",
+            status_code=204,
+            include_in_schema=False,
+        )
+        def request_runtime_shutdown() -> Response:
+            runtime_shutdown()
+            return Response(status_code=204)
 
     @app.get(
         f"{API_NAMESPACE}/jobs/{{job_id}}",

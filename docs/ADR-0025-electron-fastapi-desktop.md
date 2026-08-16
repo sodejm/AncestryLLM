@@ -220,9 +220,14 @@ untrusted even when they originated locally.
 - Use a token-derived readiness proof and exact app/sidecar build and protocol
   handshake. Keep the port and bearer only in Electron main memory. Disable
   access logs and use privacy-minimal structural stderr.
+- Invalidate the public active session, then use captured Main-only credentials
+  for one exact authenticated, bodyless, hidden request that asks Uvicorn to
+  begin its graceful lifespan drain. Independently observe process exit; the
+  HTTP response is not termination proof.
 - Terminate the full isolated POSIX process group or Windows process tree with
-  bounded graceful/forced escalation and fail closed when termination cannot be
-  verified. The current lifespan drains the Uvicorn listener/server, stdio,
+  bounded graceful/forced escalation when the request fails or exit is not
+  observed, and fail closed when termination cannot be verified. The current
+  lifespan drains the Uvicorn listener/server, stdio,
   process tree, temporary launch directory, and Issue #104's application job
   admission, cooperative cancellation or bounded wait, and encrypted event
   repository. Future provider streams and other database sessions must register

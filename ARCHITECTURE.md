@@ -443,7 +443,13 @@ still requires its distribution and target-assurance gates to pass.
   owned before payload verification or process launch can yield. Both quit entry
   points are vetoed until the native job preflight and verified sidecar stop
   finish. A stop request cancels pre-spawn verification and drains any process
-  launch already in flight within a fixed 15-second supervisor deadline.
+  launch already in flight within a fixed 20-second supervisor deadline. Main
+  invalidates the publicly usable active session before using captured session
+  credentials for one exact authenticated, bodyless runtime-shutdown request.
+  That hidden route is packaged-only, omitted from OpenAPI, and never exposed to
+  preload or the renderer. Uvicorn begins its normal lifespan drain, but Main
+  still requires an observed leader exit; a response without exit falls back to
+  bounded full-tree termination.
   Electron uses
   `app.exit(0)` only from that authorized completion callback, after every owned
   resource has been released, to avoid a second platform-specific quit cycle.

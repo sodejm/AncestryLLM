@@ -23,6 +23,89 @@ class FakeChild extends EventEmitter {
 }
 
 describe('native sidecar process termination', () => {
+  it('uses authenticated graceful shutdown when the sidecar exit is observed', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn().mockResolvedValue(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      'C:\\Users\\runner\\AppData\\Local\\Temp\\ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+      'win32',
+      10,
+    )
+    child.stdout.emit(
+      'data',
+      Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+    )
+    await sidecar.ready
+    const requestGracefulShutdown = vi.fn(async () => {
+      child.exitCode = 0
+      child.emit('exit', 0, null)
+    })
+
+    await expect(sidecar.terminate(requestGracefulShutdown)).resolves.toBeUndefined()
+
+    expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+    expect(terminateProcess).not.toHaveBeenCalled()
+    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to bounded process-tree termination after graceful shutdown fails', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn().mockResolvedValue(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      '/private/ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+      'linux',
+      0,
+    )
+    child.stdout.emit(
+      'data',
+      Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+    )
+    await sidecar.ready
+    const requestGracefulShutdown = vi.fn().mockRejectedValue(
+      new Error('/private/graceful-shutdown-failure'),
+    )
+
+    await expect(sidecar.terminate(requestGracefulShutdown)).resolves.toBeUndefined()
+
+    expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+    expect(terminateProcess).toHaveBeenCalledOnce()
+    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+  })
+
+  it('falls back when graceful shutdown succeeds without an observed exit', async () => {
+    const child = new FakeChild()
+    const terminateProcess = vi.fn().mockResolvedValue(undefined)
+    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+    const sidecar = new NativeRunningSidecar(
+      child as never,
+      '/private/ancestryllm-sidecar-sensitive',
+      terminateProcess,
+      removeWorkingDirectory,
+      'linux',
+      0,
+    )
+    child.stdout.emit(
+      'data',
+      Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+    )
+    await sidecar.ready
+    const requestGracefulShutdown = vi.fn().mockResolvedValue(undefined)
+
+    await expect(sidecar.terminate(requestGracefulShutdown)).resolves.toBeUndefined()
+
+    expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+    expect(terminateProcess).toHaveBeenCalledOnce()
+    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+  })
+
   it('retries native cleanup after a failed termination attempt', async () => {
     const child = new FakeChild()
     const terminateProcess = vi.fn()

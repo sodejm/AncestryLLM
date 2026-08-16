@@ -4,7 +4,11 @@ import { createDesktopControlBridge } from './desktop-control'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
-import { createSidecarClient, type JobShutdownAction } from './sidecar-client'
+import {
+  createSidecarClient,
+  requestSidecarRuntimeShutdown,
+  type JobShutdownAction,
+} from './sidecar-client'
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
 import {
@@ -67,8 +71,9 @@ export async function startRuntimeBridge(
     },
     launch: launchNativeSidecar,
     probe: probeNativeSidecar,
+    requestShutdown: requestSidecarRuntimeShutdown,
     startupTimeoutMs: 10_000,
-    shutdownTimeoutMs: 15_000,
+    shutdownTimeoutMs: 20_000,
     maxRestarts: 2,
     maxManualRetries: 1,
     linuxKeyringVerificationRoot: options.linuxKeyringVerificationRoot,

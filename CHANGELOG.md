@@ -27,8 +27,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Changed
 
-- Hardened packaged sidecar integrity, startup, shutdown, SQLCipher migration,
-  process-tree supervision, and native Windows ARM64 and Linux verification.
+- Hardened packaged sidecar integrity, startup, authenticated graceful shutdown,
+  SQLCipher migration, process-tree supervision, and native Windows ARM64 and
+  Linux verification.
 - Expanded Ruff 0.16.1 rules in reviewed batches while retaining provider-import,
   Pydantic, GEDCOM, cross-platform, and cancellation regression contracts.
 - Completed the Diátaxis documentation cutover, deterministic Pages and Wiki

@@ -62,6 +62,7 @@ const CONSENT_PREVIEW_PATH = '/api/v1/consents/preview' as const
 const CONSENTS_PATH = '/api/v1/consents' as const
 const JOBS_PATH = '/api/v1/jobs' as const
 const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
+const RUNTIME_SHUTDOWN_PATH = '/api/v1/runtime/shutdown' as const
 const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
 const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
 const MAX_RESPONSE_BYTES = 1_048_576
@@ -82,6 +83,7 @@ type SidecarPath =
   | typeof CONSENTS_PATH
   | typeof JOBS_PATH
   | typeof JOB_SHUTDOWN_PATH
+  | typeof RUNTIME_SHUTDOWN_PATH
   | typeof CHAT_CAPABILITY_PATH
   | typeof CHAT_SESSIONS_PATH
   | `/api/v1/jobs/${string}`
@@ -353,6 +355,23 @@ function requestFixedRoute(
     if (body !== undefined) request.write(body)
     request.end()
   })
+}
+
+/** Requests a bodyless graceful shutdown from the authenticated packaged sidecar. */
+export async function requestSidecarRuntimeShutdown(
+  session: Readonly<AuthenticatedSidecarSession>,
+  request: SidecarRequest = requestFixedRoute,
+): Promise<void> {
+  let response: SidecarHttpResponse
+  try {
+    response = await request(session, RUNTIME_SHUTDOWN_PATH, undefined, { method: 'POST' })
+  } catch (error) {
+    if (error instanceof SidecarClientError) throw error
+    throw new SidecarClientError('request_failed')
+  }
+  if (response.statusCode !== 204 || response.body !== '') {
+    throw new SidecarClientError('invalid_response')
+  }
 }
 
 function secretPath(reference: SecretReference, operation: SecretOperation): SidecarPath {

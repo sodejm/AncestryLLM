@@ -132,7 +132,10 @@ does not add a production credential fallback or weaken keyring-only startup.
    current consent, bounded-input, and provider preflight checks succeed. It
    still has no generic route dispatcher. Issue #111 adds only fixed
    stream-start, session/run-owned SSE-event, and stream-cancel operations for
-   the same bounded use case.
+   the same bounded use case. Packaged composition also adds one hidden,
+   bodyless `/api/v1/runtime/shutdown` route that only Electron Main can call
+   with the active session credentials; it admits no application work and is
+   omitted from generated OpenAPI.
 6. It emits one bounded readiness line containing only the contract, sidecar
    build, and assigned port. Electron validates all three fields and verifies a
    token-derived HMAC health proof before marking the private session ready.
@@ -140,8 +143,12 @@ does not add a production credential fallback or weaken keyring-only startup.
 Contract or build mismatch fails closed without restart. Startup and probe
 work are bounded to 10 seconds. Other launch failures and unexpected crashes
 receive at most two restart attempts for the application lifetime. Application
-quit allows up to 12 seconds for Uvicorn's configured 10-second graceful
-shutdown, then force-kills and performs a bounded final exit-observation wait.
+quit first invalidates the public active session, then gives the captured
+Main-only session up to three seconds to request authenticated, bodyless
+runtime shutdown. Uvicorn begins its configured graceful drain, and Electron
+allows up to three more seconds to observe the sidecar leader exit. A `204`
+response alone is never termination proof. If the request fails or the leader
+remains live, Electron uses the existing bounded forced process-tree path.
 POSIX launches use a detached process group and signal the full group even if
 its leader already exited. On Windows, the sidecar assigns itself to a
 non-inheritable, kill-on-close Job Object before reading bootstrap input, while
@@ -158,7 +165,8 @@ retries transient filesystem errors at most five times with a 100-millisecond
 linear delay; a persistent cleanup failure still vetoes application exit. No
 sidecar is started by the development mock shell.
 
-Electron bounds the complete supervisor stop to 15 seconds, including any
+Electron bounds the complete supervisor stop to 20 seconds, including the
+graceful request and exit observation, any
 launch already in flight and all verified process-tree termination. Exceeding
 that deadline fails closed and leaves the supervisor unavailable instead of
 allowing application shutdown to wait indefinitely.
@@ -166,7 +174,9 @@ allowing application shutdown to wait indefinitely.
 The sidecar creates its SQLCipher-backed job repository only when startup
 diagnostics permit database access. It reconciles any persisted nonterminal
 snapshot to exactly one failed `JOB_INTERRUPTED` terminal state at startup; it
-never automatically replays side-effecting work. Shutdown drains the Uvicorn
+never automatically replays side-effecting work. The private runtime shutdown
+callback sets Uvicorn's graceful-exit signal only after the authenticated,
+bodyless request reaches its exact route. Shutdown drains the Uvicorn
 server task and loopback listener, child stdio, the supervised process tree,
 Electron's private temporary working directory, and the encrypted provider and
 job database sessions. Issue #110 also closes the chat service before its

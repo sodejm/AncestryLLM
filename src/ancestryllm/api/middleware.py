@@ -113,6 +113,8 @@ def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePoli
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/jobs/shutdown":
         return _RoutePolicy("POST", accepts_json=True)
+    if path == f"{API_NAMESPACE}/runtime/shutdown":
+        return _RoutePolicy("POST")
     job_match = _JOB_ROUTE.fullmatch(path)
     if job_match is not None:
         operation = job_match.group("operation")
