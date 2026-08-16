@@ -24,7 +24,7 @@ const TERMINATION_TIMEOUT_MS = 12_000
 const FORCE_TERMINATION_TIMEOUT_MS = 1000
 const WINDOWS_TREE_COMMAND_TIMEOUT_MS = 4_000
 const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
-const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 3_000
+const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 10_000
 const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
 const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
@@ -351,6 +351,9 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
         // the bounded process-tree terminator below preserves fail-closed cleanup.
       }
       if (await waitForChildExit(this.child, this.gracefulShutdownExitTimeoutMs)) {
+        if (this.platform !== 'win32') {
+          await this.terminateProcess(this.child)
+        }
         await this.removeOwnedWorkingDirectory()
         return
       }
