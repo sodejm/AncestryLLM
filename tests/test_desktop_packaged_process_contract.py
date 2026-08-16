@@ -93,7 +93,17 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     close_end = source.index("\nasync function launchPackaged", close_start)
     close_source = source[close_start:close_end]
 
-    assert "const packagedQuitRetryDelayMs = 20_000" in source
+    packaged_retry_match = re.search(
+        r"const packagedQuitRetryDelayMs = (?P<milliseconds>[\d_]+)", source
+    )
+    production_shutdown_match = re.search(
+        r"shutdownTimeoutMs: (?P<milliseconds>[\d_]+)", runtime_bridge_source
+    )
+    assert packaged_retry_match is not None
+    assert production_shutdown_match is not None
+    packaged_retry_ms = int(packaged_retry_match.group("milliseconds").replace("_", ""))
+    production_shutdown_ms = int(production_shutdown_match.group("milliseconds").replace("_", ""))
+    assert packaged_retry_ms > production_shutdown_ms
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
     platform_index = close_source.index("process.platform === 'darwin'")

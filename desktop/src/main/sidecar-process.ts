@@ -350,10 +350,14 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
         // The observed process exit remains authoritative. If the request fails,
         // the bounded process-tree terminator below preserves fail-closed cleanup.
       }
-      if (await waitForChildExit(this.child, this.gracefulShutdownExitTimeoutMs)) {
-        if (this.platform !== 'win32') {
-          await this.terminateProcess(this.child)
-        }
+      const leaderExited = await waitForChildExit(
+        this.child,
+        this.gracefulShutdownExitTimeoutMs,
+      )
+      if (leaderExited && this.platform === 'win32') {
+        // The packaged Windows sidecar's kill-on-close Job Object is released
+        // with the leader. POSIX has no equivalent containment guarantee, so it
+        // must still probe and, if necessary, terminate the detached group.
         await this.removeOwnedWorkingDirectory()
         return
       }
