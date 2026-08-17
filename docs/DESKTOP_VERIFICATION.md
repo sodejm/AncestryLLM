@@ -230,8 +230,9 @@ production signal-to-quit path. Its named handler is installed before
 asynchronous runtime startup and idempotently re-armed when the Electron-ready
 runtime takes ownership, preventing initialization from restoring the signal's
 immediate-termination default. If that first request has not produced a verified
-exit after 20 seconds—the production supervisor's complete stop boundary—the
-harness sends one later `SIGTERM` and waits under a separate 30-second deadline.
+exit after 21 seconds—strictly beyond the production supervisor's complete
+20-second stop boundary—the harness sends one later `SIGTERM` and waits under a
+separate 30-second deadline.
 This exercises the production contract that a failed stop remains fail-closed
 but does not leave a rejected shutdown promise cached forever. A second failure
 still fails the packaged test; force termination is reserved for test cleanup.

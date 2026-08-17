@@ -28,6 +28,11 @@ const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 10_000
 const SHUTDOWN_DEADLINE_MARGIN_MS = 500
 const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
 const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
+const WINDOWS_DIRECTORY_CLEANUP_RETRY_BACKOFF_MS =
+  WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS
+  * WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES
+  * (WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES + 1)
+  / 2
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
 
 type WindowsTreeKillExecutor = (
@@ -371,7 +376,9 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
       }
       if (requestSucceeded) {
         const forcedTerminationReserveMs = this.platform === 'win32'
-          ? WINDOWS_TREE_COMMAND_TIMEOUT_MS + WINDOWS_TREE_EXIT_TIMEOUT_MS
+          ? WINDOWS_TREE_COMMAND_TIMEOUT_MS
+            + WINDOWS_TREE_EXIT_TIMEOUT_MS
+            + WINDOWS_DIRECTORY_CLEANUP_RETRY_BACKOFF_MS
           : FORCE_TERMINATION_TIMEOUT_MS
         const leaderExitTimeoutMs = Math.min(
           this.gracefulShutdownExitTimeoutMs,

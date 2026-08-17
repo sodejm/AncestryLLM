@@ -146,9 +146,14 @@ receive at most two restart attempts for the application lifetime. Application
 quit first invalidates the public active session, then gives the captured
 Main-only session up to three seconds to request authenticated, bodyless
 runtime shutdown. Uvicorn begins its configured graceful drain, and Electron
-allows up to three more seconds to observe the sidecar leader exit. A `204`
-response alone is never termination proof. If the request fails or the leader
-remains live, Electron uses the existing bounded forced process-tree path.
+allows up to 10 seconds on POSIX to observe the sidecar leader exit. On Windows,
+leader observation consumes only the shared deadline remaining after reserving
+four seconds for `taskkill.exe`, five seconds for forced leader-exit
+observation, 1.5 seconds for linear directory-cleanup retry backoff, and a
+500-millisecond scheduling margin. A full three-second shutdown request
+therefore leaves up to six seconds for the first Windows leader observation. A
+`204` response alone is never termination proof. If the request fails or the
+leader remains live, Electron uses the existing bounded forced process-tree path.
 POSIX launches use a detached process group and signal the full group even if
 its leader already exited. On Windows, the sidecar assigns itself to a
 non-inheritable, kill-on-close Job Object before reading bootstrap input, while

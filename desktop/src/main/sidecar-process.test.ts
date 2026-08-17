@@ -90,6 +90,41 @@ describe('native sidecar process termination', () => {
     }
   })
 
+  it('reserves the complete Windows cleanup retry backoff before forced fallback', async () => {
+    vi.useFakeTimers()
+    try {
+      const child = new FakeChild()
+      const terminateProcess = vi.fn().mockResolvedValue(undefined)
+      const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+      const sidecar = new NativeRunningSidecar(
+        child as never,
+        'C:\\Users\\runner\\AppData\\Local\\Temp\\ancestryllm-sidecar-sensitive',
+        terminateProcess,
+        removeWorkingDirectory,
+        'win32',
+      )
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+      )
+      await sidecar.ready
+      const requestGracefulShutdown = vi.fn().mockResolvedValue(undefined)
+
+      const termination = sidecar.terminate(requestGracefulShutdown)
+      await vi.advanceTimersByTimeAsync(9_000)
+      const fellBackWithCleanupReserve = terminateProcess.mock.calls.length === 1
+      await vi.runAllTimersAsync()
+      await expect(termination).resolves.toBeUndefined()
+
+      expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+      expect(fellBackWithCleanupReserve).toBe(true)
+      expect(terminateProcess).toHaveBeenCalledWith(child, 9_500)
+      expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('falls back to bounded process-tree termination after graceful shutdown fails', async () => {
     vi.useFakeTimers()
     try {
