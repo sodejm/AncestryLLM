@@ -80,3 +80,28 @@
   one by either validating/fixing the issue or adding a clear justification.
 - Before completion, check behavior, tests, documentation, dead code, and relevant quality/security gates.
 - Link and close an issue only when the change fully satisfies its acceptance criteria.
+
+## Pull-request code review
+
+- For every non-draft pull request, request only Codex code review. Post one
+  top-level `@codex review` request for the current exact head; do not request
+  GitHub Copilot Code Review, mention `@copilot`, or hand work to a Copilot
+  coding agent.
+- Before requesting review, and again before every review-related write,
+  confirm `isDraft == false` and record the current head SHA. Treat a draft,
+  unknown, or unrefreshable state as a fail-closed stop. Do not mark a pull
+  request ready for review on a human's behalf.
+- Wait for the requested Codex review to reach a terminal result before treating
+  review as complete. Poll the exact-head review and review threads for up to
+  five minutes; if Codex remains pending or unavailable, report that state and
+  do not represent the pull request as clean.
+- After Codex completes, inspect all unresolved, non-outdated review threads.
+  Validate each issue against the exact head, implement and test supported
+  fixes, and resolve the conversation only after the issue is fixed or a clear
+  evidence-backed justification has been recorded. Do not resolve unsupported,
+  stale, ambiguous, or security-sensitive findings without the appropriate
+  human decision or private security process.
+- A head change invalidates prior review evidence. After resolving review work
+  that changes the head, request one fresh Codex review and wait for it before
+  closeout; report any remaining or new issues for a human decision rather than
+  starting an unbounded review loop.
