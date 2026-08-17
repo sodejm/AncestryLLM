@@ -25,6 +25,7 @@ const FORCE_TERMINATION_TIMEOUT_MS = 1000
 const WINDOWS_TREE_COMMAND_TIMEOUT_MS = 4_000
 const WINDOWS_TREE_EXIT_TIMEOUT_MS = 5_000
 const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 10_000
+const SHUTDOWN_DEADLINE_MARGIN_MS = 500
 const WINDOWS_DIRECTORY_CLEANUP_MAX_RETRIES = 5
 const WINDOWS_DIRECTORY_CLEANUP_RETRY_DELAY_MS = 100
 const PROCESS_GROUP_POLL_INTERVAL_MS = 50
@@ -39,6 +40,7 @@ type WindowsTreeKillExecutor = (
 type WindowsTreeTerminator = (pid: number) => Promise<void>
 type NativeProcessTerminator = (
   child: ChildProcessWithoutNullStreams,
+  gracefulTimeoutMs: number,
 ) => Promise<void>
 type WorkingDirectoryRemover = (
   path: string,
@@ -57,6 +59,9 @@ export interface PosixProcessGroupController {
 }
 
 type ProcessKill = (pid: number, signal?: string | number) => boolean
+
+/** Keeps native cleanup within the supervisor's single shutdown deadline. */
+export const NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS = 20_000
 
 /** Creates a controller that targets a detached process group rather than only its leader. */
 export function createPosixProcessGroupController(
@@ -321,10 +326,20 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly workingDirectory: string,
-    private readonly terminateProcess: NativeProcessTerminator = terminateNativeSidecarProcess,
+    private readonly terminateProcess: NativeProcessTerminator = (
+      child,
+      gracefulTimeoutMs,
+    ) => terminateNativeSidecarProcess(
+      child,
+      process.platform,
+      undefined,
+      undefined,
+      gracefulTimeoutMs,
+    ),
     private readonly removeWorkingDirectory: WorkingDirectoryRemover = rm,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly gracefulShutdownExitTimeoutMs: number = GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS,
+    private readonly shutdownTimeoutMs: number = NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS,
   ) {
     super()
     this.ready = readiness(child)
@@ -343,26 +358,47 @@ export class NativeRunningSidecar extends EventEmitter implements RunningSidecar
   }
 
   private async terminateOnce(requestGracefulShutdown?: () => Promise<void>): Promise<void> {
+    const deadline = Date.now()
+      + Math.max(0, this.shutdownTimeoutMs - SHUTDOWN_DEADLINE_MARGIN_MS)
     if (requestGracefulShutdown !== undefined) {
+      let requestSucceeded = false
       try {
         await requestGracefulShutdown()
+        requestSucceeded = true
       } catch {
         // The observed process exit remains authoritative. If the request fails,
         // the bounded process-tree terminator below preserves fail-closed cleanup.
       }
-      const leaderExited = await waitForChildExit(
-        this.child,
-        this.gracefulShutdownExitTimeoutMs,
-      )
-      if (leaderExited && this.platform === 'win32') {
-        // The packaged Windows sidecar's kill-on-close Job Object is released
-        // with the leader. POSIX has no equivalent containment guarantee, so it
-        // must still probe and, if necessary, terminate the detached group.
-        await this.removeOwnedWorkingDirectory()
-        return
+      if (requestSucceeded) {
+        const forcedTerminationReserveMs = this.platform === 'win32'
+          ? WINDOWS_TREE_COMMAND_TIMEOUT_MS + WINDOWS_TREE_EXIT_TIMEOUT_MS
+          : FORCE_TERMINATION_TIMEOUT_MS
+        const leaderExitTimeoutMs = Math.min(
+          this.gracefulShutdownExitTimeoutMs,
+          Math.max(0, deadline - Date.now() - forcedTerminationReserveMs),
+        )
+        const leaderExited = (
+          this.child.exitCode !== null
+          || this.child.signalCode !== null
+          || (
+            leaderExitTimeoutMs > 0
+            && await waitForChildExit(this.child, leaderExitTimeoutMs)
+          )
+        )
+        if (leaderExited && this.platform === 'win32') {
+          // The packaged Windows sidecar's kill-on-close Job Object is released
+          // with the leader. POSIX has no equivalent containment guarantee, so it
+          // must still probe and, if necessary, terminate the detached group.
+          await this.removeOwnedWorkingDirectory()
+          return
+        }
       }
     }
-    await this.terminateProcess(this.child)
+    const gracefulTerminationTimeoutMs = Math.min(
+      TERMINATION_TIMEOUT_MS,
+      Math.max(0, deadline - Date.now() - FORCE_TERMINATION_TIMEOUT_MS),
+    )
+    await this.terminateProcess(this.child, gracefulTerminationTimeoutMs)
     await this.removeOwnedWorkingDirectory()
   }
 

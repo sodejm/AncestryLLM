@@ -91,31 +91,40 @@ describe('native sidecar process termination', () => {
   })
 
   it('falls back to bounded process-tree termination after graceful shutdown fails', async () => {
-    const child = new FakeChild()
-    const terminateProcess = vi.fn().mockResolvedValue(undefined)
-    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
-    const sidecar = new NativeRunningSidecar(
-      child as never,
-      '/private/ancestryllm-sidecar-sensitive',
-      terminateProcess,
-      removeWorkingDirectory,
-      'linux',
-      0,
-    )
-    child.stdout.emit(
-      'data',
-      Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
-    )
-    await sidecar.ready
-    const requestGracefulShutdown = vi.fn().mockRejectedValue(
-      new Error('/private/graceful-shutdown-failure'),
-    )
+    vi.useFakeTimers()
+    try {
+      const child = new FakeChild()
+      const terminateProcess = vi.fn().mockResolvedValue(undefined)
+      const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+      const sidecar = new NativeRunningSidecar(
+        child as never,
+        '/private/ancestryllm-sidecar-sensitive',
+        terminateProcess,
+        removeWorkingDirectory,
+        'linux',
+      )
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+      )
+      await sidecar.ready
+      const requestGracefulShutdown = vi.fn().mockRejectedValue(
+        new Error('/private/graceful-shutdown-failure'),
+      )
 
-    await expect(sidecar.terminate(requestGracefulShutdown)).resolves.toBeUndefined()
+      const termination = sidecar.terminate(requestGracefulShutdown)
+      await vi.advanceTimersByTimeAsync(0)
+      const skippedLeaderExitWait = terminateProcess.mock.calls.length === 1
+      await vi.runAllTimersAsync()
+      await expect(termination).resolves.toBeUndefined()
 
-    expect(requestGracefulShutdown).toHaveBeenCalledOnce()
-    expect(terminateProcess).toHaveBeenCalledOnce()
-    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+      expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+      expect(skippedLeaderExitWait).toBe(true)
+      expect(terminateProcess).toHaveBeenCalledOnce()
+      expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('verifies the POSIX process group after a graceful leader exit', async () => {
@@ -148,29 +157,35 @@ describe('native sidecar process termination', () => {
   })
 
   it('falls back when graceful shutdown succeeds without an observed exit', async () => {
-    const child = new FakeChild()
-    const terminateProcess = vi.fn().mockResolvedValue(undefined)
-    const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
-    const sidecar = new NativeRunningSidecar(
-      child as never,
-      '/private/ancestryllm-sidecar-sensitive',
-      terminateProcess,
-      removeWorkingDirectory,
-      'linux',
-      0,
-    )
-    child.stdout.emit(
-      'data',
-      Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
-    )
-    await sidecar.ready
-    const requestGracefulShutdown = vi.fn().mockResolvedValue(undefined)
+    vi.useFakeTimers()
+    try {
+      const child = new FakeChild()
+      const terminateProcess = vi.fn().mockResolvedValue(undefined)
+      const removeWorkingDirectory = vi.fn().mockResolvedValue(undefined)
+      const sidecar = new NativeRunningSidecar(
+        child as never,
+        '/private/ancestryllm-sidecar-sensitive',
+        terminateProcess,
+        removeWorkingDirectory,
+        'linux',
+      )
+      child.stdout.emit(
+        'data',
+        Buffer.from('{"contract":"test","port":4242,"sidecar_build":"test"}\n'),
+      )
+      await sidecar.ready
+      const requestGracefulShutdown = vi.fn().mockResolvedValue(undefined)
 
-    await expect(sidecar.terminate(requestGracefulShutdown)).resolves.toBeUndefined()
+      const termination = sidecar.terminate(requestGracefulShutdown)
+      await vi.advanceTimersByTimeAsync(10_000)
+      await expect(termination).resolves.toBeUndefined()
 
-    expect(requestGracefulShutdown).toHaveBeenCalledOnce()
-    expect(terminateProcess).toHaveBeenCalledOnce()
-    expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+      expect(requestGracefulShutdown).toHaveBeenCalledOnce()
+      expect(terminateProcess).toHaveBeenCalledWith(child, 8_500)
+      expect(removeWorkingDirectory).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('retries native cleanup after a failed termination attempt', async () => {

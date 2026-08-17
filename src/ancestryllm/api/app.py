@@ -552,7 +552,12 @@ def create_app(
         redirect_slashes=False,
         lifespan=lifespan,
     )
-    app.add_middleware(InternalApiMiddleware, settings=settings, surface=surface)
+    app.add_middleware(
+        InternalApiMiddleware,
+        settings=settings,
+        surface=surface,
+        runtime_shutdown_enabled=runtime_shutdown is not None,
+    )
     diagnostics_provider = startup_diagnostics or _default_startup_diagnostics
 
     def assert_mutations_allowed() -> None:

@@ -82,7 +82,11 @@ class _RoutePolicy:
     accepts_json: bool = False
 
 
-def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePolicy | None:
+def _route_policy(
+    path: str,
+    surface: Literal["control", "probe"],
+    runtime_shutdown_enabled: bool,
+) -> _RoutePolicy | None:
     if path in {
         f"{API_NAMESPACE}/health",
         f"{API_NAMESPACE}/capabilities",
@@ -113,7 +117,7 @@ def _route_policy(path: str, surface: Literal["control", "probe"]) -> _RoutePoli
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/jobs/shutdown":
         return _RoutePolicy("POST", accepts_json=True)
-    if path == f"{API_NAMESPACE}/runtime/shutdown":
+    if runtime_shutdown_enabled and path == f"{API_NAMESPACE}/runtime/shutdown":
         return _RoutePolicy("POST")
     job_match = _JOB_ROUTE.fullmatch(path)
     if job_match is not None:
@@ -192,6 +196,7 @@ def _validate_request(
     scope: Scope,
     settings: ApiSettings,
     surface: Literal["control", "probe"],
+    runtime_shutdown_enabled: bool,
 ) -> _RoutePolicy:
     headers = _header_map(scope)
     _authenticate(headers, settings)
@@ -221,7 +226,7 @@ def _validate_request(
         )
 
     path = cast("str", scope.get("path", ""))
-    policy = _route_policy(path, surface)
+    policy = _route_policy(path, surface, runtime_shutdown_enabled)
     if policy is None:
         raise request_error(
             404, "ROUTE_UNAVAILABLE", "The requested internal API route is unavailable."
@@ -350,10 +355,12 @@ class InternalApiMiddleware:
         *,
         settings: ApiSettings,
         surface: Literal["control", "probe"] = "control",
+        runtime_shutdown_enabled: bool = False,
     ) -> None:
         self._app = app
         self._settings = settings
         self._surface = surface
+        self._runtime_shutdown_enabled = runtime_shutdown_enabled
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Apply internal request policy before delegating to the wrapped ASGI app."""
@@ -366,7 +373,12 @@ class InternalApiMiddleware:
         state["correlation_ref"] = correlation_ref
         secured_send = self._secured_send(send, correlation_ref)
         try:
-            policy = _validate_request(scope, self._settings, self._surface)
+            policy = _validate_request(
+                scope,
+                self._settings,
+                self._surface,
+                self._runtime_shutdown_enabled,
+            )
             if policy.accepts_json:
                 receive = await _buffer_bounded_body(
                     receive,

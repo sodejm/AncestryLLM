@@ -10,7 +10,11 @@ import {
   type JobShutdownAction,
 } from './sidecar-client'
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
-import { launchNativeSidecar, probeNativeSidecar } from './sidecar-process'
+import {
+  launchNativeSidecar,
+  NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS,
+  probeNativeSidecar,
+} from './sidecar-process'
 import {
   resolveSidecarExecutable,
   resolveSidecarTargetRoot,
@@ -73,7 +77,7 @@ export async function startRuntimeBridge(
     probe: probeNativeSidecar,
     requestShutdown: requestSidecarRuntimeShutdown,
     startupTimeoutMs: 10_000,
-    shutdownTimeoutMs: 20_000,
+    shutdownTimeoutMs: NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS,
     maxRestarts: 2,
     maxManualRetries: 1,
     linuxKeyringVerificationRoot: options.linuxKeyringVerificationRoot,

@@ -11,6 +11,7 @@ PACKAGED_NATIVE_VERIFICATION = (
 MAIN_INDEX = ROOT / "desktop" / "src" / "main" / "index.ts"
 PRODUCTION_NATIVE_VERIFICATION = ROOT / "desktop" / "src" / "main" / "native-verification.ts"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
+SIDECAR_PROCESS = ROOT / "desktop" / "src" / "main" / "sidecar-process.ts"
 SIDECAR_SUPERVISOR = ROOT / "desktop" / "src" / "main" / "sidecar-supervisor.ts"
 DESKTOP_WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
 
@@ -83,6 +84,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
+    sidecar_process_source = SIDECAR_PROCESS.read_text(encoding="utf-8")
     windows_close_start = source.index("async function requestWindowsPackagedWindowClose")
     windows_close_end = source.index("\nasync function requestMacPackagedQuit", windows_close_start)
     windows_close_source = source[windows_close_start:windows_close_end]
@@ -97,13 +99,16 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         r"const packagedQuitRetryDelayMs = (?P<milliseconds>[\d_]+)", source
     )
     production_shutdown_match = re.search(
-        r"shutdownTimeoutMs: (?P<milliseconds>[\d_]+)", runtime_bridge_source
+        r"export const NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS = "
+        r"(?P<milliseconds>[\d_]+)",
+        sidecar_process_source,
     )
     assert packaged_retry_match is not None
     assert production_shutdown_match is not None
     packaged_retry_ms = int(packaged_retry_match.group("milliseconds").replace("_", ""))
     production_shutdown_ms = int(production_shutdown_match.group("milliseconds").replace("_", ""))
     assert packaged_retry_ms > production_shutdown_ms
+    assert "shutdownTimeoutMs: NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS" in runtime_bridge_source
     assert "const packagedQuitTimeoutMs = 30_000" in source
     assert "waitForProcessExit(result.process, 15_000)" not in close_source
     platform_index = close_source.index("process.platform === 'darwin'")
