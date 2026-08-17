@@ -12,6 +12,7 @@ import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 import {
   SidecarClientError,
   createSidecarCapabilitiesClient,
+  requestSidecarRuntimeShutdown,
   type SidecarClientFailure,
 } from './sidecar-client'
 
@@ -199,6 +200,34 @@ describe('main-only sidecar capabilities client', () => {
         method: 'POST',
         body: JSON.stringify({ schema_version: 1, action: 'wait', timeout_seconds: 2 }),
       },
+    )
+  })
+
+  it('requests runtime shutdown through the fixed authenticated bodyless route', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 204,
+      contentType: '',
+      body: '',
+    })
+
+    await expect(requestSidecarRuntimeShutdown(session, request)).resolves.toBeUndefined()
+    expect(request).toHaveBeenCalledWith(
+      session,
+      '/api/v1/runtime/shutdown',
+      undefined,
+      { method: 'POST' },
+    )
+  })
+
+  it('fails closed when runtime shutdown does not return an empty 204 response', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      contentType: 'application/json',
+      body: '{}',
+    })
+
+    await expect(requestSidecarRuntimeShutdown(session, request)).rejects.toEqual(
+      new SidecarClientError('invalid_response'),
     )
   })
 

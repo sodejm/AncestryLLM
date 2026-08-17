@@ -13,7 +13,9 @@ import {
 import { SidecarIntegrityError, verifySidecarPayload } from './sidecar-integrity'
 
 class FakeSidecar extends EventEmitter implements RunningSidecar {
-  readonly terminate = vi.fn(async () => undefined)
+  readonly terminate = vi.fn(async (requestGracefulShutdown?: () => Promise<void>) => {
+    await requestGracefulShutdown?.()
+  })
   readonly ready: Promise<{ contract: string; sidecar_build: string; port: number }>
 
   constructor(ready: Promise<{ contract: string; sidecar_build: string; port: number }>) {
@@ -524,6 +526,28 @@ describe('SidecarSupervisor', () => {
 
     await Promise.all([supervisor.stop(), supervisor.stop()])
     expect(sidecar.terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates the active session before requesting authenticated graceful shutdown', async () => {
+    const sidecar = new FakeSidecar(Promise.resolve(ready))
+    const requestShutdown = vi.fn(async (capturedSession) => {
+      expect(supervisor.session()).toBeUndefined()
+      expect(supervisor.diagnostics().state).toBe('stopping')
+      expect(capturedSession.bearerToken).toBe('T'.repeat(43))
+    })
+    const supervisor = new SidecarSupervisor({
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => sidecar,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      requestShutdown,
+      startupTimeoutMs: 100, maxRestarts: 2,
+    })
+    await supervisor.start()
+
+    await supervisor.stop()
+
+    expect(requestShutdown).toHaveBeenCalledOnce()
+    expect(typeof sidecar.terminate.mock.calls[0]?.[0]).toBe('function')
   })
 
   it('fails shutdown closed when process-tree termination cannot be verified', async () => {

@@ -136,6 +136,71 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
     }
 
 
+def test_packaged_sidecar_runtime_shutdown_is_authenticated_bodyless_and_private(
+    tmp_path: Path,
+) -> None:
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+    )
+    request_runtime_shutdown = Mock()
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+        request_runtime_shutdown=request_runtime_shutdown,
+    )
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8421") as client:
+        unauthenticated = client.post("/api/v1/runtime/shutdown")
+        with_body = client.post(
+            "/api/v1/runtime/shutdown",
+            headers=headers,
+            json={},
+        )
+        accepted = client.post("/api/v1/runtime/shutdown", headers=headers)
+
+    assert unauthenticated.status_code == 401
+    assert with_body.status_code == 415
+    assert with_body.json()["code"] == "REQUEST_CONTENT_TYPE_FORBIDDEN"
+    assert accepted.status_code == 204
+    assert accepted.content == b""
+    assert "/api/v1/runtime/shutdown" not in app.openapi()["paths"]
+    request_runtime_shutdown.assert_called_once_with()
+
+
+def test_packaged_sidecar_runtime_shutdown_is_unavailable_without_callback(
+    tmp_path: Path,
+) -> None:
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+    )
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+    )
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8421") as client:
+        response = client.post("/api/v1/runtime/shutdown", headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "ROUTE_UNAVAILABLE"
+
+
 def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Path) -> None:
     frame = LaunchFrame(
         contract=API_CONTRACT,

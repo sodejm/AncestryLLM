@@ -344,6 +344,7 @@ def create_sidecar_app(
     *,
     config: AppConfig | None = None,
     secret_store: SecretStore | None = None,
+    request_runtime_shutdown: Callable[[], None] | None = None,
 ) -> FastAPI:
     """Compose the packaged sidecar with only bounded control-plane routes."""
 
@@ -420,6 +421,7 @@ def create_sidecar_app(
         mutations_allowed=lambda: startup_report().mutations_allowed,
         job_service=lifecycle.jobs,
         job_shutdown=lifecycle.prepare_job_shutdown,
+        runtime_shutdown=request_runtime_shutdown,
     )
 
 
@@ -434,7 +436,16 @@ def _packaged_fallback_config() -> AppConfig:
 
 async def _serve(frame: LaunchFrame) -> int:
     listener = create_listener()
-    server = Server(create_uvicorn_config(create_sidecar_app(frame)))
+    server: Server
+
+    def request_runtime_shutdown() -> None:
+        server.should_exit = True
+
+    server = Server(
+        create_uvicorn_config(
+            create_sidecar_app(frame, request_runtime_shutdown=request_runtime_shutdown)
+        )
+    )
     serve_task = asyncio.create_task(server.serve(sockets=[listener]))
     try:
         async with asyncio.timeout(STARTUP_TIMEOUT_SECONDS):

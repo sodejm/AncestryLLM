@@ -27,7 +27,7 @@ const packagedAttachTimeoutMs = 45_000
 const packagedLaunchTimeoutMs = 120_000
 const packagedCleanupTimeoutMs = 10_000
 const packagedWindowCloseTimeoutMs = 20_000
-const packagedQuitRetryDelayMs = 20_000
+const packagedQuitRetryDelayMs = 21_000
 const packagedQuitTimeoutMs = 30_000
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
@@ -442,7 +442,7 @@ async function requestMacPackagedQuit(
   try {
     return await initialExit
   } catch {
-    // Production bounds a sidecar stop at 15 seconds and deliberately leaves a
+    // Production bounds a sidecar stop at 20 seconds and deliberately leaves a
     // rejected shutdown retryable. Wait beyond that boundary, then exercise the
     // later native quit request that must start a fresh verified stop attempt.
     const retryExit = waitForProcessExit(child, packagedQuitTimeoutMs, shutdownDiagnostics)

@@ -214,7 +214,12 @@ exposed an authenticated session. Electron owns that supervisor before
 asynchronous verification or launch, and shutdown cancels pre-spawn work and
 drains any launch already in flight. Losing a previously exposed session never
 restores the empty shortcut. The IPC boundary remains intact when sidecar
-shutdown fails, allowing a subsequent bounded recovery attempt.
+shutdown fails, allowing a subsequent bounded recovery attempt. Once jobs are
+safe, Main invalidates the public sidecar session before making one exact,
+authenticated, bodyless runtime-shutdown request with captured credentials. It
+must independently observe the sidecar exit; a response alone cannot authorize
+application exit, and the bounded full-tree termination path remains the
+fail-closed fallback.
 
 ## Source-level gated transient-chat foundation
 
