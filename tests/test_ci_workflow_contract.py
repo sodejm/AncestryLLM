@@ -239,7 +239,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
     assert 'node-version: "26.5.0"' in job
-    assert "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8" in job
+    assert "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10" in job
     assert 'version: "11.9.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.8",
@@ -510,7 +510,7 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
     setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
-    setup_pnpm = "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093"
+    setup_pnpm = "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86"
 
     for quality_job in (ci_quality, readiness_quality):
         assert quality_job.count("make lint") == 1
