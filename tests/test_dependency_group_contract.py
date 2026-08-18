@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_GROUPS = {
     "lint": ["markdown-it-py>=4,<5", "ruff>=0.15,<1", "pre-commit>=4.5,<5"],
-    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.69"],
+    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.70"],
     "test": [
         "coverage[toml]>=7.12,<8",
         "pytest>=9,<10",
@@ -28,7 +28,7 @@ EXPECTED_GROUPS = {
         "build>=1.3,<2",
         "check-wheel-contents>=0.6.1,<1",
         "packaging>=25,<27",
-        "setuptools>=83,<84",
+        "setuptools>=83,<85",
         "twine>=6.2,<8",
         "uv_build>=0.12.0,<0.13",
         "wheel>=0.45,<1",
@@ -38,15 +38,15 @@ EXPECTED_GROUPS = {
 
 EXPECTED_EXTRAS = {
     "ollama": ["ollama>=0.6,<1"],
-    "openai": ["openai>=2.45,<3"],
+    "openai": ["openai>=2.45,<4"],
     "anthropic": ["anthropic>=0.71,<1"],
     "gemini": ["google-genai>=2.12,<3"],
-    "openrouter": ["openai>=2.45,<3"],
+    "openrouter": ["openai>=2.45,<4"],
     "all-llm": [
         "anthropic>=0.71,<1",
         "google-genai>=2.12,<3",
         "ollama>=0.6,<1",
-        "openai>=2.45,<3",
+        "openai>=2.45,<4",
     ],
     "desktop-build": ["pyinstaller>=6.17,<7"],
 }
@@ -66,14 +66,14 @@ OLD_DEV_DEPENDENCIES = {
     "pytest-cov>=7,<8",
     "pytest-mock>=3.15,<4",
     "ruff>=0.15,<1",
-    "setuptools>=83,<84",
+    "setuptools>=83,<85",
     "twine>=6.2,<8",
     "types-python-dateutil>=2.9,<3",
     "uv==0.12.1",
     "wheel>=0.45,<1",
     "zizmor==1.29.0",
 }
-NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.69"}
+NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.70"}
 NEW_BUILD_EVALUATION_DEPENDENCIES = {"uv_build>=0.12.0,<0.13"}
 NEW_DOCS_SCREENSHOT_DEPENDENCIES = {"markdown-it-py>=4,<5"}
 
