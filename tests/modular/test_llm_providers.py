@@ -108,7 +108,7 @@ class CompletionStream:
         yield from self.chunks
 
 
-def test_openai_client_configures_all_timeout_phases_and_disables_retries(
+def test_openai_client_configures_scalar_timeout_and_disables_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -124,7 +124,7 @@ def test_openai_client_configures_all_timeout_phases_and_disables_retries(
     OpenAIProvider("key")._client(12.5)
 
     assert captured["max_retries"] == 0
-    assert_all_phase_timeout(captured["timeout"], 12.5)
+    assert captured["timeout"] == 12.5
 
 
 def test_anthropic_client_configures_all_timeout_phases_and_disables_retries(
@@ -220,7 +220,7 @@ def test_openai_generate_passes_request_timeout_and_closes_client(
     assert provider.generate(request("openai")).text == "answer"
 
     assert client.closed
-    assert_all_phase_timeout(captured["timeout"], 12.5)
+    assert captured["timeout"] == 12.5
     assert captured["max_completion_tokens"] == 23
 
 
@@ -538,7 +538,9 @@ def test_provider_streams_normalize_timeouts_and_close_resources(
         assert client.closed
     else:
         assert client.closed
-    if provider_id in {"openai", "anthropic"}:
+    if provider_id == "openai":
+        assert captured["timeout"] == 12.5
+    if provider_id == "anthropic":
         assert_all_phase_timeout(captured["timeout"], 12.5)
     if provider_id == "gemini":
         assert captured["config"].http_options.timeout == 12_500
