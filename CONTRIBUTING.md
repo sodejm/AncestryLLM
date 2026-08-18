@@ -57,6 +57,23 @@ branch and remove its clean local worktree when its commits are safely
 reachable; preserve branches with unmerged or graph-unique work for explicit
 follow-up.
 
+### Codex pull-request review
+
+Use the repository-local
+[`code-review` skill](.agents/skills/code-review/SKILL.md) only after GitHub
+confirms that the pull request is non-draft. It requests Codex review for one
+immutable head, reuses an existing terminal result for that head, and records a
+marker that prevents duplicate requests. Draft, unknown, or unrefreshable state
+fails closed, and the workflow never marks a pull request ready on a human's
+behalf.
+
+The skill preserves the repository's Codex-only policy: it does not request a
+second review provider or hand implementation to another coding agent. Review
+findings are validated against the exact head, deduplicated by root cause, and
+resolved only with a tested fix or an evidence-backed justification. Potential
+credential exposure or another sensitive vulnerability follows the private
+security process rather than a public pull-request discussion.
+
 ## Test-driven development
 
 Every behavioral change starts from a testable acceptance criterion and follows
