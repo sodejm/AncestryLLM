@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.policy import validate_endpoint
@@ -55,7 +53,7 @@ class OpenAIProvider:
         return OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=timeout_seconds,
             max_retries=0,
         )
 
@@ -89,7 +87,7 @@ class OpenAIProvider:
             "messages": [message.model_dump() for message in request.messages],
             "max_completion_tokens": request.max_output_tokens,
             "temperature": request.temperature,
-            "timeout": httpx.Timeout(request.timeout_seconds),
+            "timeout": request.timeout_seconds,
         }
         response_format = self._response_format(request)
         if response_format:
@@ -125,7 +123,7 @@ class OpenAIProvider:
             "max_completion_tokens": request.max_output_tokens,
             "temperature": request.temperature,
             "stream": True,
-            "timeout": httpx.Timeout(request.timeout_seconds),
+            "timeout": request.timeout_seconds,
         }
         response_format = self._response_format(request)
         if response_format:
