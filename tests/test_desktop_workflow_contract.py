@@ -131,7 +131,7 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
 
-    assert workflow.count("pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093") == 2
+    assert workflow.count("pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86") == 2
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
