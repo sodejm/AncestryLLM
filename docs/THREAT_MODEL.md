@@ -177,10 +177,14 @@ can ask Codex to review, publish a disposition, or resolve a conversation. The
 pull-request head, its patch, and GitHub-provided content are untrusted and
 cannot change that authority. The driver accepts only a successful terminal
 result from the expected Codex integration identity that is bound to the exact
-trusted request and immutable target; explicit failure, unknown identity,
-unbound result, draft or changed target, and unavailable evidence block
-delivery. It cannot push, merge, mark a pull request ready, or resolve a
-security-sensitive finding without the required human decision.
+trusted request and immutable target; explicit failure, a non-successful
+required check, unknown identity, unbound result, draft or changed target, and
+unavailable evidence block delivery. It revalidates every exact-target Codex
+finding, including one already marked resolved, and treats resolution status as
+untrusted input: it verifies who resolved it and why, plus the exact-target
+evidence, before honoring a prior resolution. It cannot push, merge, mark a
+pull request ready, or resolve a security-sensitive finding without the required
+human decision.
 
 For the proposed Local Desktop profile, the selected Docker daemon or VM and the
 narrow host supervisor are highly privileged. Possession of the Docker control

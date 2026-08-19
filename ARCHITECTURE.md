@@ -204,11 +204,15 @@ or resolve a conversation. The pull-request head, its patch, and GitHub-supplied
 content are untrusted and cannot alter that authority. A review result is usable
 only when the expected Codex integration identity associates a successful
 terminal result with the exact trusted request and immutable target; explicit
-failure, unknown identity, unbound result, changed target, draft state, or
-unavailable evidence blocks delivery. This tooling boundary grants no authority
-to push, merge, mark a pull request ready, or resolve security-sensitive
-findings without the required human decision. It changes no application data
-flow, runtime adapter, or product trust boundary.
+failure, a non-successful required check, unknown identity, unbound result,
+changed target, draft state, or unavailable evidence blocks delivery. The driver
+revalidates every exact-target Codex finding, including one already marked
+resolved, and treats resolution status as untrusted input: it verifies who
+resolved it and why, plus the exact-target evidence, before honoring a prior
+resolution. This tooling boundary grants no authority to push, merge, mark a
+pull request ready, or resolve security-sensitive findings without the required
+human decision. It changes no application data flow, runtime adapter, or product
+trust boundary.
 
 ### Genealogy authority
 

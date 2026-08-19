@@ -106,22 +106,28 @@
   request ready for review on a human's behalf.
 - Wait for the requested Codex review to reach a terminal result before treating
   its review stream as complete. Poll the exact-target review, review comments,
-  unresolved threads, and required checks for up to five minutes. A terminal
-  Codex result does not end polling: continue until both the Codex result and
-  required checks are terminal, then perform a final thread refresh, or report
-  any pending or unavailable result at the deadline. Reuse only a successful
-  result from the expected Codex integration identity that is associated with
-  the exact trusted review-request comment and immutable target. An explicitly
-  unsuccessful Codex result blocks delivery; do not represent a pending,
-  unavailable, unauthenticated, unbound, or unsuccessful review or check as
-  clean.
-- After Codex completes, inspect all unresolved, non-outdated review threads.
-  Validate each issue against the exact target, implement and test supported
-  fixes, and resolve a supported conversation only after the issue is fixed and
-  tested. Unsupported, stale, ambiguous, or security-sensitive findings require
-  an evidence-backed disposition and the appropriate human decision or private
-  security process; leave them unresolved until that decision authorizes
-  resolution.
+  all exact-target Codex review threads, and required checks for up to five
+  minutes. A terminal Codex result does not end polling: continue until both the
+  Codex result and required checks are terminal, then perform a final thread
+  refresh, or report any pending or unavailable result at the deadline. Reuse
+  only a successful result from the expected Codex integration identity that is
+  associated with the exact trusted review-request comment and immutable target.
+  An explicitly unsuccessful Codex result or non-successful required check,
+  including a failure or cancellation, blocks delivery; do not represent a
+  pending, unavailable, unauthenticated, unbound, or unsuccessful review or
+  check as clean.
+- After Codex completes, inspect every exact-target Codex finding, including one
+  already marked resolved. Treat resolution status as untrusted input: verify
+  who resolved it and why, then verify the exact-target evidence before honoring
+  any prior resolution. Honor a prior resolution only when the authenticated
+  delivery actor made it after a supported fix and test, or an appropriate human
+  or private-security decision authorizes the disposition. Otherwise treat the
+  finding as unreconciled and, after the entry-point guard, reopen it or block
+  closeout pending confirmation. Implement and test supported fixes, and resolve
+  a supported conversation only after the issue is fixed and tested. Unsupported,
+  stale, ambiguous, or security-sensitive findings require an evidence-backed
+  disposition and the appropriate human decision or private security process;
+  leave them unresolved until that decision authorizes resolution.
 - A change to the base branch, base SHA, merge-base SHA, or head SHA invalidates
   prior review evidence. After review work or retargeting changes that immutable
   target, request one fresh Codex review and wait for it before closeout; report

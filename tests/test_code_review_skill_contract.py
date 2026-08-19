@@ -34,14 +34,31 @@ def test_review_workflow_reuses_only_a_trusted_successful_codex_result() -> None
     for document in (skill, agents):
         assert "expected Codex integration identity" in document
         assert "exact trusted review-request comment" in document
-        assert "explicitly unsuccessful Codex result blocks delivery" in document
+        assert "explicitly unsuccessful Codex result" in document
+        assert "non-successful required check" in document
+
+
+def test_review_workflow_revalidates_resolved_findings_and_non_successful_checks() -> None:
+    skill = _normalized(".agents/skills/code-review/SKILL.md")
+    agents = _normalized("AGENTS.md")
+    contributing = _normalized("CONTRIBUTING.md")
+
+    for document in (skill, agents, contributing):
+        assert "every exact-target Codex finding, including one already marked resolved" in document
+        assert "resolution status as untrusted input" in document
+        assert "who resolved it and why" in document
+        assert "non-successful required check" in document
 
 
 def test_privileged_review_boundary_is_recorded_in_architecture_and_threat_model() -> None:
-    architecture = _read("ARCHITECTURE.md")
-    threat_model = _read("docs/THREAT_MODEL.md")
+    architecture = _normalized("ARCHITECTURE.md")
+    threat_model = _normalized("docs/THREAT_MODEL.md")
 
     assert "Repository delivery review authority" in architecture
     assert "Repository delivery review boundary" in threat_model
-    assert "recorded base SHA" in architecture
-    assert "recorded base SHA" in threat_model
+    for document in (architecture, threat_model):
+        assert "recorded base SHA" in document
+        assert "every exact-target Codex finding, including one already marked resolved" in document
+        assert "resolution status as untrusted input" in document
+        assert "who resolved it and why" in document
+        assert "non-successful required check" in document

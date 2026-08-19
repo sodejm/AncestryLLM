@@ -75,15 +75,21 @@ unrefreshable state fails closed, and the workflow never marks a pull request
 ready on a human's behalf.
 
 The skill preserves the repository's Codex-only policy: it does not request a
-second review provider or hand implementation to another coding agent. Review
-findings are validated against the exact target and deduplicated by root cause.
+second review provider or hand implementation to another coding agent. It
+revalidates every exact-target Codex finding, including one already marked
+resolved, and deduplicates findings by root cause. It treats resolution status
+as untrusted input: verify who resolved it and why, then verify the exact-target
+evidence before honoring a prior resolution. A prior resolution is honored only
+when the authenticated delivery actor made it after a supported tested fix or an
+appropriate human or private-security decision authorizes the disposition.
 Supported findings are resolved only after a tested fix; ambiguous,
 unsupported, stale, or security-sensitive findings remain open until the
 appropriate human decision or private process authorizes resolution. A terminal
 Codex result ends only its review stream; polling continues until both the
 Codex result and required checks are terminal, followed by a final thread
 refresh, or until the five-minute deadline. An explicitly unsuccessful Codex
-result blocks delivery.
+result or non-successful required check, including a failure or cancellation,
+blocks delivery.
 
 ## Test-driven development
 
