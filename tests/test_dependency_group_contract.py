@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_GROUPS = {
     "lint": ["markdown-it-py>=4,<5", "ruff>=0.15,<1", "pre-commit>=4.5,<5"],
-    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.70"],
+    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.72"],
     "test": [
         "coverage[toml]>=7.12,<8",
         "pytest>=9,<10",
@@ -73,7 +73,7 @@ OLD_DEV_DEPENDENCIES = {
     "wheel>=0.45,<1",
     "zizmor==1.29.0",
 }
-NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.70"}
+NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.72"}
 NEW_BUILD_EVALUATION_DEPENDENCIES = {"uv_build>=0.12.0,<0.13"}
 NEW_DOCS_SCREENSHOT_DEPENDENCIES = {"markdown-it-py>=4,<5"}
 

@@ -475,7 +475,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     lock_versions = {
         package["name"]: package["version"] for package in lock["package"] if "version" in package
     }
-    assert lock_versions["ruff"] == "0.16.2"
+    assert lock_versions["ruff"] == "0.16.3"
     assert bootstrap_policy["uv"]["version"] == "0.12.1"
     assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
 
