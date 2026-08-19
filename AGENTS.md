@@ -95,16 +95,18 @@
   GitHub Copilot Code Review, mention `@copilot`, or hand work to a Copilot
   coding agent.
 - Before requesting review, and again before every review-related write,
-  confirm `isDraft == false` and record the base branch, full base SHA,
-  merge-base SHA, and full head SHA as the immutable review target. Treat a
-  draft, unknown, or unrefreshable state as a fail-closed stop. Do not mark a
-  pull request ready for review on a human's behalf.
+  refresh `isDraft`, the base branch and full SHA, merge-base SHA, and head
+  branch and full SHA. Continue only when `isDraft == false` and every value
+  matches the recorded immutable review target. Treat a draft, changed target,
+  unknown, or unrefreshable state as a fail-closed stop. Do not mark a pull
+  request ready for review on a human's behalf.
 - Wait for the requested Codex review to reach a terminal result before treating
   its review stream as complete. Poll the exact-target review, review comments,
   unresolved threads, and required checks for up to five minutes. A terminal
-  Codex result does not end polling: continue until required checks are terminal
-  and perform a final thread refresh, or report the pending state at the
-  deadline. Do not represent a pending or unavailable review as clean.
+  Codex result does not end polling: continue until both the Codex result and
+  required checks are terminal, then perform a final thread refresh, or report
+  any pending or unavailable result at the deadline. Do not represent a pending
+  or unavailable review or check as clean.
 - After Codex completes, inspect all unresolved, non-outdated review threads.
   Validate each issue against the exact target, implement and test supported
   fixes, and resolve a supported conversation only after the issue is fixed and
@@ -119,10 +121,10 @@
   unbounded review loop.
 - Before posting, inspect existing comments and reviews and reuse a terminal
   Codex result for the same immutable target. Mark a new request with
-  `<!-- codex-code-review:BASE_SHA..HEAD_SHA -->` and treat it as a lock only
-  when the authenticated workflow actor authored the comment, its first line is
-  exactly `@codex review`, and it names that exact target. Never trust a
-  contributor-authored marker or duplicate an exact-target request. Track
-  findings by source, location, impact, disposition, and target; deduplicate
-  equivalent root causes and route sensitive findings through the private
-  security process.
+  `<!-- codex-code-review:BASE_BRANCH@BASE_SHA..HEAD_SHA -->` and treat it as a
+  lock only when the authenticated workflow actor authored the comment, its
+  first line is exactly `@codex review`, and it names that exact target,
+  including the base branch. Never trust a contributor-authored marker or
+  duplicate an exact-target request. Track findings by source, location,
+  impact, disposition, and target; deduplicate equivalent root causes and route
+  sensitive findings through the private security process.

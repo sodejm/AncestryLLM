@@ -63,10 +63,12 @@ Use the repository-local
 [`code-review` skill](.agents/skills/code-review/SKILL.md) only after GitHub
 confirms that the pull request is non-draft. It requests Codex review for one
 immutable target comprising the base branch, base SHA, merge-base SHA, and head
-SHA; reuses an existing terminal result for that target; and trusts a duplicate
-prevention marker only when it was posted by the authenticated workflow actor.
-Draft, unknown, or unrefreshable state fails closed, and the workflow never
-marks a pull request ready on a human's behalf.
+SHA; reuses an existing terminal result for that target; and trusts a
+`BASE_BRANCH@BASE_SHA..HEAD_SHA` duplicate-prevention marker only when it was
+posted by the authenticated workflow actor. Before every review-related write,
+the live values must still match that target. Draft, changed, unknown, or
+unrefreshable state fails closed, and the workflow never marks a pull request
+ready on a human's behalf.
 
 The skill preserves the repository's Codex-only policy: it does not request a
 second review provider or hand implementation to another coding agent. Review
@@ -74,8 +76,9 @@ findings are validated against the exact target and deduplicated by root cause.
 Supported findings are resolved only after a tested fix; ambiguous,
 unsupported, stale, or security-sensitive findings remain open until the
 appropriate human decision or private process authorizes resolution. A terminal
-Codex result ends only the review stream; required checks and a final thread
-refresh still run until completion or the five-minute deadline.
+Codex result ends only its review stream; polling continues until both the
+Codex result and required checks are terminal, followed by a final thread
+refresh, or until the five-minute deadline.
 
 ## Test-driven development
 

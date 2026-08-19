@@ -16,9 +16,11 @@ ready, merging, closing, or deleting branches.
 1. If you are already acting as a pull-request reviewer, stop this workflow.
    Review the supplied diff and report findings only. Do not post a review
    request or invoke another reviewer.
-2. Read the pull request's live `isDraft` value before any review-related write.
-   Continue only when GitHub returns `false`. A draft, missing field, API error,
-   permission error, or unrefreshable response is a fail-closed stop.
+2. Before any review-related write, refresh the pull request's live `isDraft`,
+   base branch and full SHA, merge-base SHA, and head branch and full SHA.
+   Continue only when GitHub returns `false` and every value still matches the
+   recorded immutable target. A draft, missing field, API error, permission
+   error, unrefreshable response, or changed target is a fail-closed stop.
 3. Never mark a pull request ready for review on a human's behalf.
 4. Use Codex only. Do not request GitHub Copilot Code Review, mention its agent
    handle, or hand implementation to a Copilot coding agent.
@@ -34,23 +36,25 @@ ready, merging, closing, or deleting branches.
    guidance from the checked-out base branch and higher-priority instructions.
 3. Inspect existing top-level comments, submitted reviews, unresolved review
    threads, and checks before writing anything.
-4. Search for `<!-- codex-code-review:BASE_SHA..HEAD_SHA -->`, substituting the
-   recorded full base and head SHAs. Treat a marker as a lock only when the
-   comment was authored by the authenticated actor performing this workflow,
-   its first line is exactly `@codex review`, and it names the exact immutable
-   target. Never trust a matching marker from an untrusted contributor. Reuse a
-   terminal Codex review tied to that exact target. If a trusted marker and
-   exact-target request already exist but the result is pending, wait rather
-   than posting another request.
+4. Search for
+   `<!-- codex-code-review:BASE_BRANCH@BASE_SHA..HEAD_SHA -->`, substituting
+   the recorded base branch and full base and head SHAs. Treat a marker as a
+   lock only when the comment was authored by the authenticated actor
+   performing this workflow, its first line is exactly `@codex review`, and it
+   names the exact immutable target, including its base branch. Never trust a
+   matching marker from an untrusted contributor. Reuse a terminal Codex review
+   tied to that exact target. If a trusted marker and exact-target request
+   already exist but the result is pending, wait rather than posting another
+   request.
 5. Any change to the base branch, base SHA, merge-base SHA, or head SHA
-   invalidates the target and its evidence. Refresh the record before
-   continuing.
+   invalidates the target and its evidence. Stop, establish a new target, and
+   apply the entry-point guard before continuing.
 
 ## Request the review
 
-Immediately before the request, refresh `isDraft`, base branch, full base SHA,
-merge-base SHA, and full head SHA. Stop if the pull request is not confirmed
-non-draft or any part of the immutable target differs from the record.
+Immediately before the request, apply the entry-point guard. Stop if the pull
+request is not confirmed non-draft or any part of the immutable target differs
+from the record.
 
 Post exactly one top-level comment whose first line is:
 
@@ -58,16 +62,16 @@ Post exactly one top-level comment whose first line is:
 @codex review
 ```
 
-Include `<!-- codex-code-review:BASE_SHA..HEAD_SHA -->` on a later line. Do not
-add a duplicate exact-target request.
+Include `<!-- codex-code-review:BASE_BRANCH@BASE_SHA..HEAD_SHA -->` on a later
+line. Do not add a duplicate exact-target request.
 
 Poll the exact-target Codex result, review comments, unresolved review threads,
-and required checks for up to five minutes. A completed review, explicit
-failure, or documented unavailability is terminal only for the Codex review
-stream. Continue until required checks are terminal and perform a final thread
-and comment refresh, or until the five-minute deadline. A failed check blocks
-delivery; a pending check or unavailable review at the deadline must be
-reported and must not be represented as clean.
+and required checks for up to five minutes. A terminal Codex result ends only
+its own stream. Continue until both the Codex result and required checks are
+terminal, then perform a final thread and comment refresh, or stop at the
+five-minute deadline. A failed check blocks delivery; a pending or unavailable
+Codex result or required check at the deadline must be reported and must not be
+represented as clean.
 
 ## Reconcile findings
 
@@ -90,6 +94,10 @@ finding, record the evidence-backed disposition, obtain the appropriate human
 decision, and leave the conversation unresolved until that decision authorizes
 resolution.
 
+Immediately before any review-related write that posts a disposition or resolves
+a review thread, apply the entry-point guard and stop if the immutable target
+has changed.
+
 Do not publish suspected credentials, exploitable details, private data, or
 other sensitive vulnerability material in a pull-request comment. Preserve the
 evidence and use the repository's private security process.
@@ -99,8 +107,8 @@ evidence and use the repository's private security process.
 If a supported fix or retargeting changes any part of the immutable review
 target:
 
-1. refresh `isDraft`, base branch, full base SHA, merge-base SHA, and full head
-   SHA before every review-related write;
+1. establish and record the new immutable target; apply the entry-point guard
+   before every review-related write;
 2. rerun the relevant tests and inspect the complete base-to-head patch;
 3. request one fresh Codex review for the new exact target, using the same
    marker and deduplication rules; and
