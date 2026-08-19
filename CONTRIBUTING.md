@@ -57,6 +57,40 @@ branch and remove its clean local worktree when its commits are safely
 reachable; preserve branches with unmerged or graph-unique work for explicit
 follow-up.
 
+### Codex pull-request review
+
+Use the repository-local
+[`code-review` skill](.agents/skills/code-review/SKILL.md) only after GitHub
+confirms that the pull request is non-draft. Before invoking it, the trusted
+delivery driver records the base branch and recorded base SHA, then loads the
+applicable repository guidance and skill from that commit rather than the
+untrusted pull-request head. It requests Codex review for one immutable target
+comprising the base branch, base SHA, merge-base SHA, and head SHA; reuses only
+a successful result from the expected Codex integration identity that is tied
+to the exact trusted review-request comment and target; and trusts a
+`BASE_BRANCH@BASE_SHA..HEAD_SHA` duplicate-prevention marker only when it was
+posted by the authenticated workflow actor. Before every review-related write,
+the live values must still match that target. Draft, changed, unknown, or
+unrefreshable state fails closed, and the workflow never marks a pull request
+ready on a human's behalf.
+
+The skill preserves the repository's Codex-only policy: it does not request a
+second review provider or hand implementation to another coding agent. It
+revalidates every exact-target Codex finding, including one already marked
+resolved, and deduplicates findings by root cause. It treats resolution status
+as untrusted input: verify who resolved it and why, then verify the exact-target
+evidence before honoring a prior resolution. A prior resolution is honored only
+when the authenticated delivery actor made it after a supported tested fix or an
+appropriate human or private-security decision authorizes the disposition.
+Supported findings are resolved only after a tested fix; ambiguous,
+unsupported, stale, or security-sensitive findings remain open until the
+appropriate human decision or private process authorizes resolution. A terminal
+Codex result ends only its review stream; polling continues until both the
+Codex result and required checks are terminal, followed by a final thread
+refresh, or until the five-minute deadline. An explicitly unsuccessful Codex
+result or non-successful required check, including a failure or cancellation,
+blocks delivery.
+
 ## Test-driven development
 
 Every behavioral change starts from a testable acceptance criterion and follows
