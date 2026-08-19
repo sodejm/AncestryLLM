@@ -168,6 +168,20 @@ updates, retrieved text, and every model response are untrusted. The accepted
 desktop boundary and product decision are specified in
 [ADR-0025](ADR-0025-electron-fastapi-desktop.md).
 
+### Repository delivery review boundary
+
+Pull-request delivery is a separate administrative boundary and does not add an
+application runtime capability. The trusted delivery driver records the
+immutable target and reads review guidance from the recorded base SHA before it
+can ask Codex to review, publish a disposition, or resolve a conversation. The
+pull-request head, its patch, and GitHub-provided content are untrusted and
+cannot change that authority. The driver accepts only a successful terminal
+result from the expected Codex integration identity that is bound to the exact
+trusted request and immutable target; explicit failure, unknown identity,
+unbound result, draft or changed target, and unavailable evidence block
+delivery. It cannot push, merge, mark a pull request ready, or resolve a
+security-sensitive finding without the required human decision.
+
 For the proposed Local Desktop profile, the selected Docker daemon or VM and the
 narrow host supervisor are highly privileged. Possession of the Docker control
 socket is treated as equivalent to administrative control over the containers

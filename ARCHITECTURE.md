@@ -194,6 +194,22 @@ GEDCOM, RootsMagic content, prompt variables, OCR text, provider output, and
 external snapshots are untrusted data. An LLM is never an authority for family
 tree facts and receives no shell, SQL, filesystem, or other tool capability.
 
+### Repository delivery review authority
+
+The pull-request review workflow is a repository-delivery administrative
+boundary, not an application-runtime path. A trusted delivery driver records
+the immutable pull-request target, then reads `AGENTS.md` and the review skill
+from the recorded base SHA before it can request a review, post a disposition,
+or resolve a conversation. The pull-request head, its patch, and GitHub-supplied
+content are untrusted and cannot alter that authority. A review result is usable
+only when the expected Codex integration identity associates a successful
+terminal result with the exact trusted request and immutable target; explicit
+failure, unknown identity, unbound result, changed target, draft state, or
+unavailable evidence blocks delivery. This tooling boundary grants no authority
+to push, merge, mark a pull request ready, or resolve security-sensitive
+findings without the required human decision. It changes no application data
+flow, runtime adapter, or product trust boundary.
+
 ### Genealogy authority
 
 The project has three deliberately different data roles:
