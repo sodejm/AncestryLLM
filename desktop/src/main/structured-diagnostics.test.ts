@@ -120,7 +120,7 @@ describe('structured desktop diagnostics', () => {
       directory: invalidDirectory,
       runId: RUN_ID,
       appVersion: '0.7.0',
-      component: 'flask-sidecar',
+      component: 'desktop-sidecar',
     })
 
     expect(writer.write('SIDECAR_STARTING', 'info')).toBe(false)

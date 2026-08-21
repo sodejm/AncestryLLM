@@ -74,7 +74,7 @@ def test_privacy_canaries_are_rejected(metadata: Mapping[str, object]) -> None:
             app_version="0.7.0",
             code="PRIVACY_CANARY",
             severity=DesktopDiagnosticSeverity.ERROR,
-            component=DesktopDiagnosticComponent.FLASK_SIDECAR,
+            component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
             metadata=metadata,  # type: ignore[arg-type]
         )
 
@@ -111,7 +111,7 @@ def test_validation_and_filesystem_failures_are_non_blocking(tmp_path: Path) -> 
         directory=invalid_directory,
         run_id=RUN_ID,
         app_version="0.7.0",
-        component=DesktopDiagnosticComponent.FLASK_SIDECAR,
+        component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
     )
 
     assert not writer.write("SIDECAR_STARTING", DesktopDiagnosticSeverity.INFO)

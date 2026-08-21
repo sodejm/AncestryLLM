@@ -51,7 +51,7 @@ class DesktopDiagnosticComponent(StrEnum):
 
     ELECTRON_MAIN = "electron-main"
     PYTHON_CORE = "python-core"
-    FLASK_SIDECAR = "flask-sidecar"
+    DESKTOP_SIDECAR = "desktop-sidecar"
 
 
 DesktopDiagnosticMetadataValue = bool | int | None

@@ -10,11 +10,11 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 
-/** Version shared by Electron main, Python core, and the packaged Flask sidecar. */
+/** Version shared by Electron main, Python core, and the packaged desktop sidecar. */
 export const DESKTOP_DIAGNOSTIC_SCHEMA_VERSION = 'ancestryllm.desktop-diagnostic/1'
 
 /** Diagnostic components permitted to persist local events. */
-export type DesktopDiagnosticComponent = 'electron-main' | 'python-core' | 'flask-sidecar'
+export type DesktopDiagnosticComponent = 'electron-main' | 'python-core' | 'desktop-sidecar'
 /** Stable severities available to the versioned event contract. */
 export type DesktopDiagnosticSeverity = 'debug' | 'info' | 'warning' | 'error'
 /** Metadata deliberately excludes strings so paths, prompts, names, and secrets cannot be stored. */
@@ -64,7 +64,7 @@ const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const COMPONENTS = new Set<DesktopDiagnosticComponent>([
   'electron-main',
   'python-core',
-  'flask-sidecar',
+  'desktop-sidecar',
 ])
 const SEVERITIES = new Set<DesktopDiagnosticSeverity>([
   'debug',

@@ -13,7 +13,7 @@ Metadata does not accept strings, arrays, objects, exception text, stack traces,
 
 ## Retention and permissions
 
-Each component writes a separate file (`electron-main.jsonl`, `python-core.jsonl`, or `flask-sidecar.jsonl`) to avoid cross-process append races. The default limit is 512 KiB per file and three files per component, including the active file. Writers request owner-only directory and file permissions where the platform supports them and refuse symbolic-link targets.
+Each component writes a separate file (`electron-main.jsonl`, `python-core.jsonl`, or `desktop-sidecar.jsonl`) to avoid cross-process append races. The default limit is 512 KiB per file and three files per component, including the active file. Writers request owner-only directory and file permissions where the platform supports them and refuse symbolic-link targets.
 
 All validation, directory creation, rotation, append, and clear failures are non-blocking. Diagnostics must never alter application startup, sidecar recovery, or verified shutdown behavior.
 

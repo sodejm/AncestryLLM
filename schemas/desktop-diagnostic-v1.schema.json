@@ -42,7 +42,7 @@
       "enum": [
         "electron-main",
         "python-core",
-        "flask-sidecar"
+        "desktop-sidecar"
       ]
     },
     "app_version": {
