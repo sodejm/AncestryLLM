@@ -78,6 +78,11 @@
   branch from current `origin/main` using the appropriate `feature/*`, `bugfix/*`,
   or `hotfix/*` prefix, and never edit `main` or `master` directly.
 - Preserve unrelated changes. Do not push unless explicitly requested.
+- Sign every commit and verify that GitHub reports a verified signature for each
+  commit in the pull-request range before handoff. If repairing signatures
+  requires rewriting an already-pushed branch, preserve the remote tip, prove
+  the rewritten tree is equivalent apart from any intended changes, and use an
+  exact-tip `--force-with-lease` rather than an unguarded force push.
 - Keep the local Git environment tidy: before starting new work, reuse a suitable
   existing worktree or create one only when isolation is needed; do not leave
   disposable worktrees behind after work is closed.
