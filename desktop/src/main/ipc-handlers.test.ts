@@ -1009,6 +1009,19 @@ describe('desktop IPC handlers', () => {
     expect(control.getAppInfo).not.toHaveBeenCalled()
   })
 
+  it('records malformed capability requests before rejecting them', async () => {
+    const recordDiagnostic = vi.fn()
+    const { control, event, handlers } = harness(bridge(), { recordDiagnostic })
+
+    await expect(
+      handlers.get(desktopChannels.getCapabilities)?.(event(), 'surplus'),
+    ).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+
+    expect(control.getCapabilities).not.toHaveBeenCalled()
+    expect(recordDiagnostic).toHaveBeenCalledOnce()
+    expect(recordDiagnostic).toHaveBeenCalledWith('BRIDGE_ROUTE_REJECTED', 'warning')
+  })
+
   it('binds strict open, save, and revoke requests to the exact WebContents owner', async () => {
     const grants = fileGrantBroker()
     vi.mocked(grants.requestOpenGrant).mockResolvedValueOnce(grantedGedcom)

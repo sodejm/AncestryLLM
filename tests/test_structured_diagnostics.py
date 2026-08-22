@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 import jsonschema
 import pytest
 
+import ancestryllm.observability.structured_diagnostics as structured_diagnostics
 from ancestryllm.observability.structured_diagnostics import (
     DESKTOP_DIAGNOSTIC_CODES,
     DESKTOP_DIAGNOSTIC_SCHEMA_VERSION,
@@ -191,6 +192,39 @@ def test_validation_and_filesystem_failures_are_non_blocking(tmp_path: Path) -> 
     assert not writer.clear()
 
 
+def test_writer_completes_short_operating_system_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = DesktopDiagnosticWriter(
+        directory=tmp_path,
+        run_id=RUN_ID,
+        app_version="0.7.0",
+        component=DesktopDiagnosticComponent.PYTHON_CORE,
+    )
+    real_write = structured_diagnostics.os.write
+    calls = 0
+
+    def short_write(descriptor: int, data: bytes) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            prefix_length = max(1, len(data) // 2)
+            return real_write(descriptor, data[:prefix_length])
+        return real_write(descriptor, data)
+
+    monkeypatch.setattr(structured_diagnostics.os, "write", short_write)
+
+    assert writer.write("PYTHON_CORE_READY", DesktopDiagnosticSeverity.INFO)
+    assert calls >= 2
+    documents = [
+        json.loads(line)
+        for line in (tmp_path / "python-core.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(documents) == 1
+    assert documents[0]["code"] == "PYTHON_CORE_READY"
+
+
 def test_writer_refuses_symlink_directory(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()
@@ -229,3 +263,21 @@ def test_writer_refuses_symlink_active_file(tmp_path: Path) -> None:
     assert not writer.write("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     assert not writer.clear()
     assert target.read_text(encoding="utf-8") == "untouched"
+
+
+def test_writer_refuses_dangling_symlink_during_clear(tmp_path: Path) -> None:
+    active = tmp_path / "python-core.jsonl"
+    try:
+        active.symlink_to(tmp_path / "missing-target.jsonl")
+    except OSError:
+        pytest.skip("file symlinks are unavailable on this host")
+    writer = DesktopDiagnosticWriter(
+        directory=tmp_path,
+        run_id=RUN_ID,
+        app_version="0.7.0",
+        component=DesktopDiagnosticComponent.PYTHON_CORE,
+    )
+
+    assert active.is_symlink()
+    assert not writer.clear()
+    assert active.is_symlink()

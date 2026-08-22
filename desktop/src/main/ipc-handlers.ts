@@ -877,7 +877,10 @@ export function registerDesktopIpcHandlers(
   ipc.handle(desktopChannels.getCapabilities, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<CapabilityManifest>()
-    if (args.length !== 0) return invalidRequest<CapabilityManifest>()
+    if (args.length !== 0) {
+      rejectRoute()
+      return invalidRequest<CapabilityManifest>()
+    }
     return capabilityRequest(state, timeoutMs, bridge)
   })
   registerNoArgumentHandler(ipc, desktopChannels.retrySidecar, authorize, (signal) => bridge.retrySidecar(signal), parseStartupDiagnosticsResult, timeoutMs, rejectRoute)

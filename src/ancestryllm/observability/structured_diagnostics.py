@@ -305,7 +305,12 @@ class DesktopDiagnosticWriter:
                 0o600,
             )
             try:
-                os.write(descriptor, line)
+                written = 0
+                while written < len(line):
+                    count = os.write(descriptor, line[written:])
+                    if count <= 0:
+                        raise OSError("short diagnostic write")
+                    written += count
             finally:
                 os.close(descriptor)
         except (OSError, TypeError, ValueError):
@@ -322,10 +327,13 @@ class DesktopDiagnosticWriter:
                 return False
             for index in range(self._max_files):
                 path = self._active_path if index == 0 else Path(f"{self._active_path}.{index}")
-                if path.exists():
-                    if not _is_regular_file_or_missing(path):
-                        return False
-                    path.unlink()
+                try:
+                    metadata = path.lstat()
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                    return False
+                path.unlink()
         except OSError:
             return False
         return True
