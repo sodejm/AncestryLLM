@@ -370,6 +370,35 @@ port, URL, request, response, genealogy, provider, filesystem payload, raw
 exception, or stack. Lifecycle diagnostics contain only state, a generic
 failure class, and remaining automatic/manual retry counts.
 
+Electron Main creates one random UUIDv4 for each application launch and derives
+one absolute diagnostics directory beneath Electron's application-data root.
+It sends both only in the exact private stdin launch frame. Python rejects a
+missing, malformed, relative-directory, or additional launch-frame field and
+uses that exact directory for both Python-owned writers. The UUID correlates
+the Electron Main, packaged-sidecar, and Python-core JSONL streams, but it is
+not a user, device, installation, authentication, or genealogy identifier.
+Neither private value is placed in arguments, environment variables, URLs,
+readiness or health messages, renderer data, authorization material, stderr,
+or child output.
+
+Each component writes a separate bounded file beneath the Main-owned
+diagnostics directory. Records use an allowlisted schema and stable event-code
+catalog, carry no free-form message or metadata field, and are capped before
+serialization. The writer rotates three 512 KiB files, refuses symlinked
+directories and active files, and degrades without blocking startup,
+supervision, shutdown, or exit. The exact stderr shutdown receipt remains the
+authoritative sidecar termination evidence in Electron Main; structured
+diagnostic JSON and child output are never accepted as that receipt or as
+control input.
+
+Only two fixed, zero-argument bridge actions expose diagnostics: Main may open
+the app-owned directory with the native shell, or clear the bounded files.
+Neither action accepts or returns a path, URI, filename, record, or arbitrary
+filesystem operation. There is no renderer read API, export route, upload,
+telemetry, network transport, CI artifact, or automatic support bundle. See
+[the desktop diagnostics contract](DESKTOP_DIAGNOSTICS.md) for the schema,
+event catalog, retention limits, privacy rules, and operator procedure.
+
 Once the private sidecar session is ready, Issue #107's fixed read-only route
 returns a schema-v1 startup report. It contains an overall `ready` or
 `degraded` status, normalized platform/architecture labels, and exactly four

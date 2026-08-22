@@ -32,7 +32,10 @@ MIGRATED_READER_DOCS = {
     "VERSIONING.md": "reference/VERSIONING.md",
     "api/API_REFERENCE.md": "reference/api/API_REFERENCE.md",
 }
-CREATED_READER_DOCS = {"reference/DESKTOP.md"}
+CREATED_READER_DOCS = {
+    "reference/DESKTOP.md": "Create in #262; retain basename",
+    "reference/DESKTOP_DIAGNOSTICS.md": "Create in #461; retain basename",
+}
 
 
 def _inventory_rows() -> list[list[str]]:
@@ -98,7 +101,7 @@ def test_reference_and_explanation_inventory_records_migration_or_creation() -> 
         path: row for path, row in inventory.items() if row[1] in {"Reference", "Explanation"}
     }
 
-    assert set(reader_rows) == migrated_paths | CREATED_READER_DOCS
+    assert set(reader_rows) == migrated_paths | set(CREATED_READER_DOCS)
     assert (DOCS_DIRECTORY / "api" / "openapi-v1.json").is_file()
 
     for legacy_path, migrated_path in MIGRATED_READER_DOCS.items():
@@ -110,11 +113,11 @@ def test_reference_and_explanation_inventory_records_migration_or_creation() -> 
         assert "Wiki basename retained" in row[11]
         assert "Pages route moved" in row[11]
 
-    for created_path in CREATED_READER_DOCS:
+    for created_path, expected_action in CREATED_READER_DOCS.items():
         assert (DOCS_DIRECTORY / created_path).is_file()
         row = inventory[created_path]
         assert row[2] == f"`docs/{created_path}`"
-        assert row[3] == "Create in #262; retain basename"
+        assert row[3] == expected_action
         assert "Retain unique basename" in row[11]
         assert "validated in flat Wiki namespace" in row[11]
 

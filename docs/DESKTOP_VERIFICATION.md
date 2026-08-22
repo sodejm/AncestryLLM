@@ -305,6 +305,23 @@ sidecar registry. Renderer-visible diagnostics remain sanitized: the scenarios
 assert coded states and retry counters without exposing ports, tokens, paths,
 process IDs, or stderr.
 
+Source-level structured-diagnostics tests prove the same launch UUID is used
+across Electron Main, packaged-sidecar, and Python-core records; reject
+malformed UUIDs, oversized records, and symlinked destinations; exercise
+rotation, retry/restart/exhaustion, bridge-sender and bridge-route rejection,
+and package-verification failure; and prove writer failure cannot block
+startup, shutdown, or authorized exit. Persisted-file inspections assert that
+credential, path, genealogy, prompt, response, port, URL, and stderr canaries
+are absent. Renderer and console tests cover the fixed open-directory and
+clear actions and their generic failure states without returning a path or
+record content.
+
+Diagnostic files are deliberately excluded from CI and release artifacts and
+there is no export or upload path. The exact stderr shutdown receipt remains a
+separate, authoritative Main-process check; diagnostic JSON and arbitrary
+child output cannot satisfy it. Packaged verification may exercise the
+feature, but it must not collect the local diagnostic directory.
+
 The performance policy is versioned as `desktop-unpacked-v1` and is a hard gate,
 not an informational benchmark:
 

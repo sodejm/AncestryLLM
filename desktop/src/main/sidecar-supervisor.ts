@@ -1,7 +1,16 @@
 /** Supervises trusted sidecar discovery, launch tokens, readiness, and lifecycle. */
 import { randomBytes } from 'node:crypto'
-import { join, posix } from 'node:path'
+import { isAbsolute, join, posix } from 'node:path'
 import { SidecarIntegrityError } from './sidecar-integrity'
+import {
+  createDesktopDiagnosticRunId,
+  DESKTOP_DIAGNOSTIC_CODES,
+  isDesktopDiagnosticRunId,
+  type DesktopDiagnosticCode,
+  type DesktopDiagnosticMetadata,
+  type DesktopDiagnosticSeverity,
+  type RecordDesktopDiagnostic,
+} from './structured-diagnostics'
 
 /** Exact protocol identifier required in sidecar readiness frames and authenticated requests. */
 export const API_CONTRACT = 'ancestryllm.internal-api/1'
@@ -40,6 +49,9 @@ type ProbeSidecar = (
 
 interface SidecarSupervisorOptions {
   appBuild: string
+  diagnosticRunId?: string
+  diagnosticDirectory: string
+  recordDiagnostic?: RecordDesktopDiagnostic
   executablePath: string
   verify: () => Promise<void>
   launch: LaunchSidecar
@@ -273,6 +285,7 @@ function requireCompatible(ready: SidecarReadyFrame, appBuild: string): void {
  * Owns sidecar supervisor state transitions while enforcing authenticated local sidecar lifecycle and process isolation.
  */
 export class SidecarSupervisor {
+  private readonly diagnosticRunId: string
   private current: RunningSidecar | undefined
   private readonly pending = new Set<RunningSidecar>()
   private readonly terminationRequests = new Map<RunningSidecar, Promise<void>>()
@@ -292,6 +305,13 @@ export class SidecarSupervisor {
   private readonly sessionInvalidationListeners = new Set<() => void>()
 
   constructor(private readonly options: SidecarSupervisorOptions) {
+    this.diagnosticRunId = options.diagnosticRunId ?? createDesktopDiagnosticRunId()
+    if (!isDesktopDiagnosticRunId(this.diagnosticRunId)) {
+      throw new Error('diagnosticRunId must be a UUIDv4 identifier.')
+    }
+    if (!isAbsolute(options.diagnosticDirectory) || options.diagnosticDirectory.includes('\0')) {
+      throw new Error('diagnosticDirectory must be an absolute path.')
+    }
     if (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0) {
       throw new Error('maxRestarts must be a non-negative integer.')
     }
@@ -340,10 +360,19 @@ export class SidecarSupervisor {
       let lastError = error
       while (this.remainingRestarts > 0 && !this.stopping) {
         this.remainingRestarts -= 1
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartRequested, 'warning', {
+          restarts_remaining: this.remainingRestarts,
+        })
         try {
           await this.launchOneTracked()
+          this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartSucceeded, 'info', {
+            restarts_remaining: this.remainingRestarts,
+          })
           return
         } catch (retryError) {
+          this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartFailed, 'error', {
+            restarts_remaining: this.remainingRestarts,
+          })
           if (retryError instanceof SidecarIntegrityError) {
             this.reportUnavailable('startup_failed')
             throw retryError
@@ -355,7 +384,10 @@ export class SidecarSupervisor {
           lastError = retryError
         }
       }
-      if (!this.stopping) this.reportUnavailable(this.classifyStartupFailure(lastError))
+      if (!this.stopping) {
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartExhausted, 'error')
+        this.reportUnavailable(this.classifyStartupFailure(lastError))
+      }
       throw lastError
     }
   }
@@ -401,6 +433,9 @@ export class SidecarSupervisor {
       return Promise.resolve(false)
     }
     this.remainingManualRetries -= 1
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarManualRetryRequested, 'info', {
+      retries_remaining: this.remainingManualRetries,
+    })
     const retry = this.retryOnce()
     this.manualRetryPromise = retry
     void retry.finally(() => {
@@ -412,6 +447,7 @@ export class SidecarSupervisor {
   stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise
     this.stopping = true
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarShutdownRequested, 'info')
     this.transition('stopping', null)
     this.resolveStopRequested()
     const active = this.current
@@ -440,36 +476,76 @@ export class SidecarSupervisor {
   }
 
   private async launchOne(): Promise<void> {
-    await this.cancelOnStop(this.options.verify())
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarVerificationStarted, 'info')
+    try {
+      await this.cancelOnStop(this.options.verify())
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarVerificationSucceeded, 'info')
+    } catch (error) {
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarVerificationRejected, 'error')
+      throw error
+    }
     if (this.stopping) throw new SidecarStoppingError()
     const token = (this.options.tokenFactory ?? createLaunchToken)()
     const launchFrame = `${JSON.stringify({
       contract: API_CONTRACT,
       app_build: this.options.appBuild,
       bearer_token: token,
+      diagnostic_run_id: this.diagnosticRunId,
+      diagnostic_directory: this.options.diagnosticDirectory,
     })}\n`
-    const sidecar = await this.options.launch({
-      executablePath: this.options.executablePath,
-      environment: minimalSidecarEnvironment(
-        this.options.platform ?? process.platform,
-        this.options.sourceEnvironment ?? process.env,
-        this.options.linuxKeyringVerificationRoot,
-      ),
-      launchFrame,
-    })
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSpawnRequested, 'info')
+    let sidecar: RunningSidecar
+    try {
+      sidecar = await this.options.launch({
+        executablePath: this.options.executablePath,
+        environment: minimalSidecarEnvironment(
+          this.options.platform ?? process.platform,
+          this.options.sourceEnvironment ?? process.env,
+          this.options.linuxKeyringVerificationRoot,
+        ),
+        launchFrame,
+      })
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSpawnSucceeded, 'info')
+    } catch (error) {
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSpawnFailed, 'error')
+      throw error
+    }
     this.pending.add(sidecar)
     try {
       if (this.stopping) throw new SidecarStoppingError()
-      const ready = await this.cancelOnStop(
-        withTimeout(sidecar.ready, this.options.startupTimeoutMs),
-      )
-      requireCompatible(ready, this.options.appBuild)
-      await this.cancelOnStop(
-        withTimeout(
-          this.options.probe(ready, token, this.options.appBuild),
-          this.options.startupTimeoutMs,
-        ),
-      )
+      let ready: SidecarReadyFrame
+      try {
+        ready = await this.cancelOnStop(
+          withTimeout(sidecar.ready, this.options.startupTimeoutMs),
+        )
+        requireCompatible(ready, this.options.appBuild)
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarReadinessAccepted, 'info')
+      } catch (error) {
+        this.record(
+          error instanceof SidecarTimeoutError
+            ? DESKTOP_DIAGNOSTIC_CODES.sidecarStartupTimeout
+            : error instanceof SidecarCompatibilityError
+              ? DESKTOP_DIAGNOSTIC_CODES.sidecarIncompatible
+              : DESKTOP_DIAGNOSTIC_CODES.sidecarReadinessRejected,
+          'error',
+        )
+        throw error
+      }
+      try {
+        await this.cancelOnStop(
+          withTimeout(
+            this.options.probe(ready, token, this.options.appBuild),
+            this.options.startupTimeoutMs,
+          ),
+        )
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarHealthSucceeded, 'info')
+      } catch (error) {
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarHealthRejected, 'error')
+        if (error instanceof SidecarTimeoutError) {
+          this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarStartupTimeout, 'error')
+        }
+        throw error
+      }
       if (this.stopping) throw new SidecarStoppingError()
       this.current = sidecar
       this.setActiveSession(Object.freeze({
@@ -495,6 +571,9 @@ export class SidecarSupervisor {
     this.current = undefined
     this.setActiveSession(undefined)
     this.transition('restarting', null)
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartRequested, 'warning', {
+      restarts_remaining: this.remainingRestarts,
+    })
     void this.cleanupAndRestartAfterExit(sidecar)
   }
 
@@ -514,8 +593,14 @@ export class SidecarSupervisor {
       this.remainingRestarts -= 1
       try {
         await this.launchOneTracked()
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartSucceeded, 'info', {
+          restarts_remaining: this.remainingRestarts,
+        })
         return
       } catch (error) {
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartFailed, 'error', {
+          restarts_remaining: this.remainingRestarts,
+        })
         if (error instanceof SidecarIntegrityError) {
           this.reportUnavailable('startup_failed')
           return
@@ -527,6 +612,7 @@ export class SidecarSupervisor {
       }
     }
     if (!this.stopping) {
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarRestartExhausted, 'error')
       this.reportUnavailable('crash_loop')
     }
   }
@@ -535,9 +621,11 @@ export class SidecarSupervisor {
     this.transition('starting', null)
     try {
       await this.launchOneTracked()
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarManualRetrySucceeded, 'info')
       return true
     } catch (error) {
       if (this.stopping) return false
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarManualRetryFailed, 'error')
       this.reportUnavailable(this.classifyStartupFailure(error))
       return false
     }
@@ -563,6 +651,7 @@ export class SidecarSupervisor {
     this.activeSession = session
     if (session) this.hasExposedAuthenticatedSession = true
     if (!previous) return
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSessionInvalidated, 'warning')
     for (const listener of [...this.sessionInvalidationListeners]) {
       try {
         listener()
@@ -583,11 +672,24 @@ export class SidecarSupervisor {
   ): Promise<void> {
     const existing = this.terminationRequests.get(sidecar)
     if (existing) return existing
-    const termination = sidecar.terminate(requestGracefulShutdown)
+    this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarTerminationRequested, 'info', {
+      graceful: requestGracefulShutdown !== undefined,
+    })
+    let termination: Promise<void>
+    try {
+      termination = sidecar.terminate(requestGracefulShutdown)
+    } catch (error) {
+      this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarTerminationFailed, 'error')
+      throw error
+    }
     this.terminationRequests.set(sidecar, termination)
     void termination.then(
-      () => { this.failedTerminations.delete(sidecar) },
       () => {
+        this.failedTerminations.delete(sidecar)
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarTerminationSucceeded, 'info')
+      },
+      () => {
+        this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarTerminationFailed, 'error')
         this.failedTerminations.add(sidecar)
         if (this.terminationRequests.get(sidecar) === termination) {
           this.terminationRequests.delete(sidecar)
@@ -602,6 +704,18 @@ export class SidecarSupervisor {
     this.inFlightLaunches.add(launch)
     void launch.finally(() => { this.inFlightLaunches.delete(launch) }).catch(() => undefined)
     return launch
+  }
+
+  private record(
+    code: DesktopDiagnosticCode,
+    severity: DesktopDiagnosticSeverity,
+    metadata: DesktopDiagnosticMetadata = {},
+  ): void {
+    try {
+      this.options.recordDiagnostic?.(code, severity, metadata)
+    } catch {
+      // Diagnostics must never affect sidecar verification or lifecycle control.
+    }
   }
 
   private async finishStop(

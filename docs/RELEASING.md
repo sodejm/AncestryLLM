@@ -161,6 +161,16 @@ loopback sidecar, distributed as manual full installers under the pre-1.0
 binary-signing policy above. It excludes genealogy jobs, chat providers, cloud
 accounts, updater behavior, and background release channels.
 
+Any later candidate that contains the structured desktop diagnostic boundary
+must verify the schema-v1 event catalog, one per-launch correlation UUID across
+all three component writers, 512 KiB by three-file retention per component,
+symbolic-link refusal, and non-blocking writer failure. Inspect installed
+open-directory and clear actions without exposing a renderer path or generic
+filesystem capability. Confirm that no export or automatic upload exists and
+that diagnostics, privacy canaries, console output, and support files are absent
+from every CI and release artifact. Keep the exact standard-error shutdown
+receipt as independent exit evidence.
+
 ## One-time repository setup
 
 1. Protect `main` with a ruleset that requires CI, CodeQL, signed commits, and

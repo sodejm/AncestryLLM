@@ -66,3 +66,34 @@ The exact code is more useful than a screenshot of private local state:
 See the [Desktop reference](../reference/DESKTOP.md) for the broader code and
 state lookup. When reporting a failure, provide the AncestryLLM version,
 normalized operating-system and architecture labels, and stable code only.
+
+## Inspect and clear local diagnostic records
+
+The Diagnostics workspace also exposes two fixed native actions:
+
+1. Choose **Open diagnostics folder** to open the application-owned diagnostic
+   directory in the operating system's file browser.
+2. Inspect only the dedicated `electron-main.jsonl`, `python-core.jsonl`, and
+   `desktop-sidecar.jsonl` records and their bounded rotations. Each line is a
+   validated version-1 event with a stable code and, when needed, numeric or
+   boolean metadata.
+3. Choose **Clear diagnostics** to remove only those allowlisted diagnostic
+   files. Clearing refuses symbolic-link targets and never accepts a path from
+   the renderer.
+
+One random UUID correlates the three component streams for a single desktop
+launch. It is not an account, device, person, authentication, or telemetry
+identifier. The application does not place it in a URL, command-line argument,
+environment variable, readiness response, authentication material, or process
+output.
+
+There is no diagnostic export or upload action in this release. Records remain
+local, are not sent over the network, and are not collected as CI or release
+artifacts. If confidential support work requires a copy, inspect the files
+locally first and transfer only through the approved confidential channel.
+Never attach unreviewed records to a public issue. Clear the records after the
+support need ends.
+
+A failure to create, rotate, append, open, or clear diagnostics is deliberately
+non-blocking. The app continues its authoritative startup, security, recovery,
+and shutdown behavior and presents only a stable, generic action failure.

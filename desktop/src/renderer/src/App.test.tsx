@@ -867,4 +867,53 @@ describe('accessible desktop shell', () => {
     expect(await screen.findByText('Degraded')).toBeVisible()
     expect(getStartupDiagnostics).toHaveBeenCalledTimes(2)
   })
+
+  it('opens and clears the fixed local diagnostics directory through zero-argument bridge actions', async () => {
+    const base = await createCompletedBridge()
+    const openDiagnosticsDirectory = vi.fn(() => base.openDiagnosticsDirectory())
+    const clearDiagnostics = vi.fn(() => base.clearDiagnostics())
+    const bridge: AncestryBridge = { ...base, openDiagnosticsDirectory, clearDiagnostics }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Diagnostics' }))
+    expect(screen.getByText(/They exclude family tree records, prompts, responses, credentials, and telemetry/i)).toBeVisible()
+    await userEvent.click(await screen.findByRole('button', { name: 'Open diagnostics folder' }))
+
+    expect(openDiagnosticsDirectory).toHaveBeenCalledOnce()
+    expect(openDiagnosticsDirectory).toHaveBeenCalledWith()
+    expect(await screen.findByRole('status')).toHaveTextContent('The diagnostics folder was opened.')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear diagnostics' }))
+
+    expect(clearDiagnostics).toHaveBeenCalledOnce()
+    expect(clearDiagnostics).toHaveBeenCalledWith()
+    expect(await screen.findByRole('status')).toHaveTextContent('Local diagnostic records were cleared.')
+  })
+
+  it('renders only fixed guidance when a diagnostics directory action fails', async () => {
+    const base = await createCompletedBridge()
+    const bridge: AncestryBridge = {
+      ...base,
+      openDiagnosticsDirectory: vi.fn().mockResolvedValue({
+        ok: false,
+        protocolVersion: '1',
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'token=super-secret at /Users/example/diagnostics',
+          remediation: 'Open port 43117 and inspect stderr.',
+        },
+      }),
+    }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Diagnostics' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open diagnostics folder' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The diagnostics action could not be completed.')
+    expect(alert).toHaveTextContent('Code: INTERNAL_ERROR')
+    expect(alert).not.toHaveTextContent(/super-secret|Users\/example|43117|stderr/i)
+  })
 })

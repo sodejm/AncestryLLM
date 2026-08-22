@@ -145,6 +145,10 @@
     "title": "Desktop reference — AncestryLLM",
     "description": "Exact v0.6 source routes, states, stable codes, recovery actions, accessibility behavior, platforms, and safety boundaries."
   },
+  "reference/DESKTOP_DIAGNOSTICS.md": {
+    "title": "Desktop diagnostics contract — AncestryLLM",
+    "description": "Privacy-safe local schema, stable lifecycle catalog, bounded retention, native actions, and support boundaries for desktop diagnostics."
+  },
   "explanation/DESKTOP_SHELL.md": {
     "title": "Desktop shell — AncestryLLM",
     "description": "Released bounded v0.6.0 Electron Home, Diagnostics, Settings, and capability onboarding plus source-level gated bounded Tasks and private Chat presentation; task admission and domain authority remain excluded."

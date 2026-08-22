@@ -26,6 +26,7 @@
 ### Reference
 
 - [Desktop reference](reference/DESKTOP.md)
+- [Desktop diagnostics contract](reference/DESKTOP_DIAGNOSTICS.md)
 - [CLI reference](reference/CLI.md)
 - [Provider guide](reference/PROVIDERS.md)
 - [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)

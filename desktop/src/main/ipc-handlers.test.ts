@@ -392,9 +392,18 @@ const fileGrantBroker = (): MainFileGrantBroker => ({
 function nativeActionHarness() {
   const openExternalLink = vi.fn().mockResolvedValue(Object.freeze({ status: 'opened' as const }))
   const copyText = vi.fn().mockResolvedValue(undefined)
+  const openDiagnosticsDirectory = vi.fn().mockResolvedValue(undefined)
+  const clearDiagnostics = vi.fn().mockResolvedValue(undefined)
   return {
-    actions: Object.freeze({ openExternalLink, copyText }) satisfies MainNativeActions,
+    actions: Object.freeze({
+      openExternalLink,
+      copyText,
+      openDiagnosticsDirectory,
+      clearDiagnostics,
+    }) satisfies MainNativeActions,
+    clearDiagnostics,
     copyText,
+    openDiagnosticsDirectory,
     openExternalLink,
   }
 }
@@ -489,7 +498,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the thirty-six declared static channels', () => {
+  it('registers exactly the thirty-eight declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -497,7 +506,7 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(36)
+    expect(handlers.size).toBe(38)
   })
 
   it('routes strict native actions through the authorized main-process adapter', async () => {
@@ -531,6 +540,31 @@ describe('desktop IPC handlers', () => {
     })).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
     expect(native.openExternalLink).toHaveBeenCalledTimes(1)
     expect(native.copyText).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes only fixed diagnostics-directory actions and rejects renderer-supplied paths', async () => {
+    const native = nativeActionHarness()
+    const { event, handlers } = harness(bridge(), { nativeActions: native.actions })
+
+    await expect(handlers.get(desktopChannels.openDiagnosticsDirectory)?.(event())).resolves.toEqual(
+      result({ schema_version: 1, opened: true }),
+    )
+    await expect(handlers.get(desktopChannels.clearDiagnostics)?.(event())).resolves.toEqual(
+      result({ schema_version: 1, cleared: true }),
+    )
+    expect(native.openDiagnosticsDirectory).toHaveBeenCalledOnce()
+    expect(native.clearDiagnostics).toHaveBeenCalledOnce()
+
+    await expect(handlers.get(desktopChannels.openDiagnosticsDirectory)?.(
+      event(),
+      '/private/renderer-selected-path',
+    )).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    await expect(handlers.get(desktopChannels.clearDiagnostics)?.(
+      event(),
+      { directory: '/private/renderer-selected-path' },
+    )).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    expect(native.openDiagnosticsDirectory).toHaveBeenCalledOnce()
+    expect(native.clearDiagnostics).toHaveBeenCalledOnce()
   })
 
   it('binds chat sessions and their streams to the renderer that created them', async () => {
@@ -973,6 +1007,19 @@ describe('desktop IPC handlers', () => {
     await expect(handlers.get(desktopChannels.getAppInfo)?.(event(), 'surplus')).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
     expect(control.updatePreferences).not.toHaveBeenCalled()
     expect(control.getAppInfo).not.toHaveBeenCalled()
+  })
+
+  it('records malformed capability requests before rejecting them', async () => {
+    const recordDiagnostic = vi.fn()
+    const { control, event, handlers } = harness(bridge(), { recordDiagnostic })
+
+    await expect(
+      handlers.get(desktopChannels.getCapabilities)?.(event(), 'surplus'),
+    ).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+
+    expect(control.getCapabilities).not.toHaveBeenCalled()
+    expect(recordDiagnostic).toHaveBeenCalledOnce()
+    expect(recordDiagnostic).toHaveBeenCalledWith('BRIDGE_ROUTE_REJECTED', 'warning')
   })
 
   it('binds strict open, save, and revoke requests to the exact WebContents owner', async () => {

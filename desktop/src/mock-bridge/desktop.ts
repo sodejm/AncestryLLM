@@ -23,6 +23,7 @@ import {
   type ConsentRevokeRequest,
   type CopyTextRequest,
   type CopyTextResult,
+  type ClearDiagnosticsResult,
   type FileGrant,
   type FileGrantRevocation,
   type JobEventDelivery,
@@ -41,6 +42,7 @@ import {
   type LocalRuntimeStatus,
   type OpenExternalLinkRequest,
   type OpenExternalLinkResult,
+  type OpenDiagnosticsDirectoryResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderEndpointValidation,
@@ -704,6 +706,14 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     async copyText(input: CopyTextRequest) {
       parseCopyTextRequest(input)
       const result: CopyTextResult = { schema_version: 1, copied: true }
+      return success(result)
+    },
+    async openDiagnosticsDirectory() {
+      const result: OpenDiagnosticsDirectoryResult = { schema_version: 1, opened: true }
+      return success(result)
+    },
+    async clearDiagnostics() {
+      const result: ClearDiagnosticsResult = { schema_version: 1, cleared: true }
       return success(result)
     },
     async getChatCapability() {
