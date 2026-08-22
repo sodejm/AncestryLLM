@@ -671,6 +671,50 @@ def test_mediated_operation_request_rejects_mismatched_or_reused_grants() -> Non
         )
 
 
+@pytest.mark.parametrize(
+    "operation_id",
+    [
+        f"op_{'A' * 64}",
+        f"op_{'a' * 63}",
+        f"op_{'a' * 65}",
+        f"op_{'g' * 64}",
+    ],
+)
+def test_mediated_operation_ids_use_exact_lowercase_hex_contract(
+    operation_id: str,
+) -> None:
+    operation = "gedcom.quality"
+    input_grant = ArtifactGrantRef(
+        f"grt_{'8' * 64}",
+        operation,
+        ArtifactAccess.READ,
+    )
+    output_grant = ArtifactGrantRef(
+        f"grt_{'9' * 64}",
+        operation,
+        ArtifactAccess.WRITE,
+    )
+    artifact = ArtifactRef(
+        f"art_{'a' * 64}",
+        "text/markdown",
+        "quality_report",
+        17,
+        ArtifactStatus.READY,
+        "b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="operation_id"):
+        MediatedOperationRequest(
+            operation_id=operation_id,
+            operation=operation,
+            transport=MediationTransport.REMOTE_SERVICE,
+            inputs=(input_grant,),
+            outputs=(output_grant,),
+        )
+    with pytest.raises(ValueError, match="operation_id"):
+        MediatedOperationResult(operation_id=operation_id, outputs=(artifact,))
+
+
 def test_mediated_operation_result_rejects_duplicate_artifact_ids() -> None:
     artifact = ArtifactRef(
         f"art_{'5' * 64}",

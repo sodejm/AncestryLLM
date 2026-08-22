@@ -472,4 +472,47 @@ describe('mediated operation broker', () => {
     await expect(lstat(target)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readdir(join(root, 'operation-staging'))).resolves.toEqual([])
   })
+
+  it('releases local resources when an adapter ignores the operation deadline', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source.ged')
+    const target = join(root, 'quality.md')
+    await writeFile(source, '0 HEAD\n0 TRLR\n')
+    const owner = {}
+    const fileGrants = new FileGrantBroker(queuedDialogs([source], [target]))
+    const input = await openGrant(fileGrants, owner, 'gedcom-read')
+    const output = await saveGrant(fileGrants, owner, 'markdown-write', 'quality.md')
+    const dispose = vi.fn(async () => undefined)
+    const local: LocalMediatedOperationAdapter = {
+      prepare: vi.fn(async (context) => ({
+        realizedMounts: context.mountPlan.mounts,
+        execute: vi.fn(() => new Promise<void>(() => undefined)),
+        dispose,
+      })),
+    }
+    const broker = new MediatedOperationBroker({
+      runtimeProfileRoot: root,
+      fileGrants,
+      localAdapter: local,
+      remoteAdapter: unusedRemoteAdapter(),
+      maxDurationMs: 50,
+    })
+
+    const failure = await broker.execute(owner, request(
+      '9',
+      'gedcom.quality',
+      'local-container',
+      [input],
+      [output],
+    )).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(MediatedOperationBrokerError)
+    expect(failure).toMatchObject({
+      code: 'TIMED_OUT',
+      message: 'The mediated operation timed out.',
+    })
+    expect(dispose).toHaveBeenCalledTimes(1)
+    await expect(lstat(target)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(join(root, 'operation-staging'))).resolves.toEqual([])
+  })
 })

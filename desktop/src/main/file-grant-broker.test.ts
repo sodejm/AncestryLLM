@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FileGrantBroker,
   FileGrantBrokerError,
+  type FilePublicationPort,
   type NativeFileDialogPort,
 } from './file-grant-broker'
 
@@ -292,6 +293,7 @@ describe('opaque file-grant broker', () => {
       purpose: 'gedcom-write',
       sizeBytes: Buffer.byteLength(content),
       sha256: '770ca9286b8db4fc205c0dd3efca1e122da29f5c767232e6ab9f1d969262aad0',
+      durability: 'confirmed',
     })
     expect(JSON.stringify(published)).not.toContain(root)
     await expect(readFile(target, 'utf8')).resolves.toBe(content)
@@ -300,6 +302,38 @@ describe('opaque file-grant broker', () => {
       purpose: 'gedcom-write',
       suggestedName: 'published.ged',
     })).resolves.toMatchObject({ metadata: { validation: 'replacement-confirmed' } })
+  })
+
+  it('preserves a committed output when directory durability cannot be confirmed', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const stagedPath = join(privateRoot, 'result.ged')
+    const target = join(root, 'published.ged')
+    const content = '0 HEAD\n1 SOUR DURABILITY\n0 TRLR\n'
+    await mkdir(privateRoot, { mode: 0o700 })
+    await writeFile(stagedPath, content, { mode: 0o600 })
+    const publication: FilePublicationPort = {
+      rename,
+      syncDirectory: vi.fn(async () => { throw new Error('directory sync failed') }),
+    }
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn().mockResolvedValue(target),
+    }), publication)
+    const owner = {}
+    const grant = await broker.requestSaveGrant(owner, {
+      purpose: 'gedcom-write',
+      suggestedName: 'published.ged',
+    })
+
+    const published = await broker.publishWriteGrant(owner, grant!.grantId, 'gedcom-write', stagedPath)
+
+    expect(published).toMatchObject({
+      grantId: grant!.grantId,
+      purpose: 'gedcom-write',
+      durability: 'unconfirmed',
+    })
+    await expect(readFile(target, 'utf8')).resolves.toBe(content)
+    expect((await readdir(root)).filter((name) => name.includes('.ancestryllm-'))).toEqual([])
   })
 
   it('preserves an existing output and releases its lock when staged validation fails', async () => {
@@ -396,6 +430,40 @@ describe('opaque file-grant broker', () => {
 
     await expect(broker.resolveWriteGrant(owner, grant!.grantId, 'gedcom-write'))
       .rejects.toMatchObject({ code: 'FILE_GRANT_STALE' })
+    await expect(readdir(parent)).resolves.toEqual([])
+    await expect(readdir(displacedParent)).resolves.toEqual([])
+  })
+
+  it('removes a temporary publication if its selected parent moves during commit', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const parent = join(root, 'selected-output')
+    const displacedParent = join(root, 'displaced-output')
+    const stagedPath = join(privateRoot, 'result.ged')
+    const target = join(parent, 'new.ged')
+    await mkdir(privateRoot, { mode: 0o700 })
+    await mkdir(parent)
+    await writeFile(stagedPath, '0 HEAD\n1 SOUR PARENT-RACE\n0 TRLR\n', { mode: 0o600 })
+    const publication: FilePublicationPort = {
+      rename: vi.fn(async (source, destination) => {
+        await rename(parent, displacedParent)
+        await mkdir(parent)
+        await rename(source, destination)
+      }),
+      syncDirectory: vi.fn(async () => undefined),
+    }
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn().mockResolvedValue(target),
+    }), publication)
+    const owner = {}
+    const grant = await broker.requestSaveGrant(owner, {
+      purpose: 'gedcom-write',
+      suggestedName: 'new.ged',
+    })
+
+    await expect(broker.publishWriteGrant(owner, grant!.grantId, 'gedcom-write', stagedPath))
+      .rejects.toMatchObject({ code: 'FILE_SELECTION_INVALID' })
+
     await expect(readdir(parent)).resolves.toEqual([])
     await expect(readdir(displacedParent)).resolves.toEqual([])
   })

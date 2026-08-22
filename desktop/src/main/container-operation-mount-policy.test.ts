@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   cleanupStaleMediatedOperationMounts,
+  directoryModeIsPrivate,
   initializeMediatedOperationStaging,
   MediatedMountPolicyError,
   prepareMediatedOperationMounts,
@@ -26,6 +27,13 @@ afterEach(async () => {
 })
 
 describe('mediated operation mount policy', () => {
+  it('enforces POSIX private modes without rejecting Windows directory metadata', () => {
+    expect(directoryModeIsPrivate(0o700, 'linux')).toBe(true)
+    expect(directoryModeIsPrivate(0o755, 'linux')).toBe(false)
+    expect(directoryModeIsPrivate(0o755, 'darwin')).toBe(false)
+    expect(directoryModeIsPrivate(0o755, 'win32')).toBe(true)
+  })
+
   it('initializes a private profile and removes stale operations before desktop startup', async () => {
     const applicationDataRoot = await runtimeRoot()
     await chmod(applicationDataRoot, 0o755)
