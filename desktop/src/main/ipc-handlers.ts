@@ -26,6 +26,7 @@ import {
   type ConsentRevokeRequest,
   type CopyTextRequest,
   type CopyTextResult,
+  type ClearDiagnosticsResult,
   type FileGrant,
   type FileGrantId,
   type FileGrantRevocation,
@@ -42,6 +43,7 @@ import {
   type OpenFileGrantRequest,
   type OpenExternalLinkRequest,
   type OpenExternalLinkResult,
+  type OpenDiagnosticsDirectoryResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderEndpointValidation,
@@ -71,6 +73,7 @@ import {
   parseConsentRevokeRequest,
   parseCopyTextRequest,
   parseCopyTextResult,
+  parseClearDiagnosticsResult,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
@@ -90,6 +93,7 @@ import {
   parseOpenFileGrantRequest,
   parseOpenExternalLinkRequest,
   parseOpenExternalLinkResult,
+  parseOpenDiagnosticsDirectoryResult,
   parsePreferenceUpdate,
   parsePreferencesResult,
   parseProviderConfigurationResult,
@@ -112,6 +116,10 @@ import {
   type ChatEventStreamRequest,
 } from './sidecar-client'
 import { validateStructuredClone } from './structured-clone-policy'
+import {
+  DESKTOP_DIAGNOSTIC_CODES,
+  type RecordDesktopDiagnostic,
+} from './structured-diagnostics'
 
 type IpcHandler = (event: unknown, ...args: unknown[]) => Promise<unknown>
 /**
@@ -153,6 +161,8 @@ export interface MainDesktopBridge extends Omit<
   | 'applyLocalRuntime'
   | 'openExternalLink'
   | 'copyText'
+  | 'openDiagnosticsDirectory'
+  | 'clearDiagnostics'
   | 'getChatCapability'
   | 'createChatSession'
   | 'closeChatSession'
@@ -266,6 +276,8 @@ export interface MainFileGrantBroker {
 export interface MainNativeActions {
   openExternalLink(destination: string): Promise<Readonly<{ status: 'opened' | 'cancelled' }>>
   copyText(text: string): Promise<void> | void
+  openDiagnosticsDirectory(): Promise<void> | void
+  clearDiagnostics(): Promise<void> | void
 }
 
 /**
@@ -289,6 +301,7 @@ export interface RegistrationOptions {
   readonly runtimeOperationTimeoutMs?: number
   readonly nativeActionTimeoutMs?: number
   readonly nativeActions?: MainNativeActions
+  readonly recordDiagnostic?: RecordDesktopDiagnostic
 }
 interface Authorization {
   readonly contents: BridgeWebContents
@@ -779,11 +792,15 @@ function registerNoArgumentHandler<T>(
   operation: (signal: AbortSignal) => Promise<unknown>,
   parseResponse: (value: unknown) => BridgeResult<T>,
   timeoutMs: number,
+  rejectRoute: () => void,
 ): void {
   ipc.handle(channel, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<T>()
-    if (args.length !== 0) return invalidRequest<T>()
+    if (args.length !== 0) {
+      rejectRoute()
+      return invalidRequest<T>()
+    }
     return schedule(state, timeoutMs, operation, parseResponse)
   })
 }
@@ -817,31 +834,54 @@ export function registerDesktopIpcHandlers(
   const authorizations = new Map<BridgeWebContents, Authorization>()
   let disposed = false
 
+  const recordDiagnostic = (
+    code: Parameters<NonNullable<RegistrationOptions['recordDiagnostic']>>[0],
+    severity: Parameters<NonNullable<RegistrationOptions['recordDiagnostic']>>[1],
+  ): void => {
+    try { options.recordDiagnostic?.(code, severity) } catch { /* Diagnostics never affect IPC. */ }
+  }
+  const rejectRoute = (): void => {
+    recordDiagnostic(DESKTOP_DIAGNOSTIC_CODES.bridgeRouteRejected, 'warning')
+  }
+
   const authorize = (event: unknown): Authorization | undefined => {
     const parts = eventParts(event)
-    if (!parts || typeof parts.sender !== 'object' || parts.sender === null) return undefined
+    if (!parts || typeof parts.sender !== 'object' || parts.sender === null) {
+      recordDiagnostic(DESKTOP_DIAGNOSTIC_CODES.bridgeSenderRejected, 'warning')
+      return undefined
+    }
     const state = authorizations.get(parts.sender as BridgeWebContents)
-    if (!state) return undefined
+    if (!state) {
+      recordDiagnostic(DESKTOP_DIAGNOSTIC_CODES.bridgeSenderRejected, 'warning')
+      return undefined
+    }
     try {
-      if (state.contents.isDestroyed() || parts.senderFrame !== state.contents.mainFrame) return undefined
-      if (state.navigating) return undefined
-      if (!state.trustedUrl(state.contents.mainFrame.url)) return undefined
+      if (
+        state.contents.isDestroyed()
+        || parts.senderFrame !== state.contents.mainFrame
+        || state.navigating
+        || !state.trustedUrl(state.contents.mainFrame.url)
+      ) {
+        recordDiagnostic(DESKTOP_DIAGNOSTIC_CODES.bridgeSenderRejected, 'warning')
+        return undefined
+      }
       return state
     } catch {
+      recordDiagnostic(DESKTOP_DIAGNOSTIC_CODES.bridgeSenderRejected, 'warning')
       return undefined
     }
   }
 
-  registerNoArgumentHandler(ipc, desktopChannels.getAppInfo, authorize, (signal) => bridge.getAppInfo(signal), parseAppInfoResult, timeoutMs)
-  registerNoArgumentHandler(ipc, desktopChannels.getStartupDiagnostics, authorize, (signal) => bridge.getStartupDiagnostics(signal), parseStartupDiagnosticsResult, timeoutMs)
+  registerNoArgumentHandler(ipc, desktopChannels.getAppInfo, authorize, (signal) => bridge.getAppInfo(signal), parseAppInfoResult, timeoutMs, rejectRoute)
+  registerNoArgumentHandler(ipc, desktopChannels.getStartupDiagnostics, authorize, (signal) => bridge.getStartupDiagnostics(signal), parseStartupDiagnosticsResult, timeoutMs, rejectRoute)
   ipc.handle(desktopChannels.getCapabilities, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<CapabilityManifest>()
     if (args.length !== 0) return invalidRequest<CapabilityManifest>()
     return capabilityRequest(state, timeoutMs, bridge)
   })
-  registerNoArgumentHandler(ipc, desktopChannels.retrySidecar, authorize, (signal) => bridge.retrySidecar(signal), parseStartupDiagnosticsResult, timeoutMs)
-  registerNoArgumentHandler(ipc, desktopChannels.getPreferences, authorize, (signal) => bridge.getPreferences(signal), parsePreferencesResult, timeoutMs)
+  registerNoArgumentHandler(ipc, desktopChannels.retrySidecar, authorize, (signal) => bridge.retrySidecar(signal), parseStartupDiagnosticsResult, timeoutMs, rejectRoute)
+  registerNoArgumentHandler(ipc, desktopChannels.getPreferences, authorize, (signal) => bridge.getPreferences(signal), parsePreferencesResult, timeoutMs, rejectRoute)
   ipc.handle(desktopChannels.updatePreferences, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<LocalPreferences>()
@@ -867,6 +907,7 @@ export function registerDesktopIpcHandlers(
     (signal) => bridge.getSettings(signal),
     parseSettingsResult,
     timeoutMs,
+    rejectRoute,
   )
   ipc.handle(desktopChannels.updateSettings, async (event, ...args) => {
     const state = authorize(event)
@@ -947,6 +988,7 @@ export function registerDesktopIpcHandlers(
     (signal) => bridge.getProviderConfiguration(signal),
     parseProviderConfigurationResult,
     timeoutMs,
+    rejectRoute,
   )
   ipc.handle(desktopChannels.createProviderProfile, async (event, ...args) => {
     const state = authorize(event)
@@ -1099,6 +1141,7 @@ export function registerDesktopIpcHandlers(
     (signal) => bridge.getLocalRuntimeStatus(signal),
     parseLocalRuntimeStatusResult,
     runtimeOperationTimeoutMs,
+    rejectRoute,
   )
   ipc.handle(desktopChannels.previewLocalRuntime, async (event, ...args) => {
     const state = authorize(event)
@@ -1185,11 +1228,38 @@ export function registerDesktopIpcHandlers(
   })
   registerNoArgumentHandler(
     ipc,
+    desktopChannels.openDiagnosticsDirectory,
+    authorize,
+    async () => {
+      if (!options.nativeActions) throw new Error('Native action unavailable')
+      await options.nativeActions.openDiagnosticsDirectory()
+      return success<OpenDiagnosticsDirectoryResult>({ schema_version: 1, opened: true })
+    },
+    parseOpenDiagnosticsDirectoryResult,
+    nativeActionTimeoutMs,
+    rejectRoute,
+  )
+  registerNoArgumentHandler(
+    ipc,
+    desktopChannels.clearDiagnostics,
+    authorize,
+    async () => {
+      if (!options.nativeActions) throw new Error('Native action unavailable')
+      await options.nativeActions.clearDiagnostics()
+      return success<ClearDiagnosticsResult>({ schema_version: 1, cleared: true })
+    },
+    parseClearDiagnosticsResult,
+    nativeActionTimeoutMs,
+    rejectRoute,
+  )
+  registerNoArgumentHandler(
+    ipc,
     desktopChannels.getChatCapability,
     authorize,
     (signal) => bridge.getChatCapability(signal),
     parseChatCapabilityResult,
     timeoutMs,
+    rejectRoute,
   )
   ipc.handle(desktopChannels.createChatSession, async (event, ...args) => {
     const state = authorize(event)
@@ -1369,6 +1439,7 @@ export function registerDesktopIpcHandlers(
     (signal) => bridge.listJobs(signal),
     parseJobListResult,
     timeoutMs,
+    rejectRoute,
   )
   ipc.handle(desktopChannels.getJob, async (event, ...args) => {
     const state = authorize(event)

@@ -968,6 +968,9 @@ function Shell() {
   const [preferenceFailure, setPreferenceFailure] = useState<BridgeErrorCode | null>(null)
   const [retryPending, setRetryPending] = useState(false)
   const [retryFailure, setRetryFailure] = useState<BridgeErrorCode | null>(null)
+  const [diagnosticActionPending, setDiagnosticActionPending] = useState<'open' | 'clear' | null>(null)
+  const [diagnosticActionFailure, setDiagnosticActionFailure] = useState<BridgeErrorCode | null>(null)
+  const [diagnosticActionStatus, setDiagnosticActionStatus] = useState<string | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const lastFocusedHeadingKey = useRef<string | null>(null)
   const startupAlert = useRef<HTMLDivElement>(null)
@@ -1092,6 +1095,29 @@ function Shell() {
       setRetryFailure('INTERNAL_ERROR')
     } finally {
       setRetryPending(false)
+    }
+  }
+
+  const runDiagnosticAction = async (action: 'open' | 'clear') => {
+    if (diagnosticActionPending) return
+    setDiagnosticActionPending(action)
+    setDiagnosticActionFailure(null)
+    setDiagnosticActionStatus(null)
+    try {
+      const result = action === 'open'
+        ? await ancestryBridge().openDiagnosticsDirectory()
+        : await ancestryBridge().clearDiagnostics()
+      if (result.ok) {
+        setDiagnosticActionStatus(action === 'open'
+          ? 'The diagnostics folder was opened.'
+          : 'Local diagnostic records were cleared.')
+      } else {
+        setDiagnosticActionFailure(result.error.code)
+      }
+    } catch {
+      setDiagnosticActionFailure('INTERNAL_ERROR')
+    } finally {
+      setDiagnosticActionPending(null)
     }
   }
 
@@ -1260,6 +1286,38 @@ function Shell() {
           <h2 id="service-status">Desktop service</h2>
           {startup.isPending ? <p role="status">Checking startup state…</p> : <p>Status: <span className="badge">{startupStatus}</span></p>}
           <p>Diagnostic details stay within this shell.</p>
+        </section>
+        <section className="settings-panel" aria-labelledby="local-diagnostic-records-title">
+          <h2 id="local-diagnostic-records-title">Local diagnostic records</h2>
+          <p>
+            Privacy-safe lifecycle records are stored only on this device with bounded retention.
+            They exclude family tree records, prompts, responses, credentials, and telemetry.
+          </p>
+          <div className="home-actions">
+            <Button
+              variant="quiet"
+              disabled={diagnosticActionPending !== null}
+              onClick={() => { void runDiagnosticAction('open') }}
+            >
+              {diagnosticActionPending === 'open' ? 'Opening…' : 'Open diagnostics folder'}
+            </Button>
+            <Button
+              variant="quiet"
+              disabled={diagnosticActionPending !== null}
+              onClick={() => { void runDiagnosticAction('clear') }}
+            >
+              {diagnosticActionPending === 'clear' ? 'Clearing…' : 'Clear diagnostics'}
+            </Button>
+          </div>
+          {diagnosticActionStatus && <p role="status">{diagnosticActionStatus}</p>}
+          {diagnosticActionFailure && <div role="alert" className="error">
+            <AlertTriangle aria-hidden="true" />
+            <div>
+              <strong>The diagnostics action could not be completed.</strong>
+              <p className="error-code">Code: {diagnosticActionFailure}</p>
+              <p>Restart AncestryLLM and try again.</p>
+            </div>
+          </div>}
         </section>
         {startupData?.report && <section className="settings-panel" aria-labelledby="startup-checks-title">
           <h2 id="startup-checks-title">Startup checks</h2>

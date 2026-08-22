@@ -29,9 +29,12 @@ from ancestryllm.api.sidecar import (
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import ConfigurationError
 from ancestryllm.core.secrets import MemorySecretStore, SecretSourceMode
+from ancestryllm.observability.structured_diagnostics import DesktopDiagnosticSeverity
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+DIAGNOSTIC_RUN_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _launch_payload(**updates: str) -> bytes:
@@ -39,6 +42,7 @@ def _launch_payload(**updates: str) -> bytes:
         "contract": API_CONTRACT,
         "app_build": SIDECAR_BUILD,
         "bearer_token": "A" * 43,
+        "diagnostic_run_id": DIAGNOSTIC_RUN_ID,
     }
     payload.update(updates)
     return (json.dumps(payload) + "\n").encode()
@@ -51,6 +55,7 @@ def test_private_stdin_frame_is_strict_bounded_and_provider_none() -> None:
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
     assert frame.settings().provider_id == "none"
     assert "bearer_token" not in repr(frame)
@@ -87,6 +92,7 @@ def test_readiness_line_contains_only_public_handshake_metadata() -> None:
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="secret-value-that-must-never-appear-000000000",
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
 
     rendered = readiness_line(frame, 49152)
@@ -98,12 +104,65 @@ def test_readiness_line_contains_only_public_handshake_metadata() -> None:
     assert frame.bearer_token not in rendered
 
 
+def test_sidecar_diagnostic_recorders_correlate_bounded_component_streams(
+    tmp_path: Path,
+) -> None:
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="secret-value-that-must-never-appear-000000000",
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+    )
+    recorders = sidecar_module._create_sidecar_diagnostic_recorders(
+        frame,
+        directory=tmp_path,
+    )
+
+    recorders.core("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+    recorders.sidecar("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+
+    documents = [
+        json.loads(line)
+        for filename in ("python-core.jsonl", "desktop-sidecar.jsonl")
+        for line in (tmp_path / filename).read_text(encoding="utf-8").splitlines()
+    ]
+    assert {document["component"] for document in documents} == {
+        "python-core",
+        "desktop-sidecar",
+    }
+    assert {document["run_id"] for document in documents} == {DIAGNOSTIC_RUN_ID}
+    assert frame.bearer_token not in json.dumps(documents)
+
+
+def test_sidecar_diagnostic_writer_failure_never_blocks_runtime_flow(
+    tmp_path: Path,
+) -> None:
+    occupied = tmp_path / "occupied"
+    occupied.write_text("not a directory", encoding="utf-8")
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+    )
+    recorders = sidecar_module._create_sidecar_diagnostic_recorders(
+        frame,
+        directory=occupied,
+    )
+
+    recorders.core("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+    recorders.sidecar("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+
+    assert occupied.read_text(encoding="utf-8") == "not a directory"
+
+
 def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
     app = create_sidecar_app(
         LaunchFrame(
             contract=API_CONTRACT,
             app_build=SIDECAR_BUILD,
             bearer_token="A" * 43,
+            diagnostic_run_id=DIAGNOSTIC_RUN_ID,
         )
     )
 
@@ -143,6 +202,7 @@ def test_packaged_sidecar_runtime_shutdown_is_authenticated_bodyless_and_private
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
     request_runtime_shutdown = Mock()
     app = create_sidecar_app(
@@ -182,6 +242,7 @@ def test_packaged_sidecar_runtime_shutdown_is_unavailable_without_callback(
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
     app = create_sidecar_app(
         frame,
@@ -206,6 +267,7 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
     app = create_sidecar_app(
         frame,
@@ -258,6 +320,7 @@ def test_packaged_sidecar_closes_chat_and_llm_resources(
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
     app = create_sidecar_app(
         frame,
@@ -311,6 +374,7 @@ def test_packaged_sidecar_uses_keyring_only_secret_resolution(
             contract=API_CONTRACT,
             app_build=SIDECAR_BUILD,
             bearer_token="A" * 43,
+            diagnostic_run_id=DIAGNOSTIC_RUN_ID,
         ),
         config=AppConfig(
             config_path=tmp_path / "config.toml",
@@ -348,8 +412,14 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
         contract=API_CONTRACT,
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
     )
-    app = create_sidecar_app(frame, secret_store=MemorySecretStore({}))
+    record_diagnostic = Mock()
+    app = create_sidecar_app(
+        frame,
+        secret_store=MemorySecretStore({}),
+        record_diagnostic=record_diagnostic,
+    )
     headers = {
         "Authorization": f"Bearer {frame.bearer_token}",
         "X-Ancestry-API-Version": API_CONTRACT,
@@ -416,6 +486,12 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
         "active_jobs": [],
     }
     assert private_marker not in jobs.text
+    record_diagnostic.assert_called_once_with(
+        "CONFIGURATION_DEGRADED",
+        DesktopDiagnosticSeverity.WARNING,
+        {"blocked": True},
+    )
+    assert private_marker not in repr(record_diagnostic.call_args)
     assert str(tmp_path) not in jobs.text
     assert private_marker not in blocked.text
     assert private_marker not in blocked_chat.text

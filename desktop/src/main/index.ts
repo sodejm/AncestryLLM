@@ -1,4 +1,5 @@
 /** Boots the Electron main process, security policies, runtime bridge, IPC, and window lifecycle. */
+import { lstatSync, mkdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -48,6 +49,12 @@ import {
   appShutdownFailureDiagnostic,
   writeAppShutdownDiagnostic,
 } from './shutdown-diagnostics'
+import {
+  createDesktopDiagnosticRunId,
+  DESKTOP_DIAGNOSTIC_CODES,
+  DesktopDiagnosticWriter,
+  type RecordDesktopDiagnostic,
+} from './structured-diagnostics'
 import { startRuntimeBridge } from './runtime-bridge'
 import type { SidecarSupervisor } from './sidecar-supervisor'
 import type { JobShutdownAction } from './sidecar-client'
@@ -82,6 +89,30 @@ let shutdownPromise: Promise<boolean> | undefined
 const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }
 let ipcController: DesktopIpcController | undefined
 let removeSidecarSessionListener: (() => void) | undefined
+const diagnosticRunId = createDesktopDiagnosticRunId()
+const diagnosticDirectory = join(app.getPath('userData'), 'diagnostics')
+const diagnosticWriters = (['electron-main', 'python-core', 'desktop-sidecar'] as const).map(
+  (component) => new DesktopDiagnosticWriter({
+    directory: diagnosticDirectory,
+    runId: diagnosticRunId,
+    appVersion: app.getVersion(),
+    component,
+  }),
+)
+const electronDiagnosticWriter = diagnosticWriters[0]
+const recordDesktopDiagnostic: RecordDesktopDiagnostic = (code, severity, metadata = {}) => {
+  try {
+    const written = electronDiagnosticWriter?.write(code, severity, metadata) ?? false
+    if (!written && code !== DESKTOP_DIAGNOSTIC_CODES.diagnosticWriterDegraded) {
+      electronDiagnosticWriter?.write(
+        DESKTOP_DIAGNOSTIC_CODES.diagnosticWriterDegraded,
+        'warning',
+      )
+    }
+  } catch {
+    // Diagnostics are deliberately unable to affect startup, safety, or shutdown.
+  }
+}
 
 const requestVerifiedAppQuit = (): void => { app.quit() }
 
@@ -146,7 +177,22 @@ function registerIpcHandlers(): void {
         openExternal: async (normalized) => { await shell.openExternal(normalized) },
       }),
       copyText: (text: string) => { clipboard.writeText(text) },
+      openDiagnosticsDirectory: async () => {
+        mkdirSync(diagnosticDirectory, { recursive: true, mode: 0o700 })
+        const metadata = lstatSync(diagnosticDirectory)
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+          throw new Error('Diagnostics directory is unavailable.')
+        }
+        const error = await shell.openPath(diagnosticDirectory)
+        if (error !== '') throw new Error('Diagnostics directory could not be opened.')
+      },
+      clearDiagnostics: () => {
+        if (!diagnosticWriters.every((writer) => writer.clear())) {
+          throw new Error('Diagnostics could not be cleared safely.')
+        }
+      },
     }),
+    recordDiagnostic: recordDesktopDiagnostic,
   })
 }
 
@@ -194,6 +240,7 @@ function createWindow(): void {
   window.once('ready-to-show', () => {
     window.show()
     console.info(WINDOW_READY_RECORD)
+    recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.rendererWindowReady, 'info')
   })
   void window.loadURL(resolveRendererTarget(rendererPolicy()).value)
 }
@@ -242,12 +289,16 @@ if (localRuntimeCliRequested && !primaryInstance) {
   // must never leave SIGTERM on its default process-termination path.
   armVerifiedSigtermHandler()
   app.whenReady().then(async () => {
+    recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.appLaunchRequested, 'info')
+    recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.electronReady, 'info')
     const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
       sidecarSupervisor = supervisor
       prepareJobShutdown = prepareJobs
       armVerifiedSigtermHandler()
     }, {
       linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
+      diagnosticRunId,
+      recordDiagnostic: recordDesktopDiagnostic,
     })
     bridge = runtime.bridge
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
@@ -273,16 +324,26 @@ if (localRuntimeCliRequested && !primaryInstance) {
       writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.requested)
       shutdownPromise = completeAppShutdown(
         async (action) => {
+          recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.jobsShutdownPrepRequested, 'info')
           if (!prepareJobs) throw new Error('Job shutdown preparation is unavailable.')
           await prepareJobs(action)
           writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.jobsPrepared)
+          recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.jobsShutdownPrepSucceeded, 'info')
         },
         chooseUnsafeShutdownAction,
         async () => {
           await supervisor.stop()
           writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.sidecarStopped)
         },
-        (failure) => writeAppShutdownDiagnostic(appShutdownFailureDiagnostic(failure)),
+        (failure) => {
+          writeAppShutdownDiagnostic(appShutdownFailureDiagnostic(failure))
+          recordDesktopDiagnostic(
+            failure === 'jobs-preparation'
+              ? DESKTOP_DIAGNOSTIC_CODES.jobsShutdownPrepFailed
+              : DESKTOP_DIAGNOSTIC_CODES.sidecarTerminationFailed,
+            'error',
+          )
+        },
         () => {
           disposeIpcBoundary()
           sidecarSupervisor = undefined
@@ -292,6 +353,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
           // sidecar was owned. Once shutdown is verified, exit directly so
           // Electron cannot re-enter a platform-specific window-close cycle.
           writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.exitAuthorized)
+          recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.appExitAuthorized, 'info')
           app.exit(0)
         },
         () => supervisor.isExplicitSafeEmpty(),

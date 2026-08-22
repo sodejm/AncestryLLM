@@ -20,6 +20,7 @@ import {
   resolveSidecarTargetRoot,
   SidecarSupervisor,
 } from './sidecar-supervisor'
+import type { RecordDesktopDiagnostic } from './structured-diagnostics'
 
 /**
  * Returns the composed bridge plus the sidecar lifecycle hooks owned by the Electron main process.
@@ -35,6 +36,8 @@ export interface RuntimeBridge {
  */
 export interface RuntimeBridgeOptions {
   linuxKeyringVerificationRoot?: string | undefined
+  diagnosticRunId?: string | undefined
+  recordDiagnostic?: RecordDesktopDiagnostic | undefined
 }
 
 type OwnSidecarSupervisor = (
@@ -81,6 +84,8 @@ export async function startRuntimeBridge(
     maxRestarts: 2,
     maxManualRetries: 1,
     linuxKeyringVerificationRoot: options.linuxKeyringVerificationRoot,
+    ...(options.diagnosticRunId === undefined ? {} : { diagnosticRunId: options.diagnosticRunId }),
+    ...(options.recordDiagnostic === undefined ? {} : { recordDiagnostic: options.recordDiagnostic }),
   })
   const sidecarClient = createSidecarClient({ session: () => supervisor.session() })
   const desktopControl = createDesktopControlBridge({

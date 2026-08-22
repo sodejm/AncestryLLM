@@ -145,6 +145,14 @@ have the same command semantics regardless of the caller's interactive shell.
 | Release readiness | The exhaustive release-candidate gate, including declaration documentation on the Python 3.12 quality row. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
 
+Desktop structured-diagnostic tests cover correlation, lifecycle and recovery
+codes, non-blocking writer failure, bounded rotation, malformed and oversized
+events, symbolic-link refusal, bridge rejection, verification failure, and
+privacy canaries. The JSON Lines files themselves are never CI or release
+artifacts. Workflows may retain only their already-reviewed sanitized evidence;
+they must not search for, copy, glob, or upload the application diagnostics
+directory or its component files.
+
 The container matrix uses `ubuntu-24.04` for amd64 and
 `ubuntu-24.04-arm` for arm64. Each row builds the gateway and optional worker
 for the runner's native architecture, resolves their exact local image

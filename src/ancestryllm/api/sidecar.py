@@ -12,6 +12,7 @@ import ctypes
 import json
 import socket
 import sys
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass, field
@@ -39,12 +40,19 @@ from ancestryllm.llm.profiles import ProviderProfileService
 from ancestryllm.llm.provider_configuration import ProviderConfigurationService
 from ancestryllm.llm.registry import ProviderRegistry
 from ancestryllm.llm.service import LLMService
+from ancestryllm.observability.structured_diagnostics import (
+    DesktopDiagnosticComponent,
+    DesktopDiagnosticSeverity,
+    DesktopDiagnosticWriter,
+    validate_desktop_diagnostic_run_id,
+)
 from ancestryllm.storage.database import Database
 from ancestryllm.storage.diagnostics import StartupConfigurationFailure, diagnose_startup
 from ancestryllm.storage.job_events import SqlJobEventRepository
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
+    from pathlib import Path
 
     from fastapi import FastAPI
 
@@ -60,6 +68,9 @@ WINDOWS_EXTENDED_LIMIT_INFORMATION = 9
 
 _process_tree_guard: object | None = None
 
+DiagnosticMetadata = Mapping[str, bool | int | None]
+DiagnosticRecorder = Callable[[str, DesktopDiagnosticSeverity, DiagnosticMetadata | None], None]
+
 
 @dataclass(frozen=True, slots=True)
 class LaunchFrame:
@@ -68,12 +79,14 @@ class LaunchFrame:
     contract: str
     app_build: str
     bearer_token: str = field(repr=False)
+    diagnostic_run_id: str = field(repr=False)
 
     def __post_init__(self) -> None:
         if self.contract != API_CONTRACT:
             raise ValueError("unsupported sidecar contract")
         if self.app_build != SIDECAR_BUILD:
             raise ValueError("sidecar build does not match the application build")
+        validate_desktop_diagnostic_run_id(self.diagnostic_run_id)
         # Reuse the API boundary's validation rather than creating a second
         # token/build/host policy here.
         self.settings()
@@ -86,6 +99,98 @@ class LaunchFrame:
             sidecar_build=SIDECAR_BUILD,
             provider_id="none",
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _SidecarDiagnosticRecorders:
+    """Keep Python component streams correlated without affecting runtime flow."""
+
+    core_writer: DesktopDiagnosticWriter
+    sidecar_writer: DesktopDiagnosticWriter
+
+    @staticmethod
+    def _record(
+        writer: DesktopDiagnosticWriter,
+        fallback_writer: DesktopDiagnosticWriter,
+        code: str,
+        severity: DesktopDiagnosticSeverity,
+        metadata: DiagnosticMetadata | None = None,
+    ) -> None:
+        try:
+            if writer.write(code, severity, metadata):
+                return
+            fallback_writer.write(
+                "DIAGNOSTIC_WRITER_UNAVAILABLE",
+                DesktopDiagnosticSeverity.WARNING,
+                {"writer_failed": True},
+            )
+        except BaseException:  # noqa: BLE001 - diagnostics never control runtime flow
+            with suppress(BaseException):
+                fallback_writer.write(
+                    "DIAGNOSTIC_WRITER_UNAVAILABLE",
+                    DesktopDiagnosticSeverity.WARNING,
+                    {"writer_failed": True},
+                )
+
+    def core(
+        self,
+        code: str,
+        severity: DesktopDiagnosticSeverity,
+        metadata: DiagnosticMetadata | None = None,
+    ) -> None:
+        """Record one core event through the non-blocking boundary."""
+
+        self._record(self.core_writer, self.sidecar_writer, code, severity, metadata)
+
+    def sidecar(
+        self,
+        code: str,
+        severity: DesktopDiagnosticSeverity,
+        metadata: DiagnosticMetadata | None = None,
+    ) -> None:
+        """Record one sidecar event through the non-blocking boundary."""
+
+        self._record(self.sidecar_writer, self.core_writer, code, severity, metadata)
+
+
+def _create_sidecar_diagnostic_recorders(
+    frame: LaunchFrame,
+    *,
+    directory: Path | None = None,
+) -> _SidecarDiagnosticRecorders:
+    """Create the two fixed local component streams for this launch only."""
+
+    diagnostic_directory = directory or user_data_path(APP_NAME) / "diagnostics"
+    return _SidecarDiagnosticRecorders(
+        core_writer=DesktopDiagnosticWriter(
+            directory=diagnostic_directory,
+            run_id=frame.diagnostic_run_id,
+            app_version=frame.app_build,
+            component=DesktopDiagnosticComponent.PYTHON_CORE,
+        ),
+        sidecar_writer=DesktopDiagnosticWriter(
+            directory=diagnostic_directory,
+            run_id=frame.diagnostic_run_id,
+            app_version=frame.app_build,
+            component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
+        ),
+    )
+
+
+def _record_diagnostic(
+    recorder: DiagnosticRecorder | None,
+    code: str,
+    severity: DesktopDiagnosticSeverity,
+    metadata: DiagnosticMetadata | None = None,
+) -> None:
+    """Invoke an injected diagnostic boundary without allowing propagation."""
+
+    if recorder is None:
+        return
+    try:
+        recorder(code, severity, metadata)
+    except BaseException:  # noqa: BLE001 - diagnostics cannot block safety behavior
+        return
 
 
 class _EmptyRegistry:
@@ -304,6 +409,7 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         "contract",
         "app_build",
         "bearer_token",
+        "diagnostic_run_id",
     }:
         raise ValueError("invalid sidecar launch frame fields")
     if not all(isinstance(value, str) for value in document.values()):
@@ -312,6 +418,7 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         contract=document["contract"],
         app_build=document["app_build"],
         bearer_token=document["bearer_token"],
+        diagnostic_run_id=document["diagnostic_run_id"],
     )
 
 
@@ -345,6 +452,7 @@ def create_sidecar_app(
     config: AppConfig | None = None,
     secret_store: SecretStore | None = None,
     request_runtime_shutdown: Callable[[], None] | None = None,
+    record_diagnostic: DiagnosticRecorder | None = None,
 ) -> FastAPI:
     """Compose the packaged sidecar with only bounded control-plane routes."""
 
@@ -368,6 +476,13 @@ def create_sidecar_app(
             configuration_failure = StartupConfigurationFailure(
                 code="CONFIGURATION_UNAVAILABLE",
             )
+    if configuration_failure is not None:
+        _record_diagnostic(
+            record_diagnostic,
+            "CONFIGURATION_DEGRADED",
+            DesktopDiagnosticSeverity.WARNING,
+            {"blocked": True},
+        )
     resolved_secret_store = (
         secret_store
         if secret_store is not None
@@ -435,18 +550,31 @@ def _packaged_fallback_config() -> AppConfig:
 
 
 async def _serve(frame: LaunchFrame) -> int:
-    listener = create_listener()
+    recorders = _create_sidecar_diagnostic_recorders(frame)
+    recorders.core("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+    recorders.sidecar("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
+    try:
+        listener = create_listener()
+    except BaseException:
+        recorders.sidecar("SIDECAR_TERMINATION_FAILED", DesktopDiagnosticSeverity.ERROR)
+        raise
     server: Server
 
     def request_runtime_shutdown() -> None:
+        recorders.sidecar("SIDECAR_SHUTDOWN_REQUESTED", DesktopDiagnosticSeverity.INFO)
         server.should_exit = True
 
     server = Server(
         create_uvicorn_config(
-            create_sidecar_app(frame, request_runtime_shutdown=request_runtime_shutdown)
+            create_sidecar_app(
+                frame,
+                request_runtime_shutdown=request_runtime_shutdown,
+                record_diagnostic=recorders.core,
+            )
         )
     )
     serve_task = asyncio.create_task(server.serve(sockets=[listener]))
+    completed = False
     try:
         async with asyncio.timeout(STARTUP_TIMEOUT_SECONDS):
             while not server.started:
@@ -456,13 +584,28 @@ async def _serve(frame: LaunchFrame) -> int:
                 await asyncio.sleep(0.01)
         sys.stdout.write(readiness_line(frame, listener.getsockname()[1]) + "\n")
         sys.stdout.flush()
+        recorders.core("PYTHON_CORE_READY", DesktopDiagnosticSeverity.INFO)
+        recorders.sidecar("SIDECAR_SERVER_READY", DesktopDiagnosticSeverity.INFO)
         await serve_task
+        completed = True
         return 0
     finally:
+        recorders.sidecar("SIDECAR_TERMINATION_REQUESTED", DesktopDiagnosticSeverity.INFO)
         if not serve_task.done():
             server.should_exit = True
-            await serve_task
+            try:
+                await serve_task
+            except BaseException:
+                recorders.sidecar(
+                    "SIDECAR_TERMINATION_FAILED",
+                    DesktopDiagnosticSeverity.ERROR,
+                )
+                raise
         listener.close()
+        recorders.sidecar(
+            "SIDECAR_TERMINATION_SUCCEEDED" if completed else "SIDECAR_TERMINATION_FAILED",
+            DesktopDiagnosticSeverity.INFO if completed else DesktopDiagnosticSeverity.ERROR,
+        )
 
 
 def _fail() -> NoReturn:

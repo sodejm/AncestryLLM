@@ -105,6 +105,8 @@ Factual, accurate information to look up:
 
 - [Desktop reference](reference/DESKTOP.md) — routes, states, stable codes,
   platform behavior, accessibility, and recovery
+- [Desktop diagnostics contract](reference/DESKTOP_DIAGNOSTICS.md) — local
+  schema, event catalog, retention, privacy, and support boundaries
 - [CLI reference](reference/CLI.md) — commands, options, and exit codes
 - [Provider guide](reference/PROVIDERS.md) — provider policy, profiles, and capabilities
 - [GEDCOM compatibility and release checks](reference/GEDCOM_COMPATIBILITY.md)

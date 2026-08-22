@@ -43,6 +43,17 @@ Supervisor outcomes include `startup_failed`, `startup_timeout`,
 `CONFIGURATION_READY`, `SQLCIPHER_READY`, `KEYRING_READY`, and
 `DATABASE_DIRECTORY_READY`; configuration failure may use `CONFIG_INVALID`.
 
+The Diagnostics destination also offers fixed **Open diagnostics folder** and
+**Clear diagnostics** actions. Electron Main resolves the dedicated local
+directory; the renderer supplies no path and receives no path. Three bounded
+JSON Lines streams correlate Electron Main, Python core, and sidecar lifecycle
+events with one random per-launch UUID. Records contain stable codes and small
+numeric or boolean metadata only. They are never telemetry, are not uploaded or
+collected as CI artifacts, and do not replace the exact shutdown receipt. This
+release intentionally provides no export action. See the
+[diagnostic event contract](DESKTOP_DIAGNOSTICS.md) for the complete catalog,
+retention, and privacy rules.
+
 ## Task states
 
 | State | Meaning |

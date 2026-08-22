@@ -40,6 +40,7 @@ import {
   type ConsentWarningCode,
   type CopyTextRequest,
   type CopyTextResult,
+  type ClearDiagnosticsResult,
   type DesktopColorScheme,
   type ArtifactRef,
   type FileFormat,
@@ -70,6 +71,7 @@ import {
   type OpenFileGrantRequest,
   type OpenExternalLinkRequest,
   type OpenExternalLinkResult,
+  type OpenDiagnosticsDirectoryResult,
   type PreferenceUpdate,
   type ProviderConfiguration,
   type ProviderDataClass,
@@ -1995,6 +1997,26 @@ function parseCopyTextOutcome(value: unknown): CopyTextResult {
   return deepFreeze({ schema_version: 1, copied: true })
 }
 
+function parseOpenDiagnosticsDirectoryOutcome(value: unknown): OpenDiagnosticsDirectoryResult {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'opened'])
+    || value.schema_version !== 1
+    || value.opened !== true
+  ) invalidResponse()
+  return deepFreeze({ schema_version: 1, opened: true })
+}
+
+function parseClearDiagnosticsOutcome(value: unknown): ClearDiagnosticsResult {
+  if (
+    !record(value)
+    || !exactKeys(value, ['schema_version', 'cleared'])
+    || value.schema_version !== 1
+    || value.cleared !== true
+  ) invalidResponse()
+  return deepFreeze({ schema_version: 1, cleared: true })
+}
+
 function parseBridgeResult<T>(value: unknown, parseData: Parser<T>): BridgeResult<T> {
   if (!record(value) || value.protocolVersion !== DESKTOP_PROTOCOL_VERSION || typeof value.ok !== 'boolean') invalidResponse()
   if (value.ok) {
@@ -2073,6 +2095,17 @@ export const parseOpenExternalLinkResult = (value: unknown): BridgeResult<OpenEx
  * Validates an untrusted bridge result envelope whose successful payload is copy text.
  */
 export const parseCopyTextResult = (value: unknown): BridgeResult<CopyTextResult> => parseBridgeResult(value, parseCopyTextOutcome)
+/** Validates the fixed diagnostics-directory native action response. */
+export const parseOpenDiagnosticsDirectoryResult = (
+  value: unknown,
+): BridgeResult<OpenDiagnosticsDirectoryResult> => parseBridgeResult(
+  value,
+  parseOpenDiagnosticsDirectoryOutcome,
+)
+/** Validates the fixed diagnostic-log clearing native action response. */
+export const parseClearDiagnosticsResult = (
+  value: unknown,
+): BridgeResult<ClearDiagnosticsResult> => parseBridgeResult(value, parseClearDiagnosticsOutcome)
 /**
  * Validates an untrusted bridge result envelope whose successful payload is chat capability.
  */

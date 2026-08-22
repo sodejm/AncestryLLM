@@ -144,6 +144,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "config/docs-screenshot-drift-report-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-terminal-capture-policy-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-terminal-capture-policy.json": "docs/DOCS_AUTHORING.md",
+    # Privacy-safe local desktop diagnostic record contract.
+    "schemas/desktop-diagnostic-v1.schema.json": "docs/reference/DESKTOP_DIAGNOSTICS.md",
     "scripts/docs_screenshots.py": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/degraded.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/electron-degraded.json": "docs/DOCS_AUTHORING.md",

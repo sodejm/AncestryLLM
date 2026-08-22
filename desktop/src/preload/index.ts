@@ -51,6 +51,7 @@ import {
   parseConsentRevokeRequest,
   parseCopyTextRequest,
   parseCopyTextResult,
+  parseClearDiagnosticsResult,
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
@@ -69,6 +70,7 @@ import {
   parseLocalRuntimeStatusResult,
   parseOpenExternalLinkRequest,
   parseOpenExternalLinkResult,
+  parseOpenDiagnosticsDirectoryResult,
   parseOpenFileGrantRequest,
   parsePreferenceUpdate,
   parsePreferencesResult,
@@ -154,6 +156,12 @@ const ancestry: AncestryBridge = Object.freeze({
   ),
   copyText: async (request: CopyTextRequest) => parseCopyTextResult(
     await ipcRenderer.invoke(desktopChannels.copyText, parseCopyTextRequest(request)),
+  ),
+  openDiagnosticsDirectory: async () => parseOpenDiagnosticsDirectoryResult(
+    await ipcRenderer.invoke(desktopChannels.openDiagnosticsDirectory),
+  ),
+  clearDiagnostics: async () => parseClearDiagnosticsResult(
+    await ipcRenderer.invoke(desktopChannels.clearDiagnostics),
   ),
   listJobs: async () => parseJobListResult(await ipcRenderer.invoke(desktopChannels.listJobs)),
   getJob: async (request: JobRequest) => parseJobSnapshotResult(

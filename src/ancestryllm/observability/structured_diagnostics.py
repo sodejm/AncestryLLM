@@ -32,9 +32,7 @@ _SENSITIVE_METADATA_KEY_FRAGMENT = re.compile(
     r"content|database|email|error|exception|family|gedcom|key|message|name|path|"
     r"person|prompt|query|secret|stack|token|url"
 )
-_TIMESTAMP_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"
-)
+_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
 
 class DesktopDiagnosticSeverity(StrEnum):
@@ -91,7 +89,9 @@ def create_desktop_diagnostic_run_id() -> str:
     return str(uuid4())
 
 
-def _validate_run_id(run_id: str) -> None:
+def validate_desktop_diagnostic_run_id(run_id: str) -> None:
+    """Reject values that are not lowercase canonical UUIDv4 launch identifiers."""
+
     if not _RUN_ID_PATTERN.fullmatch(run_id):
         raise ValueError("invalid diagnostic run identifier")
     parsed = UUID(run_id)
@@ -146,7 +146,7 @@ def create_desktop_diagnostic_event(
 ) -> DesktopDiagnosticEvent:
     """Validate one event without accepting errors, paths, or free-form text."""
 
-    _validate_run_id(run_id)
+    validate_desktop_diagnostic_run_id(run_id)
     if not _VERSION_PATTERN.fullmatch(app_version):
         raise ValueError("invalid diagnostic app version")
     if not _CODE_PATTERN.fullmatch(code):
@@ -212,7 +212,7 @@ class DesktopDiagnosticWriter:
     ) -> None:
         """Configure a writer without touching the filesystem."""
 
-        _validate_run_id(run_id)
+        validate_desktop_diagnostic_run_id(run_id)
         if not _VERSION_PATTERN.fullmatch(app_version):
             raise ValueError("invalid diagnostic app version")
         if not isinstance(component, DesktopDiagnosticComponent):
@@ -243,8 +243,7 @@ class DesktopDiagnosticWriter:
                 metadata=metadata,
             )
             line = (
-                json.dumps(event.as_document(), separators=(",", ":"), sort_keys=True)
-                + "\n"
+                json.dumps(event.as_document(), separators=(",", ":"), sort_keys=True) + "\n"
             ).encode()
             if len(line) > self._max_bytes:
                 return False
@@ -320,4 +319,5 @@ __all__ = [
     "DesktopDiagnosticWriter",
     "create_desktop_diagnostic_event",
     "create_desktop_diagnostic_run_id",
+    "validate_desktop_diagnostic_run_id",
 ]

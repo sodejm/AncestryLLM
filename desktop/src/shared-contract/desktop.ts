@@ -1053,6 +1053,18 @@ export interface CopyTextResult {
   copied: true
 }
 
+/** Result returned after opening the one main-process-owned diagnostics directory. */
+export interface OpenDiagnosticsDirectoryResult {
+  schema_version: 1
+  opened: true
+}
+
+/** Result returned after clearing the bounded component diagnostic logs. */
+export interface ClearDiagnosticsResult {
+  schema_version: 1
+  cleared: true
+}
+
 /**
  * Defines the callable bridge error code surface exposed by the isolated preload boundary.
  */
@@ -1171,6 +1183,8 @@ export interface AncestryBridge {
   applyLocalRuntime(request: LocalRuntimeApplyRequest): Promise<BridgeResult<LocalRuntimeResult>>
   openExternalLink(request: OpenExternalLinkRequest): Promise<BridgeResult<OpenExternalLinkResult>>
   copyText(request: CopyTextRequest): Promise<BridgeResult<CopyTextResult>>
+  openDiagnosticsDirectory(): Promise<BridgeResult<OpenDiagnosticsDirectoryResult>>
+  clearDiagnostics(): Promise<BridgeResult<ClearDiagnosticsResult>>
   getChatCapability(): Promise<BridgeResult<ChatCapability>>
   createChatSession(request: ChatSessionCreateRequest): Promise<BridgeResult<ChatSession>>
   closeChatSession(request: ChatSessionRequest): Promise<BridgeResult<ChatSessionClosure>>
@@ -1215,6 +1229,8 @@ export const desktopChannels = Object.freeze({
   applyLocalRuntime: 'ancestry:desktop:apply-local-runtime',
   openExternalLink: 'ancestry:desktop:open-external-link',
   copyText: 'ancestry:desktop:copy-text',
+  openDiagnosticsDirectory: 'ancestry:desktop:open-diagnostics-directory',
+  clearDiagnostics: 'ancestry:desktop:clear-diagnostics',
   getChatCapability: 'ancestry:desktop:get-chat-capability',
   createChatSession: 'ancestry:desktop:create-chat-session',
   closeChatSession: 'ancestry:desktop:close-chat-session',

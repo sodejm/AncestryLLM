@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly thirty-eight deterministic, deeply frozen methods', async () => {
+  it('exposes exactly forty deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
       'acknowledgeChatStream',
       'cancelChatStream',
+      'clearDiagnostics',
       'closeChatSession',
       'copyText',
       'createConsent',
@@ -38,6 +39,7 @@ describe('versioned mock bridge', () => {
       'unsubscribeJobEvents',
       'onJobEvent',
       'onChatEventBatch',
+      'openDiagnosticsDirectory',
       'openExternalLink',
       'cancelJob',
       'updatePreferences',

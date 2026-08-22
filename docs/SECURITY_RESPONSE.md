@@ -55,6 +55,20 @@ risk policy requires independent review.
   destructive migration. A reviewed migration or recovery procedure remains a
   remediation blocker.
 
+## Desktop diagnostic evidence
+
+- Prefer the stable event code, application version, and normalized platform
+  labels shown by the Diagnostics workspace. Do not request genealogy content,
+  credentials, host details, raw process output, or environment dumps.
+- Local component files are bounded structural evidence, not a complete audit
+  trail. Their writers can fail by design so that security and shutdown remain
+  authoritative. Never infer a successful shutdown from diagnostic JSON; use
+  the separately verified shutdown receipt.
+- There is no automatic upload or export. If a confidential investigation needs
+  the local files, have the user inspect them first, transfer them only through
+  the approved confidential workspace, limit access and retention, and clear
+  them when the incident need ends. Never attach unreviewed records publicly.
+
 ## Disposition and disclosure
 
 1. Critical or High residual risk cannot be accepted for an affected

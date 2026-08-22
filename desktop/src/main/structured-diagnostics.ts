@@ -17,12 +17,63 @@ export const DESKTOP_DIAGNOSTIC_SCHEMA_VERSION = 'ancestryllm.desktop-diagnostic
 export type DesktopDiagnosticComponent = 'electron-main' | 'python-core' | 'desktop-sidecar'
 /** Stable severities available to the versioned event contract. */
 export type DesktopDiagnosticSeverity = 'debug' | 'info' | 'warning' | 'error'
+/** Stable event codes shared by the trusted desktop lifecycle writers. */
+export const DESKTOP_DIAGNOSTIC_CODES = Object.freeze({
+  appLaunchRequested: 'APP_LAUNCH_REQUESTED',
+  electronReady: 'ELECTRON_READY',
+  rendererWindowReady: 'RENDERER_WINDOW_READY',
+  sidecarVerificationStarted: 'SIDECAR_VERIFICATION_STARTED',
+  sidecarVerificationSucceeded: 'SIDECAR_VERIFICATION_SUCCEEDED',
+  sidecarVerificationRejected: 'SIDECAR_VERIFICATION_REJECTED',
+  sidecarSpawnRequested: 'SIDECAR_SPAWN_REQUESTED',
+  sidecarSpawnSucceeded: 'SIDECAR_SPAWN_SUCCEEDED',
+  sidecarSpawnFailed: 'SIDECAR_SPAWN_FAILED',
+  sidecarReadinessAccepted: 'SIDECAR_READINESS_ACCEPTED',
+  sidecarReadinessRejected: 'SIDECAR_READINESS_REJECTED',
+  sidecarHealthSucceeded: 'SIDECAR_HEALTH_SUCCEEDED',
+  sidecarHealthRejected: 'SIDECAR_HEALTH_REJECTED',
+  sidecarStartupTimeout: 'SIDECAR_STARTUP_TIMEOUT',
+  sidecarIncompatible: 'SIDECAR_INCOMPATIBLE',
+  sidecarShutdownRequested: 'SIDECAR_SHUTDOWN_REQUESTED',
+  sidecarRestartRequested: 'SIDECAR_RESTART_REQUESTED',
+  sidecarRestartSucceeded: 'SIDECAR_RESTART_SUCCEEDED',
+  sidecarRestartFailed: 'SIDECAR_RESTART_FAILED',
+  sidecarRestartExhausted: 'SIDECAR_RESTART_EXHAUSTED',
+  sidecarManualRetryRequested: 'SIDECAR_MANUAL_RETRY_REQUESTED',
+  sidecarManualRetrySucceeded: 'SIDECAR_MANUAL_RETRY_SUCCEEDED',
+  sidecarManualRetryFailed: 'SIDECAR_MANUAL_RETRY_FAILED',
+  sidecarSessionInvalidated: 'SIDECAR_SESSION_INVALIDATED',
+  bridgeSenderRejected: 'BRIDGE_SENDER_REJECTED',
+  bridgeRouteRejected: 'BRIDGE_ROUTE_REJECTED',
+  configurationDegraded: 'CONFIGURATION_DEGRADED',
+  jobsShutdownPrepRequested: 'JOBS_SHUTDOWN_PREP_REQUESTED',
+  jobsShutdownPrepSucceeded: 'JOBS_SHUTDOWN_PREP_SUCCEEDED',
+  jobsShutdownPrepFailed: 'JOBS_SHUTDOWN_PREP_FAILED',
+  sidecarTerminationRequested: 'SIDECAR_TERMINATION_REQUESTED',
+  sidecarTerminationSucceeded: 'SIDECAR_TERMINATION_SUCCEEDED',
+  sidecarTerminationFailed: 'SIDECAR_TERMINATION_FAILED',
+  appExitAuthorized: 'APP_EXIT_AUTHORIZED',
+  diagnosticWriterUnavailable: 'DIAGNOSTIC_WRITER_UNAVAILABLE',
+  diagnosticWriterDegraded: 'DIAGNOSTIC_WRITER_DEGRADED',
+  pythonCoreBootstrapStarted: 'PYTHON_CORE_BOOTSTRAP_STARTED',
+  pythonCoreReady: 'PYTHON_CORE_READY',
+  sidecarBootstrapStarted: 'SIDECAR_BOOTSTRAP_STARTED',
+  sidecarServerReady: 'SIDECAR_SERVER_READY',
+} as const)
+/** Union of the stable event codes trusted writers may persist. */
+export type DesktopDiagnosticCode = typeof DESKTOP_DIAGNOSTIC_CODES[keyof typeof DESKTOP_DIAGNOSTIC_CODES]
 /** Metadata deliberately excludes strings so paths, prompts, names, and secrets cannot be stored. */
 export type DesktopDiagnosticMetadataValue = boolean | number | null
 /** Bounded metadata attached to one stable diagnostic code. */
 export type DesktopDiagnosticMetadata = Readonly<Record<string, DesktopDiagnosticMetadataValue>>
+/** Non-throwing trusted-main-process diagnostic callback. */
+export type RecordDesktopDiagnostic = (
+  code: DesktopDiagnosticCode,
+  severity: DesktopDiagnosticSeverity,
+  metadata?: DesktopDiagnosticMetadata,
+) => void
 
-/** One versioned diagnostic event safe for local persistence and support export. */
+/** One versioned diagnostic event safe for bounded local persistence. */
 export interface DesktopDiagnosticEvent {
   schema_version: typeof DESKTOP_DIAGNOSTIC_SCHEMA_VERSION
   timestamp: string
@@ -85,6 +136,11 @@ export function createDesktopDiagnosticRunId(): string {
   return randomUUID()
 }
 
+/** Returns true only for the canonical UUIDv4 correlation value shared by one desktop launch. */
+export function isDesktopDiagnosticRunId(value: string): boolean {
+  return RUN_ID_PATTERN.test(value)
+}
+
 function requireSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < -1_000_000_000 || value > 1_000_000_000) {
     throw new Error(`${label} must be a bounded integer.`)
@@ -117,7 +173,7 @@ function normalizeMetadata(
 export function createDesktopDiagnosticEvent(
   input: DesktopDiagnosticEventInput,
 ): Readonly<DesktopDiagnosticEvent> {
-  if (!RUN_ID_PATTERN.test(input.runId)) throw new Error('Invalid diagnostic run identifier.')
+  if (!isDesktopDiagnosticRunId(input.runId)) throw new Error('Invalid diagnostic run identifier.')
   if (!VERSION_PATTERN.test(input.appVersion)) throw new Error('Invalid diagnostic app version.')
   if (!CODE_PATTERN.test(input.code)) throw new Error('Invalid diagnostic code.')
   if (!COMPONENTS.has(input.component)) throw new Error('Invalid diagnostic component.')

@@ -63,6 +63,61 @@ describe('structured desktop diagnostics', () => {
     })).toThrow()
   })
 
+  it.each([
+    'not-a-uuid',
+    '123e4567-e89b-12d3-a456-426614174000',
+    '123E4567-E89B-42D3-A456-426614174000',
+  ])('rejects the malformed launch correlation identifier %s', (runId) => {
+    expect(() => createDesktopDiagnosticEvent({
+      runId,
+      appVersion: '0.7.0',
+      code: 'MALFORMED_RUN_ID',
+      severity: 'error',
+      component: 'electron-main',
+    })).toThrow('Invalid diagnostic run identifier')
+  })
+
+  it('refuses an event larger than the configured component file bound', () => {
+    const directory = temporaryDirectory()
+    const writer = new DesktopDiagnosticWriter({
+      directory,
+      runId: RUN_ID,
+      appVersion: '0.7.0',
+      component: 'electron-main',
+      maxBytes: 32,
+    })
+
+    expect(writer.write('OVERSIZED_FOR_STREAM', 'warning')).toBe(false)
+    expect(readdirSync(directory)).toEqual([])
+  })
+
+  it('never persists rejected privacy canaries', () => {
+    const directory = temporaryDirectory()
+    const writer = new DesktopDiagnosticWriter({
+      directory,
+      runId: RUN_ID,
+      appVersion: '0.7.0',
+      component: 'desktop-sidecar',
+    })
+    const canaries = [
+      'Fictional Family',
+      'Summarize this family tree',
+      '/Users/canary/private-tree.rmtree',
+      'canary-secret-token',
+    ]
+
+    expect(writer.write('PRIVACY_CANARY', 'error', { family_name: canaries[0] } as never)).toBe(false)
+    expect(writer.write('PRIVACY_CANARY', 'error', { prompt: canaries[1] } as never)).toBe(false)
+    expect(writer.write('PRIVACY_CANARY', 'error', { path: canaries[2] } as never)).toBe(false)
+    expect(writer.write('PRIVACY_CANARY', 'error', { token: canaries[3] } as never)).toBe(false)
+    expect(writer.write('PRIVACY_CHECK_COMPLETE', 'info')).toBe(true)
+
+    const persisted = readdirSync(directory)
+      .map((file) => readFileSync(join(directory, file), 'utf8'))
+      .join('\n')
+    for (const canary of canaries) expect(persisted).not.toContain(canary)
+  })
+
   it('rotates component files within the configured byte and file bounds', () => {
     const directory = temporaryDirectory()
     const writer = new DesktopDiagnosticWriter({
@@ -110,6 +165,28 @@ describe('structured desktop diagnostics', () => {
     expect(writer.write('DESKTOP_STARTING', 'info')).toBe(false)
     expect(writer.clear()).toBe(false)
     expect(readdirSync(target)).toEqual([])
+  })
+
+  it('refuses a symbolic-link active file without changing its target', () => {
+    const directory = temporaryDirectory()
+    const target = join(directory, 'outside.jsonl')
+    const active = join(directory, 'electron-main.jsonl')
+    writeFileSync(target, 'untouched')
+    try {
+      symlinkSync(target, active, 'file')
+    } catch {
+      return
+    }
+    const writer = new DesktopDiagnosticWriter({
+      directory,
+      runId: RUN_ID,
+      appVersion: '0.7.0',
+      component: 'electron-main',
+    })
+
+    expect(writer.write('DESKTOP_STARTING', 'info')).toBe(false)
+    expect(writer.clear()).toBe(false)
+    expect(readFileSync(target, 'utf8')).toBe('untouched')
   })
 
   it('keeps validation and filesystem failures non-blocking', () => {

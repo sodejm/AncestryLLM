@@ -26,8 +26,9 @@ RUN_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 def _schema() -> Mapping[str, Any]:
     return json.loads(
-        (Path(__file__).parents[1] / "schemas" / "desktop-diagnostic-v1.schema.json")
-        .read_text(encoding="utf-8")
+        (Path(__file__).parents[1] / "schemas" / "desktop-diagnostic-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
 
 
@@ -77,6 +78,64 @@ def test_privacy_canaries_are_rejected(metadata: Mapping[str, object]) -> None:
             component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
             metadata=metadata,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "not-a-uuid",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "123E4567-E89B-42D3-A456-426614174000",
+    ],
+)
+def test_malformed_launch_correlation_identifiers_are_rejected(run_id: str) -> None:
+    with pytest.raises(ValueError, match="invalid diagnostic run identifier"):
+        create_desktop_diagnostic_event(
+            run_id=run_id,
+            app_version="0.7.0",
+            code="MALFORMED_RUN_ID",
+            severity=DesktopDiagnosticSeverity.ERROR,
+            component=DesktopDiagnosticComponent.PYTHON_CORE,
+        )
+
+
+def test_event_larger_than_component_file_bound_is_refused(tmp_path: Path) -> None:
+    writer = DesktopDiagnosticWriter(
+        directory=tmp_path,
+        run_id=RUN_ID,
+        app_version="0.7.0",
+        component=DesktopDiagnosticComponent.PYTHON_CORE,
+        max_bytes=32,
+    )
+
+    assert not writer.write("OVERSIZED_FOR_STREAM", DesktopDiagnosticSeverity.WARNING)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_rejected_privacy_canaries_are_never_persisted(tmp_path: Path) -> None:
+    writer = DesktopDiagnosticWriter(
+        directory=tmp_path,
+        run_id=RUN_ID,
+        app_version="0.7.0",
+        component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
+    )
+    canaries = [
+        "Fictional Family",
+        "Summarize this family tree",
+        "/Users/canary/private-tree.rmtree",
+        "canary-secret-token",
+    ]
+
+    for key, canary in zip(("family_name", "prompt", "path", "token"), canaries, strict=True):
+        assert not writer.write(
+            "PRIVACY_CANARY",
+            DesktopDiagnosticSeverity.ERROR,
+            {key: canary},  # type: ignore[dict-item]
+        )
+    assert writer.write("PRIVACY_CHECK_COMPLETE", DesktopDiagnosticSeverity.INFO)
+
+    persisted = "\n".join(path.read_text(encoding="utf-8") for path in tmp_path.iterdir())
+    assert all(canary not in persisted for canary in canaries)
 
 
 def test_rotation_is_bounded_by_bytes_and_file_count(tmp_path: Path) -> None:
@@ -137,3 +196,23 @@ def test_writer_refuses_symlink_directory(tmp_path: Path) -> None:
     assert not writer.write("PYTHON_CORE_STARTING", DesktopDiagnosticSeverity.INFO)
     assert not writer.clear()
     assert list(target.iterdir()) == []
+
+
+def test_writer_refuses_symlink_active_file(tmp_path: Path) -> None:
+    target = tmp_path / "outside.jsonl"
+    target.write_text("untouched", encoding="utf-8")
+    active = tmp_path / "python-core.jsonl"
+    try:
+        active.symlink_to(target)
+    except OSError:
+        pytest.skip("file symlinks are unavailable on this host")
+    writer = DesktopDiagnosticWriter(
+        directory=tmp_path,
+        run_id=RUN_ID,
+        app_version="0.7.0",
+        component=DesktopDiagnosticComponent.PYTHON_CORE,
+    )
+
+    assert not writer.write("PYTHON_CORE_STARTING", DesktopDiagnosticSeverity.INFO)
+    assert not writer.clear()
+    assert target.read_text(encoding="utf-8") == "untouched"
