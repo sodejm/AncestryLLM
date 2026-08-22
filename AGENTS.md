@@ -45,6 +45,33 @@
 - Use the OS keyring for secrets; environment injection is for headless/CI use. Do not auto-load `.env`.
 - Cloud calls require explicit provider selection and user consent.
 
+## SLSA v0.1 Level 1 maintenance
+
+- Treat [SLSA v0.1 Level 1](https://slsa.dev/spec/v0.1/levels) and its
+  [requirements](https://slsa.dev/spec/v0.1/requirements) as the minimum
+  software-supply-chain baseline for every project-produced release artifact.
+  Evaluate compliance per artifact and release; do not make a repository-wide,
+  transitive, or dependency compliance claim without matching evidence.
+- Build every release artifact through a fully scripted or automated process.
+  The only permitted manual build action is invoking the build script or
+  workflow; never publish an artifact assembled or modified through
+  undocumented manual steps.
+- Generate provenance for every release artifact and make it available to
+  consumers. At minimum, the provenance must identify the artifact by a
+  cryptographic hash (prefer SHA-256), the builder, and the top-level build
+  instructions. It should also record the build start and end times and a
+  unique build identifier. Prefer in-toto SLSA Provenance unless the producer
+  and consumer explicitly agree on another format meeting these requirements.
+- Before completing a release, verify that each published artifact's digest
+  matches its provenance and that consumers can retrieve both. Missing,
+  inaccessible, or mismatched provenance blocks the SLSA Level 1 claim and
+  release completion.
+- Changes to build, packaging, release, or artifact-publication paths must
+  preserve this baseline, update applicable release documentation and
+  validation, and report the exact artifacts and provenance evidence checked.
+  Preserve stronger existing controls, including signed attestations, without
+  representing them as required by Level 1.
+
 ## Workflow and completion
 
 - Follow the [GitHub Flow branch contract](CONTRIBUTING.md#github-flow-branch-strategy):
