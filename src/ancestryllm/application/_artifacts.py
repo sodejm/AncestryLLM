@@ -75,11 +75,20 @@ class _ArtifactRegistry:
         """Grant one operation read access to a current regular file."""
 
         try:
+            selected = os.lstat(path)
+            lexical_path = path.absolute()
             resolved = path.resolve(strict=True)
             metadata = os.lstat(resolved)
         except (OSError, RuntimeError) as exc:
             raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID) from exc
-        if not stat.S_ISREG(metadata.st_mode):
+        if (
+            not stat.S_ISREG(selected.st_mode)
+            or selected.st_nlink != 1
+            or resolved != lexical_path
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or self._identity(selected) != self._identity(metadata)
+        ):
             raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
         if metadata.st_size > MAX_ARTIFACT_BYTES:
             raise DomainFailure(DomainFailureCode.ARTIFACT_TOO_LARGE)
@@ -177,7 +186,7 @@ class _ArtifactRegistry:
                 metadata = os.lstat(binding.path)
             except OSError as exc:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID) from exc
-            if not stat.S_ISREG(metadata.st_mode):
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
             if metadata.st_size > MAX_ARTIFACT_BYTES:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_TOO_LARGE)
@@ -228,7 +237,7 @@ class _ArtifactRegistry:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
             resolved_root = root.resolve(strict=True)
             generated_before = os.lstat(generated_path)
-            if not stat.S_ISREG(generated_before.st_mode):
+            if not stat.S_ISREG(generated_before.st_mode) or generated_before.st_nlink != 1:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
             resolved_generated = generated_path.resolve(strict=True)
             resolved_generated.relative_to(resolved_root)
@@ -305,7 +314,7 @@ class _ArtifactRegistry:
             flags |= getattr(os, flag_name, 0)
         try:
             before = os.lstat(path)
-            if not stat.S_ISREG(before.st_mode):
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
             if before.st_size > MAX_ARTIFACT_BYTES:
                 raise DomainFailure(DomainFailureCode.ARTIFACT_TOO_LARGE)
@@ -316,7 +325,11 @@ class _ArtifactRegistry:
             raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID) from exc
         try:
             opened = os.fstat(descriptor)
-            if not stat.S_ISREG(opened.st_mode) or self._identity(opened) != self._identity(before):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or self._identity(opened) != self._identity(before)
+            ):
                 raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
             digest = hashlib.sha256()
             size_bytes = 0

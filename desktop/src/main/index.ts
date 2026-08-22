@@ -19,6 +19,7 @@ import {
   type AppShutdownProgress,
   type UnsafeShutdownChoice,
 } from './app-shutdown'
+import { initializeMediatedOperationStaging } from './container-operation-mount-policy'
 import { FileGrantBroker } from './file-grant-broker'
 import { externalLinkPrompt, openExternalLinkWithConfirmation } from './external-links'
 import {
@@ -291,6 +292,12 @@ if (localRuntimeCliRequested && !primaryInstance) {
   app.whenReady().then(async () => {
     recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.appLaunchRequested, 'info')
     recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.electronReady, 'info')
+    try {
+      await initializeMediatedOperationStaging(app.getPath('userData'))
+    } catch {
+      app.exit(1)
+      return
+    }
     const runtime = await startRuntimeBridge((supervisor, prepareJobs) => {
       sidecarSupervisor = supervisor
       prepareJobShutdown = prepareJobs

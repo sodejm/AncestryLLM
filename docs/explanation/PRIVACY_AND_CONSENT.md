@@ -64,6 +64,24 @@ Secret operations are set, delete, and presence only; Python `SecretStore` and
 the OS keyring remain the sole authority. File choices become scoped opaque
 grants, not renderer-visible paths.
 
+Issue #352 extends that rule through trusted file processing. Main revalidates
+each grant and copies the selected input into an owner-only private operation
+directory; the source remains immutable, and success, failure, cancellation,
+timeout, or startup recovery removes only the exact transient staging area.
+The renderer, mediation DTO, progress events, stable errors, logs, and remote
+adapter receive no raw host path. A trusted local adapter receives only private
+staged paths and an exact operation mount plan. A trusted remote adapter
+receives bounded, single-use content streams with verified size and digest,
+never filesystem identity or path metadata.
+
+Choosing remote transport is a data-disclosure boundary, not consent by
+itself. A future remote genealogy adapter must first satisfy the existing exact
+deployment profile, provider/endpoint, purpose, data-class, living-person,
+retention, and active-consent checks. The mediation broker grants no network or
+provider authority and cannot infer consent from a file choice; `provider=none`
+remains network-free. Issue #352 is therefore a source-level containment gate,
+not a new renderer action or supported upload workflow.
+
 The [desktop first-run tutorial](../tutorials/desktop-first-run.md), focused
 [provider and consent guide](../how-to/desktop-provider-consent.md),
 [file-access guide](../how-to/desktop-file-access.md), and

@@ -1,8 +1,8 @@
 /** Mediates native file selections through opaque, validated, single-use grants. */
 import { constants, type Stats } from 'node:fs'
-import { lstat, open, realpath } from 'node:fs/promises'
+import { chmod, lstat, open, realpath, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type {
   FileFormat,
   FileGrant,
@@ -27,6 +27,7 @@ export type FileGrantFailureCode =
   | 'FILE_GRANT_REVOKED'
   | 'FILE_GRANT_STALE'
   | 'FILE_GRANT_CONFLICT'
+  | 'FILE_OPERATION_CANCELLED'
   | 'FILE_DIALOG_FAILED'
 
 /**
@@ -67,6 +68,29 @@ export interface ResolvedFileGrant {
   readonly maxBytes: number
 }
 
+/** Reports a private staged input without exposing its main-process-only path. */
+export interface StagedReadGrant {
+  readonly grantId: FileGrantId
+  readonly purpose: FileReadPurpose
+  readonly sizeBytes: number
+  readonly sha256: string
+}
+
+/** Reports an atomically published output without exposing its selected host path. */
+export interface PublishedWriteGrant {
+  readonly grantId: FileGrantId
+  readonly purpose: FileWritePurpose
+  readonly sizeBytes: number
+  readonly sha256: string
+}
+
+/** Reports a validated private output before publication. */
+export interface ValidatedStagedOutput {
+  readonly purpose: FileWritePurpose
+  readonly sizeBytes: number
+  readonly sha256: string
+}
+
 interface PurposePolicy {
   readonly access: FileGrantAccess
   readonly format: FileFormat
@@ -98,12 +122,19 @@ interface Binding {
   redeemed: boolean
 }
 
+interface InspectedStagedFile {
+  readonly fingerprint: Fingerprint
+  readonly canonicalPath: string
+  readonly sizeBytes: number
+  readonly sha256: string
+}
+
 const purposePolicies: Readonly<Record<FileGrantPurpose, PurposePolicy>> = Object.freeze({
   'gedcom-read': Object.freeze({ access: 'read', format: 'gedcom', extensions: ['.ged', '.gedcom'], maxBytes: 536_870_912 }),
   'rootsmagic-read': Object.freeze({ access: 'read', format: 'rootsmagic', extensions: ['.rmtree'], maxBytes: 8_589_934_592 }),
   'gedcom-write': Object.freeze({ access: 'write', format: 'gedcom', extensions: ['.ged'], maxBytes: 536_870_912 }),
-  'json-write': Object.freeze({ access: 'write', format: 'json', extensions: ['.json'], maxBytes: 536_870_912 }),
-  'markdown-write': Object.freeze({ access: 'write', format: 'markdown', extensions: ['.md'], maxBytes: 536_870_912 }),
+  'json-write': Object.freeze({ access: 'write', format: 'json', extensions: ['.json'], maxBytes: 67_108_864 }),
+  'markdown-write': Object.freeze({ access: 'write', format: 'markdown', extensions: ['.md'], maxBytes: 67_108_864 }),
 })
 
 // Control characters are intentionally rejected from user-visible file names.
@@ -114,6 +145,12 @@ const archiveSignatures = [
   Buffer.from([0x50, 0x4b, 0x05, 0x06]),
   Buffer.from([0x50, 0x4b, 0x07, 0x08]),
   Buffer.from([0x1f, 0x8b]),
+  Buffer.from([0x42, 0x5a, 0x68]),
+  Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]),
+  Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]),
+  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]),
+  Buffer.from([0x28, 0xb5, 0x2f, 0xfd]),
 ] as const
 const sqliteSignature = Buffer.from('SQLite format 3\0', 'ascii')
 const grantPattern = /^grt_[a-f0-9]{64}$/
@@ -123,11 +160,15 @@ function fail(code: FileGrantFailureCode): never {
 }
 
 function checkSignal(signal?: AbortSignal): void {
-  if (signal?.aborted) throw signal.reason ?? new Error('Operation aborted')
+  if (signal?.aborted) fail('FILE_OPERATION_CANCELLED')
 }
 
 function safeName(value: string): boolean {
   return safeNamePattern.test(value) && value !== '.' && value !== '..'
+}
+
+function collisionKey(value: string): string {
+  return value.normalize('NFC').toLocaleLowerCase('en-US')
 }
 
 /** Normalizes a user-selected absolute path only after rejecting unsafe names and aliases. */
@@ -198,6 +239,207 @@ function isGedcom(prefix: Buffer): boolean {
     text = prefix.toString('utf8').replace(/^\uFEFF/, '')
   }
   return /^0[ \t]+HEAD(?:[ \t\r\n]|$)/.test(text)
+}
+
+function safePrivateFilePath(value: string, policy: PurposePolicy): string {
+  if (!isAbsolute(value) || value.includes('\0') || normalize(value) !== value
+    || !safeName(basename(value)) || !hasExpectedExtension(value, policy)) {
+    fail('FILE_SELECTION_INVALID')
+  }
+  return resolve(value)
+}
+
+function openFlags(access: 'read' | 'exclusive-write'): number {
+  const optionalConstants = constants as typeof constants & Readonly<Record<string, number | undefined>>
+  const common = (optionalConstants.O_CLOEXEC ?? 0) | (optionalConstants.O_NOFOLLOW ?? 0)
+  if (access === 'read') return constants.O_RDONLY | common | (optionalConstants.O_NONBLOCK ?? 0)
+  return constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | common
+}
+
+async function validatePrivateParent(path: string): Promise<void> {
+  let parentStat: Stats
+  try {
+    parentStat = await lstat(dirname(path))
+  } catch {
+    fail('FILE_SELECTION_INVALID')
+  }
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
+}
+
+async function removeIfPresent(path: string): Promise<void> {
+  try {
+    await unlink(path)
+  } catch (error) {
+    if (!isMissing(error)) throw error
+  }
+}
+
+async function writeAll(
+  handle: Awaited<ReturnType<typeof open>>,
+  buffer: Buffer,
+  length: number,
+): Promise<void> {
+  let offset = 0
+  while (offset < length) {
+    const written = await handle.write(buffer, offset, length - offset)
+    if (written.bytesWritten <= 0) fail('FILE_SELECTION_INVALID')
+    offset += written.bytesWritten
+  }
+}
+
+async function copyValidatedFile(
+  sourcePath: string,
+  destinationPath: string,
+  maxBytes: number,
+  expected: Fingerprint,
+  signal?: AbortSignal,
+): Promise<Readonly<{ sizeBytes: number; sha256: string }>> {
+  checkSignal(signal)
+  await validatePrivateParent(destinationPath)
+  let sourceHandle: Awaited<ReturnType<typeof open>> | undefined
+  let destinationHandle: Awaited<ReturnType<typeof open>> | undefined
+  let destinationCreated = false
+  let completed = false
+  try {
+    sourceHandle = await open(sourcePath, openFlags('read'))
+    const opened = validateRegularFile(await sourceHandle.stat(), maxBytes)
+    if (!sameFingerprint(expected, opened)) fail('FILE_GRANT_STALE')
+    destinationHandle = await open(destinationPath, openFlags('exclusive-write'), 0o600)
+    destinationCreated = true
+    const digest = createHash('sha256')
+    const buffer = Buffer.allocUnsafe(1024 * 1024)
+    let sizeBytes = 0
+    for (;;) {
+      checkSignal(signal)
+      const read = await sourceHandle.read(buffer, 0, buffer.length, null)
+      if (read.bytesRead === 0) break
+      sizeBytes += read.bytesRead
+      if (sizeBytes > maxBytes) fail('FILE_TOO_LARGE')
+      const chunk = buffer.subarray(0, read.bytesRead)
+      digest.update(chunk)
+      await writeAll(destinationHandle, chunk, chunk.length)
+    }
+    if (sizeBytes !== opened.size) fail('FILE_GRANT_STALE')
+    await destinationHandle.sync()
+    const afterHandle = validateRegularFile(await sourceHandle.stat(), maxBytes)
+    const afterPath = validateRegularFile(await lstat(sourcePath), maxBytes)
+    if (!sameFingerprint(expected, afterHandle) || !sameFingerprint(expected, afterPath)) {
+      fail('FILE_GRANT_STALE')
+    }
+    checkSignal(signal)
+    const copied = Object.freeze({ sizeBytes, sha256: digest.digest('hex') })
+    completed = true
+    return copied
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    return fail('FILE_SELECTION_INVALID')
+  } finally {
+    await destinationHandle?.close().catch(() => undefined)
+    await sourceHandle?.close().catch(() => undefined)
+    if (destinationCreated && !completed) await removeIfPresent(destinationPath).catch(() => undefined)
+  }
+}
+
+async function inspectStagedOutput(
+  path: string,
+  purpose: FileWritePurpose,
+  signal?: AbortSignal,
+): Promise<InspectedStagedFile> {
+  const policy = purposePolicies[purpose]
+  const safePath = safePrivateFilePath(path, policy)
+  checkSignal(signal)
+  let before: Fingerprint
+  let canonicalPath: string
+  try {
+    before = validateRegularFile(await lstat(safePath), policy.maxBytes)
+    canonicalPath = await realpath(safePath)
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    fail('FILE_SELECTION_INVALID')
+  }
+  let handle: Awaited<ReturnType<typeof open>>
+  try {
+    handle = await open(safePath, openFlags('read'))
+  } catch {
+    fail('FILE_SELECTION_INVALID')
+  }
+  const digest = createHash('sha256')
+  const prefixParts: Buffer[] = []
+  let prefixBytes = 0
+  const textParts: string[] = []
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let sizeBytes = 0
+  try {
+    const opened = validateRegularFile(await handle.stat(), policy.maxBytes)
+    if (!sameFingerprint(before, opened)) fail('FILE_GRANT_STALE')
+    const buffer = Buffer.allocUnsafe(1024 * 1024)
+    for (;;) {
+      checkSignal(signal)
+      const read = await handle.read(buffer, 0, buffer.length, null)
+      if (read.bytesRead === 0) break
+      sizeBytes += read.bytesRead
+      if (sizeBytes > policy.maxBytes) fail('FILE_TOO_LARGE')
+      const chunk = Buffer.from(buffer.subarray(0, read.bytesRead))
+      digest.update(chunk)
+      if (prefixBytes < 4_096) {
+        const prefixChunk = chunk.subarray(0, Math.min(chunk.length, 4_096 - prefixBytes))
+        prefixParts.push(prefixChunk)
+        prefixBytes += prefixChunk.length
+      }
+      if (policy.format === 'json' || policy.format === 'markdown') {
+        const decoded = decoder.decode(chunk, { stream: true })
+        if (decoded.includes('\0')) fail('FILE_SELECTION_INVALID')
+        if (policy.format === 'json') textParts.push(decoded)
+      }
+    }
+    if (sizeBytes !== opened.size) fail('FILE_GRANT_STALE')
+    if (policy.format === 'json' || policy.format === 'markdown') {
+      const tail = decoder.decode()
+      if (tail.includes('\0')) fail('FILE_SELECTION_INVALID')
+      if (policy.format === 'json') textParts.push(tail)
+    }
+    const prefix = Buffer.concat(prefixParts)
+    if (archiveSignatures.some((signature) => prefix.subarray(0, signature.length).equals(signature))) {
+      fail('FILE_SELECTION_INVALID')
+    }
+    if (policy.format === 'gedcom' && !isGedcom(prefix)) fail('FILE_SELECTION_INVALID')
+    if (policy.format === 'json') {
+      try {
+        JSON.parse(textParts.join(''))
+      } catch {
+        fail('FILE_SELECTION_INVALID')
+      }
+    }
+    const afterHandle = validateRegularFile(await handle.stat(), policy.maxBytes)
+    const afterPath = validateRegularFile(await lstat(safePath), policy.maxBytes)
+    if (!sameFingerprint(before, afterHandle) || !sameFingerprint(before, afterPath)
+      || canonicalPath !== await realpath(safePath)) fail('FILE_GRANT_STALE')
+    checkSignal(signal)
+    return {
+      fingerprint: before,
+      canonicalPath,
+      sizeBytes,
+      sha256: digest.digest('hex'),
+    }
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    fail('FILE_SELECTION_INVALID')
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(path, constants.O_RDONLY)
+    await handle.sync()
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined
+    if (process.platform !== 'win32' || !['EACCES', 'EINVAL', 'EISDIR', 'EPERM'].includes(String(code))) throw error
+  } finally {
+    await handle?.close().catch(() => undefined)
+  }
 }
 
 /** Opens and fingerprints a permitted input without following links or trusting its extension alone. */
@@ -384,7 +626,7 @@ export class FileGrantBroker {
         validation = 'replacement-confirmed'
       }
       this.requireGeneration(owner, generation)
-      if (this.outputLocks.has(inspected.canonicalPath)) fail('FILE_GRANT_CONFLICT')
+      if (this.outputLocks.has(collisionKey(inspected.canonicalPath))) fail('FILE_GRANT_CONFLICT')
       const binding = this.createBinding(
         owner,
         request.purpose,
@@ -396,9 +638,123 @@ export class FileGrantBroker {
       this.assertNoAlias(binding)
       this.requireGeneration(owner, generation)
       this.bindings.set(binding.id, binding)
-      this.outputLocks.set(binding.canonicalPath, binding.id)
+      this.outputLocks.set(collisionKey(binding.canonicalPath), binding.id)
       return publicGrant(binding, inspected.fingerprint?.size ?? 0, validation)
     })
+  }
+
+  /**
+   * Redeems an input grant by copying immutable bytes into trusted private staging.
+   * The returned metadata deliberately excludes both selected and staging paths.
+   */
+  async stageReadGrant(
+    owner: object,
+    grantId: FileGrantId,
+    purpose: FileReadPurpose,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<Readonly<StagedReadGrant>> {
+    const binding = this.binding(owner, grantId, purpose, 'read')
+    binding.redeemed = true
+    const policy = purposePolicies[purpose]
+    const stagedPath = safePrivateFilePath(destination, policy)
+    try {
+      checkSignal(signal)
+      if (collisionKey(binding.canonicalPath) === collisionKey(stagedPath)) fail('FILE_SELECTION_INVALID')
+      const inspected = await inspectInput(binding.path, policy)
+      if (this.bindings.get(binding.id) !== binding
+        || binding.fingerprint === null
+        || !sameFingerprint(binding.fingerprint, inspected.fingerprint)
+        || binding.canonicalPath !== inspected.canonicalPath) fail('FILE_GRANT_STALE')
+      const copied = await copyValidatedFile(
+        binding.path,
+        stagedPath,
+        binding.maxBytes,
+        inspected.fingerprint,
+        signal,
+      )
+      await chmod(stagedPath, 0o400)
+      const staged = await inspectInput(stagedPath, policy)
+      if (staged.fingerprint.size !== copied.sizeBytes) fail('FILE_GRANT_STALE')
+      checkSignal(signal)
+      return Object.freeze({
+        grantId,
+        purpose,
+        sizeBytes: copied.sizeBytes,
+        sha256: copied.sha256,
+      })
+    } catch (error) {
+      await removeIfPresent(stagedPath).catch(() => undefined)
+      throw error
+    } finally {
+      this.removeBinding(binding)
+    }
+  }
+
+  /** Validates one private staged output before any selected host path is touched. */
+  async validateStagedOutput(
+    purpose: FileWritePurpose,
+    stagedPath: string,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ValidatedStagedOutput>> {
+    const inspected = await inspectStagedOutput(stagedPath, purpose, signal)
+    return Object.freeze({ purpose, sizeBytes: inspected.sizeBytes, sha256: inspected.sha256 })
+  }
+
+  /**
+   * Redeems an output grant by validating private staging and atomically renaming a
+   * same-directory temporary file over the selected destination.
+   */
+  async publishWriteGrant(
+    owner: object,
+    grantId: FileGrantId,
+    purpose: FileWritePurpose,
+    stagedPath: string,
+    signal?: AbortSignal,
+  ): Promise<Readonly<PublishedWriteGrant>> {
+    const binding = this.binding(owner, grantId, purpose, 'write')
+    binding.redeemed = true
+    let temporaryPath: string | undefined
+    let published = false
+    try {
+      checkSignal(signal)
+      const staged = await inspectStagedOutput(stagedPath, purpose, signal)
+      if (collisionKey(staged.canonicalPath) === collisionKey(binding.canonicalPath)) {
+        fail('FILE_SELECTION_INVALID')
+      }
+      await this.validateWriteBinding(binding)
+      temporaryPath = join(
+        dirname(binding.path),
+        `.${basename(binding.path)}.ancestryllm-${randomBytes(16).toString('hex')}.tmp`,
+      )
+      const copied = await copyValidatedFile(
+        staged.canonicalPath,
+        temporaryPath,
+        binding.maxBytes,
+        staged.fingerprint,
+        signal,
+      )
+      if (copied.sizeBytes !== staged.sizeBytes || copied.sha256 !== staged.sha256) fail('FILE_GRANT_STALE')
+      await this.validateWriteBinding(binding)
+      checkSignal(signal)
+      await rename(temporaryPath, binding.path)
+      published = true
+      await syncDirectory(dirname(binding.path))
+      return Object.freeze({
+        grantId,
+        purpose,
+        sizeBytes: staged.sizeBytes,
+        sha256: staged.sha256,
+      })
+    } catch (error) {
+      if (error instanceof FileGrantBrokerError) throw error
+      return fail('FILE_SELECTION_INVALID')
+    } finally {
+      if (!published && temporaryPath !== undefined) {
+        await removeIfPresent(temporaryPath).catch(() => undefined)
+      }
+      this.removeBinding(binding)
+    }
   }
 
   async resolveReadGrant(
@@ -428,15 +784,7 @@ export class FileGrantBroker {
     const binding = this.binding(owner, grantId, purpose, 'write')
     binding.redeemed = true
     try {
-      const inspected = await inspectOutput(binding.path, purposePolicies[purpose])
-      if (this.bindings.get(binding.id) !== binding) fail('FILE_GRANT_REVOKED')
-      if (binding.canonicalPath !== inspected.canonicalPath
-        || binding.parentFingerprint === null
-        || !sameFingerprint(binding.parentFingerprint, inspected.parentFingerprint)
-        || (binding.fingerprint === null) !== (inspected.fingerprint === null)
-        || (binding.fingerprint !== null && inspected.fingerprint !== null
-          && !sameFingerprint(binding.fingerprint, inspected.fingerprint))) fail('FILE_GRANT_STALE')
-      this.assertNoAlias(binding)
+      await this.validateWriteBinding(binding)
     } catch (error) {
       this.removeBinding(binding)
       throw error
@@ -520,10 +868,23 @@ export class FileGrantBroker {
   private assertNoAlias(candidate: Binding): void {
     for (const binding of this.bindings.values()) {
       if (binding.id === candidate.id) continue
-      if (binding.canonicalPath === candidate.canonicalPath || sameIdentity(binding.fingerprint, candidate.fingerprint)) {
+      if (collisionKey(binding.canonicalPath) === collisionKey(candidate.canonicalPath)
+        || sameIdentity(binding.fingerprint, candidate.fingerprint)) {
         if (binding.access === 'write' || candidate.access === 'write') fail('FILE_GRANT_CONFLICT')
       }
     }
+  }
+
+  private async validateWriteBinding(binding: Binding): Promise<void> {
+    const inspected = await inspectOutput(binding.path, purposePolicies[binding.purpose])
+    if (this.bindings.get(binding.id) !== binding) fail('FILE_GRANT_REVOKED')
+    if (binding.canonicalPath !== inspected.canonicalPath
+      || binding.parentFingerprint === null
+      || !sameIdentity(binding.parentFingerprint, inspected.parentFingerprint)
+      || (binding.fingerprint === null) !== (inspected.fingerprint === null)
+      || (binding.fingerprint !== null && inspected.fingerprint !== null
+        && !sameFingerprint(binding.fingerprint, inspected.fingerprint))) fail('FILE_GRANT_STALE')
+    this.assertNoAlias(binding)
   }
 
   private binding(
@@ -544,8 +905,9 @@ export class FileGrantBroker {
   private removeBinding(binding: Binding): void {
     if (this.bindings.get(binding.id) !== binding) return
     this.bindings.delete(binding.id)
-    if (this.outputLocks.get(binding.canonicalPath) === binding.id) {
-      this.outputLocks.delete(binding.canonicalPath)
+    const lockKey = collisionKey(binding.canonicalPath)
+    if (this.outputLocks.get(lockKey) === binding.id) {
+      this.outputLocks.delete(lockKey)
     }
   }
 }

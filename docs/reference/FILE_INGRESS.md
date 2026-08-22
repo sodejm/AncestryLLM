@@ -121,10 +121,67 @@ restart invalidate it. Trusted same-document application route changes retain
 the existing renderer-bound grant. Only trusted main-process code can call
 `resolveReadGrant` or `resolveWriteGrant`; those operations consume the grant
 and revalidate its identity before returning an internal path. The renderer
-cannot invoke either resolver. A future Python integration must reopen that
-internal path through the shared policy above and retain its
-descriptor/fingerprint checks through parsing, worker execution, and atomic
+cannot invoke either resolver. The mediated-operation broker consumes those
+resolvers internally and preserves their descriptor/fingerprint checks through
+private staging, trusted adapter execution, output validation, and atomic
 publication.
+
+### Mediated operations and private staging
+
+Issue #352 adds one path-free `MediatedOperationRequest`/
+`MediatedOperationResult` contract for these allowlisted source-level
+operations:
+
+| Operation | Inputs | Declared outputs |
+| --- | --- | --- |
+| `rootsmagic.export` | Exactly one `rootsmagic-read` grant | GEDCOM plus Markdown report |
+| `gedcom.merge` | 2-16 `gedcom-read` grants | GEDCOM plus Markdown quality report |
+| `gedcom.subtree` | Exactly one `gedcom-read` grant | GEDCOM |
+| `gedcom.quality` | Exactly one `gedcom-read` grant | Markdown quality report |
+
+Requests carry only an operation ID, transport choice, opaque input grant
+references, and opaque output grant IDs. Local and remote
+execution use the same DTO but distinct trusted adapters. A local adapter
+receives only private staging paths, fixed container paths, and an exact mount
+plan. A remote adapter receives bounded, single-use streams with verified
+lengths and SHA-256 digests; it never receives or interprets a host or staging
+path. The renderer receives no operation route from this source-level gate.
+
+The broker admits at most two operations at once, limits one operation to five
+minutes and 8,589,934,592 aggregate input bytes, and applies each grant
+purpose's per-file limit. Archive expansion bytes and archive depth are both
+zero: known archives and compressed containers are rejected instead of
+expanded. An operation ID is single-use, including after failure or
+cancellation.
+
+Main creates the fixed `mediated-runtime` root and each operation directory
+with owner-only `0700` permissions. It revalidates the source descriptor,
+fingerprint, canonical identity, link count, content signature, and size while
+copying it into a `0400` staged input. Traversal spellings, symbolic links,
+hard links, special files, stale/replaced inputs, archive signatures, and
+casefold- or Unicode-normalization-equivalent names fail before adapter work.
+RootsMagic source bytes remain untouched.
+
+For a local container adapter, only the exact staged input root may be mounted
+read-only and only the exact staged output root may be mounted read-write at
+fixed `/run/ancestryllm/operations/<operation>/...` paths. The complete mount
+set reported by the engine must exactly equal the plan; missing, additional,
+broad, aliased, or access-mode-changed mounts fail before publication. No home,
+selected source directory, or broad `family_trees` mount is permitted.
+
+Every declared output must exist as a bounded regular staged file with the
+expected purpose and content signature. All outputs are validated before any
+is published. Publication uses same-directory temporary files and atomic
+replacement, preserving the source and prior destination until validation
+succeeds. Progress contains only operation ID, phase, and bounded counts;
+errors use stable codes and no path or adapter diagnostic. Success, failure,
+cancellation, timeout, and startup recovery revoke grants and remove only the
+exact private operation directory. Unexpected staging entries are preserved
+and startup fails closed for inspection instead of deleting ambiguous data.
+
+This broker is a reusable source-level gate. Concrete genealogy adapters and
+integrated parser/container-worker execution remain separately gated; this
+section does not claim that a renderer-facing domain workflow is supported.
 
 The broker uses these path-free failure categories:
 
@@ -134,15 +191,24 @@ The broker uses these path-free failure categories:
 - `FILE_GRANT_REVOKED`
 - `FILE_GRANT_STALE`
 - `FILE_GRANT_CONFLICT`
+- `FILE_OPERATION_CANCELLED`
 - `FILE_DIALOG_FAILED`
+
+The mediated-operation boundary maps lower-level failures to these path-free
+codes: `INVALID_REQUEST`, `OPERATION_REPLAYED`, `OPERATION_CONFLICT`,
+`LIMIT_EXCEEDED`, `CANCELLED`, `TIMED_OUT`, `GRANT_REJECTED`,
+`ADAPTER_FAILED`, `OUTPUT_INVALID`, `MOUNT_MISMATCH`, and `CLEANUP_FAILED`.
+Mount preparation itself is limited to `INVALID_OPERATION`, `STAGING_UNSAFE`,
+and `MOUNT_MISMATCH`; raw filesystem or container-engine diagnostics do not
+cross the broker boundary.
 
 Renderer-visible messages and packaged evidence contain no path. The design
 rejects renderer-supplied paths, drag-and-drop path trust, extension-only
 validation, directory or persistent grants, direct renderer filesystem APIs,
-unbounded reads, and overwrite of immutable inputs. A future container worker
-may receive only broker-verified bytes staged in application-owned scratch
-storage; it must not receive a raw host path. RootsMagic remains read-only, and
-remote artifact references remain opaque and path-free.
+unbounded reads, and overwrite of immutable inputs. A container worker may
+receive only broker-verified private staged files through the exact mount plan;
+it must not receive a raw host path. RootsMagic remains read-only, and remote
+artifact references remain opaque and path-free.
 
 ## Configuration
 

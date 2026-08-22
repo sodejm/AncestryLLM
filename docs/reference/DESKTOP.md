@@ -136,6 +136,35 @@ The file-grant card is a reusable contract, not a standalone destination. A
 supported product action must request the native chooser. RootsMagic inputs
 remain immutable and GEDCOM processing remains loss-minimal.
 
+### Mediated file operations
+
+Issue #352 extends opaque grants into one transport-neutral mediated-operation
+request and result contract. The allowlist contains `rootsmagic.export`,
+`gedcom.merge`, `gedcom.subtree`, and `gedcom.quality`; it does not introduce a
+renderer filesystem API, a second command registry, or a path-bearing DTO.
+
+For local execution, Electron Main copies each selected input into a private
+0700 operation directory, makes staged inputs immutable to the worker, and
+constructs only the exact read-only input and read-write output mounts required
+for that operation. The complete realized mount set must match the approved
+plan before work begins. For remote execution, the trusted adapter receives
+one-use bounded streams and opaque metadata only; it never receives or
+interprets a local path. Progress, results, and stable errors remain path-free
+for both transports.
+
+Each operation is single-use and bounded to two concurrent operations, five
+minutes, 8 GiB of aggregate selected input, the per-purpose file-size and count
+limits in [file ingress](FILE_INGRESS.md), and zero archive expansion or nested
+archive depth. Every declared output must validate before any output is
+published. Publication then uses a same-directory temporary file and atomic
+replace for each user-selected destination. Cancellation, expiry, failure, and
+startup cleanup remove only exact private operation directories and fail closed
+if unexpected entries prevent safe cleanup.
+
+This is a source-level Main-process foundation for future genealogy adapters.
+No renderer route or supported RootsMagic/GEDCOM product workflow is claimed by
+this contract alone.
+
 ## Chat limits and states
 
 Chat accepts at most 32 concurrent sessions, 32 stored messages per session,
@@ -159,7 +188,8 @@ code. Unknown bridge failures normalize to `UNEXPECTED_ERROR` or
 |---|---|
 | Bridge and startup | `INVALID_REQUEST`, `UNAUTHORIZED_SENDER`, `INVALID_RESPONSE`, `BRIDGE_OVERLOADED`, `REQUEST_CANCELLED`, `REQUEST_TIMEOUT`, `SIDECAR_UNAVAILABLE`, `SIDECAR_REQUEST_FAILED`, `STARTUP_MUTATION_BLOCKED`, `INTERNAL_ERROR` |
 | Preferences | `PREFERENCES_UNAVAILABLE`, `PREFERENCES_CONFLICT`, `PREFERENCES_INVALID` |
-| File grants | `FILE_SELECTION_INVALID`, `FILE_TOO_LARGE`, `FILE_GRANT_FORBIDDEN`, `FILE_GRANT_REVOKED`, `FILE_GRANT_STALE`, `FILE_GRANT_CONFLICT`, `FILE_DIALOG_FAILED` |
+| File grants | `FILE_SELECTION_INVALID`, `FILE_TOO_LARGE`, `FILE_GRANT_FORBIDDEN`, `FILE_GRANT_REVOKED`, `FILE_GRANT_STALE`, `FILE_GRANT_CONFLICT`, `FILE_DIALOG_FAILED`, `FILE_OPERATION_CANCELLED` |
+| File mediation | `INVALID_REQUEST`, `OPERATION_REPLAYED`, `OPERATION_CONFLICT`, `LIMIT_EXCEEDED`, `CANCELLED`, `TIMED_OUT`, `GRANT_REJECTED`, `ADAPTER_FAILED`, `OUTPUT_INVALID`, `MOUNT_MISMATCH`, `CLEANUP_FAILED` |
 | Tasks | `JOB_ID_INVALID`, `JOB_NOT_FOUND`, `JOB_EVENT_CURSOR_INVALID`, `JOB_EVENT_REPLAY_EXPIRED`, `JOB_SERVICE_UNAVAILABLE`, `JOB_SUBSCRIBER_LIMIT`, `JOB_SUBSCRIPTION_CLOSED`, `JOB_SUBSCRIPTION_CONFLICT`, `JOB_EVENT_STREAM_FAILED` |
 | Chat sessions | `CHAT_SESSION_INVALID`, `CHAT_SESSION_NOT_FOUND`, `CHAT_SESSION_LIMIT`, `CHAT_SESSION_BUSY`, `CHAT_SERVICE_UNAVAILABLE` |
 | Chat streams | `CHAT_STREAM_NOT_FOUND`, `CHAT_STREAM_CURSOR_INVALID`, `CHAT_STREAM_REPLAY_EXPIRED`, `CHAT_STREAM_SERVICE_UNAVAILABLE`, `CHAT_STREAM_LIMIT`, `CHAT_STREAM_BACKPRESSURE_TIMEOUT`, `CHAT_STREAM_STALLED`, `CHAT_STREAM_EVENT_INVALID` |
@@ -209,6 +239,7 @@ where each user-visible contract is taught and referenced.
 | [#108 settings, providers, consent, and secrets](https://github.com/sodejm/AncestryLLM/issues/108) | [Provider and consent setup](../how-to/desktop-provider-consent.md) and [settings catalog](#settings-catalog) |
 | [#109 tasks, cancellation, and coded errors](https://github.com/sodejm/AncestryLLM/issues/109) | [Task monitoring](../how-to/desktop-tasks.md) and [stable error codes](#stable-error-codes) |
 | [#112 transient chat](https://github.com/sodejm/AncestryLLM/issues/112) | [Desktop chat](../how-to/desktop-chat.md) and [chat limits and states](#chat-limits-and-states) |
+| [#103 opaque file grants](https://github.com/sodejm/AncestryLLM/issues/103) and [#352 mediated operations](https://github.com/sodejm/AncestryLLM/issues/352) | [Desktop file access](../how-to/desktop-file-access.md), [file ingress](FILE_INGRESS.md), and [mediated file operations](#mediated-file-operations) |
 
 ## Related explanations and procedures
 

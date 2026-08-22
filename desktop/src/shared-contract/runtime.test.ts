@@ -6,6 +6,8 @@ import { settingsFixture } from '../mock-bridge/fixtures'
 import {
   parseAppInfoResult,
   parseArtifactRef,
+  parseMediatedOperationRequest,
+  parseMediatedOperationResult,
   parseCapabilitiesResult,
   parseFileGrantId,
   parseFileGrantResult,
@@ -603,14 +605,28 @@ describe('runtime bridge validation', () => {
       protocolVersion: '1',
       data: { revoked: true },
     }).ok).toBe(true)
-    expect(parseArtifactRef({
-      artifact_id: `art_${'b'.repeat(32)}`,
+    const artifact = {
+      artifact_id: `art_${'b'.repeat(64)}`,
       artifact_type: 'gedcom_export',
       media_type: 'text/vnd.gedcom',
       sha256: 'c'.repeat(64),
       size_bytes: 42,
-      status: 'staged',
-    })).toMatchObject({ artifact_type: 'gedcom_export', status: 'staged' })
+      status: 'ready',
+    } as const
+    expect(parseArtifactRef(artifact)).toMatchObject({ artifact_type: 'gedcom_export', status: 'ready' })
+    expect(parseArtifactRef({ ...artifact, sha256: null, status: 'pending' }))
+      .toMatchObject({ sha256: null, status: 'pending' })
+
+    const request = {
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'local-container',
+      inputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'read' }],
+      outputs: [{ grant_id: `grt_${'f'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
+    } as const
+    expect(parseMediatedOperationRequest(request)).toEqual(request)
+    expect(parseMediatedOperationResult({ operation_id: request.operation_id, outputs: [artifact] }))
+      .toMatchObject({ operation_id: request.operation_id, outputs: [{ status: 'ready' }] })
   })
 
   it('rejects renderer paths, malformed IDs, unknown fields, and incoherent grant metadata', () => {
@@ -637,13 +653,34 @@ describe('runtime bridge validation', () => {
       },
     })).toThrow('Invalid bridge response')
     expect(() => parseArtifactRef({
-      artifact_id: `art_${'b'.repeat(32)}`,
+      artifact_id: `art_${'b'.repeat(64)}`,
       artifact_type: 'gedcom_export',
       media_type: 'text/vnd.gedcom',
       sha256: 'c'.repeat(64),
       size_bytes: 42,
-      status: 'staged',
+      status: 'ready',
       path: '/private/tree.ged',
+    })).toThrow('Invalid bridge response')
+
+    expect(() => parseMediatedOperationRequest({
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'remote-service',
+      inputs: [{
+        grant_id: `grt_${'e'.repeat(64)}`,
+        operation: 'gedcom.merge',
+        access: 'read',
+        path: '/private/tree.ged',
+      }],
+      outputs: [{ grant_id: `grt_${'f'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
+    })).toThrow('Invalid bridge response')
+
+    expect(() => parseMediatedOperationRequest({
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'remote-service',
+      inputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'read' }],
+      outputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
     })).toThrow('Invalid bridge response')
   })
 
