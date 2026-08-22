@@ -453,6 +453,8 @@ function fileGrantFailure<T>(cause: unknown): BridgeResult<T> {
       return error(cause.code, 'The selected file changed after it was approved.', 'Review and select the file again.')
     case 'FILE_GRANT_CONFLICT':
       return error(cause.code, 'The selected file is already in use by another operation.', 'Finish or cancel the other operation and try again.')
+    case 'FILE_OPERATION_CANCELLED':
+      return cancelled<T>()
     case 'FILE_DIALOG_FAILED':
       return error(cause.code, 'The system file dialog could not complete the request.', 'Try again or restart AncestryLLM.')
   }

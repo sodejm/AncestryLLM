@@ -1,9 +1,9 @@
 # Application-service contracts
 
-Status: implemented for the `0.4.0` release line. These contracts
-are the framework-independent boundary shared by the current terminal adapters
-and the future FastAPI/Electron adapters. `ARCHITECTURE.md` owns the
-repository-wide dependency graph and current-versus-target status.
+Status: implemented for the current source release line. These contracts are
+the framework-independent boundary shared by the current terminal adapters and
+the FastAPI/Electron foundations. `ARCHITECTURE.md` owns the repository-wide
+dependency graph and current-versus-target status.
 
 ## Public boundary
 
@@ -117,6 +117,24 @@ publication removes the staged artifact and preserves any previous
 destination. Publication failures map to a sanitized code; partial external
 outputs and raw exception details are not returned.
 
+`MediatedOperationRequest` and `MediatedOperationResult` extend this capability
+model without adding an operation registry. A request binds one unpredictable
+operation ID, one allowlisted operation code, `local-container` or
+`remote-service` transport, 1-16 unique read grants, and 1-8 unique write
+grants. Every grant must name that same operation and exact access mode. The
+result returns only ready `ArtifactRef` values for the same operation ID.
+Both DTOs are strict, immutable, deterministic, serializable, and path-free.
+
+Electron Main uses the corresponding shared desktop shape to select one of two
+trusted adapters. The local adapter may receive only private staged paths,
+fixed container paths, and an exact mount plan; those implementation objects do
+not enter the application DTO. The remote adapter may receive only bounded
+single-use streams with verified byte counts and digests, never host paths.
+This is adapter composition around the existing application inventory, not a
+second desktop or transport-specific API. The private artifact registry also
+rejects non-canonical paths, symbolic links, hard-link aliases, and identity
+changes before resolving a capability.
+
 Secrets use a separate write-only `SecretGrantRef`. Secret values remain in the
 owning adapter/secret-store boundary and never enter a request, result, error,
 progress event, or deterministic JSON envelope. Secret results expose presence
@@ -160,7 +178,10 @@ locations, SQL, provider payloads, credentials, or genealogy content.
 - structural port conformance and legacy cancellation mapping;
 - strict JSON, finite-number, bounded-value, and path/content rejection;
 - complete stable failure mapping with sanitized envelopes;
-- scoped, revocable, opaque artifact grants;
+- scoped, revocable, opaque artifact grants, including link and replacement
+  rejection at resolution;
+- strict, deterministic, path-free mediated-operation request/result round
+  trips with local/remote transport selection and access-bound grant checks;
 - atomic publication, cancellation preservation, and absence of partial
   external output;
 - write-only secret capability use.

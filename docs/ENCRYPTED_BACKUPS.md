@@ -16,6 +16,28 @@ restoring the key into an OS credential store, opening a copy, checking the
 schema revision, and running integrity checks. Plain SQLite files and wrong keys
 are rejected. Never commit a database or backup to Git.
 
+## Transient file-operation recovery
+
+Issue #352's `mediated-runtime` staging area is scratch space, not a backup,
+workspace, or retained family-tree copy. Inputs are immutable private copies;
+outputs remain staged until every declared artifact validates. The original
+RootsMagic or GEDCOM source and the prior destination remain the recovery
+authority until a validated output is published through same-directory atomic
+replacement.
+
+Success, failure, cancellation, and timeout remove the exact private operation
+directory. On startup, Electron Main removes only recognized operation
+directories beneath the fixed owner-only staging root. An unexpected file,
+link, directory shape, permission, or owner fails closed and is preserved for
+investigation instead of triggering broad cleanup. This cleanup does not scan
+or delete user-selected source or destination directories.
+
+After interruption, restart the application and retry with fresh opaque
+grants. Never salvage, move, or publish staged files, and never treat them as a
+backup. If recovery fails, retain the source and prior output and record only
+the stable operation code and phase; support material must exclude host,
+staging, destination, and container mount paths.
+
 ## Deployment-profile metadata and future runtimes
 
 Backup manifests and support bundles may include the redacted structural

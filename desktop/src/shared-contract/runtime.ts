@@ -42,6 +42,7 @@ import {
   type CopyTextResult,
   type ClearDiagnosticsResult,
   type DesktopColorScheme,
+  type ArtifactGrantRef,
   type ArtifactRef,
   type FileFormat,
   type FileGrant,
@@ -57,6 +58,8 @@ import {
   type LocalRuntimeReview,
   type LocalRuntimeResult,
   type LocalRuntimeStatus,
+  type MediatedOperationRequest,
+  type MediatedOperationResult,
   type JobArtifactRef,
   type JobEvent,
   type JobEventDelivery,
@@ -174,7 +177,8 @@ const startupArchitectures = ['x64', 'arm64', 'unsupported'] as const
 const identifierPattern = /^[A-Za-z0-9._:-]+$/
 const dispatchKeyPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 const fileGrantIdPattern = /^grt_[a-f0-9]{64}$/
-const artifactIdPattern = /^art_[a-f0-9]{32}$/
+const artifactIdPattern = /^art_[a-f0-9]{64}$/
+const operationIdPattern = /^op_[a-f0-9]{64}$/
 const jobArtifactIdPattern = /^art_[A-Za-z0-9._:-]+$/
 const jobIdPattern = /^j[0-9]{6,12}$/
 const jobResourcePattern = /^resource_[a-f0-9]{64}$/
@@ -193,6 +197,8 @@ const safeDiagnosticTextPattern = /^[^/\\\u0000-\u001f\u007f]+$/
 const mediaTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/
 const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'markdown']
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
+const artifactStatuses = ['pending', 'ready', 'failed', 'revoked'] as const
+const mediationTransports = ['local-container', 'remote-service'] as const
 const secretStatuses = ['present', 'missing', 'unavailable'] as const
 const providerValues = ['none', 'ollama', 'openai', 'anthropic', 'gemini', 'openrouter'] as const
 const localRuntimeStates = ['not-installed', 'stopped', 'ready', 'unhealthy'] as const
@@ -1712,10 +1718,54 @@ export function parseArtifactRef(value: unknown): Readonly<ArtifactRef> {
     || typeof value.artifact_id !== 'string' || !artifactIdPattern.test(value.artifact_id)
     || !bounded(value.artifact_type, 1, 96) || !identifierPattern.test(value.artifact_type)
     || !bounded(value.media_type, 3, 127) || !mediaTypePattern.test(value.media_type)
-    || typeof value.sha256 !== 'string' || !digestPattern.test(value.sha256)
+    || (value.sha256 !== null && (typeof value.sha256 !== 'string' || !digestPattern.test(value.sha256)))
     || !integer(value.size_bytes, 0, Number.MAX_SAFE_INTEGER)
-    || (value.status !== 'staged' && value.status !== 'published')) invalidResponse()
+    || !artifactStatuses.includes(value.status as typeof artifactStatuses[number])) invalidResponse()
   return deepFreeze(value as unknown as ArtifactRef)
+}
+
+function parseArtifactGrantRef(value: unknown): ArtifactGrantRef {
+  if (!record(value) || !exactKeys(value, ['grant_id', 'operation', 'access'])
+    || typeof value.grant_id !== 'string' || !fileGrantIdPattern.test(value.grant_id)
+    || !bounded(value.operation, 3, 96) || !dispatchKeyPattern.test(value.operation)
+    || (value.access !== 'read' && value.access !== 'write')) invalidResponse()
+  return value as unknown as ArtifactGrantRef
+}
+
+/**
+ * Validates the path-free request shared by local-container and remote-service adapters.
+ */
+export function parseMediatedOperationRequest(value: unknown): Readonly<MediatedOperationRequest> {
+  if (!record(value) || !exactKeys(value, ['operation_id', 'operation', 'transport', 'inputs', 'outputs'])
+    || typeof value.operation_id !== 'string' || !operationIdPattern.test(value.operation_id)
+    || !bounded(value.operation, 3, 96) || !dispatchKeyPattern.test(value.operation)
+    || !mediationTransports.includes(value.transport as typeof mediationTransports[number])
+    || !Array.isArray(value.inputs) || value.inputs.length < 1 || value.inputs.length > 16
+    || !Array.isArray(value.outputs) || value.outputs.length < 1 || value.outputs.length > 8) invalidResponse()
+
+  const inputs = value.inputs.map(parseArtifactGrantRef)
+  const outputs = value.outputs.map(parseArtifactGrantRef)
+  const grants = [...inputs, ...outputs]
+  if (new Set(grants.map((grant) => grant.grant_id)).size !== grants.length
+    || grants.some((grant) => grant.operation !== value.operation)
+    || inputs.some((grant) => grant.access !== 'read')
+    || outputs.some((grant) => grant.access !== 'write')) invalidResponse()
+  return deepFreeze(value as unknown as MediatedOperationRequest)
+}
+
+/**
+ * Validates path-free ready artifacts returned by one mediated operation.
+ */
+export function parseMediatedOperationResult(value: unknown): Readonly<MediatedOperationResult> {
+  if (!record(value) || !exactKeys(value, ['operation_id', 'outputs'])
+    || typeof value.operation_id !== 'string' || !operationIdPattern.test(value.operation_id)
+    || !Array.isArray(value.outputs) || value.outputs.length < 1 || value.outputs.length > 8) {
+    invalidResponse()
+  }
+  const outputs = value.outputs.map(parseArtifactRef)
+  if (outputs.some((output) => output.status !== 'ready')
+    || new Set(outputs.map((output) => output.artifact_id)).size !== outputs.length) invalidResponse()
+  return deepFreeze(value as unknown as MediatedOperationResult)
 }
 
 function parseNullableFileGrant(value: unknown): FileGrant | null {

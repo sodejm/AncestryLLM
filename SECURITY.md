@@ -74,6 +74,14 @@ output is never an authority for genealogy facts.
   GEDCOM operations do not overwrite their inputs, preserve unsupported source
   structure where possible, and validate output. Incremental GEDCOM updates
   stage and atomically publish complete release bundles.
+- Electron Main mediates native files through opaque, single-use grants. The
+  Issue #352 operation broker stages local inputs beneath private 0700 roots,
+  rejects links, replacements, aliases, archive signatures, and out-of-policy
+  counts or sizes, and permits only exact read-only input and read-write output
+  mounts after comparing the complete realized mount set. Remote adapters
+  receive bounded streams and opaque metadata, never local paths. All declared
+  outputs validate before any destination is atomically replaced, and
+  renderer-visible progress, results, and errors remain path-free.
 - Provider and model output is untrusted data, is schema-validated when a
   structured result is required, and is never executed. An LLM receives no
   shell, SQL, filesystem, or other tool capability. Desktop model text is
@@ -183,6 +191,16 @@ enable data writes or migrations, prove registry provenance, or make the
 topology supported for application use; those residual controls remain owned
 by #350, #351, #353, #364, and #365.
 
+Issue #352 adds the source-level trust boundary for mediated host-file work.
+The shared request/result DTO is transport-neutral; the trusted local adapter
+alone may use private staged paths and exact container mounts, while a trusted
+remote adapter receives one-use bounded streams. Operations are allowlisted,
+single-use, concurrency- and time-bounded, and fail closed on stale grants,
+mount drift, unsafe staging, invalid outputs, or incomplete cleanup. This is
+Main-process foundation evidence only: no renderer operation route, concrete
+genealogy adapter, packaged parser worker, or supported container workload is
+enabled by it.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;
@@ -194,6 +212,9 @@ Current limitations that must not be credited as controls include:
 - the Issue #349 container topology remains a probe-only validation shell with
   no application workload, secret delivery, writable persistence, or schema
   migration; and
+- the Issue #352 mediated-operation broker remains a source-level Main-process
+  gate until a concrete adapter, renderer-owned product action, parser-worker
+  isolation, and packaged runtime evidence are delivered; and
 - several GEDCOM synchronization and recovery paths need broader end-to-end
   evidence.
 

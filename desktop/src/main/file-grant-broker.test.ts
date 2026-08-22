@@ -1,5 +1,5 @@
 /** Verifies opaque file grants remain bounded, owner-scoped, and stale-safe. */
-import { link, mkdir, mkdtemp, readdir, rename, symlink, truncate, writeFile } from 'node:fs/promises'
+import { link, lstat, mkdir, mkdtemp, readFile, readdir, rename, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -157,6 +157,35 @@ describe('opaque file-grant broker', () => {
     await expect(broker.resolveReadGrant(owner, grant!.grantId, 'gedcom-read')).rejects.toMatchObject({ code: 'FILE_GRANT_STALE' })
   })
 
+  it('copies a granted input once into immutable private staging without returning a host path', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'source.ged')
+    const staging = join(root, 'private-staging')
+    const destination = join(staging, 'input.ged')
+    const content = '0 HEAD\n1 SOUR STAGED\n0 TRLR\n'
+    await writeFile(source, content)
+    await mkdir(staging, { mode: 0o700 })
+    const broker = new FileGrantBroker(dialogs({ selectOpenFile: vi.fn().mockResolvedValue(source) }))
+    const owner = {}
+    const grant = await broker.requestOpenGrant(owner, { purpose: 'gedcom-read' })
+
+    const staged = await broker.stageReadGrant(owner, grant!.grantId, 'gedcom-read', destination)
+
+    expect(staged).toEqual({
+      grantId: grant!.grantId,
+      purpose: 'gedcom-read',
+      sizeBytes: Buffer.byteLength(content),
+      sha256: '8833aa9eb59feec44ff56ecc6375c4685b044f99533b167996d5f326c635bc0a',
+    })
+    expect(JSON.stringify(staged)).not.toContain(root)
+    await expect(readFile(destination, 'utf8')).resolves.toBe(content)
+    if (process.platform !== 'win32') {
+      expect((await lstat(destination)).mode & 0o777).toBe(0o400)
+    }
+    await expect(broker.stageReadGrant(owner, grant!.grantId, 'gedcom-read', join(staging, 'again.ged')))
+      .rejects.toMatchObject({ code: 'FILE_GRANT_REVOKED' })
+  })
+
   it('permits exactly one concurrent redemption of a single-use grant', async () => {
     const root = await temporaryRoot()
     const path = join(root, 'single-use.ged')
@@ -238,6 +267,115 @@ describe('opaque file-grant broker', () => {
     await expect(readdir(root)).resolves.toEqual(expect.arrayContaining(['existing.ged', 'new.ged']))
   })
 
+  it('validates and atomically publishes a staged output without returning a host path', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const stagedPath = join(privateRoot, 'result.ged')
+    const target = join(root, 'published.ged')
+    const content = '0 HEAD\n1 SOUR PUBLISHED\n0 TRLR\n'
+    await mkdir(privateRoot, { mode: 0o700 })
+    await writeFile(stagedPath, content, { mode: 0o600 })
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn().mockResolvedValue(target),
+      confirmReplacement: vi.fn().mockResolvedValue(true),
+    }))
+    const owner = {}
+    const grant = await broker.requestSaveGrant(owner, {
+      purpose: 'gedcom-write',
+      suggestedName: 'published.ged',
+    })
+
+    const published = await broker.publishWriteGrant(owner, grant!.grantId, 'gedcom-write', stagedPath)
+
+    expect(published).toEqual({
+      grantId: grant!.grantId,
+      purpose: 'gedcom-write',
+      sizeBytes: Buffer.byteLength(content),
+      sha256: '770ca9286b8db4fc205c0dd3efca1e122da29f5c767232e6ab9f1d969262aad0',
+    })
+    expect(JSON.stringify(published)).not.toContain(root)
+    await expect(readFile(target, 'utf8')).resolves.toBe(content)
+    expect((await readdir(root)).filter((name) => name.includes('.ancestryllm-'))).toEqual([])
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'published.ged',
+    })).resolves.toMatchObject({ metadata: { validation: 'replacement-confirmed' } })
+  })
+
+  it('preserves an existing output and releases its lock when staged validation fails', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const stagedPath = join(privateRoot, 'invalid.md')
+    const target = join(root, 'existing.md')
+    const original = '# Original report\n'
+    await mkdir(privateRoot, { mode: 0o700 })
+    await writeFile(stagedPath, Buffer.from('BZh9malformed-archive', 'ascii'))
+    await writeFile(target, original)
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn().mockResolvedValue(target),
+      confirmReplacement: vi.fn().mockResolvedValue(true),
+    }))
+    const owner = {}
+    const grant = await broker.requestSaveGrant(owner, {
+      purpose: 'markdown-write',
+      suggestedName: 'existing.md',
+    })
+
+    await expect(broker.publishWriteGrant(owner, grant!.grantId, 'markdown-write', stagedPath))
+      .rejects.toMatchObject({ code: 'FILE_SELECTION_INVALID' })
+
+    await expect(readFile(target, 'utf8')).resolves.toBe(original)
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'markdown-write',
+      suggestedName: 'existing.md',
+    })).resolves.toMatchObject({ metadata: { validation: 'replacement-confirmed' } })
+  })
+
+  it('rejects an oversized sparse staged output before publication', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const stagedPath = join(privateRoot, 'oversized.md')
+    await mkdir(privateRoot, { mode: 0o700 })
+    await writeFile(stagedPath, '# Fictional report\n', { mode: 0o600 })
+    await truncate(stagedPath, 67_108_865)
+    const broker = new FileGrantBroker(dialogs())
+
+    await expect(broker.validateStagedOutput('markdown-write', stagedPath))
+      .rejects.toMatchObject({ code: 'FILE_TOO_LARGE' })
+  })
+
+  it('cancels publication without changing its target or leaving temporary files', async () => {
+    const root = await temporaryRoot()
+    const privateRoot = join(root, 'private-staging')
+    const stagedPath = join(privateRoot, 'result.ged')
+    const target = join(root, 'existing.ged')
+    const original = '0 HEAD\n1 SOUR ORIGINAL\n0 TRLR\n'
+    await mkdir(privateRoot, { mode: 0o700 })
+    await writeFile(stagedPath, '0 HEAD\n1 SOUR CANCELLED\n0 TRLR\n')
+    await writeFile(target, original)
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn().mockResolvedValue(target),
+      confirmReplacement: vi.fn().mockResolvedValue(true),
+    }))
+    const owner = {}
+    const grant = await broker.requestSaveGrant(owner, {
+      purpose: 'gedcom-write',
+      suggestedName: 'existing.ged',
+    })
+    const controller = new AbortController()
+    controller.abort(new Error('/private/path-must-not-leak'))
+
+    await expect(broker.publishWriteGrant(owner, grant!.grantId, 'gedcom-write', stagedPath, controller.signal))
+      .rejects.toMatchObject({ code: 'FILE_OPERATION_CANCELLED', message: 'FILE_OPERATION_CANCELLED' })
+
+    await expect(readFile(target, 'utf8')).resolves.toBe(original)
+    expect((await readdir(root)).filter((name) => name.includes('.ancestryllm-'))).toEqual([])
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'existing.ged',
+    })).resolves.toMatchObject({ metadata: { validation: 'replacement-confirmed' } })
+  })
+
   it('rejects an output grant when its selected parent directory is replaced', async () => {
     const root = await temporaryRoot()
     const parent = join(root, 'selected-output')
@@ -315,6 +453,40 @@ describe('opaque file-grant broker', () => {
     await broker.requestOpenGrant({}, { purpose: 'gedcom-read' })
 
     await expect(broker.requestSaveGrant({}, { purpose: 'gedcom-write', suggestedName: 'same.ged' })).rejects.toMatchObject({ code: 'FILE_GRANT_CONFLICT' })
+  })
+
+  it('serializes case-folded and Unicode-normalized output aliases', async () => {
+    const root = await temporaryRoot()
+    const selections = [
+      join(root, 'Export.ged'),
+      join(root, 'export.ged'),
+      join(root, 'cafe\u0301.ged'),
+      join(root, 'caf\u00e9.ged'),
+    ]
+    const broker = new FileGrantBroker(dialogs({
+      selectSaveFile: vi.fn()
+        .mockResolvedValueOnce(selections[0])
+        .mockResolvedValueOnce(selections[1])
+        .mockResolvedValueOnce(selections[2])
+        .mockResolvedValueOnce(selections[3]),
+    }))
+
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'Export.ged',
+    })).resolves.toBeTruthy()
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'export.ged',
+    })).rejects.toMatchObject({ code: 'FILE_GRANT_CONFLICT' })
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'cafe\u0301.ged',
+    })).resolves.toBeTruthy()
+    await expect(broker.requestSaveGrant({}, {
+      purpose: 'gedcom-write',
+      suggestedName: 'caf\u00e9.ged',
+    })).rejects.toMatchObject({ code: 'FILE_GRANT_CONFLICT' })
   })
 
   it('revokes every grant owned by a closed window without exposing existence', async () => {

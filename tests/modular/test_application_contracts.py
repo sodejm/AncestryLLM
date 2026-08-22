@@ -30,6 +30,9 @@ from ancestryllm.application.dto import (
     BoundaryDTO,
     FailureDetail,
     IdentityResolutionResult,
+    MediatedOperationRequest,
+    MediatedOperationResult,
+    MediationTransport,
     ProgressUpdate,
     ProviderSelection,
     QualityResolutionResult,
@@ -592,6 +595,97 @@ def test_artifact_read_grant_rejects_replaced_input(tmp_path: Path) -> None:
         registry.describe_input(grant, operation="gedcom.merge")
 
     assert changed.value.code is DomainFailureCode.ARTIFACT_INVALID
+
+
+@pytest.mark.parametrize("alias_kind", ["symlink", "hardlink"])
+def test_artifact_read_grant_rejects_linked_input(
+    tmp_path: Path,
+    alias_kind: str,
+) -> None:
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    selected = tmp_path / "selected.ged"
+    if alias_kind == "symlink":
+        selected.symlink_to(source)
+    else:
+        selected.hardlink_to(source)
+
+    with pytest.raises(DomainFailure) as rejected:
+        _ArtifactRegistry().grant_input(
+            selected,
+            operation="gedcom.merge",
+            media_type="text/vnd.gedcom",
+            artifact_type="gedcom",
+        )
+
+    assert rejected.value.code is DomainFailureCode.ARTIFACT_INVALID
+
+
+def test_mediated_operation_request_is_path_free_and_transport_neutral() -> None:
+    operation = "gedcom.merge"
+    request = MediatedOperationRequest(
+        operation_id=f"op_{'a' * 64}",
+        operation=operation,
+        transport=MediationTransport.LOCAL_CONTAINER,
+        inputs=(ArtifactGrantRef(f"grt_{'b' * 64}", operation, ArtifactAccess.READ),),
+        outputs=(
+            ArtifactGrantRef(f"grt_{'c' * 64}", operation, ArtifactAccess.WRITE),
+            ArtifactGrantRef(f"grt_{'d' * 64}", operation, ArtifactAccess.WRITE),
+        ),
+    )
+
+    serialized = request.to_json()
+
+    assert MediatedOperationRequest.from_json(serialized) == request
+    assert request.transport is MediationTransport.LOCAL_CONTAINER
+    assert "/Users/" not in serialized
+    assert "\\\\" not in serialized
+
+
+def test_mediated_operation_request_rejects_mismatched_or_reused_grants() -> None:
+    operation = "gedcom.subtree"
+    shared = ArtifactGrantRef(f"grt_{'e' * 64}", operation, ArtifactAccess.READ)
+
+    with pytest.raises(ValueError, match="unique"):
+        MediatedOperationRequest(
+            operation_id=f"op_{'f' * 64}",
+            operation=operation,
+            transport=MediationTransport.REMOTE_SERVICE,
+            inputs=(shared, shared),
+            outputs=(ArtifactGrantRef(f"grt_{'1' * 64}", operation, ArtifactAccess.WRITE),),
+        )
+
+    with pytest.raises(ValueError, match="operation"):
+        MediatedOperationRequest(
+            operation_id=f"op_{'2' * 64}",
+            operation=operation,
+            transport=MediationTransport.LOCAL_CONTAINER,
+            inputs=(
+                ArtifactGrantRef(
+                    f"grt_{'3' * 64}",
+                    "gedcom.quality",
+                    ArtifactAccess.READ,
+                ),
+            ),
+            outputs=(ArtifactGrantRef(f"grt_{'4' * 64}", operation, ArtifactAccess.WRITE),),
+        )
+
+
+def test_mediated_operation_result_rejects_duplicate_artifact_ids() -> None:
+    artifact = ArtifactRef(
+        f"art_{'5' * 64}",
+        "text/vnd.familysearch.gedcom",
+        "gedcom_export",
+        17,
+        ArtifactStatus.READY,
+        "6" * 64,
+    )
+
+    with pytest.raises(ValueError, match="unique"):
+        MediatedOperationResult(
+            operation_id=f"op_{'7' * 64}",
+            outputs=(artifact, artifact),
+        )
 
 
 def test_artifact_publication_is_atomic_and_returns_no_host_path(tmp_path: Path) -> None:

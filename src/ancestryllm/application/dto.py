@@ -253,6 +253,13 @@ class ArtifactAccess(StrEnum):
     WRITE = "write"
 
 
+class MediationTransport(StrEnum):
+    """Trusted execution adapter selected without exposing a host path."""
+
+    LOCAL_CONTAINER = "local-container"
+    REMOTE_SERVICE = "remote-service"
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactRef(BoundaryDTO):
     """Opaque application artifact descriptor with bounded metadata."""
@@ -288,6 +295,51 @@ class ArtifactGrantRef(BoundaryDTO):
     def __post_init__(self) -> None:
         _validate_identifier("grant_id", self.grant_id, prefix="grt_")
         _validate_code("operation", self.operation)
+
+
+@dataclass(frozen=True, slots=True)
+class MediatedOperationRequest(ServiceRequest):
+    """Path-free capability request shared by local and remote adapters."""
+
+    operation_id: str
+    operation: str
+    transport: MediationTransport
+    inputs: tuple[ArtifactGrantRef, ...]
+    outputs: tuple[ArtifactGrantRef, ...]
+
+    def __post_init__(self) -> None:
+        _validate_identifier("operation_id", self.operation_id, prefix="op_")
+        _validate_code("operation", self.operation)
+        if not 1 <= len(self.inputs) <= 16:
+            raise ValueError("mediated inputs must contain between 1 and 16 grants.")
+        if not 1 <= len(self.outputs) <= 8:
+            raise ValueError("mediated outputs must contain between 1 and 8 grants.")
+        grants = (*self.inputs, *self.outputs)
+        if len({grant.grant_id for grant in grants}) != len(grants):
+            raise ValueError("mediated grant identifiers must be unique.")
+        if any(grant.operation != self.operation for grant in grants):
+            raise ValueError("mediated grants must match the requested operation.")
+        if any(grant.access is not ArtifactAccess.READ for grant in self.inputs):
+            raise ValueError("mediated input grants must provide read access.")
+        if any(grant.access is not ArtifactAccess.WRITE for grant in self.outputs):
+            raise ValueError("mediated output grants must provide write access.")
+
+
+@dataclass(frozen=True, slots=True)
+class MediatedOperationResult(ServiceResult):
+    """Path-free artifacts produced by one mediated operation."""
+
+    operation_id: str
+    outputs: tuple[ArtifactRef, ...]
+
+    def __post_init__(self) -> None:
+        _validate_identifier("operation_id", self.operation_id, prefix="op_")
+        if not 1 <= len(self.outputs) <= 8:
+            raise ValueError("mediated results must contain between 1 and 8 artifacts.")
+        if len({output.artifact_id for output in self.outputs}) != len(self.outputs):
+            raise ValueError("mediated result artifact identifiers must be unique.")
+        if any(output.status is not ArtifactStatus.READY for output in self.outputs):
+            raise ValueError("mediated result artifacts must be ready.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +630,9 @@ __all__ = [
     "IdentityResolutionRequest",
     "IdentityResolutionResult",
     "JSONValue",
+    "MediatedOperationRequest",
+    "MediatedOperationResult",
+    "MediationTransport",
     "NamedValue",
     "ProgressUpdate",
     "ProviderSelection",

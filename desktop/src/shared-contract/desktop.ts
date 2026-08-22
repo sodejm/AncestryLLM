@@ -518,14 +518,45 @@ export interface SaveFileGrantRequest { purpose: FileWritePurpose; suggestedName
  */
 export interface FileGrantRevocation { revoked: true }
 
+/** Mirrors the transport-neutral Python application artifact lifecycle. */
+export type ArtifactStatus = 'pending' | 'ready' | 'failed' | 'revoked'
+
+/** Mirrors the transport-neutral Python application grant access contract. */
+export type ArtifactAccess = 'read' | 'write'
+
+/** Selects a trusted execution adapter without granting it a host path. */
+export type MediationTransport = 'local-container' | 'remote-service'
+
 /** Mirrors the transport-neutral Python application artifact contract. */
 export interface ArtifactRef {
   artifact_id: string
   artifact_type: string
   media_type: string
-  sha256: string
+  sha256: string | null
   size_bytes: number
-  status: 'staged' | 'published'
+  status: ArtifactStatus
+}
+
+/** Carries an opaque, operation-scoped artifact grant across trusted adapters. */
+export interface ArtifactGrantRef {
+  grant_id: string
+  operation: string
+  access: ArtifactAccess
+}
+
+/** Defines the path-free request shared by local-container and remote-service adapters. */
+export interface MediatedOperationRequest {
+  operation_id: string
+  operation: string
+  transport: MediationTransport
+  inputs: readonly ArtifactGrantRef[]
+  outputs: readonly ArtifactGrantRef[]
+}
+
+/** Defines the path-free artifacts returned after a mediated operation. */
+export interface MediatedOperationResult {
+  operation_id: string
+  outputs: readonly ArtifactRef[]
 }
 
 /** Maximum renderer delivery debt before the main process pauses the SSE source. */
