@@ -370,13 +370,16 @@ port, URL, request, response, genealogy, provider, filesystem payload, raw
 exception, or stack. Lifecycle diagnostics contain only state, a generic
 failure class, and remaining automatic/manual retry counts.
 
-Electron Main creates one random UUIDv4 for each application launch and sends
-it only in the exact private stdin launch frame. Python rejects a missing,
-malformed, or additional launch-frame field. The value correlates the
-Electron Main, packaged-sidecar, and Python-core JSONL streams, but it is not a
-user, device, installation, authentication, or genealogy identifier. It is
-never placed in arguments, environment variables, URLs, readiness or health
-messages, authorization material, stderr, or child output.
+Electron Main creates one random UUIDv4 for each application launch and derives
+one absolute diagnostics directory beneath Electron's application-data root.
+It sends both only in the exact private stdin launch frame. Python rejects a
+missing, malformed, relative-directory, or additional launch-frame field and
+uses that exact directory for both Python-owned writers. The UUID correlates
+the Electron Main, packaged-sidecar, and Python-core JSONL streams, but it is
+not a user, device, installation, authentication, or genealogy identifier.
+Neither private value is placed in arguments, environment variables, URLs,
+readiness or health messages, renderer data, authorization material, stderr,
+or child output.
 
 Each component writes a separate bounded file beneath the Main-owned
 diagnostics directory. Records use an allowlisted schema and stable event-code

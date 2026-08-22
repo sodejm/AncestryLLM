@@ -11,6 +11,7 @@ import jsonschema
 import pytest
 
 from ancestryllm.observability.structured_diagnostics import (
+    DESKTOP_DIAGNOSTIC_CODES,
     DESKTOP_DIAGNOSTIC_SCHEMA_VERSION,
     DesktopDiagnosticComponent,
     DesktopDiagnosticSeverity,
@@ -36,7 +37,7 @@ def test_event_matches_shared_versioned_schema() -> None:
     event = create_desktop_diagnostic_event(
         run_id=RUN_ID,
         app_version="0.7.0-dev.1",
-        code="PYTHON_CORE_STARTING",
+        code="PYTHON_CORE_BOOTSTRAP_STARTED",
         severity=DesktopDiagnosticSeverity.INFO,
         component=DesktopDiagnosticComponent.PYTHON_CORE,
         metadata={"retry_count": 2, "degraded": False},
@@ -48,13 +49,25 @@ def test_event_matches_shared_versioned_schema() -> None:
         "schema_version": DESKTOP_DIAGNOSTIC_SCHEMA_VERSION,
         "timestamp": "2026-08-19T12:34:56.789Z",
         "run_id": RUN_ID,
-        "code": "PYTHON_CORE_STARTING",
+        "code": "PYTHON_CORE_BOOTSTRAP_STARTED",
         "severity": "info",
         "component": "python-core",
         "app_version": "0.7.0-dev.1",
         "metadata": {"retry_count": 2, "degraded": False},
     }
     jsonschema.Draft202012Validator(_schema()).validate(event.as_document())
+
+
+def test_event_code_catalog_matches_schema_and_rejects_unknown_codes() -> None:
+    assert set(_schema()["properties"]["code"]["enum"]) == DESKTOP_DIAGNOSTIC_CODES
+    with pytest.raises(ValueError, match="invalid diagnostic code"):
+        create_desktop_diagnostic_event(
+            run_id=RUN_ID,
+            app_version="0.7.0",
+            code="UNREVIEWED_EVENT_CODE",
+            severity=DesktopDiagnosticSeverity.INFO,
+            component=DesktopDiagnosticComponent.PYTHON_CORE,
+        )
 
 
 @pytest.mark.parametrize(
@@ -73,7 +86,7 @@ def test_privacy_canaries_are_rejected(metadata: Mapping[str, object]) -> None:
         create_desktop_diagnostic_event(
             run_id=RUN_ID,
             app_version="0.7.0",
-            code="PRIVACY_CANARY",
+            code="SIDECAR_BOOTSTRAP_STARTED",
             severity=DesktopDiagnosticSeverity.ERROR,
             component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
             metadata=metadata,  # type: ignore[arg-type]
@@ -93,7 +106,7 @@ def test_malformed_launch_correlation_identifiers_are_rejected(run_id: str) -> N
         create_desktop_diagnostic_event(
             run_id=run_id,
             app_version="0.7.0",
-            code="MALFORMED_RUN_ID",
+            code="PYTHON_CORE_BOOTSTRAP_STARTED",
             severity=DesktopDiagnosticSeverity.ERROR,
             component=DesktopDiagnosticComponent.PYTHON_CORE,
         )
@@ -108,7 +121,7 @@ def test_event_larger_than_component_file_bound_is_refused(tmp_path: Path) -> No
         max_bytes=32,
     )
 
-    assert not writer.write("OVERSIZED_FOR_STREAM", DesktopDiagnosticSeverity.WARNING)
+    assert not writer.write("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.WARNING)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -128,11 +141,11 @@ def test_rejected_privacy_canaries_are_never_persisted(tmp_path: Path) -> None:
 
     for key, canary in zip(("family_name", "prompt", "path", "token"), canaries, strict=True):
         assert not writer.write(
-            "PRIVACY_CANARY",
+            "SIDECAR_BOOTSTRAP_STARTED",
             DesktopDiagnosticSeverity.ERROR,
             {key: canary},  # type: ignore[dict-item]
         )
-    assert writer.write("PRIVACY_CHECK_COMPLETE", DesktopDiagnosticSeverity.INFO)
+    assert writer.write("SIDECAR_SERVER_READY", DesktopDiagnosticSeverity.INFO)
 
     persisted = "\n".join(path.read_text(encoding="utf-8") for path in tmp_path.iterdir())
     assert all(canary not in persisted for canary in canaries)
@@ -150,7 +163,7 @@ def test_rotation_is_bounded_by_bytes_and_file_count(tmp_path: Path) -> None:
 
     for sequence in range(12):
         assert writer.write(
-            "ROTATION_CHECK",
+            "PYTHON_CORE_READY",
             DesktopDiagnosticSeverity.INFO,
             {"sequence": sequence},
         )
@@ -173,7 +186,7 @@ def test_validation_and_filesystem_failures_are_non_blocking(tmp_path: Path) -> 
         component=DesktopDiagnosticComponent.DESKTOP_SIDECAR,
     )
 
-    assert not writer.write("SIDECAR_STARTING", DesktopDiagnosticSeverity.INFO)
+    assert not writer.write("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     assert not writer.write("bad code", DesktopDiagnosticSeverity.INFO)
     assert not writer.clear()
 
@@ -193,7 +206,7 @@ def test_writer_refuses_symlink_directory(tmp_path: Path) -> None:
         component=DesktopDiagnosticComponent.PYTHON_CORE,
     )
 
-    assert not writer.write("PYTHON_CORE_STARTING", DesktopDiagnosticSeverity.INFO)
+    assert not writer.write("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     assert not writer.clear()
     assert list(target.iterdir()) == []
 
@@ -213,6 +226,6 @@ def test_writer_refuses_symlink_active_file(tmp_path: Path) -> None:
         component=DesktopDiagnosticComponent.PYTHON_CORE,
     )
 
-    assert not writer.write("PYTHON_CORE_STARTING", DesktopDiagnosticSeverity.INFO)
+    assert not writer.write("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     assert not writer.clear()
     assert target.read_text(encoding="utf-8") == "untouched"

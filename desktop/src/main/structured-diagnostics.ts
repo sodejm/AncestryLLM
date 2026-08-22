@@ -62,6 +62,7 @@ export const DESKTOP_DIAGNOSTIC_CODES = Object.freeze({
 } as const)
 /** Union of the stable event codes trusted writers may persist. */
 export type DesktopDiagnosticCode = typeof DESKTOP_DIAGNOSTIC_CODES[keyof typeof DESKTOP_DIAGNOSTIC_CODES]
+const DESKTOP_DIAGNOSTIC_CODE_VALUES = new Set<string>(Object.values(DESKTOP_DIAGNOSTIC_CODES))
 /** Metadata deliberately excludes strings so paths, prompts, names, and secrets cannot be stored. */
 export type DesktopDiagnosticMetadataValue = boolean | number | null
 /** Bounded metadata attached to one stable diagnostic code. */
@@ -175,7 +176,9 @@ export function createDesktopDiagnosticEvent(
 ): Readonly<DesktopDiagnosticEvent> {
   if (!isDesktopDiagnosticRunId(input.runId)) throw new Error('Invalid diagnostic run identifier.')
   if (!VERSION_PATTERN.test(input.appVersion)) throw new Error('Invalid diagnostic app version.')
-  if (!CODE_PATTERN.test(input.code)) throw new Error('Invalid diagnostic code.')
+  if (!CODE_PATTERN.test(input.code) || !DESKTOP_DIAGNOSTIC_CODE_VALUES.has(input.code)) {
+    throw new Error('Invalid diagnostic code.')
+  }
   if (!COMPONENTS.has(input.component)) throw new Error('Invalid diagnostic component.')
   if (!SEVERITIES.has(input.severity)) throw new Error('Invalid diagnostic severity.')
   const timestamp = (input.now ?? new Date()).toISOString()

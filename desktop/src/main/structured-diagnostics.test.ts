@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  DESKTOP_DIAGNOSTIC_CODES,
   DESKTOP_DIAGNOSTIC_SCHEMA_VERSION,
   DesktopDiagnosticWriter,
   createDesktopDiagnosticEvent,
@@ -25,11 +26,31 @@ afterEach(() => {
 })
 
 describe('structured desktop diagnostics', () => {
+  it('keeps the runtime catalog aligned with the shared schema', () => {
+    const schema = JSON.parse(readFileSync(
+      join(process.cwd(), '..', 'schemas', 'desktop-diagnostic-v1.schema.json'),
+      'utf8',
+    )) as { properties: { code: { enum: string[] } } }
+    expect([...schema.properties.code.enum].sort()).toEqual(
+      Object.values(DESKTOP_DIAGNOSTIC_CODES).sort(),
+    )
+  })
+
+  it('rejects shape-valid event codes outside the reviewed catalog', () => {
+    expect(() => createDesktopDiagnosticEvent({
+      runId: RUN_ID,
+      appVersion: '0.7.0',
+      code: 'UNREVIEWED_EVENT_CODE',
+      severity: 'info',
+      component: 'electron-main',
+    })).toThrow('Invalid diagnostic code')
+  })
+
   it('creates the exact versioned contract with bounded numeric metadata', () => {
     expect(createDesktopDiagnosticEvent({
       runId: RUN_ID,
       appVersion: '0.7.0-dev.1',
-      code: 'DESKTOP_STARTING',
+      code: 'APP_LAUNCH_REQUESTED',
       severity: 'info',
       component: 'electron-main',
       metadata: { retry_count: 2, degraded: false },
@@ -38,7 +59,7 @@ describe('structured desktop diagnostics', () => {
       schema_version: DESKTOP_DIAGNOSTIC_SCHEMA_VERSION,
       timestamp: '2026-08-19T12:34:56.789Z',
       run_id: RUN_ID,
-      code: 'DESKTOP_STARTING',
+      code: 'APP_LAUNCH_REQUESTED',
       severity: 'info',
       component: 'electron-main',
       app_version: '0.7.0-dev.1',
@@ -56,7 +77,7 @@ describe('structured desktop diagnostics', () => {
     expect(() => createDesktopDiagnosticEvent({
       runId: RUN_ID,
       appVersion: '0.7.0',
-      code: 'PRIVACY_CANARY',
+      code: 'SIDECAR_BOOTSTRAP_STARTED',
       severity: 'error',
       component: 'python-core',
       metadata: metadata as never,
@@ -71,7 +92,7 @@ describe('structured desktop diagnostics', () => {
     expect(() => createDesktopDiagnosticEvent({
       runId,
       appVersion: '0.7.0',
-      code: 'MALFORMED_RUN_ID',
+      code: 'APP_LAUNCH_REQUESTED',
       severity: 'error',
       component: 'electron-main',
     })).toThrow('Invalid diagnostic run identifier')
@@ -87,7 +108,7 @@ describe('structured desktop diagnostics', () => {
       maxBytes: 32,
     })
 
-    expect(writer.write('OVERSIZED_FOR_STREAM', 'warning')).toBe(false)
+    expect(writer.write('APP_LAUNCH_REQUESTED', 'warning')).toBe(false)
     expect(readdirSync(directory)).toEqual([])
   })
 
@@ -106,11 +127,11 @@ describe('structured desktop diagnostics', () => {
       'canary-secret-token',
     ]
 
-    expect(writer.write('PRIVACY_CANARY', 'error', { family_name: canaries[0] } as never)).toBe(false)
-    expect(writer.write('PRIVACY_CANARY', 'error', { prompt: canaries[1] } as never)).toBe(false)
-    expect(writer.write('PRIVACY_CANARY', 'error', { path: canaries[2] } as never)).toBe(false)
-    expect(writer.write('PRIVACY_CANARY', 'error', { token: canaries[3] } as never)).toBe(false)
-    expect(writer.write('PRIVACY_CHECK_COMPLETE', 'info')).toBe(true)
+    expect(writer.write('SIDECAR_BOOTSTRAP_STARTED', 'error', { family_name: canaries[0] } as never)).toBe(false)
+    expect(writer.write('SIDECAR_BOOTSTRAP_STARTED', 'error', { prompt: canaries[1] } as never)).toBe(false)
+    expect(writer.write('SIDECAR_BOOTSTRAP_STARTED', 'error', { path: canaries[2] } as never)).toBe(false)
+    expect(writer.write('SIDECAR_BOOTSTRAP_STARTED', 'error', { token: canaries[3] } as never)).toBe(false)
+    expect(writer.write('SIDECAR_SERVER_READY', 'info')).toBe(true)
 
     const persisted = readdirSync(directory)
       .map((file) => readFileSync(join(directory, file), 'utf8'))
@@ -130,7 +151,7 @@ describe('structured desktop diagnostics', () => {
     })
 
     for (let index = 0; index < 12; index += 1) {
-      expect(writer.write('ROTATION_CHECK', 'info', { sequence: index })).toBe(true)
+      expect(writer.write('ELECTRON_READY', 'info', { sequence: index })).toBe(true)
     }
 
     const files = readdirSync(directory).sort()
@@ -162,7 +183,7 @@ describe('structured desktop diagnostics', () => {
       component: 'electron-main',
     })
 
-    expect(writer.write('DESKTOP_STARTING', 'info')).toBe(false)
+    expect(writer.write('APP_LAUNCH_REQUESTED', 'info')).toBe(false)
     expect(writer.clear()).toBe(false)
     expect(readdirSync(target)).toEqual([])
   })
@@ -184,7 +205,7 @@ describe('structured desktop diagnostics', () => {
       component: 'electron-main',
     })
 
-    expect(writer.write('DESKTOP_STARTING', 'info')).toBe(false)
+    expect(writer.write('APP_LAUNCH_REQUESTED', 'info')).toBe(false)
     expect(writer.clear()).toBe(false)
     expect(readFileSync(target, 'utf8')).toBe('untouched')
   })
@@ -200,7 +221,7 @@ describe('structured desktop diagnostics', () => {
       component: 'desktop-sidecar',
     })
 
-    expect(writer.write('SIDECAR_STARTING', 'info')).toBe(false)
+    expect(writer.write('SIDECAR_BOOTSTRAP_STARTED', 'info')).toBe(false)
     expect(writer.write('bad code', 'info')).toBe(false)
     expect(writer.clear()).toBe(false)
   })

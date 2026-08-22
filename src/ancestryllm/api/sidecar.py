@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 from platformdirs import user_config_path, user_data_path
@@ -52,7 +53,6 @@ from ancestryllm.storage.job_events import SqlJobEventRepository
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from fastapi import FastAPI
 
@@ -80,6 +80,7 @@ class LaunchFrame:
     app_build: str
     bearer_token: str = field(repr=False)
     diagnostic_run_id: str = field(repr=False)
+    diagnostic_directory: str = field(repr=False)
 
     def __post_init__(self) -> None:
         if self.contract != API_CONTRACT:
@@ -87,6 +88,8 @@ class LaunchFrame:
         if self.app_build != SIDECAR_BUILD:
             raise ValueError("sidecar build does not match the application build")
         validate_desktop_diagnostic_run_id(self.diagnostic_run_id)
+        if "\0" in self.diagnostic_directory or not Path(self.diagnostic_directory).is_absolute():
+            raise ValueError("diagnostic directory must be an absolute path")
         # Reuse the API boundary's validation rather than creating a second
         # token/build/host policy here.
         self.settings()
@@ -160,7 +163,7 @@ def _create_sidecar_diagnostic_recorders(
 ) -> _SidecarDiagnosticRecorders:
     """Create the two fixed local component streams for this launch only."""
 
-    diagnostic_directory = directory or user_data_path(APP_NAME) / "diagnostics"
+    diagnostic_directory = directory or Path(frame.diagnostic_directory)
     return _SidecarDiagnosticRecorders(
         core_writer=DesktopDiagnosticWriter(
             directory=diagnostic_directory,
@@ -410,6 +413,7 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         "app_build",
         "bearer_token",
         "diagnostic_run_id",
+        "diagnostic_directory",
     }:
         raise ValueError("invalid sidecar launch frame fields")
     if not all(isinstance(value, str) for value in document.values()):
@@ -419,6 +423,7 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         app_build=document["app_build"],
         bearer_token=document["bearer_token"],
         diagnostic_run_id=document["diagnostic_run_id"],
+        diagnostic_directory=document["diagnostic_directory"],
     )
 
 

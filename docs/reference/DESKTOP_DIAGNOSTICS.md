@@ -9,14 +9,20 @@ activity.
 
 Electron Main creates one random UUIDv4 for each application launch. The same
 identifier is used by the Electron Main, Python core, and packaged sidecar
-writers. Main sends it to the sidecar only in the strict private standard-input
-launch frame. The value is never placed in command-line arguments, environment
-variables, URLs, readiness or health responses, authentication material, or
-process output. It is correlation data, not an identity or credential.
+writers. Main derives one absolute diagnostics directory beneath Electron's
+application-data root and sends that directory and the identifier to the
+sidecar only in the strict private standard-input launch frame. The identifier
+and directory are never placed in command-line arguments, environment
+variables, URLs, readiness or health responses, authentication material,
+renderer data, or process output. The identifier is correlation data, not an
+identity or credential; the directory is private bootstrap control data, not a
+renderer filesystem capability.
 
-The Python parser requires the exact launch-frame fields and a canonical
-lowercase UUIDv4. An absent, malformed, extra, or wrong-version field fails the
-private launch contract before server startup.
+The Python parser requires the exact launch-frame fields, a canonical lowercase
+UUIDv4, and an absolute diagnostics directory. An absent, malformed, relative,
+extra, or wrong-version field fails the private launch contract before server
+startup. Both Python diagnostic writers use that exact Main-derived directory,
+so all three component streams share one cross-platform destination.
 
 ## Version 1 event
 

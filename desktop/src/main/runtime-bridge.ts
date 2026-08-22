@@ -1,5 +1,6 @@
 /** Composes the authenticated sidecar, local runtime, preferences, and desktop bridge. */
 import { app } from 'electron'
+import { join } from 'node:path'
 import { createDesktopControlBridge } from './desktop-control'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import type { MainDesktopBridge } from './ipc-handlers'
@@ -37,6 +38,7 @@ export interface RuntimeBridge {
 export interface RuntimeBridgeOptions {
   linuxKeyringVerificationRoot?: string | undefined
   diagnosticRunId?: string | undefined
+  diagnosticDirectory?: string | undefined
   recordDiagnostic?: RecordDesktopDiagnostic | undefined
 }
 
@@ -60,6 +62,8 @@ export async function startRuntimeBridge(
   const target = `${process.platform}-${process.arch}`
   const supervisor = new SidecarSupervisor({
     appBuild: app.getVersion(),
+    diagnosticDirectory: options.diagnosticDirectory
+      ?? join(app.getPath('userData'), 'diagnostics'),
     executablePath: resolveSidecarExecutable(process.resourcesPath, process.platform, process.arch),
     verify: async () => {
       if (__ANCESTRYLLM_SIDECAR_MANIFEST_SHA256__ === null) {

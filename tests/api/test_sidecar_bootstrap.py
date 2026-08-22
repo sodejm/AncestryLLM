@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -31,10 +31,8 @@ from ancestryllm.core.errors import ConfigurationError
 from ancestryllm.core.secrets import MemorySecretStore, SecretSourceMode
 from ancestryllm.observability.structured_diagnostics import DesktopDiagnosticSeverity
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 DIAGNOSTIC_RUN_ID = "123e4567-e89b-42d3-a456-426614174000"
+DIAGNOSTIC_DIRECTORY = str(Path.cwd() / "fictional-app-data" / "diagnostics")
 
 
 def _launch_payload(**updates: str) -> bytes:
@@ -43,6 +41,7 @@ def _launch_payload(**updates: str) -> bytes:
         "app_build": SIDECAR_BUILD,
         "bearer_token": "A" * 43,
         "diagnostic_run_id": DIAGNOSTIC_RUN_ID,
+        "diagnostic_directory": DIAGNOSTIC_DIRECTORY,
     }
     payload.update(updates)
     return (json.dumps(payload) + "\n").encode()
@@ -56,6 +55,7 @@ def test_private_stdin_frame_is_strict_bounded_and_provider_none() -> None:
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     assert frame.settings().provider_id == "none"
     assert "bearer_token" not in repr(frame)
@@ -66,6 +66,7 @@ def test_private_stdin_frame_is_strict_bounded_and_provider_none() -> None:
     (
         _launch_payload(contract="ancestryllm.internal-api/2"),
         _launch_payload(app_build="different-build"),
+        _launch_payload(diagnostic_directory="relative/diagnostics"),
         _launch_payload() + b"unexpected",
         b"{}\n",
         b"x" * 4097,
@@ -93,6 +94,7 @@ def test_readiness_line_contains_only_public_handshake_metadata() -> None:
         app_build=SIDECAR_BUILD,
         bearer_token="secret-value-that-must-never-appear-000000000",
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
 
     rendered = readiness_line(frame, 49152)
@@ -112,11 +114,9 @@ def test_sidecar_diagnostic_recorders_correlate_bounded_component_streams(
         app_build=SIDECAR_BUILD,
         bearer_token="secret-value-that-must-never-appear-000000000",
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=str(tmp_path),
     )
-    recorders = sidecar_module._create_sidecar_diagnostic_recorders(
-        frame,
-        directory=tmp_path,
-    )
+    recorders = sidecar_module._create_sidecar_diagnostic_recorders(frame)
 
     recorders.core("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     recorders.sidecar("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
@@ -144,6 +144,7 @@ def test_sidecar_diagnostic_writer_failure_never_blocks_runtime_flow(
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     recorders = sidecar_module._create_sidecar_diagnostic_recorders(
         frame,
@@ -163,6 +164,7 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
             app_build=SIDECAR_BUILD,
             bearer_token="A" * 43,
             diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+            diagnostic_directory=DIAGNOSTIC_DIRECTORY,
         )
     )
 
@@ -203,6 +205,7 @@ def test_packaged_sidecar_runtime_shutdown_is_authenticated_bodyless_and_private
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     request_runtime_shutdown = Mock()
     app = create_sidecar_app(
@@ -243,6 +246,7 @@ def test_packaged_sidecar_runtime_shutdown_is_unavailable_without_callback(
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     app = create_sidecar_app(
         frame,
@@ -268,6 +272,7 @@ def test_packaged_sidecar_composes_provider_configuration_services(tmp_path: Pat
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     app = create_sidecar_app(
         frame,
@@ -321,6 +326,7 @@ def test_packaged_sidecar_closes_chat_and_llm_resources(
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     app = create_sidecar_app(
         frame,
@@ -375,6 +381,7 @@ def test_packaged_sidecar_uses_keyring_only_secret_resolution(
             app_build=SIDECAR_BUILD,
             bearer_token="A" * 43,
             diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+            diagnostic_directory=DIAGNOSTIC_DIRECTORY,
         ),
         config=AppConfig(
             config_path=tmp_path / "config.toml",
@@ -413,6 +420,7 @@ def test_corrupt_config_opens_sanitized_degraded_shell_and_blocks_mutations(
         app_build=SIDECAR_BUILD,
         bearer_token="A" * 43,
         diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
     )
     record_diagnostic = Mock()
     app = create_sidecar_app(

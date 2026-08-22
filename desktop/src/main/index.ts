@@ -298,6 +298,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
     }, {
       linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
       diagnosticRunId,
+      diagnosticDirectory,
       recordDiagnostic: recordDesktopDiagnostic,
     })
     bridge = runtime.bridge

@@ -21,6 +21,50 @@ DESKTOP_DIAGNOSTIC_SCHEMA_VERSION: Final = "ancestryllm.desktop-diagnostic/1"
 MAX_DESKTOP_DIAGNOSTIC_EVENT_BYTES: Final = 4096
 DEFAULT_DESKTOP_DIAGNOSTIC_MAX_BYTES: Final = 512 * 1024
 DEFAULT_DESKTOP_DIAGNOSTIC_MAX_FILES: Final = 3
+DESKTOP_DIAGNOSTIC_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "APP_LAUNCH_REQUESTED",
+        "ELECTRON_READY",
+        "RENDERER_WINDOW_READY",
+        "SIDECAR_VERIFICATION_STARTED",
+        "SIDECAR_VERIFICATION_SUCCEEDED",
+        "SIDECAR_VERIFICATION_REJECTED",
+        "SIDECAR_SPAWN_REQUESTED",
+        "SIDECAR_SPAWN_SUCCEEDED",
+        "SIDECAR_SPAWN_FAILED",
+        "SIDECAR_READINESS_ACCEPTED",
+        "SIDECAR_READINESS_REJECTED",
+        "SIDECAR_HEALTH_SUCCEEDED",
+        "SIDECAR_HEALTH_REJECTED",
+        "SIDECAR_STARTUP_TIMEOUT",
+        "SIDECAR_INCOMPATIBLE",
+        "SIDECAR_SHUTDOWN_REQUESTED",
+        "SIDECAR_RESTART_REQUESTED",
+        "SIDECAR_RESTART_SUCCEEDED",
+        "SIDECAR_RESTART_FAILED",
+        "SIDECAR_RESTART_EXHAUSTED",
+        "SIDECAR_MANUAL_RETRY_REQUESTED",
+        "SIDECAR_MANUAL_RETRY_SUCCEEDED",
+        "SIDECAR_MANUAL_RETRY_FAILED",
+        "SIDECAR_SESSION_INVALIDATED",
+        "BRIDGE_SENDER_REJECTED",
+        "BRIDGE_ROUTE_REJECTED",
+        "CONFIGURATION_DEGRADED",
+        "JOBS_SHUTDOWN_PREP_REQUESTED",
+        "JOBS_SHUTDOWN_PREP_SUCCEEDED",
+        "JOBS_SHUTDOWN_PREP_FAILED",
+        "SIDECAR_TERMINATION_REQUESTED",
+        "SIDECAR_TERMINATION_SUCCEEDED",
+        "SIDECAR_TERMINATION_FAILED",
+        "APP_EXIT_AUTHORIZED",
+        "DIAGNOSTIC_WRITER_UNAVAILABLE",
+        "DIAGNOSTIC_WRITER_DEGRADED",
+        "PYTHON_CORE_BOOTSTRAP_STARTED",
+        "PYTHON_CORE_READY",
+        "SIDECAR_BOOTSTRAP_STARTED",
+        "SIDECAR_SERVER_READY",
+    }
+)
 
 _RUN_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -149,7 +193,7 @@ def create_desktop_diagnostic_event(
     validate_desktop_diagnostic_run_id(run_id)
     if not _VERSION_PATTERN.fullmatch(app_version):
         raise ValueError("invalid diagnostic app version")
-    if not _CODE_PATTERN.fullmatch(code):
+    if not _CODE_PATTERN.fullmatch(code) or code not in DESKTOP_DIAGNOSTIC_CODES:
         raise ValueError("invalid diagnostic code")
     if not isinstance(severity, DesktopDiagnosticSeverity):
         raise ValueError("invalid diagnostic severity")

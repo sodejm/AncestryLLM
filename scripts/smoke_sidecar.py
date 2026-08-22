@@ -15,6 +15,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
+from uuid import uuid4
 
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import SIDECAR_BUILD
@@ -79,19 +80,36 @@ def _readline_with_timeout(
         executor.shutdown(wait=False, cancel_futures=True)
 
 
-def smoke(executable: Path) -> None:
-    """Launch, authenticate, inspect, and terminate one native sidecar."""
+def _build_launch_frame(
+    token: str,
+    diagnostic_run_id: str,
+    diagnostic_directory: str,
+) -> str:
+    """Build the exact private frame required by the packaged sidecar."""
 
-    token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
-    launch_frame = json.dumps(
+    return json.dumps(
         {
             "contract": API_CONTRACT,
             "app_build": SIDECAR_BUILD,
             "bearer_token": token,
+            "diagnostic_run_id": diagnostic_run_id,
+            "diagnostic_directory": diagnostic_directory,
         },
         separators=(",", ":"),
     )
+
+
+def smoke(executable: Path) -> None:
+    """Launch, authenticate, inspect, and terminate one native sidecar."""
+
+    token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
     with tempfile.TemporaryDirectory(prefix="ancestryllm-sidecar-smoke-") as working_directory:
+        diagnostic_directory = str(Path(working_directory).resolve() / "diagnostics")
+        launch_frame = _build_launch_frame(
+            token,
+            str(uuid4()),
+            diagnostic_directory,
+        )
         process = subprocess.Popen(  # noqa: S603 - explicit artifact under test, no shell
             [str(executable.resolve())],
             cwd=working_directory,

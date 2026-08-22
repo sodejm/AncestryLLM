@@ -1,6 +1,6 @@
 /** Supervises trusted sidecar discovery, launch tokens, readiness, and lifecycle. */
 import { randomBytes } from 'node:crypto'
-import { join, posix } from 'node:path'
+import { isAbsolute, join, posix } from 'node:path'
 import { SidecarIntegrityError } from './sidecar-integrity'
 import {
   createDesktopDiagnosticRunId,
@@ -50,6 +50,7 @@ type ProbeSidecar = (
 interface SidecarSupervisorOptions {
   appBuild: string
   diagnosticRunId?: string
+  diagnosticDirectory: string
   recordDiagnostic?: RecordDesktopDiagnostic
   executablePath: string
   verify: () => Promise<void>
@@ -308,6 +309,9 @@ export class SidecarSupervisor {
     if (!isDesktopDiagnosticRunId(this.diagnosticRunId)) {
       throw new Error('diagnosticRunId must be a UUIDv4 identifier.')
     }
+    if (!isAbsolute(options.diagnosticDirectory) || options.diagnosticDirectory.includes('\0')) {
+      throw new Error('diagnosticDirectory must be an absolute path.')
+    }
     if (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0) {
       throw new Error('maxRestarts must be a non-negative integer.')
     }
@@ -487,6 +491,7 @@ export class SidecarSupervisor {
       app_build: this.options.appBuild,
       bearer_token: token,
       diagnostic_run_id: this.diagnosticRunId,
+      diagnostic_directory: this.options.diagnosticDirectory,
     })}\n`
     this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSpawnRequested, 'info')
     let sidecar: RunningSidecar

@@ -1,5 +1,6 @@
 /** Verifies sidecar discovery, launch authentication, compatibility, and recovery. */
 import { EventEmitter } from 'node:events'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   API_CONTRACT,
@@ -28,6 +29,7 @@ class FakeSidecar extends EventEmitter implements RunningSidecar {
 const ready = { contract: API_CONTRACT, sidecar_build: '0.5.0-dev', port: 49152 }
 const verify = async (): Promise<void> => undefined
 const diagnosticRunId = '123e4567-e89b-42d3-a456-426614174000'
+const diagnosticDirectory = join(process.cwd(), 'fictional-app-data', 'diagnostics')
 
 describe('sidecar launch boundary', () => {
   it('creates a fresh 256-bit URL-safe launch token', () => {
@@ -122,11 +124,22 @@ describe('sidecar launch boundary', () => {
 })
 
 describe('SidecarSupervisor', () => {
+  it('rejects a relative diagnostics directory before launch', () => {
+    expect(() => new SidecarSupervisor({
+      diagnosticDirectory: 'relative/diagnostics',
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
+      launch: async () => new FakeSidecar(Promise.resolve(ready)),
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })).toThrow('diagnosticDirectory must be an absolute path')
+  })
+
   it('verifies the immutable payload before token creation and does not restart integrity failures', async () => {
     const events: string[] = []
     const diagnosticCodes: string[] = []
     const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar',
       verify: async () => {
         events.push('verify')
@@ -164,6 +177,7 @@ describe('SidecarSupervisor', () => {
       .mockRejectedValueOnce(new SidecarIntegrityError())
       .mockResolvedValueOnce(undefined)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify: verifier, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, maxManualRetries: 1,
@@ -188,6 +202,7 @@ describe('SidecarSupervisor', () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const launch = vi.fn(async () => sidecar)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/private/canary-sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'S'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
@@ -227,6 +242,7 @@ describe('SidecarSupervisor', () => {
     const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
     const probe = vi.fn(async () => undefined)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch, probe,
       tokenFactory: () => 'T'.repeat(43), startupTimeoutMs: 100, maxRestarts: 2,
     })
@@ -246,6 +262,7 @@ describe('SidecarSupervisor', () => {
       return new FakeSidecar(Promise.resolve(ready))
     })
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', diagnosticRunId,
       executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -260,6 +277,7 @@ describe('SidecarSupervisor', () => {
       app_build: '0.5.0-dev',
       bearer_token: 'T'.repeat(43),
       diagnostic_run_id: diagnosticRunId,
+      diagnostic_directory: diagnosticDirectory,
     })
   })
 
@@ -267,6 +285,7 @@ describe('SidecarSupervisor', () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const diagnosticCodes: string[] = []
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', diagnosticRunId,
       executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
@@ -301,6 +320,7 @@ describe('SidecarSupervisor', () => {
     const diagnosticCodes: string[] = []
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => { throw new Error(privateFailure) },
@@ -323,6 +343,7 @@ describe('SidecarSupervisor', () => {
     const launch = vi.fn(async () => sidecar)
     const verifier = vi.fn(verify)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify: verifier, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2,
@@ -346,6 +367,7 @@ describe('SidecarSupervisor', () => {
     const fatal = vi.fn()
     const diagnosticCodes: string[] = []
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
@@ -374,6 +396,7 @@ describe('SidecarSupervisor', () => {
     const fatal = vi.fn()
     const diagnosticCodes: string[] = []
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,
@@ -393,6 +416,7 @@ describe('SidecarSupervisor', () => {
   it('bounds startup time and terminates the stalled process', async () => {
     const sidecar = new FakeSidecar(new Promise(() => undefined))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -410,6 +434,7 @@ describe('SidecarSupervisor', () => {
     })
     const launch = vi.fn(async () => new FakeSidecar(Promise.resolve(ready)))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar',
       verify: async () => verification, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -431,6 +456,7 @@ describe('SidecarSupervisor', () => {
   it('never treats a supervisor that exposed a job-capable session as explicit safe empty', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -454,6 +480,7 @@ describe('SidecarSupervisor', () => {
       releaseLaunch = () => resolve(sidecar)
     }))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0,
@@ -480,6 +507,7 @@ describe('SidecarSupervisor', () => {
       releaseLaunch = () => resolve(sidecar)
     }))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, shutdownTimeoutMs: 5, maxRestarts: 0,
@@ -511,6 +539,7 @@ describe('SidecarSupervisor', () => {
       releaseLaunch = () => resolve(sidecar)
     }))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0,
@@ -535,6 +564,7 @@ describe('SidecarSupervisor', () => {
     const secret = 'secret-token-canary'
     const privatePath = '/private/path/canary-sidecar'
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: privatePath, verify,
       launch: async () => { throw new Error(`${secret} ${privatePath}\nprivate stderr\nstack`) },
       probe: async () => undefined, tokenFactory: () => secret,
@@ -563,6 +593,7 @@ describe('SidecarSupervisor', () => {
       .mockRejectedValueOnce(new Error('initial failure'))
       .mockResolvedValueOnce(retrySidecar)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 0, maxManualRetries: 1,
@@ -589,6 +620,7 @@ describe('SidecarSupervisor', () => {
       .mockRejectedValueOnce(new Error('initial failure'))
       .mockResolvedValueOnce(retrySidecar)
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 10, maxRestarts: 0, maxManualRetries: 1,
@@ -608,6 +640,7 @@ describe('SidecarSupervisor', () => {
   it('terminates the active sidecar exactly once on app shutdown', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -627,6 +660,7 @@ describe('SidecarSupervisor', () => {
       expect(capturedSession.bearerToken).toBe('T'.repeat(43))
     })
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -647,6 +681,7 @@ describe('SidecarSupervisor', () => {
     sidecar.terminate.mockRejectedValueOnce(new Error(privateFailure))
     const fatal = vi.fn()
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify,
       launch: async () => sidecar,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
@@ -681,6 +716,7 @@ describe('SidecarSupervisor', () => {
     const launch = vi.fn(async () => sidecar)
     const fatal = vi.fn()
     const supervisor = new SidecarSupervisor({
+      diagnosticDirectory,
       appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
       probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
       startupTimeoutMs: 100, maxRestarts: 2, onFatal: fatal,

@@ -434,18 +434,21 @@ still requires its distribution and target-assurance gates to pass.
   separate manual retry. Bootstrap material,
   ports, tokens, endpoints, executable or preference-file paths, stderr, raw
   sidecar or bridge errors, and stacks never cross preload or renderer IPC.
-- Electron Main creates one random UUIDv4 per launch and supplies it to the
-  packaged sidecar only through the strict private standard-input launch
-  frame. Electron Main, Python core, and sidecar write separate bounded
-  schema-v1 JSON Lines streams beneath the fixed application diagnostics
-  directory. Records accept only stable codes and small numeric, boolean, or
-  null metadata; writers refuse symbolic links and cannot block startup,
-  security enforcement, recovery, or shutdown. The renderer receives only
-  fixed zero-argument open-directory and clear actions, never a path or generic
-  filesystem capability. No export, telemetry, network transmission, console
-  forwarding, or CI artifact collection is part of this boundary. The exact
-  sidecar standard-error shutdown receipt remains a separate authoritative
-  protocol and is not inferred from diagnostic JSON or child output.
+- Electron Main creates one random UUIDv4 per launch and derives one absolute
+  diagnostics directory beneath its application-data root. It supplies both to
+  the packaged sidecar only through the strict private standard-input launch
+  frame. The sidecar rejects a missing, relative, malformed, or additional
+  field and uses that exact Main-derived directory for both Python-owned
+  writers. Electron Main, Python core, and sidecar write separate bounded
+  schema-v1 JSON Lines streams beneath that shared directory. Records accept
+  only cataloged codes and small numeric, boolean, or null metadata; writers
+  refuse symbolic links and cannot block startup, security enforcement,
+  recovery, or shutdown. The renderer receives only fixed zero-argument
+  open-directory and clear actions, never a path or generic filesystem
+  capability. No export, telemetry, network transmission, console forwarding,
+  or CI artifact collection is part of this boundary. The exact sidecar
+  standard-error shutdown receipt remains a separate authoritative protocol
+  and is not inferred from diagnostic JSON or child output.
 - Issue #102 verifies an embedded-digest-bound, target/build-specific full
   sidecar payload manifest before token generation or process spawn. This
   detects payload substitution relative to the built Electron main process; it
