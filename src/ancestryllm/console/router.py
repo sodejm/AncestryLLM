@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ancestryllm.application.results import TableResult
 from ancestryllm.console.parser import ParsedInvocation, parse_repl_invocation, split_repl_input
 from ancestryllm.console.security import is_secret_name
 from ancestryllm.core.commands import (
@@ -80,12 +81,15 @@ class SessionRouter:
         if control == "help":
             return RouteResult(RouteKind.OUTPUT, self._help(tokens[1:]))
         if control == "modules" and len(tokens) == 1:
+            descriptors = ModuleRegistry(self.context).descriptors()
             return RouteResult(
                 RouteKind.OUTPUT,
-                [
-                    {"module_id": item.module_id, "name": item.name, "summary": item.summary}
-                    for item in ModuleRegistry(self.context).descriptors()
-                ],
+                TableResult(
+                    columns=("module", "enter_command", "description"),
+                    rows=tuple(
+                        (item.name, f"use {item.module_id}", item.summary) for item in descriptors
+                    ),
+                ),
             )
         if control == "use":
             return self._use(tokens)

@@ -168,10 +168,6 @@ def test_adapter_explicitly_routes_structured_and_file_artifact_results(
     ("result", "expected"),
     (
         (SuccessResult("[bold]Saved.[/bold]"), "[bold]Saved.[/bold]\n"),
-        (
-            TableResult(columns=("name",), rows=(("[bold]Ada[/bold]",),)),
-            '{"name": "[bold]Ada[/bold]"}\n',
-        ),
         (MarkdownResult("# [bold]Report[/bold]\n"), "# [bold]Report[/bold]\n"),
         (
             WarningResult("RESULT_PARTIAL", "Some records were skipped."),
@@ -204,6 +200,22 @@ def test_adapter_renders_each_declared_result_through_injected_console(
     expected: str,
 ) -> None:
     assert _capture_render(result) == expected
+
+
+def test_adapter_renders_table_as_a_literal_human_readable_grid() -> None:
+    output = _capture_render(
+        TableResult(
+            columns=("name", "available_actions"),
+            rows=(("[bold]Ada[/bold]", ["merge", "quality"]),),
+        )
+    )
+
+    assert "Name" in output
+    assert "Available Actions" in output
+    assert "[bold]Ada[/bold]" in output
+    assert "merge, quality" in output
+    assert '{"name":' not in output
+    assert "╭" in output
 
 
 def test_adapter_renders_json_through_injected_console_without_markup_interpretation() -> None:
