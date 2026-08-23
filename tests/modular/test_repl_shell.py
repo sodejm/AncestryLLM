@@ -23,6 +23,7 @@ from prompt_toolkit.completion import DummyCompleter
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
+from ancestryllm.application.results import TableResult
 from ancestryllm.console.router import RouteKind, RouteResult
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError
@@ -1694,3 +1695,21 @@ def test_prompt_toolkit_repl_preserves_modules_list_json_schema(
         "required_services",
     }
     assert gedcom["actions"] == ["merge", "subtree", "quality", "sync"]
+
+
+def test_prompt_toolkit_repl_renders_bare_modules_as_a_readable_chooser(
+    shell_module, app_context: AppContext
+) -> None:
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        route = application.router.route("modules")
+        asyncio.run(application.execute_line("modules"))
+
+    assert isinstance(route.value, TableResult)
+    rendered = stdout.getvalue()
+    assert "Module" in rendered
+    assert "Enter Command" in rendered
+    assert "Description" in rendered
+    assert "GEDCOM" in rendered
+    assert "use gedcom" in rendered
+    assert '{"module_id":' not in rendered
