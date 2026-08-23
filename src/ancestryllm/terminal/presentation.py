@@ -7,7 +7,9 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
+from rich import box
 from rich.console import Console
+from rich.table import Table
 from rich.text import Text
 
 from ancestryllm.application.errors import error_envelope
@@ -86,9 +88,17 @@ class PresentationAdapter:
         self.render(ErrorResult(error_envelope(error)))
 
     def _render_table(self, result: TableResult) -> None:
+        table = Table(
+            box=box.ROUNDED,
+            border_style="bright_black",
+            header_style="bold cyan",
+            highlight=False,
+        )
+        for column in result.columns:
+            table.add_column(_table_heading(column), overflow="fold")
         for row in result.rows:
-            item = dict(zip(result.columns, row, strict=True))
-            self._print_text(json.dumps(item, sort_keys=True))
+            table.add_row(*(Text(_table_cell(cell)) for cell in row))
+        self.console.print(table)
 
     def _render_error_envelope(self, error: ErrorEnvelope) -> None:
         message = f"[{error.code}] {error.message}"
@@ -123,6 +133,27 @@ class PresentationAdapter:
             overflow="ignore",
             crop=False,
         )
+
+
+def _table_heading(column: str) -> str:
+    """Turn a stable snake-case field name into a readable table heading."""
+
+    acronyms = {"id": "ID", "ids": "IDs", "json": "JSON", "url": "URL"}
+    return " ".join(acronyms.get(word.casefold(), word.capitalize()) for word in column.split("_"))
+
+
+def _table_cell(value: Any) -> str:
+    """Format one JSON-compatible table cell for compact human display."""
+
+    if value is None or value == [] or value == {}:
+        return "—"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        return ", ".join(_table_cell(item) for item in value)
+    if isinstance(value, dict):
+        return ", ".join(f"{key}={_table_cell(item)}" for key, item in sorted(value.items()))
+    return str(value)
 
 
 __all__ = ["PresentationAdapter", "to_plain"]

@@ -17,7 +17,9 @@ logic path.
 
 At the root prompt, use `modules` to inspect available modules or `use MODULE`
 to enter a module context. The active-module prompt makes the current context
-visible:
+visible. The bare `modules` command renders a compact chooser with each module's
+display name, `use MODULE` command, and description. For the complete stable
+machine-readable descriptor list, run `modules list --json` instead.
 
 ```text
 ancestry > modules
