@@ -518,6 +518,32 @@ async function findDirectoryByIdentity(
   return undefined
 }
 
+async function locatePublicationFile(
+  handle: FileHandle,
+  originalParent: string,
+  fileName: string,
+  expectedIdentity: Fingerprint,
+  expectedParent: Fingerprint | null,
+  maxBytes: number,
+): Promise<Readonly<{ parentPath: string; filePath: string }>> {
+  if (expectedParent === null || !safeName(fileName)) fail('FILE_SELECTION_INVALID')
+  const parentPath = await findDirectoryByIdentity(originalParent, expectedParent)
+  if (parentPath === undefined) fail('FILE_SELECTION_INVALID')
+  const filePath = join(parentPath, fileName)
+  try {
+    const opened = validateRegularFile(await handle.stat(), maxBytes)
+    const current = validateRegularFile(await lstat(filePath), maxBytes)
+    if (!sameIdentity(expectedIdentity, opened) || !sameFingerprint(opened, current)
+      || !await directoryMatchesIdentity(parentPath, expectedParent)) {
+      fail('FILE_SELECTION_INVALID')
+    }
+    return Object.freeze({ parentPath, filePath })
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    return fail('FILE_SELECTION_INVALID')
+  }
+}
+
 async function unlinkExactFile(path: string, expected: Fingerprint): Promise<boolean> {
   try {
     const current = await lstat(path)
@@ -535,20 +561,32 @@ async function cleanupTemporaryPublication(
   temporaryPath: string,
   expectedIdentity: Fingerprint,
   expectedParent: Fingerprint | null,
+  alternateName?: string,
 ): Promise<void> {
   await handle.truncate(0).catch(() => undefined)
   await handle.sync().catch(() => undefined)
   const originalParent = dirname(temporaryPath)
-  const temporaryName = basename(temporaryPath)
+  const candidateNames = [basename(temporaryPath)]
+  if (alternateName !== undefined && safeName(alternateName)
+    && !candidateNames.includes(alternateName)) candidateNames.push(alternateName)
   let removed = false
   if (expectedParent !== null) {
     const parent = await findDirectoryByIdentity(originalParent, expectedParent)
-    if (parent !== undefined) removed = await unlinkExactFile(join(parent, temporaryName), expectedIdentity)
+    if (parent !== undefined) {
+      for (const candidateName of candidateNames) {
+        removed = await unlinkExactFile(join(parent, candidateName), expectedIdentity)
+        if (removed) break
+      }
+    }
   }
   await handle.close().catch(() => undefined)
   if (!removed && expectedParent !== null) {
     const parent = await findDirectoryByIdentity(originalParent, expectedParent)
-    if (parent !== undefined) await unlinkExactFile(join(parent, temporaryName), expectedIdentity)
+    if (parent !== undefined) {
+      for (const candidateName of candidateNames) {
+        if (await unlinkExactFile(join(parent, candidateName), expectedIdentity)) break
+      }
+    }
   }
 }
 
@@ -832,6 +870,7 @@ export class FileGrantBroker {
     let temporaryPath: string | undefined
     let temporaryHandle: FileHandle | undefined
     let temporaryIdentity: Fingerprint | undefined
+    let publicationAttempted = false
     let published = false
     try {
       checkSignal(signal)
@@ -857,13 +896,36 @@ export class FileGrantBroker {
       temporaryIdentity = temporary.identity
       await this.validateWriteBinding(binding)
       checkSignal(signal)
-      await this.publication.rename(temporaryPath, binding.path)
+      const originalParent = dirname(binding.path)
+      const temporaryName = basename(temporaryPath)
+      const targetName = basename(binding.path)
+      const anchoredTemporary = await locatePublicationFile(
+        temporaryHandle,
+        originalParent,
+        temporaryName,
+        temporaryIdentity,
+        binding.parentFingerprint,
+        binding.maxBytes,
+      )
+      publicationAttempted = true
+      await this.publication.rename(
+        anchoredTemporary.filePath,
+        join(anchoredTemporary.parentPath, targetName),
+      )
+      const anchoredPublished = await locatePublicationFile(
+        temporaryHandle,
+        originalParent,
+        targetName,
+        temporaryIdentity,
+        binding.parentFingerprint,
+        binding.maxBytes,
+      )
       published = true
       await temporaryHandle.close().catch(() => undefined)
       temporaryHandle = undefined
       let durability: PublishedWriteGrant['durability'] = 'confirmed'
       try {
-        await this.publication.syncDirectory(dirname(binding.path))
+        await this.publication.syncDirectory(anchoredPublished.parentPath)
       } catch {
         durability = 'unconfirmed'
       }
@@ -885,6 +947,7 @@ export class FileGrantBroker {
           temporaryPath,
           temporaryIdentity,
           binding.parentFingerprint,
+          publicationAttempted ? basename(binding.path) : undefined,
         )
         temporaryHandle = undefined
       } else if (!published && temporaryPath !== undefined) {

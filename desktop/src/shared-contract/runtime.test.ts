@@ -625,8 +625,24 @@ describe('runtime bridge validation', () => {
       outputs: [{ grant_id: `grt_${'f'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
     } as const
     expect(parseMediatedOperationRequest(request)).toEqual(request)
-    expect(parseMediatedOperationResult({ operation_id: request.operation_id, outputs: [artifact] }))
-      .toMatchObject({ operation_id: request.operation_id, outputs: [{ status: 'ready' }] })
+    expect(parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+      cleanup_status: 'complete',
+    })).toMatchObject({
+      operation_id: request.operation_id,
+      outputs: [{ status: 'ready' }],
+      cleanup_status: 'complete',
+    })
+    expect(() => parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+    })).toThrow('Invalid bridge response')
+    expect(() => parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+      cleanup_status: 'failed',
+    })).toThrow('Invalid bridge response')
   })
 
   it('rejects renderer paths, malformed IDs, unknown fields, and incoherent grant metadata', () => {

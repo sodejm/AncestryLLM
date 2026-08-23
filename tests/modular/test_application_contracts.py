@@ -30,6 +30,7 @@ from ancestryllm.application.dto import (
     BoundaryDTO,
     FailureDetail,
     IdentityResolutionResult,
+    MediatedOperationCleanupStatus,
     MediatedOperationRequest,
     MediatedOperationResult,
     MediationTransport,
@@ -577,6 +578,20 @@ def test_artifact_grants_are_opaque_operation_scoped_and_revocable(tmp_path: Pat
     assert revoked.value.code is DomainFailureCode.ARTIFACT_FORBIDDEN
 
 
+@pytest.mark.parametrize(
+    "grant_id",
+    [
+        f"grt_{'a' * 32}",
+        f"grt_{'a' * 65}",
+        f"grt_{'A' * 64}",
+        f"grt_{'g' * 64}",
+    ],
+)
+def test_artifact_grant_ids_match_the_desktop_broker_contract(grant_id: str) -> None:
+    with pytest.raises(ValueError, match="grant_id"):
+        ArtifactGrantRef(grant_id, "gedcom.merge", ArtifactAccess.READ)
+
+
 def test_artifact_read_grant_rejects_replaced_input(tmp_path: Path) -> None:
     source = tmp_path / "fictional.ged"
     source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
@@ -712,7 +727,11 @@ def test_mediated_operation_ids_use_exact_lowercase_hex_contract(
             outputs=(output_grant,),
         )
     with pytest.raises(ValueError, match="operation_id"):
-        MediatedOperationResult(operation_id=operation_id, outputs=(artifact,))
+        MediatedOperationResult(
+            operation_id=operation_id,
+            outputs=(artifact,),
+            cleanup_status=MediatedOperationCleanupStatus.COMPLETE,
+        )
 
 
 def test_mediated_operation_result_rejects_duplicate_artifact_ids() -> None:
@@ -729,6 +748,7 @@ def test_mediated_operation_result_rejects_duplicate_artifact_ids() -> None:
         MediatedOperationResult(
             operation_id=f"op_{'7' * 64}",
             outputs=(artifact, artifact),
+            cleanup_status=MediatedOperationCleanupStatus.COMPLETE,
         )
 
 

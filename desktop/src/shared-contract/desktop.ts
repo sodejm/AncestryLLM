@@ -527,6 +527,9 @@ export type ArtifactAccess = 'read' | 'write'
 /** Selects a trusted execution adapter without granting it a host path. */
 export type MediationTransport = 'local-container' | 'remote-service'
 
+/** Reports whether private operation staging was removed after artifact publication. */
+export type MediatedOperationCleanupStatus = 'complete' | 'recovery-required'
+
 /** Mirrors the transport-neutral Python application artifact contract. */
 export interface ArtifactRef {
   artifact_id: string
@@ -557,6 +560,7 @@ export interface MediatedOperationRequest {
 export interface MediatedOperationResult {
   operation_id: string
   outputs: readonly ArtifactRef[]
+  cleanup_status: MediatedOperationCleanupStatus
 }
 
 /** Maximum renderer delivery debt before the main process pauses the SSE source. */

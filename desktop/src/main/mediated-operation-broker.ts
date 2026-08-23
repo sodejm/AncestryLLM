@@ -151,6 +151,7 @@ export interface MediatedOperationBrokerOptions {
   readonly maxConcurrent?: number
   readonly maxDurationMs?: number
   readonly maxTotalInputBytes?: number
+  readonly removeOperationRoot?: (path: string) => Promise<void>
 }
 
 interface ArtifactPolicy {
@@ -337,6 +338,7 @@ export class MediatedOperationBroker {
   private readonly maxConcurrent: number
   private readonly maxDurationMs: number
   private readonly maxTotalInputBytes: number
+  private readonly removeOperationRoot: (path: string) => Promise<void>
   private readonly seenOperationIds = new Set<string>()
   private initialization: Promise<void> | null = null
   private activeOperations = 0
@@ -352,6 +354,8 @@ export class MediatedOperationBroker {
       options.maxTotalInputBytes ?? MAX_TOTAL_INPUT_BYTES,
       MAX_TOTAL_INPUT_BYTES,
     )
+    this.removeOperationRoot = options.removeOperationRoot
+      ?? (async (path) => rm(path, { recursive: true, force: false }))
   }
 
   /** Cleans exact stale operation directories once before accepting staged work. */
@@ -568,6 +572,7 @@ export class MediatedOperationBroker {
       operationResult = Object.freeze({
         operation_id: request.operation_id,
         outputs: Object.freeze(artifacts),
+        cleanup_status: 'complete',
       })
     } catch (error) {
       operationFailure = mapFailure(error, phase, controller.signal, timedOut)
@@ -579,17 +584,20 @@ export class MediatedOperationBroker {
       }
       if (mountPlan !== null) {
         try {
-          await rm(mountPlan.operationRoot, { recursive: true, force: false })
+          await this.removeOperationRoot(mountPlan.operationRoot)
         } catch {
           cleanupFailed = true
         }
       }
       this.activeOperations -= 1
     }
-    if (cleanupFailed) fail('CLEANUP_FAILED')
-    if (operationFailure !== null) throw operationFailure
+    if (operationFailure !== null) {
+      if (cleanupFailed) fail('CLEANUP_FAILED')
+      throw operationFailure
+    }
     if (operationResult === null) fail('ADAPTER_FAILED')
-    return operationResult
+    if (!cleanupFailed) return operationResult
+    return Object.freeze({ ...operationResult, cleanup_status: 'recovery-required' })
   }
 
   private remoteInput(

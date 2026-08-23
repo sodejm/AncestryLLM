@@ -160,6 +160,7 @@ describe('mediated operation broker', () => {
     const result = await broker.execute(owner, operationRequest, (update) => progress.push(update))
 
     expect(result.operation_id).toBe(operationRequest.operation_id)
+    expect(result.cleanup_status).toBe('complete')
     expect(result.outputs).toEqual([
       {
         artifact_id: expect.stringMatching(/^art_[a-f0-9]{64}$/),
@@ -194,6 +195,54 @@ describe('mediated operation broker', () => {
     await expect(readFile(gedcomTarget, 'utf8')).resolves.toBe(gedcom)
     await expect(readFile(reportTarget, 'utf8')).resolves.toBe(report)
     await expect(readdir(join(root, 'operation-staging'))).resolves.toEqual([])
+  })
+
+  it('returns committed artifacts with recovery status when staging cleanup fails', async () => {
+    const root = await temporaryRoot()
+    const source = join(root, 'fictional.ged')
+    const target = join(root, 'quality.md')
+    const report = '# GEDCOM quality\n\nStatus: OK\n'
+    await writeFile(source, '0 HEAD\n0 TRLR\n')
+    const owner = {}
+    const fileGrants = new FileGrantBroker(queuedDialogs([source], [target]))
+    const input = await openGrant(fileGrants, owner, 'gedcom-read')
+    const output = await saveGrant(fileGrants, owner, 'markdown-write', 'quality.md')
+    const local: LocalMediatedOperationAdapter = {
+      prepare: vi.fn(async (context) => ({
+        realizedMounts: context.mountPlan.mounts,
+        execute: vi.fn(async () => writeFile(context.outputs[0]!.hostPath, report, { mode: 0o600 })),
+        dispose: vi.fn(async () => undefined),
+      })),
+    }
+    const removeOperationRoot = vi.fn(async () => {
+      throw Object.assign(new Error('locked staging directory'), { code: 'EBUSY' })
+    })
+    const operationRequest = request(
+      'b',
+      'gedcom.quality',
+      'local-container',
+      [input],
+      [output],
+    )
+    const broker = new MediatedOperationBroker({
+      runtimeProfileRoot: root,
+      fileGrants,
+      localAdapter: local,
+      remoteAdapter: unusedRemoteAdapter(),
+      removeOperationRoot,
+    })
+
+    const result = await broker.execute(owner, operationRequest)
+
+    expect(result).toMatchObject({
+      operation_id: operationRequest.operation_id,
+      cleanup_status: 'recovery-required',
+      outputs: [{ status: 'ready' }],
+    })
+    expect(removeOperationRoot).toHaveBeenCalledWith(
+      join(root, 'operation-staging', operationRequest.operation_id),
+    )
+    await expect(readFile(target, 'utf8')).resolves.toBe(report)
   })
 
   it('gives the remote adapter bounded streams and never a local path', async () => {

@@ -47,6 +47,21 @@ describe('mediated operation mount policy', () => {
     await expect(lstat(stale.operationRoot)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('canonicalizes a trusted application-data root before creating private staging', async () => {
+    const applicationDataRoot = await runtimeRoot()
+    const linkedAncestor = await runtimeRoot()
+    const linkedRoot = join(linkedAncestor, 'linked-user-data')
+    await chmod(applicationDataRoot, 0o755)
+    await symlink(
+      applicationDataRoot,
+      linkedRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    await expect(initializeMediatedOperationStaging(linkedRoot))
+      .resolves.toBe(join(applicationDataRoot, 'mediated-runtime'))
+  })
+
   it('creates only private per-operation input and output bind mounts', async () => {
     const root = await runtimeRoot()
 

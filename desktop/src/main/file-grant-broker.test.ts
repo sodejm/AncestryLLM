@@ -1,7 +1,7 @@
 /** Verifies opaque file grants remain bounded, owner-scoped, and stale-safe. */
 import { link, lstat, mkdir, mkdtemp, readFile, readdir, rename, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FileGrantBroker,
@@ -434,7 +434,7 @@ describe('opaque file-grant broker', () => {
     await expect(readdir(displacedParent)).resolves.toEqual([])
   })
 
-  it('removes a temporary publication if its selected parent moves during commit', async () => {
+  it('rejects replacement-directory bytes if its selected parent moves during commit', async () => {
     const root = await temporaryRoot()
     const privateRoot = join(root, 'private-staging')
     const parent = join(root, 'selected-output')
@@ -448,6 +448,7 @@ describe('opaque file-grant broker', () => {
       rename: vi.fn(async (source, destination) => {
         await rename(parent, displacedParent)
         await mkdir(parent)
+        await writeFile(join(parent, basename(source)), 'attacker-controlled replacement')
         await rename(source, destination)
       }),
       syncDirectory: vi.fn(async () => undefined),
@@ -464,8 +465,9 @@ describe('opaque file-grant broker', () => {
     await expect(broker.publishWriteGrant(owner, grant!.grantId, 'gedcom-write', stagedPath))
       .rejects.toMatchObject({ code: 'FILE_SELECTION_INVALID' })
 
-    await expect(readdir(parent)).resolves.toEqual([])
+    await expect(readdir(parent)).resolves.toEqual(['new.ged'])
     await expect(readdir(displacedParent)).resolves.toEqual([])
+    await expect(readFile(target, 'utf8')).resolves.toBe('attacker-controlled replacement')
   })
 
   it('cancels native dialogs without creating grants or touching existing output', async () => {

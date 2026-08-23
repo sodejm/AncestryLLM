@@ -77,6 +77,19 @@ async function inspectCanonicalDirectory(path: string, requirePrivateAccess: boo
   }
 }
 
+async function inspectTrustedApplicationDataRoot(path: string): Promise<string> {
+  if (!isAbsolute(path) || path.includes('\0') || normalize(path) !== path) fail('STAGING_UNSAFE')
+  try {
+    const canonical = await realpath(path)
+    const stat = await lstat(canonical)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('STAGING_UNSAFE')
+    return canonical
+  } catch (error) {
+    if (error instanceof MediatedMountPolicyError) throw error
+    return fail('STAGING_UNSAFE')
+  }
+}
+
 async function inspectPrivateDirectory(path: string): Promise<string> {
   return inspectCanonicalDirectory(path, true)
 }
@@ -103,7 +116,7 @@ function requireDescendant(parent: string, child: string): void {
 export async function initializeMediatedOperationStaging(
   applicationDataRoot: string,
 ): Promise<string> {
-  const appDataRoot = await inspectCanonicalDirectory(applicationDataRoot, false)
+  const appDataRoot = await inspectTrustedApplicationDataRoot(applicationDataRoot)
   const runtimeProfileRoot = await ensurePrivateDirectory(join(appDataRoot, 'mediated-runtime'))
   requireDescendant(appDataRoot, runtimeProfileRoot)
   await cleanupStaleMediatedOperationMounts(runtimeProfileRoot)

@@ -234,6 +234,17 @@ def _validate_operation_id(value: str) -> None:
         )
 
 
+def _validate_grant_id(value: str) -> None:
+    if (
+        len(value) != 68
+        or not value.startswith("grt_")
+        or any(character not in "0123456789abcdef" for character in value[4:])
+    ):
+        raise ValueError(
+            "grant_id must use the form grt_ followed by 64 lowercase hexadecimal characters."
+        )
+
+
 def _validate_code(label: str, value: str) -> None:
     if not 1 <= len(value) <= 96:
         raise ValueError(f"{label} length is outside its bounded range.")
@@ -271,6 +282,13 @@ class MediationTransport(StrEnum):
     REMOTE_SERVICE = "remote-service"
 
 
+class MediatedOperationCleanupStatus(StrEnum):
+    """Cleanup state returned separately from committed artifact readiness."""
+
+    COMPLETE = "complete"
+    RECOVERY_REQUIRED = "recovery-required"
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactRef(BoundaryDTO):
     """Opaque application artifact descriptor with bounded metadata."""
@@ -304,7 +322,7 @@ class ArtifactGrantRef(BoundaryDTO):
     access: ArtifactAccess
 
     def __post_init__(self) -> None:
-        _validate_identifier("grant_id", self.grant_id, prefix="grt_")
+        _validate_grant_id(self.grant_id)
         _validate_code("operation", self.operation)
 
 
@@ -342,6 +360,7 @@ class MediatedOperationResult(ServiceResult):
 
     operation_id: str
     outputs: tuple[ArtifactRef, ...]
+    cleanup_status: MediatedOperationCleanupStatus
 
     def __post_init__(self) -> None:
         _validate_operation_id(self.operation_id)
@@ -641,6 +660,7 @@ __all__ = [
     "IdentityResolutionRequest",
     "IdentityResolutionResult",
     "JSONValue",
+    "MediatedOperationCleanupStatus",
     "MediatedOperationRequest",
     "MediatedOperationResult",
     "MediationTransport",

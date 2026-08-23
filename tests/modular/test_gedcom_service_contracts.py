@@ -108,7 +108,7 @@ def _unresolved_grant(
     marker: str,
 ) -> ArtifactGrantRef:
     return ArtifactGrantRef(
-        grant_id=f"grt_{marker * 32}",
+        grant_id=f"grt_{marker * 64}",
         operation=operation,
         access=access,
     )

@@ -199,6 +199,7 @@ const fileFormats: readonly FileFormat[] = ['gedcom', 'rootsmagic', 'json', 'mar
 const fileValidations: readonly FileValidation[] = ['validated-input', 'new-output', 'replacement-confirmed']
 const artifactStatuses = ['pending', 'ready', 'failed', 'revoked'] as const
 const mediationTransports = ['local-container', 'remote-service'] as const
+const mediatedOperationCleanupStatuses = ['complete', 'recovery-required'] as const
 const secretStatuses = ['present', 'missing', 'unavailable'] as const
 const providerValues = ['none', 'ollama', 'openai', 'anthropic', 'gemini', 'openrouter'] as const
 const localRuntimeStates = ['not-installed', 'stopped', 'ready', 'unhealthy'] as const
@@ -1757,9 +1758,12 @@ export function parseMediatedOperationRequest(value: unknown): Readonly<Mediated
  * Validates path-free ready artifacts returned by one mediated operation.
  */
 export function parseMediatedOperationResult(value: unknown): Readonly<MediatedOperationResult> {
-  if (!record(value) || !exactKeys(value, ['operation_id', 'outputs'])
+  if (!record(value) || !exactKeys(value, ['operation_id', 'outputs', 'cleanup_status'])
     || typeof value.operation_id !== 'string' || !operationIdPattern.test(value.operation_id)
-    || !Array.isArray(value.outputs) || value.outputs.length < 1 || value.outputs.length > 8) {
+    || !Array.isArray(value.outputs) || value.outputs.length < 1 || value.outputs.length > 8
+    || !mediatedOperationCleanupStatuses.includes(
+      value.cleanup_status as typeof mediatedOperationCleanupStatuses[number],
+    )) {
     invalidResponse()
   }
   const outputs = value.outputs.map(parseArtifactRef)
