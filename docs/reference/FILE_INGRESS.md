@@ -173,11 +173,17 @@ Every declared output must exist as a bounded regular staged file with the
 expected purpose and content signature. All outputs are validated before any
 is published. Publication uses same-directory temporary files and atomic
 replacement, preserving the source and prior destination until validation
-succeeds. Progress contains only operation ID, phase, and bounded counts;
-errors use stable codes and no path or adapter diagnostic. Success, failure,
-cancellation, timeout, and startup recovery revoke grants and remove only the
-exact private operation directory. Unexpected staging entries are preserved
-and startup fails closed for inspection instead of deleting ambiguous data.
+succeeds. The temporary file is flushed before replacement. A successful
+publication reports `confirmed` durability when the selected parent directory
+also flushes, or `unconfirmed` when replacement succeeded but that directory
+flush failed; the latter does not falsely roll back or report the committed
+output as absent. Failure cleanup retains the temporary file's exact identity,
+including when the selected parent directory is renamed during commit.
+Progress contains only operation ID, phase, and bounded counts; errors use
+stable codes and no path or adapter diagnostic. Success, failure, cancellation,
+timeout, and startup recovery revoke grants and remove only the exact private
+operation directory. Unexpected staging entries are preserved and startup
+fails closed for inspection instead of deleting ambiguous data.
 
 This broker is a reusable source-level gate. Concrete genealogy adapters and
 integrated parser/container-worker execution remain separately gated; this

@@ -1,6 +1,15 @@
 /** Mediates native file selections through opaque, validated, single-use grants. */
 import { constants, type Stats } from 'node:fs'
-import { chmod, lstat, open, realpath, rename, unlink } from 'node:fs/promises'
+import {
+  chmod,
+  lstat,
+  open,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+  type FileHandle,
+} from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import type {
@@ -82,6 +91,13 @@ export interface PublishedWriteGrant {
   readonly purpose: FileWritePurpose
   readonly sizeBytes: number
   readonly sha256: string
+  readonly durability: 'confirmed' | 'unconfirmed'
+}
+
+/** Abstracts the two commit operations so durability failures remain distinguishable. */
+export interface FilePublicationPort {
+  rename(source: string, destination: string): Promise<void>
+  syncDirectory(path: string): Promise<void>
 }
 
 /** Reports a validated private output before publication. */
@@ -442,6 +458,100 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
+const nodeFilePublication: Readonly<FilePublicationPort> = Object.freeze({
+  rename,
+  syncDirectory,
+})
+
+async function openTemporaryPublication(
+  path: string,
+  maxBytes: number,
+): Promise<Readonly<{ handle: FileHandle; identity: Fingerprint }>> {
+  const optionalConstants = constants as typeof constants & Readonly<Record<string, number | undefined>>
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(
+      path,
+      constants.O_RDWR | (optionalConstants.O_CLOEXEC ?? 0) | (optionalConstants.O_NOFOLLOW ?? 0),
+    )
+    const opened = validateRegularFile(await handle.stat(), maxBytes)
+    const current = validateRegularFile(await lstat(path), maxBytes)
+    if (!sameFingerprint(opened, current)) fail('FILE_GRANT_STALE')
+    return Object.freeze({ handle, identity: opened })
+  } catch (error) {
+    await handle?.close().catch(() => undefined)
+    if (error instanceof FileGrantBrokerError) throw error
+    return fail('FILE_SELECTION_INVALID')
+  }
+}
+
+async function directoryMatchesIdentity(path: string, expected: Fingerprint): Promise<boolean> {
+  try {
+    const stat = await lstat(path)
+    return stat.isDirectory() && !stat.isSymbolicLink()
+      && sameIdentity(expected, fingerprint(stat))
+  } catch {
+    return false
+  }
+}
+
+async function findDirectoryByIdentity(
+  originalPath: string,
+  expected: Fingerprint,
+): Promise<string | undefined> {
+  if (await directoryMatchesIdentity(originalPath, expected)) return originalPath
+  const container = dirname(originalPath)
+  if (container === originalPath) return undefined
+  let entries
+  try {
+    entries = await readdir(container, { withFileTypes: true })
+  } catch {
+    return undefined
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+    const candidate = join(container, entry.name)
+    if (candidate !== originalPath && await directoryMatchesIdentity(candidate, expected)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+async function unlinkExactFile(path: string, expected: Fingerprint): Promise<boolean> {
+  try {
+    const current = await lstat(path)
+    if (!current.isFile() || current.isSymbolicLink()
+      || !sameIdentity(expected, fingerprint(current))) return false
+    await unlink(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function cleanupTemporaryPublication(
+  handle: FileHandle,
+  temporaryPath: string,
+  expectedIdentity: Fingerprint,
+  expectedParent: Fingerprint | null,
+): Promise<void> {
+  await handle.truncate(0).catch(() => undefined)
+  await handle.sync().catch(() => undefined)
+  const originalParent = dirname(temporaryPath)
+  const temporaryName = basename(temporaryPath)
+  let removed = false
+  if (expectedParent !== null) {
+    const parent = await findDirectoryByIdentity(originalParent, expectedParent)
+    if (parent !== undefined) removed = await unlinkExactFile(join(parent, temporaryName), expectedIdentity)
+  }
+  await handle.close().catch(() => undefined)
+  if (!removed && expectedParent !== null) {
+    const parent = await findDirectoryByIdentity(originalParent, expectedParent)
+    if (parent !== undefined) await unlinkExactFile(join(parent, temporaryName), expectedIdentity)
+  }
+}
+
 /** Opens and fingerprints a permitted input without following links or trusting its extension alone. */
 async function inspectInput(path: string, policy: PurposePolicy): Promise<Readonly<{ fingerprint: Fingerprint; canonicalPath: string }>> {
   if (!hasExpectedExtension(path, policy)) fail('FILE_SELECTION_INVALID')
@@ -561,14 +671,19 @@ function publicGrant(binding: Binding, sizeBytes: number, validation: FileValida
  */
 export class FileGrantBroker {
   private readonly dialogs: NativeFileDialogPort
+  private readonly publication: Readonly<FilePublicationPort>
   private readonly bindings = new Map<FileGrantId, Binding>()
   private readonly outputLocks = new Map<string, FileGrantId>()
   private readonly pendingDialogs = new Set<object>()
   private readonly ownerGenerations = new WeakMap<object, number>()
   private disposed = false
 
-  constructor(dialogs: NativeFileDialogPort) {
+  constructor(
+    dialogs: NativeFileDialogPort,
+    publication: Readonly<FilePublicationPort> = nodeFilePublication,
+  ) {
     this.dialogs = dialogs
+    this.publication = publication
   }
 
   async requestOpenGrant(
@@ -715,6 +830,8 @@ export class FileGrantBroker {
     const binding = this.binding(owner, grantId, purpose, 'write')
     binding.redeemed = true
     let temporaryPath: string | undefined
+    let temporaryHandle: FileHandle | undefined
+    let temporaryIdentity: Fingerprint | undefined
     let published = false
     try {
       checkSignal(signal)
@@ -735,22 +852,42 @@ export class FileGrantBroker {
         signal,
       )
       if (copied.sizeBytes !== staged.sizeBytes || copied.sha256 !== staged.sha256) fail('FILE_GRANT_STALE')
+      const temporary = await openTemporaryPublication(temporaryPath, binding.maxBytes)
+      temporaryHandle = temporary.handle
+      temporaryIdentity = temporary.identity
       await this.validateWriteBinding(binding)
       checkSignal(signal)
-      await rename(temporaryPath, binding.path)
+      await this.publication.rename(temporaryPath, binding.path)
       published = true
-      await syncDirectory(dirname(binding.path))
+      await temporaryHandle.close().catch(() => undefined)
+      temporaryHandle = undefined
+      let durability: PublishedWriteGrant['durability'] = 'confirmed'
+      try {
+        await this.publication.syncDirectory(dirname(binding.path))
+      } catch {
+        durability = 'unconfirmed'
+      }
       return Object.freeze({
         grantId,
         purpose,
         sizeBytes: staged.sizeBytes,
         sha256: staged.sha256,
+        durability,
       })
     } catch (error) {
       if (error instanceof FileGrantBrokerError) throw error
       return fail('FILE_SELECTION_INVALID')
     } finally {
-      if (!published && temporaryPath !== undefined) {
+      if (!published && temporaryPath !== undefined && temporaryHandle !== undefined
+        && temporaryIdentity !== undefined) {
+        await cleanupTemporaryPublication(
+          temporaryHandle,
+          temporaryPath,
+          temporaryIdentity,
+          binding.parentFingerprint,
+        )
+        temporaryHandle = undefined
+      } else if (!published && temporaryPath !== undefined) {
         await removeIfPresent(temporaryPath).catch(() => undefined)
       }
       this.removeBinding(binding)

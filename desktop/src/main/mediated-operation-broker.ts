@@ -254,6 +254,33 @@ function checkSignal(signal: AbortSignal, timedOut: boolean): void {
   if (signal.aborted) fail(timedOut ? 'TIMED_OUT' : 'CANCELLED')
 }
 
+function awaitAdapterOperation<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+  timedOut: () => boolean,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const finish = (callback: () => void): void => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', abort)
+      callback()
+    }
+    const abort = (): void => {
+      finish(() => reject(new MediatedOperationBrokerError(
+        timedOut() ? 'TIMED_OUT' : 'CANCELLED',
+      )))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    )
+    if (signal.aborted) abort()
+  })
+}
+
 function optionalOpenFlag(name: 'O_CLOEXEC' | 'O_NOFOLLOW' | 'O_NONBLOCK'): number {
   return (constants as typeof constants & Readonly<Record<string, number | undefined>>)[name] ?? 0
 }
@@ -446,17 +473,33 @@ export class MediatedOperationBroker {
       emit('executing', 0, 1)
       checkSignal(controller.signal, timedOut)
       if (request.transport === 'local-container') {
-        const prepared = await this.localAdapter.prepare(Object.freeze({
+        const preparation = this.localAdapter.prepare(Object.freeze({
           request,
           mountPlan,
           inputs: Object.freeze(localInputs),
           outputs: Object.freeze(localOutputs),
         }), controller.signal)
+        let prepared: Readonly<PreparedLocalMediatedOperation>
+        try {
+          prepared = await awaitAdapterOperation(preparation, controller.signal, () => timedOut)
+        } catch (error) {
+          if (controller.signal.aborted) {
+            void preparation.then(
+              async (latePreparation) => latePreparation.dispose().catch(() => undefined),
+              () => undefined,
+            )
+          }
+          throw error
+        }
         try {
           checkSignal(controller.signal, timedOut)
           validateRealizedMediatedMounts(mountPlan, prepared.realizedMounts)
           checkSignal(controller.signal, timedOut)
-          await prepared.execute(controller.signal)
+          await awaitAdapterOperation(
+            prepared.execute(controller.signal),
+            controller.signal,
+            () => timedOut,
+          )
           checkSignal(controller.signal, timedOut)
         } finally {
           try {
@@ -468,11 +511,15 @@ export class MediatedOperationBroker {
       } else {
         const remoteInputs = localInputs.map((input) => this.remoteInput(input, controller.signal, () => timedOut))
         const remoteOutputs = localOutputs.map((output) => this.remoteOutput(output, controller.signal, () => timedOut))
-        await this.remoteAdapter.execute(Object.freeze({
-          request,
-          inputs: Object.freeze(remoteInputs),
-          outputs: Object.freeze(remoteOutputs),
-        }), controller.signal)
+        await awaitAdapterOperation(
+          this.remoteAdapter.execute(Object.freeze({
+            request,
+            inputs: Object.freeze(remoteInputs),
+            outputs: Object.freeze(remoteOutputs),
+          }), controller.signal),
+          controller.signal,
+          () => timedOut,
+        )
         checkSignal(controller.signal, timedOut)
       }
       emit('executing', 1, 1)

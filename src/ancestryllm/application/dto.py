@@ -223,6 +223,17 @@ def _validate_identifier(label: str, value: str, *, prefix: str | None = None) -
         raise ValueError(f"{label} must not contain paths or control characters.")
 
 
+def _validate_operation_id(value: str) -> None:
+    if (
+        len(value) != 67
+        or not value.startswith("op_")
+        or any(character not in "0123456789abcdef" for character in value[3:])
+    ):
+        raise ValueError(
+            "operation_id must use the form op_ followed by 64 lowercase hexadecimal characters."
+        )
+
+
 def _validate_code(label: str, value: str) -> None:
     if not 1 <= len(value) <= 96:
         raise ValueError(f"{label} length is outside its bounded range.")
@@ -308,7 +319,7 @@ class MediatedOperationRequest(ServiceRequest):
     outputs: tuple[ArtifactGrantRef, ...]
 
     def __post_init__(self) -> None:
-        _validate_identifier("operation_id", self.operation_id, prefix="op_")
+        _validate_operation_id(self.operation_id)
         _validate_code("operation", self.operation)
         if not 1 <= len(self.inputs) <= 16:
             raise ValueError("mediated inputs must contain between 1 and 16 grants.")
@@ -333,7 +344,7 @@ class MediatedOperationResult(ServiceResult):
     outputs: tuple[ArtifactRef, ...]
 
     def __post_init__(self) -> None:
-        _validate_identifier("operation_id", self.operation_id, prefix="op_")
+        _validate_operation_id(self.operation_id)
         if not 1 <= len(self.outputs) <= 8:
             raise ValueError("mediated results must contain between 1 and 8 artifacts.")
         if len({output.artifact_id for output in self.outputs}) != len(self.outputs):

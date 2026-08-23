@@ -43,6 +43,14 @@ export interface MediatedOperationMountPlan {
 
 const OPERATION_ID = /^op_[a-f0-9]{64}$/
 
+/** Applies POSIX mode enforcement only on platforms whose directory modes carry it. */
+export function directoryModeIsPrivate(
+  mode: number,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'win32' || (mode & 0o077) === 0
+}
+
 function fail(code: MediatedMountPolicyErrorCode): never {
   throw new MediatedMountPolicyError(code)
 }
@@ -57,7 +65,7 @@ async function inspectCanonicalDirectory(path: string, requirePrivateAccess: boo
   try {
     const stat = await lstat(path)
     if (!stat.isDirectory() || stat.isSymbolicLink()
-      || (requirePrivateAccess && (stat.mode & 0o077) !== 0)) {
+      || (requirePrivateAccess && !directoryModeIsPrivate(stat.mode))) {
       fail('STAGING_UNSAFE')
     }
     const canonical = await realpath(path)
