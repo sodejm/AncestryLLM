@@ -91,3 +91,11 @@ separate adoption change. It does not prove a later commit or release candidate,
 cannot replace exact-candidate readiness evidence, and cannot turn an
 incompatible comparison into an authorized release backend. See the human
 [uv_build evaluation](../reference/UV_BUILD_EVALUATION.md) for the disposition.
+
+## Test-suite audit records
+
+[`issue-453-test-suite-audit.md`](issue-453-test-suite-audit.md) records the
+v0.7.0 consolidation audit, its before-and-after collection, runtime, and
+coverage measurements, and the rationale for both consolidated and retained
+test structures. It is a source-level maintenance record, not exact-candidate
+release-readiness evidence.

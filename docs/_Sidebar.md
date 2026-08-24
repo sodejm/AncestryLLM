@@ -62,6 +62,7 @@
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md)
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md)
 - [Release evidence index](release-evidence/README.md)
+- [v0.7.0 test-suite audit](release-evidence/issue-453-test-suite-audit.md)
 
 ### Architecture and decisions
 
