@@ -79,6 +79,28 @@ test('source grep derives the degraded fixture from the canonical scenario', () 
   assert.equal(calls[0].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
 })
 
+test('source grep rejects a short-title start anchor that Mocha cannot match', () => {
+  const calls = []
+
+  assert.throws(
+    () => runWdio('source', ['--grep', '^built degraded shell'], runnerOptions(calls)),
+    /must match exactly one declared source scenario; matched 0/u,
+  )
+  assert.equal(calls.some((call) => call.args !== undefined), false)
+})
+
+test('source grep accepts the suite-qualified full-title anchor used by Mocha', () => {
+  const calls = []
+  const status = runWdio(
+    'source',
+    ['--grep', '^source-built desktop shell built degraded shell'],
+    runnerOptions(calls),
+  )
+
+  assert.equal(status, 0)
+  assert.equal(calls[0].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
+})
+
 test('source grep rejects zero declared scenario matches before invocation', () => {
   const calls = []
 
@@ -94,7 +116,7 @@ test('source grep rejects multiple declared scenario matches before invocation',
 
   assert.throws(
     () => runWdio('source', ['--grep', 'built'], runnerOptions(calls)),
-    /must match exactly one declared source scenario; matched 4/u,
+    /must match exactly one declared source scenario; matched 6/u,
   )
   assert.equal(calls.some((call) => call.args !== undefined), false)
 })

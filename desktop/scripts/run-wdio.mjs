@@ -24,6 +24,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const defaultDesktopRoot = fileURLToPath(new URL('../', import.meta.url))
+const suiteTitles = Object.freeze({
+  packaged: 'unpublished unpacked native package',
+  source: 'source-built desktop shell',
+})
 const sourceScenarios = Object.freeze([
   'built shell exposes the bounded production Home, Chat, Tasks, Diagnostics, and Settings surfaces',
   'task center streams one safe cancellation lifecycle and reloads the terminal backend snapshot',
@@ -49,7 +53,9 @@ function selectedScenario(argv, scenarios, mode) {
   const pattern = argv[grepIndex + 1]
   assert.equal(typeof pattern, 'string', 'WebdriverIO grep requires a pattern')
   const matcher = new RegExp(pattern)
-  const matches = scenarios.filter((scenario) => matcher.test(scenario))
+  const suiteTitle = suiteTitles[mode]
+  assert.equal(typeof suiteTitle, 'string', 'unknown WebdriverIO suite')
+  const matches = scenarios.filter((scenario) => matcher.test(`${suiteTitle} ${scenario}`))
   assert.equal(
     matches.length,
     1,
