@@ -83,7 +83,7 @@ def test_wdio_runner_preserves_multiword_filters_without_a_shell() -> None:
     assert "@wdio/cli" in runner
     assert "shell: false" in runner
     assert "--mochaOpts.grep" in runner
-    assert "runWdio('packaged'" in packaged_runner
+    assert "runWdioPlan('packaged'" in packaged_runner
     assert "@playwright/test/cli" not in packaged_runner
     assert "ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT" not in runner
 

@@ -2,7 +2,7 @@
 
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { runWdio, runWdioPlan, wdioInvocation } from './run-wdio.mjs'
+import { runWdioPlan, wdioInvocation } from './run-wdio.mjs'
 
 /**
  * Constructs the packaged WebdriverIO invocation retained by release workflows.
@@ -21,11 +21,7 @@ export function packagedTestInvocation(argv, options = {}) {
  * @returns {number} Integer child-process exit code.
  */
 export function runPackagedTests(argv, options = {}) {
-  // Keep the direct call visible as the compatibility contract while the plan
-  // owns all-scenario isolation when no explicit filter is supplied.
-  return argv.length === 0
-    ? runWdioPlan('packaged', argv, options)
-    : runWdio('packaged', argv, options)
+  return runWdioPlan('packaged', argv, options)
 }
 
 const entrypoint = process.argv[1]

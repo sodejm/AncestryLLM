@@ -82,3 +82,32 @@ test('packaged test runner executes the exact invocation without a shell', () =>
     },
   }])
 })
+
+test('packaged test runner preserves scenario isolation with non-filter options', () => {
+  const calls = []
+  const scenarios = []
+  const status = runPackagedTests(['--logLevel', 'debug'], {
+    cliPath: '/repo/desktop/node_modules/@wdio/cli/bin/wdio.js',
+    desktopRoot: '/repo/desktop',
+    executable: '/usr/bin/node',
+    userDataDirectory: '/tmp/ancestryllm-test-profile',
+    preparePackagedScenarioImpl(scenario, environment) {
+      scenarios.push(scenario)
+      return { environment }
+    },
+    spawnSyncImpl(executable, args, options) {
+      calls.push({ executable, args, options })
+      return { error: undefined, signal: null, status: 0 }
+    },
+  })
+
+  assert.equal(status, 0)
+  assert.equal(calls.length, 6)
+  assert.equal(scenarios.length, 6)
+  assert.equal(new Set(scenarios).size, 6)
+  assert.equal(calls.every(({ args }) => (
+    args.includes('--mochaOpts.grep')
+      && args.includes('--logLevel')
+      && args.includes('debug')
+  )), true)
+})
