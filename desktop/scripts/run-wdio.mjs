@@ -24,6 +24,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const defaultDesktopRoot = fileURLToPath(new URL('../', import.meta.url))
+const suiteTitles = Object.freeze({
+  packaged: 'unpublished unpacked native package',
+  source: 'source-built desktop shell',
+})
 const sourceScenarios = Object.freeze([
   'built shell exposes the bounded production Home, Chat, Tasks, Diagnostics, and Settings surfaces',
   'task center streams one safe cancellation lifecycle and reloads the terminal backend snapshot',
@@ -41,7 +45,7 @@ const packagedScenarios = Object.freeze([
   'launches production normally without a debugging transport',
 ])
 
-function selectedScenario(argv, scenarios) {
+function selectedScenario(argv, scenarios, mode) {
   const grepIndex = argv.findIndex((argument) => (
     argument === '--grep' || argument === '--mochaOpts.grep'
   ))
@@ -49,11 +53,13 @@ function selectedScenario(argv, scenarios) {
   const pattern = argv[grepIndex + 1]
   assert.equal(typeof pattern, 'string', 'WebdriverIO grep requires a pattern')
   const matcher = new RegExp(pattern)
-  const matches = scenarios.filter((scenario) => matcher.test(scenario))
+  const suiteTitle = suiteTitles[mode]
+  assert.equal(typeof suiteTitle, 'string', 'unknown WebdriverIO suite')
+  const matches = scenarios.filter((scenario) => matcher.test(`${suiteTitle} ${scenario}`))
   assert.equal(
     matches.length,
     1,
-    `WebdriverIO grep must match exactly one declared packaged scenario; matched ${matches.length}`,
+    `WebdriverIO grep must match exactly one declared ${mode} scenario; matched ${matches.length}`,
   )
   return matches[0]
 }
@@ -259,14 +265,16 @@ export function runWdio(mode, argv, {
   userDataDirectory,
   ...invocationOptions
 } = {}) {
+  const scenarios = mode === 'source' ? sourceScenarios : packagedScenarios
+  const scenario = selectedScenario(argv, scenarios, mode)
   const createdUserDataDirectory = userDataDirectory === undefined
   const isolatedUserDataDirectory = userDataDirectory
     ?? mkdtempSyncImpl(join(tmpdir(), 'ancestryllm-wdio-'))
-  const fixture = argv.join('\n').includes('degraded') ? 'degraded' : 'success'
+  const fixture = scenario === sourceScenarios[2] ? 'degraded' : 'success'
   let preparedPackage = { environment }
   try {
     preparedPackage = mode === 'packaged'
-      ? preparePackagedScenarioImpl(selectedScenario(argv, packagedScenarios), environment)
+      ? preparePackagedScenarioImpl(scenario, environment)
       : { environment }
     const invocation = wdioInvocation(mode, argv, {
       ...invocationOptions,

@@ -280,6 +280,24 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "if (createdUserDataDirectory)" in runner_source
 
 
+def test_packaged_ready_metric_excludes_onboarding_automation_latency() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    scenario_start = source.index(
+        "it('exercises first run, persistence, corrupt preferences, security, and resource evidence'"
+    )
+    scenario_end = source.index(
+        "\n  it('withholds and restores the packaged sidecar through Diagnostics retry'",
+        scenario_start,
+    )
+    scenario_source = source[scenario_start:scenario_end]
+
+    diagnostics_index = scenario_source.index("await expectStartupDiagnostics(READY_DIAGNOSTICS)")
+    ready_index = scenario_source.index("const readyMs = Date.now() - launchedAt")
+    onboarding_click_index = scenario_source.index("await click('button=Continue to Home')")
+
+    assert diagnostics_index < ready_index < onboarding_click_index
+
+
 def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     helper_start = source.index("async function expectStartupDiagnostics")
