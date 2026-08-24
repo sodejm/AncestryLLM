@@ -15,6 +15,7 @@ import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 
 const packagedExecutable = process.env.ANCESTRYLLM_PACKAGED_APP
+const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
 const restartEvidencePath = process.env.ANCESTRYLLM_RESTART_EVIDENCE
@@ -147,9 +148,19 @@ async function expectSafeDiagnosticsAlert(expectedMessage: RegExp): Promise<void
 }
 
 async function mainPid(): Promise<number> {
-  const pid = await browser.electron.execute(() => process.pid)
-  assert.ok(Number.isInteger(pid) && pid > 0, 'Packaged Electron main-process PID is unavailable')
-  return pid
+  if (!automatedPackagedExecutable || !userDataDirectory) {
+    throw new Error('Automated packaged executable and isolated user data are required')
+  }
+  const profileArgument = `--user-data-dir=${userDataDirectory}`
+  return eventually(
+    'Packaged Electron main-process PID was not observed',
+    async () => (await processSnapshot()).find((record) => (
+      !record.commandLine.includes('--type=')
+      && record.commandLine.includes(automatedPackagedExecutable)
+      && record.commandLine.includes(profileArgument)
+    ))?.pid ?? -1,
+    (pid) => pid > 0,
+  )
 }
 
 async function processSnapshot(): Promise<ProcessRecord[]> {
@@ -245,28 +256,16 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
   )
 }
 
-async function quitApplication(): Promise<number> {
-  const pid = await browser.electron.execute((electron) => {
-    const currentPid = process.pid
-    setTimeout(() => electron.app.quit(), 50)
-    return currentPid
-  })
-  try {
-    await expectProcessAbsent(pid, process.platform === 'darwin' ? 25_000 : 45_000)
-  } catch (error) {
-    if (process.platform !== 'darwin') throw error
-    try { process.kill(pid, 'SIGTERM') } catch { /* already absent */ }
-    await expectProcessAbsent(pid, 35_000)
-  }
+async function closeApplicationWindow(): Promise<number> {
+  const pid = await mainPid()
+  await browser.closeWindow()
+  await expectProcessAbsent(pid)
   return pid
 }
 
-async function exitVerificationApplication(): Promise<number> {
-  const pid = await browser.electron.execute((electron) => {
-    const currentPid = process.pid
-    setTimeout(() => electron.app.exit(0), 50)
-    return currentPid
-  })
+async function terminateVerificationApplication(): Promise<number> {
+  const pid = await mainPid()
+  await killProcess(pid)
   await expectProcessAbsent(pid)
   return pid
 }
@@ -348,42 +347,6 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
     const ancestry = (window as unknown as { ancestry: object }).ancestry
     return { frozen: Object.isFrozen(ancestry), methods: Object.keys(ancestry).sort() }
   }), { frozen: true, methods: bridgeMethods })
-
-  const securityState = await browser.electron.execute((electron) => {
-    const window = electron.BrowserWindow.getAllWindows()[0]
-    if (!window) throw new Error('No BrowserWindow')
-    const preferences = (window.webContents as unknown as {
-      getLastWebPreferences(): {
-        contextIsolation?: boolean
-        nodeIntegration?: boolean
-        nodeIntegrationInWorker?: boolean
-        nodeIntegrationInSubFrames?: boolean
-        sandbox?: boolean
-        webSecurity?: boolean
-        webviewTag?: boolean
-      }
-    }).getLastWebPreferences()
-    return {
-      rendererUrl: window.webContents.getURL(),
-      contextIsolation: preferences.contextIsolation,
-      nodeIntegration: preferences.nodeIntegration,
-      nodeIntegrationInWorker: preferences.nodeIntegrationInWorker ?? false,
-      nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames ?? false,
-      sandbox: preferences.sandbox,
-      webSecurity: preferences.webSecurity,
-      webviewTag: preferences.webviewTag,
-    }
-  })
-  assert.deepEqual(securityState, {
-    rendererUrl: 'app://bundle/index.html',
-    contextIsolation: true,
-    nodeIntegration: false,
-    nodeIntegrationInWorker: false,
-    nodeIntegrationInSubFrames: false,
-    sandbox: true,
-    webSecurity: true,
-    webviewTag: false,
-  })
 
   await browser.waitUntil(async () => browser.execute(({ source, flags }) => {
     const pattern = new RegExp(source, flags)
@@ -515,14 +478,10 @@ async function expectAccessibleShell(): Promise<void> {
   assert.ok(visualChecks.reducedAnimationMs <= 0.001)
   assert.ok(visualChecks.reducedTransitionMs <= 0.001)
 
-  const originalWindow = await browser.electron.execute((electron) => {
-    const window = electron.BrowserWindow.getAllWindows()[0]
-    if (!window) throw new Error('No BrowserWindow')
-    const state = { bounds: window.getBounds(), zoomFactor: window.webContents.getZoomFactor() }
-    window.setSize(720, 560)
-    window.webContents.setZoomFactor(2)
-    return state
-  })
+  const originalWindow = await browser.getWindowSize()
+  await browser.setWindowSize(720, 560)
+  const zoomModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+  for (let level = 0; level < 5; level += 1) await browser.keys([zoomModifier, '+'])
   try {
     const layout = await eventually(
       'Packaged 200 percent layout did not settle',
@@ -549,12 +508,8 @@ async function expectAccessibleShell(): Promise<void> {
     assert.deepEqual(layout.clippedControls, [])
     assert.equal(await (await visible('nav[aria-label="Primary"]')).isDisplayed(), true)
   } finally {
-    await browser.electron.execute((electron, state) => {
-      const window = electron.BrowserWindow.getAllWindows()[0]
-      if (!window) throw new Error('No BrowserWindow')
-      window.webContents.setZoomFactor(state.zoomFactor)
-      window.setBounds(state.bounds)
-    }, originalWindow)
+    await browser.keys([zoomModifier, '0'])
+    await browser.setWindowSize(originalWindow.width, originalWindow.height)
   }
 }
 
@@ -666,6 +621,30 @@ async function forceCloseProcess(child: ChildProcessWithoutNullStreams): Promise
   }
 }
 
+async function requestNormalApplicationQuit(
+  child: ChildProcessWithoutNullStreams,
+): Promise<void> {
+  if (!child.pid) throw new Error('Normal packaged launch PID is unavailable')
+  if (process.platform === 'win32') {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      `$target = Get-Process -Id ${String(child.pid)} -ErrorAction Stop`,
+      "if (-not $target.CloseMainWindow()) { throw 'native-window-close-request-failed' }",
+    ].join('\n')
+    await execFileAsync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ], { encoding: 'utf8', windowsHide: true })
+  } else if (!child.kill('SIGTERM')) {
+    throw new Error(`Could not request normal exit for process ${String(child.pid)}`)
+  }
+  const exitStatus = await waitForChildExit(child, 45_000)
+  assert.deepEqual(exitStatus, { code: 0, signal: null })
+}
+
 async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void> {
   if (!packagedExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
   const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
@@ -687,6 +666,7 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
   }
   child.stdout.on('data', consume)
   child.stderr.on('data', consume)
+  let exitedCleanly = false
   try {
     const rootPid = child.pid
     if (!rootPid) throw new Error('Normal packaged launch PID is unavailable')
@@ -719,8 +699,10 @@ async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void
     assert.doesNotMatch(launchArguments.join('\n'), disallowedControlArgument)
     assert.doesNotMatch([...observedCommandLines].join('\n'), disallowedControlArgument)
     assert.doesNotMatch(output, /DevTools listening on /u)
+    await requestNormalApplicationQuit(child)
+    exitedCleanly = true
   } finally {
-    await forceCloseProcess(child)
+    if (!exitedCleanly) await forceCloseProcess(child)
   }
 }
 
@@ -824,13 +806,13 @@ describe('unpublished unpacked native package', () => {
       manualRetriesRemaining: 0,
     })
     assert.equal((await $$('[role="alert"]')).length, 0)
-    await quitApplication()
+    await closeApplicationWindow()
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',
       automaticRestartsRemaining: 2,
       manualRetriesRemainingBefore: 1,
       recoveredState: 'ready',
-      cleanExit: true,
+      processExitedAfterWindowClose: true,
     })
   })
 
@@ -878,7 +860,7 @@ describe('unpublished unpacked native package', () => {
       manualRetriesRemaining: 0,
     })
     const retried = await sidecarPid(applicationPid, copiedSidecarPath, killed)
-    await quitApplication()
+    await closeApplicationWindow()
     await expectProcessAbsent(retried)
     await writeFaultEvidence(restartEvidencePath, 'sidecar-restart-exhaustion-quit', {
       automaticRestartCount: 2,
@@ -886,7 +868,7 @@ describe('unpublished unpacked native package', () => {
       manualRetriesRemainingBefore: 1,
       manualRetryState: 'ready',
       activeSidecarExitedOnQuit: true,
-      cleanExit: true,
+      processExitedAfterWindowClose: true,
     })
   })
 
@@ -919,7 +901,7 @@ describe('unpublished unpacked native package', () => {
         manualRetriesRemaining: 0,
       })
       phase = 'termination'
-      await exitVerificationApplication()
+      await terminateVerificationApplication()
       processExited = true
       phase = 'write fault evidence'
       await writeFaultEvidence(integrityEvidencePath, 'sidecar-integrity-substitution', {
@@ -1039,13 +1021,13 @@ describe('unpublished unpacked native package', () => {
       fileGrantSavePath,
       normalizedSavePath,
     ])) assert.equal(exposedStrings.includes(selectedPath), false)
-    await quitApplication()
+    await closeApplicationWindow()
     await writeFileGrantEvidence(fileGrantEvidencePath)
   })
 
   it('launches production normally without a debugging transport', async () => {
     if (!packagedExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
-    await quitApplication()
+    await closeApplicationWindow()
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-normal-launch-'))
     try {
       await expectNormalLaunchWithoutDebugSurface(root)

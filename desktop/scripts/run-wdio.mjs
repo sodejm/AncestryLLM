@@ -227,13 +227,12 @@ export function wdioInvocation(mode, argv, {
  * Runs one WebdriverIO suite and preserves its actual exit status.
  * @param {'source' | 'packaged'} mode - Bounded suite identifier.
  * @param {string[]} argv - Additional WebdriverIO arguments.
- * @param {{spawnSyncImpl?: Function, cliPath?: string, desktopRoot?: string, environment?: NodeJS.ProcessEnv, executable?: string, mkdtempSyncImpl?: Function, nowImpl?: Function, preparePackagedScenarioImpl?: Function, rmSyncImpl?: Function, userDataDirectory?: string}} [options] - Injectable runner, paths, clock, and isolation functions.
+ * @param {{spawnSyncImpl?: Function, cliPath?: string, desktopRoot?: string, environment?: NodeJS.ProcessEnv, executable?: string, mkdtempSyncImpl?: Function, preparePackagedScenarioImpl?: Function, rmSyncImpl?: Function, userDataDirectory?: string}} [options] - Injectable runner, paths, and isolation functions.
  * @returns {number} Integer child-process exit code; spawn and signal failures throw.
  */
 export function runWdio(mode, argv, {
   environment = {},
   mkdtempSyncImpl = mkdtempSync,
-  nowImpl = Date.now,
   preparePackagedScenarioImpl = preparePackagedScenario,
   rmSyncImpl = rmSync,
   spawnSyncImpl = spawnSync,
@@ -244,15 +243,15 @@ export function runWdio(mode, argv, {
   const isolatedUserDataDirectory = userDataDirectory
     ?? mkdtempSyncImpl(join(tmpdir(), 'ancestryllm-wdio-'))
   const fixture = argv.join('\n').includes('degraded') ? 'degraded' : 'success'
-  const preparedPackage = mode === 'packaged'
-    ? preparePackagedScenarioImpl(selectedScenario(argv), environment)
-    : { environment }
+  let preparedPackage = { environment }
   try {
+    preparedPackage = mode === 'packaged'
+      ? preparePackagedScenarioImpl(selectedScenario(argv), environment)
+      : { environment }
     const invocation = wdioInvocation(mode, argv, {
       ...invocationOptions,
       environment: {
         ANCESTRYLLM_DESKTOP_FIXTURE: fixture,
-        ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT: String(nowImpl()),
         ANCESTRYLLM_WDIO_USER_DATA: isolatedUserDataDirectory,
         ...preparedPackage.environment,
       },

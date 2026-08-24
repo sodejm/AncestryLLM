@@ -54,12 +54,34 @@ test('source run selects the degraded fixture and removes its isolated profile',
   assert.equal(calls.length, 2)
   assert.equal(calls[0].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
   assert.equal(calls[0].options.env.ANCESTRYLLM_WDIO_USER_DATA, '/tmp/ancestryllm-isolated-profile')
+  assert.equal(calls[0].options.env.ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT, undefined)
   assert.deepEqual(calls[1], {
     cleanup: {
       path: '/tmp/ancestryllm-isolated-profile',
       options: { force: true, recursive: true },
     },
   })
+})
+
+test('packaged preparation failure still removes the isolated profile', () => {
+  const calls = []
+  const options = {
+    ...runnerOptions(calls),
+    preparePackagedScenarioImpl() {
+      throw new Error('package preparation failed')
+    },
+  }
+
+  assert.throws(
+    () => runWdio('packaged', ['--grep', 'packaged scenario'], options),
+    /package preparation failed/u,
+  )
+  assert.deepEqual(calls, [{
+    cleanup: {
+      path: '/tmp/ancestryllm-isolated-profile',
+      options: { force: true, recursive: true },
+    },
+  }])
 })
 
 test('complete source plan runs every scenario through a fresh profile', () => {

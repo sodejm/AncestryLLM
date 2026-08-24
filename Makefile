@@ -54,7 +54,7 @@ verified-uv: system-python
 
 setup: verified-uv
 	@if [ -e "$(VENV_DIR)" ] || [ -L "$(VENV_DIR)" ]; then \
-		if [ -L "$(VENV_DIR)" ] || [ ! -d "$(VENV_DIR)" ] || [ ! -f "$(VENV_DIR)/pyvenv.cfg" ]; then \
+		if [ -L "$(VENV_DIR)" ] || [ ! -d "$(VENV_DIR)" ] || [ ! -f "$(VENV_DIR)/pyvenv.cfg" ] || ! grep -Eq '^[[:space:]]*uv[[:space:]]*=' "$(VENV_DIR)/pyvenv.cfg"; then \
 			echo "UVENV_VENV_REPAIR_REFUSED: $(VENV_DIR) is not a regular uv-managed virtual environment" >&2; \
 			exit 2; \
 		fi; \

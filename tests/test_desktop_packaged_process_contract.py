@@ -30,7 +30,12 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
-    assert "browser.electron.execute" in source
+    assert "browser.electron.execute" not in source
+    assert (
+        "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
+    )
+    assert "record.commandLine.includes(automatedPackagedExecutable)" in source
+    assert "record.commandLine.includes(profileArgument)" in source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
     assert "record.commandLine.includes('--type=renderer')" in source
     assert "!record.commandLine.includes('--no-sandbox')" in source
@@ -59,21 +64,27 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "unexpectedErrorCodes: []" in source
 
 
-def test_packaged_clean_quit_requests_native_quit_and_releases_runtime() -> None:
+def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
-    quit_start = source.index("async function quitApplication")
-    quit_end = source.index("\nasync function exitVerificationApplication", quit_start)
+    quit_start = source.index("async function closeApplicationWindow")
+    quit_end = source.index("\nasync function terminateVerificationApplication", quit_start)
     quit_source = source[quit_start:quit_end]
+    normal_quit_start = source.index("async function requestNormalApplicationQuit")
+    normal_quit_end = source.index(
+        "\nasync function expectNormalLaunchWithoutDebugSurface", normal_quit_start
+    )
+    normal_quit_source = source[normal_quit_start:normal_quit_end]
 
-    assert "browser.electron.execute((electron) => {" in quit_source
-    assert "setTimeout(() => electron.app.quit(), 50)" in quit_source
+    assert "await browser.closeWindow()" in quit_source
     assert "await expectProcessAbsent" in quit_source
-    assert "if (process.platform !== 'darwin') throw error" in quit_source
-    assert "process.kill(pid, 'SIGTERM')" in quit_source
-    assert "newBrowserCDPSession" not in quit_source
-    assert "Browser.close" not in quit_source
+    assert "browser.electron.execute" not in quit_source
+
+    assert "CloseMainWindow()" in normal_quit_source
+    assert "child.kill('SIGTERM')" in normal_quit_source
+    assert "await waitForChildExit(child, 45_000)" in normal_quit_source
+    assert "assert.deepEqual(exitStatus, { code: 0, signal: null })" in normal_quit_source
 
     assert "const requestVerifiedAppQuit = (): void => { app.quit() }" in main_source
     assert "process.off('SIGTERM', requestVerifiedAppQuit)" in main_source
@@ -190,6 +201,8 @@ def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -
         "disallowedControlArgument)" in source
     )
     assert "assert.doesNotMatch(output, /DevTools listening on /u)" in source
+    assert "await requestNormalApplicationQuit(child)" in source
+    assert "if (!exitedCleanly) await forceCloseProcess(child)" in source
 
 
 def test_local_runtime_cli_shares_the_desktop_single_instance_lock() -> None:

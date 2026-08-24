@@ -51,6 +51,9 @@ def test_wdio_config_owns_source_and_packaged_electron_sessions() -> None:
     assert "shell.wdio.ts" in source
     assert "packaged-shell.wdio.ts" in source
     assert "@wdio/electron-service" in source
+    assert "beforeSession" in source
+    assert "ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT" in source
+    assert "String(Date.now())" in source
 
 
 def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None:
@@ -70,6 +73,7 @@ def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None
         assert forbidden not in combined
     assert "browser.electron.execute" in combined
     assert "browser.reloadSession" in combined
+    assert "browser.electron.execute" not in PACKAGED_SPEC.read_text(encoding="utf-8")
 
 
 def test_wdio_runner_preserves_multiword_filters_without_a_shell() -> None:
@@ -81,6 +85,7 @@ def test_wdio_runner_preserves_multiword_filters_without_a_shell() -> None:
     assert "--mochaOpts.grep" in runner
     assert "runWdio('packaged'" in packaged_runner
     assert "@playwright/test/cli" not in packaged_runner
+    assert "ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT" not in runner
 
 
 def test_playwright_is_bounded_to_reviewed_documentation_screenshots() -> None:

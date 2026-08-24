@@ -307,7 +307,9 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert workflow.count(install) == 1
     assert release.count(install) == 2
     assert workflow.count(verifier_launcher) == 2
-    assert release.count(production_launcher) == 2
+    # Both the private build validation and the public artifact validation run
+    # the automated and normal-launch packaged scenarios on Linux.
+    assert release.count(production_launcher) == 4
     assert "--production-runtime-bus" not in workflow
     assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
     assert "dbus-run-session" not in runner

@@ -213,9 +213,13 @@ Each native row then:
 
 The packaged WebdriverIO pass launches the unpublished application through the
 pinned WebdriverIO Electron service. The service supplies the native Electron
-automation session, and the specifications use `browser.electron.execute` for
-bounded Main-process observations and lifecycle requests. No CDP endpoint,
-remote-debugging argument, browser-level CDP command, or external Chromium
+automation session. Internally, the service may use its managed Puppeteer/CDP
+bridge where the Electron fuse permits it, including the source-mode suite. The
+secure packaged build disables the Node CLI inspect-arguments fuse, so its
+specifications deliberately avoid `browser.electron.execute`: renderer state is
+observed through WebDriver, while Main-process and sidecar lifecycle evidence
+comes from bounded native process snapshots. No repository-authored CDP
+endpoint, remote-debugging argument, direct CDP command, or external Chromium
 launch is part of product verification. A separate launch uses a fresh profile
 and the ordinary production executable; the test verifies that neither its
 process tree nor captured output exposes a debugging surface. The normal launch
@@ -229,21 +233,23 @@ keychain. That automation-only switch is not part of a shipped launch path and
 does not replace the sidecar's OS keyring implementation. Linux uses the native
 Secret Service harness described above rather than a mock backend.
 
-The clean-quit check asks Electron Main to call `app.quit()` through the native
-service, then independently observes that the packaged process PID disappears
-within the bounded deadline. On macOS, if that request has not completed after
-the production supervisor's 20-second stop boundary, one later `SIGTERM`
-exercises the production signal-to-quit path and must still produce native
-process exit. A second failure fails the test; forced termination is cleanup
-only. The source contract also proves that Electron owns the supervisor and job
-preflight before payload verification or process launch can yield. The quit is
-vetoed while fail-closed job preflight and verified sidecar shutdown run. Only
-the authorized completion callback uses `app.exit(0)`, after releasing the IPC
-boundary and sidecar supervisor, so Electron cannot enter a second
-platform-dependent quit cycle. The sidecar-substitution scenario cannot perform
-a normal sidecar drain; after recording the fail-closed result it uses
-`app.exit(0)` only to terminate its disposable verification package and does not
-count that termination as clean-shutdown evidence.
+The automated scenarios close the native application window through WebDriver,
+then independently observe that the packaged Main PID and active sidecar PID
+disappear within bounded deadlines. Because the secure packaged service session
+does not expose its child-process exit tuple, every release row also performs a
+separate ordinary production launch. Windows requests native window closure;
+macOS and Linux send `SIGTERM` through the production signal-to-quit path. That
+process must report the exact native result `{ code: 0, signal: null }`; any
+nonzero code, signal termination, or timeout fails the test, and forced
+termination is failure cleanup only. The source contract also proves that
+Electron owns the supervisor and job preflight before payload verification or
+process launch can yield. The quit is vetoed while fail-closed job preflight and
+verified sidecar shutdown run. Only the authorized completion callback uses
+`app.exit(0)`, after releasing the IPC boundary and sidecar supervisor, so
+Electron cannot enter a second platform-dependent quit cycle. The
+sidecar-substitution scenario cannot perform a normal sidecar drain; after
+recording the fail-closed result it terminates its disposable verification
+package and does not count that termination as clean-shutdown evidence.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and

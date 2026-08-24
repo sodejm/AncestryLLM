@@ -673,6 +673,8 @@ jobs:
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/run-wdio.mjs packaged \
+            --grep "launches production normally without a debugging transport"
       - name: Unmount macOS installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -758,6 +760,8 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
         shell: pwsh
@@ -900,6 +904,9 @@ jobs:
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
+            node desktop/scripts/run-wdio.mjs packaged \
+            --grep "launches production normally without a debugging transport"
       - name: Remove temporary Ubuntu signing and installation state
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -1255,6 +1262,8 @@ jobs:
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/run-wdio.mjs packaged \
+            --grep "launches production normally without a debugging transport"
       - name: Unmount macOS validation installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -1335,6 +1344,8 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
         shell: pwsh
@@ -1431,6 +1442,9 @@ jobs:
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
+            node desktop/scripts/run-wdio.mjs packaged \
+            --grep "launches production normally without a debugging transport"
       - name: Remove temporary Ubuntu validation installation
         if: always() && runner.os == 'Linux'
         shell: bash

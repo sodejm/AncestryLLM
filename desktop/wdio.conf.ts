@@ -42,7 +42,7 @@ const electronServiceOptions = mode === 'packaged'
       appArgs,
     }
 
-/** Configures isolated source and packaged Electron sessions without a debug transport. */
+/** Configures isolated source and packaged Electron sessions with service-managed automation. */
 export const config = {
   runner: 'local',
   autoXvfb: true,
@@ -56,6 +56,9 @@ export const config = {
     browserName: 'electron',
     'wdio:electronServiceOptions': electronServiceOptions,
   }],
+  beforeSession: () => {
+    process.env.ANCESTRYLLM_WDIO_LAUNCH_STARTED_AT = String(Date.now())
+  },
   services: ['electron'],
   framework: 'mocha',
   reporters: ['spec'],

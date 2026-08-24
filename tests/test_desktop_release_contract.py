@@ -179,12 +179,14 @@ def test_electron_builder_includes_the_nsis_binary_extraction_fix() -> None:
 
 def test_release_packaged_smoke_forwards_the_webdriverio_filter_without_a_pnpm_separator() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    scenario = (
+    automated_scenario = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence"
     )
+    normal_scenario = "launches production normally without a debugging transport"
 
-    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
-    assert workflow.count(f'--grep "{scenario}"') == 6
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 12
+    assert workflow.count(f'--grep "{automated_scenario}"') == 6
+    assert workflow.count(f'--grep "{normal_scenario}"') == 6
     assert re.search(r"run-wdio\.mjs packaged --\s", workflow) is None
 
 
