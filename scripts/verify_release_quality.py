@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import re
 import sys
 from datetime import UTC, date, datetime, timedelta
@@ -958,7 +959,12 @@ def _validate_performance(
             _reject("RQ006", f"{runner} performance checks are incomplete")
         for metric in metrics:
             value = observed[metric]
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or (isinstance(value, float) and not math.isfinite(value))
+                or value < 0
+            ):
                 _reject("RQ006", f"{runner} performance metric {metric} is invalid")
             if (
                 checks[metric]

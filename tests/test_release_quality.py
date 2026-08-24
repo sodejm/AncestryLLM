@@ -634,6 +634,19 @@ def test_incomplete_performance_evidence_is_rejected() -> None:
         _build(policy, desktop=desktop)
 
 
+def test_non_finite_performance_observation_is_rejected() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    performance = desktop["targets"][0]["performance"]
+    metric = policy["performance"]["metrics"][0]
+    non_finite = float("nan")
+    performance["observed"][metric] = non_finite
+    performance["checks"][metric]["observed"] = non_finite
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{metric}.*invalid"):
+        _build(policy, desktop=desktop)
+
+
 @pytest.mark.parametrize(
     ("surface", "code"),
     (
