@@ -1,3 +1,5 @@
+/** Verifies packaged Electron main-process records match across supported platforms. */
+
 import { describe, expect, it } from 'vitest'
 import { matchesPackagedMainProcess } from './process-records'
 
