@@ -60,11 +60,16 @@ reuse. A mismatch fails closed without deleting user data; remove only the
 specific ignored `.tools/uv/` cache and run the bootstrap again after resolving
 the cause.
 
-If Python instead fails during startup and reports a deleted or temporary
-interpreter path, the checkout's ignored `.venv` may already be tied to a
-runtime that no longer exists. Remove only that checkout's `.venv`, select a
-supported system interpreter, and rerun `make setup`. Setting `PYTHON` cannot
-repair an existing virtual environment whose base interpreter has disappeared.
+Before synchronization, `make setup` probes an existing regular uv-managed
+`.venv` with an isolated standard-library import. If Python fails during that
+probe because the generated environment is tied to a runtime that no longer
+exists, setup emits `UVENV_VENV_RECREATED`, clears only that ignored environment
+through the verified `uv`, recreates it with the selected supported system
+interpreter, and continues. It refuses to follow or replace a symlink, a
+non-directory, or a directory without `pyvenv.cfg`; those ambiguous targets
+fail closed with `UVENV_VENV_REPAIR_REFUSED` and require the developer to
+inspect and move the exact path aside manually. Setting `PYTHON` alone does not
+repair an existing environment whose base interpreter has disappeared.
 
 ## Trust policy
 

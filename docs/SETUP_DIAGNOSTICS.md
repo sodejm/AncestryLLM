@@ -19,11 +19,22 @@ command to `uv`, rather than allowing `uv` to resolve the name independently.
 Do not recover by installing `uv` with `pip`, using an executable from `PATH`,
 enabling Python downloads, using `uvx`, or adding `uv run --with` dependencies.
 
+Before synchronization, `make setup` probes an existing regular uv-managed
+`.venv` with an isolated standard-library import. If the generated environment
+cannot start, the target emits `UVENV_VENV_RECREATED`, clears only that ignored
+environment through the verified `uv`, recreates it with the selected system
+interpreter, and continues with the locked sync. It never follows or replaces a
+symlink and never assumes an arbitrary directory is disposable. A symlink,
+non-directory, or directory without `pyvenv.cfg` fails closed with
+`UVENV_VENV_REPAIR_REFUSED`; inspect that path and move it aside manually only
+after confirming its ownership and contents.
+
 | Failure | Meaning | Required action |
 |---|---|---|
 | `UVENV_PYTHON_NOT_FOUND` | The selected system Python executable is absent. | Install a supported system Python or set `PYTHON` to an existing supported executable, then retry. |
 | `UVENV_PYTHON_VERSION_UNSUPPORTED` | The selected interpreter is outside Python 3.12-3.14 or its version cannot be read. | Select a supported system interpreter; do not let `uv` download one. |
-| `Fatal Python error: init_fs_encoding` refers to a deleted or temporary interpreter path | The ignored `.venv` was created from an interpreter that no longer exists. | Remove only the checkout's `.venv`, select a supported system interpreter, and rerun `make setup`. Changing `PYTHON` does not repair an already-created virtual environment. |
+| `UVENV_VENV_RECREATED` | The regular ignored `.venv` could not start, usually because its base interpreter disappeared. | No manual deletion is required. Setup recreates only that generated environment with the selected supported system interpreter and continues. |
+| `UVENV_VENV_REPAIR_REFUSED` | `.venv` is a symlink, is not a directory, or lacks uv virtual-environment metadata. | Inspect the exact path. Move it aside manually only after confirming its ownership and contents, then rerun setup; do not make setup delete an ambiguous target. |
 | Bootstrap receipt reports a stable failure category | The cached or downloaded `uv`, verifier, policy, identity, or provenance failed closed. | Follow the [verified uv bootstrap recovery procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md); never bypass verification or substitute another `uv`. |
 
 Successful setup verifies the repository-local executable, then runs
