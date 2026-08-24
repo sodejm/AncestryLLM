@@ -1,7 +1,7 @@
 /** Verifies desktop evidence aggregation, coverage gates, and performance policy. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -11,6 +11,7 @@ import {
   aggregateEvidence,
   createSecurityEvidence,
   createTargetEvidence,
+  deriveReleaseQualityContract,
   runCli,
 } from './verification-evidence.mjs'
 import {
@@ -35,6 +36,17 @@ const metrics = {
   readyMs: 500,
   rssBytes: 150_000_000,
   rendererOutboundRequests: 0,
+}
+
+const expectedFuseStates = {
+  RunAsNode: 'disabled',
+  EnableCookieEncryption: 'enabled',
+  EnableNodeOptionsEnvironmentVariable: 'disabled',
+  EnableNodeCliInspectArguments: 'disabled',
+  EnableEmbeddedAsarIntegrityValidation: 'enabled',
+  OnlyLoadAppFromAsar: 'enabled',
+  LoadBrowserProcessSpecificV8Snapshot: 'disabled',
+  GrantFileProtocolExtraPrivileges: 'disabled',
 }
 
 function encoded(value) {
@@ -95,8 +107,13 @@ function fuseInspection(platform) {
     package: { executable: '/package/app', application: '/package', resources: '/package/resources' },
     fuses: {
       status: 'verified',
-      count: 1,
-      items: [{ name: 'RunAsNode', expected: 'disabled', actual: 'disabled', status: 'verified' }],
+      count: Object.keys(expectedFuseStates).length,
+      items: Object.entries(expectedFuseStates).map(([name, state]) => ({
+        name,
+        expected: state,
+        actual: state,
+        status: 'verified',
+      })),
     },
     asar: { path: '/package/resources/app.asar', presence: { status: 'verified' }, integrity },
   }
@@ -379,6 +396,23 @@ test('target evidence records every observed value, ceiling, and check and rejec
   const missing = { ...metrics }
   delete missing.readyMs
   assert.throws(() => targetFixture(rows[0], missing), /exact schema/)
+})
+
+test('release evidence derives performance ceilings from the central quality policy', async () => {
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  const changed = structuredClone(policy)
+  changed.performance.policyVersion = 'desktop-unpacked-test'
+  changed.performance.targets[0].performanceCeilings.coldLaunchMs = 1234
+  changed.qa.toolVersions.node = '26.6.0'
+
+  const contract = deriveReleaseQualityContract(changed)
+
+  assert.equal(contract.performancePolicyVersion, 'desktop-unpacked-test')
+  assert.equal(contract.targetRows['macos-15'].ceilings.coldLaunchMs, 1234)
+  assert.equal(contract.toolVersions.node, '26.6.0')
 })
 
 test('target evidence rejects a digest-unbound artifact and the wrong platform ASAR scope', () => {

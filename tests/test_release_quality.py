@@ -24,6 +24,16 @@ _SPEC.loader.exec_module(quality)
 
 HEAD = "a" * 40
 VERSION = "0.7.0"
+EXPECTED_FUSE_STATES = {
+    "RunAsNode": "disabled",
+    "EnableCookieEncryption": "enabled",
+    "EnableNodeOptionsEnvironmentVariable": "disabled",
+    "EnableNodeCliInspectArguments": "disabled",
+    "EnableEmbeddedAsarIntegrityValidation": "enabled",
+    "OnlyLoadAppFromAsar": "enabled",
+    "LoadBrowserProcessSpecificV8Snapshot": "disabled",
+    "GrantFileProtocolExtraPrivileges": "disabled",
+}
 
 
 def _digest(*, sha256: str = "d" * 64, size: int = 1) -> dict[str, Any]:
@@ -191,14 +201,15 @@ def _inspection(sidecar_target: str) -> dict[str, Any]:
         "platform": platform,
         "fuses": {
             "status": "verified",
-            "count": 1,
+            "count": len(EXPECTED_FUSE_STATES),
             "items": [
                 {
-                    "name": "RunAsNode",
-                    "expected": False,
-                    "actual": False,
+                    "name": name,
+                    "expected": state,
+                    "actual": state,
                     "status": "verified",
                 }
+                for name, state in EXPECTED_FUSE_STATES.items()
             ],
         },
         "asar": {
@@ -541,6 +552,39 @@ def test_exception_requires_independent_approval_and_a_bounded_expiry() -> None:
     assert _build(policy, as_of=as_of)["exceptions"] == policy["exceptions"]
 
 
+@pytest.mark.parametrize(
+    ("family", "gate"),
+    (
+        ("qa", "not-a-gate"),
+        ("security", "tests-and-coverage"),
+        ("performance", "diagnosticsContractPassed"),
+        ("diagnostics", "coldLaunchMs"),
+    ),
+)
+def test_exception_gate_must_belong_to_the_selected_family(
+    family: str,
+    gate: str,
+) -> None:
+    policy = _policy()
+    policy["exceptions"] = [
+        {
+            "id": "RQ-EXAMPLE",
+            "family": family,
+            "gate": gate,
+            "owner": "release-owner",
+            "approvedBy": "security-owner",
+            "reason": "Synthetic policy-validation exception.",
+            "expires": "2026-08-25",
+        }
+    ]
+
+    with pytest.raises(
+        quality.ReleaseQualityError,
+        match=rf"RQ009.*unknown gate for {family}",
+    ):
+        _build(policy)
+
+
 @pytest.mark.parametrize("surface", ["security", "target"])
 def test_nested_desktop_receipts_must_bind_to_the_exact_head(surface: str) -> None:
     policy = _policy()
@@ -747,6 +791,28 @@ def test_target_supporting_evidence_is_validated(
     mutate(desktop["targets"][0])
 
     with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{message}"):
+        _build(policy, desktop=desktop)
+
+
+def test_fuse_inventory_cannot_omit_a_required_fuse() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    fuses = desktop["targets"][0]["inspection"]["fuses"]
+    fuses["items"].pop()
+    fuses["count"] -= 1
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*fuses.*inventory"):
+        _build(policy, desktop=desktop)
+
+
+def test_fuse_inventory_cannot_rewrite_the_expected_state() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    item = desktop["targets"][0]["inspection"]["fuses"]["items"][0]
+    item["expected"] = "enabled"
+    item["actual"] = "enabled"
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*fuses.*inventory"):
         _build(policy, desktop=desktop)
 
 

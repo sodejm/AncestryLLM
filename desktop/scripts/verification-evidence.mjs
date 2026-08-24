@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -20,58 +21,168 @@ const EVIDENCE_SCHEMA_VERSION = 2
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
 const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
 const FILE_GRANT_EVIDENCE_KIND = 'ancestryllm-packaged-file-grant-evidence'
-const METRIC_NAMES = Object.freeze([
+const REQUIRED_METRIC_NAMES = Object.freeze([
   'coldLaunchMs',
   'warmLaunchMs',
   'readyMs',
   'rssBytes',
   'rendererOutboundRequests',
 ])
+const REQUIRED_TOOL_NAMES = Object.freeze([
+  'python',
+  'node',
+  'pnpm',
+  'vitest',
+  'webdriverio',
+])
+const RELEASE_QUALITY_POLICY_ID = 'ancestryllm-release-quality-v1'
+
+function policyRecord(value, label) {
+  assert.equal(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    true,
+    `${label} must be an object`,
+  )
+  return value
+}
+
+function exactPolicyKeys(value, expected, label) {
+  assert.deepEqual(Object.keys(value).sort(), [...expected].sort(), `${label} must use the exact schema`)
+}
+
+function requiredPolicyString(value, label) {
+  assert.equal(typeof value === 'string' && value.trim().length > 0, true, `${label} is required`)
+  return value
+}
+
+function frozenPolicyValues(value, names) {
+  return Object.freeze(Object.fromEntries(names.map((name) => [name, value[name]])))
+}
 
 /**
- * Identifies the immutable performance-threshold contract used by release evidence.
- * @type {string}
+ * Derives the desktop release-quality contract from the repository's central policy.
+ * @param {unknown} policy - Parsed release-quality policy document.
+ * @returns {Readonly<Record<string, unknown>>} Validated immutable desktop contract.
  */
-export const PERFORMANCE_POLICY_VERSION = 'desktop-unpacked-v1'
+export function deriveReleaseQualityContract(policy) {
+  const root = policyRecord(policy, 'release-quality policy')
+  assert.equal(root.schemaVersion, 1, 'unsupported release-quality policy schema')
+  assert.equal(root.policyId, RELEASE_QUALITY_POLICY_ID, 'unsupported release-quality policy identity')
 
-/**
- * Identifies the exact release-quality toolchain represented by desktop evidence.
- * Runtime commands validate these versions before the evidence is assembled.
- * @type {Readonly<Record<string, string>>}
- */
-export const TOOL_VERSIONS = Object.freeze({
-  python: '3.12',
-  node: '26.5.0',
-  pnpm: '11.9.0',
-  vitest: '3.2.7',
-  webdriverio: '9.31.2',
-})
+  const qa = policyRecord(root.qa, 'release-quality QA policy')
+  const toolVersions = policyRecord(qa.toolVersions, 'release-quality tool versions')
+  exactPolicyKeys(toolVersions, REQUIRED_TOOL_NAMES, 'release-quality tool versions')
+  for (const name of REQUIRED_TOOL_NAMES) {
+    requiredPolicyString(toolVersions[name], `release-quality tool version ${name}`)
+  }
 
-function ceilings(coldLaunchMs, warmLaunchMs, readyMs, rssBytes) {
+  const performance = policyRecord(root.performance, 'release-quality performance policy')
+  exactPolicyKeys(
+    performance,
+    ['policyVersion', 'method', 'metrics', 'targets'],
+    'release-quality performance policy',
+  )
+  const performancePolicyVersion = requiredPolicyString(
+    performance.policyVersion,
+    'release-quality performance policy version',
+  )
+  const method = policyRecord(performance.method, 'release-quality performance method')
+  exactPolicyKeys(
+    method,
+    ['command', 'measurementSource', 'validator', 'packageBoundary'],
+    'release-quality performance method',
+  )
+  for (const field of ['command', 'measurementSource', 'validator', 'packageBoundary']) {
+    requiredPolicyString(method[field], `release-quality performance method ${field}`)
+  }
+  assert.equal(
+    method.packageBoundary,
+    'unpacked-native',
+    'release-quality performance method must validate the unpacked-native boundary',
+  )
+
+  assert.equal(Array.isArray(performance.metrics), true, 'release-quality performance metrics must be an array')
+  assert.deepEqual(
+    [...performance.metrics].sort(),
+    [...REQUIRED_METRIC_NAMES].sort(),
+    'release-quality performance metrics must use the exact inventory',
+  )
+  assert.equal(
+    new Set(performance.metrics).size,
+    REQUIRED_METRIC_NAMES.length,
+    'release-quality performance metrics must be unique',
+  )
+
+  assert.equal(
+    Array.isArray(performance.targets) && performance.targets.length > 0,
+    true,
+    'release-quality performance targets are required',
+  )
+  const targetRows = {}
+  for (const rawTarget of performance.targets) {
+    const target = policyRecord(rawTarget, 'release-quality performance target')
+    exactPolicyKeys(
+      target,
+      ['runner', 'sidecarTarget', 'expectedOs', 'arch', 'hostArch', 'performanceCeilings'],
+      'release-quality performance target',
+    )
+    for (const field of ['runner', 'sidecarTarget', 'expectedOs', 'arch', 'hostArch']) {
+      requiredPolicyString(target[field], `release-quality performance target ${field}`)
+    }
+    assert.equal(targetRows[target.runner], undefined, `duplicate release-quality runner ${target.runner}`)
+    const platform = target.sidecarTarget.split('-', 1)[0]
+    assert.equal(
+      ['darwin', 'win32', 'linux'].includes(platform),
+      true,
+      `unsupported release-quality platform ${platform}`,
+    )
+    const rawCeilings = policyRecord(
+      target.performanceCeilings,
+      `${target.runner} performance ceilings`,
+    )
+    exactPolicyKeys(rawCeilings, REQUIRED_METRIC_NAMES, `${target.runner} performance ceilings`)
+    for (const name of REQUIRED_METRIC_NAMES) {
+      assert.equal(
+        Number.isSafeInteger(rawCeilings[name]) && rawCeilings[name] >= 0,
+        true,
+        `${target.runner} performance ceiling ${name} must be a non-negative safe integer`,
+      )
+    }
+    targetRows[target.runner] = Object.freeze({
+      sidecarTarget: target.sidecarTarget,
+      platform,
+      expectedOs: target.expectedOs,
+      actualOs: target.expectedOs,
+      arch: target.arch,
+      hostArch: target.hostArch,
+      platformValidated: true,
+      ceilings: frozenPolicyValues(rawCeilings, REQUIRED_METRIC_NAMES),
+    })
+  }
+
   return Object.freeze({
-    coldLaunchMs,
-    warmLaunchMs,
-    readyMs,
-    rssBytes,
-    rendererOutboundRequests: 0,
+    metricNames: Object.freeze([...performance.metrics]),
+    performancePolicyVersion,
+    toolVersions: frozenPolicyValues(toolVersions, REQUIRED_TOOL_NAMES),
+    targetRows: Object.freeze(targetRows),
   })
 }
 
-const macAndLinuxCeilings = ceilings(30_000, 20_000, 45_000, 1_610_612_736)
-const windowsCeilings = ceilings(45_000, 30_000, 60_000, 2_147_483_648)
+const releaseQualityPolicy = JSON.parse(readFileSync(
+  new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+  'utf8',
+))
+const releaseQualityContract = deriveReleaseQualityContract(releaseQualityPolicy)
+const METRIC_NAMES = releaseQualityContract.metricNames
 
-/**
- * Defines the exact native runner, architecture, operating-system, and performance rows accepted as release evidence.
- * @type {Readonly<Record<string, Readonly<Record<string, unknown>>>>}
- */
-export const TARGET_ROWS = Object.freeze({
-  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'windows-11-arm': Object.freeze({ sidecarTarget: 'win32-arm64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: windowsCeilings }),
-  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-})
+/** Identifies the central performance-threshold contract used by release evidence. */
+export const PERFORMANCE_POLICY_VERSION = releaseQualityContract.performancePolicyVersion
+
+/** Identifies the exact central-policy toolchain represented by desktop evidence. */
+export const TOOL_VERSIONS = releaseQualityContract.toolVersions
+
+/** Defines the native target rows accepted by the central release-quality policy. */
+export const TARGET_ROWS = releaseQualityContract.targetRows
 
 function exactHead(value, label = 'gitHead') {
   assert.match(value, SHA, `${label} must be a lowercase full Git commit SHA`)
@@ -605,7 +716,11 @@ export async function aggregateEvidence(root, requestedHead) {
     .filter((value) => value.kind === 'target')
     .map((value) => validateTargetEvidence(value, gitHead, receiptRecords, files))
   const security = evidence.filter((value) => value.kind === 'security')
-  assert.equal(targets.length, Object.keys(TARGET_ROWS).length, 'expected exactly six target evidence rows')
+  assert.equal(
+    targets.length,
+    Object.keys(TARGET_ROWS).length,
+    'target evidence count does not match the release-quality policy',
+  )
   assert.equal(security.length, 1, 'expected exactly one security evidence row')
   assert.equal(new Set(targets.map((target) => target.runner)).size, targets.length, 'duplicate target evidence row')
   assert.deepEqual(targets.map((target) => target.runner).sort(), Object.keys(TARGET_ROWS).sort(), 'target evidence matrix is incomplete')

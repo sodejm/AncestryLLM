@@ -21,6 +21,16 @@ ARTIFACT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 MAX_SAFE_INTEGER = (2**53) - 1
 FAMILIES = ("diagnostics", "performance", "qa", "security")
+EXPECTED_FUSE_STATES = {
+    "RunAsNode": "disabled",
+    "EnableCookieEncryption": "enabled",
+    "EnableNodeOptionsEnvironmentVariable": "disabled",
+    "EnableNodeCliInspectArguments": "disabled",
+    "EnableEmbeddedAsarIntegrityValidation": "enabled",
+    "OnlyLoadAppFromAsar": "enabled",
+    "LoadBrowserProcessSpecificV8Snapshot": "disabled",
+    "GrantFileProtocolExtraPrivileges": "disabled",
+}
 REQUIRED_EVIDENCE_INPUTS = (
     ("release-evidence", "gates.json"),
     ("desktop-evidence-aggregate", "desktop-evidence.json"),
@@ -258,7 +268,7 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         "RQ001",
         "QA policy",
     )
-    _string_list(qa["readinessGates"], "RQ001", "readiness gates")
+    readiness_gates = _string_list(qa["readinessGates"], "RQ001", "readiness gates")
     tools = _object(qa["toolVersions"], "RQ001", "tool versions")
     _exact_keys(
         tools,
@@ -426,6 +436,12 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
     if diagnostics["telemetry"] is not False:
         _reject("RQ001", "diagnostics telemetry must remain disabled")
 
+    gate_inventory = {
+        "qa": set(readiness_gates),
+        "security": set(receipt_gates),
+        "performance": set(metrics),
+        "diagnostics": {diagnostics["syntheticCanaryGate"]},
+    }
     exceptions = policy["exceptions"]
     if not isinstance(exceptions, list):
         _reject("RQ009", "exceptions must be an array")
@@ -444,8 +460,14 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         if record["id"] in seen:
             _reject("RQ009", f"duplicate exception {record['id']}")
         seen.add(record["id"])
-        if record["family"] not in FAMILIES:
+        family = record["family"]
+        if family not in FAMILIES:
             _reject("RQ009", f"exception {record['id']} has an unknown family")
+        if record["gate"] not in gate_inventory[family]:
+            _reject(
+                "RQ009",
+                f"exception {record['id']} has an unknown gate for {family}",
+            )
         if record["approvedBy"] == record["owner"]:
             _reject("RQ009", f"exception {record['id']} needs an independent approver")
         try:
@@ -749,11 +771,12 @@ def _validate_inspection(value: Any, runner: str, platform: str) -> None:
     if (
         fuses["status"] != "verified"
         or type(count) is not int
-        or count <= 0
+        or count != len(EXPECTED_FUSE_STATES)
         or not isinstance(items, list)
         or len(items) != count
     ):
-        _reject("RQ006", f"{fuses_label} evidence is invalid")
+        _reject("RQ006", f"{fuses_label} inventory is invalid")
+    seen_names: set[str] = set()
     for index, raw_item in enumerate(items):
         item_label = f"{fuses_label} item {index}"
         item = _object(raw_item, "RQ006", item_label)
@@ -763,13 +786,19 @@ def _validate_inspection(value: Any, runner: str, platform: str) -> None:
             "RQ006",
             item_label,
         )
+        name = item["name"]
+        expected_state = EXPECTED_FUSE_STATES.get(name)
         if (
-            not isinstance(item["name"], str)
-            or not item["name"].strip()
+            expected_state is None
+            or name in seen_names
             or item["status"] != "verified"
-            or item["actual"] != item["expected"]
+            or item["expected"] != expected_state
+            or item["actual"] != expected_state
         ):
-            _reject("RQ006", f"{item_label} was not verified")
+            _reject("RQ006", f"{fuses_label} inventory item {index} is invalid")
+        seen_names.add(name)
+    if seen_names != set(EXPECTED_FUSE_STATES):
+        _reject("RQ006", f"{fuses_label} inventory is invalid")
 
     asar_label = f"{runner} ASAR inspection"
     asar = _object(inspection["asar"], "RQ006", asar_label)
