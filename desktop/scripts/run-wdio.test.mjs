@@ -71,6 +71,34 @@ test('source run selects the degraded fixture and removes its isolated profile',
   })
 })
 
+test('source grep derives the degraded fixture from the canonical scenario', () => {
+  const calls = []
+  const status = runWdio('source', ['--grep', 'bounded recovery'], runnerOptions(calls))
+
+  assert.equal(status, 0)
+  assert.equal(calls[0].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
+})
+
+test('source grep rejects zero declared scenario matches before invocation', () => {
+  const calls = []
+
+  assert.throws(
+    () => runWdio('source', ['--grep', 'missing scenario'], runnerOptions(calls)),
+    /must match exactly one declared source scenario; matched 0/u,
+  )
+  assert.equal(calls.some((call) => call.args !== undefined), false)
+})
+
+test('source grep rejects multiple declared scenario matches before invocation', () => {
+  const calls = []
+
+  assert.throws(
+    () => runWdio('source', ['--grep', 'built'], runnerOptions(calls)),
+    /must match exactly one declared source scenario; matched 4/u,
+  )
+  assert.equal(calls.some((call) => call.args !== undefined), false)
+})
+
 test('packaged preparation failure still removes the isolated profile', () => {
   const calls = []
   const options = {

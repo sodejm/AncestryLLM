@@ -774,11 +774,12 @@ describe('unpublished unpacked native package', () => {
     await expectFocusedHeading('Welcome to AncestryLLM')
     const coldLaunchMs = Date.now() - launchedAt
     assert.match(await text('main'), /Your desktop control shell stays local to this device\./u)
+    await expectStartupDiagnostics(READY_DIAGNOSTICS)
+    const readyMs = Date.now() - launchedAt
     await click('button=Continue to Home')
     await expectFocusedHeading('Home')
     assert.match(await text('main'), /Packaged build/u)
     assert.match(await text('main'), /Ready/u)
-    const readyMs = Date.now() - launchedAt
     const rssBytes = await expectProductionBoundary(await mainPid())
     await click('a=Diagnostics')
     await expectFocusedHeading('Diagnostics')

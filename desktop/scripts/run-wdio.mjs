@@ -41,7 +41,7 @@ const packagedScenarios = Object.freeze([
   'launches production normally without a debugging transport',
 ])
 
-function selectedScenario(argv, scenarios) {
+function selectedScenario(argv, scenarios, mode) {
   const grepIndex = argv.findIndex((argument) => (
     argument === '--grep' || argument === '--mochaOpts.grep'
   ))
@@ -53,7 +53,7 @@ function selectedScenario(argv, scenarios) {
   assert.equal(
     matches.length,
     1,
-    `WebdriverIO grep must match exactly one declared packaged scenario; matched ${matches.length}`,
+    `WebdriverIO grep must match exactly one declared ${mode} scenario; matched ${matches.length}`,
   )
   return matches[0]
 }
@@ -259,14 +259,16 @@ export function runWdio(mode, argv, {
   userDataDirectory,
   ...invocationOptions
 } = {}) {
+  const scenarios = mode === 'source' ? sourceScenarios : packagedScenarios
+  const scenario = selectedScenario(argv, scenarios, mode)
   const createdUserDataDirectory = userDataDirectory === undefined
   const isolatedUserDataDirectory = userDataDirectory
     ?? mkdtempSyncImpl(join(tmpdir(), 'ancestryllm-wdio-'))
-  const fixture = argv.join('\n').includes('degraded') ? 'degraded' : 'success'
+  const fixture = scenario === sourceScenarios[2] ? 'degraded' : 'success'
   let preparedPackage = { environment }
   try {
     preparedPackage = mode === 'packaged'
-      ? preparePackagedScenarioImpl(selectedScenario(argv, packagedScenarios), environment)
+      ? preparePackagedScenarioImpl(scenario, environment)
       : { environment }
     const invocation = wdioInvocation(mode, argv, {
       ...invocationOptions,

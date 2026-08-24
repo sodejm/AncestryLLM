@@ -739,9 +739,9 @@ owned by Issues #11 and #102:
   A nonzero code, signal termination, timeout, force termination, CDP endpoint,
   browser-level shutdown command, broadcast close message, renderer-executed
   close shortcut, or verifier-only production backdoor cannot satisfy the
-  clean-shutdown evidence. The sidecar-substitution case uses `app.exit(0)` only
-  to terminate its disposable fail-closed verification package and records no
-  clean-shutdown claim. Issue #111's chat stream registers its cancellation,
+  clean-shutdown evidence. The sidecar-substitution verifier force-terminates
+  its disposable fail-closed package with `SIGKILL` or `taskkill /F` and records
+  no clean-shutdown claim. Issue #111's chat stream registers its cancellation,
   payload-free terminal audit, and restart-reconciliation drain before exposing
   its routes.
   The WebdriverIO verifier is a development-only harness. Its complete lock
