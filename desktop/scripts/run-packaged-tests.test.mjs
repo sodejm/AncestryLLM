@@ -36,13 +36,16 @@ test('packaged test invocation keeps a multiword grep filter as one argument', (
 
 test('packaged test runner executes the exact invocation without a shell', () => {
   const calls = []
-  const status = runPackagedTests(['--grep', 'multi word filter'], {
+  const status = runPackagedTests(['--grep', 'withholds and restores'], {
     cliPath: '/repo/desktop/node_modules/@wdio/cli/bin/wdio.js',
     desktopRoot: '/repo/desktop',
     executable: '/usr/bin/node',
     userDataDirectory: '/tmp/ancestryllm-test-profile',
     preparePackagedScenarioImpl(scenario, environment) {
-      assert.equal(scenario, 'multi word filter')
+      assert.equal(
+        scenario,
+        'withholds and restores the packaged sidecar through Diagnostics retry',
+      )
       return {
         environment: {
           ...environment,
@@ -66,7 +69,7 @@ test('packaged test runner executes the exact invocation without a shell', () =>
       '--suite',
       'packaged',
       '--mochaOpts.grep',
-      'multi word filter',
+      'withholds and restores',
     ],
     options: {
       cwd: '/repo/desktop',

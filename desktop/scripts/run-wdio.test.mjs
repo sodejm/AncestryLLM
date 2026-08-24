@@ -81,7 +81,7 @@ test('packaged preparation failure still removes the isolated profile', () => {
   }
 
   assert.throws(
-    () => runWdio('packaged', ['--grep', 'packaged scenario'], options),
+    () => runWdio('packaged', ['--grep', 'exercises first run'], options),
     /package preparation failed/u,
   )
   assert.deepEqual(calls, [{
@@ -105,7 +105,7 @@ test('packaged cleanup failure still removes the isolated profile', () => {
   }
 
   assert.throws(
-    () => runWdio('packaged', ['--grep', 'packaged scenario'], options),
+    () => runWdio('packaged', ['--grep', 'exercises first run'], options),
     /package cleanup failed/u,
   )
   assert.deepEqual(calls.filter((call) => call.cleanup !== undefined), [
@@ -122,6 +122,39 @@ test('packaged cleanup failure still removes the isolated profile', () => {
       },
     },
   ])
+})
+
+test('packaged grep resolves one declared scenario before package preparation', () => {
+  const calls = []
+  const status = runWdio('packaged', ['--grep', 'withholds'], runnerOptions(calls))
+
+  assert.equal(status, 0)
+  assert.equal(
+    calls.find((call) => call.preparation !== undefined)?.preparation.scenario,
+    'withholds and restores the packaged sidecar through Diagnostics retry',
+  )
+})
+
+test('packaged grep rejects zero declared scenario matches before preparation', () => {
+  const calls = []
+
+  assert.throws(
+    () => runWdio('packaged', ['--grep', 'missing scenario'], runnerOptions(calls)),
+    /must match exactly one declared packaged scenario; matched 0/u,
+  )
+  assert.equal(calls.some((call) => call.preparation !== undefined), false)
+  assert.equal(calls.some((call) => call.args !== undefined), false)
+})
+
+test('packaged grep rejects multiple declared scenario matches before preparation', () => {
+  const calls = []
+
+  assert.throws(
+    () => runWdio('packaged', ['--grep', 'packaged'], runnerOptions(calls)),
+    /must match exactly one declared packaged scenario; matched 4/u,
+  )
+  assert.equal(calls.some((call) => call.preparation !== undefined), false)
+  assert.equal(calls.some((call) => call.args !== undefined), false)
 })
 
 test('packaged preparation cleanup retries transient Windows file locks', () => {

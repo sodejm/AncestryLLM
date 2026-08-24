@@ -41,11 +41,21 @@ const packagedScenarios = Object.freeze([
   'launches production normally without a debugging transport',
 ])
 
-function selectedScenario(argv) {
+function selectedScenario(argv, scenarios) {
   const grepIndex = argv.findIndex((argument) => (
     argument === '--grep' || argument === '--mochaOpts.grep'
   ))
-  return grepIndex === -1 ? '' : argv[grepIndex + 1] ?? ''
+  if (grepIndex === -1) return ''
+  const pattern = argv[grepIndex + 1]
+  assert.equal(typeof pattern, 'string', 'WebdriverIO grep requires a pattern')
+  const matcher = new RegExp(pattern)
+  const matches = scenarios.filter((scenario) => matcher.test(scenario))
+  assert.equal(
+    matches.length,
+    1,
+    `WebdriverIO grep must match exactly one declared packaged scenario; matched ${matches.length}`,
+  )
+  return matches[0]
 }
 
 function packageRootForExecutable(applicationExecutable, platform = process.platform) {
@@ -256,7 +266,7 @@ export function runWdio(mode, argv, {
   let preparedPackage = { environment }
   try {
     preparedPackage = mode === 'packaged'
-      ? preparePackagedScenarioImpl(selectedScenario(argv), environment)
+      ? preparePackagedScenarioImpl(selectedScenario(argv, packagedScenarios), environment)
       : { environment }
     const invocation = wdioInvocation(mode, argv, {
       ...invocationOptions,
