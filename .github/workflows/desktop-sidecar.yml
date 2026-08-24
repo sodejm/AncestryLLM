@@ -458,20 +458,30 @@ jobs:
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --gate packageRuntimePassed \
             --gate rendererZeroEgressCanaryPassed \
-            --gate normalLaunchDebugSurfaceAbsentPassed \
             --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
+            --gate normalLaunchDebugSurfaceAbsentPassed \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "launches production normally without a debugging transport"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --gate packagedSidecarWithholdRetryPassed \
             --artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "withholds and restores the packaged sidecar through Diagnostics retry"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
@@ -479,19 +489,21 @@ jobs:
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             --gate packagedSidecarRestartExhaustionQuitPassed \
             --artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
-              --grep "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit"
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "exhausts packaged sidecar restarts and exits cleanly"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
@@ -501,8 +513,8 @@ jobs:
             --artifact faultEvidence="$ANCESTRYLLM_INTEGRITY_EVIDENCE" \
             --artifact failureDiagnostics="$ANCESTRYLLM_INTEGRITY_DIAGNOSTICS" \
             --artifact substitutedSidecar="$ANCESTRYLLM_SUBSTITUTED_SIDECAR" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
-              --grep "rejects a target-native substituted packaged sidecar before spawn"
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "rejects a substituted packaged sidecar before launch"
       - name: Inspect packaged Electron fuses
         shell: bash
         env:
@@ -515,6 +527,7 @@ jobs:
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
@@ -582,6 +595,7 @@ jobs:
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
@@ -596,7 +610,7 @@ jobs:
             --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
             --gate packagedFileGrantSmokePassed \
             --artifact fileGrantEvidence="$ANCESTRYLLM_FILE_GRANT_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "mediates opaque packaged open and save file grants"
       - name: Record target evidence
         shell: bash

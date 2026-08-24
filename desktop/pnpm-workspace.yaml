@@ -8,18 +8,25 @@ sharedWorkspaceLockfile: false
 overrides:
   extract-zip: npm:@electron-internal/extract-zip@1.0.5
   fast-uri: 3.1.5
+  deepmerge-ts: 8.0.0
   js-yaml@4.3.0: 4.3.1
   nanoid@<3.3.18: 3.3.18
+  serialize-javascript: 7.0.3
+  tsx: 4.21.1
 onlyBuiltDependencies:
   - electron
   - esbuild
 ignoredBuiltDependencies:
+  - edgedriver
   - electron-winstaller
+  - geckodriver
   - libxmljs2
 allowBuilds:
+  edgedriver: false
   electron: true
   electron-winstaller: false
   esbuild: true
+  geckodriver: false
   libxmljs2: false
 patchedDependencies:
   electron@39.8.10: patches/electron@39.8.10.patch

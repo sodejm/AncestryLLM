@@ -671,7 +671,7 @@ jobs:
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
-          pnpm --dir desktop run test:e2e:packaged \
+          node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Unmount macOS installer
         if: always() && runner.os == 'macOS'
@@ -756,7 +756,7 @@ jobs:
             throw "unsigned application Authenticode status is $($applicationSignature.Status)"
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
-          pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
@@ -898,7 +898,7 @@ jobs:
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
-            pnpm --dir desktop run test:e2e:packaged \
+            node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu signing and installation state
         if: always() && runner.os == 'Linux'
@@ -1253,7 +1253,7 @@ jobs:
           fi
           ditto --noqtn "${mounted_apps[0]}" "$installed_app"
           export ANCESTRYLLM_PACKAGED_APP="$installed_app/Contents/MacOS/ancestryllm"
-          pnpm --dir desktop run test:e2e:packaged \
+          node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Unmount macOS validation installer
         if: always() && runner.os == 'macOS'
@@ -1333,7 +1333,7 @@ jobs:
             throw "unsigned application Authenticode status is $($applicationSignature.Status)"
           }
           $env:ANCESTRYLLM_PACKAGED_APP = $application
-          pnpm --dir desktop run test:e2e:packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+          node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
@@ -1429,7 +1429,7 @@ jobs:
           test -x /opt/AncestryLLM/ancestryllm
           export ANCESTRYLLM_PACKAGED_APP=/opt/AncestryLLM/ancestryllm
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
-            pnpm --dir desktop run test:e2e:packaged \
+            node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
       - name: Remove temporary Ubuntu validation installation
         if: always() && runner.os == 'Linux'

@@ -63,7 +63,7 @@ runner creates a disposable D-Bus session, isolated owner-only keyring directori
 and a disposable native Secret Service collection, then removes them when the
 check exits. It verifies that the native service owns
 `org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
-before Playwright may start. A normal Linux launch ignores inherited D-Bus and
+before the WebdriverIO Electron session may start. A normal Linux launch ignores inherited D-Bus and
 XDG runtime selectors and binds the sidecar to the conventional
 `unix:path=/run/user/<uid>/bus` endpoint derived from the kernel-reported user
 ID. The exact verification runner instead binds its private D-Bus daemon to an
@@ -75,7 +75,7 @@ no verifier root, and the production build scan rejects the selector literal.
 In the verifier, Main requires an absolute Linux path and derives the sidecar's
 disposable home, XDG cache, configuration, data, and runtime paths plus the
 exact D-Bus address from that root; it does not inherit those values from
-Playwright's environment. The packaged process therefore reaches that verified
+the WebdriverIO runner's environment. The packaged process therefore reaches that verified
 service without selecting a Python test backend, injecting a packaged
 credential, or retaining runner keyring state. An unavailable or failed native
 service fails the row.
@@ -211,59 +211,45 @@ Each native row then:
     Focused broker and dialog tests separately cover cancellation, replacement
     races, sentinel preservation, alias rejection, and output locking.
 
-The packaged Playwright pass attaches through an ephemeral CDP endpoint bound
-to `127.0.0.1` solely so the harness can inspect and close the unpublished
-application. It does not pass credentials or expose the endpoint beyond the
-runner. A separate launch uses a fresh profile and no remote-debugging or
-Node-inspector argument; the test verifies that neither the normal process tree
-nor captured output exposes a debugging surface. The normal launch waits for a
-constant, non-sensitive lifecycle record emitted by the existing
+The packaged WebdriverIO pass launches the unpublished application through the
+pinned WebdriverIO Electron service. The service supplies the native Electron
+automation session, and the specifications use `browser.electron.execute` for
+bounded Main-process observations and lifecycle requests. No CDP endpoint,
+remote-debugging argument, browser-level CDP command, or external Chromium
+launch is part of product verification. A separate launch uses a fresh profile
+and the ordinary production executable; the test verifies that neither its
+process tree nor captured output exposes a debugging surface. The normal launch
+waits for a constant, non-sensitive lifecycle record emitted by the existing
 `ready-to-show` window path, so a sidecar or crash helper cannot satisfy the
-renderer-readiness gate. On macOS only, both automation launches pass Chromium's
-`--use-mock-keychain` because the ad hoc, unpackaged runner build cannot reliably
-use a login keychain. That automation-only switch
-is not part of a shipped launch path and does not replace the sidecar's OS
-keyring implementation. Linux uses the native Secret Service harness described
-above rather than a mock backend. The clean-quit check registers the native
-process exit listener first. On macOS it sends `SIGTERM`, exercising the
-production signal-to-quit path. Its named handler is installed before
-asynchronous runtime startup and idempotently re-armed when the Electron-ready
-runtime takes ownership, preventing initialization from restoring the signal's
-immediate-termination default. If that first request has not produced a verified
-exit after 21 seconds—strictly beyond the production supervisor's complete
-20-second stop boundary—the harness sends one later `SIGTERM` and waits under a
-separate 30-second deadline.
-This exercises the production contract that a failed stop remains fail-closed
-but does not leave a rejected shutdown promise cached forever. A second failure
-still fails the packaged test; force termination is reserved for test cleanup.
-On Windows and Linux the harness arms the native process-exit listener before
-requesting the final native window close under a bounded deadline. Windows
-validates the packaged process identifier, enumerates desktop top-level windows,
-and retains only handles whose owner PID exactly matches the launched package
-and whose caption is exactly the application-controlled `AncestryLLM` title.
-It requires exactly one such handle before posting `WM_CLOSE`; zero or multiple
-matches fail the gate. The lookup does not depend on taskbar visibility or
-main-window heuristics, which are not stable on hosted Windows. Linux uses
-Playwright's Chromium-native
-page-close request with unload handling enabled. The harness then releases the
-Playwright connection and requires a normal zero-code native process exit,
-proving the final-window path without a broadcast, renderer `window.close()`,
-raw CDP `Browser.close`, force termination, or verifier-only production
-backdoor. A source contract
-test also proves that Electron owns the supervisor and job preflight before
-payload verification or process launch can yield. Both platform paths request
-`app.quit()` and are vetoed while the
-fail-closed job preflight and verified sidecar shutdown run. Only the authorized
-completion callback uses `app.exit(0)`, after releasing the IPC boundary and
-sidecar supervisor, so Electron cannot enter a second platform-dependent quit
-cycle.
+renderer-readiness gate.
+
+On macOS only, both automation launches pass Chromium's `--use-mock-keychain`
+because the ad hoc, unpackaged runner build cannot reliably use a login
+keychain. That automation-only switch is not part of a shipped launch path and
+does not replace the sidecar's OS keyring implementation. Linux uses the native
+Secret Service harness described above rather than a mock backend.
+
+The clean-quit check asks Electron Main to call `app.quit()` through the native
+service, then independently observes that the packaged process PID disappears
+within the bounded deadline. On macOS, if that request has not completed after
+the production supervisor's 20-second stop boundary, one later `SIGTERM`
+exercises the production signal-to-quit path and must still produce native
+process exit. A second failure fails the test; forced termination is cleanup
+only. The source contract also proves that Electron owns the supervisor and job
+preflight before payload verification or process launch can yield. The quit is
+vetoed while fail-closed job preflight and verified sidecar shutdown run. Only
+the authorized completion callback uses `app.exit(0)`, after releasing the IPC
+boundary and sidecar supervisor, so Electron cannot enter a second
+platform-dependent quit cycle. The sidecar-substitution scenario cannot perform
+a normal sidecar drain; after recording the fail-closed result it uses
+`app.exit(0)` only to terminate its disposable verification package and does not
+count that termination as clean-shutdown evidence.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and
-unrelated-key behavior. CDP-injected keyboard events do not traverse that
-browser-process hook, so the packaged harness verifies layout at an equivalent
-200% renderer scale and states that distinction explicitly instead of claiming
-a native shortcut observation it did not make.
+unrelated-key behavior. The WebdriverIO harness applies an equivalent 200%
+renderer scale through the native Electron session and states that distinction
+explicitly instead of claiming a native shortcut observation it did not make.
 
 On macOS, the verification-only builder overlay applies an ephemeral ad hoc
 signature after electron-builder mutates the Electron executable and fuses.

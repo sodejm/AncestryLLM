@@ -4,14 +4,14 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
+PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
+PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
 PACKAGED_NATIVE_VERIFICATION = (
     ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
 )
 MAIN_INDEX = ROOT / "desktop" / "src" / "main" / "index.ts"
 PRODUCTION_NATIVE_VERIFICATION = ROOT / "desktop" / "src" / "main" / "native-verification.ts"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
-SIDECAR_PROCESS = ROOT / "desktop" / "src" / "main" / "sidecar-process.ts"
 SIDECAR_SUPERVISOR = ROOT / "desktop" / "src" / "main" / "sidecar-supervisor.ts"
 DESKTOP_WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
 
@@ -26,187 +26,55 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
     )
 
 
-def test_packaged_renderer_evidence_joins_browser_scoped_cdp_pids() -> None:
+def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
-    assert "browser.newBrowserCDPSession()" in source
-    assert "session.send('SystemInfo.getProcessInfo')" in source
-    assert re.search(r"\.filter\(\(record\) => record\.type === 'renderer'\)", source)
-    assert "rendererPids.has(record.pid)" in source
-    assert "await session.detach()" in source
-    assert re.search(
-        r"packagedProcessTreeMetrics\(\s*browser:\s*Browser,\s*rootPid:\s*number",
-        source,
-    )
-    assert "sandboxedRendererCorrelated" in source
-    assert re.search(
-        r"tree\.some\(\(record\)\s*=>\s*"
-        r"isSandboxedRendererProcess\(record,\s*rendererPids\)\)",
-        source,
-    )
-    assert re.search(
-        r"correlatedRendererProcesses\s*=\s*tree\.filter\("
-        r"\(record\)\s*=>\s*isSandboxedRendererProcess\(record,\s*rendererPids\)\)",
-        source,
-    )
-    assert "correlatedRendererProcesses.length" in source
+    assert "browser.electron.execute" in source
+    assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
+    assert "record.commandLine.includes('--type=renderer')" in source
+    assert "!record.commandLine.includes('--no-sandbox')" in source
     assert "app.enableSandbox()" in main_source
-    assert "commandLine.includes('--no-sandbox')" in source
-    assert "commandLine.includes('--disable-setuid-sandbox')" not in source
-    assert "commandLine.includes('--enable-sandbox')" not in source
-    assert not re.search(r"--type=renderer", source)
+    for forbidden in (
+        "newBrowserCDPSession",
+        "SystemInfo.getProcessInfo",
+        "connectOverCDP",
+        "remote-debugging-port",
+    ):
+        assert forbidden not in source
 
 
 def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 
-    ready_index = source.index(
-        "await expect(page.getByText(CAPABILITY_SUMMARY_READY)).toBeVisible()"
-    )
-    burst_index = source.index("running bounded packaged capability bridge burst")
+    ready_index = source.index("await browser.waitUntil(async () => browser.execute")
+    burst_index = source.index("const capabilityBurst = await browser.execute")
     assert ready_index < burst_index
-    assert "warming packaged capability bridge" not in source
-    assert "running bounded packaged capability bridge burst" in source
     assert "Array.from({ length: 32 }" in source
     assert "Promise.all(" in source
     assert "ancestry.getCapabilities()" in source
-    assert "successful: responses.filter((result) => result.ok).length" in source
-    assert "result.error?.code === 'BRIDGE_OVERLOADED'" in source
-    assert "expect(capabilityBurst.successful).toBe(32)" in source
-    assert "expect(capabilityBurst.overloaded).toBe(0)" in source
-    assert "expect(capabilityBurst.successful).toBeGreaterThan(0)" not in source
-    assert "capabilityBurst.successful + capabilityBurst.overloaded" not in source
-    assert "expect(capabilityBurst.unexpectedErrorCodes).toEqual([])" in source
+    assert "assert.deepEqual(capabilityBurst, {" in source
+    assert "successful: 32" in source
+    assert "overloaded: 0" in source
+    assert "unexpectedErrorCodes: []" in source
 
 
-def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> None:
+def test_packaged_clean_quit_requests_native_quit_and_releases_runtime() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
-    sidecar_process_source = SIDECAR_PROCESS.read_text(encoding="utf-8")
-    windows_close_start = source.index("async function requestWindowsPackagedWindowClose")
-    windows_close_end = source.index("\nasync function requestMacPackagedQuit", windows_close_start)
-    windows_close_source = source[windows_close_start:windows_close_end]
-    retry_start = source.index("async function requestMacPackagedQuit")
-    retry_end = source.index("\nasync function forceClosePackaged", retry_start)
-    retry_source = source[retry_start:retry_end]
-    close_start = source.index("async function closePackaged")
-    close_end = source.index("\nasync function launchPackaged", close_start)
-    close_source = source[close_start:close_end]
+    quit_start = source.index("async function quitApplication")
+    quit_end = source.index("\nasync function exitVerificationApplication", quit_start)
+    quit_source = source[quit_start:quit_end]
 
-    packaged_retry_match = re.search(
-        r"const packagedQuitRetryDelayMs = (?P<milliseconds>[\d_]+)", source
-    )
-    production_shutdown_match = re.search(
-        r"export const NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS = "
-        r"(?P<milliseconds>[\d_]+)",
-        sidecar_process_source,
-    )
-    assert packaged_retry_match is not None
-    assert production_shutdown_match is not None
-    packaged_retry_ms = int(packaged_retry_match.group("milliseconds").replace("_", ""))
-    production_shutdown_ms = int(production_shutdown_match.group("milliseconds").replace("_", ""))
-    assert packaged_retry_ms > production_shutdown_ms
-    assert "shutdownTimeoutMs: NATIVE_SIDECAR_SHUTDOWN_TIMEOUT_MS" in runtime_bridge_source
-    assert "const packagedQuitTimeoutMs = 30_000" in source
-    assert "waitForProcessExit(result.process, 15_000)" not in close_source
-    platform_index = close_source.index("process.platform === 'darwin'")
-    retry_index = close_source.index(
-        "processExit = requestMacPackagedQuit(result.process, result.shutdownDiagnostics)",
-        platform_index,
-    )
-    process_exit_match = re.search(
-        r"processExit = waitForProcessExit\(\s*result\.process,\s*"
-        r"packagedQuitTimeoutMs,\s*result\.shutdownDiagnostics,\s*\)",
-        close_source[retry_index:],
-    )
-    assert process_exit_match is not None
-    process_exit_index = retry_index + process_exit_match.start()
-    windows_platform_index = close_source.index("process.platform === 'win32'", process_exit_index)
-    windows_close_index = close_source.index(
-        "requestWindowsPackagedWindowClose(result.process)", windows_platform_index
-    )
-    window_close_index = close_source.index(
-        "result.page.close({ runBeforeUnload: true })", windows_close_index
-    )
-    browser_close_index = close_source.index("result.browser.close()", window_close_index)
-    status_index = close_source.index("const status = await processExit", browser_close_index)
+    assert "browser.electron.execute((electron) => {" in quit_source
+    assert "setTimeout(() => electron.app.quit(), 50)" in quit_source
+    assert "await expectProcessAbsent" in quit_source
+    assert "if (process.platform !== 'darwin') throw error" in quit_source
+    assert "process.kill(pid, 'SIGTERM')" in quit_source
+    assert "newBrowserCDPSession" not in quit_source
+    assert "Browser.close" not in quit_source
 
-    assert "new WebSocket(" not in close_source
-    assert "browserEndpoint" not in close_source
-    assert "newBrowserCDPSession" not in close_source
-    assert "session.send('Browser.close')" not in close_source
-    assert "result.page.keyboard.press('Meta+Q')" not in close_source
-    assert "window.close()" not in close_source
-    assert "result.page.evaluate" not in close_source
-    assert "result.process.kill('SIGKILL')" not in close_source
-    assert "child.kill('SIGKILL')" not in retry_source
-    assert "Number.isSafeInteger(pid)" in windows_close_source
-    assert "pid <= 0" in windows_close_source
-    assert "powershell.exe" in windows_close_source
-    assert "-NoProfile" in windows_close_source
-    assert "-NonInteractive" in windows_close_source
-    assert "EnumWindows" in windows_close_source
-    assert "GetWindowThreadProcessId" in windows_close_source
-    assert "GetWindowText" in windows_close_source
-    assert 'EntryPoint = "GetWindowTextW"' in windows_close_source
-    assert "expectedWindowTitle" in windows_close_source
-    assert "new StringBuilder(512)" in windows_close_source
-    assert "titleLength == expectedWindowTitle.Length" in windows_close_source
-    assert "StringComparison.Ordinal" in windows_close_source
-    assert "IsWindowVisible" not in windows_close_source
-    assert "GetWindow(" not in windows_close_source
-    assert "GW_OWNER" not in windows_close_source
-    assert "WM_CLOSE" in windows_close_source
-    assert "PostMessage" in windows_close_source
-    assert "targetProcessId" in windows_close_source
-    assert "RequestClose([uint32]${String(pid)}, 'AncestryLLM')" in windows_close_source
-    assert "$matchedWindowCount -ne 1" in windows_close_source
-    assert "[System.Diagnostics.Process]::GetProcessById" not in windows_close_source
-    assert "CloseMainWindow" not in windows_close_source
-    assert "HWND_BROADCAST" not in windows_close_source
-    assert "SendMessage" not in windows_close_source
-    assert "windowsHide: true" in windows_close_source
-    assert "taskkill.exe" not in windows_close_source
-    assert "/F" not in windows_close_source
-    assert "SIGKILL" not in windows_close_source
-    assert "Browser.close" not in windows_close_source
-    assert "window.close()" not in windows_close_source
-    assert "page.close" not in windows_close_source
-    assert re.search(
-        r"const initialExit = waitForProcessExit\(\s*child,\s*"
-        r"packagedQuitRetryDelayMs,\s*shutdownDiagnostics,\s*\)\s*"
-        r"requestQuit\('initial', initialExit\)\s*"
-        r"try \{\s*return await initialExit\s*\} catch \{.*?"
-        r"const retryExit = waitForProcessExit\(child, packagedQuitTimeoutMs, shutdownDiagnostics\)\s*"
-        r"requestQuit\('retry', retryExit\)\s*return retryExit",
-        retry_source,
-        re.DOTALL,
-    )
-    assert re.search(
-        r"if \(!child\.kill\('SIGTERM'\)\) \{.*?"
-        r"void processExit\.catch\(\(\) => undefined\)\s*"
-        r"throw new Error\(`Packaged app rejected the macOS \$\{attempt\} quit request\.`\)\s*"
-        r"\}",
-        retry_source,
-        re.DOTALL,
-    )
-    assert re.search(
-        r"await withinDeadline\(\s*'closing packaged application window',\s*"
-        r"packagedWindowCloseTimeoutMs,\s*"
-        r"\(\) => result\.page\.close\(\{ runBeforeUnload: true \}\),\s*\)",
-        close_source,
-    )
-    assert "runBeforeUnload: false" not in close_source
-    assert "'closing packaged browser automation'" in close_source
-    assert "packagedCleanupTimeoutMs" in close_source
-    assert "const packagedWindowCloseTimeoutMs = 20_000" in source
-    assert platform_index < retry_index < process_exit_index
-    assert process_exit_index < windows_platform_index < windows_close_index
-    assert windows_close_index < window_close_index < browser_close_index
-    assert browser_close_index < status_index
-    assert "expect(status).toEqual({ code: 0, signal: null })" in close_source
     assert "const requestVerifiedAppQuit = (): void => { app.quit() }" in main_source
     assert "process.off('SIGTERM', requestVerifiedAppQuit)" in main_source
     assert "process.on('SIGTERM', requestVerifiedAppQuit)" in main_source
@@ -223,6 +91,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         < runtime_rearm_index
         < packaged_window_index
     )
+
     own_supervisor_index = runtime_bridge_source.index(
         "onSupervisorOwned?.(supervisor, prepareJobShutdown)"
     )
@@ -234,7 +103,6 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         "!shutdownAuthorized && (sidecarSupervisor !== undefined || shutdownPromise !== undefined)"
         in main_source
     )
-    assert "shutdownPromise !== undefined," in main_source
     assert "app.on('window-all-closed', () => { app.quit() })" in main_source
     assert "supervisor.isExplicitSafeEmpty()" in main_source
     assert "const shutdownProgress: AppShutdownProgress = { jobsPrepared: false }" in main_source
@@ -242,6 +110,7 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
         r"\(\) => supervisor\.isExplicitSafeEmpty\(\),\s*shutdownProgress,",
         main_source,
     )
+
     verified_exit_start = main_source.index(
         "() => {\n          disposeIpcBoundary()",
         main_source.index("shutdownPromise = completeAppShutdown("),
@@ -252,7 +121,6 @@ def test_packaged_clean_quit_requests_native_quit_and_releases_automation() -> N
     supervisor_release_index = verified_exit_source.index("sidecarSupervisor = undefined")
     authorization_index = verified_exit_source.index("shutdownAuthorized = true")
     exit_index = verified_exit_source.index("app.exit(0)")
-
     assert dispose_index < supervisor_release_index < authorization_index < exit_index
     assert "app.quit()" not in verified_exit_source
 
@@ -302,7 +170,8 @@ def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> N
     assert "source.XDG_DATA_HOME" not in supervisor_source
     assert (
         "environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'"
-    ) in supervisor_source
+        in supervisor_source
+    )
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
@@ -310,12 +179,17 @@ def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
     assert "outputContainsWindowReadyRecord(output)" in source
-    assert "expect(windowReady).toBe(true)" in source
+    assert "assert.equal(windowReady, true)" in source
     assert "tree.length > 1" not in source
     assert "console.info(WINDOW_READY_RECORD)" in main_source
     assert "window.once('ready-to-show'" in main_source
-    assert "expect([...observedCommandLines].join('\\n')).not.toMatch(DEBUG_ARGUMENT)" in source
-    assert "expect(output).not.toContain('DevTools listening on ')" in source
+    assert "const remoteStem = ['remote', 'debugging'].join('-')" in source
+    assert "assert.doesNotMatch(launchArguments.join('\\n'), disallowedControlArgument)" in source
+    assert (
+        "assert.doesNotMatch([...observedCommandLines].join('\\n'), "
+        "disallowedControlArgument)" in source
+    )
+    assert "assert.doesNotMatch(output, /DevTools listening on /u)" in source
 
 
 def test_local_runtime_cli_shares_the_desktop_single_instance_lock() -> None:
@@ -336,93 +210,76 @@ def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> Non
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 
     assert re.search(
-        r"async function removeTemporaryPackage\(root: string\): Promise<void> \{\s*"
-        r"await rm\(root, \{\s*recursive: true,\s*force: true,\s*"
-        r"maxRetries: 10,\s*retryDelay: 100,\s*\}\)\s*\}",
+        r"await rm\(root, \{\s*force: true,\s*recursive: true,\s*"
+        r"maxRetries: 10,\s*retryDelay: 100\s*\}\)",
         source,
     )
-    assert source.count("await removeTemporaryPackage(root)") == 5
 
 
-def test_packaged_cleanup_terminates_the_windows_process_tree_with_a_deadline() -> None:
+def test_packaged_cleanup_terminates_the_process_tree_with_a_deadline() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
 
     assert "async function forceCloseProcess(child: ChildProcessWithoutNullStreams)" in source
     assert "taskkill.exe" in source
     assert "['/PID', String(child.pid), '/T', '/F']" in source
-    assert "timeout: 10_000" in source
-    assert "await forceCloseProcess(result.process)" in source
+    assert "child.kill('SIGTERM')" in source
+    assert "child.kill('SIGKILL')" in source
     assert "await forceCloseProcess(child)" in source
 
 
 def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
-    deadline_helper = PACKAGED_SPEC.parent / "packaged-deadline.ts"
-    deadline_source = deadline_helper.read_text(encoding="utf-8")
+    runner_source = PACKAGED_RUNNER.read_text(encoding="utf-8")
 
     assert (
         "const integrityDiagnosticsPath = process.env.ANCESTRYLLM_INTEGRITY_DIAGNOSTICS" in source
     )
-    assert "import { withinDeadline } from './packaged-deadline'" in source
-    assert "export async function withinDeadline<T>" in deadline_source
-    assert "Timed out while ${operation}" in deadline_source
-    assert "const packagedLaunchTimeoutMs = 120_000" in source
-    assert (
-        "return await withinDeadline(`launching packaged ${phase}`, packagedLaunchTimeoutMs"
-        in source
-    )
-    assert (
-        "await page.waitForLoadState('domcontentloaded', { timeout: packagedAttachTimeoutMs })"
-        in source
-    )
-    assert (
-        "withinDeadline('closing failed packaged browser automation', packagedCleanupTimeoutMs"
-        in source
-    )
-    assert "return withinDeadline('reading packaged startup diagnostics'" in source
-    assert "Packaged startup diagnostics did not match expected state" in source
-    assert "JSON.stringify(actual)" in source
+    assert "type StartupExpectation" in source
+    assert "await browser.waitUntil" in source
+    assert "let lastActual: StartupDiagnostics | null = null" in source
+    assert "lastActual = actual" in source
+    assert "Packaged startup diagnostics did not match" in source
+    assert "JSON.stringify(lastActual)" in source
     assert "async function writeIntegrityDiagnostics" in source
-    assert "let cleanupFailure: unknown" in source
-    assert "let primaryFailurePhase: string | null = null" in source
-    assert "primaryFailurePhase = phase" in source
-    assert "let cleanupFailurePhase: string | null = null" in source
-    assert "cleanupFailurePhase = phase" in source
-    assert "phase: primaryFailurePhase ?? cleanupFailurePhase ?? phase" in source
-    assert "status: failure || cleanupFailure ? 'failed' : 'passed'" in source
+    assert "let phase = 'launch and readiness'" in source
+    assert "let failure: unknown" in source
+    assert "failure = error" in source
+    assert "status: failure ? 'failed' : 'passed'" in source
     assert "await writeIntegrityDiagnostics" in source
+    assert "} finally {" in runner_source
+    assert "if (preparedPackage.cleanupPath)" in runner_source
+    assert (
+        "rmSyncImpl(preparedPackage.cleanupPath, { force: true, recursive: true })" in runner_source
+    )
 
 
 def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     helper_start = source.index("async function expectStartupDiagnostics")
-    helper_end = source.index("\nfunction packageRootForExecutable", helper_start)
+    helper_end = source.index("\nasync function expectSafeDiagnosticsAlert", helper_start)
     helper_source = source[helper_start:helper_end]
 
-    poll_start = helper_source.index("await expect.poll")
-    match_index = helper_source.index(").toMatchObject(expected)", poll_start)
-    poll_source = helper_source[poll_start:match_index]
-
-    assert "startupDiagnostics(page).catch(() => null)" in poll_source
-    assert "return actual ?? {}" in poll_source
-    assert ").toMatchObject(expected)" in helper_source
+    assert "startupDiagnostics().catch(() => null)" in helper_source
+    assert "if (actual === null) return false" in helper_source
+    assert "return matchesStartup(actual, expected)" in helper_source
+    assert "lastActual = actual" in helper_source
 
 
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
-    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    source = PACKAGED_RUNNER.read_text(encoding="utf-8")
 
-    assert "async function prepareCopiedLinuxSandbox(packageRoot: string)" in source
+    assert "function prepareCopiedLinuxSandbox(packageRoot, execFileSyncImpl)" in source
     assert "if (process.platform !== 'linux') return" in source
     assert "const sandboxPath = join(packageRoot, 'chrome-sandbox')" in source
     assert "sandbox.isSymbolicLink()" in source
     assert "sandbox.isFile()" in source
-    assert "['--non-interactive', 'chown', 'root:root', '--', sandboxPath]" in source
-    assert "['--non-interactive', 'chmod', '4755', '--', sandboxPath]" in source
-    assert "prepared.uid !== 0" in source
-    assert "prepared.gid !== 0" in source
-    assert "(prepared.mode & 0o7777) !== 0o4755" in source
-    assert "await prepareCopiedLinuxSandbox(packageRoot)" in source
-    assert source.index("await cp(sourcePackageRoot, packageRoot") < source.index(
-        "await prepareCopiedLinuxSandbox(packageRoot)"
+    assert "'--non-interactive', 'chown', 'root:root', '--', sandboxPath" in source
+    assert "'--non-interactive', 'chmod', '4755', '--', sandboxPath" in source
+    assert "prepared.uid, 0" in source
+    assert "prepared.gid, 0" in source
+    assert "prepared.mode & 0o7777, 0o4755" in source
+    assert "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)" in source
+    assert source.index("cpSync(sourcePackageRoot, copiedPackageRoot") < source.index(
+        "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)"
     )
-    assert "args.push('--no-sandbox')" not in source
+    assert "--no-sandbox" not in source

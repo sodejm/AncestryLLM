@@ -177,15 +177,15 @@ def test_electron_builder_includes_the_nsis_binary_extraction_fix() -> None:
     assert development_dependencies["electron-builder-squirrel-windows"] == "26.15.7"
 
 
-def test_release_packaged_smoke_forwards_the_playwright_filter_without_a_pnpm_separator() -> None:
+def test_release_packaged_smoke_forwards_the_webdriverio_filter_without_a_pnpm_separator() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     scenario = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence"
     )
 
-    assert workflow.count("test:e2e:packaged") == 6
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
     assert workflow.count(f'--grep "{scenario}"') == 6
-    assert re.search(r"test:e2e:packaged --\s", workflow) is None
+    assert re.search(r"run-wdio\.mjs packaged --\s", workflow) is None
 
 
 def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> None:
@@ -220,7 +220,7 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
         "desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus "
         "xvfb-run --auto-servernum" in verification_step
     )
-    assert "pnpm --dir desktop run test:e2e:packaged" in verification_step
+    assert "node desktop/scripts/run-wdio.mjs packaged" in verification_step
 
 
 def test_release_installer_runtime_validation_uses_platform_native_copy_and_install() -> None:

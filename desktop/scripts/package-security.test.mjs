@@ -87,8 +87,10 @@ test('dependency overrides preserve the audited transitive remediation floors', 
     pnpmWorkspace,
     /^ {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5$/m,
   )
+  assert.match(pnpmWorkspace, /^ {2}deepmerge-ts: 8\.0\.0$/m)
   assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.1$/m)
   assert.match(pnpmWorkspace, /^ {2}nanoid@<3\.3\.18: 3\.3\.18$/m)
+  assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.0\.3$/m)
   assert.match(
     pnpmWorkspace,
     /^patchedDependencies:\n {2}electron@39\.8\.10: patches\/electron@39\.8\.10\.patch$/m,
