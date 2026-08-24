@@ -93,6 +93,7 @@ jobs:
             project_include_milestone="true"
             project_milestone_title="$(jq -r '.project.milestone.title' .github/release-config.json)"
             project_milestone_args=(
+              --repository-owner "$GITHUB_REPOSITORY_OWNER"
               --repository "$project_repository"
               --milestone-number "$project_milestone_number"
               --milestone-title "$project_milestone_title"
@@ -108,6 +109,7 @@ jobs:
             -f query="$project_query" \
             -f owner="$project_owner" \
             -F number="$project_number" \
+            -f repositoryOwner="$GITHUB_REPOSITORY_OWNER" \
             -f repository="$project_repository" \
             -F milestoneNumber="$project_milestone_number" \
             -F includeMilestone="$project_include_milestone" |

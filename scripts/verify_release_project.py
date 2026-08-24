@@ -39,6 +39,7 @@ class ProjectGate:
     priorities: tuple[str, ...]
     status: str
     validation: str
+    repository_owner: str | None = None
     repository: str | None = None
     milestone_number: int | None = None
     milestone_title: str | None = None
@@ -139,13 +140,24 @@ def _validate_project_gate(gate: ProjectGate) -> None:
         raise ProjectVerificationError("release priorities are malformed")
     if len(set(gate.priorities)) != len(gate.priorities):
         raise ProjectVerificationError("release priorities must be unique")
-    milestone_values = (gate.repository, gate.milestone_number, gate.milestone_title)
+    milestone_values = (
+        gate.repository_owner,
+        gate.repository,
+        gate.milestone_number,
+        gate.milestone_title,
+    )
     if any(value is not None for value in milestone_values) and not all(
         value is not None for value in milestone_values
     ):
         raise ProjectVerificationError(
-            "repository and milestone coordinates must be supplied together"
+            "repository owner, repository, and milestone coordinates must be supplied together"
         )
+    if gate.repository_owner is not None and (
+        not isinstance(gate.repository_owner, str)
+        or not gate.repository_owner.strip()
+        or "/" in gate.repository_owner
+    ):
+        raise ProjectVerificationError("release repository owner is malformed")
     if gate.repository is not None and (
         not isinstance(gate.repository, str)
         or not gate.repository.strip()
@@ -520,7 +532,7 @@ def _milestone_issues(
     if gate.repository is None or gate.milestone_number is None or gate.milestone_title is None:
         return {}
 
-    expected_repository = f"{gate.owner}/{gate.repository}"
+    expected_repository = f"{gate.repository_owner}/{gate.repository}"
     baseline: dict[tuple[str, int], str] | None = None
     for page in _pages(payload):
         data = _require_mapping(page.get("data"), "GitHub Project response data")
@@ -549,6 +561,37 @@ def _milestone_issues(
             raise ProjectVerificationError("GitHub release milestone issues are malformed")
         if page_info["hasNextPage"]:
             raise ProjectVerificationError("GitHub release milestone pagination is incomplete")
+
+        pull_requests = _require_mapping(
+            milestone_mapping.get("pullRequests"),
+            "GitHub release milestone pull requests",
+        )
+        pull_request_nodes = pull_requests.get("nodes")
+        pull_request_page_info = _require_mapping(
+            pull_requests.get("pageInfo"),
+            "GitHub release milestone pull request pagination",
+        )
+        if not isinstance(pull_request_nodes, list) or not isinstance(
+            pull_request_page_info.get("hasNextPage"), bool
+        ):
+            raise ProjectVerificationError("GitHub release milestone pull requests are malformed")
+        if pull_request_page_info["hasNextPage"]:
+            raise ProjectVerificationError(
+                "GitHub release milestone pull request pagination is incomplete"
+            )
+        for node in pull_request_nodes:
+            pull_request = _require_mapping(node, "GitHub release milestone pull request")
+            if pull_request.get("__typename") != "PullRequest":
+                raise ProjectVerificationError(
+                    "GitHub release milestone pull request data is malformed"
+                )
+            number = _require_positive_integer(
+                pull_request.get("number"),
+                "GitHub release milestone pull request number",
+            )
+            raise ProjectVerificationError(
+                f"GitHub release milestone contains pull request #{number}"
+            )
 
         current: dict[tuple[str, int], str] = {}
         for node in nodes:
@@ -642,7 +685,7 @@ def verify_project_schema(payload: object, gate: ProjectGate) -> list[ProjectIss
         milestone_items = _milestone_issues(payload, gate)
         project_keys = set(by_issue)
         milestone_keys = set(milestone_items)
-        expected_repository = f"{gate.owner}/{gate.repository}"
+        expected_repository = f"{gate.repository_owner}/{gate.repository}"
         milestone_only = milestone_keys - project_keys
         if milestone_only:
             raise ProjectVerificationError(
@@ -1030,6 +1073,7 @@ def main() -> int:
     )
     parser.add_argument("--status", required=True)
     parser.add_argument("--validation", required=True)
+    parser.add_argument("--repository-owner")
     parser.add_argument("--repository")
     parser.add_argument("--milestone-number", type=int)
     parser.add_argument("--milestone-title")
@@ -1052,6 +1096,7 @@ def main() -> int:
     if (args.security_policy is None) != (args.security_report is None):
         parser.error("--security-policy and --security-report must be supplied together")
     milestone_coordinates = (
+        args.repository_owner,
         args.repository,
         args.milestone_number,
         args.milestone_title,
@@ -1060,7 +1105,8 @@ def main() -> int:
         value is not None for value in milestone_coordinates
     ):
         parser.error(
-            "--repository, --milestone-number, and --milestone-title must be supplied together"
+            "--repository-owner, --repository, --milestone-number, and --milestone-title "
+            "must be supplied together"
         )
     gate = ProjectGate(
         owner=args.project_owner,
@@ -1070,6 +1116,7 @@ def main() -> int:
         priorities=tuple(args.priority),
         status=args.status,
         validation=args.validation,
+        repository_owner=args.repository_owner,
         repository=args.repository,
         milestone_number=args.milestone_number,
         milestone_title=args.milestone_title,

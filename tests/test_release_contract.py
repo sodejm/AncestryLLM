@@ -442,6 +442,7 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
         assert ".project.milestone.number // 1" in workflow
         assert 'project_include_milestone="false"' in workflow
         assert 'project_include_milestone="true"' in workflow
+        assert '-f repositoryOwner="$GITHUB_REPOSITORY_OWNER"' in workflow
         assert '-f repository="$project_repository"' in workflow
         assert '-F milestoneNumber="$project_milestone_number"' in workflow
         assert '-F includeMilestone="$project_include_milestone"' in workflow
@@ -455,10 +456,12 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
 
     assert "projectV2(number: $number)" in project_query
     assert "blockedBy(first: 100)" in project_query
-    assert "repository(owner: $owner, name: $repository)" in project_query
+    assert "$repositoryOwner: String!" in project_query
+    assert "repository(owner: $repositoryOwner, name: $repository)" in project_query
     assert "@include(if: $includeMilestone)" in project_query
     assert "milestone(number: $milestoneNumber)" in project_query
     assert "issues(first: 100)" in project_query
+    assert "pullRequests(first: 100)" in project_query
 
 
 def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_proof() -> None:

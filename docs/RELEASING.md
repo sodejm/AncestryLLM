@@ -117,6 +117,12 @@ for that gate. Proof, readiness, and release workflows must use both files
 without embedding a divergent query or inferring policy from issue titles,
 bodies, labels, or comments.
 
+The Project owner and repository owner are independent coordinates: workflows
+take the former from release configuration and the latter from
+`GITHUB_REPOSITORY_OWNER`. For schema v3 releases, the gate compares the exact
+Project iteration issue set with the exact repository milestone issue set and
+fails if the milestone contains any pull request.
+
 When the plan changes, update the issue number, owner, iteration, dependency
 edge, iteration order, and consumer in the same reviewed pull request wherever
 they are affected. Apply the corresponding owner, Project field, and native

@@ -113,6 +113,7 @@ def _release_page(
     items: list[dict[str, object]],
     milestone_items: list[dict[str, object]],
     *,
+    milestone_pull_requests: list[dict[str, object]] | None = None,
     milestone_number: int = 6,
     milestone_title: str = "0.7.0 Genealogy Workflows",
     milestone_has_next_page: bool = False,
@@ -128,6 +129,13 @@ def _release_page(
                 "pageInfo": {
                     "hasNextPage": milestone_has_next_page,
                     "endCursor": "milestone-cursor" if milestone_has_next_page else None,
+                },
+            },
+            "pullRequests": {
+                "nodes": milestone_pull_requests or [],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
                 },
             },
         },
@@ -156,13 +164,14 @@ def gate(verifier):
 @pytest.fixture()
 def release_gate(verifier):
     return verifier.ProjectGate(
-        owner="sodejm",
+        owner="release-project-owner",
         number=2,
         title="AncestryLLM Feature Releases",
         iteration="v0.7.0 — Genealogy workflows",
         priorities=("P0", "P1"),
         status="Done",
         validation="Verified",
+        repository_owner="sodejm",
         repository="AncestryLLM",
         milestone_number=6,
         milestone_title="0.7.0 Genealogy Workflows",
@@ -443,9 +452,13 @@ def test_rejects_project_and_milestone_issue_set_mismatch(
 def test_rejects_pull_request_in_release_milestone(verifier, release_gate):
     item = _item(202, iteration=release_gate.iteration)
 
-    with pytest.raises(verifier.ProjectVerificationError, match="non-Issue item"):
+    with pytest.raises(verifier.ProjectVerificationError, match="contains pull request #470"):
         verifier.verify_project_schema(
-            _release_page([item], [_milestone_issue(202, typename="PullRequest")]),
+            _release_page(
+                [item],
+                [_milestone_issue(202)],
+                milestone_pull_requests=[_milestone_issue(470, typename="PullRequest")],
+            ),
             release_gate,
         )
 
