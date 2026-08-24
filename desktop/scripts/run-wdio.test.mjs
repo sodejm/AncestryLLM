@@ -233,3 +233,23 @@ test('complete packaged plan prepares and cleans every isolated scenario', () =>
     options.env.ANCESTRYLLM_PACKAGED_EXECUTABLE === '/repo/release/ancestryllm'
   )), true)
 })
+
+test('non-filter options are forwarded to every isolated packaged scenario', () => {
+  const calls = []
+  const status = runWdioPlan('packaged', ['--logLevel', 'debug'], runnerOptions(calls))
+  const invocations = calls.filter((call) => call.args !== undefined)
+  const preparations = calls
+    .filter((call) => call.preparation !== undefined)
+    .map(({ preparation }) => preparation.scenario)
+
+  assert.equal(status, 0)
+  assert.equal(invocations.length, 6)
+  assert.equal(preparations.length, 6)
+  assert.equal(new Set(preparations).size, 6)
+  assert.equal(preparations.every((scenario) => scenario.length > 0), true)
+  assert.equal(invocations.every(({ args }) => (
+    args.includes('--mochaOpts.grep')
+      && args.includes('--logLevel')
+      && args.includes('debug')
+  )), true)
+})

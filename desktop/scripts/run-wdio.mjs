@@ -308,9 +308,12 @@ export function runWdio(mode, argv, {
  */
 export function runWdioPlan(mode, argv, options = {}) {
   const scenarios = mode === 'source' ? sourceScenarios : packagedScenarios
-  const invocations = argv.length === 0
-    ? scenarios.map((scenario) => ['--grep', scenario])
-    : [argv]
+  const hasScenarioFilter = argv.some((argument) => (
+    argument === '--grep' || argument === '--mochaOpts.grep'
+  ))
+  const invocations = hasScenarioFilter
+    ? [argv]
+    : scenarios.map((scenario) => ['--grep', scenario, ...argv])
   for (const invocationArguments of invocations) {
     const status = runWdio(mode, invocationArguments, options)
     if (status !== 0) return status
