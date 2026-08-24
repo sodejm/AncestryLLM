@@ -164,12 +164,16 @@ export function preparePackagedScenario(scenario, environment, {
     }
     return { environment: preparedEnvironment, cleanupPath: root }
   } catch (error) {
-    rmSyncImpl(root, {
-      force: true,
-      maxRetries: 10,
-      recursive: true,
-      retryDelay: 100,
-    })
+    try {
+      rmSyncImpl(root, {
+        force: true,
+        maxRetries: 10,
+        recursive: true,
+        retryDelay: 100,
+      })
+    } catch {
+      // Best-effort cleanup must not replace the actionable preparation failure.
+    }
     throw error
   }
 }

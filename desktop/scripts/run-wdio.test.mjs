@@ -160,6 +160,50 @@ test('packaged preparation cleanup retries transient Windows file locks', () => 
   }
 })
 
+test('packaged preparation cleanup failure preserves the preparation error', () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), 'ancestryllm-wdio-source-'))
+  const cleanupRoot = mkdtempSync(join(tmpdir(), 'ancestryllm-wdio-copy-'))
+  const packageRoot = process.platform === 'darwin'
+    ? join(sourceRoot, 'AncestryLLM.app')
+    : join(sourceRoot, 'package')
+  const executable = process.platform === 'darwin'
+    ? join(packageRoot, 'Contents', 'MacOS', 'AncestryLLM')
+    : join(packageRoot, process.platform === 'win32' ? 'AncestryLLM.exe' : 'ancestryllm')
+  const preparationError = new Error('package preparation failed')
+  const cleanupError = new Error('package cleanup failed')
+  mkdirSync(join(packageRoot, process.platform === 'darwin' ? 'Contents/MacOS' : ''), {
+    recursive: true,
+  })
+  writeFileSync(executable, '')
+  if (process.platform === 'linux') writeFileSync(join(packageRoot, 'chrome-sandbox'), '')
+
+  try {
+    assert.throws(
+      () => preparePackagedScenario(
+        'withholds and restores the packaged sidecar through Diagnostics retry',
+        { ANCESTRYLLM_PACKAGED_APP: executable },
+        {
+          execFileSyncImpl() { throw preparationError },
+          mkdtempSyncImpl: () => cleanupRoot,
+          rmSyncImpl() { throw cleanupError },
+        },
+      ),
+      (error) => {
+        if (process.platform === 'win32') {
+          assert.notEqual(error, cleanupError)
+          assert.match(error.message, /ENOENT/u)
+        } else {
+          assert.equal(error, preparationError)
+        }
+        return true
+      },
+    )
+  } finally {
+    rmSync(sourceRoot, { force: true, recursive: true })
+    rmSync(cleanupRoot, { force: true, recursive: true })
+  }
+})
+
 test('complete source plan runs every scenario through a fresh profile', () => {
   const calls = []
   const status = runWdioPlan('source', [], runnerOptions(calls))
