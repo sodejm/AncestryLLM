@@ -1,5 +1,12 @@
-# Shared schema-v1 query for fail-closed Version 1 release-project verification.
-query($owner: String!, $number: Int!, $endCursor: String) {
+# Shared query for fail-closed release-project and optional milestone verification.
+query(
+  $owner: String!
+  $number: Int!
+  $endCursor: String
+  $repository: String!
+  $milestoneNumber: Int!
+  $includeMilestone: Boolean!
+) {
   user(login: $owner) {
     projectV2(number: $number) {
       number
@@ -60,6 +67,27 @@ query($owner: String!, $number: Int!, $endCursor: String) {
                 }
               }
             }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+  repository(owner: $owner, name: $repository) @include(if: $includeMilestone) {
+    nameWithOwner
+    milestone(number: $milestoneNumber) {
+      number
+      title
+      issues(first: 100) {
+        nodes {
+          __typename
+          number
+          state
+          repository {
+            nameWithOwner
           }
         }
         pageInfo {

@@ -145,6 +145,10 @@ def test_release_docs_and_manifest_define_immutable_cli_distribution() -> None:
     assert "PyPI: unavailable" in releasing
     assert "GitHub Project 2" in releasing
     assert "Release iteration" in releasing
+    assert "Schema 3" in releasing
+    assert "`project.priorities`" in releasing
+    assert "exactly the same issues" in releasing
+    assert "active v0.6.0 configuration remains on schema 2" in normalized_releasing
     assert "ANCESTRYLLM_PROJECT_READ_TOKEN" in releasing
     assert "read:project" in releasing
     assert "fork or Dependabot pull request cannot receive the secret" in releasing
@@ -423,14 +427,25 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
 def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    proof = (ROOT / ".github/workflows/release-project-gate-proof.yml").read_text(encoding="utf-8")
     project_query = (ROOT / "config/release-project-query-v1.graphql").read_text(encoding="utf-8")
 
-    for workflow in (readiness, release):
+    for workflow in (readiness, release, proof):
         assert "verify_release_configuration.py" in workflow
         assert "--config .github/release-config.json" in workflow
         assert "verify_release_project.py" in workflow
         assert 'project_query="$(< config/release-project-query-v1.graphql)"' in workflow
         assert '--project-owner "$project_owner"' in workflow
+        assert "(.project.priorities // [.project.priority])[]" in workflow
+        assert 'project_priority_args+=(--priority "$project_priority")' in workflow
+        assert '"${project_priority_args[@]}"' in workflow
+        assert ".project.milestone.number // 1" in workflow
+        assert 'project_include_milestone="false"' in workflow
+        assert 'project_include_milestone="true"' in workflow
+        assert '-f repository="$project_repository"' in workflow
+        assert '-F milestoneNumber="$project_milestone_number"' in workflow
+        assert '-F includeMilestone="$project_include_milestone"' in workflow
+        assert '"${project_milestone_args[@]}"' in workflow
         assert "--paginate --slurp" in workflow
         assert "verify_release_milestone.py" not in workflow
         assert "/milestones/" not in workflow
@@ -440,6 +455,10 @@ def test_release_workflows_enforce_project_native_gate_and_paginate() -> None:
 
     assert "projectV2(number: $number)" in project_query
     assert "blockedBy(first: 100)" in project_query
+    assert "repository(owner: $owner, name: $repository)" in project_query
+    assert "@include(if: $includeMilestone)" in project_query
+    assert "milestone(number: $milestoneNumber)" in project_query
+    assert "issues(first: 100)" in project_query
 
 
 def test_release_project_queries_require_a_dedicated_read_token_and_safe_hosted_proof() -> None:

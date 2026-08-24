@@ -45,6 +45,26 @@ def _project_configuration() -> dict[str, object]:
     }
 
 
+def _project_v3_configuration() -> dict[str, object]:
+    return {
+        "schema_version": 3,
+        "release": "0.7.0",
+        "project": {
+            "owner": "sodejm",
+            "number": 2,
+            "title": "AncestryLLM Feature Releases",
+            "iteration": "v0.7.0 — Genealogy workflows",
+            "priorities": ["P0", "P1"],
+            "milestone": {
+                "number": 6,
+                "title": "0.7.0 Genealogy Workflows",
+            },
+            "status": "Done",
+            "validation": "Verified",
+        },
+    }
+
+
 def test_accepts_exact_release_control_configuration() -> None:
     configuration = verifier.validate_release_configuration(
         _configuration(),
@@ -73,12 +93,30 @@ def test_accepts_project_native_release_configuration() -> None:
     assert configuration.project_validation == "Verified"
 
 
+def test_accepts_project_and_milestone_release_configuration() -> None:
+    configuration = verifier.validate_release_configuration(
+        _project_v3_configuration(),
+        expected_version="0.7.0",
+    )
+
+    assert configuration.release == "0.7.0"
+    assert configuration.project_owner == "sodejm"
+    assert configuration.project_number == 2
+    assert configuration.project_iteration == "v0.7.0 — Genealogy workflows"
+    assert configuration.project_priority is None
+    assert configuration.project_priorities == ("P0", "P1")
+    assert configuration.milestone_number == 6
+    assert configuration.milestone_title == "0.7.0 Genealogy Workflows"
+    assert configuration.project_status == "Done"
+    assert configuration.project_validation == "Verified"
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     (
         ({"release": "0.3.0"}, "does not match"),
         ({"release": "0.3"}, "stable SemVer"),
-        ({"schema_version": 3}, "schema_version"),
+        ({"schema_version": 4}, "schema_version"),
         ({"unexpected": True}, "keys are invalid"),
         (
             {"milestone": {"number": True, "title": "0.4.0 Genealogy Core Facades"}},
@@ -95,6 +133,17 @@ def test_rejects_mismatched_or_malformed_configuration(
     configuration.update(mutation)
 
     with pytest.raises(ValueError, match=message):
+        verifier.validate_release_configuration(
+            configuration,
+            expected_version="0.4.0",
+        )
+
+
+def test_rejects_missing_release_as_invalid_configuration() -> None:
+    configuration = _configuration()
+    del configuration["release"]
+
+    with pytest.raises(ValueError, match="release"):
         verifier.validate_release_configuration(
             configuration,
             expected_version="0.4.0",
@@ -129,6 +178,28 @@ def test_rejects_malformed_project_native_configuration(
 
     with pytest.raises(ValueError, match=message):
         verifier.validate_release_configuration(configuration, expected_version="0.6.0")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ({"priorities": []}, "non-empty list"),
+        ({"priorities": ["P0", "P0"]}, "unique"),
+        ({"priorities": ["P0", "P1\n"]}, "trimmed string"),
+        ({"milestone": {"number": 0, "title": "0.7.0 Genealogy Workflows"}}, "positive integer"),
+        ({"milestone": {"number": 6}}, "milestone keys are invalid"),
+    ),
+)
+def test_rejects_malformed_project_and_milestone_configuration(
+    mutation: dict[str, object], message: str
+) -> None:
+    configuration = _project_v3_configuration()
+    project = configuration["project"]
+    assert isinstance(project, dict)
+    project.update(mutation)
+
+    with pytest.raises(ValueError, match=message):
+        verifier.validate_release_configuration(configuration, expected_version="0.7.0")
 
 
 def test_cli_rejects_invalid_json(tmp_path: Path) -> None:

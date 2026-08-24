@@ -47,9 +47,25 @@ jobs:
           project_number="$(jq -r '.project.number' .github/release-config.json)"
           project_title="$(jq -r '.project.title' .github/release-config.json)"
           project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
-          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
           project_status="$(jq -r '.project.status' .github/release-config.json)"
           project_validation="$(jq -r '.project.validation' .github/release-config.json)"
+          project_repository="${GITHUB_REPOSITORY#*/}"
+          project_milestone_number="$(jq -r '.project.milestone.number // 1' .github/release-config.json)"
+          project_include_milestone="false"
+          project_priority_args=()
+          while IFS= read -r project_priority; do
+            project_priority_args+=(--priority "$project_priority")
+          done < <(jq -r '(.project.priorities // [.project.priority])[]' .github/release-config.json)
+          project_milestone_args=()
+          if test "$(jq -r '.schema_version' .github/release-config.json)" -eq 3; then
+            project_include_milestone="true"
+            project_milestone_title="$(jq -r '.project.milestone.title' .github/release-config.json)"
+            project_milestone_args=(
+              --repository "$project_repository"
+              --milestone-number "$project_milestone_number"
+              --milestone-title "$project_milestone_title"
+            )
+          fi
           project_query="$(< config/release-project-query-v1.graphql)"
           mkdir -p "$RUNNER_TEMP/version-1-security-gate"
           test -n "$PROJECT_READ_TOKEN" || {
@@ -59,16 +75,20 @@ jobs:
           GH_TOKEN="$PROJECT_READ_TOKEN" gh api graphql --paginate --slurp \
             -f query="$project_query" \
             -f owner="$project_owner" \
-            -F number="$project_number" |
+            -F number="$project_number" \
+            -f repository="$project_repository" \
+            -F milestoneNumber="$project_milestone_number" \
+            -F includeMilestone="$project_include_milestone" |
             python scripts/verify_release_project.py \
               --schema-only \
               --project-owner "$project_owner" \
               --project-number "$project_number" \
               --project-title "$project_title" \
               --iteration "$project_iteration" \
-              --priority "$project_priority" \
+              "${project_priority_args[@]}" \
               --status "$project_status" \
               --validation "$project_validation" \
+              "${project_milestone_args[@]}" \
               --security-policy config/version-1-security-policy.json \
               --security-report "$RUNNER_TEMP/version-1-security-gate/report.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -85,7 +105,7 @@ jobs:
         with:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-release-project-proof
-      - name: Prove strict verifier rejects a non-ready P0 fixture
+      - name: Prove strict verifier rejects a non-ready configured-priority fixture
         run: |
           uv sync --locked --no-default-groups --group test
           uv run --no-sync python -m pytest tests/test_verify_release_project.py -q
