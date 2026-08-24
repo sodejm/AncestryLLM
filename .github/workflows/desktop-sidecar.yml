@@ -61,7 +61,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -92,6 +92,16 @@ jobs:
         run: |
           uv sync --locked --no-default-groups --group test
           node desktop/scripts/install-locked.mjs
+      - name: Verify release tool versions
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/runner-versions.json"
+          --gate runnerVersionsPassed
+          -- node desktop/scripts/verify-release-toolchain.mjs
       - name: Verify API and workflow contracts
         shell: bash
         env:
@@ -100,18 +110,29 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/api-contract.json" \
+            --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --gate apiContractPassed \
             --gate authBeforeParsingPassed \
+            --gate diagnosticsContractPassed \
             --gate domainRoutesAbsentPassed \
             --gate providerNoneNetworkFreePassed \
             --gate redactionPassed \
-            -- uv run --no-sync python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_verification_wrong_sidecar.py
+            -- uv run --no-sync python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_structured_diagnostics.py tests/test_verification_wrong_sidecar.py
       - name: Verify desktop source
         shell: bash
-        run: |
-          pnpm --dir desktop run lint
-          pnpm --dir desktop run typecheck
-      - name: Verify desktop tests
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --gate desktopLintPassed
+          --gate desktopTypecheckPassed
+          --gate jsStaticAnalysisPassed
+          -- pnpm --dir desktop run verify:source
+      - name: Verify desktop tests and coverage
         shell: bash
         env:
           RECEIPTS_DIR: desktop/verification/security/receipts
@@ -119,11 +140,43 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --gate desktopCoveragePassed
           --gate ipcSenderValidationPassed
           --gate sidecarCompatibilityPassed
           --gate sidecarIntegrityPassed
-          -- pnpm --dir desktop run test
+          -- pnpm --dir desktop run test:coverage
+      - name: Verify desktop accessibility
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --gate accessibilityPassed
+          -- pnpm --dir desktop run test:accessibility
+      - name: Verify source WebdriverIO scenarios
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --output "$RECEIPTS_DIR/source-webdriver.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --gate sourceWebdriverPassed
+          -- pnpm --dir desktop run test:e2e
       - name: Verify production build inspection
         shell: bash
         env:
@@ -132,8 +185,12 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/build-inspection.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --gate buildInspectionPassed
           -- pnpm --dir desktop run build
       - name: Verify dependency audit
@@ -144,8 +201,12 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/audit.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --allow-output "$RECEIPTS_DIR/build-inspection.json"
           --gate auditPassed
           -- pnpm --dir desktop run audit
@@ -157,8 +218,12 @@ jobs:
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
           --output "$RECEIPTS_DIR/secrets.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --allow-output "$RECEIPTS_DIR/build-inspection.json"
           --allow-output "$RECEIPTS_DIR/audit.json"
           --gate secretsPassed
@@ -172,8 +237,12 @@ jobs:
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/sbom.json" \
+            --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --allow-output "$RECEIPTS_DIR/api-contract.json" \
+            --allow-output "$RECEIPTS_DIR/desktop-source.json" \
             --allow-output "$RECEIPTS_DIR/desktop-tests.json" \
+            --allow-output "$RECEIPTS_DIR/accessibility.json" \
+            --allow-output "$RECEIPTS_DIR/source-webdriver.json" \
             --allow-output "$RECEIPTS_DIR/build-inspection.json" \
             --allow-output "$RECEIPTS_DIR/audit.json" \
             --allow-output "$RECEIPTS_DIR/secrets.json" \
@@ -392,17 +461,17 @@ jobs:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
         run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release
       - name: Build packaged native-verification application
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         shell: bash
         run: pnpm --dir desktop run build:packaged-native-verification
       - name: Assemble packaged native-verification application
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         shell: bash
         env:
           PACKAGE_ARGS: ${{ matrix.package_args }}
         run: pnpm --dir desktop exec electron-builder --config electron-builder.native-verification.yml $PACKAGE_ARGS
       - name: Verify packaged native-verification sidecar resource
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         shell: bash
         env:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
@@ -410,7 +479,7 @@ jobs:
       - name: Select packaged runtime
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
             echo "PACKAGED_RELEASE_ROOT=desktop/release-native-verification" >> "$GITHUB_ENV"
           else
             echo "PACKAGED_RELEASE_ROOT=desktop/release" >> "$GITHUB_ENV"
@@ -470,7 +539,7 @@ jobs:
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --gate normalLaunchDebugSurfaceAbsentPassed \
             -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
-              --grep "launches production normally without a debugging transport"
+              --grep "launches the selected packaged runtime normally without a debugging transport"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
             --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \

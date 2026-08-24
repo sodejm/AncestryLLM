@@ -42,7 +42,7 @@ const packagedScenarios = Object.freeze([
   'exhausts packaged sidecar restarts and exits cleanly',
   'rejects a substituted packaged sidecar before launch',
   'mediates opaque packaged open and save file grants',
-  'launches production normally without a debugging transport',
+  'launches the selected packaged runtime normally without a debugging transport',
 ])
 
 function selectedScenario(argv, scenarios, mode) {
@@ -250,6 +250,26 @@ export function wdioInvocation(mode, argv, {
 }
 
 /**
+ * Constructs the no-shell direct packaged-runtime launch verifier invocation.
+ * @param {{desktopRoot?: string, environment?: NodeJS.ProcessEnv, executable?: string, scriptPath?: string}} [options] - Injectable paths and environment for tests.
+ * @returns {Readonly<{executable: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, shell: false}>} Invocation contract.
+ */
+export function normalLaunchInvocation({
+  desktopRoot = defaultDesktopRoot,
+  environment = {},
+  executable = process.execPath,
+  scriptPath = join(desktopRoot, 'scripts', 'verify-normal-launch.mjs'),
+} = {}) {
+  return Object.freeze({
+    executable,
+    args: Object.freeze([scriptPath]),
+    cwd: desktopRoot,
+    env: Object.freeze({ ...process.env, ...environment, ANCESTRYLLM_WDIO_MODE: 'packaged' }),
+    shell: false,
+  })
+}
+
+/**
  * Runs one WebdriverIO suite and preserves its actual exit status.
  * @param {'source' | 'packaged'} mode - Bounded suite identifier.
  * @param {string[]} argv - Additional WebdriverIO arguments.
@@ -276,14 +296,18 @@ export function runWdio(mode, argv, {
     preparedPackage = mode === 'packaged'
       ? preparePackagedScenarioImpl(scenario, environment)
       : { environment }
-    const invocation = wdioInvocation(mode, argv, {
-      ...invocationOptions,
-      environment: {
-        ANCESTRYLLM_DESKTOP_FIXTURE: fixture,
-        ANCESTRYLLM_WDIO_USER_DATA: isolatedUserDataDirectory,
-        ...preparedPackage.environment,
-      },
-    })
+    const invocationEnvironment = {
+      ANCESTRYLLM_DESKTOP_FIXTURE: fixture,
+      ANCESTRYLLM_WDIO_USER_DATA: isolatedUserDataDirectory,
+      ...preparedPackage.environment,
+    }
+    const directNormalLaunch = mode === 'packaged' && scenario === packagedScenarios[5]
+    const invocation = directNormalLaunch
+      ? normalLaunchInvocation({ ...invocationOptions, environment: invocationEnvironment })
+      : wdioInvocation(mode, argv, {
+          ...invocationOptions,
+          environment: invocationEnvironment,
+        })
     const result = spawnSyncImpl(invocation.executable, invocation.args, {
       cwd: invocation.cwd,
       env: invocation.env,
@@ -291,8 +315,9 @@ export function runWdio(mode, argv, {
       stdio: 'inherit',
     })
     if (result.error) throw result.error
-    assert.equal(result.signal, null, `WebdriverIO ${mode} suite terminated by signal ${result.signal}`)
-    assert.equal(Number.isInteger(result.status), true, `WebdriverIO ${mode} suite did not report an exit status`)
+    const runner = directNormalLaunch ? 'Packaged normal-launch verifier' : `WebdriverIO ${mode} suite`
+    assert.equal(result.signal, null, `${runner} terminated by signal ${result.signal}`)
+    assert.equal(Number.isInteger(result.status), true, `${runner} did not report an exit status`)
     return result.status
   } finally {
     try {

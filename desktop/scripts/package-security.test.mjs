@@ -106,15 +106,19 @@ test('production main entry contains no fixture bridge or test hook', () => {
   assert.doesNotMatch(productionMain, /__ancestryllmSecurityStateForTests/)
 })
 
-test('production packages cannot select verifier-only native storage roots', () => {
+test('production packages cannot select verifier-only native storage backends', () => {
   assert.doesNotMatch(productionMain, /ancestryllm-linux-keyring-verification-root/)
+  assert.doesNotMatch(productionMain, /ancestryllm-macos-ephemeral-verification/)
   assert.doesNotMatch(productionNativeVerification, /LINUX_KEYRING_VERIFICATION_SWITCH/)
+  assert.doesNotMatch(productionNativeVerification, /MACOS_EPHEMERAL_VERIFICATION_SWITCH/)
   assert.doesNotMatch(
     productionNativeVerification,
     /ancestryllm-linux-keyring-verification-root/,
   )
   assert.match(productionNativeVerification, /return undefined/)
+  assert.match(productionNativeVerification, /return false/)
   assert.match(packagedNativeVerification, /LINUX_KEYRING_VERIFICATION_SWITCH/)
+  assert.match(packagedNativeVerification, /MACOS_EPHEMERAL_VERIFICATION_SWITCH/)
   assert.equal(
     packageJson.scripts['build:packaged-native-verification'],
     'pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification',
@@ -140,7 +144,7 @@ test('production shutdown owns the supervisor before asynchronous sidecar startu
   )
   assert.match(
     productionMain,
-    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(app\.commandLine\),\s*diagnosticRunId,\s*diagnosticDirectory,\s*recordDiagnostic: recordDesktopDiagnostic,\s*\}\)/,
+    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(app\.commandLine\),\s*macosEphemeralWorkspaceVerification: requestedMacosEphemeralVerification\(app\.commandLine\),\s*diagnosticRunId,\s*diagnosticDirectory,\s*recordDiagnostic: recordDesktopDiagnostic,\s*\}\)/,
   )
   assert.match(
     productionMain,

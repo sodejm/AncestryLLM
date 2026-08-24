@@ -370,6 +370,7 @@ jobs:
             --arg release "$VERSION" \
             --arg commit "$COMMIT_SHA" \
             --arg run_url "$RUN_URL" \
+            --slurpfile quality_policy config/release-quality-policy-v1.json \
             '{
               schema_version: 1,
               release: $release,
@@ -383,9 +384,9 @@ jobs:
                   "cyclonedx-sbom",
                   "dependency-audit",
                   "lifecycle-audit",
-                  "project-release-gate",
                   "mypy",
                   "privacy-regressions",
+                  "project-release-gate",
                   "repository-safety",
                   "reproducible-distributions",
                   "ruff-format",
@@ -394,7 +395,11 @@ jobs:
                   "tests-and-coverage",
                   "version-1-security-dependencies",
                   "workflow-security-analysis"
-                ]
+                ] as $manifest_gates
+                | if $quality_policy[0].qa.readinessGates == $manifest_gates
+                  then $manifest_gates
+                  else error("release readiness gates do not match the quality policy")
+                  end
                 | map({
                     name: .,
                     status: "verified",

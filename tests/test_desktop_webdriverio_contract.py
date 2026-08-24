@@ -8,6 +8,7 @@ DESKTOP = ROOT / "desktop"
 PACKAGE = DESKTOP / "package.json"
 WDIO_CONFIG = DESKTOP / "wdio.conf.ts"
 WDIO_RUNNER = DESKTOP / "scripts" / "run-wdio.mjs"
+NORMAL_LAUNCH_VERIFIER = DESKTOP / "scripts" / "verify-normal-launch.mjs"
 PACKAGED_RUNNER = DESKTOP / "scripts" / "run-packaged-tests.mjs"
 SOURCE_SPEC = DESKTOP / "e2e" / "shell.wdio.ts"
 PACKAGED_SPEC = DESKTOP / "e2e" / "packaged-shell.wdio.ts"
@@ -97,8 +98,9 @@ def test_playwright_is_bounded_to_reviewed_documentation_screenshots() -> None:
     assert not (DESKTOP / "e2e" / "packaged-shell.spec.ts").exists()
 
 
-def test_packaged_wdio_suite_keeps_release_and_negative_security_scenarios() -> None:
+def test_packaged_suite_keeps_release_and_negative_security_scenarios() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    runner = WDIO_RUNNER.read_text(encoding="utf-8")
 
     for scenario in (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence",
@@ -106,9 +108,15 @@ def test_packaged_wdio_suite_keeps_release_and_negative_security_scenarios() -> 
         "exhausts packaged sidecar restarts and exits cleanly",
         "rejects a substituted packaged sidecar before launch",
         "mediates opaque packaged open and save file grants",
-        "launches production normally without a debugging transport",
     ):
         assert scenario in source
+    normal_scenario = (
+        "launches the selected packaged runtime normally without a debugging transport"
+    )
+    assert normal_scenario not in source
+    assert normal_scenario in runner
+    assert "verify-normal-launch.mjs" in runner
+    assert NORMAL_LAUNCH_VERIFIER.is_file()
 
 
 def test_packaged_boundary_is_checked_before_leaving_home() -> None:
@@ -121,15 +129,27 @@ def test_packaged_boundary_is_checked_before_leaving_home() -> None:
     assert scenario.index("expectProductionBoundary") < scenario.index("click('a=Diagnostics')")
 
 
+def test_packaged_boundary_reads_the_document_csp_without_fetch_access_to_app_scheme() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert 'meta[http-equiv="Content-Security-Policy"]' in source
+    assert "fetch(location.href)" not in source
+
+
 def test_packaged_zoom_uses_equivalent_renderer_scale() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
-    scenario = source.split("const originalWindow = await browser.getWindowSize()", maxsplit=1)[
-        1
-    ].split("\n}\n\nfunction inheritedEnvironment", maxsplit=1)[0]
+    scenario = source.split("async function expectAccessibleShell()", maxsplit=1)[1].split(
+        "\n}\n\ndescribe('unpublished unpacked native package'", maxsplit=1
+    )[0]
 
+    assert "window.resizeTo(720, 560)" in scenario
+    assert "window.outerWidth" in scenario
+    assert "window.outerHeight" in scenario
     assert "document.documentElement.style.zoom = '200%'" in scenario
     assert "getComputedStyle(document.documentElement).zoom" in scenario
     assert "document.documentElement.style.removeProperty('zoom')" in scenario
+    assert "browser.getWindowSize" not in scenario
+    assert "browser.setWindowSize" not in scenario
     assert "browser.keys" not in scenario
     assert "zoomModifier" not in scenario
 

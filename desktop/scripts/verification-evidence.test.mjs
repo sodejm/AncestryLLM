@@ -183,7 +183,7 @@ function targetFixture(row, observed = metrics) {
       'desktop/scripts/run-wdio.mjs',
       'packaged',
       '--grep',
-      'launches production normally without a debugging transport',
+      'launches the selected packaged runtime normally without a debugging transport',
     ],
   )
   const processTreeGuardReceipt = receiptRecord(
@@ -494,6 +494,13 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.equal(aggregate.platformValidated, true)
   assert.equal(aggregate.status, 'passed')
   assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
+  assert.deepEqual(aggregate.toolVersions, {
+    python: '3.12',
+    node: '26.5.0',
+    pnpm: '11.9.0',
+    vitest: '3.2.7',
+    webdriverio: '9.31.2',
+  })
 
   await writeFile(join(targetsRoot, 'windows-11-arm', 'evidence.json'), encoded({
     ...aggregate.targets.find((target) => target.runner === 'windows-11-arm'),

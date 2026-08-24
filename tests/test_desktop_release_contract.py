@@ -182,7 +182,9 @@ def test_release_packaged_smoke_forwards_the_webdriverio_filter_without_a_pnpm_s
     automated_scenario = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence"
     )
-    normal_scenario = "launches production normally without a debugging transport"
+    normal_scenario = (
+        "launches the selected packaged runtime normally without a debugging transport"
+    )
 
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 12
     assert workflow.count(f'--grep "{automated_scenario}"') == 6

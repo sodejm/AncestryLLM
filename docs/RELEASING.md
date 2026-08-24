@@ -29,6 +29,42 @@ values and no open dependency. Draft or non-Issue Project items, unconfigured
 priorities, incomplete pagination, missing coordinates, or scope and state
 mismatches fail the gate closed.
 
+## Release quality approval contract
+
+`config/release-quality-policy-v1.json` is the versioned, authoritative
+contract for the QA, security, performance, and diagnostics evidence that may
+approve a release commit. The contract names each accountable owner, the exact
+readiness and desktop receipt gates, pinned tool versions, coverage policy,
+native performance method and ceilings, diagnostic schema and retention, and
+the commands that produce the evidence:
+
+| Family | Owner | Required commands |
+|---|---|---|
+| QA | `release-owner` | `make test`; `make lint`; `make typecheck`; `pnpm --dir desktop run verify:source`; `pnpm --dir desktop run test:coverage`; `pnpm --dir desktop run test:accessibility`; `pnpm --dir desktop run test:e2e`; `pnpm --dir desktop run test:e2e:packaged` |
+| Security | `security-owner` | `make security`; `make sbom`; `pnpm --dir desktop run test:security`; `pnpm --dir desktop run check:secrets`; `pnpm --dir desktop run sbom` |
+| Performance | `desktop-owner` | `pnpm --dir desktop run test:e2e:packaged` |
+| Diagnostics | `desktop-owner` | `make test`; `pnpm --dir desktop run test:coverage` |
+
+Release readiness writes `release-evidence/gates.json`; the exact-head desktop
+aggregate writes `desktop-evidence-aggregate/desktop-evidence.json`.
+`scripts/verify_release_quality.py` accepts only those closed-schema artifacts,
+recomputes the policy digest, requires both artifacts and every nested receipt
+to name the requested full commit SHA, and writes
+`release-quality-approval.json`. Missing, extra, malformed, stale,
+wrong-version, wrong-tool, failed, or unapproved evidence is a blocking error.
+The verifier runs once before the release job can begin and again after final
+distribution assembly; the second pass must retain the same approval in
+`dist/release-quality-approval.json` so it is covered by the release checksums
+and provenance.
+
+The schema permits only explicitly recorded, unexpired exception documents
+with a known family, owner, independent approver, rationale, compensating
+controls, issue URL, decision date, and expiry no later than 90 days. An
+exception is an auditable disclosure and never changes a failed gate into a
+pass. The v1 policy contains no exceptions. Any future waiver semantics require
+a reviewed policy-schema revision; editing an evidence artifact cannot create
+one.
+
 ## Future deployment-runtime release gate
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted

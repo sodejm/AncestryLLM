@@ -157,6 +157,30 @@ def test_sidecar_diagnostic_writer_failure_never_blocks_runtime_flow(
     assert occupied.read_text(encoding="utf-8") == "not a directory"
 
 
+def test_native_verification_dependencies_are_explicit_ephemeral_and_in_memory() -> None:
+    with sidecar_module._verification_sidecar_dependencies({}) as dependencies:
+        assert dependencies == (None, None)
+
+    with sidecar_module._verification_sidecar_dependencies(
+        {"ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE": "true"}
+    ) as dependencies:
+        assert dependencies == (None, None)
+
+    with sidecar_module._verification_sidecar_dependencies(
+        {"ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE": "1"}
+    ) as (config, secret_store):
+        assert config is not None
+        assert isinstance(secret_store, MemorySecretStore)
+        verification_root = config.config_path.parent
+        assert config.config_path == verification_root / "config.toml"
+        assert config.data_dir == verification_root / "data"
+        assert verification_root.exists()
+        secret_store.set("database-key", "fictional-verification-key")
+        assert secret_store.get("database-key") == "fictional-verification-key"
+
+    assert not verification_root.exists()
+
+
 def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
     app = create_sidecar_app(
         LaunchFrame(

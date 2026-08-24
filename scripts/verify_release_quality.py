@@ -1,0 +1,562 @@
+#!/usr/bin/env python3
+"""Validate exact-head release quality evidence and emit its approval manifest."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import re
+import sys
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any, Never
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_POLICY = ROOT / "config" / "release-quality-policy-v1.json"
+SHA = re.compile(r"^[0-9a-f]{40}$")
+VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+FAMILIES = ("diagnostics", "performance", "qa", "security")
+
+
+class ReleaseQualityError(ValueError):
+    """A stable, operator-actionable release-quality validation error."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+
+
+def _reject(code: str, message: str) -> Never:
+    raise ReleaseQualityError(code, message)
+
+
+def _object(value: Any, code: str, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        _reject(code, f"{label} must be an object")
+    return value
+
+
+def _exact_keys(value: dict[str, Any], expected: set[str], code: str, label: str) -> None:
+    if set(value) != expected:
+        _reject(code, f"{label} must use the exact schema")
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _string_list(value: Any, code: str, label: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        _reject(code, f"{label} must be a non-empty array")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        _reject(code, f"{label} must contain non-empty strings")
+    if len(set(value)) != len(value):
+        _reject(code, f"{label} must contain unique values")
+    return value
+
+
+def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]]:
+    _exact_keys(
+        policy,
+        {
+            "schemaVersion",
+            "policyId",
+            "families",
+            "evidence",
+            "qa",
+            "security",
+            "performance",
+            "diagnostics",
+            "exceptions",
+        },
+        "RQ001",
+        "quality policy",
+    )
+    if policy["schemaVersion"] != 1 or policy["policyId"] != "ancestryllm-release-quality-v1":
+        _reject("RQ001", "unsupported quality policy identity")
+    families = _object(policy["families"], "RQ001", "policy families")
+    if set(families) != set(FAMILIES):
+        _reject("RQ001", "policy must assign all four quality families")
+    for family in FAMILIES:
+        record = _object(families[family], "RQ001", f"{family} family")
+        _exact_keys(record, {"owner", "commands"}, "RQ001", f"{family} family")
+        if not isinstance(record["owner"], str) or not record["owner"].strip():
+            _reject("RQ001", f"{family} owner is missing")
+        _string_list(record["commands"], "RQ001", f"{family} commands")
+
+    evidence = _object(policy["evidence"], "RQ001", "evidence policy")
+    _exact_keys(
+        evidence,
+        {"inputs", "approvalPath", "verifier"},
+        "RQ001",
+        "evidence policy",
+    )
+    inputs = evidence["inputs"]
+    if not isinstance(inputs, list) or len(inputs) != 2:
+        _reject("RQ001", "evidence policy must define the two required inputs")
+    checked_inputs: list[tuple[str, str]] = []
+    for item in inputs:
+        record = _object(item, "RQ001", "evidence input")
+        _exact_keys(record, {"artifact", "path"}, "RQ001", "evidence input")
+        if any(
+            not isinstance(record[field], str) or not record[field].strip()
+            for field in ("artifact", "path")
+        ):
+            _reject("RQ001", "evidence input artifact and path are required")
+        checked_inputs.append((record["artifact"], record["path"]))
+    if len(set(checked_inputs)) != len(checked_inputs):
+        _reject("RQ001", "evidence inputs must be unique")
+    if evidence["approvalPath"] != "release-quality-approval.json":
+        _reject("RQ001", "unsupported release-quality approval path")
+    if evidence["verifier"] != "scripts/verify_release_quality.py":
+        _reject("RQ001", "unsupported release-quality verifier")
+
+    qa = _object(policy["qa"], "RQ001", "QA policy")
+    _exact_keys(
+        qa,
+        {"readinessGates", "toolVersions", "desktopCoverage"},
+        "RQ001",
+        "QA policy",
+    )
+    _string_list(qa["readinessGates"], "RQ001", "readiness gates")
+    tools = _object(qa["toolVersions"], "RQ001", "tool versions")
+    _exact_keys(
+        tools,
+        {"python", "node", "pnpm", "vitest", "webdriverio"},
+        "RQ001",
+        "tool versions",
+    )
+    if any(not isinstance(version, str) or not version.strip() for version in tools.values()):
+        _reject("RQ001", "tool versions must be non-empty strings")
+    coverage = _object(qa["desktopCoverage"], "RQ001", "desktop coverage")
+    _exact_keys(
+        coverage,
+        {"provider", "thresholds", "reviewedExclusions"},
+        "RQ001",
+        "desktop coverage",
+    )
+    if coverage["provider"] != "v8":
+        _reject("RQ001", "desktop coverage provider must be v8")
+    thresholds = _object(coverage["thresholds"], "RQ001", "coverage thresholds")
+    _exact_keys(
+        thresholds,
+        {"branches", "functions", "lines", "statements"},
+        "RQ001",
+        "coverage thresholds",
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100
+        for value in thresholds.values()
+    ):
+        _reject("RQ001", "coverage thresholds must be integer percentages")
+    _string_list(
+        coverage["reviewedExclusions"],
+        "RQ001",
+        "coverage exclusions",
+    )
+
+    security = _object(policy["security"], "RQ001", "security policy")
+    _exact_keys(
+        security,
+        {"desktopReceiptGates"},
+        "RQ001",
+        "security policy",
+    )
+    receipt_gates = _string_list(
+        security["desktopReceiptGates"],
+        "RQ001",
+        "desktop receipt gates",
+    )
+
+    performance = _object(policy["performance"], "RQ001", "performance policy")
+    _exact_keys(
+        performance,
+        {"policyVersion", "method", "metrics", "targets"},
+        "RQ001",
+        "performance policy",
+    )
+    if (
+        not isinstance(performance["policyVersion"], str)
+        or not performance["policyVersion"].strip()
+    ):
+        _reject("RQ001", "performance policy version is missing")
+    method = _object(performance["method"], "RQ001", "performance method")
+    _exact_keys(
+        method,
+        {"command", "measurementSource", "validator", "packageBoundary"},
+        "RQ001",
+        "performance method",
+    )
+    if any(not isinstance(value, str) or not value.strip() for value in method.values()):
+        _reject("RQ001", "performance method fields are required")
+    if method["packageBoundary"] != "unpacked-native":
+        _reject("RQ001", "performance method must validate the unpacked-native boundary")
+    metrics = _string_list(performance["metrics"], "RQ001", "performance metrics")
+    targets = performance["targets"]
+    if not isinstance(targets, list) or not targets:
+        _reject("RQ001", "performance targets are missing")
+    runners: set[str] = set()
+    for item in targets:
+        record = _object(item, "RQ001", "performance target")
+        _exact_keys(
+            record,
+            {
+                "runner",
+                "sidecarTarget",
+                "expectedOs",
+                "arch",
+                "hostArch",
+                "performanceCeilings",
+            },
+            "RQ001",
+            "performance target",
+        )
+        for field in ("runner", "sidecarTarget", "expectedOs", "arch", "hostArch"):
+            if not isinstance(record[field], str) or not record[field].strip():
+                _reject("RQ001", f"performance target {field} is missing")
+        if record["runner"] in runners:
+            _reject("RQ001", f"duplicate performance runner {record['runner']}")
+        runners.add(record["runner"])
+        ceilings = _object(
+            record["performanceCeilings"],
+            "RQ001",
+            f"{record['runner']} performance ceilings",
+        )
+        if set(ceilings) != set(metrics):
+            _reject("RQ001", f"{record['runner']} performance ceilings are incomplete")
+        if any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
+            for value in ceilings.values()
+        ):
+            _reject("RQ001", f"{record['runner']} performance ceilings are invalid")
+
+    diagnostics = _object(policy["diagnostics"], "RQ001", "diagnostics policy")
+    _exact_keys(
+        diagnostics,
+        {
+            "schemaVersion",
+            "schemaPath",
+            "schemaSha256",
+            "safeCodesSource",
+            "syntheticCanaryGate",
+            "retention",
+            "telemetry",
+        },
+        "RQ001",
+        "diagnostics policy",
+    )
+    for field in (
+        "schemaVersion",
+        "schemaPath",
+        "safeCodesSource",
+        "syntheticCanaryGate",
+    ):
+        if not isinstance(diagnostics[field], str) or not diagnostics[field].strip():
+            _reject("RQ001", f"diagnostics {field} is missing")
+    if not isinstance(diagnostics["schemaSha256"], str) or not re.fullmatch(
+        r"[0-9a-f]{64}", diagnostics["schemaSha256"]
+    ):
+        _reject("RQ001", "diagnostics schema digest is invalid")
+    repository_root = ROOT.resolve()
+    schema_path = (repository_root / diagnostics["schemaPath"]).resolve()
+    try:
+        schema_path.relative_to(repository_root)
+    except ValueError:
+        _reject("RQ008", "diagnostics schema path must stay inside the repository")
+    try:
+        schema_digest = hashlib.sha256(schema_path.read_bytes()).hexdigest()
+    except OSError as error:
+        _reject("RQ008", f"cannot read diagnostics schema: {error}")
+    if schema_digest != diagnostics["schemaSha256"]:
+        _reject("RQ008", "diagnostics schema digest does not match the checked-out schema")
+    if diagnostics["syntheticCanaryGate"] not in receipt_gates:
+        _reject("RQ001", "diagnostics canary is not a required desktop receipt gate")
+    retention = _object(diagnostics["retention"], "RQ001", "diagnostics retention")
+    _exact_keys(
+        retention,
+        {"maxBytesPerFile", "maxFilesPerComponent"},
+        "RQ001",
+        "diagnostics retention",
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in retention.values()
+    ):
+        _reject("RQ001", "diagnostics retention limits must be positive integers")
+    if diagnostics["telemetry"] is not False:
+        _reject("RQ001", "diagnostics telemetry must remain disabled")
+
+    exceptions = policy["exceptions"]
+    if not isinstance(exceptions, list):
+        _reject("RQ009", "exceptions must be an array")
+    seen: set[str] = set()
+    for item in exceptions:
+        record = _object(item, "RQ009", "exception")
+        _exact_keys(
+            record,
+            {"id", "family", "gate", "owner", "approvedBy", "reason", "expires"},
+            "RQ009",
+            "exception",
+        )
+        for field in ("id", "gate", "owner", "approvedBy", "reason", "expires"):
+            if not isinstance(record[field], str) or not record[field].strip():
+                _reject("RQ009", f"exception {field} is missing")
+        if record["id"] in seen:
+            _reject("RQ009", f"duplicate exception {record['id']}")
+        seen.add(record["id"])
+        if record["family"] not in FAMILIES:
+            _reject("RQ009", f"exception {record['id']} has an unknown family")
+        try:
+            expiry = date.fromisoformat(record["expires"])
+        except ValueError:
+            _reject("RQ009", f"exception {record['id']} has an invalid expiry")
+        if expiry < as_of:
+            _reject("RQ009", f"exception {record['id']} expired before {as_of.isoformat()}")
+    return copy.deepcopy(exceptions)
+
+
+def _validate_readiness(
+    readiness: dict[str, Any], version: str, commit: str, required: list[str]
+) -> dict[str, str]:
+    if readiness.get("schema_version") != 1 or readiness.get("release") != version:
+        _reject("RQ003", "readiness evidence has the wrong schema or release")
+    if readiness.get("commit") != commit:
+        _reject("RQ002", "readiness evidence is not from the exact head")
+    gates = readiness.get("gates")
+    if not isinstance(gates, list):
+        _reject("RQ004", "readiness gate inventory is missing")
+    by_name: dict[str, dict[str, Any]] = {}
+    for raw in gates:
+        gate = _object(raw, "RQ004", "readiness gate")
+        name = gate.get("name")
+        if not isinstance(name, str) or name in by_name:
+            _reject("RQ004", "readiness gate names must be unique strings")
+        by_name[name] = gate
+    if set(by_name) != set(required):
+        missing = sorted(set(required) - set(by_name))
+        unknown = sorted(set(by_name) - set(required))
+        _reject("RQ004", f"readiness gate inventory mismatch; missing={missing}, unknown={unknown}")
+    for name in required:
+        gate = by_name[name]
+        if gate.get("status") != "verified":
+            _reject("RQ004", f"readiness gate {name} is not verified")
+        url = gate.get("evidence_url")
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+            _reject("RQ004", f"readiness gate {name} has no evidence URL")
+    return {name: str(by_name[name]["evidence_url"]) for name in sorted(by_name)}
+
+
+def _validate_performance(desktop: dict[str, Any], policy: dict[str, Any]) -> list[dict[str, Any]]:
+    performance = _object(policy["performance"], "RQ001", "performance policy")
+    metrics = performance.get("metrics")
+    targets_policy = performance.get("targets")
+    if not isinstance(metrics, list) or not metrics or len(set(metrics)) != len(metrics):
+        _reject("RQ001", "performance metrics are invalid")
+    if not isinstance(targets_policy, list) or not targets_policy:
+        _reject("RQ001", "performance targets are missing")
+    expected = {row["runner"]: row for row in targets_policy}
+    targets = desktop.get("targets")
+    if not isinstance(targets, list):
+        _reject("RQ006", "desktop target matrix is missing")
+    actual = {row.get("runner"): row for row in targets if isinstance(row, dict)}
+    if len(actual) != len(targets) or set(actual) != set(expected):
+        _reject("RQ006", "desktop target matrix is incomplete or contains an unknown runner")
+
+    summaries: list[dict[str, Any]] = []
+    for runner in sorted(expected):
+        row = actual[runner]
+        contract = expected[runner]
+        for field in ("sidecarTarget", "expectedOs", "arch", "hostArch"):
+            if row.get(field) != contract[field]:
+                _reject("RQ006", f"{runner} target matrix {field} mismatch")
+        if row.get("actualOs") != contract["expectedOs"]:
+            _reject("RQ006", f"{runner} did not execute on the required OS")
+        if (
+            row.get("packageBoundary") != "unpacked-native"
+            or row.get("platformValidated") is not True
+        ):
+            _reject("RQ006", f"{runner} target matrix boundary was not validated")
+        evidence = _object(row.get("performance"), "RQ006", f"{runner} performance evidence")
+        if (
+            evidence.get("policyVersion") != performance["policyVersion"]
+            or evidence.get("runner") != runner
+            or evidence.get("platform") != contract["sidecarTarget"]
+            or evidence.get("passed") is not True
+        ):
+            _reject("RQ006", f"{runner} performance identity or result is invalid")
+        ceilings = contract["performanceCeilings"]
+        if evidence.get("ceilings") != ceilings:
+            _reject("RQ006", f"{runner} performance ceilings do not match policy")
+        observed = evidence.get("observed")
+        checks = evidence.get("checks")
+        if not isinstance(observed, dict) or set(observed) != set(metrics):
+            _reject("RQ006", f"{runner} performance observations are incomplete")
+        if not isinstance(checks, dict) or set(checks) != set(metrics):
+            _reject("RQ006", f"{runner} performance checks are incomplete")
+        for metric in metrics:
+            value = observed[metric]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                _reject("RQ006", f"{runner} performance metric {metric} is invalid")
+            if (
+                checks[metric]
+                != {
+                    "observed": value,
+                    "ceiling": ceilings[metric],
+                    "passed": True,
+                }
+                or value > ceilings[metric]
+            ):
+                _reject("RQ006", f"{runner} performance metric {metric} did not pass")
+        summaries.append(
+            {
+                "runner": runner,
+                "sidecarTarget": contract["sidecarTarget"],
+                "observed": copy.deepcopy(observed),
+                "ceilings": copy.deepcopy(ceilings),
+            }
+        )
+    return summaries
+
+
+def build_manifest(
+    *,
+    version: str,
+    commit: str,
+    readiness: dict[str, Any],
+    desktop: dict[str, Any],
+    policy: dict[str, Any],
+    as_of: date | None = None,
+) -> dict[str, Any]:
+    """Validate inputs and return a deterministic release-quality approval manifest."""
+
+    if not VERSION.fullmatch(version):
+        _reject("RQ003", "release version must be X.Y.Z")
+    if not SHA.fullmatch(commit):
+        _reject("RQ002", "commit must be a lowercase full Git SHA")
+    checked_policy = copy.deepcopy(_object(policy, "RQ001", "quality policy"))
+    exceptions = _validate_policy(checked_policy, as_of or datetime.now(UTC).date())
+    checked_readiness = _object(copy.deepcopy(readiness), "RQ003", "readiness evidence")
+    checked_desktop = _object(copy.deepcopy(desktop), "RQ003", "desktop evidence")
+
+    readiness_urls = _validate_readiness(
+        checked_readiness,
+        version,
+        commit,
+        checked_policy["qa"]["readinessGates"],
+    )
+    if checked_desktop.get("gitHead") != commit:
+        _reject("RQ002", "desktop evidence is not from the exact head")
+    if (
+        checked_desktop.get("schemaVersion") != 2
+        or checked_desktop.get("kind") != "aggregate"
+        or checked_desktop.get("status") != "passed"
+        or checked_desktop.get("platformValidated") is not True
+        or checked_desktop.get("publicationRequirements") != {"desktopInstaller": True}
+    ):
+        _reject("RQ003", "desktop aggregate identity or status is invalid")
+    if checked_desktop.get("toolVersions") != checked_policy["qa"]["toolVersions"]:
+        _reject("RQ005", "desktop tool versions do not match the pinned policy")
+
+    security = _object(checked_desktop.get("security"), "RQ007", "desktop security evidence")
+    gates = _object(security.get("gates"), "RQ007", "desktop security gates")
+    required_gates = checked_policy["security"]["desktopReceiptGates"]
+    canary = checked_policy["diagnostics"]["syntheticCanaryGate"]
+    if gates.get(canary) is not True:
+        _reject("RQ008", f"diagnostics canary {canary} is missing or failed")
+    for gate in required_gates:
+        if gates.get(gate) is not True:
+            _reject("RQ007", f"desktop quality gate {gate} is missing or failed")
+    if set(gates) != set(required_gates):
+        _reject("RQ007", "desktop security gate inventory contains unknown gates")
+
+    performance = _validate_performance(checked_desktop, checked_policy)
+    diagnostics = checked_policy["diagnostics"]
+    return {
+        "schemaVersion": 1,
+        "kind": "release-quality-approval",
+        "policy": {
+            "id": checked_policy["policyId"],
+            "schemaVersion": checked_policy["schemaVersion"],
+            "sha256": _canonical_sha256(checked_policy),
+        },
+        "release": version,
+        "commit": commit,
+        "status": "approved",
+        "evidence": copy.deepcopy(checked_policy["evidence"]),
+        "families": {
+            "qa": {
+                "status": "passed",
+                "owner": checked_policy["families"]["qa"]["owner"],
+                "commands": copy.deepcopy(checked_policy["families"]["qa"]["commands"]),
+                "readinessGates": readiness_urls,
+                "toolVersions": copy.deepcopy(checked_policy["qa"]["toolVersions"]),
+                "desktopCoverage": copy.deepcopy(checked_policy["qa"]["desktopCoverage"]),
+            },
+            "security": {
+                "status": "passed",
+                "owner": checked_policy["families"]["security"]["owner"],
+                "commands": copy.deepcopy(checked_policy["families"]["security"]["commands"]),
+                "desktopReceiptGates": dict.fromkeys(required_gates, True),
+            },
+            "performance": {
+                "status": "passed",
+                "owner": checked_policy["families"]["performance"]["owner"],
+                "commands": copy.deepcopy(checked_policy["families"]["performance"]["commands"]),
+                "policyVersion": checked_policy["performance"]["policyVersion"],
+                "method": copy.deepcopy(checked_policy["performance"]["method"]),
+                "targets": performance,
+            },
+            "diagnostics": {
+                "status": "passed",
+                "owner": checked_policy["families"]["diagnostics"]["owner"],
+                "commands": copy.deepcopy(checked_policy["families"]["diagnostics"]["commands"]),
+                **copy.deepcopy(diagnostics),
+            },
+        },
+        "exceptions": exceptions,
+    }
+
+
+def _load(path: Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        _reject("RQ010", f"cannot load {label}: {error}")
+    return _object(value, "RQ010", label)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Validate release evidence from CLI arguments and write an approval."""
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--gates", required=True, type=Path)
+    parser.add_argument("--desktop-evidence", required=True, type=Path)
+    parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        manifest = build_manifest(
+            version=args.version,
+            commit=args.commit,
+            readiness=_load(args.gates, "readiness gates"),
+            desktop=_load(args.desktop_evidence, "desktop evidence"),
+            policy=_load(args.policy, "quality policy"),
+        )
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except ReleaseQualityError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

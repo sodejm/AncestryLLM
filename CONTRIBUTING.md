@@ -126,6 +126,17 @@ scope, privacy impact, threat-model changes, migration impact, and exact test
 evidence. Do not commit real GEDCOM, RootsMagic, database, backup, report, log,
 prompt/response, secrets, or person details; use clearly fictional fixtures.
 
+Release-quality work additionally follows the versioned contract in
+`config/release-quality-policy-v1.json`. It assigns the QA, security,
+performance, and diagnostics families to named owners and is the authoritative
+inventory of their commands, pinned tool versions, desktop coverage policy,
+receipt gates, performance ceilings, diagnostic canary, and bounded
+exceptions. Run the listed desktop commands through the checked-in pnpm
+lockfile; do not substitute a locally convenient tool version or edit generated
+evidence. Local results support review, but only the hosted verifier can bind
+the two required workflow artifacts and their policy digest to the exact pull
+request or release commit.
+
 Changes to the OCI or Compose topology also run `make container-policy` and
 the focused container contract tests. Native lifecycle evidence must be
 produced on a matching Linux architecture: CI builds and runs both gateway and

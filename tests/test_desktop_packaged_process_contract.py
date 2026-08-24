@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
+NORMAL_LAUNCH_VERIFIER = ROOT / "desktop" / "scripts" / "verify-normal-launch.mjs"
 PACKAGED_NATIVE_VERIFICATION = (
     ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
 )
@@ -71,16 +72,17 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
     quit_start = source.index("async function closeApplicationWindow")
     quit_end = source.index("\nasync function terminateVerificationApplication", quit_start)
     quit_source = source[quit_start:quit_end]
-    normal_quit_start = source.index("async function requestNormalApplicationQuit")
-    normal_quit_end = source.index(
-        "\nasync function expectNormalLaunchWithoutDebugSurface", normal_quit_start
+    normal_quit_start = normal_source.index("async function requestNormalApplicationQuit")
+    normal_quit_end = normal_source.index(
+        "\n/** Launches and verifies one selected packaged runtime", normal_quit_start
     )
-    normal_quit_source = source[normal_quit_start:normal_quit_end]
+    normal_quit_source = normal_source[normal_quit_start:normal_quit_end]
 
     assert "async function closeApplicationWindow(sidecarPath: string)" in quit_source
     assert "const activeSidecarPid = await sidecarPid(pid, sidecarPath)" in quit_source
@@ -89,7 +91,7 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     assert "expectProcessAbsent(pid)" in quit_source
     assert "expectProcessAbsent(activeSidecarPid)" in quit_source
     assert "browser.electron.execute" not in quit_source
-    assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 4
+    assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
     assert "await closeApplicationWindow()" not in source
 
     assert "CloseMainWindow()" in normal_quit_source
@@ -147,26 +149,29 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     assert "app.quit()" not in verified_exit_source
 
 
-def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> None:
-    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+def test_packaged_environment_authenticates_native_keyring_boundaries() -> None:
+    normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     production_verifier_source = PRODUCTION_NATIVE_VERIFICATION.read_text(encoding="utf-8")
     packaged_verifier_source = PACKAGED_NATIVE_VERIFICATION.read_text(encoding="utf-8")
     supervisor_source = SIDECAR_SUPERVISOR.read_text(encoding="utf-8")
     workflow_source = DESKTOP_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in source
-    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" in source
+    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in normal_source
+    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" in normal_source
     assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" not in supervisor_source
-    assert "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME'" not in source
-    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in source
+    assert "inheritedEnvironment(['HOME', 'XDG_CACHE_HOME'" not in normal_source
+    assert "LINUX_KEYRING_VERIFICATION_SWITCH" in normal_source
     assert "LINUX_KEYRING_VERIFICATION_SWITCH" not in main_source
     assert "ancestryllm-linux-keyring-verification-root" not in main_source
     assert "LINUX_KEYRING_VERIFICATION_SWITCH" not in production_verifier_source
+    assert "MACOS_EPHEMERAL_VERIFICATION_SWITCH" not in production_verifier_source
     assert "ancestryllm-linux-keyring-verification-root" not in production_verifier_source
     assert "return undefined" in production_verifier_source
     assert "LINUX_KEYRING_VERIFICATION_SWITCH" in packaged_verifier_source
+    assert "MACOS_EPHEMERAL_VERIFICATION_SWITCH" in packaged_verifier_source
     assert "requestedLinuxKeyringVerificationRoot(app.commandLine)" in main_source
+    assert "requestedMacosEphemeralVerification(app.commandLine)" in main_source
     production_build = workflow_source.index("pnpm --dir desktop run build\n")
     verification_build = workflow_source.index(
         "pnpm --dir desktop run build:packaged-native-verification"
@@ -186,6 +191,7 @@ def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> N
     assert "`unix:path=${posix.join(runtimeDirectory, 'bus')}`" in supervisor_source
     assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in supervisor_source
     assert "linuxKeyringVerificationRoot" in supervisor_source
+    assert "macosEphemeralWorkspaceVerification" in supervisor_source
     assert "source.HOME" not in supervisor_source
     assert "source.XDG_CACHE_HOME" not in supervisor_source
     assert "source.XDG_CONFIG_HOME" not in supervisor_source
@@ -194,14 +200,18 @@ def test_linux_packaged_environment_authenticates_native_keyring_boundary() -> N
         "environment.PYTHON_KEYRING_BACKEND = 'keyring.backends.SecretService.Keyring'"
         in supervisor_source
     )
+    assert "keyring.backends.null.Keyring" not in supervisor_source
+    assert (
+        "environment.ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE = '1'" in supervisor_source
+    )
 
 
 def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -> None:
-    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
     assert "outputContainsWindowReadyRecord(output)" in source
-    assert "assert.equal(windowReady, true)" in source
+    assert "assert.equal(windowReady, true," in source
     assert "tree.length > 1" not in source
     assert "console.info(WINDOW_READY_RECORD)" in main_source
     assert "window.once('ready-to-show'" in main_source
@@ -212,7 +222,7 @@ def test_normal_launch_waits_for_window_specific_readiness_without_debugging() -
         "disallowedControlArgument)" in source
     )
     assert "assert.doesNotMatch(output, /DevTools listening on /u)" in source
-    assert "await requestNormalApplicationQuit(child)" in source
+    assert "await requestNormalApplicationQuit(child, platform)" in source
     assert "if (!exitedCleanly) await forceCloseProcess(child)" in source
 
 
@@ -231,19 +241,19 @@ def test_local_runtime_cli_shares_the_desktop_single_instance_lock() -> None:
 
 
 def test_temporary_package_cleanup_retries_transient_windows_file_locks() -> None:
-    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    source = PACKAGED_RUNNER.read_text(encoding="utf-8")
 
     assert re.search(
-        r"await rm\(root, \{\s*force: true,\s*recursive: true,\s*"
-        r"maxRetries: 10,\s*retryDelay: 100\s*\}\)",
+        r"rmSyncImpl\(isolatedUserDataDirectory, \{\s*force: true,\s*"
+        r"recursive: true,\s*maxRetries: 10,\s*retryDelay: 100,?\s*\}\)",
         source,
     )
 
 
 def test_packaged_cleanup_terminates_the_process_tree_with_a_deadline() -> None:
-    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
 
-    assert "async function forceCloseProcess(child: ChildProcessWithoutNullStreams)" in source
+    assert "async function forceCloseProcess(child)" in source
     assert "taskkill.exe" in source
     assert "['/PID', String(child.pid), '/T', '/F']" in source
     assert "child.kill('SIGTERM')" in source

@@ -306,6 +306,13 @@ jobs:
           assert actual == expected
           assert all(row["platformValidated"] is True for row in evidence["targets"])
           PY
+          python scripts/verify_release_quality.py \
+            --version "$version" \
+            --commit "$commit" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output approved/release-quality-approval.json
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
@@ -346,12 +353,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
+          DESKTOP_RUN: ${{ needs.validate.outputs.desktop_run }}
           VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
         run: |
           mkdir approved
           gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
             --name release-evidence --dir approved
+          mkdir approved-desktop
+          gh run download "$DESKTOP_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name desktop-evidence-aggregate --dir approved-desktop
           cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS
           cmp "docs/release-evidence/$VERSION/findings.json" \
             approved/findings-dispositions.json
@@ -364,6 +376,13 @@ jobs:
             dist/version-1-security-gate-report.json
           cp approved/release-evidence.md dist/readiness-evidence.md
           cp "docs/release-notes/$VERSION.md" dist/release-notes.md
+          python scripts/verify_release_quality.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output dist/release-quality-approval.json
           printf '\n\n' >> dist/release-notes.md
           python scripts/release_signing_policy.py \
             --version "$VERSION" \
@@ -674,7 +693,7 @@ jobs:
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Unmount macOS installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -760,7 +779,7 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
-          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches the selected packaged runtime normally without a debugging transport"
           if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
@@ -906,7 +925,7 @@ jobs:
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Remove temporary Ubuntu signing and installation state
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -1263,7 +1282,7 @@ jobs:
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Unmount macOS validation installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -1344,7 +1363,7 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
-          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches the selected packaged runtime normally without a debugging transport"
           if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
@@ -1444,7 +1463,7 @@ jobs:
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Remove temporary Ubuntu validation installation
         if: always() && runner.os == 'Linux'
         shell: bash

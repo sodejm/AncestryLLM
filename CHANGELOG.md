@@ -6,6 +6,26 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Versioned release-quality policy and exact-head approval evidence covering
+  QA, security, performance, and diagnostics ownership, commands, inputs, and
+  fail-closed exceptions.
+
+### Changed
+
+- Desktop release evidence now pins its Python, Node.js, pnpm, Vitest, and
+  WebdriverIO versions; enforces V8 coverage, accessibility, source Webdriver,
+  target-specific packaged-performance ceilings, and privacy-safe diagnostic
+  canaries; and records those results in the aggregate receipt.
+
+### Security
+
+- Release and release-readiness workflows now verify the policy-bound
+  release-quality approval against the exact commit and both source artifacts.
+  Release verifies it again immediately before publication so stale, edited,
+  substituted, incomplete, or excepted-without-approval evidence fails closed.
+
 ## [0.6.0] - 2026-08-14
 
 ### Added

@@ -30,6 +30,56 @@ packaged-network or exact-six bridge claim. Issue #131 must update the package
 harness and supply target-matched stream-race, accessibility, and hostile-content
 evidence before a packaged application can claim this Chat destination.
 
+## Versioned release-quality evidence
+
+The desktop portion of `config/release-quality-policy-v1.json` is the only
+release-quality authority for tool versions, coverage, receipt gates,
+performance budgets, and diagnostics policy. Hosted verification uses Python
+3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+`desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
+accepted.
+
+The source verification matrix is deliberately layered:
+
+| Evidence | Command | Boundary |
+|---|---|---|
+| Lint and all TypeScript configurations | `pnpm --dir desktop run verify:source` | Source |
+| V8 unit/integration coverage plus script tests | `pnpm --dir desktop run test:coverage` | Source |
+| axe accessibility checks | `pnpm --dir desktop run test:accessibility` | Source renderer |
+| WebDriver functional and WCAG scenarios | `pnpm --dir desktop run test:e2e` | Source application |
+| Native launch, security, lifecycle, and performance scenarios | `pnpm --dir desktop run test:e2e:packaged` | Unpublished unpacked native package |
+
+V8 coverage fails below 70% branches or 75% functions, lines, or statements.
+Only `e2e/**`, declaration files under `src/**/*.d.ts`, and the renderer test
+bootstrap `src/renderer/src/test-setup.ts` are excluded. Tests and canaries use
+deterministic fictional records; real genealogy, credentials, prompts,
+responses, or diagnostic payloads must never enter evidence.
+
+Each command is wrapped by a write-once receipt. The aggregate accepts exactly
+the receipt gates declared by the central policy, including pinned runner
+versions, lint, type checking, coverage, accessibility, source WebDriver,
+JavaScript/TypeScript static analysis, dependency audit, secret scanning,
+diagnostics, packaged security, and SBOM generation. It rejects a missing,
+extra, failed, wrong-head, legacy, or digest-mismatched receipt and records the
+exact `toolVersions` object for the release verifier.
+
+Native performance uses policy `desktop-unpacked-v1`. WebdriverIO measures
+cold launch, warm launch, readiness, process-tree RSS, and renderer outbound
+requests in `desktop/e2e/packaged-shell.wdio.ts`; the aggregate validator in
+`desktop/scripts/verification-evidence.mjs` compares every value with the
+target-specific ceiling. The package boundary is always `unpacked-native`.
+The six native rows and their numeric ceilings live only in the central policy;
+missing, negative, non-finite, over-budget, or nonzero renderer-egress evidence
+fails the row.
+
+Diagnostics must match `ancestryllm.desktop-diagnostic/1` and its policy-bound
+schema digest. The synthetic privacy canary proves only allowlisted useful
+codes are retained while credential, path, genealogy, prompt, response, port,
+URL, stderr, and output canaries are absent. Retention remains three 512 KiB
+files per component. Diagnostics have no telemetry, export, upload, CI-artifact,
+or release-artifact path; the release approval consumes only the boolean gate,
+schema identity, and sanitized receipt metadata.
+
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`
@@ -189,9 +239,9 @@ Each native row then:
    assembles and verifies an unpublished unpacked production application;
 3. verifies that the packaged resources exactly match the deterministic
    target/build-bound sidecar payload manifest;
-4. on Linux only, builds a separate unpublished native-keyring verifier package
-   after the production assembly is complete, then launches that verifier;
-   other rows launch the production package directly;
+4. on Linux and macOS, builds a separate unpublished native-keyring verifier
+   package after the production assembly is complete, then launches that
+   verifier; Windows launches the production package directly;
 5. verifies first-run welcome, Home and healthy Diagnostics, Settings
    persistence across a new process, corrupt-preference fail-closed behavior,
    clean quit and relaunch, custom-protocol and production CSP behavior,
@@ -221,25 +271,37 @@ observed through WebDriver, while Main-process and sidecar lifecycle evidence
 comes from bounded native process snapshots. No repository-authored CDP
 endpoint, remote-debugging argument, direct CDP command, or external Chromium
 launch is part of product verification. A separate launch uses a fresh profile
-and the ordinary production executable; the test verifies that neither its
-process tree nor captured output exposes a debugging surface. The normal launch
-waits for a constant, non-sensitive lifecycle record emitted by the existing
-`ready-to-show` window path, so a sidecar or crash helper cannot satisfy the
-renderer-readiness gate.
+and the selected packaged runtime without WebDriver: the production package on
+Windows and the unpublished verifier package on Linux and macOS. The test
+verifies that neither its process tree nor captured output exposes a debugging
+surface. The normal launch waits for a constant, non-sensitive lifecycle record
+emitted by the existing `ready-to-show` window path, so a sidecar or crash
+helper cannot satisfy the renderer-readiness gate. This bounded check does not
+claim a direct normal-launch observation of the production package on Linux or
+macOS; the earlier production assembly and scanner remain the production-build
+evidence on those rows.
 
 On macOS only, both automation launches pass Chromium's `--use-mock-keychain`
 because the ad hoc, unpackaged runner build cannot reliably use a login
-keychain. That automation-only switch is not part of a shipped launch path and
-does not replace the sidecar's OS keyring implementation. Linux uses the native
-Secret Service harness described above rather than a mock backend.
+keychain. The unpublished native-verification package also accepts one reviewed
+selector that directs its Python sidecar to an in-memory secret store and a
+throwaway workspace; otherwise WebdriverIO's child process can block on the
+interactive login keychain before Electron creates a renderer, or load an
+existing encrypted workspace that the verifier must never inspect. Both
+selectors are absent from the production package, and source/unit coverage
+continues to exercise the ordinary OS-keyring adapter. The macOS row therefore
+proves packaged launch, process, diagnostic, and shutdown behavior but does not
+claim native Keychain denial or locking coverage. Linux uses the native Secret
+Service harness described above rather than a mock backend.
 
 The automated scenarios close the native application window through WebDriver,
 then independently observe that the packaged Main PID and active sidecar PID
 disappear within bounded deadlines. Because the secure packaged service session
 does not expose its child-process exit tuple, every release row also performs a
-separate ordinary production launch. Windows requests native window closure;
-macOS and Linux send `SIGTERM` through the production signal-to-quit path. That
-process must report the exact native result `{ code: 0, signal: null }`; any
+separate transport-free launch of the selected packaged runtime. Windows
+requests native window closure; macOS and Linux send `SIGTERM` through the
+shared production signal-to-quit path. That process must report the exact
+native result `{ code: 0, signal: null }`; any
 nonzero code, signal termination, or timeout fails the test, and forced
 termination is failure cleanup only. The source contract also proves that
 Electron owns the supervisor and job preflight before payload verification or

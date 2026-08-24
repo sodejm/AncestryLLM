@@ -1,5 +1,6 @@
 """Contract tests for the exact-head desktop verification workflow."""
 
+import json
 import re
 from pathlib import Path
 
@@ -184,6 +185,8 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert (
         'echo "PACKAGED_RELEASE_ROOT=desktop/release-native-verification" >> "$GITHUB_ENV"'
     ) in workflow
+    assert workflow.count("if: runner.os != 'Windows'") >= 3
+    assert 'if [[ "$RUNNER_OS" != "Windows" ]]; then' in workflow
     assert 'packaged_app="$(node desktop/scripts/find-packaged-app.mjs '
     assert '"$PACKAGED_RELEASE_ROOT")"' in workflow
 
@@ -269,7 +272,7 @@ def test_packaged_scenarios_forward_webdriverio_filters_without_a_pnpm_separator
         "exhausts packaged sidecar restarts and exits cleanly",
         "rejects a substituted packaged sidecar before launch",
         "mediates opaque packaged open and save file grants",
-        "launches production normally without a debugging transport",
+        "launches the selected packaged runtime normally without a debugging transport",
     )
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == len(expected_scenarios)
     for scenario in expected_scenarios:
@@ -438,3 +441,29 @@ def test_verification_document_covers_external_release_blockers() -> None:
     assert "immutable event SHA for the selected same-repository ref" in document
     assert "does not receive release credentials" in document
     assert "Windows Server 2025" not in document
+
+
+def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
+    workflow = _workflow()
+    policy = json.loads(
+        (ROOT / "config/release-quality-policy-v1.json").read_text(encoding="utf-8")
+    )
+    package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+    vitest = (ROOT / "desktop/vitest.config.ts").read_text(encoding="utf-8")
+
+    for gate in policy["security"]["desktopReceiptGates"]:
+        assert f"--gate {gate}" in workflow
+
+    assert "verify-release-toolchain.mjs" in workflow
+    assert "pnpm --dir desktop run test:coverage" in workflow
+    assert "pnpm --dir desktop run test:accessibility" in workflow
+    assert "pnpm --dir desktop run test:e2e" in workflow
+    assert "tests/test_structured_diagnostics.py" in workflow
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "3.2.7"
+    assert "test:coverage" in package["scripts"]
+    coverage = policy["qa"]["desktopCoverage"]
+    assert f"provider: '{coverage['provider']}'" in vitest
+    for metric, threshold in coverage["thresholds"].items():
+        assert f"{metric}: {threshold}" in vitest
+    for exclusion in coverage["reviewedExclusions"]:
+        assert f"'{exclusion}'" in vitest

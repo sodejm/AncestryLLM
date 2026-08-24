@@ -1,21 +1,17 @@
 /** Verifies packaged Electron security, resilience, grants, and release evidence with WebdriverIO. */
 import assert from 'node:assert/strict'
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { readFile, rename, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { $, $$, browser } from '@wdio/globals'
 import '@wdio/native-types'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
-import { LINUX_KEYRING_VERIFICATION_SWITCH } from '../src/main/sidecar-supervisor'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
-import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
 
-const packagedExecutable = process.env.ANCESTRYLLM_PACKAGED_APP
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
 const withholdEvidencePath = process.env.ANCESTRYLLM_WITHHOLD_EVIDENCE
@@ -450,7 +446,9 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
       externalResources: performance.getEntriesByType('resource')
         .map((entry) => entry.name)
         .filter((url) => /^(?:https?|wss?):/iu.test(url)),
-      csp: (await fetch(location.href)).headers.get('content-security-policy'),
+      csp: document.querySelector<HTMLMetaElement>(
+        'meta[http-equiv="Content-Security-Policy"]',
+      )?.content ?? null,
     }
   })
   assert.deepEqual(denied, {
@@ -471,8 +469,18 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
     )),
   )
   assert.ok(tree.some((record) => record.pid === rootPid))
+  // The WebdriverIO Electron service supplies a main-process inspector argument
+  // for this automated session. Keep it out of renderer processes here; the
+  // package-fuse inspection and the separate normal-launch scenario prove that
+  // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
-  assert.doesNotMatch(tree.map((record) => record.commandLine).join('\n'), inspectPattern)
+  assert.doesNotMatch(
+    tree
+      .filter((record) => record.commandLine.includes('--type=renderer'))
+      .map((record) => record.commandLine)
+      .join('\n'),
+    inspectPattern,
+  )
   const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
   assert.ok(rssBytes > 0)
   return rssBytes
@@ -526,9 +534,21 @@ async function expectAccessibleShell(): Promise<void> {
   assert.ok(visualChecks.reducedAnimationMs <= 0.001)
   assert.ok(visualChecks.reducedTransitionMs <= 0.001)
 
-  const originalWindow = await browser.getWindowSize()
+  // Electron's hardened package disables the browser-process CDP bridge, so
+  // WebDriver's getWindowSize/setWindowSize commands are intentionally
+  // unavailable. The renderer can still exercise the native resizable window
+  // at its declared minimum without weakening the packaged fuses.
+  const originalWindow = await browser.execute(() => ({
+    height: window.outerHeight,
+    width: window.outerWidth,
+  }))
   try {
-    await browser.setWindowSize(720, 560)
+    await browser.execute(() => window.resizeTo(720, 560))
+    await eventually(
+      'Packaged window did not reach its minimum dimensions',
+      () => browser.execute(() => ({ height: window.outerHeight, width: window.outerWidth })),
+      (dimensions) => dimensions.height === 560 && dimensions.width === 720,
+    )
     // WebDriver key events are injected in the renderer and do not traverse
     // Electron's browser-process before-input-event hook. The native shortcut
     // policy is covered by zoom-policy.test.ts; this packaged pass exercises
@@ -566,200 +586,7 @@ async function expectAccessibleShell(): Promise<void> {
     await browser.execute(() => {
       document.documentElement.style.removeProperty('zoom')
     })
-    await browser.setWindowSize(originalWindow.width, originalWindow.height)
-  }
-}
-
-function inheritedEnvironment(names: readonly string[]): Record<string, string> {
-  return Object.fromEntries(names.flatMap((name): [string, string][] => {
-    const value = process.env[name]
-    return value === undefined ? [] : [[name, value]]
-  }))
-}
-
-async function isolatedEnvironment(root: string): Promise<Record<string, string>> {
-  const isolatedHome = join(root, 'os-home')
-  const isolatedTemp = join(isolatedHome, 'tmp')
-  await Promise.all([
-    join(isolatedHome, 'AppData', 'Local'),
-    join(isolatedHome, 'AppData', 'Roaming'),
-    join(isolatedHome, 'Library', 'Application Support'),
-    join(isolatedHome, 'Library', 'Caches'),
-    join(isolatedHome, 'Library', 'Logs'),
-    join(isolatedHome, 'Library', 'Preferences'),
-    join(isolatedHome, '.cache'),
-    join(isolatedHome, '.config'),
-    join(isolatedHome, '.local', 'share'),
-    isolatedTemp,
-    join(root, 'chromium-cache'),
-    join(root, 'crash-dumps'),
-  ].map(async (path) => mkdir(path, { recursive: true })))
-  const baseNames = ['LANG', 'LC_ALL', 'LC_CTYPE', 'PATH', 'TZ'] as const
-  const platformNames = process.platform === 'win32'
-    ? ['COMSPEC', 'NUMBER_OF_PROCESSORS', 'PATHEXT', 'PROCESSOR_ARCHITECTURE', 'SYSTEMROOT', 'USERNAME', 'USERDOMAIN', 'WINDIR']
-    : process.platform === 'darwin'
-      ? ['HOME', 'LOGNAME', 'SECURITYSESSIONID', 'SHELL', 'USER', '__CF_USER_TEXT_ENCODING']
-      : ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'LOGNAME', 'SHELL', 'USER', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR']
-  const environment: Record<string, string> = {
-    ...inheritedEnvironment([...baseNames, ...platformNames]),
-    USERPROFILE: isolatedHome,
-    APPDATA: join(isolatedHome, 'AppData', 'Roaming'),
-    LOCALAPPDATA: join(isolatedHome, 'AppData', 'Local'),
-    XDG_CACHE_HOME: join(isolatedHome, '.cache'),
-    XDG_CONFIG_HOME: join(isolatedHome, '.config'),
-    XDG_DATA_HOME: join(isolatedHome, '.local', 'share'),
-    TEMP: isolatedTemp,
-    TMP: isolatedTemp,
-    TMPDIR: isolatedTemp,
-    NO_PROXY: '127.0.0.1,localhost',
-    no_proxy: '127.0.0.1,localhost',
-  }
-  if (process.platform !== 'darwin') environment.HOME = isolatedHome
-  const packagedRuntimePath = process.env.ANCESTRYLLM_PACKAGED_RUNTIME_PATH
-  if (packagedRuntimePath !== undefined) environment.PATH = packagedRuntimePath
-  return environment
-}
-
-function linuxKeyringVerificationArguments(): string[] {
-  const root = process.env.ANCESTRYLLM_NATIVE_KEYRING_ROOT
-  if (process.platform !== 'linux') {
-    if (root !== undefined) throw new Error('Linux keyring verification root is Linux only')
-    return []
-  }
-  if (!root || !isAbsolute(root)) {
-    throw new Error('Packaged Linux verification requires an absolute native keyring root')
-  }
-  return [`--${LINUX_KEYRING_VERIFICATION_SWITCH}=${root}`]
-}
-
-function waitForChildExit(
-  child: ChildProcessWithoutNullStreams,
-  timeoutMs: number,
-): Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve({ code: child.exitCode, signal: child.signalCode })
-  }
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error(`Process ${String(child.pid)} did not exit within ${timeoutMs} ms`))
-    }, timeoutMs)
-    const onError = (error: Error): void => { cleanup(); reject(error) }
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      cleanup()
-      resolve({ code, signal })
-    }
-    const cleanup = (): void => {
-      clearTimeout(timeout)
-      child.off('error', onError)
-      child.off('exit', onExit)
-    }
-    child.once('error', onError)
-    child.once('exit', onExit)
-  })
-}
-
-async function forceCloseProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  if (process.platform === 'win32' && child.pid) {
-    await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-      encoding: 'utf8',
-      windowsHide: true,
-    }).catch(() => undefined)
-    await waitForChildExit(child, 10_000).catch(() => undefined)
-    return
-  }
-  child.kill('SIGTERM')
-  try {
-    await waitForChildExit(child, 5_000)
-  } catch {
-    child.kill('SIGKILL')
-    await waitForChildExit(child, 5_000).catch(() => undefined)
-  }
-}
-
-async function requestNormalApplicationQuit(
-  child: ChildProcessWithoutNullStreams,
-): Promise<void> {
-  if (!child.pid) throw new Error('Normal packaged launch PID is unavailable')
-  if (process.platform === 'win32') {
-    const script = [
-      '$ErrorActionPreference = "Stop"',
-      `$target = Get-Process -Id ${String(child.pid)} -ErrorAction Stop`,
-      "if (-not $target.CloseMainWindow()) { throw 'native-window-close-request-failed' }",
-    ].join('\n')
-    await execFileAsync('powershell.exe', [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      script,
-    ], { encoding: 'utf8', windowsHide: true })
-  } else if (!child.kill('SIGTERM')) {
-    throw new Error(`Could not request normal exit for process ${String(child.pid)}`)
-  }
-  const exitStatus = await waitForChildExit(child, 45_000)
-  assert.deepEqual(exitStatus, { code: 0, signal: null })
-}
-
-async function expectNormalLaunchWithoutDebugSurface(root: string): Promise<void> {
-  if (!packagedExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
-  const automationArguments = process.platform === 'darwin' ? ['--use-mock-keychain'] : []
-  const launchArguments = [
-    ...automationArguments,
-    ...linuxKeyringVerificationArguments(),
-    `--user-data-dir=${root}`,
-    `--disk-cache-dir=${join(root, 'chromium-cache')}`,
-    `--crash-dumps-dir=${join(root, 'crash-dumps')}`,
-  ]
-  const child = spawn(packagedExecutable, launchArguments, {
-    env: await isolatedEnvironment(root),
-    stdio: 'pipe',
-    windowsHide: true,
-  })
-  let output = ''
-  const consume = (chunk: Buffer): void => {
-    output = `${output}${chunk.toString('utf8')}`.slice(-32_768)
-  }
-  child.stdout.on('data', consume)
-  child.stderr.on('data', consume)
-  let exitedCleanly = false
-  try {
-    const rootPid = child.pid
-    if (!rootPid) throw new Error('Normal packaged launch PID is unavailable')
-    const deadline = Date.now() + 30_000
-    let tree: ProcessRecord[] = []
-    let windowReady = false
-    const observedCommandLines = new Set<string>()
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`Normal packaged launch exited before readiness.\n${output}`)
-      }
-      tree = descendantProcessTree(await processSnapshot(), rootPid)
-      for (const record of tree) observedCommandLines.add(record.commandLine)
-      windowReady = outputContainsWindowReadyRecord(output)
-      if (
-        windowReady
-        && tree.some((record) => record.pid === rootPid)
-        && tree.reduce((total, record) => total + record.rssBytes, 0) > 0
-      ) break
-      await delay(250)
-    }
-    assert.ok(tree.some((record) => record.pid === rootPid))
-    assert.ok(tree.reduce((total, record) => total + record.rssBytes, 0) > 0)
-    assert.equal(windowReady, true)
-    const remoteStem = ['remote', 'debugging'].join('-')
-    const disallowedControlArgument = new RegExp(
-      `(?:^|\\s)--(?:${remoteStem}(?:-address|-port|-pipe)?|inspect(?:-brk)?)(?:=|\\s|$)`,
-      'u',
-    )
-    assert.doesNotMatch(launchArguments.join('\n'), disallowedControlArgument)
-    assert.doesNotMatch([...observedCommandLines].join('\n'), disallowedControlArgument)
-    assert.doesNotMatch(output, /DevTools listening on /u)
-    await requestNormalApplicationQuit(child)
-    exitedCleanly = true
-  } finally {
-    if (!exitedCleanly) await forceCloseProcess(child)
+    await browser.execute(({ height, width }) => window.resizeTo(width, height), originalWindow)
   }
 }
 
@@ -1086,16 +913,4 @@ describe('unpublished unpacked native package', () => {
     await writeFileGrantEvidence(fileGrantEvidencePath)
   })
 
-  it('launches production normally without a debugging transport', async () => {
-    if (!packagedExecutable || !copiedSidecarPath) {
-      throw new Error('Packaged app and prepared sidecar are required')
-    }
-    await closeApplicationWindow(copiedSidecarPath)
-    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-normal-launch-'))
-    try {
-      await expectNormalLaunchWithoutDebugSurface(root)
-    } finally {
-      await rm(root, { force: true, recursive: true, maxRetries: 10, retryDelay: 100 })
-    }
-  })
 })

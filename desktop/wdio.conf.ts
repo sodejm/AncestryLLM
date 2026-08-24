@@ -1,7 +1,10 @@
 /** Owns the authoritative WebdriverIO sessions for source and packaged Electron tests. */
 import '@wdio/electron-service'
 import { isAbsolute, join, resolve } from 'node:path'
-import { LINUX_KEYRING_VERIFICATION_SWITCH } from './src/main/sidecar-supervisor'
+import {
+  LINUX_KEYRING_VERIFICATION_SWITCH,
+  MACOS_EPHEMERAL_VERIFICATION_SWITCH,
+} from './src/main/sidecar-supervisor'
 
 const mode = process.env.ANCESTRYLLM_WDIO_MODE
 if (mode !== 'source' && mode !== 'packaged') {
@@ -24,6 +27,9 @@ const appArgs = [
   `--crash-dumps-dir=${join(userDataDirectory, 'crash-dumps')}`,
 ]
 if (process.platform === 'darwin') appArgs.push('--use-mock-keychain')
+if (process.platform === 'darwin' && mode === 'packaged') {
+  appArgs.push(`--${MACOS_EPHEMERAL_VERIFICATION_SWITCH}`)
+}
 if (process.platform === 'linux' && mode === 'packaged') {
   const nativeKeyringRoot = process.env.ANCESTRYLLM_NATIVE_KEYRING_ROOT
   if (!nativeKeyringRoot || !isAbsolute(nativeKeyringRoot)) {

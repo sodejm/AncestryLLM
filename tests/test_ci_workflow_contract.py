@@ -50,7 +50,7 @@ GOVERNED_JOB_TIMEOUTS = {
     },
     ".github/workflows/desktop-sidecar.yml": {
         "changes": 5,
-        "desktop-security": 30,
+        "desktop-security": 60,
         "native-package": 45,
         "desktop-gate": 10,
     },

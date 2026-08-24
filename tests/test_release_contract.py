@@ -313,6 +313,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verified-pypi-attestations" in release
     assert "artifact: [wheel, sdist]" in release
     assert "verify_release_assets.py" in release
+
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
     assert "uv sync --locked --no-default-groups --group release-verifier" in release
@@ -336,6 +337,21 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--actual downloaded" in release
     assert "--json isDraft,name,body" in release
     assert "--clobber" not in release
+
+
+def test_release_build_emits_and_retains_one_exact_head_quality_approval() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert release.count("scripts/verify_release_quality.py") >= 2
+    assert "--policy config/release-quality-policy-v1.json" in release
+    assert "--desktop-evidence approved-desktop/desktop-evidence.json" in release
+    assert "--output dist/release-quality-approval.json" in release
+    assert "release-quality-approval.json" in release
+    assert '(python_dir, {"SHA256SUMS", "release-evidence.md"}),' in release
+    assert (
+        '(python_dir, {"SHA256SUMS", "release-evidence.md", '
+        '"release-quality-approval.json"}),' not in release
+    )
 
 
 def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
@@ -521,10 +537,18 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
 def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    policy = json.loads(
+        (ROOT / "config/release-quality-policy-v1.json").read_text(encoding="utf-8")
+    )
 
     assert "name: uv-bootstrap-readiness-package" in readiness
     assert "--bootstrap-receipt evidence/bootstrap/uv-bootstrap.json" in readiness
-    assert readiness.count('"bootstrap-verification"') == 1
+    assert "--slurpfile quality_policy config/release-quality-policy-v1.json" in readiness
+    assert "$quality_policy[0].qa.readinessGates" in readiness
+    assert "bootstrap-verification" in policy["qa"]["readinessGates"]
+    assert '"bootstrap-verification",' in readiness
+    assert "$quality_policy[0].qa.readinessGates == $manifest_gates" in readiness
+    assert "release readiness gates do not match the quality policy" in readiness
 
     assert "--bootstrap-receipt .tools/receipts/uv-bootstrap.json" in release
     assert "name: uv-bootstrap-release-build" in release
@@ -546,6 +570,7 @@ def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
         "scripts/verify_release_configuration.py",
         "scripts/verify_release_milestone.py",
         "scripts/verify_release_project.py",
+        "scripts/verify_release_quality.py",
     ),
 )
 def test_release_helpers_expose_non_mutating_help(script: str) -> None:

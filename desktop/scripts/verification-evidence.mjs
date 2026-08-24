@@ -34,6 +34,19 @@ const METRIC_NAMES = Object.freeze([
  */
 export const PERFORMANCE_POLICY_VERSION = 'desktop-unpacked-v1'
 
+/**
+ * Identifies the exact release-quality toolchain represented by desktop evidence.
+ * Runtime commands validate these versions before the evidence is assembled.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const TOOL_VERSIONS = Object.freeze({
+  python: '3.12',
+  node: '26.5.0',
+  pnpm: '11.9.0',
+  vitest: '3.2.7',
+  webdriverio: '9.31.2',
+})
+
 function ceilings(coldLaunchMs, warmLaunchMs, readyMs, rssBytes) {
   return Object.freeze({
     coldLaunchMs,
@@ -604,6 +617,7 @@ export async function aggregateEvidence(root, requestedHead) {
     gitHead,
     status: 'passed',
     platformValidated: true,
+    toolVersions: TOOL_VERSIONS,
     targets: Object.freeze(targets.sort((left, right) => left.runner.localeCompare(right.runner))),
     security: checkedSecurity,
     publicationRequirements: Object.freeze({
