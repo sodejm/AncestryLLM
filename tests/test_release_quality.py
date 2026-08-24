@@ -30,7 +30,12 @@ def _digest(*, sha256: str = "d" * 64, size: int = 1) -> dict[str, Any]:
     return {"sha256": sha256, "bytes": size}
 
 
-def _receipt(gates: list[str], *, head: str = HEAD) -> dict[str, Any]:
+def _receipt(
+    gates: list[str],
+    *,
+    artifacts: dict[str, dict[str, Any]] | None = None,
+    head: str = HEAD,
+) -> dict[str, Any]:
     receipt = {
         "schemaVersion": 2,
         "kind": "verification-receipt",
@@ -46,7 +51,7 @@ def _receipt(gates: list[str], *, head: str = HEAD) -> dict[str, Any]:
             "stdout": _digest(size=0),
             "stderr": _digest(size=0),
         },
-        "artifacts": {},
+        "artifacts": copy.deepcopy(artifacts or {}),
         "workspace": {
             "algorithm": "git-workspace-v1",
             "allowedOutputs": [],
@@ -96,29 +101,190 @@ def _performance(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
-    target_receipt = _receipt(list(quality.TARGET_RECEIPT_GATES))
-    targets = [
-        {
-            "schemaVersion": 2,
-            "kind": "target",
-            "gitHead": HEAD,
-            "runner": row["runner"],
-            "sidecarTarget": row["sidecarTarget"],
-            "expectedOs": row["expectedOs"],
-            "actualOs": row["expectedOs"],
-            "arch": row["arch"],
-            "hostArch": row["hostArch"],
-            "packageBoundary": "unpacked-native",
-            "platformValidated": True,
-            "gates": dict.fromkeys(quality.TARGET_RECEIPT_GATES, True),
-            "receipts": {
-                gate: copy.deepcopy(target_receipt) for gate in quality.TARGET_RECEIPT_GATES
+def _file_grant_mediation() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "kind": "ancestryllm-packaged-file-grant-evidence",
+        "status": "passed",
+        "verificationOnlyDialogAdapter": True,
+        "observations": {
+            "openGrantOpaque": True,
+            "openMetadataValidated": True,
+            "saveGrantOpaque": True,
+            "replacementConfirmed": True,
+            "revocationPassed": True,
+            "selectedPathsAbsent": True,
+        },
+    }
+
+
+def _fault_scenarios() -> dict[str, Any]:
+    return {
+        "sidecar-withhold-retry": {
+            "schemaVersion": 1,
+            "kind": "ancestryllm-packaged-fault-evidence",
+            "scenario": "sidecar-withhold-retry",
+            "status": "passed",
+            "packageCopy": True,
+            "productionFaultHookUsed": False,
+            "observations": {
+                "failure": "startup_failed",
+                "automaticRestartsRemaining": 2,
+                "manualRetriesRemainingBefore": 1,
+                "recoveredState": "ready",
+                "processExitedAfterWindowClose": True,
             },
-            "performance": _performance(row, policy),
+        },
+        "sidecar-restart-exhaustion-quit": {
+            "schemaVersion": 1,
+            "kind": "ancestryllm-packaged-fault-evidence",
+            "scenario": "sidecar-restart-exhaustion-quit",
+            "status": "passed",
+            "packageCopy": True,
+            "productionFaultHookUsed": False,
+            "observations": {
+                "automaticRestartCount": 2,
+                "exhaustedFailure": "crash_loop",
+                "manualRetriesRemainingBefore": 1,
+                "manualRetryState": "ready",
+                "activeSidecarExitedOnQuit": True,
+                "processExitedAfterWindowClose": True,
+            },
+        },
+        "sidecar-integrity-substitution": {
+            "schemaVersion": 1,
+            "kind": "ancestryllm-packaged-fault-evidence",
+            "scenario": "sidecar-integrity-substitution",
+            "status": "passed",
+            "packageCopy": True,
+            "productionFaultHookUsed": False,
+            "observations": {
+                "failure": "startup_failed",
+                "automaticRestartsRemaining": 2,
+                "manualRetriesRemainingBefore": 1,
+                "manualRetryFailure": "startup_failed",
+                "manualRetriesRemainingAfter": 0,
+                "verificationProcessTerminated": True,
+            },
+        },
+    }
+
+
+def _inspection(sidecar_target: str) -> dict[str, Any]:
+    platform = sidecar_target.split("-", maxsplit=1)[0]
+    if platform == "darwin":
+        integrity = {
+            "status": "verified",
+            "scope": "app.asar",
+            "algorithm": "SHA256",
+            "hash": "8" * 64,
         }
-        for row in policy["performance"]["targets"]
-    ]
+    else:
+        integrity = {
+            "status": "not-applicable",
+            "scope": "app.asar",
+            "reason": "platform does not expose ASAR integrity metadata",
+        }
+    return {
+        "schemaVersion": 1,
+        "kind": "ancestryllm-desktop-package-security-inspection",
+        "platform": platform,
+        "fuses": {
+            "status": "verified",
+            "count": 1,
+            "items": [
+                {
+                    "name": "RunAsNode",
+                    "expected": False,
+                    "actual": False,
+                    "status": "verified",
+                }
+            ],
+        },
+        "asar": {
+            "presence": {"status": "verified"},
+            "integrity": integrity,
+        },
+    }
+
+
+def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    artifacts = {
+        "metrics": _digest(sha256="1" * 64),
+        "fuseInspection": _digest(sha256="2" * 64),
+        "fileGrantEvidence": _digest(sha256="3" * 64),
+        "withholdEvidence": _digest(sha256="4" * 64),
+        "restartEvidence": _digest(sha256="5" * 64),
+        "integrityEvidence": _digest(sha256="6" * 64),
+    }
+    runtime_receipt = _receipt(
+        ["packageRuntimePassed", "rendererZeroEgressCanaryPassed"],
+        artifacts={"metrics": artifacts["metrics"]},
+    )
+    receipts = {
+        "packageRuntimePassed": runtime_receipt,
+        "sidecarProcessTreeGuardPassed": _receipt(["sidecarProcessTreeGuardPassed"]),
+        "sidecarSmokePassed": _receipt(["sidecarSmokePassed"]),
+        "fusesInspectedPassed": _receipt(
+            ["fusesInspectedPassed"],
+            artifacts={"fuseInspection": artifacts["fuseInspection"]},
+        ),
+        "rendererZeroEgressCanaryPassed": copy.deepcopy(runtime_receipt),
+        "normalLaunchDebugSurfaceAbsentPassed": _receipt(["normalLaunchDebugSurfaceAbsentPassed"]),
+        "packagedFileGrantSmokePassed": _receipt(
+            ["packagedFileGrantSmokePassed"],
+            artifacts={"fileGrantEvidence": artifacts["fileGrantEvidence"]},
+        ),
+        "packagedSidecarWithholdRetryPassed": _receipt(
+            ["packagedSidecarWithholdRetryPassed"],
+            artifacts={"faultEvidence": artifacts["withholdEvidence"]},
+        ),
+        "packagedSidecarRestartExhaustionQuitPassed": _receipt(
+            ["packagedSidecarRestartExhaustionQuitPassed"],
+            artifacts={"faultEvidence": artifacts["restartEvidence"]},
+        ),
+        "packagedSidecarIntegritySubstitutionPassed": _receipt(
+            ["packagedSidecarIntegritySubstitutionPassed"],
+            artifacts={
+                "failureDiagnostics": _digest(sha256="8" * 64),
+                "faultEvidence": artifacts["integrityEvidence"],
+                "substitutedSidecar": _digest(sha256="7" * 64),
+            },
+        ),
+    }
+    return {
+        "schemaVersion": 2,
+        "kind": "target",
+        "gitHead": HEAD,
+        "runner": row["runner"],
+        "sidecarTarget": row["sidecarTarget"],
+        "expectedOs": row["expectedOs"],
+        "actualOs": row["expectedOs"],
+        "arch": row["arch"],
+        "hostArch": row["hostArch"],
+        "packageBoundary": "unpacked-native",
+        "platformValidated": True,
+        "artifactKind": "unpublished-unpacked-native",
+        "signingVerified": False,
+        "packageRuntime": True,
+        "sidecarSmoke": True,
+        "fusesInspected": True,
+        "rendererZeroEgressCanary": True,
+        "normalLaunchDebugSurfaceAbsent": True,
+        "packagedFileGrantSmoke": True,
+        "performancePassed": True,
+        "gates": dict.fromkeys(quality.TARGET_RECEIPT_GATES, True),
+        "receipts": receipts,
+        "artifacts": artifacts,
+        "fileGrantMediation": _file_grant_mediation(),
+        "faultScenarios": _fault_scenarios(),
+        "performance": _performance(row, policy),
+        "inspection": _inspection(row["sidecarTarget"]),
+    }
+
+
+def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
+    targets = [_target(row, policy) for row in policy["performance"]["targets"]]
     security_gates = policy["security"]["desktopReceiptGates"]
     security_receipt = _receipt(security_gates)
     sbom = _digest(sha256="c" * 64, size=512)
@@ -421,6 +587,166 @@ def test_incomplete_performance_evidence_is_rejected() -> None:
     desktop["targets"][0]["performance"]["checks"].pop("rssBytes")
 
     with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*performance"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize(
+    ("surface", "code"),
+    (
+        ("policy", "RQ001"),
+        ("readiness", "RQ003"),
+        ("aggregate", "RQ003"),
+        ("target", "RQ006"),
+        ("target-receipt", "RQ006"),
+        ("file-grant", "RQ006"),
+        ("fault", "RQ006"),
+        ("inspection", "RQ006"),
+        ("security", "RQ007"),
+    ),
+)
+def test_boolean_schema_versions_are_rejected(surface: str, code: str) -> None:
+    policy = _policy()
+    readiness = _readiness(policy)
+    desktop = _desktop(policy)
+    if surface == "policy":
+        policy["schemaVersion"] = True
+    elif surface == "readiness":
+        readiness["schema_version"] = True
+    elif surface == "aggregate":
+        desktop["schemaVersion"] = True
+    elif surface == "target":
+        desktop["targets"][0]["schemaVersion"] = True
+    elif surface == "target-receipt":
+        desktop["targets"][0]["receipts"]["packageRuntimePassed"]["schemaVersion"] = True
+    elif surface == "file-grant":
+        desktop["targets"][0]["fileGrantMediation"]["schemaVersion"] = True
+    elif surface == "fault":
+        desktop["targets"][0]["faultScenarios"]["sidecar-withhold-retry"]["schemaVersion"] = True
+    elif surface == "inspection":
+        desktop["targets"][0]["inspection"]["schemaVersion"] = True
+    else:
+        desktop["security"]["schemaVersion"] = True
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"{code}.*schema"):
+        _build(policy, readiness=readiness, desktop=desktop)
+
+
+def test_target_evidence_uses_the_complete_closed_schema() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0].pop("artifactKind")
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*exact schema"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize(
+    ("gate", "receipt_artifact", "target_artifact"),
+    (
+        ("packageRuntimePassed", "metrics", "metrics"),
+        ("fusesInspectedPassed", "fuseInspection", "fuseInspection"),
+        ("packagedFileGrantSmokePassed", "fileGrantEvidence", "fileGrantEvidence"),
+        ("packagedSidecarWithholdRetryPassed", "faultEvidence", "withholdEvidence"),
+        (
+            "packagedSidecarRestartExhaustionQuitPassed",
+            "faultEvidence",
+            "restartEvidence",
+        ),
+        (
+            "packagedSidecarIntegritySubstitutionPassed",
+            "faultEvidence",
+            "integrityEvidence",
+        ),
+    ),
+)
+def test_target_artifacts_are_bound_to_their_successful_receipts(
+    gate: str,
+    receipt_artifact: str,
+    target_artifact: str,
+) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    target = desktop["targets"][0]
+    target["receipts"][gate]["artifacts"][receipt_artifact] = _digest(sha256="0" * 64)
+
+    with pytest.raises(
+        quality.ReleaseQualityError,
+        match=rf"RQ006.*{target_artifact}.*not bound",
+    ):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize(
+    ("gate", "artifact"),
+    [
+        (gate, artifact)
+        for gate, artifacts in quality.TARGET_RECEIPT_ARTIFACTS.items()
+        for artifact in sorted(artifacts)
+    ],
+)
+def test_target_receipts_require_each_gate_artifact(gate: str, artifact: str) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"][gate]["artifacts"].pop(artifact)
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{artifact}"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize("gate", quality.TARGET_RECEIPT_GATES)
+def test_target_receipt_artifact_inventories_reject_unknown_artifacts(gate: str) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"][gate]["artifacts"]["unknownArtifact"] = _digest()
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*artifact inventory"):
+        _build(policy, desktop=desktop)
+
+
+def test_integrity_receipt_requires_the_substituted_sidecar_digest() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"]["packagedSidecarIntegritySubstitutionPassed"][
+        "artifacts"
+    ].pop("substitutedSidecar")
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*substitutedSidecar"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize(
+    ("surface", "mutate", "message"),
+    (
+        (
+            "file-grant",
+            lambda target: target["fileGrantMediation"]["observations"].pop("selectedPathsAbsent"),
+            "file-grant observations",
+        ),
+        (
+            "fault",
+            lambda target: target["faultScenarios"]["sidecar-withhold-retry"].update(
+                {"unexpected": True}
+            ),
+            "sidecar-withhold-retry fault evidence",
+        ),
+        (
+            "inspection",
+            lambda target: target["inspection"]["fuses"].update({"status": "failed"}),
+            "fuses",
+        ),
+    ),
+)
+def test_target_supporting_evidence_is_validated(
+    surface: str,
+    mutate: Any,
+    message: str,
+) -> None:
+    del surface
+    policy = _policy()
+    desktop = _desktop(policy)
+    mutate(desktop["targets"][0])
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{message}"):
         _build(policy, desktop=desktop)
 
 

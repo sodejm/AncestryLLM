@@ -37,6 +37,118 @@ TARGET_RECEIPT_GATES = (
     "packagedSidecarRestartExhaustionQuitPassed",
     "packagedSidecarIntegritySubstitutionPassed",
 )
+TARGET_EVIDENCE_KEYS = {
+    "schemaVersion",
+    "kind",
+    "gitHead",
+    "runner",
+    "sidecarTarget",
+    "expectedOs",
+    "actualOs",
+    "arch",
+    "hostArch",
+    "packageBoundary",
+    "platformValidated",
+    "artifactKind",
+    "signingVerified",
+    "packageRuntime",
+    "sidecarSmoke",
+    "fusesInspected",
+    "rendererZeroEgressCanary",
+    "normalLaunchDebugSurfaceAbsent",
+    "packagedFileGrantSmoke",
+    "performancePassed",
+    "gates",
+    "receipts",
+    "artifacts",
+    "fileGrantMediation",
+    "faultScenarios",
+    "performance",
+    "inspection",
+}
+TARGET_ARTIFACT_BINDINGS = (
+    ("packageRuntimePassed", "metrics", "metrics"),
+    ("fusesInspectedPassed", "fuseInspection", "fuseInspection"),
+    ("packagedFileGrantSmokePassed", "fileGrantEvidence", "fileGrantEvidence"),
+    ("packagedSidecarWithholdRetryPassed", "faultEvidence", "withholdEvidence"),
+    (
+        "packagedSidecarRestartExhaustionQuitPassed",
+        "faultEvidence",
+        "restartEvidence",
+    ),
+    (
+        "packagedSidecarIntegritySubstitutionPassed",
+        "faultEvidence",
+        "integrityEvidence",
+    ),
+)
+TARGET_RECEIPT_ARTIFACTS: dict[str, frozenset[str]] = {
+    "packageRuntimePassed": frozenset({"metrics"}),
+    "sidecarProcessTreeGuardPassed": frozenset(),
+    "sidecarSmokePassed": frozenset(),
+    "fusesInspectedPassed": frozenset({"fuseInspection"}),
+    "rendererZeroEgressCanaryPassed": frozenset({"metrics"}),
+    "normalLaunchDebugSurfaceAbsentPassed": frozenset(),
+    "packagedFileGrantSmokePassed": frozenset({"fileGrantEvidence"}),
+    "packagedSidecarWithholdRetryPassed": frozenset({"faultEvidence"}),
+    "packagedSidecarRestartExhaustionQuitPassed": frozenset({"faultEvidence"}),
+    "packagedSidecarIntegritySubstitutionPassed": frozenset(
+        {"failureDiagnostics", "faultEvidence", "substitutedSidecar"}
+    ),
+}
+TARGET_GATE_FLAGS = {
+    "packageRuntime": "packageRuntimePassed",
+    "sidecarSmoke": "sidecarSmokePassed",
+    "fusesInspected": "fusesInspectedPassed",
+    "rendererZeroEgressCanary": "rendererZeroEgressCanaryPassed",
+    "normalLaunchDebugSurfaceAbsent": "normalLaunchDebugSurfaceAbsentPassed",
+    "packagedFileGrantSmoke": "packagedFileGrantSmokePassed",
+}
+FILE_GRANT_OBSERVATIONS = {
+    "openGrantOpaque": True,
+    "openMetadataValidated": True,
+    "saveGrantOpaque": True,
+    "replacementConfirmed": True,
+    "revocationPassed": True,
+    "selectedPathsAbsent": True,
+}
+FAULT_SCENARIOS: dict[str, dict[str, Any]] = {
+    "packagedSidecarWithholdRetryPassed": {
+        "name": "sidecar-withhold-retry",
+        "artifact": "withholdEvidence",
+        "observations": {
+            "failure": "startup_failed",
+            "automaticRestartsRemaining": 2,
+            "manualRetriesRemainingBefore": 1,
+            "recoveredState": "ready",
+            "processExitedAfterWindowClose": True,
+        },
+    },
+    "packagedSidecarRestartExhaustionQuitPassed": {
+        "name": "sidecar-restart-exhaustion-quit",
+        "artifact": "restartEvidence",
+        "observations": {
+            "automaticRestartCount": 2,
+            "exhaustedFailure": "crash_loop",
+            "manualRetriesRemainingBefore": 1,
+            "manualRetryState": "ready",
+            "activeSidecarExitedOnQuit": True,
+            "processExitedAfterWindowClose": True,
+        },
+    },
+    "packagedSidecarIntegritySubstitutionPassed": {
+        "name": "sidecar-integrity-substitution",
+        "artifact": "integrityEvidence",
+        "observations": {
+            "failure": "startup_failed",
+            "automaticRestartsRemaining": 2,
+            "manualRetriesRemainingBefore": 1,
+            "manualRetryFailure": "startup_failed",
+            "manualRetriesRemainingAfter": 0,
+            "verificationProcessTerminated": True,
+        },
+    },
+}
 
 
 class ReleaseQualityError(ValueError):
@@ -60,6 +172,11 @@ def _object(value: Any, code: str, label: str) -> dict[str, Any]:
 def _exact_keys(value: dict[str, Any], expected: set[str], code: str, label: str) -> None:
     if set(value) != expected:
         _reject(code, f"{label} must use the exact schema")
+
+
+def _schema_version(value: Any, expected: int, code: str, label: str) -> None:
+    if type(value) is not int or value != expected:
+        _reject(code, f"{label} has an unsupported schema version")
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -94,7 +211,8 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         "RQ001",
         "quality policy",
     )
-    if policy["schemaVersion"] != 1 or policy["policyId"] != "ancestryllm-release-quality-v1":
+    _schema_version(policy["schemaVersion"], 1, "RQ001", "quality policy")
+    if policy["policyId"] != "ancestryllm-release-quality-v1":
         _reject("RQ001", "unsupported quality policy identity")
     families = _object(policy["families"], "RQ001", "policy families")
     if set(families) != set(FAMILIES):
@@ -350,8 +468,9 @@ def _validate_readiness(
         "RQ003",
         "readiness evidence",
     )
-    if readiness["schema_version"] != 1 or readiness["release"] != version:
-        _reject("RQ003", "readiness evidence has the wrong schema or release")
+    _schema_version(readiness["schema_version"], 1, "RQ003", "readiness evidence")
+    if readiness["release"] != version:
+        _reject("RQ003", "readiness evidence has the wrong release")
     if readiness["commit"] != commit:
         _reject("RQ002", "readiness evidence is not from the exact head")
     run_url = readiness["run_url"]
@@ -434,11 +553,8 @@ def _validate_receipt_summary(
     }
     _exact_keys(summary, receipt_keys | {"receiptFile"}, code, label)
     _validate_digest(summary["receiptFile"], code, f"{label} receipt file")
-    if (
-        summary["schemaVersion"] != 2
-        or summary["kind"] != "verification-receipt"
-        or summary["status"] != "passed"
-    ):
+    _schema_version(summary["schemaVersion"], 2, code, label)
+    if summary["kind"] != "verification-receipt" or summary["status"] != "passed":
         _reject(code, f"{label} has an invalid receipt identity or result")
     if any(summary[field] != commit for field in ("gitHead", "headBefore", "headAfter")):
         _reject(code, f"{label} is not from the exact head")
@@ -528,6 +644,171 @@ def _validate_receipt_inventory(
     }
 
 
+def _validate_file_grant_mediation(value: Any, runner: str) -> None:
+    label = f"{runner} file-grant evidence"
+    evidence = _object(value, "RQ006", label)
+    _exact_keys(
+        evidence,
+        {
+            "schemaVersion",
+            "kind",
+            "status",
+            "verificationOnlyDialogAdapter",
+            "observations",
+        },
+        "RQ006",
+        label,
+    )
+    _schema_version(evidence["schemaVersion"], 1, "RQ006", label)
+    if (
+        evidence["kind"] != "ancestryllm-packaged-file-grant-evidence"
+        or evidence["status"] != "passed"
+        or evidence["verificationOnlyDialogAdapter"] is not True
+    ):
+        _reject("RQ006", f"{label} identity or result is invalid")
+    observations_label = f"{runner} file-grant observations"
+    observations = _object(evidence["observations"], "RQ006", observations_label)
+    _exact_keys(
+        observations,
+        set(FILE_GRANT_OBSERVATIONS),
+        "RQ006",
+        observations_label,
+    )
+    if observations != FILE_GRANT_OBSERVATIONS:
+        _reject("RQ006", f"{observations_label} did not pass")
+
+
+def _validate_fault_scenarios(value: Any, runner: str) -> None:
+    scenarios = _object(value, "RQ006", f"{runner} fault scenarios")
+    expected_names = {str(spec["name"]) for spec in FAULT_SCENARIOS.values()}
+    if set(scenarios) != expected_names:
+        _reject("RQ006", f"{runner} fault scenario inventory is incomplete or unknown")
+    for spec in FAULT_SCENARIOS.values():
+        name = str(spec["name"])
+        label = f"{runner} {name} fault evidence"
+        evidence = _object(scenarios[name], "RQ006", label)
+        _exact_keys(
+            evidence,
+            {
+                "schemaVersion",
+                "kind",
+                "scenario",
+                "status",
+                "packageCopy",
+                "productionFaultHookUsed",
+                "observations",
+            },
+            "RQ006",
+            label,
+        )
+        _schema_version(evidence["schemaVersion"], 1, "RQ006", label)
+        if (
+            evidence["kind"] != "ancestryllm-packaged-fault-evidence"
+            or evidence["scenario"] != name
+            or evidence["status"] != "passed"
+            or evidence["packageCopy"] is not True
+            or evidence["productionFaultHookUsed"] is not False
+        ):
+            _reject("RQ006", f"{label} identity or result is invalid")
+        observations_label = f"{label} observations"
+        observations = _object(evidence["observations"], "RQ006", observations_label)
+        expected_observations = spec["observations"]
+        if not isinstance(expected_observations, dict):
+            _reject("RQ006", f"{observations_label} contract is invalid")
+        _exact_keys(
+            observations,
+            set(expected_observations),
+            "RQ006",
+            observations_label,
+        )
+        if observations != expected_observations:
+            _reject("RQ006", f"{observations_label} did not pass")
+
+
+def _validate_inspection(value: Any, runner: str, platform: str) -> None:
+    label = f"{runner} package security inspection"
+    inspection = _object(value, "RQ006", label)
+    _exact_keys(
+        inspection,
+        {"schemaVersion", "kind", "platform", "fuses", "asar"},
+        "RQ006",
+        label,
+    )
+    _schema_version(inspection["schemaVersion"], 1, "RQ006", label)
+    if (
+        inspection["kind"] != "ancestryllm-desktop-package-security-inspection"
+        or inspection["platform"] != platform
+    ):
+        _reject("RQ006", f"{label} identity is invalid")
+
+    fuses_label = f"{runner} fuses"
+    fuses = _object(inspection["fuses"], "RQ006", fuses_label)
+    _exact_keys(fuses, {"status", "count", "items"}, "RQ006", fuses_label)
+    items = fuses["items"]
+    count = fuses["count"]
+    if (
+        fuses["status"] != "verified"
+        or type(count) is not int
+        or count <= 0
+        or not isinstance(items, list)
+        or len(items) != count
+    ):
+        _reject("RQ006", f"{fuses_label} evidence is invalid")
+    for index, raw_item in enumerate(items):
+        item_label = f"{fuses_label} item {index}"
+        item = _object(raw_item, "RQ006", item_label)
+        _exact_keys(
+            item,
+            {"name", "expected", "actual", "status"},
+            "RQ006",
+            item_label,
+        )
+        if (
+            not isinstance(item["name"], str)
+            or not item["name"].strip()
+            or item["status"] != "verified"
+            or item["actual"] != item["expected"]
+        ):
+            _reject("RQ006", f"{item_label} was not verified")
+
+    asar_label = f"{runner} ASAR inspection"
+    asar = _object(inspection["asar"], "RQ006", asar_label)
+    _exact_keys(asar, {"presence", "integrity"}, "RQ006", asar_label)
+    presence = _object(asar["presence"], "RQ006", f"{asar_label} presence")
+    _exact_keys(presence, {"status"}, "RQ006", f"{asar_label} presence")
+    if presence["status"] != "verified":
+        _reject("RQ006", f"{asar_label} presence was not verified")
+    integrity = _object(asar["integrity"], "RQ006", f"{asar_label} integrity")
+    if platform == "darwin":
+        _exact_keys(
+            integrity,
+            {"status", "scope", "algorithm", "hash"},
+            "RQ006",
+            f"{asar_label} integrity",
+        )
+        if (
+            integrity["status"] != "verified"
+            or not isinstance(integrity["scope"], str)
+            or not integrity["scope"].strip()
+            or integrity["algorithm"] != "SHA256"
+            or not isinstance(integrity["hash"], str)
+            or not SHA256.fullmatch(integrity["hash"])
+        ):
+            _reject("RQ006", f"{asar_label} integrity is invalid")
+    else:
+        _exact_keys(
+            integrity,
+            {"status", "scope", "reason"},
+            "RQ006",
+            f"{asar_label} integrity",
+        )
+        if integrity["status"] != "not-applicable" or any(
+            not isinstance(integrity[field], str) or not integrity[field].strip()
+            for field in ("scope", "reason")
+        ):
+            _reject("RQ006", f"{asar_label} integrity is invalid")
+
+
 def _validate_performance(
     desktop: dict[str, Any], policy: dict[str, Any], commit: str
 ) -> list[dict[str, Any]]:
@@ -550,30 +831,80 @@ def _validate_performance(
     for runner in sorted(expected):
         row = actual[runner]
         contract = expected[runner]
-        if (
-            row.get("schemaVersion") != 2
-            or row.get("kind") != "target"
-            or row.get("gitHead") != commit
-        ):
+        _exact_keys(row, TARGET_EVIDENCE_KEYS, "RQ006", f"{runner} target")
+        _schema_version(row["schemaVersion"], 2, "RQ006", f"{runner} target")
+        if row["kind"] != "target" or row["gitHead"] != commit:
             _reject("RQ006", f"{runner} target identity is not from the exact head")
         for field in ("sidecarTarget", "expectedOs", "arch", "hostArch"):
-            if row.get(field) != contract[field]:
+            if row[field] != contract[field]:
                 _reject("RQ006", f"{runner} target matrix {field} mismatch")
-        if row.get("actualOs") != contract["expectedOs"]:
+        if row["actualOs"] != contract["expectedOs"]:
             _reject("RQ006", f"{runner} did not execute on the required OS")
-        if (
-            row.get("packageBoundary") != "unpacked-native"
-            or row.get("platformValidated") is not True
-        ):
+        if row["packageBoundary"] != "unpacked-native" or row["platformValidated"] is not True:
             _reject("RQ006", f"{runner} target matrix boundary was not validated")
-        _validate_receipt_inventory(
+        if (
+            row["artifactKind"] != "unpublished-unpacked-native"
+            or row["signingVerified"] is not False
+        ):
+            _reject("RQ006", f"{runner} target artifact boundary is invalid")
+        receipts = _validate_receipt_inventory(
             row,
             TARGET_RECEIPT_GATES,
             commit,
             "RQ006",
             f"{runner} target",
         )
-        evidence = _object(row.get("performance"), "RQ006", f"{runner} performance evidence")
+        for gate, expected_artifacts in TARGET_RECEIPT_ARTIFACTS.items():
+            receipt_artifacts = receipts[gate]["artifacts"]
+            if set(receipt_artifacts) != expected_artifacts:
+                expected_inventory = ", ".join(sorted(expected_artifacts)) or "no artifacts"
+                _reject(
+                    "RQ006",
+                    f"{runner} target receipt {gate} artifact inventory must be exactly {expected_inventory}",
+                )
+            for name in sorted(expected_artifacts):
+                _validate_digest(
+                    receipt_artifacts[name],
+                    "RQ006",
+                    f"{runner} target receipt {gate} artifact {name}",
+                    nonempty=True,
+                )
+        gates = _object(row["gates"], "RQ006", f"{runner} target gates")
+        for flag, gate in TARGET_GATE_FLAGS.items():
+            if row[flag] is not gates[gate]:
+                _reject("RQ006", f"{runner} target {flag} does not match gate {gate}")
+        if row["performancePassed"] is not True:
+            _reject("RQ006", f"{runner} performance did not pass")
+
+        artifacts = _object(row["artifacts"], "RQ006", f"{runner} target artifacts")
+        target_artifact_names = {
+            target_artifact for _, _, target_artifact in TARGET_ARTIFACT_BINDINGS
+        }
+        _exact_keys(
+            artifacts,
+            target_artifact_names,
+            "RQ006",
+            f"{runner} target artifacts",
+        )
+        for name in sorted(target_artifact_names):
+            _validate_digest(
+                artifacts[name],
+                "RQ006",
+                f"{runner} target artifact {name}",
+                nonempty=True,
+            )
+        for gate, receipt_artifact, target_artifact in TARGET_ARTIFACT_BINDINGS:
+            if receipts[gate]["artifacts"].get(receipt_artifact) != artifacts[target_artifact]:
+                _reject(
+                    "RQ006",
+                    f"{runner} {target_artifact} is not bound to its successful receipt",
+                )
+        _validate_file_grant_mediation(row["fileGrantMediation"], runner)
+        _validate_fault_scenarios(row["faultScenarios"], runner)
+        platform = str(contract["sidecarTarget"]).split("-", maxsplit=1)[0]
+        _validate_inspection(row["inspection"], runner, platform)
+
+        evidence = _object(row["performance"], "RQ006", f"{runner} performance evidence")
         _exact_keys(
             evidence,
             {"policyVersion", "runner", "platform", "observed", "ceilings", "checks", "passed"},
@@ -665,9 +996,14 @@ def build_manifest(
     )
     if checked_desktop["gitHead"] != commit:
         _reject("RQ002", "desktop evidence is not from the exact head")
+    _schema_version(
+        checked_desktop["schemaVersion"],
+        2,
+        "RQ003",
+        "desktop aggregate evidence",
+    )
     if (
-        checked_desktop["schemaVersion"] != 2
-        or checked_desktop["kind"] != "aggregate"
+        checked_desktop["kind"] != "aggregate"
         or checked_desktop["status"] != "passed"
         or checked_desktop["platformValidated"] is not True
         or checked_desktop["publicationRequirements"] != {"desktopInstaller": True}
@@ -685,11 +1021,13 @@ def build_manifest(
         "RQ007",
         "desktop security evidence",
     )
-    if (
-        security["schemaVersion"] != 2
-        or security["kind"] != "security"
-        or security["gitHead"] != commit
-    ):
+    _schema_version(
+        security["schemaVersion"],
+        2,
+        "RQ007",
+        "desktop security evidence",
+    )
+    if security["kind"] != "security" or security["gitHead"] != commit:
         _reject("RQ007", "desktop security evidence is not from the exact head")
     gates = _object(security.get("gates"), "RQ007", "desktop security gates")
     required_gates = checked_policy["security"]["desktopReceiptGates"]
