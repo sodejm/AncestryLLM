@@ -141,7 +141,7 @@ function targetFixture(row, observed = metrics) {
     automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
     recoveredState: 'ready',
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
   const restartEvidence = faultEvidence('sidecar-restart-exhaustion-quit', {
     automaticRestartCount: 2,
@@ -149,7 +149,7 @@ function targetFixture(row, observed = metrics) {
     manualRetriesRemainingBefore: 1,
     manualRetryState: 'ready',
     activeSidecarExitedOnQuit: true,
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
   const integrityEvidence = faultEvidence('sidecar-integrity-substitution', {
     failure: 'startup_failed',
@@ -316,6 +316,21 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
   assert.equal(evidence.signingVerified, false)
   assert.equal(evidence.hostArch, 'arm64')
   assert.equal(evidence.arch, 'arm64')
+  assert.equal(
+    evidence.faultScenarios['sidecar-withhold-retry'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    evidence.faultScenarios['sidecar-restart-exhaustion-quit'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    Object.hasOwn(
+      evidence.faultScenarios['sidecar-withhold-retry'].observations,
+      'cleanExit',
+    ),
+    false,
+  )
   assert.equal(evidence.performance.policyVersion, PERFORMANCE_POLICY_VERSION)
   assert.deepEqual(evidence.gates, Object.fromEntries(TARGET_RECEIPT_GATES.map((gate) => [gate, true])))
 

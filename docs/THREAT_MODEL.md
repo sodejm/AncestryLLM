@@ -728,18 +728,22 @@ owned by Issues #11 and #102:
   failing closed. The initial quit is vetoed while cleanup runs; only the
   authorized completion callback calls
   `app.exit(0)`, after the IPC boundary and verified sidecar ownership have been
-  released. The packaged verifier asks Electron Main to call `app.quit()`
-  through the pinned WebdriverIO Electron service, then independently observes
-  that the native packaged process PID disappears within the bounded deadline.
-  No CDP endpoint, browser-level shutdown command, broadcast close message,
-  renderer-executed close shortcut, force termination, or verifier-only
-  production backdoor satisfies that clean-shutdown evidence. A later macOS
-  `SIGTERM` is permitted only after the supervisor's 20-second stop boundary to
-  exercise the same production signal-to-quit path; another failure fails the
-  gate. The sidecar-substitution case uses `app.exit(0)` only to terminate its
-  disposable fail-closed verification package and records no clean-shutdown
-  claim. Issue #111's chat stream registers its cancellation, payload-free
-  terminal audit, and restart-reconciliation drain before exposing its routes.
+  released. Every packaged matrix row closes the native application window
+  through WebDriver, then independently observes that both the packaged Main PID
+  and active sidecar PID disappear within bounded deadlines. Because the secure
+  packaged service session does not expose its child-process exit tuple, the row
+  also performs a separate ordinary production launch. Windows requests native
+  window closure through the launched PID's `CloseMainWindow()` operation;
+  macOS and Linux send `SIGTERM` through the production signal-to-quit path.
+  That process must report the exact native result `{ code: 0, signal: null }`.
+  A nonzero code, signal termination, timeout, force termination, CDP endpoint,
+  browser-level shutdown command, broadcast close message, renderer-executed
+  close shortcut, or verifier-only production backdoor cannot satisfy the
+  clean-shutdown evidence. The sidecar-substitution case uses `app.exit(0)` only
+  to terminate its disposable fail-closed verification package and records no
+  clean-shutdown claim. Issue #111's chat stream registers its cancellation,
+  payload-free terminal audit, and restart-reconciliation drain before exposing
+  its routes.
   The WebdriverIO verifier is a development-only harness. Its complete lock
   overrides `deepmerge-ts` to exact 8.0.0 and `serialize-javascript` to exact
   7.0.3 so the canonical high-severity registry audit rejects the vulnerable

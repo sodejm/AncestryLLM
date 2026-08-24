@@ -119,3 +119,16 @@ def test_packaged_boundary_is_checked_before_leaving_home() -> None:
     )[1].split("\n  it(", maxsplit=1)[0]
 
     assert scenario.index("expectProductionBoundary") < scenario.index("click('a=Diagnostics')")
+
+
+def test_packaged_zoom_uses_equivalent_renderer_scale() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    scenario = source.split("const originalWindow = await browser.getWindowSize()", maxsplit=1)[
+        1
+    ].split("\n}\n\nfunction inheritedEnvironment", maxsplit=1)[0]
+
+    assert "document.documentElement.style.zoom = '200%'" in scenario
+    assert "getComputedStyle(document.documentElement).zoom" in scenario
+    assert "document.documentElement.style.removeProperty('zoom')" in scenario
+    assert "browser.keys" not in scenario
+    assert "zoomModifier" not in scenario

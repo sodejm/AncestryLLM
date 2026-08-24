@@ -254,8 +254,9 @@ package and does not count that termination as clean-shutdown evidence.
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and
 unrelated-key behavior. The WebdriverIO harness applies an equivalent 200%
-renderer scale through the native Electron session and states that distinction
-explicitly instead of claiming a native shortcut observation it did not make.
+renderer scale through WebDriver execution in the secure packaged session and
+states that distinction explicitly instead of claiming a native shortcut
+observation it did not make.
 
 On macOS, the verification-only builder overlay applies an ephemeral ad hoc
 signature after electron-builder mutates the Electron executable and fuses.

@@ -474,10 +474,15 @@ async function expectAccessibleShell(): Promise<void> {
   assert.ok(visualChecks.reducedTransitionMs <= 0.001)
 
   const originalWindow = await browser.getWindowSize()
-  await browser.setWindowSize(720, 560)
-  const zoomModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
-  for (let level = 0; level < 5; level += 1) await browser.keys([zoomModifier, '+'])
   try {
+    await browser.setWindowSize(720, 560)
+    // WebDriver key events are injected in the renderer and do not traverse
+    // Electron's browser-process before-input-event hook. The native shortcut
+    // policy is covered by zoom-policy.test.ts; this packaged pass exercises
+    // the rendered shell at the equivalent maximum 200% scale.
+    await browser.execute(() => {
+      document.documentElement.style.zoom = '200%'
+    })
     const layout = await eventually(
       'Packaged 200 percent layout did not settle',
       () => browser.execute(() => {
@@ -492,18 +497,22 @@ async function expectAccessibleShell(): Promise<void> {
           return [control.getAttribute('aria-label') ?? control.textContent?.trim() ?? control.tagName]
         })
         return {
+          zoom: getComputedStyle(document.documentElement).zoom,
           viewportWidth: window.innerWidth,
           documentWidth: document.documentElement.scrollWidth,
           clippedControls,
         }
       }),
-      (state) => state.viewportWidth >= 340 && state.viewportWidth <= 365,
+      (state) => state.zoom === '2',
     )
+    assert.equal(layout.zoom, '2')
     assert.ok(layout.documentWidth <= layout.viewportWidth)
     assert.deepEqual(layout.clippedControls, [])
     assert.equal(await (await visible('nav[aria-label="Primary"]')).isDisplayed(), true)
   } finally {
-    await browser.keys([zoomModifier, '0'])
+    await browser.execute(() => {
+      document.documentElement.style.removeProperty('zoom')
+    })
     await browser.setWindowSize(originalWindow.width, originalWindow.height)
   }
 }
