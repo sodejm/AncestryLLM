@@ -1,8 +1,16 @@
 /** Verifies isolated WebdriverIO scenario orchestration. */
 
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { runWdio, runWdioPlan, wdioInvocation } from './run-wdio.mjs'
+import {
+  preparePackagedScenario,
+  runWdio,
+  runWdioPlan,
+  wdioInvocation,
+} from './run-wdio.mjs'
 
 const runnerOptions = (calls) => ({
   cliPath: '/repo/desktop/node_modules/@wdio/cli/bin/wdio.js',
@@ -114,6 +122,42 @@ test('packaged cleanup failure still removes the isolated profile', () => {
       },
     },
   ])
+})
+
+test('packaged preparation cleanup retries transient Windows file locks', () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), 'ancestryllm-wdio-source-'))
+  const cleanupRoot = mkdtempSync(join(tmpdir(), 'ancestryllm-wdio-copy-'))
+  const packageRoot = process.platform === 'darwin'
+    ? join(sourceRoot, 'AncestryLLM.app')
+    : join(sourceRoot, 'package')
+  const executable = process.platform === 'darwin'
+    ? join(packageRoot, 'Contents', 'MacOS', 'AncestryLLM')
+    : join(packageRoot, process.platform === 'win32' ? 'AncestryLLM.exe' : 'ancestryllm')
+  const cleanupCalls = []
+  mkdirSync(join(packageRoot, process.platform === 'darwin' ? 'Contents/MacOS' : ''), {
+    recursive: true,
+  })
+  writeFileSync(executable, '')
+  if (process.platform === 'linux') writeFileSync(join(packageRoot, 'chrome-sandbox'), '')
+
+  try {
+    assert.throws(() => preparePackagedScenario(
+      'withholds and restores the packaged sidecar through Diagnostics retry',
+      { ANCESTRYLLM_PACKAGED_APP: executable },
+      {
+        execFileSyncImpl() { throw new Error('package preparation failed') },
+        mkdtempSyncImpl: () => cleanupRoot,
+        rmSyncImpl(path, options) { cleanupCalls.push({ path, options }) },
+      },
+    ))
+    assert.deepEqual(cleanupCalls, [{
+      path: cleanupRoot,
+      options: { force: true, maxRetries: 10, recursive: true, retryDelay: 100 },
+    }])
+  } finally {
+    rmSync(sourceRoot, { force: true, recursive: true })
+    rmSync(cleanupRoot, { force: true, recursive: true })
+  }
 })
 
 test('complete source plan runs every scenario through a fresh profile', () => {

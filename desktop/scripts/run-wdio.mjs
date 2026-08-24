@@ -94,12 +94,13 @@ function prepareCopiedLinuxSandbox(packageRoot, execFileSyncImpl) {
  * Prepares the immutable original package or a disposable fault-injection copy.
  * @param {string} scenario - Selected packaged test name.
  * @param {NodeJS.ProcessEnv} environment - Explicit child environment.
- * @param {{execFileSyncImpl?: Function, mkdtempSyncImpl?: Function}} [options] - Injectable native operations.
+ * @param {{execFileSyncImpl?: Function, mkdtempSyncImpl?: Function, rmSyncImpl?: Function}} [options] - Injectable native operations.
  * @returns {{environment: NodeJS.ProcessEnv, cleanupPath?: string}} Prepared package contract.
  */
 export function preparePackagedScenario(scenario, environment, {
   execFileSyncImpl = execFileSync,
   mkdtempSyncImpl = mkdtempSync,
+  rmSyncImpl = rmSync,
 } = {}) {
   const originalExecutable = environment.ANCESTRYLLM_PACKAGED_APP
     ?? process.env.ANCESTRYLLM_PACKAGED_APP
@@ -163,7 +164,12 @@ export function preparePackagedScenario(scenario, environment, {
     }
     return { environment: preparedEnvironment, cleanupPath: root }
   } catch (error) {
-    rmSync(root, { force: true, recursive: true })
+    rmSyncImpl(root, {
+      force: true,
+      maxRetries: 10,
+      recursive: true,
+      retryDelay: 100,
+    })
     throw error
   }
 }
