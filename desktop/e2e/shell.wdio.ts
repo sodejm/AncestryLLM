@@ -194,10 +194,33 @@ async function expectBoundedBridgeAndSecurity() {
     try { await fetch('https://example.invalid/') } catch { fetchBlocked = true }
 
     const webSocketBlocked = await new Promise<boolean>((resolve) => {
-      const socket = new WebSocket('wss://example.invalid/')
-      const timer = setTimeout(() => resolve(false), 1_500)
-      socket.addEventListener('error', () => { clearTimeout(timer); resolve(true) }, { once: true })
-      socket.addEventListener('open', () => { clearTimeout(timer); socket.close(); resolve(false) }, { once: true })
+      const target = 'wss://example.invalid/'
+      let settled = false
+      let socket: WebSocket | undefined
+      function finish(blocked: boolean): void {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        document.removeEventListener('securitypolicyviolation', onViolation)
+        if (socket && socket.readyState !== WebSocket.CLOSED) socket.close()
+        resolve(blocked)
+      }
+      function onViolation(event: SecurityPolicyViolationEvent): void {
+        if (
+          event.disposition === 'enforce'
+          && event.effectiveDirective === 'connect-src'
+          && event.blockedURI.startsWith('wss://example.invalid')
+        ) finish(true)
+      }
+      const timer = setTimeout(() => finish(false), 1_500)
+      document.addEventListener('securitypolicyviolation', onViolation)
+      try {
+        socket = new WebSocket(target)
+        socket.addEventListener('error', () => undefined, { once: true })
+        socket.addEventListener('open', () => finish(false), { once: true })
+      } catch {
+        // Constructor errors alone do not prove CSP enforcement.
+      }
     })
 
     let serviceWorkerBlocked = !('serviceWorker' in navigator)

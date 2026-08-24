@@ -267,10 +267,25 @@ export function runWdio(mode, argv, {
     assert.equal(Number.isInteger(result.status), true, `WebdriverIO ${mode} suite did not report an exit status`)
     return result.status
   } finally {
-    if (preparedPackage.cleanupPath) {
-      rmSyncImpl(preparedPackage.cleanupPath, { force: true, recursive: true })
+    try {
+      if (preparedPackage.cleanupPath) {
+        rmSyncImpl(preparedPackage.cleanupPath, {
+          force: true,
+          recursive: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        })
+      }
+    } finally {
+      if (createdUserDataDirectory) {
+        rmSyncImpl(isolatedUserDataDirectory, {
+          force: true,
+          recursive: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        })
+      }
     }
-    if (createdUserDataDirectory) rmSyncImpl(isolatedUserDataDirectory, { force: true, recursive: true })
   }
 }
 

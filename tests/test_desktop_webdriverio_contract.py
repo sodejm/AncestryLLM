@@ -132,3 +132,41 @@ def test_packaged_zoom_uses_equivalent_renderer_scale() -> None:
     assert "document.documentElement.style.removeProperty('zoom')" in scenario
     assert "browser.keys" not in scenario
     assert "zoomModifier" not in scenario
+
+
+def test_packaged_warm_launch_timing_starts_at_the_replacement_process() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    scenario = source.split(
+        "it('exercises first run, persistence, corrupt preferences, security, and resource evidence'",
+        maxsplit=1,
+    )[1].split("\n  it(", maxsplit=1)[0]
+
+    assert "async function mainPid(excluded: ReadonlySet<number> = new Set())" in source
+    assert "!excluded.has(record.pid)" in source
+    assert "async function processStartedAt(pid: number): Promise<number>" in source
+    assert "const previousApplicationPid = await mainPid()" in scenario
+    assert "await browser.reloadSession()" in scenario
+    assert (
+        "const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))"
+        in scenario
+    )
+    assert "const warmLaunchedAt = await processStartedAt(replacementApplicationPid)" in scenario
+    assert "const warmLaunchMs = Date.now() - warmLaunchedAt" in scenario
+    assert "const warmStartedAt = Date.now()" not in scenario
+
+
+def test_websocket_csp_evidence_requires_a_matching_policy_violation() -> None:
+    for spec in (SOURCE_SPEC, PACKAGED_SPEC):
+        source = spec.read_text(encoding="utf-8")
+        denied_start = source.index("const webSocketBlocked = await new Promise<boolean>")
+        denied_end = source.index("\n    let serviceWorkerBlocked", denied_start)
+        denied_source = source[denied_start:denied_end]
+
+        assert "securitypolicyviolation" in denied_source
+        assert "event.disposition === 'enforce'" in denied_source
+        assert "event.effectiveDirective === 'connect-src'" in denied_source
+        assert "event.blockedURI.startsWith('wss://example.invalid')" in denied_source
+        assert denied_source.index("document.addEventListener") < denied_source.index(
+            "new WebSocket"
+        )
+        assert "resolve(true)" not in denied_source

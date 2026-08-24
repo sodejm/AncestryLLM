@@ -58,7 +58,7 @@ test('source run selects the degraded fixture and removes its isolated profile',
   assert.deepEqual(calls[1], {
     cleanup: {
       path: '/tmp/ancestryllm-isolated-profile',
-      options: { force: true, recursive: true },
+      options: { force: true, maxRetries: 10, recursive: true, retryDelay: 100 },
     },
   })
 })
@@ -79,9 +79,41 @@ test('packaged preparation failure still removes the isolated profile', () => {
   assert.deepEqual(calls, [{
     cleanup: {
       path: '/tmp/ancestryllm-isolated-profile',
-      options: { force: true, recursive: true },
+      options: { force: true, maxRetries: 10, recursive: true, retryDelay: 100 },
     },
   }])
+})
+
+test('packaged cleanup failure still removes the isolated profile', () => {
+  const calls = []
+  const options = {
+    ...runnerOptions(calls),
+    rmSyncImpl(path, cleanupOptions) {
+      calls.push({ cleanup: { path, options: cleanupOptions } })
+      if (path === '/tmp/ancestryllm-packaged-copy') {
+        throw new Error('package cleanup failed')
+      }
+    },
+  }
+
+  assert.throws(
+    () => runWdio('packaged', ['--grep', 'packaged scenario'], options),
+    /package cleanup failed/u,
+  )
+  assert.deepEqual(calls.filter((call) => call.cleanup !== undefined), [
+    {
+      cleanup: {
+        path: '/tmp/ancestryllm-packaged-copy',
+        options: { force: true, maxRetries: 10, recursive: true, retryDelay: 100 },
+      },
+    },
+    {
+      cleanup: {
+        path: '/tmp/ancestryllm-isolated-profile',
+        options: { force: true, maxRetries: 10, recursive: true, retryDelay: 100 },
+      },
+    },
+  ])
 })
 
 test('complete source plan runs every scenario through a fresh profile', () => {

@@ -141,14 +141,14 @@ async function expectSafeDiagnosticsAlert(expectedMessage: RegExp): Promise<void
   assert.doesNotMatch(alertText, /token|secret|stderr|\.json|[/\\](?:Users|home|AppData)[/\\]/iu)
 }
 
-async function mainPid(): Promise<number> {
+async function mainPid(excluded: ReadonlySet<number> = new Set()): Promise<number> {
   if (!automatedPackagedExecutable || !userDataDirectory) {
     throw new Error('Automated packaged executable and isolated user data are required')
   }
   return eventually(
     'Packaged Electron main-process PID was not observed',
     async () => (await processSnapshot()).find((record) => (
-      matchesPackagedMainProcess(
+      !excluded.has(record.pid) && matchesPackagedMainProcess(
         record,
         automatedPackagedExecutable,
         userDataDirectory,
@@ -156,6 +156,32 @@ async function mainPid(): Promise<number> {
     ))?.pid ?? -1,
     (pid) => pid > 0,
   )
+}
+
+async function processStartedAt(pid: number): Promise<number> {
+  let rawStartedAt: string
+  if (process.platform === 'win32') {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString("o")`,
+    ].join('\n')
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ], { encoding: 'utf8', windowsHide: true })
+    rawStartedAt = stdout.trim()
+  } else {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf8',
+    })
+    rawStartedAt = stdout.trim()
+  }
+  const startedAt = Date.parse(rawStartedAt)
+  assert.ok(Number.isFinite(startedAt) && startedAt > 0, `Process ${pid} start time was invalid`)
+  return startedAt
 }
 
 async function processSnapshot(): Promise<ProcessRecord[]> {
@@ -251,10 +277,14 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
   )
 }
 
-async function closeApplicationWindow(): Promise<number> {
+async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   const pid = await mainPid()
+  const activeSidecarPid = await sidecarPid(pid, sidecarPath)
   await browser.closeWindow()
-  await expectProcessAbsent(pid)
+  await Promise.all([
+    expectProcessAbsent(pid),
+    expectProcessAbsent(activeSidecarPid),
+  ])
   return pid
 }
 
@@ -377,10 +407,33 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
     let fetchBlocked = false
     try { await fetch('https://example.invalid/') } catch { fetchBlocked = true }
     const webSocketBlocked = await new Promise<boolean>((resolve) => {
-      const socket = new WebSocket('wss://example.invalid/')
-      const timer = setTimeout(() => resolve(false), 1_500)
-      socket.addEventListener('error', () => { clearTimeout(timer); resolve(true) }, { once: true })
-      socket.addEventListener('open', () => { clearTimeout(timer); socket.close(); resolve(false) }, { once: true })
+      const target = 'wss://example.invalid/'
+      let settled = false
+      let socket: WebSocket | undefined
+      function finish(blocked: boolean): void {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        document.removeEventListener('securitypolicyviolation', onViolation)
+        if (socket && socket.readyState !== WebSocket.CLOSED) socket.close()
+        resolve(blocked)
+      }
+      function onViolation(event: SecurityPolicyViolationEvent): void {
+        if (
+          event.disposition === 'enforce'
+          && event.effectiveDirective === 'connect-src'
+          && event.blockedURI.startsWith('wss://example.invalid')
+        ) finish(true)
+      }
+      const timer = setTimeout(() => finish(false), 1_500)
+      document.addEventListener('securitypolicyviolation', onViolation)
+      try {
+        socket = new WebSocket(target)
+        socket.addEventListener('error', () => undefined, { once: true })
+        socket.addEventListener('open', () => finish(false), { once: true })
+      } catch {
+        // Constructor errors alone do not prove CSP enforcement.
+      }
     })
     let serviceWorkerBlocked = !('serviceWorker' in navigator)
     if (!serviceWorkerBlocked) {
@@ -758,10 +811,12 @@ describe('unpublished unpacked native package', () => {
       'schemaVersion',
     ])
 
-    const warmStartedAt = Date.now()
+    const previousApplicationPid = await mainPid()
     await browser.reloadSession()
+    const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))
+    const warmLaunchedAt = await processStartedAt(replacementApplicationPid)
     await expectFocusedHeading('Home')
-    const warmLaunchMs = Date.now() - warmStartedAt
+    const warmLaunchMs = Date.now() - warmLaunchedAt
     assert.equal((await $$('h1=Welcome to AncestryLLM')).length, 0)
     assert.deepEqual(await browser.execute(() => ({
       theme: document.documentElement.dataset.theme,
@@ -810,7 +865,7 @@ describe('unpublished unpacked native package', () => {
       manualRetriesRemaining: 0,
     })
     assert.equal((await $$('[role="alert"]')).length, 0)
-    await closeApplicationWindow()
+    await closeApplicationWindow(copiedSidecarPath)
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',
       automaticRestartsRemaining: 2,
@@ -864,7 +919,7 @@ describe('unpublished unpacked native package', () => {
       manualRetriesRemaining: 0,
     })
     const retried = await sidecarPid(applicationPid, copiedSidecarPath, killed)
-    await closeApplicationWindow()
+    await closeApplicationWindow(copiedSidecarPath)
     await expectProcessAbsent(retried)
     await writeFaultEvidence(restartEvidencePath, 'sidecar-restart-exhaustion-quit', {
       automaticRestartCount: 2,
@@ -941,9 +996,10 @@ describe('unpublished unpacked native package', () => {
       || !fileGrantOpenPath
       || !fileGrantSavePath
       || !fileGrantEvidencePath
+      || !copiedSidecarPath
     ) this.skip()
-    if (!fileGrantOpenPath || !fileGrantSavePath || !fileGrantEvidencePath) {
-      throw new Error('Packaged file-grant verification inputs and evidence output are required')
+    if (!fileGrantOpenPath || !fileGrantSavePath || !fileGrantEvidencePath || !copiedSidecarPath) {
+      throw new Error('Packaged file-grant verification inputs, sidecar, and evidence output are required')
     }
     const normalizedOpenPath = normalizeVerificationSelection(fileGrantOpenPath)
     const normalizedSavePath = normalizeVerificationSelection(fileGrantSavePath)
@@ -1025,13 +1081,15 @@ describe('unpublished unpacked native package', () => {
       fileGrantSavePath,
       normalizedSavePath,
     ])) assert.equal(exposedStrings.includes(selectedPath), false)
-    await closeApplicationWindow()
+    await closeApplicationWindow(copiedSidecarPath)
     await writeFileGrantEvidence(fileGrantEvidencePath)
   })
 
   it('launches production normally without a debugging transport', async () => {
-    if (!packagedExecutable) throw new Error('ANCESTRYLLM_PACKAGED_APP is required')
-    await closeApplicationWindow()
+    if (!packagedExecutable || !copiedSidecarPath) {
+      throw new Error('Packaged app and prepared sidecar are required')
+    }
+    await closeApplicationWindow(copiedSidecarPath)
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-normal-launch-'))
     try {
       await expectNormalLaunchWithoutDebugSurface(root)

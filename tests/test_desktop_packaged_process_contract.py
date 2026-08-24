@@ -82,9 +82,15 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     )
     normal_quit_source = source[normal_quit_start:normal_quit_end]
 
+    assert "async function closeApplicationWindow(sidecarPath: string)" in quit_source
+    assert "const activeSidecarPid = await sidecarPid(pid, sidecarPath)" in quit_source
     assert "await browser.closeWindow()" in quit_source
-    assert "await expectProcessAbsent" in quit_source
+    assert "await Promise.all([" in quit_source
+    assert "expectProcessAbsent(pid)" in quit_source
+    assert "expectProcessAbsent(activeSidecarPid)" in quit_source
     assert "browser.electron.execute" not in quit_source
+    assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 4
+    assert "await closeApplicationWindow()" not in source
 
     assert "CloseMainWindow()" in normal_quit_source
     assert "child.kill('SIGTERM')" in normal_quit_source
@@ -266,9 +272,12 @@ def test_packaged_startup_diagnostics_are_bounded_and_record_failure_context() -
     assert "await writeIntegrityDiagnostics" in source
     assert "} finally {" in runner_source
     assert "if (preparedPackage.cleanupPath)" in runner_source
-    assert (
-        "rmSyncImpl(preparedPackage.cleanupPath, { force: true, recursive: true })" in runner_source
+    assert re.search(
+        r"rmSyncImpl\(preparedPackage\.cleanupPath, \{\s*force: true,\s*"
+        r"recursive: true,\s*maxRetries: 10,\s*retryDelay: 100,?\s*\}\)",
+        runner_source,
     )
+    assert "if (createdUserDataDirectory)" in runner_source
 
 
 def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> None:
