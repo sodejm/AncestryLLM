@@ -6,19 +6,28 @@ uploads are prohibited.
 
 Repository release coordinates are defined in
 `.github/release-config.json`. Its stable package version and GitHub Project 2
-release fields are one reviewed release control. The Project fields are the
-owner, Project number and title, `Release iteration`, `Priority`, `Status`, and
-`Validation`; no successor tracker issue is required. The release workflow
-requires the configured version, `pyproject.toml`, `desktop/package.json`, and
-the packaged sidecar build identity to match exactly before either pre-tag
-packaging or tagged publication can proceed. Readiness and publication use the
-configured Project values instead of inferring release state from an issue
-number or version string.
+release fields are one reviewed release control. Every Project-backed schema
+names the owner, Project number and title, `Release iteration`, `Status`, and
+`Validation`; no successor tracker issue is required. Schema 2 selects one
+`project.priority`. Schema 3 replaces that singular field with the non-empty,
+unique `project.priorities` list and adds the repository milestone number and
+title under `project.milestone`. The release workflow requires the configured
+version, `pyproject.toml`, `desktop/package.json`, and the packaged sidecar build
+identity to match exactly before either pre-tag packaging or tagged publication
+can proceed. Readiness and publication use the configured Project values
+instead of inferring release state from an issue number or version string.
 
 The published v0.4.0 release continues to use its preserved milestone/tracker
-evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
+evidence. Schema 2 is the v0.5.0 and v0.6.0 control plane: its selected Project
 iteration, currently `v0.6.0 — Usable desktop core`, is authoritative for
-release readiness.
+release readiness. The active v0.6.0 configuration remains on schema 2 until
+the final v0.7.0 release-preparation change selects schema 3. Under schema 3,
+the selected Project iteration and configured repository milestone must contain
+exactly the same issues. Every configured priority must be represented, and
+each release issue must be closed with the configured `Status` and `Validation`
+values and no open dependency. Draft or non-Issue Project items, unconfigured
+priorities, incomplete pagination, missing coordinates, or scope and state
+mismatches fail the gate closed.
 
 ## Future deployment-runtime release gate
 
@@ -89,7 +98,7 @@ that the checkout and `origin/main` are the triggering commit, validates the
 configured release coordinates, and performs the authenticated Project query.
 It verifies pagination and target-iteration field schema without claiming that
 the in-development iteration is ready to release; a deterministic regression
-then proves the strict verifier rejects an open P0 item. `Release readiness`
+then proves the strict verifier rejects a non-ready configured-priority item. `Release readiness`
 and the tag workflow continue to use the strict live gate. The proof has no
 pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
 While the triggering commit remains the tip of `main`, use GitHub's rerun
@@ -107,6 +116,12 @@ dependencies, their iteration order, and the #131 release-evidence consumer.
 for that gate. Proof, readiness, and release workflows must use both files
 without embedding a divergent query or inferring policy from issue titles,
 bodies, labels, or comments.
+
+The Project owner and repository owner are independent coordinates: workflows
+take the former from release configuration and the latter from
+`GITHUB_REPOSITORY_OWNER`. For schema v3 releases, the gate compares the exact
+Project iteration issue set with the exact repository milestone issue set and
+fails if the milestone contains any pull request.
 
 When the plan changes, update the issue number, owner, iteration, dependency
 edge, iteration order, and consumer in the same reviewed pull request wherever

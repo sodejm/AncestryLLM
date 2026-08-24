@@ -29,6 +29,7 @@ class ReleaseConfiguration:
     project_title: str | None = None
     project_iteration: str | None = None
     project_priority: str | None = None
+    project_priorities: tuple[str, ...] = ()
     project_status: str | None = None
     project_validation: str | None = None
 
@@ -66,6 +67,15 @@ def _require_text(value: object, location: str) -> str:
     return value
 
 
+def _require_text_list(value: object, location: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{location} must be a non-empty list")
+    result = tuple(_require_text(item, f"{location}[{index}]") for index, item in enumerate(value))
+    if len(set(result)) != len(result):
+        raise ValueError(f"{location} values must be unique")
+    return result
+
+
 def validate_release_configuration(
     payload: object,
     *,
@@ -77,10 +87,10 @@ def validate_release_configuration(
 
     root = _require_mapping(payload, "release configuration")
     schema_version = root.get("schema_version")
-    if isinstance(schema_version, bool) or schema_version not in {1, 2}:
-        raise ValueError("release configuration schema_version must be 1 or 2")
+    if isinstance(schema_version, bool) or schema_version not in {1, 2, 3}:
+        raise ValueError("release configuration schema_version must be 1, 2, or 3")
 
-    release = _require_text(root["release"], "release")
+    release = _require_text(root.get("release"), "release")
     if STABLE_SEMVER.fullmatch(release) is None:
         raise ValueError(f"configured release {release!r} is not stable SemVer")
     if release != expected_version:
@@ -106,26 +116,53 @@ def validate_release_configuration(
             tracker_label=_require_text(tracker["label"], "tracker.label"),
         )
 
-    _require_exact_keys(
-        root,
-        {"schema_version", "release", "project"},
-        "release configuration",
-    )
+    _require_exact_keys(root, {"schema_version", "release", "project"}, "release configuration")
     project = _require_mapping(root["project"], "project")
-    _require_exact_keys(
-        project,
-        {"owner", "number", "title", "iteration", "priority", "status", "validation"},
-        "project",
-    )
+    if schema_version == 2:
+        _require_exact_keys(
+            project,
+            {"owner", "number", "title", "iteration", "priority", "status", "validation"},
+            "project",
+        )
+    else:
+        _require_exact_keys(
+            project,
+            {
+                "owner",
+                "number",
+                "title",
+                "iteration",
+                "priorities",
+                "milestone",
+                "status",
+                "validation",
+            },
+            "project",
+        )
+    common = {
+        "release": release,
+        "project_owner": _require_text(project.get("owner"), "project.owner"),
+        "project_number": _require_positive_integer(project.get("number"), "project.number"),
+        "project_title": _require_text(project.get("title"), "project.title"),
+        "project_iteration": _require_text(project.get("iteration"), "project.iteration"),
+        "project_status": _require_text(project.get("status"), "project.status"),
+        "project_validation": _require_text(project.get("validation"), "project.validation"),
+    }
+    if schema_version == 2:
+        priority = _require_text(project["priority"], "project.priority")
+        return ReleaseConfiguration(
+            **common,
+            project_priority=priority,
+            project_priorities=(priority,),
+        )
+
+    milestone = _require_mapping(project["milestone"], "project.milestone")
+    _require_exact_keys(milestone, {"number", "title"}, "project.milestone")
     return ReleaseConfiguration(
-        release=release,
-        project_owner=_require_text(project["owner"], "project.owner"),
-        project_number=_require_positive_integer(project["number"], "project.number"),
-        project_title=_require_text(project["title"], "project.title"),
-        project_iteration=_require_text(project["iteration"], "project.iteration"),
-        project_priority=_require_text(project["priority"], "project.priority"),
-        project_status=_require_text(project["status"], "project.status"),
-        project_validation=_require_text(project["validation"], "project.validation"),
+        **common,
+        project_priorities=_require_text_list(project["priorities"], "project.priorities"),
+        milestone_number=_require_positive_integer(milestone["number"], "project.milestone.number"),
+        milestone_title=_require_text(milestone["title"], "project.milestone.title"),
     )
 
 

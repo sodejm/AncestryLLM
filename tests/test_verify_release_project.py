@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -93,6 +94,55 @@ def _page(items: list[dict[str, object]], *, has_next_page: bool = False) -> dic
     }
 
 
+def _milestone_issue(
+    number: int,
+    *,
+    state: str = "CLOSED",
+    repository: str = "sodejm/AncestryLLM",
+    typename: str = "Issue",
+) -> dict[str, object]:
+    return {
+        "__typename": typename,
+        "number": number,
+        "state": state,
+        "repository": {"nameWithOwner": repository},
+    }
+
+
+def _release_page(
+    items: list[dict[str, object]],
+    milestone_items: list[dict[str, object]],
+    *,
+    milestone_pull_requests: list[dict[str, object]] | None = None,
+    milestone_number: int = 6,
+    milestone_title: str = "0.7.0 Genealogy Workflows",
+    milestone_has_next_page: bool = False,
+) -> dict[str, object]:
+    page = _page(items)
+    page["data"]["repository"] = {
+        "nameWithOwner": "sodejm/AncestryLLM",
+        "milestone": {
+            "number": milestone_number,
+            "title": milestone_title,
+            "issues": {
+                "nodes": milestone_items,
+                "pageInfo": {
+                    "hasNextPage": milestone_has_next_page,
+                    "endCursor": "milestone-cursor" if milestone_has_next_page else None,
+                },
+            },
+            "pullRequests": {
+                "nodes": milestone_pull_requests or [],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
+                },
+            },
+        },
+    }
+    return page
+
+
 @pytest.fixture()
 def verifier():
     return _load_module()
@@ -105,9 +155,26 @@ def gate(verifier):
         number=2,
         title="AncestryLLM Feature Releases",
         iteration="v0.5.0 — Foundation",
-        priority="P0",
+        priorities=("P0",),
         status="Done",
         validation="Verified",
+    )
+
+
+@pytest.fixture()
+def release_gate(verifier):
+    return verifier.ProjectGate(
+        owner="release-project-owner",
+        number=2,
+        title="AncestryLLM Feature Releases",
+        iteration="v0.7.0 — Genealogy workflows",
+        priorities=("P0", "P1"),
+        status="Done",
+        validation="Verified",
+        repository_owner="sodejm",
+        repository="AncestryLLM",
+        milestone_number=6,
+        milestone_title="0.7.0 Genealogy Workflows",
     )
 
 
@@ -115,6 +182,21 @@ def test_accepts_complete_paginated_project_items(verifier, gate):
     pages = [_page([_item(202)], has_next_page=True), _page([_item(224)])]
 
     verifier.verify_project_gate(pages, gate)
+
+
+def test_rejects_non_text_release_priority(verifier, gate):
+    malformed = verifier.ProjectGate(
+        owner=gate.owner,
+        number=gate.number,
+        title=gate.title,
+        iteration=gate.iteration,
+        priorities=cast("tuple[str, ...]", (None,)),
+        status=gate.status,
+        validation=gate.validation,
+    )
+
+    with pytest.raises(verifier.ProjectVerificationError, match="priorities are malformed"):
+        verifier.verify_project_schema(_page([_item(202)]), malformed)
 
 
 def test_rejects_unfinished_project_item_pagination(verifier, gate):
@@ -286,3 +368,110 @@ def test_rejects_inconsistent_duplicate_issue_data(verifier, gate):
     duplicate["id"] = "PVTITEM_duplicate"
     with pytest.raises(verifier.ProjectVerificationError, match="inconsistent"):
         verifier.verify_project_gate(_page([_item(202), duplicate]), gate)
+
+
+def test_accepts_all_configured_priorities_with_exact_milestone_parity(verifier, release_gate):
+    items = [
+        _item(202, iteration=release_gate.iteration, priority="P0"),
+        _item(224, iteration=release_gate.iteration, priority="P1"),
+    ]
+    milestone_items = [_milestone_issue(202), _milestone_issue(224)]
+
+    verifier.verify_project_gate(_release_page(items, milestone_items), release_gate)
+
+
+def test_rejects_unready_issue_in_any_configured_priority(verifier, release_gate):
+    items = [
+        _item(202, iteration=release_gate.iteration, priority="P0"),
+        _item(
+            224,
+            iteration=release_gate.iteration,
+            priority="P1",
+            state="OPEN",
+            status="In progress",
+            validation="Pending",
+        ),
+    ]
+
+    with pytest.raises(verifier.ProjectVerificationError, match="issue #224 is still open"):
+        verifier.verify_project_gate(
+            _release_page(items, [_milestone_issue(202), _milestone_issue(224, state="OPEN")]),
+            release_gate,
+        )
+
+
+def test_rejects_unconfigured_target_priority(verifier, release_gate):
+    item = _item(202, iteration=release_gate.iteration, priority="P2")
+
+    with pytest.raises(verifier.ProjectVerificationError, match="unconfigured Priority 'P2'"):
+        verifier.verify_project_schema(
+            _release_page([item], [_milestone_issue(202)]),
+            release_gate,
+        )
+
+
+def test_rejects_non_issue_in_target_iteration(verifier, release_gate):
+    draft = _item(202, iteration=release_gate.iteration)
+    draft["content"] = {"__typename": "DraftIssue", "title": "untracked work"}
+
+    with pytest.raises(verifier.ProjectVerificationError, match="non-Issue item"):
+        verifier.verify_project_schema(
+            _release_page([draft], []),
+            release_gate,
+        )
+
+
+@pytest.mark.parametrize(
+    ("items", "milestone_items", "expected"),
+    (
+        (
+            [_item(202, iteration="v0.7.0 — Genealogy workflows")],
+            [_milestone_issue(202), _milestone_issue(224)],
+            "milestone-only issues: #224",
+        ),
+        (
+            [
+                _item(202, iteration="v0.7.0 — Genealogy workflows"),
+                _item(224, iteration="v0.7.0 — Genealogy workflows"),
+            ],
+            [_milestone_issue(202)],
+            "Project-only issues: #224",
+        ),
+    ),
+)
+def test_rejects_project_and_milestone_issue_set_mismatch(
+    verifier, release_gate, items, milestone_items, expected
+):
+    with pytest.raises(verifier.ProjectVerificationError, match=expected):
+        verifier.verify_project_schema(
+            _release_page(items, milestone_items),
+            release_gate,
+        )
+
+
+def test_rejects_pull_request_in_release_milestone(verifier, release_gate):
+    item = _item(202, iteration=release_gate.iteration)
+
+    with pytest.raises(verifier.ProjectVerificationError, match="contains pull request #470"):
+        verifier.verify_project_schema(
+            _release_page(
+                [item],
+                [_milestone_issue(202)],
+                milestone_pull_requests=[_milestone_issue(470, typename="PullRequest")],
+            ),
+            release_gate,
+        )
+
+
+def test_rejects_incomplete_milestone_pagination(verifier, release_gate):
+    item = _item(202, iteration=release_gate.iteration)
+
+    with pytest.raises(verifier.ProjectVerificationError, match="milestone pagination"):
+        verifier.verify_project_schema(
+            _release_page(
+                [item],
+                [_milestone_issue(202)],
+                milestone_has_next_page=True,
+            ),
+            release_gate,
+        )
