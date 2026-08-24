@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -84,6 +86,40 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         )
         assert declaration is not None, target_name
         assert "verified-uv" in declaration.group("prerequisites"), target_name
+
+
+def test_make_pins_uv_to_selected_system_python() -> None:
+    selected_python = Path(sys.executable)
+    environment = os.environ.copy()
+    environment["PATH"] = os.pathsep.join(
+        (str(selected_python.parent), environment.get("PATH", ""))
+    )
+    probe_makefile = """\
+.PHONY: probe-selected-uv-python
+probe-selected-uv-python:
+\t@"$(PYTHON)" -c 'import os, pathlib, sys; selected = pathlib.Path(os.environ["UV_PYTHON"]); assert selected.is_absolute(), selected; assert selected.samefile(sys.executable), (selected, sys.executable)'
+"""
+
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-f",
+            str(ROOT / "Makefile"),
+            "-f",
+            "-",
+            "probe-selected-uv-python",
+            f"PYTHON={selected_python.name}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        input=probe_makefile,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_make_exposes_the_exact_canonical_uv_commands() -> None:

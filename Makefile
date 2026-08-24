@@ -21,7 +21,8 @@ PYTHON ?= python3
 UV_BIN := $(UV_TOOL_DIR)/uv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
-export UV_PYTHON := $(PYTHON)
+SYSTEM_PYTHON_EXECUTABLE := $(shell "$(PYTHON)" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null)
+export UV_PYTHON := $(SYSTEM_PYTHON_EXECUTABLE)
 
 .PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-cutover docs-screenshots docs-screenshots-check docs-terminal-screenshots
 
