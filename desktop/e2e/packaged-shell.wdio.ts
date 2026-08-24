@@ -13,6 +13,7 @@ import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/
 import { outputContainsWindowReadyRecord } from '../src/main/window-readiness'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
+import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
 
 const packagedExecutable = process.env.ANCESTRYLLM_PACKAGED_APP
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
@@ -29,13 +30,6 @@ const userDataDirectory = process.env.ANCESTRYLLM_WDIO_USER_DATA
 const copiedSidecarPath = process.env.ANCESTRYLLM_WDIO_SIDECAR_PATH
 const withheldSidecarPath = process.env.ANCESTRYLLM_WDIO_WITHHELD_SIDECAR
 const execFileAsync = promisify(execFile)
-
-type ProcessRecord = Readonly<{
-  pid: number
-  ppid: number
-  rssBytes: number
-  commandLine: string
-}>
 
 type StartupExpectation = Readonly<{
   state: StartupDiagnostics['state']
@@ -151,13 +145,14 @@ async function mainPid(): Promise<number> {
   if (!automatedPackagedExecutable || !userDataDirectory) {
     throw new Error('Automated packaged executable and isolated user data are required')
   }
-  const profileArgument = `--user-data-dir=${userDataDirectory}`
   return eventually(
     'Packaged Electron main-process PID was not observed',
     async () => (await processSnapshot()).find((record) => (
-      !record.commandLine.includes('--type=')
-      && record.commandLine.includes(automatedPackagedExecutable)
-      && record.commandLine.includes(profileArgument)
+      matchesPackagedMainProcess(
+        record,
+        automatedPackagedExecutable,
+        userDataDirectory,
+      )
     ))?.pid ?? -1,
     (pid) => pid > 0,
   )
@@ -721,12 +716,12 @@ describe('unpublished unpacked native package', () => {
     await expectFocusedHeading('Home')
     assert.match(await text('main'), /Packaged build/u)
     assert.match(await text('main'), /Ready/u)
+    const readyMs = Date.now() - launchedAt
+    const rssBytes = await expectProductionBoundary(await mainPid())
     await click('a=Diagnostics')
     await expectFocusedHeading('Diagnostics')
     assert.match(await text('main'), /Desktop service[\s\S]*Ready/u)
     assert.equal((await $$('[role="alert"]')).length, 0)
-    const readyMs = Date.now() - launchedAt
-    const rssBytes = await expectProductionBoundary(await mainPid())
     await expectAccessibleShell()
 
     const preferencesPath = join(userDataDirectory, 'preferences.json')

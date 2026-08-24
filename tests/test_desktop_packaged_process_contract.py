@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
+PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
 PACKAGED_NATIVE_VERIFICATION = (
     ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
@@ -28,14 +29,18 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
 
 def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    process_records_source = PROCESS_RECORDS.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
 
     assert "browser.electron.execute" not in source
     assert (
         "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
     )
-    assert "record.commandLine.includes(automatedPackagedExecutable)" in source
-    assert "record.commandLine.includes(profileArgument)" in source
+    assert "matchesPackagedMainProcess(" in source
+    assert "record.commandLine" in process_records_source
+    assert "commandLine.includes(expectedExecutable)" in process_records_source
+    assert "commandLine.includes(expectedProfile)" in process_records_source
+    assert "!commandLine.includes('--type=')" in process_records_source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
     assert "record.commandLine.includes('--type=renderer')" in source
     assert "!record.commandLine.includes('--no-sandbox')" in source

@@ -109,3 +109,13 @@ def test_packaged_wdio_suite_keeps_release_and_negative_security_scenarios() -> 
         "launches production normally without a debugging transport",
     ):
         assert scenario in source
+
+
+def test_packaged_boundary_is_checked_before_leaving_home() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    scenario = source.split(
+        "it('exercises first run, persistence, corrupt preferences, security, and resource evidence'",
+        maxsplit=1,
+    )[1].split("\n  it(", maxsplit=1)[0]
+
+    assert scenario.index("expectProductionBoundary") < scenario.index("click('a=Diagnostics')")
