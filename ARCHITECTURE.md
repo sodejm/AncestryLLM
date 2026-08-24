@@ -500,23 +500,19 @@ still requires its distribution and target-assurance gates to pass.
   resource has been released, to avoid a second platform-specific quit cycle.
   Shutdown fails closed when termination cannot be verified, while clearing the
   rejected shutdown attempt so a later native quit request can start one fresh,
-  fully verified stop. The packaged macOS matrix exercises that later-request
-  recovery under independent bounded deadlines and never treats force-kill
-  cleanup as a successful exit. On packaged Windows and Linux, verification
-  arms the process-exit listener before requesting the final native window
-  close. Windows sends an operating-system main-window close message through
-  a PID-bound top-level-window lookup: it enumerates desktop windows, retains
-  only handles whose owning process is the launched package and whose caption
-  exactly matches the application-controlled `AncestryLLM` title, requires
-  exactly one match, and posts `WM_CLOSE` to that handle. This avoids relying
-  on taskbar visibility heuristics that are not stable on hosted Windows.
-  Linux uses
-  Playwright's page-close request with unload handling enabled. The harness
-  releases the automation connection only after the request is in flight and
-  accepts only a normal zero-code Electron exit. It does not use a broadcast,
-  renderer close shortcut, raw CDP browser shutdown, or a verifier-only
-  production backdoor. The implemented drain covers the Uvicorn server
-  and listener, stdio, process tree, temporary
+  fully verified stop. Every packaged matrix row closes the application window
+  through WebDriver and independently observes that both the packaged Main PID
+  and active sidecar PID disappear within bounded deadlines. Because the secure
+  packaged service session does not expose its child-process exit tuple, the row
+  also performs a separate ordinary production launch. Windows requests native
+  window closure through the launched PID's `CloseMainWindow()` operation;
+  macOS and Linux send `SIGTERM` through the production signal-to-quit path.
+  That ordinary launch must report the exact native result
+  `{ code: 0, signal: null }`. A timeout, nonzero code, signal termination, or
+  force-kill cleanup never satisfies the clean-shutdown proof. The harness does
+  not use a broadcast, renderer close shortcut, raw CDP browser shutdown, or a
+  verifier-only production backdoor. The implemented drain covers the Uvicorn
+  server and listener, stdio, process tree, temporary
   launch directory, and Issue #104's application job admission, cooperative
   cancellation or bounded wait, and encrypted snapshot/event repository.
   Issue #110 registers its process-memory `ChatService` with sidecar teardown,

@@ -53,7 +53,7 @@ _CLASSIFICATION_CASES: dict[str, tuple[str, str]] = {
         "desktop/scripts/verify-build.test.mjs",
         "first-party-script",
     ),
-    "e2e-typescript": ("desktop/e2e/shell.spec.ts", "first-party-test"),
+    "e2e-typescript": ("desktop/e2e/shell.wdio.ts", "first-party-test"),
     "shell-script": ("scripts/check_repository_safety.sh", "first-party-script"),
     "swift-script": (
         "scripts/export-apple-signing-identity.swift",

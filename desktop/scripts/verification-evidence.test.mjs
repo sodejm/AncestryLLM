@@ -141,7 +141,7 @@ function targetFixture(row, observed = metrics) {
     automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
     recoveredState: 'ready',
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
   const restartEvidence = faultEvidence('sidecar-restart-exhaustion-quit', {
     automaticRestartCount: 2,
@@ -149,7 +149,7 @@ function targetFixture(row, observed = metrics) {
     manualRetriesRemainingBefore: 1,
     manualRetryState: 'ready',
     activeSidecarExitedOnQuit: true,
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
   const integrityEvidence = faultEvidence('sidecar-integrity-substitution', {
     failure: 'startup_failed',
@@ -165,9 +165,26 @@ function targetFixture(row, observed = metrics) {
   const fileGrantMediation = fileGrantEvidence()
   const fileGrantEvidenceBytes = encoded(fileGrantMediation)
   const runtimeReceipt = receiptRecord(
-    ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed', 'normalLaunchDebugSurfaceAbsentPassed'],
+    ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed'],
     { metrics: digest(metricsBytes) },
-    ['pnpm', 'exec', 'playwright', 'test'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'exercises first run, persistence, corrupt preferences, security, and resource evidence',
+    ],
+  )
+  const normalLaunchReceipt = receiptRecord(
+    ['normalLaunchDebugSurfaceAbsentPassed'],
+    {},
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'launches production normally without a debugging transport',
+    ],
   )
   const processTreeGuardReceipt = receiptRecord(
     ['sidecarProcessTreeGuardPassed'],
@@ -183,17 +200,35 @@ function targetFixture(row, observed = metrics) {
   const fileGrantReceipt = receiptRecord(
     ['packagedFileGrantSmokePassed'],
     { fileGrantEvidence: digest(fileGrantEvidenceBytes) },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'mediates opaque packaged open and save file grants'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'mediates opaque packaged open and save file grants',
+    ],
   )
   const withholdReceipt = receiptRecord(
     ['packagedSidecarWithholdRetryPassed'],
     { faultEvidence: digest(withholdEvidenceBytes) },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'withholds'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'withholds and restores the packaged sidecar through Diagnostics retry',
+    ],
   )
   const restartReceipt = receiptRecord(
     ['packagedSidecarRestartExhaustionQuitPassed'],
     { faultEvidence: digest(restartEvidenceBytes) },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'restarts'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'exhausts packaged sidecar restarts and exits cleanly',
+    ],
   )
   const integrityReceipt = receiptRecord(
     ['packagedSidecarIntegritySubstitutionPassed'],
@@ -201,10 +236,17 @@ function targetFixture(row, observed = metrics) {
       faultEvidence: digest(integrityEvidenceBytes),
       substitutedSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
     },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'substituted-sidecar'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'rejects a substituted packaged sidecar before launch',
+    ],
   )
   const receiptRecords = [
     runtimeReceipt,
+    normalLaunchReceipt,
     processTreeGuardReceipt,
     sidecarReceipt,
     fuseReceipt,
@@ -274,6 +316,21 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
   assert.equal(evidence.signingVerified, false)
   assert.equal(evidence.hostArch, 'arm64')
   assert.equal(evidence.arch, 'arm64')
+  assert.equal(
+    evidence.faultScenarios['sidecar-withhold-retry'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    evidence.faultScenarios['sidecar-restart-exhaustion-quit'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    Object.hasOwn(
+      evidence.faultScenarios['sidecar-withhold-retry'].observations,
+      'cleanExit',
+    ),
+    false,
+  )
   assert.equal(evidence.performance.policyVersion, PERFORMANCE_POLICY_VERSION)
   assert.deepEqual(evidence.gates, Object.fromEntries(TARGET_RECEIPT_GATES.map((gate) => [gate, true])))
 

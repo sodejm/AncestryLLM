@@ -102,6 +102,7 @@ function unusedRemoteAdapter(): RemoteMediatedOperationAdapter {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -532,10 +533,15 @@ describe('mediated operation broker', () => {
     const input = await openGrant(fileGrants, owner, 'gedcom-read')
     const output = await saveGrant(fileGrants, owner, 'markdown-write', 'quality.md')
     const dispose = vi.fn(async () => undefined)
+    let markExecuteStarted!: () => void
+    const executeStarted = new Promise<void>((resolve) => { markExecuteStarted = resolve })
     const local: LocalMediatedOperationAdapter = {
       prepare: vi.fn(async (context) => ({
         realizedMounts: context.mountPlan.mounts,
-        execute: vi.fn(() => new Promise<void>(() => undefined)),
+        execute: vi.fn(() => {
+          markExecuteStarted()
+          return new Promise<void>(() => undefined)
+        }),
         dispose,
       })),
     }
@@ -547,13 +553,17 @@ describe('mediated operation broker', () => {
       maxDurationMs: 50,
     })
 
-    const failure = await broker.execute(owner, request(
+    vi.useFakeTimers()
+    const execution = broker.execute(owner, request(
       '9',
       'gedcom.quality',
       'local-container',
       [input],
       [output],
     )).catch((error: unknown) => error)
+    await executeStarted
+    await vi.advanceTimersByTimeAsync(50)
+    const failure = await execution
 
     expect(failure).toBeInstanceOf(MediatedOperationBrokerError)
     expect(failure).toMatchObject({

@@ -236,7 +236,7 @@ const FAULT_SCENARIOS = Object.freeze({
       automaticRestartsRemaining: 2,
       manualRetriesRemainingBefore: 1,
       recoveredState: 'ready',
-      cleanExit: true,
+      processExitedAfterWindowClose: true,
     }),
   }),
   packagedSidecarRestartExhaustionQuitPassed: Object.freeze({
@@ -248,7 +248,7 @@ const FAULT_SCENARIOS = Object.freeze({
       manualRetriesRemainingBefore: 1,
       manualRetryState: 'ready',
       activeSidecarExitedOnQuit: true,
-      cleanExit: true,
+      processExitedAfterWindowClose: true,
     }),
   }),
   packagedSidecarIntegritySubstitutionPassed: Object.freeze({

@@ -53,6 +53,16 @@ verified-uv: system-python
 	@$(PYTHON) scripts/bootstrap_uv.py bootstrap --install-dir $(UV_TOOL_DIR) --receipt $(UV_RECEIPT) >/dev/null
 
 setup: verified-uv
+	@if [ -e "$(VENV_DIR)" ] || [ -L "$(VENV_DIR)" ]; then \
+		if [ -L "$(VENV_DIR)" ] || [ ! -d "$(VENV_DIR)" ] || [ -L "$(VENV_DIR)/pyvenv.cfg" ] || [ ! -f "$(VENV_DIR)/pyvenv.cfg" ] || ! grep -Eq '^[[:space:]]*uv[[:space:]]*=' "$(VENV_DIR)/pyvenv.cfg"; then \
+			echo "UVENV_VENV_REPAIR_REFUSED: $(VENV_DIR) is not a regular uv-managed virtual environment" >&2; \
+			exit 2; \
+		fi; \
+		if ! "$(VENV_PYTHON)" -I -c 'import encodings' >/dev/null 2>&1; then \
+			echo "UVENV_VENV_RECREATED: replacing the unusable generated environment at $(VENV_DIR)" >&2; \
+			$(UV_BIN) venv --clear --python "$(UV_PYTHON)" "$(VENV_DIR)" >/dev/null; \
+		fi; \
+	fi
 	@$(UV_BIN) sync --locked --all-extras --all-groups
 
 bootstrap: setup hooks

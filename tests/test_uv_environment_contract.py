@@ -122,6 +122,189 @@ probe-selected-uv-python:
     assert completed.returncode == 0, completed.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual-environment layout")
+def test_make_setup_repairs_an_unstartable_checkout_environment(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    (venv_dir / "pyvenv.cfg").write_text(
+        "home = /deleted/python\nuv = 0.12.1\n",
+        encoding="utf-8",
+    )
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    calls = call_log.read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        " ".join(
+            (
+                "venv --clear --python",
+                str(Path(sys.executable).resolve()),
+                str(venv_dir),
+            )
+        ),
+        "sync --locked --all-extras --all-groups",
+    ]
+    assert "UVENV_VENV_RECREATED" in completed.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual-environment layout")
+def test_make_setup_refuses_to_recreate_an_environment_not_owned_by_uv(
+    tmp_path: Path,
+) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    (venv_dir / "pyvenv.cfg").write_text(
+        "home = /deleted/python\n",
+        encoding="utf-8",
+    )
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link semantics")
+def test_make_setup_refuses_to_replace_a_dangling_environment_symlink(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_dir.symlink_to(tmp_path / "missing-environment", target_is_directory=True)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_dir / 'bin' / 'python'}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link semantics")
+def test_make_setup_refuses_symlinked_uv_ownership_metadata(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    ownership_metadata = tmp_path / "untrusted-pyvenv.cfg"
+    ownership_metadata.write_text(
+        "home = /deleted/python\nuv = 0.12.1\n",
+        encoding="utf-8",
+    )
+    (venv_dir / "pyvenv.cfg").symlink_to(ownership_metadata)
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
 def test_make_exposes_the_exact_canonical_uv_commands() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     expected_commands = {

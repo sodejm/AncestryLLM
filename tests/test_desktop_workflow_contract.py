@@ -10,7 +10,7 @@ MAKEFILE = ROOT / "Makefile"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
 NATIVE_VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.native-verification.yml"
-PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.spec.ts"
+PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
 LINUX_KEYRING_RUNNER = ROOT / "desktop" / "scripts" / "run-with-linux-keyring.sh"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 
@@ -135,7 +135,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
-    assert workflow.count("node desktop/scripts/run-packaged-tests.mjs") == 5
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
@@ -260,21 +260,22 @@ def test_workflow_binds_packaged_file_grant_mediation_without_production_dialog_
     assert "ANCESTRYLLM_FILE_GRANT_EVIDENCE" not in production_sources
 
 
-def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator() -> None:
+def test_packaged_scenarios_forward_webdriverio_filters_without_a_pnpm_separator() -> None:
     workflow = _workflow()
 
     expected_scenarios = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence",
-        "mediates opaque packaged open and save file grants",
         "withholds and restores the packaged sidecar through Diagnostics retry",
-        "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
-        "rejects a target-native substituted packaged sidecar before spawn",
+        "exhausts packaged sidecar restarts and exits cleanly",
+        "rejects a substituted packaged sidecar before launch",
+        "mediates opaque packaged open and save file grants",
+        "launches production normally without a debugging transport",
     )
-    assert workflow.count("run-packaged-tests.mjs") == len(expected_scenarios)
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == len(expected_scenarios)
     for scenario in expected_scenarios:
         assert workflow.count(f'--grep "{scenario}"') == 1
 
-    assert re.search(r"run-packaged-tests\.mjs --\s", workflow) is None
+    assert re.search(r"run-wdio\.mjs packaged --\s", workflow) is None
 
 
 def test_packaged_diagnostics_expectations_follow_the_shared_contract() -> None:
@@ -282,11 +283,12 @@ def test_packaged_diagnostics_expectations_follow_the_shared_contract() -> None:
 
     assert "import type { AncestryBridge, StartupDiagnostics }" in source
     assert "type StartupDiagnostics = Readonly<{" not in source
-    assert "type StartupDiagnosticsExpectation" in source
+    assert "type StartupExpectation" in source
     assert "schema_version: 1" in source
     assert "status: 'ready'" in source
-    assert ").toMatchObject(expected)" in source
-    assert ").toEqual(expected)" not in source
+    assert "function matchesStartup" in source
+    assert "browser.waitUntil" in source
+    assert ").toMatchObject(expected)" not in source
 
 
 def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
@@ -305,7 +307,9 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
     assert workflow.count(install) == 1
     assert release.count(install) == 2
     assert workflow.count(verifier_launcher) == 2
-    assert release.count(production_launcher) == 2
+    # Both the private build validation and the public artifact validation run
+    # the automated and normal-launch packaged scenarios on Linux.
+    assert release.count(production_launcher) == 4
     assert "--production-runtime-bus" not in workflow
     assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
     assert "dbus-run-session" not in runner
