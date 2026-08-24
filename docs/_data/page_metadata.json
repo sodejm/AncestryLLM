@@ -209,6 +209,10 @@
     "title": "GEDCOM import smoke-test evidence — AncestryLLM",
     "description": "Reproducible evidence for the fictional GEDCOM importer smoke tests tracked by issue 10."
   },
+  "release-evidence/issue-453-test-suite-audit.md": {
+    "title": "v0.7.0 test-suite consolidation audit — AncestryLLM",
+    "description": "Before-and-after collection, runtime, coverage, and rationale for the issue 453 test-suite consolidation."
+  },
   "release-notes/0.2.0.md": {
     "title": "AncestryLLM 0.2.0 release notes",
     "description": "Changes, compatibility notes, and validation evidence for the AncestryLLM 0.2.0 release."

@@ -37,128 +37,94 @@ def _fixture_source(name: str) -> str:
 # classify() — extension and path-prefix rules
 # ---------------------------------------------------------------------------
 
+_CLASSIFICATION_CASES: dict[str, tuple[str, str]] = {
+    "python-source-in-src": ("src/ancestryllm/cli.py", "first-party-code"),
+    "python-test-file": ("tests/test_something.py", "first-party-test"),
+    "python-script": ("scripts/build_release.py", "first-party-script"),
+    "typescript-source": ("desktop/src/main/index.ts", "first-party-code"),
+    "typescript-declaration-file": (
+        "desktop/src/shared-contract/index.d.ts",
+        "first-party-code",
+    ),
+    "typescript-test": ("desktop/src/main/foo.test.ts", "first-party-code"),
+    "tsx-source": ("desktop/src/renderer/App.tsx", "first-party-code"),
+    "mjs-desktop-script": ("desktop/scripts/verify-build.mjs", "first-party-script"),
+    "mjs-desktop-test": (
+        "desktop/scripts/verify-build.test.mjs",
+        "first-party-script",
+    ),
+    "e2e-typescript": ("desktop/e2e/shell.spec.ts", "first-party-test"),
+    "shell-script": ("scripts/check_repository_safety.sh", "first-party-script"),
+    "swift-script": (
+        "scripts/export-apple-signing-identity.swift",
+        "first-party-script",
+    ),
+    "yaml-workflow": (".github/workflows/ci.yml", "first-party-config-exec"),
+    "toml-pyproject": ("pyproject.toml", "first-party-config-exec"),
+    "graphql-query": (
+        "config/release-project-query-v1.graphql",
+        "first-party-config-exec",
+    ),
+    "makefile": ("Makefile", "first-party-config-exec"),
+    "dockerfile": ("containers/Dockerfile", "first-party-config-exec"),
+    "named-dockerfile": (
+        "containers/docs-terminal-capture.Dockerfile",
+        "first-party-config-exec",
+    ),
+    "markdown-doc": ("README.md", "non-code-doc"),
+    "docs-markdown": ("docs/CODE_DOCUMENTATION.md", "non-code-doc"),
+    "docs-png": ("docs/assets/screenshots/terminal/cli-help.png", "non-code-doc"),
+    "license-file": ("LICENSE", "non-code-doc"),
+    "json-file": (".github/release-config.json", "non-comment-format"),
+    "strict-json-compose": ("containers/compose.yaml", "non-comment-format"),
+    "strict-json-compose-local": (
+        "containers/compose.local.yaml",
+        "non-comment-format",
+    ),
+    "strict-json-compose-remote": (
+        "containers/compose.remote.yaml",
+        "non-comment-format",
+    ),
+    "plist-file": (
+        "desktop/resources/entitlements.mac.plist",
+        "non-comment-format",
+    ),
+    "ged-fixture": (
+        "tests/fixtures/gedcom_adversarial/sample.ged",
+        "test-data-fixture",
+    ),
+    "uv-lock": ("uv.lock", "generated-vendor"),
+    "pnpm-lock": ("pnpm-lock.yaml", "generated-vendor"),
+    "reviewed-electron-patch": (
+        "desktop/patches/electron@39.8.10.patch",
+        "generated-vendor",
+    ),
+    "node-modules-subtree": (
+        "desktop/node_modules/foo/index.js",
+        "generated-vendor",
+    ),
+    "vscode-settings": (".vscode/settings.json", "ide-config"),
+    "env-example": (".env.example", "non-comment-format"),
+    "gitignore": (".gitignore", "non-code-doc"),
+    "manifest-in": ("MANIFEST.in", "first-party-config-exec"),
+}
+
 
 class TestClassify:
     """Unit tests for the file-classification function."""
 
-    def test_python_source_in_src(self) -> None:
-        assert classify("src/ancestryllm/cli.py") == "first-party-code"
-
-    def test_python_test_file(self) -> None:
-        assert classify("tests/test_something.py") == "first-party-test"
-
-    def test_python_script(self) -> None:
-        assert classify("scripts/build_release.py") == "first-party-script"
-
-    def test_typescript_source(self) -> None:
-        assert classify("desktop/src/main/index.ts") == "first-party-code"
-
-    def test_typescript_declaration_file(self) -> None:
-        assert classify("desktop/src/shared-contract/index.d.ts") == "first-party-code"
-
-    def test_typescript_test(self) -> None:
-        assert classify("desktop/src/main/foo.test.ts") == "first-party-code"
-
-    def test_tsx_source(self) -> None:
-        assert classify("desktop/src/renderer/App.tsx") == "first-party-code"
-
-    def test_mjs_desktop_script(self) -> None:
-        assert classify("desktop/scripts/verify-build.mjs") == "first-party-script"
-
-    def test_mjs_desktop_test(self) -> None:
-        assert classify("desktop/scripts/verify-build.test.mjs") == "first-party-script"
-
-    def test_e2e_typescript(self) -> None:
-        assert classify("desktop/e2e/shell.spec.ts") == "first-party-test"
-
-    def test_shell_script(self) -> None:
-        assert classify("scripts/check_repository_safety.sh") == "first-party-script"
-
-    def test_swift_script(self) -> None:
-        assert classify("scripts/export-apple-signing-identity.swift") == "first-party-script"
-
-    def test_yaml_workflow(self) -> None:
-        assert classify(".github/workflows/ci.yml") == "first-party-config-exec"
-
-    def test_toml_pyproject(self) -> None:
-        assert classify("pyproject.toml") == "first-party-config-exec"
-
-    def test_graphql_query(self) -> None:
-        assert classify("config/release-project-query-v1.graphql") == ("first-party-config-exec")
-
-    def test_makefile(self) -> None:
-        assert classify("Makefile") == "first-party-config-exec"
-
-    def test_dockerfile(self) -> None:
-        assert classify("containers/Dockerfile") == "first-party-config-exec"
-
-    def test_named_dockerfile(self) -> None:
-        assert classify("containers/docs-terminal-capture.Dockerfile") == "first-party-config-exec"
-
-    def test_markdown_doc(self) -> None:
-        assert classify("README.md") == "non-code-doc"
-
-    def test_docs_markdown(self) -> None:
-        assert classify("docs/CODE_DOCUMENTATION.md") == "non-code-doc"
-
-    def test_docs_png(self) -> None:
-        assert classify("docs/assets/screenshots/terminal/cli-help.png") == "non-code-doc"
-
-    def test_license_file(self) -> None:
-        assert classify("LICENSE") == "non-code-doc"
-
-    def test_json_file(self) -> None:
-        assert classify(".github/release-config.json") == "non-comment-format"
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "containers/compose.yaml",
-            "containers/compose.local.yaml",
-            "containers/compose.remote.yaml",
-        ],
-    )
-    def test_strict_json_compose_file(self, path: str) -> None:
-        assert classify(path) == "non-comment-format"
-
-    def test_plist_file(self) -> None:
-        assert classify("desktop/resources/entitlements.mac.plist") == "non-comment-format"
-
-    def test_ged_fixture(self) -> None:
-        assert classify("tests/fixtures/gedcom_adversarial/sample.ged") == "test-data-fixture"
-
-    def test_uv_lock(self) -> None:
-        assert classify("uv.lock") == "generated-vendor"
-
-    def test_pnpm_lock(self) -> None:
-        assert classify("pnpm-lock.yaml") == "generated-vendor"
-
-    def test_reviewed_electron_patch(self) -> None:
-        assert classify("desktop/patches/electron@39.8.10.patch") == "generated-vendor"
+    @pytest.mark.parametrize("case_id", _CLASSIFICATION_CASES)
+    def test_known_path(self, case_id: str) -> None:
+        path, expected = _CLASSIFICATION_CASES[case_id]
+        assert classify(path) == expected
 
     def test_unreviewed_patch_raises(self) -> None:
         with pytest.raises(ValueError, match="unclassified"):
             classify("desktop/patches/electron@39.8.11.patch")
 
-    def test_node_modules_subtree(self) -> None:
-        assert classify("desktop/node_modules/foo/index.js") == "generated-vendor"
-
-    def test_vscode_settings(self) -> None:
-        assert classify(".vscode/settings.json") == "ide-config"
-
-    def test_env_example(self) -> None:
-        # .env.example has extension .example — classified as non-comment-format
-        assert classify(".env.example") == "non-comment-format"
-
     def test_unknown_extension_raises(self) -> None:
         with pytest.raises(ValueError, match="unclassified"):
             classify("src/ancestryllm/foo.xyz")
-
-    def test_gitignore(self) -> None:
-        assert classify(".gitignore") == "non-code-doc"
-
-    def test_manifest_in(self) -> None:
-        assert classify("MANIFEST.in") == "first-party-config-exec"
 
 
 # ---------------------------------------------------------------------------
