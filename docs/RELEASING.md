@@ -53,17 +53,18 @@ to name the requested full commit SHA, and writes
 `release-quality-approval.json`. Missing, extra, malformed, stale,
 wrong-version, wrong-tool, failed, or unapproved evidence is a blocking error.
 The verifier runs once before the release job can begin and again after final
-distribution assembly; the second pass must retain the same approval in
+distribution assembly. The second pass re-downloads the two immutable source
+artifacts, checks the assembled readiness evidence against its approved copy,
+and regenerates the same deterministic approval in
 `dist/release-quality-approval.json` so it is covered by the release checksums
 and provenance.
 
 The schema permits only explicitly recorded, unexpired exception documents
-with a known family, owner, independent approver, rationale, compensating
-controls, issue URL, decision date, and expiry no later than 90 days. An
-exception is an auditable disclosure and never changes a failed gate into a
-pass. The v1 policy contains no exceptions. Any future waiver semantics require
-a reviewed policy-schema revision; editing an evidence artifact cannot create
-one.
+with a known family and gate, an owner, an independent approver, a reason, and
+an expiry no later than 90 days after verification. An exception is an
+auditable disclosure and never changes a failed gate into a pass. The v1 policy
+contains no exceptions. Any future waiver semantics require a reviewed
+policy-schema revision; editing an evidence artifact cannot create one.
 
 ## Future deployment-runtime release gate
 

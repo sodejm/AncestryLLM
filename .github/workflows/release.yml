@@ -1874,6 +1874,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: read # required to download the exact approved evidence artifacts by run ID
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1897,10 +1898,19 @@ jobs:
           path: desktop-release
       - name: Merge exact release assets and regenerate final evidence
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
+          DESKTOP_RUN: ${{ needs.validate.outputs.desktop_run }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          mkdir approved
+          gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name release-evidence --dir approved
+          mkdir approved-desktop
+          gh run download "$DESKTOP_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name desktop-evidence-aggregate --dir approved-desktop
           python - python-release desktop-release dist <<'PY'
           import shutil
           import sys
@@ -1909,7 +1919,10 @@ jobs:
           python_dir, desktop_dir, output_dir = map(Path, sys.argv[1:])
           output_dir.mkdir()
           for source_dir, skipped in (
-              (python_dir, {"SHA256SUMS", "release-evidence.md"}),
+              (
+                  python_dir,
+                  {"SHA256SUMS", "release-evidence.md", "release-quality-approval.json"},
+              ),
               (desktop_dir, set()),
           ):
               for source in source_dir.iterdir():
@@ -1922,6 +1935,14 @@ jobs:
                       raise SystemExit(f"release asset collision: {source.name}")
                   shutil.copyfile(source, destination)
           PY
+          cmp dist/gates.json approved/gates.json
+          python scripts/verify_release_quality.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output dist/release-quality-approval.json
           python scripts/create_release_evidence.py \
             --version "$VERSION" \
             --commit "$COMMIT_SHA" \

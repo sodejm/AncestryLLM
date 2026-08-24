@@ -9,15 +9,34 @@ import hashlib
 import json
 import re
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Never
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = ROOT / "config" / "release-quality-policy-v1.json"
 SHA = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+ARTIFACT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+MAX_SAFE_INTEGER = (2**53) - 1
 FAMILIES = ("diagnostics", "performance", "qa", "security")
+REQUIRED_EVIDENCE_INPUTS = (
+    ("release-evidence", "gates.json"),
+    ("desktop-evidence-aggregate", "desktop-evidence.json"),
+)
+TARGET_RECEIPT_GATES = (
+    "packageRuntimePassed",
+    "sidecarProcessTreeGuardPassed",
+    "sidecarSmokePassed",
+    "fusesInspectedPassed",
+    "rendererZeroEgressCanaryPassed",
+    "normalLaunchDebugSurfaceAbsentPassed",
+    "packagedFileGrantSmokePassed",
+    "packagedSidecarWithholdRetryPassed",
+    "packagedSidecarRestartExhaustionQuitPassed",
+    "packagedSidecarIntegritySubstitutionPassed",
+)
 
 
 class ReleaseQualityError(ValueError):
@@ -107,8 +126,8 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         ):
             _reject("RQ001", "evidence input artifact and path are required")
         checked_inputs.append((record["artifact"], record["path"]))
-    if len(set(checked_inputs)) != len(checked_inputs):
-        _reject("RQ001", "evidence inputs must be unique")
+    if tuple(checked_inputs) != REQUIRED_EVIDENCE_INPUTS:
+        _reject("RQ001", "evidence policy must use the two required inputs")
     if evidence["approvalPath"] != "release-quality-approval.json":
         _reject("RQ001", "unsupported release-quality approval path")
     if evidence["verifier"] != "scripts/verify_release_quality.py":
@@ -309,29 +328,48 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         seen.add(record["id"])
         if record["family"] not in FAMILIES:
             _reject("RQ009", f"exception {record['id']} has an unknown family")
+        if record["approvedBy"] == record["owner"]:
+            _reject("RQ009", f"exception {record['id']} needs an independent approver")
         try:
             expiry = date.fromisoformat(record["expires"])
         except ValueError:
             _reject("RQ009", f"exception {record['id']} has an invalid expiry")
         if expiry < as_of:
             _reject("RQ009", f"exception {record['id']} expired before {as_of.isoformat()}")
+        if expiry > as_of + timedelta(days=90):
+            _reject("RQ009", f"exception {record['id']} expires more than 90 days from review")
     return copy.deepcopy(exceptions)
 
 
 def _validate_readiness(
     readiness: dict[str, Any], version: str, commit: str, required: list[str]
 ) -> dict[str, str]:
-    if readiness.get("schema_version") != 1 or readiness.get("release") != version:
+    _exact_keys(
+        readiness,
+        {"schema_version", "release", "commit", "run_url", "gates"},
+        "RQ003",
+        "readiness evidence",
+    )
+    if readiness["schema_version"] != 1 or readiness["release"] != version:
         _reject("RQ003", "readiness evidence has the wrong schema or release")
-    if readiness.get("commit") != commit:
+    if readiness["commit"] != commit:
         _reject("RQ002", "readiness evidence is not from the exact head")
-    gates = readiness.get("gates")
+    run_url = readiness["run_url"]
+    if not isinstance(run_url, str) or not run_url.startswith(("https://", "http://")):
+        _reject("RQ003", "readiness evidence has no run URL")
+    gates = readiness["gates"]
     if not isinstance(gates, list):
         _reject("RQ004", "readiness gate inventory is missing")
     by_name: dict[str, dict[str, Any]] = {}
     for raw in gates:
         gate = _object(raw, "RQ004", "readiness gate")
-        name = gate.get("name")
+        _exact_keys(
+            gate,
+            {"name", "status", "evidence_url"},
+            "RQ004",
+            "readiness gate",
+        )
+        name = gate["name"]
         if not isinstance(name, str) or name in by_name:
             _reject("RQ004", "readiness gate names must be unique strings")
         by_name[name] = gate
@@ -341,15 +379,158 @@ def _validate_readiness(
         _reject("RQ004", f"readiness gate inventory mismatch; missing={missing}, unknown={unknown}")
     for name in required:
         gate = by_name[name]
-        if gate.get("status") != "verified":
+        if gate["status"] != "verified":
             _reject("RQ004", f"readiness gate {name} is not verified")
-        url = gate.get("evidence_url")
+        url = gate["evidence_url"]
         if not isinstance(url, str) or not url.startswith(("https://", "http://")):
             _reject("RQ004", f"readiness gate {name} has no evidence URL")
     return {name: str(by_name[name]["evidence_url"]) for name in sorted(by_name)}
 
 
-def _validate_performance(desktop: dict[str, Any], policy: dict[str, Any]) -> list[dict[str, Any]]:
+def _validate_digest(
+    value: Any,
+    code: str,
+    label: str,
+    *,
+    nonempty: bool = False,
+) -> dict[str, Any]:
+    digest = _object(value, code, label)
+    _exact_keys(digest, {"bytes", "sha256"}, code, label)
+    if not isinstance(digest["sha256"], str) or not SHA256.fullmatch(digest["sha256"]):
+        _reject(code, f"{label}.sha256 must be a lowercase SHA-256 digest")
+    size = digest["bytes"]
+    minimum = 1 if nonempty else 0
+    if (
+        isinstance(size, bool)
+        or not isinstance(size, int)
+        or not minimum <= size <= MAX_SAFE_INTEGER
+    ):
+        qualifier = "positive" if nonempty else "non-negative"
+        _reject(code, f"{label}.bytes must be a {qualifier} safe integer")
+    return digest
+
+
+def _validate_receipt_summary(
+    value: Any,
+    required_gate: str,
+    commit: str,
+    allowed_gates: tuple[str, ...] | list[str],
+    code: str,
+    label: str,
+) -> dict[str, Any]:
+    summary = _object(value, code, label)
+    receipt_keys = {
+        "artifacts",
+        "command",
+        "gates",
+        "gitHead",
+        "headAfter",
+        "headBefore",
+        "kind",
+        "result",
+        "schemaVersion",
+        "status",
+        "workspace",
+    }
+    _exact_keys(summary, receipt_keys | {"receiptFile"}, code, label)
+    _validate_digest(summary["receiptFile"], code, f"{label} receipt file")
+    if (
+        summary["schemaVersion"] != 2
+        or summary["kind"] != "verification-receipt"
+        or summary["status"] != "passed"
+    ):
+        _reject(code, f"{label} has an invalid receipt identity or result")
+    if any(summary[field] != commit for field in ("gitHead", "headBefore", "headAfter")):
+        _reject(code, f"{label} is not from the exact head")
+
+    gates = summary["gates"]
+    if (
+        not isinstance(gates, list)
+        or not gates
+        or any(not isinstance(gate, str) for gate in gates)
+        or gates != sorted(set(gates))
+        or not set(gates) <= set(allowed_gates)
+    ):
+        _reject(code, f"{label} contains an invalid receipt gate inventory")
+    if required_gate not in gates:
+        _reject(code, f"{label} does not claim {required_gate}")
+
+    command = _object(summary["command"], code, f"{label} command")
+    _exact_keys(command, {"args", "executable", "shell"}, code, f"{label} command")
+    if not isinstance(command["executable"], str) or not command["executable"]:
+        _reject(code, f"{label} command executable is missing")
+    if not isinstance(command["args"], list) or any(
+        not isinstance(argument, str) for argument in command["args"]
+    ):
+        _reject(code, f"{label} command arguments are invalid")
+    if not isinstance(command["shell"], bool):
+        _reject(code, f"{label} command shell flag is invalid")
+
+    result = _object(summary["result"], code, f"{label} result")
+    _exact_keys(result, {"exitCode", "signal", "stderr", "stdout"}, code, f"{label} result")
+    if result["exitCode"] != 0 or result["signal"] is not None:
+        _reject(code, f"{label} command did not pass")
+    _validate_digest(result["stdout"], code, f"{label} stdout")
+    _validate_digest(result["stderr"], code, f"{label} stderr")
+
+    artifacts = _object(summary["artifacts"], code, f"{label} artifacts")
+    for name, artifact in artifacts.items():
+        if not isinstance(name, str) or not ARTIFACT_NAME.fullmatch(name):
+            _reject(code, f"{label} contains an invalid artifact name")
+        _validate_digest(artifact, code, f"{label} artifact {name}")
+
+    workspace = _object(summary["workspace"], code, f"{label} workspace")
+    _exact_keys(
+        workspace,
+        {"after", "algorithm", "allowedOutputs", "before", "status"},
+        code,
+        f"{label} workspace",
+    )
+    if workspace["algorithm"] != "git-workspace-v1" or workspace["status"] != "unchanged":
+        _reject(code, f"{label} workspace was not unchanged")
+    allowed_outputs = workspace["allowedOutputs"]
+    if (
+        not isinstance(allowed_outputs, list)
+        or any(not isinstance(path, str) or not path for path in allowed_outputs)
+        or allowed_outputs != sorted(set(allowed_outputs))
+    ):
+        _reject(code, f"{label} workspace allowed outputs are invalid")
+    before = _validate_digest(workspace["before"], code, f"{label} workspace before", nonempty=True)
+    after = _validate_digest(workspace["after"], code, f"{label} workspace after", nonempty=True)
+    if before != after:
+        _reject(code, f"{label} workspace changed during verification")
+    return summary
+
+
+def _validate_receipt_inventory(
+    evidence: dict[str, Any],
+    required_gates: tuple[str, ...] | list[str],
+    commit: str,
+    code: str,
+    label: str,
+) -> dict[str, dict[str, Any]]:
+    gates = _object(evidence.get("gates"), code, f"{label} gates")
+    if set(gates) != set(required_gates) or any(gates[gate] is not True for gate in gates):
+        _reject(code, f"{label} gate inventory is incomplete or contains unknown gates")
+    receipts = evidence.get("receipts")
+    if not isinstance(receipts, dict) or set(receipts) != set(required_gates):
+        _reject(code, f"{label} receipt inventory is incomplete or contains unknown receipts")
+    return {
+        gate: _validate_receipt_summary(
+            receipts[gate],
+            gate,
+            commit,
+            required_gates,
+            code,
+            f"{label} receipt {gate}",
+        )
+        for gate in required_gates
+    }
+
+
+def _validate_performance(
+    desktop: dict[str, Any], policy: dict[str, Any], commit: str
+) -> list[dict[str, Any]]:
     performance = _object(policy["performance"], "RQ001", "performance policy")
     metrics = performance.get("metrics")
     targets_policy = performance.get("targets")
@@ -369,6 +550,12 @@ def _validate_performance(desktop: dict[str, Any], policy: dict[str, Any]) -> li
     for runner in sorted(expected):
         row = actual[runner]
         contract = expected[runner]
+        if (
+            row.get("schemaVersion") != 2
+            or row.get("kind") != "target"
+            or row.get("gitHead") != commit
+        ):
+            _reject("RQ006", f"{runner} target identity is not from the exact head")
         for field in ("sidecarTarget", "expectedOs", "arch", "hostArch"):
             if row.get(field) != contract[field]:
                 _reject("RQ006", f"{runner} target matrix {field} mismatch")
@@ -379,19 +566,32 @@ def _validate_performance(desktop: dict[str, Any], policy: dict[str, Any]) -> li
             or row.get("platformValidated") is not True
         ):
             _reject("RQ006", f"{runner} target matrix boundary was not validated")
+        _validate_receipt_inventory(
+            row,
+            TARGET_RECEIPT_GATES,
+            commit,
+            "RQ006",
+            f"{runner} target",
+        )
         evidence = _object(row.get("performance"), "RQ006", f"{runner} performance evidence")
+        _exact_keys(
+            evidence,
+            {"policyVersion", "runner", "platform", "observed", "ceilings", "checks", "passed"},
+            "RQ006",
+            f"{runner} performance evidence",
+        )
         if (
-            evidence.get("policyVersion") != performance["policyVersion"]
-            or evidence.get("runner") != runner
-            or evidence.get("platform") != contract["sidecarTarget"]
-            or evidence.get("passed") is not True
+            evidence["policyVersion"] != performance["policyVersion"]
+            or evidence["runner"] != runner
+            or evidence["platform"] != contract["sidecarTarget"]
+            or evidence["passed"] is not True
         ):
             _reject("RQ006", f"{runner} performance identity or result is invalid")
         ceilings = contract["performanceCeilings"]
-        if evidence.get("ceilings") != ceilings:
+        if evidence["ceilings"] != ceilings:
             _reject("RQ006", f"{runner} performance ceilings do not match policy")
-        observed = evidence.get("observed")
-        checks = evidence.get("checks")
+        observed = evidence["observed"]
+        checks = evidence["checks"]
         if not isinstance(observed, dict) or set(observed) != set(metrics):
             _reject("RQ006", f"{runner} performance observations are incomplete")
         if not isinstance(checks, dict) or set(checks) != set(metrics):
@@ -447,20 +647,50 @@ def build_manifest(
         commit,
         checked_policy["qa"]["readinessGates"],
     )
-    if checked_desktop.get("gitHead") != commit:
+    _exact_keys(
+        checked_desktop,
+        {
+            "schemaVersion",
+            "kind",
+            "gitHead",
+            "status",
+            "platformValidated",
+            "toolVersions",
+            "targets",
+            "security",
+            "publicationRequirements",
+        },
+        "RQ003",
+        "desktop aggregate evidence",
+    )
+    if checked_desktop["gitHead"] != commit:
         _reject("RQ002", "desktop evidence is not from the exact head")
     if (
-        checked_desktop.get("schemaVersion") != 2
-        or checked_desktop.get("kind") != "aggregate"
-        or checked_desktop.get("status") != "passed"
-        or checked_desktop.get("platformValidated") is not True
-        or checked_desktop.get("publicationRequirements") != {"desktopInstaller": True}
+        checked_desktop["schemaVersion"] != 2
+        or checked_desktop["kind"] != "aggregate"
+        or checked_desktop["status"] != "passed"
+        or checked_desktop["platformValidated"] is not True
+        or checked_desktop["publicationRequirements"] != {"desktopInstaller": True}
     ):
         _reject("RQ003", "desktop aggregate identity or status is invalid")
-    if checked_desktop.get("toolVersions") != checked_policy["qa"]["toolVersions"]:
+    if checked_desktop["toolVersions"] != checked_policy["qa"]["toolVersions"]:
         _reject("RQ005", "desktop tool versions do not match the pinned policy")
 
-    security = _object(checked_desktop.get("security"), "RQ007", "desktop security evidence")
+    security = _object(checked_desktop["security"], "RQ007", "desktop security evidence")
+    if "receipts" not in security:
+        _reject("RQ007", "desktop security receipt inventory is missing")
+    _exact_keys(
+        security,
+        {"schemaVersion", "kind", "gitHead", "gates", "receipts", "sbom"},
+        "RQ007",
+        "desktop security evidence",
+    )
+    if (
+        security["schemaVersion"] != 2
+        or security["kind"] != "security"
+        or security["gitHead"] != commit
+    ):
+        _reject("RQ007", "desktop security evidence is not from the exact head")
     gates = _object(security.get("gates"), "RQ007", "desktop security gates")
     required_gates = checked_policy["security"]["desktopReceiptGates"]
     canary = checked_policy["diagnostics"]["syntheticCanaryGate"]
@@ -471,8 +701,19 @@ def build_manifest(
             _reject("RQ007", f"desktop quality gate {gate} is missing or failed")
     if set(gates) != set(required_gates):
         _reject("RQ007", "desktop security gate inventory contains unknown gates")
+    security_receipts = _validate_receipt_inventory(
+        security,
+        required_gates,
+        commit,
+        "RQ007",
+        "desktop security",
+    )
+    sbom = _validate_digest(security["sbom"], "RQ007", "desktop security SBOM")
+    sbom_receipt = security_receipts["sbomGeneratedPassed"]
+    if sbom_receipt["artifacts"].get("sbom") != sbom:
+        _reject("RQ007", "desktop security SBOM is not bound to its verification receipt")
 
-    performance = _validate_performance(checked_desktop, checked_policy)
+    performance = _validate_performance(checked_desktop, checked_policy, commit)
     diagnostics = checked_policy["diagnostics"]
     return {
         "schemaVersion": 1,
@@ -486,6 +727,16 @@ def build_manifest(
         "commit": commit,
         "status": "approved",
         "evidence": copy.deepcopy(checked_policy["evidence"]),
+        "inputDigests": [
+            {
+                **checked_policy["evidence"]["inputs"][0],
+                "sha256": _canonical_sha256(checked_readiness),
+            },
+            {
+                **checked_policy["evidence"]["inputs"][1],
+                "sha256": _canonical_sha256(checked_desktop),
+            },
+        ],
         "families": {
             "qa": {
                 "status": "passed",

@@ -339,18 +339,26 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--clobber" not in release
 
 
-def test_release_build_emits_and_retains_one_exact_head_quality_approval() -> None:
+def test_release_build_revalidates_one_exact_head_quality_approval_after_assembly() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    final_assembly = release.split("  assemble-release-distributions:", maxsplit=1)[1].split(
+        "\n  publish-build-provenance:", maxsplit=1
+    )[0]
 
-    assert release.count("scripts/verify_release_quality.py") >= 2
+    assert release.count("scripts/verify_release_quality.py") >= 3
     assert "--policy config/release-quality-policy-v1.json" in release
     assert "--desktop-evidence approved-desktop/desktop-evidence.json" in release
     assert "--output dist/release-quality-approval.json" in release
-    assert "release-quality-approval.json" in release
-    assert '(python_dir, {"SHA256SUMS", "release-evidence.md"}),' in release
+    normalized_assembly = " ".join(final_assembly.split())
     assert (
-        '(python_dir, {"SHA256SUMS", "release-evidence.md", '
-        '"release-quality-approval.json"}),' not in release
+        'python_dir, {"SHA256SUMS", "release-evidence.md", '
+        '"release-quality-approval.json"},' in normalized_assembly
+    )
+    assert 'gh run download "$READINESS_RUN"' in final_assembly
+    assert 'gh run download "$DESKTOP_RUN"' in final_assembly
+    assert "cmp dist/gates.json approved/gates.json" in final_assembly
+    assert final_assembly.index("scripts/verify_release_quality.py") < final_assembly.index(
+        "scripts/create_release_evidence.py"
     )
 
 

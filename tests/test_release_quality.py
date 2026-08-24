@@ -6,7 +6,7 @@ import copy
 import importlib.util
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,38 @@ _SPEC.loader.exec_module(quality)
 
 HEAD = "a" * 40
 VERSION = "0.7.0"
+
+
+def _digest(*, sha256: str = "d" * 64, size: int = 1) -> dict[str, Any]:
+    return {"sha256": sha256, "bytes": size}
+
+
+def _receipt(gates: list[str], *, head: str = HEAD) -> dict[str, Any]:
+    receipt = {
+        "schemaVersion": 2,
+        "kind": "verification-receipt",
+        "status": "passed",
+        "gitHead": head,
+        "headBefore": head,
+        "headAfter": head,
+        "gates": sorted(gates),
+        "command": {"executable": "node", "args": ["--test"], "shell": False},
+        "result": {
+            "exitCode": 0,
+            "signal": None,
+            "stdout": _digest(size=0),
+            "stderr": _digest(size=0),
+        },
+        "artifacts": {},
+        "workspace": {
+            "algorithm": "git-workspace-v1",
+            "allowedOutputs": [],
+            "before": _digest(sha256="e" * 64, size=128),
+            "after": _digest(sha256="e" * 64, size=128),
+            "status": "unchanged",
+        },
+    }
+    return {**receipt, "receiptFile": _digest(sha256="f" * 64, size=256)}
 
 
 def _policy() -> dict[str, Any]:
@@ -65,8 +97,12 @@ def _performance(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
 
 
 def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
+    target_receipt = _receipt(list(quality.TARGET_RECEIPT_GATES))
     targets = [
         {
+            "schemaVersion": 2,
+            "kind": "target",
+            "gitHead": HEAD,
             "runner": row["runner"],
             "sidecarTarget": row["sidecarTarget"],
             "expectedOs": row["expectedOs"],
@@ -75,10 +111,18 @@ def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
             "hostArch": row["hostArch"],
             "packageBoundary": "unpacked-native",
             "platformValidated": True,
+            "gates": dict.fromkeys(quality.TARGET_RECEIPT_GATES, True),
+            "receipts": {
+                gate: copy.deepcopy(target_receipt) for gate in quality.TARGET_RECEIPT_GATES
+            },
             "performance": _performance(row, policy),
         }
         for row in policy["performance"]["targets"]
     ]
+    security_gates = policy["security"]["desktopReceiptGates"]
+    security_receipt = _receipt(security_gates)
+    sbom = _digest(sha256="c" * 64, size=512)
+    security_receipt["artifacts"]["sbom"] = copy.deepcopy(sbom)
     return {
         "schemaVersion": 2,
         "kind": "aggregate",
@@ -87,7 +131,14 @@ def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
         "platformValidated": True,
         "toolVersions": copy.deepcopy(policy["qa"]["toolVersions"]),
         "targets": targets,
-        "security": {"gates": dict.fromkeys(policy["security"]["desktopReceiptGates"], True)},
+        "security": {
+            "schemaVersion": 2,
+            "kind": "security",
+            "gitHead": HEAD,
+            "gates": dict.fromkeys(security_gates, True),
+            "receipts": {gate: copy.deepcopy(security_receipt) for gate in security_gates},
+            "sbom": sbom,
+        },
         "publicationRequirements": {"desktopInstaller": True},
     }
 
@@ -124,6 +175,16 @@ def test_valid_evidence_produces_all_four_quality_families() -> None:
         "security",
     }
     assert manifest["evidence"] == policy["evidence"]
+    assert manifest["inputDigests"] == [
+        {
+            **policy["evidence"]["inputs"][0],
+            "sha256": quality._canonical_sha256(_readiness(policy)),
+        },
+        {
+            **policy["evidence"]["inputs"][1],
+            "sha256": quality._canonical_sha256(_desktop(policy)),
+        },
+    ]
     for family in manifest["families"]:
         assert manifest["families"][family]["commands"] == policy["families"][family]["commands"]
     assert manifest["families"]["performance"]["method"] == policy["performance"]["method"]
@@ -203,6 +264,33 @@ def test_malformed_policy_contract_is_rejected(
         _build(policy)
 
 
+def test_policy_cannot_substitute_release_evidence_inputs() -> None:
+    policy = _policy()
+    policy["evidence"]["inputs"][0] = {
+        "artifact": "substituted-evidence",
+        "path": "gates.json",
+    }
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ001.*required inputs"):
+        _build(policy)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    (
+        (lambda evidence: evidence.update({"unexpected": True}), "RQ003"),
+        (lambda evidence: evidence["gates"][0].update({"unexpected": True}), "RQ004"),
+    ),
+)
+def test_readiness_evidence_uses_closed_schemas(mutate: Any, code: str) -> None:
+    policy = _policy()
+    readiness = _readiness(policy)
+    mutate(readiness)
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"{code}.*exact schema"):
+        _build(policy, readiness=readiness)
+
+
 def test_missing_readiness_gate_is_rejected() -> None:
     policy = _policy()
     readiness = _readiness(policy)
@@ -258,6 +346,56 @@ def test_expired_exception_is_rejected_and_current_exception_is_retained() -> No
     policy["exceptions"][0]["expires"] = "2026-08-25"
     manifest = _build(policy)
     assert manifest["exceptions"] == policy["exceptions"]
+
+
+def test_exception_requires_independent_approval_and_a_bounded_expiry() -> None:
+    policy = _policy()
+    as_of = date(2026, 8, 24)
+    policy["exceptions"] = [
+        {
+            "id": "RQ-EXAMPLE",
+            "family": "qa",
+            "gate": "tests-and-coverage",
+            "owner": "release-owner",
+            "approvedBy": "release-owner",
+            "reason": "Synthetic policy-validation exception.",
+            "expires": (as_of + timedelta(days=1)).isoformat(),
+        }
+    ]
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ009.*independent"):
+        _build(policy, as_of=as_of)
+
+    policy["exceptions"][0]["approvedBy"] = "security-owner"
+    policy["exceptions"][0]["expires"] = (as_of + timedelta(days=91)).isoformat()
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ009.*90 days"):
+        _build(policy, as_of=as_of)
+
+    policy["exceptions"][0]["expires"] = (as_of + timedelta(days=90)).isoformat()
+    assert _build(policy, as_of=as_of)["exceptions"] == policy["exceptions"]
+
+
+@pytest.mark.parametrize("surface", ["security", "target"])
+def test_nested_desktop_receipts_must_bind_to_the_exact_head(surface: str) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    if surface == "security":
+        receipt = next(iter(desktop["security"]["receipts"].values()))
+    else:
+        receipt = next(iter(desktop["targets"][0]["receipts"].values()))
+    receipt["gitHead"] = "b" * 40
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ00[67].*exact head"):
+        _build(policy, desktop=desktop)
+
+
+def test_security_receipt_inventory_is_required() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["security"].pop("receipts")
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ007.*receipt inventory"):
+        _build(policy, desktop=desktop)
 
 
 def test_missing_diagnostics_canary_is_rejected() -> None:
