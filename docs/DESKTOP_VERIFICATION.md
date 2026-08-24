@@ -247,9 +247,12 @@ process launch can yield. The quit is vetoed while fail-closed job preflight and
 verified sidecar shutdown run. Only the authorized completion callback uses
 `app.exit(0)`, after releasing the IPC boundary and sidecar supervisor, so
 Electron cannot enter a second platform-dependent quit cycle. The
-sidecar-substitution scenario cannot perform a normal sidecar drain; after
-recording the fail-closed result it terminates its disposable verification
-package and does not count that termination as clean-shutdown evidence.
+sidecar-substitution scenario cannot perform a normal sidecar drain. After
+recording the fail-closed result, the WebdriverIO harness forcibly terminates
+its disposable verification application with `SIGKILL` on POSIX or
+`taskkill.exe /T /F` on Windows. That verification-only cleanup does not call
+the production `app.exit(0)` completion callback and supplies no clean-shutdown
+evidence.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and
