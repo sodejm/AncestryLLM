@@ -2,8 +2,10 @@
 
 ## Repository environment setup
 
-A source checkout requires a system-supplied Python 3.12 through 3.14. The
-checked-in `.python-version` selects 3.12 by default, and repository policy
+A source checkout requires a system-supplied Python 3.12 through 3.14. When
+`uv` is invoked directly, the checked-in `.python-version` requests 3.12 by
+default. Canonical Make targets instead resolve their selected `PYTHON` command
+to its exact native executable path before invoking `uv`. Repository policy
 requires exactly `uv` 0.12.1 with Python downloads disabled. Run:
 
 ```console
@@ -12,14 +14,16 @@ make setup
 
 On Windows, Make looks for `python`; on macOS and Linux it looks for `python3`.
 Set `PYTHON` to another system executable when necessary, for example
-`make setup PYTHON=python3.13`. Do not recover by installing `uv` with `pip`,
-using an executable from `PATH`, enabling Python downloads, using `uvx`, or
-adding `uv run --with` dependencies.
+`make setup PYTHON=python3.13`. Make passes the executable selected by that
+command to `uv`, rather than allowing `uv` to resolve the name independently.
+Do not recover by installing `uv` with `pip`, using an executable from `PATH`,
+enabling Python downloads, using `uvx`, or adding `uv run --with` dependencies.
 
 | Failure | Meaning | Required action |
 |---|---|---|
 | `UVENV_PYTHON_NOT_FOUND` | The selected system Python executable is absent. | Install a supported system Python or set `PYTHON` to an existing supported executable, then retry. |
 | `UVENV_PYTHON_VERSION_UNSUPPORTED` | The selected interpreter is outside Python 3.12-3.14 or its version cannot be read. | Select a supported system interpreter; do not let `uv` download one. |
+| `Fatal Python error: init_fs_encoding` refers to a deleted or temporary interpreter path | The ignored `.venv` was created from an interpreter that no longer exists. | Remove only the checkout's `.venv`, select a supported system interpreter, and rerun `make setup`. Changing `PYTHON` does not repair an already-created virtual environment. |
 | Bootstrap receipt reports a stable failure category | The cached or downloaded `uv`, verifier, policy, identity, or provenance failed closed. | Follow the [verified uv bootstrap recovery procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md); never bypass verification or substitute another `uv`. |
 
 Successful setup verifies the repository-local executable, then runs

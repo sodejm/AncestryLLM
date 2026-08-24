@@ -13,9 +13,11 @@ storage, FastAPI contracts, or desktop boundaries.
 ## Developer setup
 
 Use a supported system Python 3.12-3.14. The checked-in `.python-version`
-selects 3.12 by default; `[tool.uv]` permits only a system interpreter and
-disables Python downloads. GitHub's attestation API also requires
-authentication. For interactive development, authenticate once with:
+requests 3.12 when `uv` performs direct fallback discovery. Canonical Make
+targets instead resolve the selected `PYTHON` command to its exact native
+executable path and provide that path to `uv`; `[tool.uv]` permits only a system
+interpreter and disables Python downloads. GitHub's attestation API also
+requires authentication. For interactive development, authenticate once with:
 
 ```bash
 gh auth login --hostname github.com
@@ -57,6 +59,12 @@ implicit latest release, an alternate index or mirror, or an existing `uv` on
 reuse. A mismatch fails closed without deleting user data; remove only the
 specific ignored `.tools/uv/` cache and run the bootstrap again after resolving
 the cause.
+
+If Python instead fails during startup and reports a deleted or temporary
+interpreter path, the checkout's ignored `.venv` may already be tied to a
+runtime that no longer exists. Remove only that checkout's `.venv`, select a
+supported system interpreter, and rerun `make setup`. Setting `PYTHON` cannot
+repair an existing virtual environment whose base interpreter has disappeared.
 
 ## Trust policy
 
