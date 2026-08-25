@@ -62,6 +62,9 @@ jobs:
     if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      VERIFICATION_RUNNER: ubuntu-24.04
+      VERIFICATION_SIDECAR_TARGET: none
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -99,6 +102,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/runner-versions.json"
           --gate runnerVersionsPassed
           -- node desktop/scripts/verify-release-toolchain.mjs
@@ -109,6 +114,8 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/api-contract.json" \
             --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --gate apiContractPassed \
@@ -125,6 +132,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -139,6 +148,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/desktop-tests.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -155,6 +166,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/accessibility.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -169,6 +182,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/source-webdriver.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -184,6 +199,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/build-inspection.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -200,6 +217,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/audit.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -217,6 +236,8 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/secrets.json"
           --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
@@ -236,6 +257,8 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/sbom.json" \
             --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --allow-output "$RECEIPTS_DIR/api-contract.json" \
@@ -332,6 +355,9 @@ jobs:
             package_args: --linux --dir --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
     timeout-minutes: 45
+    env:
+      VERIFICATION_RUNNER: ${{ matrix.runner }}
+      VERIFICATION_SIDECAR_TARGET: ${{ matrix.sidecar_target }}
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -431,6 +457,8 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --gate sidecarProcessTreeGuardPassed \
             -- uv run --no-sync python -m pytest -q tests/api/test_sidecar_bootstrap.py
@@ -439,6 +467,8 @@ jobs:
           if [[ "$SIDECAR_TARGET" == win32-* ]]; then sidecar_executable="$sidecar_executable.exe"; fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --gate sidecarSmokePassed \
@@ -522,6 +552,8 @@ jobs:
           fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-runtime.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -532,6 +564,8 @@ jobs:
               --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -542,6 +576,8 @@ jobs:
               --grep "launches the selected packaged runtime normally without a debugging transport"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -554,6 +590,8 @@ jobs:
               --grep "withholds and restores the packaged sidecar through Diagnostics retry"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -568,6 +606,8 @@ jobs:
               --grep "exhausts packaged sidecar restarts and exits cleanly"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -592,6 +632,8 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/fuse-inspection.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
@@ -660,6 +702,8 @@ jobs:
           fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-file-grants.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \

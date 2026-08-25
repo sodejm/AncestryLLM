@@ -21,6 +21,7 @@ const EVIDENCE_SCHEMA_VERSION = 2
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
 const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
 const FILE_GRANT_EVIDENCE_KIND = 'ancestryllm-packaged-file-grant-evidence'
+const SECURITY_RECEIPT_CONTEXT = Object.freeze({ runner: 'ubuntu-24.04', sidecarTarget: 'none' })
 const REQUIRED_METRIC_NAMES = Object.freeze([
   'coldLaunchMs',
   'warmLaunchMs',
@@ -208,8 +209,8 @@ function validateDigest(value, label, { nonempty = true } = {}) {
   return value
 }
 
-function receiptSummary(record, gitHead) {
-  const receipt = validateVerificationReceipt(record.receipt, gitHead)
+function receiptSummary(record, gitHead, expectedContext) {
+  const receipt = validateVerificationReceipt(record.receipt, gitHead, expectedContext)
   validateDigest(record.file, 'receipt file')
   return Object.freeze({
     ...receipt,
@@ -217,11 +218,11 @@ function receiptSummary(record, gitHead) {
   })
 }
 
-function deriveReceiptGates(records, requiredGates, gitHead) {
+function deriveReceiptGates(records, requiredGates, gitHead, expectedContext) {
   assert.equal(Array.isArray(records) && records.length > 0, true, 'verification receipt records are required')
   const expected = new Set(requiredGates)
   for (const record of records) {
-    validateVerificationReceipt(record.receipt, gitHead)
+    validateVerificationReceipt(record.receipt, gitHead, expectedContext)
     for (const gate of record.receipt.gates) {
       assert.equal(expected.has(gate), true, `receipt claims out-of-scope gate ${gate}`)
     }
@@ -233,7 +234,7 @@ function deriveReceiptGates(records, requiredGates, gitHead) {
     const matches = records.filter((record) => record.receipt.gates.includes(gate))
     assert.equal(matches.length, 1, `expected exactly one successful exact-head receipt for ${gate}`)
     gates[gate] = true
-    receipts[gate] = receiptSummary(matches[0], gitHead)
+    receipts[gate] = receiptSummary(matches[0], gitHead, expectedContext)
   }
   return Object.freeze({ gates: Object.freeze(gates), receipts: Object.freeze(receipts) })
 }
@@ -474,7 +475,8 @@ function validateTargetRow(input) {
 export function createTargetEvidence(input) {
   const gitHead = exactHead(input.gitHead)
   const expected = validateTargetRow(input)
-  const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead)
+  const receiptContext = Object.freeze({ runner: input.runner, sidecarTarget: input.sidecarTarget })
+  const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead, receiptContext)
   const metricsArtifact = artifactDigest(input.metricsBytes)
   const fuseInspectionArtifact = artifactDigest(input.fuseInspectionBytes)
   const fileGrantEvidenceArtifact = artifactDigest(input.fileGrantEvidenceBytes)
@@ -548,7 +550,12 @@ export function createTargetEvidence(input) {
  */
 export function createSecurityEvidence(input) {
   const gitHead = exactHead(input.gitHead)
-  const derived = deriveReceiptGates(input.receiptRecords, SECURITY_RECEIPT_GATES, gitHead)
+  const derived = deriveReceiptGates(
+    input.receiptRecords,
+    SECURITY_RECEIPT_GATES,
+    gitHead,
+    SECURITY_RECEIPT_CONTEXT,
+  )
   const sbom = artifactDigest(input.sbomBytes)
   assertArtifactBound(derived.receipts.sbomGeneratedPassed, 'sbom', sbom, 'SBOM')
   return Object.freeze({
@@ -571,11 +578,11 @@ async function jsonFiles(root) {
   return output
 }
 
-function validateReceiptSummary(summary, gate, gitHead, receiptRecords) {
+function validateReceiptSummary(summary, gate, gitHead, receiptRecords, expectedContext) {
   assert.equal(summary !== null && typeof summary === 'object' && !Array.isArray(summary), true, `receipt summary for ${gate} is missing`)
   const { receiptFile, ...receipt } = summary
   validateDigest(receiptFile, `${gate} receipt file`)
-  validateVerificationReceipt(receipt, gitHead)
+  validateVerificationReceipt(receipt, gitHead, expectedContext)
   assert.equal(receipt.gates.includes(gate), true, `${gate} receipt does not claim its evidence gate`)
   const matches = receiptRecords.filter((record) => (
     record.file.sha256 === receiptFile.sha256
@@ -586,11 +593,19 @@ function validateReceiptSummary(summary, gate, gitHead, receiptRecords) {
   return receipt
 }
 
-function validateDerivedReceipts(value, requiredGates, gitHead, receiptRecords) {
+function validateDerivedReceipts(value, requiredGates, gitHead, receiptRecords, expectedContext) {
   assert.deepEqual(value.gates, Object.fromEntries(requiredGates.map((gate) => [gate, true])), 'evidence gate set is incomplete')
   assert.deepEqual(Object.keys(value.receipts ?? {}), [...requiredGates], 'evidence receipt set is incomplete')
   const receipts = {}
-  for (const gate of requiredGates) receipts[gate] = validateReceiptSummary(value.receipts[gate], gate, gitHead, receiptRecords)
+  for (const gate of requiredGates) {
+    receipts[gate] = validateReceiptSummary(
+      value.receipts[gate],
+      gate,
+      gitHead,
+      receiptRecords,
+      expectedContext,
+    )
+  }
   return receipts
 }
 
@@ -614,7 +629,13 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.platformValidated, expected.platformValidated, `${value.runner} platformValidated is not derived from the executed target`)
   assert.equal(value.artifactKind, 'unpublished-unpacked-native')
   assert.equal(value.signingVerified, false)
-  const receipts = validateDerivedReceipts(value, TARGET_RECEIPT_GATES, gitHead, receiptRecords)
+  const receipts = validateDerivedReceipts(
+    value,
+    TARGET_RECEIPT_GATES,
+    gitHead,
+    receiptRecords,
+    { runner: value.runner, sidecarTarget: value.sidecarTarget },
+  )
   assert.equal(value.packageRuntime, value.gates.packageRuntimePassed)
   assert.equal(value.sidecarSmoke, value.gates.sidecarSmokePassed)
   assert.equal(value.fusesInspected, value.gates.fusesInspectedPassed)
@@ -675,7 +696,13 @@ function validateSecurityEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.schemaVersion, EVIDENCE_SCHEMA_VERSION, 'unsupported security evidence schema')
   assert.equal(value.kind, 'security')
   assert.equal(value.gitHead, gitHead, 'security evidence is not from the exact head')
-  const receipts = validateDerivedReceipts(value, SECURITY_RECEIPT_GATES, gitHead, receiptRecords)
+  const receipts = validateDerivedReceipts(
+    value,
+    SECURITY_RECEIPT_GATES,
+    gitHead,
+    receiptRecords,
+    SECURITY_RECEIPT_CONTEXT,
+  )
   validateDigest(value.sbom, 'security SBOM')
   assertArtifactBound(receipts.sbomGeneratedPassed, 'sbom', value.sbom, 'SBOM')
   const sbomFile = findArtifactFile(files, value.sbom, 'security SBOM')

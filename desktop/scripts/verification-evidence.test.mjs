@@ -57,12 +57,18 @@ function digest(bytes) {
   return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength }
 }
 
-function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
+function receiptRecord(
+  gates,
+  artifacts = {},
+  command = ['node', '--test'],
+  context = { runner: 'ubuntu-24.04', sidecarTarget: 'none' },
+) {
   const receipt = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: 'verification-receipt',
     status: 'passed',
     gitHead,
+    context,
     headBefore: gitHead,
     headAfter: gitHead,
     gates: [...gates].sort(),
@@ -82,7 +88,7 @@ function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
       status: 'unchanged',
     },
   }
-  validateVerificationReceipt(receipt, gitHead)
+  validateVerificationReceipt(receipt, gitHead, context)
   const raw = encoded(receipt)
   return { receipt, file: digest(raw), raw }
 }
@@ -148,8 +154,12 @@ function fileGrantEvidence() {
   }
 }
 
-function targetFixture(row, observed = metrics) {
+function targetFixture(row, observed = metrics, receiptContext) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
+  const targetContext = receiptContext ?? { runner, sidecarTarget }
+  const targetReceipt = (gates, artifacts = {}, command = ['node', '--test']) => (
+    receiptRecord(gates, artifacts, command, targetContext)
+  )
   const metricsBytes = encoded(observed)
   const inspection = fuseInspection(TARGET_ROWS[runner].platform)
   const fuseInspectionBytes = encoded(inspection)
@@ -181,7 +191,7 @@ function targetFixture(row, observed = metrics) {
   const integrityEvidenceBytes = encoded(integrityEvidence)
   const fileGrantMediation = fileGrantEvidence()
   const fileGrantEvidenceBytes = encoded(fileGrantMediation)
-  const runtimeReceipt = receiptRecord(
+  const runtimeReceipt = targetReceipt(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed'],
     { metrics: digest(metricsBytes) },
     [
@@ -192,7 +202,7 @@ function targetFixture(row, observed = metrics) {
       'exercises first run, persistence, corrupt preferences, security, and resource evidence',
     ],
   )
-  const normalLaunchReceipt = receiptRecord(
+  const normalLaunchReceipt = targetReceipt(
     ['normalLaunchDebugSurfaceAbsentPassed'],
     {},
     [
@@ -203,18 +213,18 @@ function targetFixture(row, observed = metrics) {
       'launches the selected packaged runtime normally without a debugging transport',
     ],
   )
-  const processTreeGuardReceipt = receiptRecord(
+  const processTreeGuardReceipt = targetReceipt(
     ['sidecarProcessTreeGuardPassed'],
     {},
     ['python', '-m', 'pytest', 'tests/api/test_sidecar_bootstrap.py'],
   )
-  const sidecarReceipt = receiptRecord(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
-  const fuseReceipt = receiptRecord(
+  const sidecarReceipt = targetReceipt(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
+  const fuseReceipt = targetReceipt(
     ['fusesInspectedPassed'],
     { fuseInspection: digest(fuseInspectionBytes) },
     ['node', 'scripts/inspect-package-fuses.mjs'],
   )
-  const fileGrantReceipt = receiptRecord(
+  const fileGrantReceipt = targetReceipt(
     ['packagedFileGrantSmokePassed'],
     { fileGrantEvidence: digest(fileGrantEvidenceBytes) },
     [
@@ -225,7 +235,7 @@ function targetFixture(row, observed = metrics) {
       'mediates opaque packaged open and save file grants',
     ],
   )
-  const withholdReceipt = receiptRecord(
+  const withholdReceipt = targetReceipt(
     ['packagedSidecarWithholdRetryPassed'],
     { faultEvidence: digest(withholdEvidenceBytes) },
     [
@@ -236,7 +246,7 @@ function targetFixture(row, observed = metrics) {
       'withholds and restores the packaged sidecar through Diagnostics retry',
     ],
   )
-  const restartReceipt = receiptRecord(
+  const restartReceipt = targetReceipt(
     ['packagedSidecarRestartExhaustionQuitPassed'],
     { faultEvidence: digest(restartEvidenceBytes) },
     [
@@ -247,7 +257,7 @@ function targetFixture(row, observed = metrics) {
       'exhausts packaged sidecar restarts and exits cleanly',
     ],
   )
-  const integrityReceipt = receiptRecord(
+  const integrityReceipt = targetReceipt(
     ['packagedSidecarIntegritySubstitutionPassed'],
     {
       faultEvidence: digest(integrityEvidenceBytes),
@@ -396,6 +406,10 @@ test('target evidence records every observed value, ceiling, and check and rejec
   const missing = { ...metrics }
   delete missing.readyMs
   assert.throws(() => targetFixture(rows[0], missing), /exact schema/)
+  assert.throws(
+    () => targetFixture(rows[0], metrics, { runner: rows[1][0], sidecarTarget: rows[1][1] }),
+    /requested execution context/,
+  )
 })
 
 test('release evidence derives performance ceilings from the central quality policy', async () => {
@@ -448,7 +462,12 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
   const wrongBytes = encoded(wrong)
   const records = linuxFixture.receiptRecords.map((record) => (
     record.receipt.gates.includes('fusesInspectedPassed')
-      ? receiptRecord(['fusesInspectedPassed'], { fuseInspection: digest(wrongBytes) })
+      ? receiptRecord(
+          ['fusesInspectedPassed'],
+          { fuseInspection: digest(wrongBytes) },
+          ['node', '--test'],
+          { runner: linuxRow[0], sidecarTarget: linuxRow[1] },
+        )
       : record
   ))
   assert.throws(() => createTargetEvidence({

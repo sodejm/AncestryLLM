@@ -115,6 +115,130 @@ TARGET_GATE_FLAGS = {
     "normalLaunchDebugSurfaceAbsent": "normalLaunchDebugSurfaceAbsentPassed",
     "packagedFileGrantSmoke": "packagedFileGrantSmokePassed",
 }
+
+
+def _command(executable: str, *args: str) -> dict[str, Any]:
+    return {"executable": executable, "args": list(args), "shell": False}
+
+
+_API_CONTRACT_COMMAND = _command(
+    "uv",
+    "run",
+    "--no-sync",
+    "python",
+    "-m",
+    "pytest",
+    "tests/api",
+    "tests/test_build_verification_sidecar.py",
+    "tests/test_desktop_workflow_contract.py",
+    "tests/test_structured_diagnostics.py",
+    "tests/test_verification_wrong_sidecar.py",
+)
+_DESKTOP_SOURCE_COMMAND = _command("pnpm", "--dir", "desktop", "run", "verify:source")
+_DESKTOP_COVERAGE_COMMAND = _command("pnpm", "--dir", "desktop", "run", "test:coverage")
+SECURITY_RECEIPT_COMMANDS: dict[str, dict[str, Any]] = {
+    "runnerVersionsPassed": _command("node", "desktop/scripts/verify-release-toolchain.mjs"),
+    "desktopLintPassed": _DESKTOP_SOURCE_COMMAND,
+    "desktopTypecheckPassed": _DESKTOP_SOURCE_COMMAND,
+    "desktopCoveragePassed": _DESKTOP_COVERAGE_COMMAND,
+    "accessibilityPassed": _command("pnpm", "--dir", "desktop", "run", "test:accessibility"),
+    "sourceWebdriverPassed": _command("pnpm", "--dir", "desktop", "run", "test:e2e"),
+    "diagnosticsContractPassed": _API_CONTRACT_COMMAND,
+    "jsStaticAnalysisPassed": _DESKTOP_SOURCE_COMMAND,
+    "auditPassed": _command("pnpm", "--dir", "desktop", "run", "audit"),
+    "secretsPassed": _command("pnpm", "--dir", "desktop", "run", "check:secrets"),
+    "buildInspectionPassed": _command("pnpm", "--dir", "desktop", "run", "build"),
+    "apiContractPassed": _API_CONTRACT_COMMAND,
+    "authBeforeParsingPassed": _API_CONTRACT_COMMAND,
+    "domainRoutesAbsentPassed": _API_CONTRACT_COMMAND,
+    "ipcSenderValidationPassed": _DESKTOP_COVERAGE_COMMAND,
+    "sidecarCompatibilityPassed": _DESKTOP_COVERAGE_COMMAND,
+    "sidecarIntegrityPassed": _DESKTOP_COVERAGE_COMMAND,
+    "providerNoneNetworkFreePassed": _API_CONTRACT_COMMAND,
+    "redactionPassed": _API_CONTRACT_COMMAND,
+    "sbomGeneratedPassed": _command("pnpm", "--dir", "desktop", "run", "sbom"),
+}
+
+
+def _target_receipt_commands(runner: str, sidecar_target: str) -> dict[str, dict[str, Any]]:
+    scenario_prefix: tuple[str, ...]
+    if runner == "ubuntu-24.04":
+        scenario_executable = "desktop/scripts/run-with-linux-keyring.sh"
+        scenario_prefix = (
+            "xvfb-run",
+            "--auto-servernum",
+            "node",
+            "desktop/scripts/run-wdio.mjs",
+            "packaged",
+            "--grep",
+        )
+    else:
+        scenario_executable = "node"
+        scenario_prefix = ("desktop/scripts/run-wdio.mjs", "packaged", "--grep")
+
+    def scenario(name: str) -> dict[str, Any]:
+        return _command(scenario_executable, *scenario_prefix, name)
+
+    sidecar_executable = (
+        f"desktop/build/sidecar/{sidecar_target}/ancestryllm-sidecar/ancestryllm-sidecar"
+    )
+    if sidecar_target.startswith("win32-"):
+        sidecar_executable += ".exe"
+    release_root = (
+        "desktop/release"
+        if sidecar_target.startswith("win32-")
+        else "desktop/release-native-verification"
+    )
+    runtime_scenario = scenario(
+        "exercises first run, persistence, corrupt preferences, security, and resource evidence"
+    )
+    return {
+        "packageRuntimePassed": runtime_scenario,
+        "sidecarProcessTreeGuardPassed": _command(
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/api/test_sidecar_bootstrap.py",
+        ),
+        "sidecarSmokePassed": _command(
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "scripts/smoke_sidecar.py",
+            sidecar_executable,
+        ),
+        "fusesInspectedPassed": _command(
+            "node",
+            "desktop/scripts/inspect-package-fuses.mjs",
+            "--root",
+            release_root,
+            "--output",
+            f"desktop/verification/{runner}/fuse-inspection.json",
+        ),
+        "rendererZeroEgressCanaryPassed": runtime_scenario,
+        "normalLaunchDebugSurfaceAbsentPassed": scenario(
+            "launches the selected packaged runtime normally without a debugging transport"
+        ),
+        "packagedFileGrantSmokePassed": scenario(
+            "mediates opaque packaged open and save file grants"
+        ),
+        "packagedSidecarWithholdRetryPassed": scenario(
+            "withholds and restores the packaged sidecar through Diagnostics retry"
+        ),
+        "packagedSidecarRestartExhaustionQuitPassed": scenario(
+            "exhausts packaged sidecar restarts and exits cleanly"
+        ),
+        "packagedSidecarIntegritySubstitutionPassed": scenario(
+            "rejects a substituted packaged sidecar before launch"
+        ),
+    }
+
+
 FILE_GRANT_OBSERVATIONS = {
     "openGrantOpaque": True,
     "openMetadataValidated": True,
@@ -168,6 +292,19 @@ class ReleaseQualityError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+class _DuplicateJsonMember(ValueError):
+    """Raised when evidence tries to shadow an earlier JSON object member."""
+
+
+def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonMember(f"duplicate JSON object member {key!r}")
+        result[key] = value
+    return result
 
 
 def _reject(code: str, message: str) -> Never:
@@ -376,7 +513,10 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         if set(ceilings) != set(metrics):
             _reject("RQ001", f"{record['runner']} performance ceilings are incomplete")
         if any(
-            isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
             for value in ceilings.values()
         ):
             _reject("RQ001", f"{record['runner']} performance ceilings are invalid")
@@ -557,6 +697,8 @@ def _validate_receipt_summary(
     required_gate: str,
     commit: str,
     allowed_gates: tuple[str, ...] | list[str],
+    expected_context: dict[str, str],
+    expected_command: dict[str, Any],
     code: str,
     label: str,
 ) -> dict[str, Any]:
@@ -564,6 +706,7 @@ def _validate_receipt_summary(
     receipt_keys = {
         "artifacts",
         "command",
+        "context",
         "gates",
         "gitHead",
         "headAfter",
@@ -576,11 +719,21 @@ def _validate_receipt_summary(
     }
     _exact_keys(summary, receipt_keys | {"receiptFile"}, code, label)
     _validate_digest(summary["receiptFile"], code, f"{label} receipt file")
-    _schema_version(summary["schemaVersion"], 2, code, label)
+    _schema_version(summary["schemaVersion"], 3, code, label)
     if summary["kind"] != "verification-receipt" or summary["status"] != "passed":
         _reject(code, f"{label} has an invalid receipt identity or result")
     if any(summary[field] != commit for field in ("gitHead", "headBefore", "headAfter")):
         _reject(code, f"{label} is not from the exact head")
+
+    context = _object(summary["context"], code, f"{label} context")
+    _exact_keys(
+        context,
+        {"runner", "sidecarTarget"},
+        code,
+        f"{label} context",
+    )
+    if context != expected_context:
+        _reject(code, f"{label} context does not match the required runner and target")
 
     gates = summary["gates"]
     if (
@@ -604,6 +757,8 @@ def _validate_receipt_summary(
         _reject(code, f"{label} command arguments are invalid")
     if not isinstance(command["shell"], bool):
         _reject(code, f"{label} command shell flag is invalid")
+    if command != expected_command:
+        _reject(code, f"{label} command does not match the required verification command")
 
     result = _object(summary["result"], code, f"{label} result")
     _exact_keys(result, {"exitCode", "signal", "stderr", "stdout"}, code, f"{label} result")
@@ -645,6 +800,8 @@ def _validate_receipt_inventory(
     evidence: dict[str, Any],
     required_gates: tuple[str, ...] | list[str],
     commit: str,
+    expected_context: dict[str, str],
+    expected_commands: dict[str, dict[str, Any]],
     code: str,
     label: str,
 ) -> dict[str, dict[str, Any]]:
@@ -660,6 +817,8 @@ def _validate_receipt_inventory(
             gate,
             commit,
             required_gates,
+            expected_context,
+            expected_commands[gate],
             code,
             f"{label} receipt {gate}",
         )
@@ -881,6 +1040,8 @@ def _validate_performance(
             row,
             TARGET_RECEIPT_GATES,
             commit,
+            {"runner": runner, "sidecarTarget": contract["sidecarTarget"]},
+            _target_receipt_commands(runner, contract["sidecarTarget"]),
             "RQ006",
             f"{runner} target",
         )
@@ -1078,10 +1239,12 @@ def build_manifest(
         security,
         required_gates,
         commit,
+        {"runner": "ubuntu-24.04", "sidecarTarget": "none"},
+        SECURITY_RECEIPT_COMMANDS,
         "RQ007",
         "desktop security",
     )
-    sbom = _validate_digest(security["sbom"], "RQ007", "desktop security SBOM")
+    sbom = _validate_digest(security["sbom"], "RQ007", "desktop security SBOM", nonempty=True)
     sbom_receipt = security_receipts["sbomGeneratedPassed"]
     if sbom_receipt["artifacts"].get("sbom") != sbom:
         _reject("RQ007", "desktop security SBOM is not bound to its verification receipt")
@@ -1146,8 +1309,11 @@ def build_manifest(
 
 def _load(path: Path, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_members,
+        )
+    except (OSError, json.JSONDecodeError, _DuplicateJsonMember) as error:
         _reject("RQ010", f"cannot load {label}: {error}")
     return _object(value, "RQ010", label)
 

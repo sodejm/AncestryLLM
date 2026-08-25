@@ -43,18 +43,21 @@ def _digest(*, sha256: str = "d" * 64, size: int = 1) -> dict[str, Any]:
 def _receipt(
     gates: list[str],
     *,
+    context: dict[str, str],
+    command: dict[str, Any],
     artifacts: dict[str, dict[str, Any]] | None = None,
     head: str = HEAD,
 ) -> dict[str, Any]:
     receipt = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "kind": "verification-receipt",
         "status": "passed",
         "gitHead": head,
         "headBefore": head,
         "headAfter": head,
         "gates": sorted(gates),
-        "command": {"executable": "node", "args": ["--test"], "shell": False},
+        "context": copy.deepcopy(context),
+        "command": copy.deepcopy(command),
         "result": {
             "exitCode": 0,
             "signal": None,
@@ -228,35 +231,55 @@ def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         "restartEvidence": _digest(sha256="5" * 64),
         "integrityEvidence": _digest(sha256="6" * 64),
     }
-    runtime_receipt = _receipt(
+    receipt_context = {
+        "runner": row["runner"],
+        "sidecarTarget": row["sidecarTarget"],
+    }
+    receipt_commands = quality._target_receipt_commands(row["runner"], row["sidecarTarget"])
+
+    def target_receipt(
+        gates: list[str],
+        *,
+        receipt_artifacts: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return _receipt(
+            gates,
+            context=receipt_context,
+            command=receipt_commands[gates[0]],
+            artifacts=receipt_artifacts,
+        )
+
+    runtime_receipt = target_receipt(
         ["packageRuntimePassed", "rendererZeroEgressCanaryPassed"],
-        artifacts={"metrics": artifacts["metrics"]},
+        receipt_artifacts={"metrics": artifacts["metrics"]},
     )
     receipts = {
         "packageRuntimePassed": runtime_receipt,
-        "sidecarProcessTreeGuardPassed": _receipt(["sidecarProcessTreeGuardPassed"]),
-        "sidecarSmokePassed": _receipt(["sidecarSmokePassed"]),
-        "fusesInspectedPassed": _receipt(
+        "sidecarProcessTreeGuardPassed": target_receipt(["sidecarProcessTreeGuardPassed"]),
+        "sidecarSmokePassed": target_receipt(["sidecarSmokePassed"]),
+        "fusesInspectedPassed": target_receipt(
             ["fusesInspectedPassed"],
-            artifacts={"fuseInspection": artifacts["fuseInspection"]},
+            receipt_artifacts={"fuseInspection": artifacts["fuseInspection"]},
         ),
         "rendererZeroEgressCanaryPassed": copy.deepcopy(runtime_receipt),
-        "normalLaunchDebugSurfaceAbsentPassed": _receipt(["normalLaunchDebugSurfaceAbsentPassed"]),
-        "packagedFileGrantSmokePassed": _receipt(
+        "normalLaunchDebugSurfaceAbsentPassed": target_receipt(
+            ["normalLaunchDebugSurfaceAbsentPassed"]
+        ),
+        "packagedFileGrantSmokePassed": target_receipt(
             ["packagedFileGrantSmokePassed"],
-            artifacts={"fileGrantEvidence": artifacts["fileGrantEvidence"]},
+            receipt_artifacts={"fileGrantEvidence": artifacts["fileGrantEvidence"]},
         ),
-        "packagedSidecarWithholdRetryPassed": _receipt(
+        "packagedSidecarWithholdRetryPassed": target_receipt(
             ["packagedSidecarWithholdRetryPassed"],
-            artifacts={"faultEvidence": artifacts["withholdEvidence"]},
+            receipt_artifacts={"faultEvidence": artifacts["withholdEvidence"]},
         ),
-        "packagedSidecarRestartExhaustionQuitPassed": _receipt(
+        "packagedSidecarRestartExhaustionQuitPassed": target_receipt(
             ["packagedSidecarRestartExhaustionQuitPassed"],
-            artifacts={"faultEvidence": artifacts["restartEvidence"]},
+            receipt_artifacts={"faultEvidence": artifacts["restartEvidence"]},
         ),
-        "packagedSidecarIntegritySubstitutionPassed": _receipt(
+        "packagedSidecarIntegritySubstitutionPassed": target_receipt(
             ["packagedSidecarIntegritySubstitutionPassed"],
-            artifacts={
+            receipt_artifacts={
                 "failureDiagnostics": _digest(sha256="8" * 64),
                 "faultEvidence": artifacts["integrityEvidence"],
                 "substitutedSidecar": _digest(sha256="7" * 64),
@@ -297,9 +320,17 @@ def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
 def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
     targets = [_target(row, policy) for row in policy["performance"]["targets"]]
     security_gates = policy["security"]["desktopReceiptGates"]
-    security_receipt = _receipt(security_gates)
     sbom = _digest(sha256="c" * 64, size=512)
-    security_receipt["artifacts"]["sbom"] = copy.deepcopy(sbom)
+    security_context = {"runner": "ubuntu-24.04", "sidecarTarget": "none"}
+    security_receipts = {
+        gate: _receipt(
+            [gate],
+            context=security_context,
+            command=quality.SECURITY_RECEIPT_COMMANDS[gate],
+            artifacts={"sbom": sbom} if gate == "sbomGeneratedPassed" else None,
+        )
+        for gate in security_gates
+    }
     return {
         "schemaVersion": 2,
         "kind": "aggregate",
@@ -313,7 +344,7 @@ def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
             "kind": "security",
             "gitHead": HEAD,
             "gates": dict.fromkeys(security_gates, True),
-            "receipts": {gate: copy.deepcopy(security_receipt) for gate in security_gates},
+            "receipts": security_receipts,
             "sbom": sbom,
         },
         "publicationRequirements": {"desktopInstaller": True},
@@ -645,6 +676,59 @@ def test_non_finite_performance_observation_is_rejected() -> None:
 
     with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{metric}.*invalid"):
         _build(policy, desktop=desktop)
+
+
+def test_non_finite_performance_ceiling_is_rejected() -> None:
+    policy = _policy()
+    metric = policy["performance"]["metrics"][0]
+    policy["performance"]["targets"][0]["performanceCeilings"][metric] = float("inf")
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ001.*ceilings.*invalid"):
+        _build(policy)
+
+
+def test_target_receipt_command_must_match_required_gate() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"]["packageRuntimePassed"]["command"] = {
+        "executable": "printf",
+        "args": ["forged"],
+        "shell": False,
+    }
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*command"):
+        _build(policy, desktop=desktop)
+
+
+def test_target_receipt_context_must_match_required_runner() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    transplanted_context = copy.deepcopy(
+        desktop["targets"][1]["receipts"]["packageRuntimePassed"]["context"]
+    )
+    desktop["targets"][0]["receipts"]["packageRuntimePassed"]["context"] = transplanted_context
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*context"):
+        _build(policy, desktop=desktop)
+
+
+def test_desktop_sbom_must_be_nonempty() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    empty_sbom = _digest(sha256="c" * 64, size=0)
+    desktop["security"]["sbom"] = copy.deepcopy(empty_sbom)
+    desktop["security"]["receipts"]["sbomGeneratedPassed"]["artifacts"]["sbom"] = empty_sbom
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ007.*SBOM.*positive"):
+        _build(policy, desktop=desktop)
+
+
+def test_rejects_duplicate_json_object_members(tmp_path: Path) -> None:
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text('{"schemaVersion": 1, "schemaVersion": 2}', encoding="utf-8")
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ010.*duplicate"):
+        quality._load(duplicate, "duplicate fixture")
 
 
 @pytest.mark.parametrize(
