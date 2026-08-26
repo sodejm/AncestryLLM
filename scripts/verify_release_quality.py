@@ -20,6 +20,9 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ARTIFACT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+GITHUB_ACTIONS_RUN_URL = re.compile(
+    r"^https://github[.]com/sodejm/AncestryLLM/actions/runs/[1-9][0-9]*$"
+)
 MAX_SAFE_INTEGER = (2**53) - 1
 FAMILIES = ("diagnostics", "performance", "qa", "security")
 EXPECTED_FUSE_STATES = {
@@ -332,6 +335,21 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _matches_typed_value(actual: Any, expected: Any) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            _matches_typed_value(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _matches_typed_value(actual_item, expected_item)
+            for actual_item, expected_item in zip(actual, expected, strict=True)
+        )
+    return actual == expected
+
+
 def _string_list(value: Any, code: str, label: str) -> list[str]:
     if not isinstance(value, list) or not value:
         _reject(code, f"{label} must be a non-empty array")
@@ -637,8 +655,8 @@ def _validate_readiness(
     if readiness["commit"] != commit:
         _reject("RQ002", "readiness evidence is not from the exact head")
     run_url = readiness["run_url"]
-    if not isinstance(run_url, str) or not run_url.startswith(("https://", "http://")):
-        _reject("RQ003", "readiness evidence has no run URL")
+    if not isinstance(run_url, str) or not GITHUB_ACTIONS_RUN_URL.fullmatch(run_url):
+        _reject("RQ003", "readiness evidence must identify the expected GitHub Actions run")
     gates = readiness["gates"]
     if not isinstance(gates, list):
         _reject("RQ004", "readiness gate inventory is missing")
@@ -664,8 +682,8 @@ def _validate_readiness(
         if gate["status"] != "verified":
             _reject("RQ004", f"readiness gate {name} is not verified")
         url = gate["evidence_url"]
-        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
-            _reject("RQ004", f"readiness gate {name} has no evidence URL")
+        if url != run_url:
+            _reject("RQ004", f"readiness gate {name} is not bound to the declared run")
     return {name: str(by_name[name]["evidence_url"]) for name in sorted(by_name)}
 
 
@@ -762,7 +780,9 @@ def _validate_receipt_summary(
 
     result = _object(summary["result"], code, f"{label} result")
     _exact_keys(result, {"exitCode", "signal", "stderr", "stdout"}, code, f"{label} result")
-    if result["exitCode"] != 0 or result["signal"] is not None:
+    if type(result["exitCode"]) is not int or result["exitCode"] != 0:
+        _reject(code, f"{label} command exit code must be integer zero")
+    if result["signal"] is not None:
         _reject(code, f"{label} command did not pass")
     _validate_digest(result["stdout"], code, f"{label} stdout")
     _validate_digest(result["stderr"], code, f"{label} stderr")
@@ -856,7 +876,7 @@ def _validate_file_grant_mediation(value: Any, runner: str) -> None:
         "RQ006",
         observations_label,
     )
-    if observations != FILE_GRANT_OBSERVATIONS:
+    if not _matches_typed_value(observations, FILE_GRANT_OBSERVATIONS):
         _reject("RQ006", f"{observations_label} did not pass")
 
 
@@ -903,7 +923,7 @@ def _validate_fault_scenarios(value: Any, runner: str) -> None:
             "RQ006",
             observations_label,
         )
-        if observations != expected_observations:
+        if not _matches_typed_value(observations, expected_observations):
             _reject("RQ006", f"{observations_label} did not pass")
 
 

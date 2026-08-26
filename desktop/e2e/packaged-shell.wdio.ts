@@ -38,6 +38,11 @@ type StartupExpectation = Readonly<{
   }>
 }>
 
+type ProductionBoundaryMetrics = Readonly<{
+  rendererOutboundRequests: number
+  rssBytes: number
+}>
+
 const READY_DIAGNOSTICS: StartupExpectation = Object.freeze({
   state: 'ready',
   failure: null,
@@ -350,7 +355,51 @@ function stringsIn(value: unknown): string[] {
   return []
 }
 
-async function expectProductionBoundary(rootPid: number): Promise<number> {
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function externalNetworkUrl(value: unknown): string | null {
+  return typeof value === 'string' && /^(?:https?|wss?):/iu.test(value) ? value : null
+}
+
+function rendererNetworkAttemptUrls(entries: readonly object[]): string[] {
+  const webSocketUrls = new Map<string, string>()
+  const attempts = new Set<string>()
+  for (const entry of entries) {
+    const encoded = recordValue(entry)?.message
+    if (typeof encoded !== 'string') continue
+    let decoded: unknown
+    try {
+      decoded = JSON.parse(encoded)
+    } catch {
+      continue
+    }
+    const message = recordValue(recordValue(decoded)?.message)
+    const method = message?.method
+    const params = recordValue(message?.params)
+    const requestId = params?.requestId
+    if (typeof method !== 'string' || typeof requestId !== 'string') continue
+    if (method === 'Network.webSocketCreated') {
+      const url = externalNetworkUrl(params?.url)
+      if (url !== null) webSocketUrls.set(requestId, url)
+      continue
+    }
+    if (method === 'Network.webSocketWillSendHandshakeRequest') {
+      const url = webSocketUrls.get(requestId)
+      if (url !== undefined) attempts.add(`${requestId}\0${url}`)
+      continue
+    }
+    if (method !== 'Network.requestWillBeSent') continue
+    const url = externalNetworkUrl(recordValue(params?.request)?.url)
+    if (url !== null) attempts.add(`${requestId}\0${url}`)
+  }
+  return [...attempts].map((attempt) => attempt.slice(attempt.indexOf('\0') + 1))
+}
+
+async function expectProductionBoundary(rootPid: number): Promise<ProductionBoundaryMetrics> {
   const appUrl = new URL(await browser.getUrl())
   assert.deepEqual({
     protocol: appUrl.protocol,
@@ -443,9 +492,6 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
       webSocketBlocked,
       serviceWorkerBlocked,
       childWindowBlocked: window.open('https://github.com/') === null,
-      externalResources: performance.getEntriesByType('resource')
-        .map((entry) => entry.name)
-        .filter((url) => /^(?:https?|wss?):/iu.test(url)),
       csp: document.querySelector<HTMLMetaElement>(
         'meta[http-equiv="Content-Security-Policy"]',
       )?.content ?? null,
@@ -456,9 +502,13 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
     webSocketBlocked: true,
     serviceWorkerBlocked: true,
     childWindowBlocked: true,
-    externalResources: [],
     csp: PRODUCTION_CSP,
   })
+  const rendererOutboundAttemptUrls = rendererNetworkAttemptUrls(
+    await browser.getLogs('performance'),
+  )
+  const rendererOutboundRequests = rendererOutboundAttemptUrls.length
+  assert.deepEqual(rendererOutboundAttemptUrls, [])
 
   const tree = await eventually(
     'Packaged renderer process was not observed',
@@ -483,7 +533,7 @@ async function expectProductionBoundary(rootPid: number): Promise<number> {
   )
   const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
   assert.ok(rssBytes > 0)
-  return rssBytes
+  return { rendererOutboundRequests, rssBytes }
 }
 
 async function expectAccessibleShell(): Promise<void> {
@@ -607,7 +657,7 @@ describe('unpublished unpacked native package', () => {
     await expectFocusedHeading('Home')
     assert.match(await text('main'), /Packaged build/u)
     assert.match(await text('main'), /Ready/u)
-    const rssBytes = await expectProductionBoundary(await mainPid())
+    const { rendererOutboundRequests, rssBytes } = await expectProductionBoundary(await mainPid())
     await click('a=Diagnostics')
     await expectFocusedHeading('Diagnostics')
     assert.match(await text('main'), /Desktop service[\s\S]*Ready/u)
@@ -668,7 +718,7 @@ describe('unpublished unpacked native package', () => {
       warmLaunchMs,
       readyMs,
       rssBytes,
-      rendererOutboundRequests: 0,
+      rendererOutboundRequests,
     }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
   })
 

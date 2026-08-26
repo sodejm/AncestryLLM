@@ -136,6 +136,24 @@ def test_packaged_boundary_reads_the_document_csp_without_fetch_access_to_app_sc
     assert "fetch(location.href)" not in source
 
 
+def test_packaged_renderer_egress_metric_is_measured_at_the_network_layer() -> None:
+    config = WDIO_CONFIG.read_text(encoding="utf-8")
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    scenario = source.split(
+        "it('exercises first run, persistence, corrupt preferences, security, and resource evidence'",
+        maxsplit=1,
+    )[1].split("\n  it(", maxsplit=1)[0]
+
+    assert "'goog:loggingPrefs'" in config
+    assert "performance: 'ALL'" in config
+    assert "browser.getLogs('performance')" in source
+    assert "Network.requestWillBeSent" in source
+    assert "Network.webSocketWillSendHandshakeRequest" in source
+    assert "performance.getEntriesByType('resource')" not in source
+    assert "rendererOutboundRequests: 0" not in scenario
+    assert "rendererOutboundRequests," in scenario
+
+
 def test_packaged_zoom_uses_equivalent_renderer_scale() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     scenario = source.split("async function expectAccessibleShell()", maxsplit=1)[1].split(
@@ -179,7 +197,7 @@ def test_websocket_csp_evidence_requires_a_matching_policy_violation() -> None:
     for spec in (SOURCE_SPEC, PACKAGED_SPEC):
         source = spec.read_text(encoding="utf-8")
         denied_start = source.index("const webSocketBlocked = await new Promise<boolean>")
-        denied_end = source.index("\n    let serviceWorkerBlocked", denied_start)
+        denied_end = source.index("let serviceWorkerBlocked", denied_start)
         denied_source = source[denied_start:denied_end]
 
         assert "securitypolicyviolation" in denied_source

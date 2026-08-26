@@ -81,16 +81,17 @@ def _policy() -> dict[str, Any]:
 
 
 def _readiness(policy: dict[str, Any]) -> dict[str, Any]:
+    run_url = "https://github.com/sodejm/AncestryLLM/actions/runs/123456789"
     return {
         "schema_version": 1,
         "release": VERSION,
         "commit": HEAD,
-        "run_url": "https://example.test/readiness/1",
+        "run_url": run_url,
         "gates": [
             {
                 "name": gate,
                 "status": "verified",
-                "evidence_url": f"https://example.test/readiness/1#{gate}",
+                "evidence_url": run_url,
             }
             for gate in policy["qa"]["readinessGates"]
         ],
@@ -508,6 +509,26 @@ def test_missing_readiness_gate_is_rejected() -> None:
         _build(policy, readiness=readiness)
 
 
+def test_readiness_run_url_must_identify_the_expected_repository_actions_run() -> None:
+    policy = _policy()
+    readiness = _readiness(policy)
+    readiness["run_url"] = "https://example.test/actions/runs/123456789"
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ003.*GitHub Actions run"):
+        _build(policy, readiness=readiness)
+
+
+def test_readiness_gate_evidence_url_must_be_bound_to_the_declared_run() -> None:
+    policy = _policy()
+    readiness = _readiness(policy)
+    readiness["gates"][0]["evidence_url"] = (
+        "https://github.com/sodejm/AncestryLLM/actions/runs/987654321"
+    )
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ004.*declared run"):
+        _build(policy, readiness=readiness)
+
+
 def test_unknown_runner_or_tool_version_is_rejected() -> None:
     policy = _policy()
     desktop = _desktop(policy)
@@ -709,6 +730,31 @@ def test_target_receipt_context_must_match_required_runner() -> None:
     desktop["targets"][0]["receipts"]["packageRuntimePassed"]["context"] = transplanted_context
 
     with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*context"):
+        _build(policy, desktop=desktop)
+
+
+def test_target_receipt_exit_code_requires_an_integer_zero() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"]["packageRuntimePassed"]["result"]["exitCode"] = False
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*exit code"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize("surface", ("file-grant", "fault"))
+def test_target_observations_require_their_exact_json_types(surface: str) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    target = desktop["targets"][0]
+    if surface == "file-grant":
+        target["fileGrantMediation"]["observations"]["openGrantOpaque"] = 1
+    else:
+        target["faultScenarios"]["sidecar-withhold-retry"]["observations"][
+            "automaticRestartsRemaining"
+        ] = True
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*observations"):
         _build(policy, desktop=desktop)
 
 

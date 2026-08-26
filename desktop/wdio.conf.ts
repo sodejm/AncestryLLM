@@ -60,6 +60,7 @@ export const config = {
   maxInstances: 1,
   capabilities: [{
     browserName: 'electron',
+    'goog:loggingPrefs': { performance: 'ALL' },
     'wdio:electronServiceOptions': electronServiceOptions,
   }],
   beforeSession: () => {
