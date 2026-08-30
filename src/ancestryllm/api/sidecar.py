@@ -26,7 +26,9 @@ from ancestryllm.api.app import create_app
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.server import LOOPBACK_HOST, create_uvicorn_config
 from ancestryllm.api.settings import ApiSettings
+from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandExecutor
+from ancestryllm.application.gedcom_jobs import GedcomJobFacade
 from ancestryllm.application.jobs import JOB_SCHEMA_VERSION, JobLifecycleService, ShutdownAssessment
 from ancestryllm.application.secret_management import SecretManagementService
 from ancestryllm.application.settings import SettingsService
@@ -34,6 +36,7 @@ from ancestryllm.core.config import APP_NAME, AppConfig
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
+from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.llm.chat import ChatService
 from ancestryllm.llm.chat_streaming import ChatStreamingService
 from ancestryllm.llm.endpoint_validation import EndpointValidationService
@@ -211,6 +214,7 @@ class _SidecarLifecycle:
     startup_diagnostics: Callable[[], StartupDiagnosticReport]
     chat_service: ChatService
     llm_service: LLMService
+    gedcom_service: GedcomService
     chat_streaming_service: ChatStreamingService
     job_lifecycle: JobLifecycleService | None = field(init=False, default=None, repr=False)
 
@@ -268,6 +272,11 @@ class _SidecarLifecycle:
                 "Resolve startup diagnostics, then restart the desktop application.",
             )
         return self.job_lifecycle
+
+    def gedcom_jobs(self) -> GedcomJobFacade:
+        """Bind GEDCOM operations to the ready background-job service."""
+
+        return GedcomJobFacade(service=self.gedcom_service, jobs=self.jobs())
 
     def prepare_job_shutdown(self, action: str, timeout_seconds: float) -> ShutdownAssessment:
         """Authorize degraded shutdown or delegate to the live job boundary."""
@@ -456,6 +465,7 @@ def create_sidecar_app(
     *,
     config: AppConfig | None = None,
     secret_store: SecretStore | None = None,
+    artifact_registry: _ArtifactRegistry | None = None,
     request_runtime_shutdown: Callable[[], None] | None = None,
     record_diagnostic: DiagnosticRecorder | None = None,
 ) -> FastAPI:
@@ -513,6 +523,14 @@ def create_sidecar_app(
         database,
         profiles=provider_profiles,
     )
+    resolved_artifact_registry = (
+        artifact_registry if artifact_registry is not None else _ArtifactRegistry()
+    )
+    gedcom_service = GedcomService(
+        llm_service,
+        consent_lookup=provider_profiles.consent_grant,
+        artifacts=resolved_artifact_registry,
+    )
     chat_service = ChatService(llm_service, provider_profiles)
     chat_streaming_service = ChatStreamingService(chat_service, llm_service)
 
@@ -521,6 +539,7 @@ def create_sidecar_app(
         startup_diagnostics=startup_report,
         chat_service=chat_service,
         llm_service=llm_service,
+        gedcom_service=gedcom_service,
         chat_streaming_service=chat_streaming_service,
     )
     return create_app(
@@ -540,6 +559,7 @@ def create_sidecar_app(
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,
         job_service=lifecycle.jobs,
+        gedcom_job_service=lifecycle.gedcom_jobs,
         job_shutdown=lifecycle.prepare_job_shutdown,
         runtime_shutdown=request_runtime_shutdown,
     )

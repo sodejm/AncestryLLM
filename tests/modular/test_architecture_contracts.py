@@ -201,6 +201,24 @@ def test_every_declared_public_facade_has_a_literal_bound_allowlist() -> None:
     assert not facade_errors
 
 
+def test_public_facade_recognizes_pep_695_type_alias_exports(tmp_path: Path) -> None:
+    root = tmp_path / "ancestryllm"
+    _write_module(
+        root,
+        "ancestryllm.application.dto",
+        "type JSONValue = str | list[JSONValue]\n__all__ = ['JSONValue']\n",
+    )
+
+    report = check_tree(
+        root,
+        public_facades=("ancestryllm.application.dto",),
+        exceptions=(),
+        require_all_exceptions=False,
+    )
+
+    assert report.passed
+
+
 def test_pure_gedcom_document_contracts_are_declared_public_facades() -> None:
     assert {
         "ancestryllm.gedcom.model",

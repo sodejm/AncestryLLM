@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import types
+from contextlib import contextmanager
 from dataclasses import MISSING, fields
 from enum import StrEnum
 from pathlib import Path
@@ -248,6 +249,74 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
         "question",
         "provider",
     )
+
+
+def test_gedcom_operation_dtos_use_public_names_safe_defaults_and_legacy_aliases() -> None:
+    public_names = {
+        "GedcomSourceSummary",
+        "GedcomValidationFinding",
+        "MergeDecisionRequest",
+        "MergeRequest",
+        "MergeResult",
+        "QualityRequest",
+        "QualityResult",
+        "RootCandidate",
+        "SubtreeRequest",
+        "SubtreeResult",
+        "SyncRequest",
+        "SyncResult",
+    }
+    assert public_names <= set(operations_module.__all__)
+
+    read_grant = ArtifactGrantRef(
+        f"grt_{'a' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.READ,
+    )
+    output_grant = ArtifactGrantRef(
+        f"grt_{'b' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.WRITE,
+    )
+    report_grant = ArtifactGrantRef(
+        f"grt_{'c' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.WRITE,
+    )
+    merge = operations_module.MergeRequest(
+        inputs=(read_grant,),
+        output=output_grant,
+        quality_report=report_grant,
+        root_person_ref="person:root",
+        provider=ProviderSelection(),
+        similarity_threshold=70,
+    )
+    decision = operations_module.MergeDecisionRequest(
+        decision_id="merge-duplicate-1",
+        left_person_ref="person:left",
+        right_person_ref="person:right",
+        evidence_codes=("possible-duplicate",),
+    )
+
+    assert type(merge).__name__ == "MergeRequest"
+    assert merge.gedcom_version == "5.5.5"
+    assert operations_module.MergeRequest.from_json(merge.to_json()) == merge
+    assert decision.default_option_id == "retain-both"
+    assert tuple(option.option_id for option in decision.options) == (
+        "retain-both",
+        "merge",
+    )
+    assert decision.options[1].destructive
+    assert operations_module.MergeDecisionRequest.from_json(decision.to_json()) == decision
+
+    assert operations_module.GedcomMergeRequest is operations_module.MergeRequest
+    assert operations_module.GedcomMergeResult is operations_module.MergeResult
+    assert operations_module.GedcomQualityRequest is operations_module.QualityRequest
+    assert operations_module.GedcomQualityResult is operations_module.QualityResult
+    assert operations_module.GedcomSubtreeRequest is operations_module.SubtreeRequest
+    assert operations_module.GedcomSubtreeResult is operations_module.SubtreeResult
+    assert operations_module.GedcomSyncRequest is operations_module.SyncRequest
+    assert operations_module.GedcomSyncResult is operations_module.SyncResult
 
 
 @pytest.mark.parametrize(
@@ -502,6 +571,17 @@ def test_existing_domain_failure_is_preserved_by_current_exception_mapping() -> 
     )
 
     assert domain_failure_from_exception(failure) is failure
+
+
+def test_domain_failure_can_cross_context_manager_boundary() -> None:
+    @contextmanager
+    def application_boundary() -> Any:
+        yield
+
+    with pytest.raises(DomainFailure) as caught, application_boundary():
+        raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
+
+    assert caught.value.code is DomainFailureCode.INVALID_REQUEST
 
 
 def test_current_cancellation_adapter_maps_legacy_signal_without_detail() -> None:

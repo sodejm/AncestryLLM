@@ -21,15 +21,20 @@ from ancestryllm.application.errors import domain_failure_from_exception
 from ancestryllm.application.genealogy import GenealogyAggregate
 from ancestryllm.application.operations import (
     ChangeSummary,
+    GedcomInspectRequest,
+    GedcomInspectResult,
     GedcomMergeRequest,
     GedcomMergeResult,
     GedcomQualityRequest,
     GedcomQualityResult,
+    GedcomSourceSummary,
     GedcomSubtreeRequest,
     GedcomSubtreeResult,
     GedcomSyncRequest,
+    GedcomValidationFinding,
     ProvenanceRecord,
     QualitySummary,
+    RootCandidate,
 )
 from ancestryllm.application.operations import (
     GedcomSyncResult as GedcomSyncServiceResult,
@@ -70,6 +75,7 @@ from ancestryllm.gedcom.identity import (
     individual_from_record,
     merge_records,
 )
+from ancestryllm.gedcom.model import parse_gedcom_line
 from ancestryllm.gedcom.parser import GedcomParseError, GedcomRecord, load_sources
 from ancestryllm.gedcom.quality import (
     QUALITY_AI_LIMIT,
@@ -898,6 +904,90 @@ class GedcomService:
             consent=consent,
         ).output_path
 
+    def execute_inspect(
+        self,
+        request: GedcomInspectRequest,
+        *,
+        cancellation: CancellationPort | None = None,
+    ) -> GedcomInspectResult:
+        """Inspect a granted source without exposing paths or record contents."""
+
+        return _at_contract_boundary(
+            lambda: self._execute_inspect(request, cancellation=cancellation)
+        )
+
+    def _execute_inspect(
+        self,
+        request: GedcomInspectRequest,
+        *,
+        cancellation: CancellationPort | None,
+    ) -> GedcomInspectResult:
+        operation = "gedcom.inspect"
+        registry = self._require_artifacts()
+        cancellation_port = cancellation or NeverCancelled()
+        cancellation_port.check_cancelled()
+        source_path = registry.resolve(
+            request.source,
+            operation=operation,
+            access=ArtifactAccess.READ,
+        )
+        sources, source_records, people, _fingerprints = self._people_and_sources([source_path])
+        cancellation_port.check_cancelled()
+
+        version = ""
+        for source in sources:
+            for record in source.records:
+                if record.tag != "HEAD":
+                    continue
+                for line in record.lines:
+                    parsed = parse_gedcom_line(line)
+                    if parsed.tag == "VERS":
+                        version = parsed.value.strip()
+                        break
+                if version:
+                    break
+            if version:
+                break
+
+        findings: tuple[GedcomValidationFinding, ...]
+        if version == "5.5.5":
+            findings = ()
+        elif version == "5.5.1":
+            findings = (
+                GedcomValidationFinding(
+                    code="gedcom-version-fallback",
+                    severity="info",
+                ),
+            )
+        else:
+            findings = (
+                GedcomValidationFinding(
+                    code="gedcom-version-unsupported",
+                    severity="warning",
+                ),
+            )
+
+        summary = GedcomSourceSummary(
+            source=registry.describe_input(request.source, operation=operation),
+            gedcom_version=version,
+            individual_count=sum(record.tag == "INDI" for record in source_records),
+            family_count=sum(record.tag == "FAM" for record in source_records),
+            other_record_count=sum(record.tag not in {"INDI", "FAM"} for record in source_records),
+        )
+        root_candidates = tuple(
+            RootCandidate(
+                person_ref=_opaque_ref("person", person.pointer),
+                reason_code="individual-record",
+            )
+            for person in sorted(people, key=lambda candidate: candidate.pointer)
+        )
+        cancellation_port.check_cancelled()
+        return GedcomInspectResult(
+            summary=summary,
+            findings=findings,
+            root_candidates=root_candidates,
+        )
+
     def execute_merge(
         self,
         request: GedcomMergeRequest,
@@ -919,8 +1009,7 @@ class GedcomService:
         operation = "gedcom.merge"
         if (
             len(request.inputs) < 2
-            or request.root_person_ref is None
-            or not request.root_person_ref.strip()
+            or (request.root_person_ref is not None and not request.root_person_ref.strip())
             or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
             or not 0 <= request.similarity_threshold <= 100
         ):
@@ -941,10 +1030,14 @@ class GedcomService:
             operation=operation,
             access=ArtifactAccess.WRITE,
         )
-        quality_report = registry.resolve(
-            request.quality_report,
-            operation=operation,
-            access=ArtifactAccess.WRITE,
+        quality_report = (
+            registry.resolve(
+                request.quality_report,
+                operation=operation,
+                access=ArtifactAccess.WRITE,
+            )
+            if request.quality_report is not None
+            else None
         )
         execution = self._merge(
             inputs,
@@ -958,15 +1051,21 @@ class GedcomService:
             threshold=request.similarity_threshold,
             cancellation=cancellation_port,
         )
-        if execution.root_person_ref is None:
-            raise DomainFailure(DomainFailureCode.INTERNAL)
         return GedcomMergeResult(
             gedcom=registry.describe_output(request.output, operation=operation),
-            quality_report=registry.describe_output(
-                request.quality_report,
-                operation=operation,
+            quality_report=(
+                registry.describe_output(
+                    request.quality_report,
+                    operation=operation,
+                )
+                if request.quality_report is not None
+                else None
             ),
-            root_person_ref=_opaque_ref("person", execution.root_person_ref),
+            root_person_ref=(
+                _opaque_ref("person", execution.root_person_ref)
+                if execution.root_person_ref is not None
+                else None
+            ),
             changes=execution.changes,
             quality=execution.quality,
             provenance=execution.provenance,
@@ -1048,7 +1147,11 @@ class GedcomService:
         cancellation: CancellationPort | None,
     ) -> GedcomQualityResult:
         operation = "gedcom.quality"
-        if request.root_person_ref is None or not request.root_person_ref.strip():
+        if (
+            request.root_person_ref is None
+            or not request.root_person_ref.strip()
+            or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
+        ):
             raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
         registry = self._require_artifacts()
         cancellation_port = cancellation or NeverCancelled()

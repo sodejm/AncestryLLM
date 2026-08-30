@@ -176,6 +176,13 @@ def _unresolved_grant(
             root_person_ref=None,
             provider=_offline_provider(),
         ),
+        GedcomQualityRequest(
+            source=_unresolved_grant("gedcom.quality", ArtifactAccess.READ, "a"),
+            output=_unresolved_grant("gedcom.quality", ArtifactAccess.WRITE, "b"),
+            root_person_ref="person:root",
+            provider=_offline_provider(),
+            gedcom_version="5.5.6",
+        ),
     ),
 )
 def test_service_contract_rejects_invalid_requests_before_resolving_grants(

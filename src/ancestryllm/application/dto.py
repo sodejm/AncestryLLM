@@ -13,7 +13,7 @@ import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Self, TypeAlias, Union, cast, get_args, get_origin, get_type_hints
+from typing import Self, Union, cast, get_args, get_origin, get_type_hints
 
 CONTRACT_VERSION = "ancestryllm.application/0.3"
 MAX_BOUNDARY_JSON_BYTES = 1_048_576
@@ -22,7 +22,7 @@ MAX_TEXT_LENGTH = 65_536
 MAX_PROGRESS_TOTAL = 1_000_000_000
 
 Scalar = str | int | float | bool | None
-JSONValue: TypeAlias = Scalar | list["JSONValue"] | dict[str, "JSONValue"]  # noqa: UP040
+type JSONValue = Scalar | list[JSONValue] | dict[str, JSONValue]
 
 
 class BoundaryDTO:

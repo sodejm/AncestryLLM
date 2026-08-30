@@ -161,39 +161,31 @@ def test_gedcom_file_commands_return_path_free_file_artifacts(
     action: str,
     tmp_path: Path,
     app_context: AppContext,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "source.ged"
-    source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "second.ged"
+    second.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
     output = tmp_path / ("quality.md" if action == "quality" else "output.ged")
     report = tmp_path / "quality.md"
-
-    def merge(_self: object, *_args: object, **_kwargs: object) -> object:
-        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        report.write_text("# Quality\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output, quality_path=report)
-
-    def subtree(_self: object, *_args: object, **_kwargs: object) -> object:
-        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output, quality_path=None)
-
-    def quality(_self: object, *_args: object, **_kwargs: object) -> Path:
-        output.write_text("# Quality\n", encoding="utf-8")
-        return output
-
-    monkeypatch.setattr(
-        f"ancestryllm.gedcom.service.GedcomService.{action}",
-        {"merge": merge, "subtree": subtree, "quality": quality}[action],
-    )
     arguments = {
         "merge": [
             "gedcom",
             "merge",
             str(source),
+            str(second),
             "--output",
             str(output),
             "--quality-report",
             str(report),
+            "--root-person",
+            "@I1@",
         ],
         "subtree": [
             "gedcom",
@@ -202,7 +194,7 @@ def test_gedcom_file_commands_return_path_free_file_artifacts(
             "--output",
             str(output),
             "--root-person",
-            "Ada Example",
+            "@I1@",
         ],
         "quality": [
             "gedcom",
@@ -211,7 +203,7 @@ def test_gedcom_file_commands_return_path_free_file_artifacts(
             "--output",
             str(output),
             "--root-person",
-            "Ada Example",
+            "@I1@",
         ],
     }[action]
 
@@ -224,6 +216,59 @@ def test_gedcom_file_commands_return_path_free_file_artifacts(
     assert isinstance(outcome.result, FileArtifactResult)
     assert str(output) not in json.dumps(serialized)
     assert str(report) not in json.dumps(serialized)
+
+
+def test_gedcom_merge_cli_dispatches_through_typed_service_contract(
+    tmp_path: Path,
+    app_context: AppContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ancestryllm.gedcom.service import GedcomService
+
+    first = tmp_path / "first.ged"
+    second = tmp_path / "second.ged"
+    output = tmp_path / "merged.ged"
+    first.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    second.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    typed_calls = 0
+    execute_merge = GedcomService.execute_merge
+
+    def execute_typed_merge(self: GedcomService, *args: object, **kwargs: object) -> object:
+        nonlocal typed_calls
+        typed_calls += 1
+        return execute_merge(self, *args, **kwargs)
+
+    def reject_legacy_merge(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the CLI must not call the path-bearing compatibility method")
+
+    monkeypatch.setattr(GedcomService, "execute_merge", execute_typed_merge)
+    monkeypatch.setattr(GedcomService, "merge", reject_legacy_merge)
+
+    outcome = GedcomExecutor(
+        app_context,
+        FileIngressPolicy(app_context.config.file_ingress),
+    )(
+        _invocation(
+            [
+                "gedcom",
+                "merge",
+                str(first),
+                str(second),
+                "--output",
+                str(output),
+            ]
+        )
+    )
+
+    assert typed_calls == 1
+    assert isinstance(outcome.result, FileArtifactResult)
+    assert output.exists()
 
 
 def test_rootsmagic_export_returns_path_free_file_artifacts(

@@ -89,7 +89,6 @@ def test_language_and_correctness_suppressions_are_narrow_and_reviewed() -> None
             ("scripts/bootstrap_uv.py", "PTH100"): 2,
             ("scripts/snapshot_credential_file.py", "PTH100"): 1,
             ("src/ancestryllm/api/contracts.py", "UP040"): 1,
-            ("src/ancestryllm/application/dto.py", "UP040"): 1,
             ("src/ancestryllm/application/events.py", "UP040"): 1,
             ("src/ancestryllm/application/executor.py", "UP040"): 2,
             ("src/ancestryllm/core/publication.py", "PTH100"): 1,

@@ -51,7 +51,37 @@ from ancestryllm.application.chat import (
 from ancestryllm.application.chat import (
     ChatStreamRun as ApplicationChatStreamRun,
 )
-from ancestryllm.application.dto import CONTRACT_VERSION, MAX_BOUNDARY_JSON_BYTES
+from ancestryllm.application.dto import (
+    CONTRACT_VERSION,
+    MAX_BOUNDARY_JSON_BYTES,
+    ArtifactAccess,
+    ArtifactGrantRef,
+    JSONValue,
+    ProviderSelection,
+)
+from ancestryllm.application.operations import (
+    GedcomInspectRequest as ApplicationGedcomInspectRequest,
+)
+from ancestryllm.application.operations import (
+    GedcomInspectResult,
+    GedcomSyncSnapshot,
+    MergeResult,
+    QualityResult,
+    SubtreeResult,
+    SyncResult,
+)
+from ancestryllm.application.operations import (
+    MergeRequest as ApplicationMergeRequest,
+)
+from ancestryllm.application.operations import (
+    QualityRequest as ApplicationQualityRequest,
+)
+from ancestryllm.application.operations import (
+    SubtreeRequest as ApplicationSubtreeRequest,
+)
+from ancestryllm.application.operations import (
+    SyncRequest as ApplicationSyncRequest,
+)
 
 API_NAMESPACE: Literal["/api/v1"] = "/api/v1"
 API_CONTRACT: Literal["ancestryllm.internal-api/1"] = "ancestryllm.internal-api/1"
@@ -65,6 +95,12 @@ _BuildIdentity = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[
 _ConfigurationRevision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 _JobId = Annotated[str, Field(pattern=r"^j[0-9]{6,12}$")]
 _JobTimestamp = Annotated[str, Field(min_length=1, max_length=64)]
+_GrantId = Annotated[str, Field(pattern=r"^grt_[0-9a-f]{64}$")]
+_PersonRef = Annotated[
+    str,
+    Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._:@+-]+$"),
+]
+_GedcomVersion = Literal["5.5.5", "5.5.1"]
 _JobState = Literal[
     "queued",
     "running",
@@ -789,6 +825,338 @@ class ChatCapability(BaseModel):
         )
 
 
+def _require_gedcom_grant(
+    grant: ArtifactGrantRequest,
+    *,
+    operation: str,
+    access: Literal["read", "write"],
+) -> None:
+    if grant.operation != operation or grant.access != access:
+        raise ValueError(f"grant must authorize {access} access for {operation}")
+
+
+def _reject_duplicate_grants(grants: tuple[ArtifactGrantRequest, ...]) -> None:
+    identifiers = tuple(grant.grant_id for grant in grants)
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("GEDCOM grant identifiers must be unique")
+
+
+class ArtifactGrantRequest(BaseModel):
+    """Opaque, operation-scoped artifact capability accepted by the API."""
+
+    model_config = _STRICT_MODEL
+
+    grant_id: _GrantId
+    operation: _SafeCode
+    access: Literal["read", "write"]
+
+    def to_application(self) -> ArtifactGrantRef:
+        """Translate the transport grant without resolving a host path."""
+        return ArtifactGrantRef(
+            grant_id=self.grant_id,
+            operation=self.operation,
+            access=ArtifactAccess(self.access),
+        )
+
+
+class GedcomProviderSelectionRequest(BaseModel):
+    """Explicit offline or consent-bound provider selection for GEDCOM work."""
+
+    model_config = _STRICT_MODEL
+
+    provider_id: _SafeCode = "none"
+    profile_id: _SafeCode | None = None
+    model_id: _SafeCode | None = None
+    consent_id: _SafeCode | None = None
+
+    @model_validator(mode="after")
+    def validate_provider_authority(self) -> GedcomProviderSelectionRequest:
+        """Require a complete authority tuple for every networked provider."""
+        authority = (self.profile_id, self.model_id, self.consent_id)
+        if self.provider_id == "none" and any(value is not None for value in authority):
+            raise ValueError("offline provider selection cannot include remote authority")
+        if self.provider_id != "none" and any(value is None for value in authority):
+            raise ValueError("remote provider selection requires profile, model, and consent")
+        return self
+
+    def to_application(self) -> ProviderSelection:
+        """Translate the validated provider authority."""
+        return ProviderSelection(
+            provider_id=self.provider_id,
+            profile_id=self.profile_id,
+            model_id=self.model_id,
+            consent_id=self.consent_id,
+        )
+
+
+class GedcomInspectOperationRequest(BaseModel):
+    """Inspect one GEDCOM through a read-only scoped grant."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    source: ArtifactGrantRequest
+
+    @model_validator(mode="after")
+    def validate_grants(self) -> GedcomInspectOperationRequest:
+        """Reject grants that could authorize another operation or mutation."""
+        _require_gedcom_grant(self.source, operation="gedcom.inspect", access="read")
+        return self
+
+    def to_application(self) -> ApplicationGedcomInspectRequest:
+        """Translate the path-free inspect request."""
+        return ApplicationGedcomInspectRequest(source=self.source.to_application())
+
+
+class GedcomMergeOperationRequest(BaseModel):
+    """Merge GEDCOM inputs into new GEDCOM and quality-report artifacts."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    inputs: Annotated[list[ArtifactGrantRequest], Field(min_length=2, max_length=16)]
+    output: ArtifactGrantRequest
+    quality_report: ArtifactGrantRequest
+    root_person_ref: _PersonRef
+    provider: GedcomProviderSelectionRequest = Field(default_factory=GedcomProviderSelectionRequest)
+    similarity_threshold: Annotated[int, Field(ge=0, le=100)] = 80
+    gedcom_version: _GedcomVersion = "5.5.5"
+
+    @model_validator(mode="after")
+    def validate_grants(self) -> GedcomMergeOperationRequest:
+        """Require distinct grants with exact merge access scopes."""
+        for grant in self.inputs:
+            _require_gedcom_grant(grant, operation="gedcom.merge", access="read")
+        _require_gedcom_grant(self.output, operation="gedcom.merge", access="write")
+        _require_gedcom_grant(
+            self.quality_report,
+            operation="gedcom.merge",
+            access="write",
+        )
+        _reject_duplicate_grants((*self.inputs, self.output, self.quality_report))
+        return self
+
+    def to_application(self) -> ApplicationMergeRequest:
+        """Translate the validated merge request."""
+        return ApplicationMergeRequest(
+            inputs=tuple(grant.to_application() for grant in self.inputs),
+            output=self.output.to_application(),
+            quality_report=self.quality_report.to_application(),
+            root_person_ref=self.root_person_ref,
+            provider=self.provider.to_application(),
+            similarity_threshold=self.similarity_threshold,
+            gedcom_version=self.gedcom_version,
+        )
+
+
+class GedcomSubtreeOperationRequest(BaseModel):
+    """Extract one rooted GEDCOM subtree into a new artifact."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    source: ArtifactGrantRequest
+    output: ArtifactGrantRequest
+    root_person_ref: _PersonRef
+    scope: Literal["connected", "ancestors", "descendants"] = "connected"
+    generations: Annotated[int, Field(ge=0, le=100)] | None = None
+    gedcom_version: _GedcomVersion = "5.5.5"
+
+    @model_validator(mode="after")
+    def validate_grants(self) -> GedcomSubtreeOperationRequest:
+        """Require exact read and write grants for subtree extraction."""
+        _require_gedcom_grant(self.source, operation="gedcom.subtree", access="read")
+        _require_gedcom_grant(self.output, operation="gedcom.subtree", access="write")
+        _reject_duplicate_grants((self.source, self.output))
+        return self
+
+    def to_application(self) -> ApplicationSubtreeRequest:
+        """Translate the validated subtree request."""
+        return ApplicationSubtreeRequest(
+            source=self.source.to_application(),
+            output=self.output.to_application(),
+            root_person_ref=self.root_person_ref,
+            scope=self.scope,
+            generations=self.generations,
+            gedcom_version=self.gedcom_version,
+        )
+
+
+class GedcomQualityOperationRequest(BaseModel):
+    """Analyze a rooted GEDCOM and publish a new quality report."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    source: ArtifactGrantRequest
+    output: ArtifactGrantRequest
+    root_person_ref: _PersonRef
+    provider: GedcomProviderSelectionRequest = Field(default_factory=GedcomProviderSelectionRequest)
+    gedcom_version: _GedcomVersion = "5.5.5"
+
+    @model_validator(mode="after")
+    def validate_grants(self) -> GedcomQualityOperationRequest:
+        """Require exact read and write grants for quality analysis."""
+        _require_gedcom_grant(self.source, operation="gedcom.quality", access="read")
+        _require_gedcom_grant(self.output, operation="gedcom.quality", access="write")
+        _reject_duplicate_grants((self.source, self.output))
+        return self
+
+    def to_application(self) -> ApplicationQualityRequest:
+        """Translate the validated quality request."""
+        return ApplicationQualityRequest(
+            source=self.source.to_application(),
+            output=self.output.to_application(),
+            root_person_ref=self.root_person_ref,
+            provider=self.provider.to_application(),
+            gedcom_version=self.gedcom_version,
+        )
+
+
+class GedcomSyncSnapshotRequest(BaseModel):
+    """One path-free website export supplied to a sync update."""
+
+    model_config = _STRICT_MODEL
+
+    source_id: _SafeCode
+    vendor: Literal["ancestry", "geni", "myheritage", "other"]
+    artifact: ArtifactGrantRequest
+    exported_at: _JobTimestamp | None = None
+
+    def to_application(self) -> GedcomSyncSnapshot:
+        """Translate the validated snapshot descriptor."""
+        return GedcomSyncSnapshot(
+            source_id=self.source_id,
+            vendor=self.vendor,
+            artifact=self.artifact.to_application(),
+            exported_at=self.exported_at,
+        )
+
+
+class GedcomSyncOperationRequest(BaseModel):
+    """Run a typed update or rebase without accepting unrestricted paths."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    sync_command: Literal["update", "rebase"]
+    master: ArtifactGrantRequest
+    release_root: ArtifactGrantRequest
+    provider: GedcomProviderSelectionRequest = Field(default_factory=GedcomProviderSelectionRequest)
+    manifest: ArtifactGrantRequest | None = None
+    snapshots: Annotated[list[GedcomSyncSnapshotRequest], Field(max_length=16)] = Field(
+        default_factory=list
+    )
+    initialize_manifest: bool = False
+    quality_root_person_ref: _PersonRef | None = None
+    quality_report_enabled: bool = True
+    dry_run: bool = False
+    accept_manual_deletions: bool = False
+    reason: _SafeText | None = None
+    gedcom_version: _GedcomVersion = "5.5.5"
+    automatic_identity_resolution: bool = True
+
+    @model_validator(mode="after")
+    def validate_command_and_grants(self) -> GedcomSyncOperationRequest:
+        """Enforce update/rebase invariants before background execution."""
+        _require_gedcom_grant(self.master, operation="gedcom.sync", access="read")
+        _require_gedcom_grant(self.release_root, operation="gedcom.sync", access="write")
+        if self.manifest is not None:
+            _require_gedcom_grant(self.manifest, operation="gedcom.sync", access="read")
+        for snapshot in self.snapshots:
+            _require_gedcom_grant(
+                snapshot.artifact,
+                operation="gedcom.sync",
+                access="read",
+            )
+        grants = (
+            self.master,
+            self.release_root,
+            *((self.manifest,) if self.manifest is not None else ()),
+            *(snapshot.artifact for snapshot in self.snapshots),
+        )
+        _reject_duplicate_grants(grants)
+        source_ids = tuple(snapshot.source_id for snapshot in self.snapshots)
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("GEDCOM sync source identifiers must be unique")
+
+        if self.sync_command == "update":
+            if not self.snapshots:
+                raise ValueError("sync update requires at least one snapshot")
+            if (self.manifest is None) is not self.initialize_manifest:
+                raise ValueError("sync update must initialize exactly when no manifest exists")
+            if self.quality_report_enabled and self.quality_root_person_ref is None:
+                raise ValueError("sync quality reporting requires a root person reference")
+            if self.accept_manual_deletions or self.reason is not None:
+                raise ValueError("sync update cannot accept rebase-only options")
+        else:
+            if self.manifest is None or self.snapshots or self.initialize_manifest:
+                raise ValueError("sync rebase requires a manifest and no snapshots")
+            if self.reason is None:
+                raise ValueError("sync rebase requires a reason")
+            if self.provider.provider_id != "none":
+                raise ValueError("sync rebase must remain offline")
+        return self
+
+    def to_application(self) -> ApplicationSyncRequest:
+        """Translate the validated sync request."""
+        return ApplicationSyncRequest(
+            sync_command=self.sync_command,
+            master=self.master.to_application(),
+            release_root=self.release_root.to_application(),
+            provider=self.provider.to_application(),
+            manifest=self.manifest.to_application() if self.manifest is not None else None,
+            snapshots=tuple(snapshot.to_application() for snapshot in self.snapshots),
+            initialize_manifest=self.initialize_manifest,
+            quality_root_person_ref=self.quality_root_person_ref,
+            quality_report_enabled=self.quality_report_enabled,
+            dry_run=self.dry_run,
+            accept_manual_deletions=self.accept_manual_deletions,
+            reason=self.reason,
+            gedcom_version=self.gedcom_version,
+            automatic_identity_resolution=self.automatic_identity_resolution,
+        )
+
+
+type GedcomApplicationResult = (
+    GedcomInspectResult | MergeResult | SubtreeResult | QualityResult | SyncResult
+)
+
+
+class GedcomResultResponse(BaseModel):
+    """Structured completed GEDCOM result without paths or raw records."""
+
+    model_config = _STRICT_MODEL
+
+    schema_version: Literal[1] = 1
+    operation: Literal[
+        "gedcom.inspect",
+        "gedcom.merge",
+        "gedcom.subtree",
+        "gedcom.quality",
+        "gedcom.sync",
+    ]
+    value: dict[str, JSONValue]
+
+    @classmethod
+    def from_application(cls, result: GedcomApplicationResult) -> GedcomResultResponse:
+        """Construct a renderer-safe result envelope from one known DTO."""
+        if isinstance(result, GedcomInspectResult):
+            operation = "gedcom.inspect"
+        elif isinstance(result, MergeResult):
+            operation = "gedcom.merge"
+        elif isinstance(result, SubtreeResult):
+            operation = "gedcom.subtree"
+        elif isinstance(result, QualityResult):
+            operation = "gedcom.quality"
+        else:
+            operation = "gedcom.sync"
+        value = result.to_serializable()
+        if not isinstance(value, dict):
+            raise TypeError("GEDCOM result must serialize as an object")
+        return cls(operation=operation, value=value)
+
+
 class JobProgressResponse(BaseModel):
     """Bounded progress metadata without operation payloads."""
 
@@ -950,6 +1318,7 @@ __all__ = [
     "API_NAMESPACE",
     "API_VERSION_HEADER",
     "ApiVersion",
+    "ArtifactGrantRequest",
     "CapabilityAction",
     "CapabilityManifest",
     "CapabilityModule",
@@ -972,6 +1341,14 @@ __all__ = [
     "ErrorEnvelope",
     "ErrorScalar",
     "FailureDetail",
+    "GedcomInspectOperationRequest",
+    "GedcomMergeOperationRequest",
+    "GedcomProviderSelectionRequest",
+    "GedcomQualityOperationRequest",
+    "GedcomResultResponse",
+    "GedcomSubtreeOperationRequest",
+    "GedcomSyncOperationRequest",
+    "GedcomSyncSnapshotRequest",
     "HealthResponse",
     "JobArtifactResponse",
     "JobEventResponse",
