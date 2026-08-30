@@ -484,6 +484,17 @@ def test_policy_cannot_substitute_release_evidence_inputs() -> None:
         _build(policy)
 
 
+def test_security_family_commands_must_be_backed_by_required_evidence() -> None:
+    policy = _policy()
+    policy["families"]["security"]["commands"][2] = "pnpm --dir desktop run test:security"
+
+    with pytest.raises(
+        quality.ReleaseQualityError,
+        match=r"RQ001.*security commands.*evidence",
+    ):
+        _build(policy)
+
+
 @pytest.mark.parametrize(
     ("mutate", "code"),
     (
@@ -648,6 +659,23 @@ def test_nested_desktop_receipts_must_bind_to_the_exact_head(surface: str) -> No
     receipt["gitHead"] = "b" * 40
 
     with pytest.raises(quality.ReleaseQualityError, match=r"RQ00[67].*exact head"):
+        _build(policy, desktop=desktop)
+
+
+@pytest.mark.parametrize("surface", ("security", "target"))
+def test_nested_desktop_receipt_files_must_be_nonempty(surface: str) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    if surface == "security":
+        receipt = next(iter(desktop["security"]["receipts"].values()))
+    else:
+        receipt = next(iter(desktop["targets"][0]["receipts"].values()))
+    receipt["receiptFile"]["bytes"] = 0
+
+    with pytest.raises(
+        quality.ReleaseQualityError,
+        match=r"RQ00[67].*receipt file.*positive",
+    ):
         _build(policy, desktop=desktop)
 
 

@@ -41,7 +41,7 @@ the commands that produce the evidence:
 | Family | Owner | Required commands |
 |---|---|---|
 | QA | `release-owner` | `make test`; `make lint`; `make typecheck`; `pnpm --dir desktop run verify:source`; `pnpm --dir desktop run test:coverage`; `pnpm --dir desktop run test:accessibility`; `pnpm --dir desktop run test:e2e`; `pnpm --dir desktop run test:e2e:packaged` |
-| Security | `security-owner` | `make security`; `make sbom`; `pnpm --dir desktop run test:security`; `pnpm --dir desktop run check:secrets`; `pnpm --dir desktop run sbom` |
+| Security | `security-owner` | `make security`; `make sbom`; `pnpm --dir desktop run audit`; `pnpm --dir desktop run check:secrets`; `pnpm --dir desktop run sbom` |
 | Performance | `desktop-owner` | `pnpm --dir desktop run test:e2e:packaged` |
 | Diagnostics | `desktop-owner` | `make test`; `pnpm --dir desktop run test:coverage` |
 

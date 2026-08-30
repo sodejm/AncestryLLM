@@ -20,7 +20,7 @@
       "commands": [
         "make security",
         "make sbom",
-        "pnpm --dir desktop run test:security",
+        "pnpm --dir desktop run audit",
         "pnpm --dir desktop run check:secrets",
         "pnpm --dir desktop run sbom"
       ]

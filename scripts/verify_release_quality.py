@@ -161,6 +161,22 @@ SECURITY_RECEIPT_COMMANDS: dict[str, dict[str, Any]] = {
     "redactionPassed": _API_CONTRACT_COMMAND,
     "sbomGeneratedPassed": _command("pnpm", "--dir", "desktop", "run", "sbom"),
 }
+SECURITY_FAMILY_RECEIPT_GATES = (
+    "auditPassed",
+    "secretsPassed",
+    "sbomGeneratedPassed",
+)
+
+
+def _command_text(command: dict[str, Any]) -> str:
+    return " ".join([command["executable"], *command["args"]])
+
+
+SECURITY_FAMILY_COMMANDS = (
+    "make security",
+    "make sbom",
+    *(_command_text(SECURITY_RECEIPT_COMMANDS[gate]) for gate in SECURITY_FAMILY_RECEIPT_GATES),
+)
 
 
 def _target_receipt_commands(runner: str, sidecar_target: str) -> dict[str, dict[str, Any]]:
@@ -389,6 +405,11 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         if not isinstance(record["owner"], str) or not record["owner"].strip():
             _reject("RQ001", f"{family} owner is missing")
         _string_list(record["commands"], "RQ001", f"{family} commands")
+    if families["security"]["commands"] != list(SECURITY_FAMILY_COMMANDS):
+        _reject(
+            "RQ001",
+            "security commands must match the required readiness and desktop receipt evidence",
+        )
 
     evidence = _object(policy["evidence"], "RQ001", "evidence policy")
     _exact_keys(
@@ -736,7 +757,12 @@ def _validate_receipt_summary(
         "workspace",
     }
     _exact_keys(summary, receipt_keys | {"receiptFile"}, code, label)
-    _validate_digest(summary["receiptFile"], code, f"{label} receipt file")
+    _validate_digest(
+        summary["receiptFile"],
+        code,
+        f"{label} receipt file",
+        nonempty=True,
+    )
     _schema_version(summary["schemaVersion"], 3, code, label)
     if summary["kind"] != "verification-receipt" or summary["status"] != "passed":
         _reject(code, f"{label} has an invalid receipt identity or result")
