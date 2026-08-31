@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+import pytest
+
 from ancestryllm.api import API_NAMESPACE
+from ancestryllm.api.contracts import GedcomResultResponse
 from ancestryllm.application.dto import ArtifactRef, ArtifactStatus
 from ancestryllm.application.operations import (
     GedcomInspectRequest,
@@ -180,7 +183,7 @@ def test_sync_update_requires_and_maps_scoped_snapshots(
     assert request.provider.provider_id == "none"
 
 
-def test_remote_provider_requires_explicit_profile_model_and_consent(
+def test_non_offline_provider_requires_explicit_profile_and_model(
     api_client: TestClient,
     api_headers: dict[str, str],
     gedcom_job_facade: Mock,
@@ -199,6 +202,35 @@ def test_remote_provider_requires_explicit_profile_model_and_consent(
 
     assert response.status_code == 400
     gedcom_job_facade.submit_quality.assert_not_called()
+
+
+def test_local_provider_selection_can_omit_consent(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    gedcom_job_facade: Mock,
+) -> None:
+    response = api_client.post(
+        f"{API_NAMESPACE}/gedcom/quality",
+        headers=api_headers,
+        json={
+            "schema_version": 1,
+            "source": _grant("gedcom.quality", "read", marker="a"),
+            "output": _grant("gedcom.quality", "write", marker="b"),
+            "root_person_ref": "person:fictional-root",
+            "provider": {
+                "provider_id": "ollama",
+                "profile_id": "fictional-local",
+                "model_id": "fixture",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    request = cast("QualityRequest", gedcom_job_facade.submit_quality.call_args.args[0])
+    assert request.provider.provider_id == "ollama"
+    assert request.provider.profile_id == "fictional-local"
+    assert request.provider.model_id == "fixture"
+    assert request.provider.consent_id is None
 
 
 def test_completed_inspect_result_stays_structured_and_path_free(
@@ -239,3 +271,34 @@ def test_completed_inspect_result_stays_structured_and_path_free(
     assert '"path"' not in response.text
     assert "/private/" not in response.text
     gedcom_job_facade.result.assert_called_once_with("j000001")
+
+
+def test_completed_result_rejects_an_oversized_boundary_payload() -> None:
+    artifact = ArtifactRef(
+        artifact_id="art_" + ("a" * 64),
+        media_type="application/x-gedcom",
+        artifact_type="gedcom",
+        size_bytes=128,
+        status=ArtifactStatus.READY,
+        sha256="b" * 64,
+    )
+    result = GedcomInspectResult(
+        summary=GedcomSourceSummary(
+            source=artifact,
+            gedcom_version="5.5.5",
+            individual_count=12_000,
+            family_count=0,
+            other_record_count=0,
+        ),
+        findings=(),
+        root_candidates=tuple(
+            RootCandidate(
+                person_ref=f"person:{index:032x}",
+                reason_code="individual-record",
+            )
+            for index in range(12_000)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Boundary DTO exceeds"):
+        GedcomResultResponse.from_application(result)

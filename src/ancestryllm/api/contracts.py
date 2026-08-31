@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Annotated, Any, Literal, TypeAlias, cast
 
@@ -860,7 +861,7 @@ class ArtifactGrantRequest(BaseModel):
 
 
 class GedcomProviderSelectionRequest(BaseModel):
-    """Explicit offline or consent-bound provider selection for GEDCOM work."""
+    """Explicit offline, local, or consent-bound provider selection."""
 
     model_config = _STRICT_MODEL
 
@@ -871,12 +872,14 @@ class GedcomProviderSelectionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_provider_authority(self) -> GedcomProviderSelectionRequest:
-        """Require a complete authority tuple for every networked provider."""
+        """Require named authority and preserve explicit remote consent."""
         authority = (self.profile_id, self.model_id, self.consent_id)
         if self.provider_id == "none" and any(value is not None for value in authority):
-            raise ValueError("offline provider selection cannot include remote authority")
-        if self.provider_id != "none" and any(value is None for value in authority):
-            raise ValueError("remote provider selection requires profile, model, and consent")
+            raise ValueError("offline provider selection cannot include provider authority")
+        if self.provider_id != "none" and (self.profile_id is None or self.model_id is None):
+            raise ValueError("provider selection requires profile and model")
+        if self.provider_id not in {"none", "ollama"} and self.consent_id is None:
+            raise ValueError("remote provider selection requires explicit consent")
         return self
 
     def to_application(self) -> ProviderSelection:
@@ -1151,7 +1154,10 @@ class GedcomResultResponse(BaseModel):
             operation = "gedcom.quality"
         else:
             operation = "gedcom.sync"
-        value = result.to_serializable()
+        envelope = json.loads(result.to_json())
+        if not isinstance(envelope, dict):
+            raise TypeError("GEDCOM result must serialize as an envelope")
+        value = envelope.get("value")
         if not isinstance(value, dict):
             raise TypeError("GEDCOM result must serialize as an object")
         return cls(operation=operation, value=value)

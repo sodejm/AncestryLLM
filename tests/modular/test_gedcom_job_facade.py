@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NoReturn, cast
 
+import pytest
+
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.dto import ArtifactStatus
 from ancestryllm.application.gedcom_jobs import GedcomJobFacade
@@ -13,6 +15,7 @@ from ancestryllm.application.jobs import (
     MemoryJobEventRepository,
 )
 from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
+from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom.service import GedcomService
@@ -131,6 +134,57 @@ def test_inspect_job_publishes_only_opaque_lifecycle_and_typed_result(
     assert source.name not in serialized
     assert "@I1@" not in serialized
     assert "Ada" not in serialized
+
+
+def test_completed_job_restored_after_restart_has_stable_unavailable_result(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fictional-family.ged"
+    _write_person(source)
+    artifacts = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=artifacts.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="text/vnd.gedcom",
+            artifact_type="gedcom",
+        )
+    )
+    repository = MemoryJobEventRepository()
+    first_jobs = JobLifecycleService(
+        JobManager(max_workers=1, max_pending=1),
+        repository,
+    )
+    first_facade = GedcomJobFacade(
+        service=GedcomService(artifacts=artifacts),
+        jobs=first_jobs,
+    )
+
+    try:
+        submitted = first_facade.submit_inspect(request)
+        first_jobs.manager.wait(submitted.job_id, timeout=5)
+        assert first_jobs.get(submitted.job_id).state is JobLifecycleState.COMPLETED
+    finally:
+        first_jobs.close()
+
+    restored_jobs = JobLifecycleService(
+        JobManager(max_workers=1, max_pending=1),
+        repository,
+    )
+    restored_facade = GedcomJobFacade(
+        service=GedcomService(artifacts=artifacts),
+        jobs=restored_jobs,
+    )
+    try:
+        with pytest.raises(AncestryError) as unavailable:
+            restored_facade.result(submitted.job_id)
+        with pytest.raises(AncestryError) as unknown:
+            restored_facade.result("j999999")
+    finally:
+        restored_jobs.close()
+
+    assert unavailable.value.code == "GEDCOM_JOB_RESULT_UNAVAILABLE"
+    assert unknown.value.code == "JOB_NOT_FOUND"
 
 
 def test_job_facade_preserves_stable_domain_failure_codes(tmp_path: Path) -> None:

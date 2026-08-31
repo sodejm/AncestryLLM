@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ancestryllm.api.app import create_app
 from ancestryllm.api.settings import ApiSettings
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI
 
+    from ancestryllm.application.gedcom_jobs import GedcomJobFacade
     from ancestryllm.core.commands import ModuleDescriptor
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -49,6 +50,7 @@ def contract_app() -> FastAPI:
             )
         ),
         secret_service=SecretManagementService(MemorySecretStore({})),
+        gedcom_job_service=lambda: cast("GedcomJobFacade", object()),
     )
 
 

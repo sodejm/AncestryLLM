@@ -1385,7 +1385,7 @@
       },
       "GedcomProviderSelectionRequest": {
         "additionalProperties": false,
-        "description": "Explicit offline or consent-bound provider selection for GEDCOM work.",
+        "description": "Explicit offline, local, or consent-bound provider selection.",
         "properties": {
           "consent_id": {
             "anyOf": [

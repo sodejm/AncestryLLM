@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ancestryllm.application.errors import map_domain_failure
+from ancestryllm.application.jobs import JobLifecycleState
 from ancestryllm.application.operations import (
     GedcomInspectRequest,
     GedcomInspectResult,
@@ -142,14 +143,17 @@ class GedcomJobFacade:
     def result(self, job_id: str) -> _GedcomResult:
         """Return one completed typed result retained outside public job state."""
 
-        snapshot = self._jobs.manager.get(job_id)
+        public_snapshot = self._jobs.get(job_id)
+        if public_snapshot.state is not JobLifecycleState.COMPLETED:
+            raise self._result_unavailable()
+        try:
+            snapshot = self._jobs.manager.get(job_id)
+        except AncestryError as error:
+            if error.code == "JOB_NOT_FOUND":
+                raise self._result_unavailable() from error
+            raise
         if snapshot.state is not JobState.COMPLETED:
-            raise AncestryError(
-                "GEDCOM_JOB_RESULT_UNAVAILABLE",
-                "The GEDCOM job does not have a completed result.",
-                "Wait for the job to finish successfully before requesting its result.",
-                exit_code=2,
-            )
+            raise self._result_unavailable()
         if not isinstance(
             snapshot.result,
             (
@@ -166,6 +170,15 @@ class GedcomJobFacade:
                 "Review the coded job outcome before retrying.",
             )
         return snapshot.result
+
+    @staticmethod
+    def _result_unavailable() -> AncestryError:
+        return AncestryError(
+            "GEDCOM_JOB_RESULT_UNAVAILABLE",
+            "The GEDCOM job does not have a completed result.",
+            "Wait for the job to finish successfully before requesting its result.",
+            exit_code=2,
+        )
 
 
 __all__ = ["GedcomJobFacade"]

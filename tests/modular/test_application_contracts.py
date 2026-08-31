@@ -298,9 +298,11 @@ def test_gedcom_operation_dtos_use_public_names_safe_defaults_and_legacy_aliases
         evidence_codes=("possible-duplicate",),
     )
 
-    assert type(merge).__name__ == "MergeRequest"
+    assert type(merge).__name__ == "GedcomMergeRequest"
     assert merge.gedcom_version == "5.5.5"
+    assert json.loads(merge.to_json())["type"] == "GedcomMergeRequest"
     assert operations_module.MergeRequest.from_json(merge.to_json()) == merge
+    assert operations_module.GedcomMergeRequest is operations_module.MergeRequest
     assert decision.default_option_id == "retain-both"
     assert tuple(option.option_id for option in decision.options) == (
         "retain-both",

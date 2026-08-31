@@ -559,7 +559,7 @@ def create_sidecar_app(
         startup_diagnostics=startup_report,
         mutations_allowed=lambda: startup_report().mutations_allowed,
         job_service=lifecycle.jobs,
-        gedcom_job_service=lifecycle.gedcom_jobs,
+        gedcom_job_service=(lifecycle.gedcom_jobs if artifact_registry is not None else None),
         job_shutdown=lifecycle.prepare_job_shutdown,
         runtime_shutdown=request_runtime_shutdown,
     )

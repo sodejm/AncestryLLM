@@ -454,7 +454,7 @@ class GedcomInspectResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
-class MergeRequest(ServiceRequest):
+class GedcomMergeRequest(ServiceRequest):
     """Merge granted GEDCOM inputs into granted loss-minimal outputs."""
 
     inputs: tuple[ArtifactGrantRef, ...]
@@ -467,7 +467,7 @@ class MergeRequest(ServiceRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class MergeResult(ServiceResult):
+class GedcomMergeResult(ServiceResult):
     """Published merge artifacts and deterministic result contracts."""
 
     gedcom: ArtifactRef
@@ -479,7 +479,7 @@ class MergeResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
-class SubtreeRequest(ServiceRequest):
+class GedcomSubtreeRequest(ServiceRequest):
     """Extract a rooted GEDCOM subtree through scoped artifact grants."""
 
     source: ArtifactGrantRef
@@ -491,7 +491,7 @@ class SubtreeRequest(ServiceRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class SubtreeResult(ServiceResult):
+class GedcomSubtreeResult(ServiceResult):
     """Published rooted subtree and deterministic accounting."""
 
     gedcom: ArtifactRef
@@ -501,7 +501,7 @@ class SubtreeResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
-class QualityRequest(ServiceRequest):
+class GedcomQualityRequest(ServiceRequest):
     """Analyze one granted GEDCOM and optionally publish a report."""
 
     source: ArtifactGrantRef
@@ -512,7 +512,7 @@ class QualityRequest(ServiceRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class QualityResult(ServiceResult):
+class GedcomQualityResult(ServiceResult):
     """Published quality report and deterministic finding counts."""
 
     report: ArtifactRef
@@ -530,7 +530,7 @@ class GedcomSyncSnapshot(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
-class SyncRequest(ServiceRequest):
+class GedcomSyncRequest(ServiceRequest):
     """Run one typed sync operation with scoped artifact grants."""
 
     sync_command: str
@@ -550,7 +550,7 @@ class SyncRequest(ServiceRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class SyncResult(ServiceResult):
+class GedcomSyncResult(ServiceResult):
     """Sync artifacts and deterministic change/conflict accounting."""
 
     committed: bool
@@ -560,15 +560,17 @@ class SyncResult(ServiceResult):
     provenance: tuple[ProvenanceRecord, ...]
 
 
-# Compatibility imports for the existing CLI dispatch and service adapters.
-GedcomMergeRequest = MergeRequest
-GedcomMergeResult = MergeResult
-GedcomQualityRequest = QualityRequest
-GedcomQualityResult = QualityResult
-GedcomSubtreeRequest = SubtreeRequest
-GedcomSubtreeResult = SubtreeResult
-GedcomSyncRequest = SyncRequest
-GedcomSyncResult = SyncResult
+# Short compatibility imports for existing CLI dispatch and service adapters.  Keep
+# the public concrete class names stable because BoundaryDTO serializes the class
+# name as its type discriminator.
+MergeRequest = GedcomMergeRequest
+MergeResult = GedcomMergeResult
+QualityRequest = GedcomQualityRequest
+QualityResult = GedcomQualityResult
+SubtreeRequest = GedcomSubtreeRequest
+SubtreeResult = GedcomSubtreeResult
+SyncRequest = GedcomSyncRequest
+SyncResult = GedcomSyncResult
 
 
 @dataclass(frozen=True, slots=True)

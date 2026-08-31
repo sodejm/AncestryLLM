@@ -6,7 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
-from fastapi import FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import StreamingResponse
@@ -560,6 +560,7 @@ def create_app(
         redirect_slashes=False,
         lifespan=lifespan,
     )
+    gedcom_router = APIRouter()
     app.add_middleware(
         InternalApiMiddleware,
         settings=settings,
@@ -804,7 +805,7 @@ def create_app(
         run = await chat_streaming().cancel(session_id, run_id)
         return ChatStreamRun.from_application(run)
 
-    @app.post(
+    @gedcom_router.post(
         f"{API_NAMESPACE}/gedcom/inspect",
         response_model=JobSnapshotResponse,
         responses=_ERROR_RESPONSES,
@@ -816,7 +817,7 @@ def create_app(
         assert_mutations_allowed()
         return _job_snapshot_response(gedcom_jobs().submit_inspect(request.to_application()))
 
-    @app.post(
+    @gedcom_router.post(
         f"{API_NAMESPACE}/gedcom/merge",
         response_model=JobSnapshotResponse,
         responses=_ERROR_RESPONSES,
@@ -828,7 +829,7 @@ def create_app(
         assert_mutations_allowed()
         return _job_snapshot_response(gedcom_jobs().submit_merge(request.to_application()))
 
-    @app.post(
+    @gedcom_router.post(
         f"{API_NAMESPACE}/gedcom/subtree",
         response_model=JobSnapshotResponse,
         responses=_ERROR_RESPONSES,
@@ -842,7 +843,7 @@ def create_app(
         assert_mutations_allowed()
         return _job_snapshot_response(gedcom_jobs().submit_subtree(request.to_application()))
 
-    @app.post(
+    @gedcom_router.post(
         f"{API_NAMESPACE}/gedcom/quality",
         response_model=JobSnapshotResponse,
         responses=_ERROR_RESPONSES,
@@ -856,7 +857,7 @@ def create_app(
         assert_mutations_allowed()
         return _job_snapshot_response(gedcom_jobs().submit_quality(request.to_application()))
 
-    @app.post(
+    @gedcom_router.post(
         f"{API_NAMESPACE}/gedcom/sync",
         response_model=JobSnapshotResponse,
         responses=_ERROR_RESPONSES,
@@ -868,7 +869,7 @@ def create_app(
         assert_mutations_allowed()
         return _job_snapshot_response(gedcom_jobs().submit_sync(request.to_application()))
 
-    @app.get(
+    @gedcom_router.get(
         f"{API_NAMESPACE}/gedcom/jobs/{{job_id}}/result",
         response_model=GedcomResultResponse,
         responses=_ERROR_RESPONSES,
@@ -878,6 +879,9 @@ def create_app(
     )
     def get_gedcom_result(job_id: str) -> GedcomResultResponse:
         return GedcomResultResponse.from_application(gedcom_jobs().result(job_id))
+
+    if gedcom_job_service is not None:
+        app.include_router(gedcom_router)
 
     @app.get(
         f"{API_NAMESPACE}/jobs",
