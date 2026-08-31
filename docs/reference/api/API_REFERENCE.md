@@ -7,6 +7,8 @@ management (#105), read-only startup diagnostics and fail-closed mutation
 gating (#107), provider profiles, endpoint tests, and consent administration
 (#108), UI-neutral job lifecycle (#104), bounded transient chat (#110), and its
 owner-scoped audited streaming lifecycle and bounded replay transport (#111).
+The `0.7.0` release tree adds source-level, capability-scoped GEDCOM operation
+and result contracts (#114).
 This remains a private, authenticated, IPv4-loopback FastAPI adapter over
 transport-neutral application contracts. It is not a public, LAN, browser, or
 multi-user API.
@@ -89,14 +91,28 @@ path templates and operations:
 - `POST /api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel`
   idempotently requests cancellation of that exact session-owned run.
 
-Together, the API has twenty-five exact path templates. There is no generic
-command or route dispatcher and no genealogy, GEDCOM, RootsMagic, storage,
-file, job-submission, direct-provider, tool-capable, or other domain-operation
-route. The fixed chat routes are the sole provider-execution surface. Credential
-and provider-configuration routes cannot read a secret value or execute a
-provider. Job routes expose lifecycle metadata only; they do not admit or
-execute work. Separately owned follow-on work must adapt the same
-transport-neutral application services.
+The `0.7.0` source-level gated #114 code adds six fixed, capability-scoped
+GEDCOM path templates:
+
+- `POST /api/v1/gedcom/inspect` submits a deterministic source inspection.
+- `POST /api/v1/gedcom/merge` submits a loss-minimal merge into new artifacts.
+- `POST /api/v1/gedcom/subtree` submits a rooted subtree extraction.
+- `POST /api/v1/gedcom/quality` submits rooted quality analysis.
+- `POST /api/v1/gedcom/sync` submits a typed incremental synchronization.
+- `GET /api/v1/gedcom/jobs/{job_id}/result` returns one completed, bounded,
+  path-free structured result while it remains in process memory.
+
+The default packaged sidecar has twenty-five exact path templates. The
+committed contract composition explicitly supplies the scoped GEDCOM artifact
+registry and has thirty-one. A composition without that registry omits all six
+GEDCOM routes instead of advertising operations that cannot resolve grants.
+There is no generic command or route dispatcher and no genealogy, RootsMagic,
+storage, host-file, direct-provider, tool-capable, or other domain-operation
+route. The fixed chat and explicitly composed GEDCOM routes are the only
+provider-execution surfaces. Credential and provider-configuration routes
+cannot read a secret value or execute a provider. General job routes expose
+lifecycle metadata only; they do not admit work. Separately owned follow-on
+work must adapt the same transport-neutral application services.
 
 ## Security boundary
 
@@ -172,6 +188,17 @@ reconciliation each converge on exactly one payload-free terminal audit
 outcome. A stream never retries provider execution after output begins, and
 receipts and audit records exclude prompt and response content.
 
+GEDCOM operations accept opaque, operation-scoped artifact grants rather than
+host paths. Offline selection rejects provider authority; local Ollama requires
+an explicit profile and model but no remote-data consent, while cloud providers
+also require an explicit consent identifier. Execution selects the named
+profile and re-enters the central provider preflight before any cloud call.
+Inputs remain immutable, outputs are new artifacts, supported GEDCOM versions
+are checked at the boundary, and structured responses omit record content and
+paths. Completed results are retained only by the process that executed the
+job; after restart, a durably known completed job returns the stable
+`GEDCOM_JOB_RESULT_UNAVAILABLE` code rather than being misreported as unknown.
+
 Job snapshots and events use strict schema version 1 and expose only bounded,
 sanitized status, progress, artifact-reference, and error fields. Sequence
 numbers increase monotonically per job. Each job retains at most 256 events;
@@ -222,17 +249,20 @@ does not expose `/openapi.json`, `/docs`, or `/redoc`.
 
 ## Release boundary
 
-The health and capability contract remains in the bounded `0.6.0` control
-shell. The settings, credential-management, startup-diagnostic,
-provider-profile, endpoint-test, consent-administration, job-lifecycle, and
-transient-chat operations are source-level gated work in `0.6.0`; they are not
-part of the supported packaged surface without the applicable desktop
-packaging, security, and exact-head verification evidence. The job contract has no producer or
-submission route. Issue #111 gives the chat contract fixed streaming routes and
-a source-level Electron Main/preload bridge. Issue #112 consumes that bridge in
-a bounded renderer conversation with explicit provider/privacy state and safe
-Markdown presentation, while adding no tool surface or genealogy integration.
-Issue #131 owns target-matched packaged evidence.
+The health and capability contract remains in the bounded control shell. The
+settings, credential-management, startup-diagnostic, provider-profile,
+endpoint-test, consent-administration, job-lifecycle, and transient-chat
+operations are source-level gated work in `0.6.0`. Issue #114 adds the
+capability-scoped GEDCOM submission and result composition in `0.7.0`. These
+gated surfaces are not part of the supported packaged surface without the
+applicable desktop packaging, security, and exact-head verification evidence.
+The general job contract has no producer or submission route; only the
+explicitly composed GEDCOM adapter submits GEDCOM work. Issue #111 gives the
+chat contract fixed streaming routes and a source-level Electron Main/preload
+bridge. Issue #112 consumes that bridge in a bounded renderer conversation
+with explicit provider/privacy state and safe Markdown presentation, while
+adding no tool surface or genealogy integration. Issue #131 owns
+target-matched packaged evidence.
 Presence in the committed OpenAPI artifact does not enable a public API,
 generic provider call, or genealogy workflow. Consent administration never
 replaces the execution-time policy check.

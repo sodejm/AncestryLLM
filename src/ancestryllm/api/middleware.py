@@ -35,6 +35,10 @@ _JOB_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/jobs/[A-Za-z0-9][A-Za-z0-9._~-]{{0,31}}"
     r"(?P<operation>/cancel|/events)?$"
 )
+_GEDCOM_RESULT_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/gedcom/jobs/"
+    r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}/result$"
+)
 _CHAT_SESSION_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}(?P<operation>/runs)?$"
 )
@@ -100,6 +104,16 @@ def _route_policy(
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/chat/sessions":
         return _RoutePolicy("POST", accepts_json=True)
+    if path in {
+        f"{API_NAMESPACE}/gedcom/inspect",
+        f"{API_NAMESPACE}/gedcom/merge",
+        f"{API_NAMESPACE}/gedcom/subtree",
+        f"{API_NAMESPACE}/gedcom/quality",
+        f"{API_NAMESPACE}/gedcom/sync",
+    }:
+        return _RoutePolicy("POST", accepts_json=True)
+    if _GEDCOM_RESULT_ROUTE.fullmatch(path) is not None:
+        return _RoutePolicy("GET")
     chat_stream_match = _CHAT_STREAM_ROUTE.fullmatch(path)
     if chat_stream_match is not None:
         operation = chat_stream_match.group("operation")

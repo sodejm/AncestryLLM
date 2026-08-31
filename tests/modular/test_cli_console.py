@@ -17,6 +17,15 @@ from unittest.mock import Mock
 import pytest
 
 from ancestryllm.application.deployment import DeploymentService
+from ancestryllm.application.dto import ArtifactAccess
+from ancestryllm.application.operations import (
+    ChangeSummary,
+    MergeResult,
+    QualityResult,
+    QualitySummary,
+    SubtreeResult,
+    SyncResult,
+)
 from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.console.router import RouteKind, SessionRouter
@@ -24,7 +33,6 @@ from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS
 from ancestryllm.core.deployment import DeploymentProfile
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import ModuleRegistry
-from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
 
 if TYPE_CHECKING:
@@ -72,6 +80,13 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
         "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
         encoding="utf-8",
     )
+    gedcom_snapshot = tmp_path / "fictional-snapshot.ged"
+    gedcom_snapshot.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "fictional-private-manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
     ocr = tmp_path / "fictional-ocr.txt"
     ocr.write_text("Ada Example was born in Fiction County.", encoding="utf-8")
     schema = tmp_path / "fictional-schema.json"
@@ -80,12 +95,15 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
     rootsmagic.write_bytes(b"fictional RootsMagic database")
     return {
         "gedcom": gedcom,
+        "gedcom_snapshot": gedcom_snapshot,
+        "manifest": manifest,
         "ocr": ocr,
         "rootsmagic": rootsmagic,
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
         "backup": tmp_path / "fictional-backup.db",
+        "release_root": tmp_path / "fictional-release",
     }
 
 
@@ -94,6 +112,7 @@ def command_cases(
     fictional_files: dict[str, Path], app_context: AppContext
 ) -> tuple[CommandCase, ...]:
     gedcom = str(fictional_files["gedcom"])
+    gedcom_snapshot = str(fictional_files["gedcom_snapshot"])
     output = str(fictional_files["output"])
     report = str(fictional_files["report"])
     ocr = str(fictional_files["ocr"])
@@ -252,7 +271,7 @@ def command_cases(
         CommandCase(
             "gedcom",
             "merge",
-            (gedcom, "--output", output, "--quality-report", report),
+            (gedcom, gedcom_snapshot, "--output", output, "--quality-report", report),
             OpaqueArtifactExpectation(
                 (
                     ("gedcom_merge", "text/vnd.familysearch.gedcom"),
@@ -282,8 +301,37 @@ def command_cases(
         CommandCase(
             "gedcom",
             "sync",
-            ("update", "--manifest", "fictional-private-manifest.json", "--dry-run"),
-            GedcomSyncResult(exit_code=0, output=""),
+            (
+                "update",
+                "--master",
+                gedcom,
+                "--manifest",
+                str(fictional_files["manifest"]),
+                "--snapshot",
+                f"fictional:other={gedcom_snapshot}",
+                "--release-root",
+                str(fictional_files["release_root"]),
+                "--no-quality-report",
+                "--dry-run",
+            ),
+            {
+                "committed": False,
+                "artifacts": (),
+                "changes": {
+                    "created": 0,
+                    "updated": 0,
+                    "unchanged": 0,
+                    "conflicts": 0,
+                    "warnings": 0,
+                },
+                "quality": {
+                    "information": 0,
+                    "warnings": 0,
+                    "errors": 0,
+                    "resolved": 0,
+                },
+                "provenance": (),
+            },
         ),
         CommandCase(
             "ocr",
@@ -449,42 +497,95 @@ def mocked_action_services(
 
     monkeypatch.setattr(RootsMagicService, "export", export_rootsmagic)
 
-    def merge_gedcom(
-        _self: GedcomService,
-        _inputs: list[Path],
-        output: Path,
-        **kwargs: Any,
-    ) -> SimpleNamespace:
-        quality_report = kwargs["quality_path"]
-        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        if quality_report is not None:
-            quality_report.write_text("# Fictional quality report\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output, quality_path=quality_report)
+    zero_changes = ChangeSummary(0, 0, 0, 0, 0)
+    zero_quality = QualitySummary(0, 0, 0, 0)
 
-    def subtree_gedcom(
-        _self: GedcomService,
-        _source: Path,
-        output: Path,
+    def execute_merge(
+        service: GedcomService,
+        request: Any,
         **_kwargs: Any,
-    ) -> SimpleNamespace:
+    ) -> MergeResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.merge",
+            access=ArtifactAccess.WRITE,
+        )
         output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output)
+        quality_report = None
+        if request.quality_report is not None:
+            quality_path = registry.resolve(
+                request.quality_report,
+                operation="gedcom.merge",
+                access=ArtifactAccess.WRITE,
+            )
+            quality_path.write_text("# Fictional quality report\n", encoding="utf-8")
+            quality_report = registry.describe_output(
+                request.quality_report,
+                operation="gedcom.merge",
+            )
+        return MergeResult(
+            gedcom=registry.describe_output(request.output, operation="gedcom.merge"),
+            quality_report=quality_report,
+            root_person_ref=request.root_person_ref,
+            changes=zero_changes,
+            quality=zero_quality,
+            provenance=(),
+        )
 
-    def quality_gedcom(
-        _self: GedcomService,
-        _source: Path,
-        output: Path,
+    def execute_subtree(
+        service: GedcomService,
+        request: Any,
         **_kwargs: Any,
-    ) -> Path:
+    ) -> SubtreeResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.subtree",
+            access=ArtifactAccess.WRITE,
+        )
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        return SubtreeResult(
+            gedcom=registry.describe_output(request.output, operation="gedcom.subtree"),
+            root_person_ref=request.root_person_ref,
+            changes=zero_changes,
+            provenance=(),
+        )
+
+    def execute_quality(
+        service: GedcomService,
+        request: Any,
+        **_kwargs: Any,
+    ) -> QualityResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.quality",
+            access=ArtifactAccess.WRITE,
+        )
         output.write_text("# Fictional quality report\n", encoding="utf-8")
-        return output
+        return QualityResult(
+            report=registry.describe_output(request.output, operation="gedcom.quality"),
+            quality=zero_quality,
+        )
 
-    monkeypatch.setattr(GedcomService, "merge", merge_gedcom)
-    monkeypatch.setattr(GedcomService, "subtree", subtree_gedcom)
-    monkeypatch.setattr(GedcomService, "quality", quality_gedcom)
-    monkeypatch.setattr(
-        GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
-    )
+    def execute_sync(
+        _service: GedcomService,
+        _request: Any,
+        **_kwargs: Any,
+    ) -> SyncResult:
+        return SyncResult(
+            committed=False,
+            artifacts=(),
+            changes=zero_changes,
+            quality=zero_quality,
+            provenance=(),
+        )
+
+    monkeypatch.setattr(GedcomService, "execute_merge", execute_merge)
+    monkeypatch.setattr(GedcomService, "execute_subtree", execute_subtree)
+    monkeypatch.setattr(GedcomService, "execute_quality", execute_quality)
+    monkeypatch.setattr(GedcomService, "execute_sync", execute_sync)
     monkeypatch.setattr(
         OcrService,
         "extract",

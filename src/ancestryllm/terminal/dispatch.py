@@ -6,8 +6,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ancestryllm.application._secrets import SecretGrantRegistry
+from ancestryllm.application.errors import map_domain_failure
 from ancestryllm.application.results import CommandResult
+from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.core.errors import AncestryError
+from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.execution.runtime import create_command_executor
 from ancestryllm.terminal.parser import invocation_from_namespace
 from ancestryllm.terminal.presentation import PresentationAdapter
@@ -55,11 +58,16 @@ def dispatch(
             namespace,
             secret_grant=secret_grant,
         )
-        outcome: CommandOutcome = create_command_executor(
-            context,
-            grants,
-            progress=progress,
-        ).execute(invocation)
+        try:
+            outcome: CommandOutcome = create_command_executor(
+                context,
+                grants,
+                progress=progress,
+            ).execute(invocation)
+        except DomainFailure as failure:
+            if failure.code is DomainFailureCode.CANCELLED:
+                raise CancellationError("The operation was cancelled.") from failure
+            raise map_domain_failure(failure) from failure
         emit(outcome.result, invocation.json_output)
         return outcome.exit_code
     finally:

@@ -6,7 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
-from fastapi import FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import StreamingResponse
@@ -36,6 +36,12 @@ from ancestryllm.api.contracts import (
     EndpointValidationRequest,
     EndpointValidationResponse,
     ErrorEnvelope,
+    GedcomInspectOperationRequest,
+    GedcomMergeOperationRequest,
+    GedcomQualityOperationRequest,
+    GedcomResultResponse,
+    GedcomSubtreeOperationRequest,
+    GedcomSyncOperationRequest,
     HealthResponse,
     JobArtifactResponse,
     JobEventResponse,
@@ -79,6 +85,7 @@ if TYPE_CHECKING:
 
     from ancestryllm.api.settings import ApiSettings
     from ancestryllm.application.executor import CommandExecutor
+    from ancestryllm.application.gedcom_jobs import GedcomJobFacade
     from ancestryllm.application.jobs import (
         JobEvent,
         JobLifecycleService,
@@ -518,6 +525,7 @@ def create_app(
     chat_service: ChatService | None = None,
     chat_streaming_service: ChatStreamingService | None = None,
     job_service: Callable[[], JobLifecycleService] | None = None,
+    gedcom_job_service: Callable[[], GedcomJobFacade] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     runtime_shutdown: Callable[[], None] | None = None,
     lifecycle: ApiLifecycle | None = None,
@@ -552,6 +560,7 @@ def create_app(
         redirect_slashes=False,
         lifespan=lifespan,
     )
+    gedcom_router = APIRouter()
     app.add_middleware(
         InternalApiMiddleware,
         settings=settings,
@@ -613,6 +622,15 @@ def create_app(
                 "Resolve startup diagnostics and restart the desktop application.",
             )
         return job_service()
+
+    def gedcom_jobs() -> GedcomJobFacade:
+        if gedcom_job_service is None:
+            raise StorageError(
+                "GEDCOM_JOB_SERVICE_UNAVAILABLE",
+                "GEDCOM operation coordination is unavailable.",
+                "Resolve startup diagnostics and restart the desktop application.",
+            )
+        return gedcom_job_service()
 
     def prepare_jobs_for_shutdown(action: str, timeout_seconds: float) -> ShutdownAssessment:
         if job_shutdown is not None:
@@ -786,6 +804,84 @@ def create_app(
         assert_mutations_allowed()
         run = await chat_streaming().cancel(session_id, run_id)
         return ChatStreamRun.from_application(run)
+
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/inspect",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="inspectInternalGedcom",
+        tags=["gedcom"],
+    )
+    def inspect_gedcom(request: GedcomInspectOperationRequest) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(gedcom_jobs().submit_inspect(request.to_application()))
+
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/merge",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="mergeInternalGedcom",
+        tags=["gedcom"],
+    )
+    def merge_gedcom(request: GedcomMergeOperationRequest) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(gedcom_jobs().submit_merge(request.to_application()))
+
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/subtree",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="extractInternalGedcomSubtree",
+        tags=["gedcom"],
+    )
+    def extract_gedcom_subtree(
+        request: GedcomSubtreeOperationRequest,
+    ) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(gedcom_jobs().submit_subtree(request.to_application()))
+
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/quality",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="analyzeInternalGedcomQuality",
+        tags=["gedcom"],
+    )
+    def analyze_gedcom_quality(
+        request: GedcomQualityOperationRequest,
+    ) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(gedcom_jobs().submit_quality(request.to_application()))
+
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/sync",
+        response_model=JobSnapshotResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="syncInternalGedcom",
+        tags=["gedcom"],
+    )
+    def sync_gedcom(request: GedcomSyncOperationRequest) -> JobSnapshotResponse:
+        assert_mutations_allowed()
+        return _job_snapshot_response(gedcom_jobs().submit_sync(request.to_application()))
+
+    @gedcom_router.get(
+        f"{API_NAMESPACE}/gedcom/jobs/{{job_id}}/result",
+        response_model=GedcomResultResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="getInternalGedcomResult",
+        tags=["gedcom"],
+    )
+    def get_gedcom_result(job_id: str) -> GedcomResultResponse:
+        return GedcomResultResponse.from_application(gedcom_jobs().result(job_id))
+
+    if gedcom_job_service is not None:
+        app.include_router(gedcom_router)
 
     @app.get(
         f"{API_NAMESPACE}/jobs",

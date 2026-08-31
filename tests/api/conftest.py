@@ -29,7 +29,13 @@ from ancestryllm.application.chat import (
     ChatStreamRun,
 )
 from ancestryllm.application.executor import CommandExecutor, CommandInvocation, CommandOutcome
-from ancestryllm.application.jobs import JobLifecycleService, MemoryJobEventRepository
+from ancestryllm.application.gedcom_jobs import GedcomJobFacade
+from ancestryllm.application.jobs import (
+    JobLifecycleService,
+    JobLifecycleState,
+    MemoryJobEventRepository,
+    PublicJobSnapshot,
+)
 from ancestryllm.application.results import StructuredResult
 from ancestryllm.application.secret_management import SecretManagementService
 from ancestryllm.application.settings import SettingsService
@@ -95,6 +101,40 @@ def job_service() -> Iterator[JobLifecycleService]:
         yield service
     finally:
         service.close()
+
+
+def _queued_job(name: str) -> PublicJobSnapshot:
+    return PublicJobSnapshot(
+        schema_version=1,
+        sequence=1,
+        job_id="j000001",
+        name=name,
+        state=JobLifecycleState.QUEUED,
+        submitted_at="2026-08-27T12:00:00+00:00",
+        started_at=None,
+        finished_at=None,
+        resource_refs=("resource_" + ("a" * 64),),
+        artifact=None,
+        outcome_summary=None,
+        next_action=None,
+        error_code=None,
+        error_message=None,
+        error_remediation=None,
+        progress=None,
+        cancellation_requested_at=None,
+        cancellation_deferred_by=None,
+    )
+
+
+@pytest.fixture
+def gedcom_job_facade() -> Mock:
+    service = Mock(spec=GedcomJobFacade)
+    service.submit_inspect.return_value = _queued_job("gedcom.inspect")
+    service.submit_merge.return_value = _queued_job("gedcom.merge")
+    service.submit_subtree.return_value = _queued_job("gedcom.subtree")
+    service.submit_quality.return_value = _queued_job("gedcom.quality")
+    service.submit_sync.return_value = _queued_job("gedcom.sync")
+    return service
 
 
 @pytest.fixture
@@ -203,6 +243,7 @@ def api_client(
     registered_keys: tuple[DispatchKey, ...],
     secret_store: MemorySecretStore,
     job_service: JobLifecycleService,
+    gedcom_job_facade: Mock,
     chat_service: Mock,
     chat_streaming_service: Mock,
     tmp_path_factory: pytest.TempPathFactory,
@@ -240,6 +281,7 @@ def api_client(
         ),
         endpoint_validation_service=endpoint_validator,
         job_service=lambda: job_service,
+        gedcom_job_service=lambda: gedcom_job_facade,
         chat_service=chat_service,
         chat_streaming_service=chat_streaming_service,
     )

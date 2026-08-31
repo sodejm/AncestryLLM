@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Never
 
@@ -32,6 +33,15 @@ from ancestryllm.gedcom.sync_operations import (
     _execute_typed_command,
     _with_error_contract,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedSyncInvocation:
+    """Terminal-only options paired with a transport-neutral sync command."""
+
+    command: SyncCommand
+    model: str | None = None
+    consent_id: str | None = None
 
 
 class PlainEnglishArgumentParser(argparse.ArgumentParser):
@@ -132,6 +142,28 @@ def _rebase_command_from_namespace(args: argparse.Namespace) -> SyncRebaseComman
     )
 
 
+def parse_arguments(argv: Sequence[str]) -> ParsedSyncInvocation:
+    """Translate terminal arguments without executing a path-bearing command."""
+
+    command_name = argv[0] if argv else ""
+    if command_name == "update":
+        args = _build_update_parser().parse_args(list(argv[1:]))
+        return ParsedSyncInvocation(
+            command=_update_command_from_namespace(args),
+            model=str(args.model) or None,
+            consent_id=args.consent,
+        )
+    if command_name == "rebase":
+        args = _build_rebase_parser().parse_args(list(argv[1:]))
+        return ParsedSyncInvocation(command=_rebase_command_from_namespace(args))
+    raise SyncError(
+        "SYNC_CONFIGURATION",
+        f"Unknown incremental command: {command_name or '(missing)'}",
+        "Only update and rebase have defined provenance behavior.",
+        ["Use gedcom_merge.py update --help or rebase --help."],
+    )
+
+
 def execute(
     argv: Sequence[str],
     core: ModuleType,
@@ -143,47 +175,29 @@ def execute(
 ) -> SyncExecutionResult:
     """Parse and dispatch ``update`` or ``rebase`` without terminal I/O."""
 
-    command_name = argv[0] if argv else ""
     policy = ingress or FileIngressPolicy()
 
     def parse_and_execute() -> SyncExecutionResult:
-        if command_name == "update":
-            args = _build_update_parser().parse_args(list(argv[1:]))
-            command: SyncCommand = _update_command_from_namespace(args)
-            identity_resolver: IdentityResolver | None = None
-            if args.provider != "none" and args.auto:
-                if resolver_factory is None:
-                    raise AncestryError(
-                        "LLM_SERVICE_UNAVAILABLE",
-                        "Incremental LLM assistance requires the modular application service.",
-                    )
-                identity_resolver = resolver_factory(
-                    args.provider,
-                    args.model,
-                    args.consent,
+        parsed = parse_arguments(argv)
+        command = parsed.command
+        identity_resolver: IdentityResolver | None = None
+        if isinstance(command, SyncUpdateCommand) and command.provider != "none" and command.auto:
+            if resolver_factory is None:
+                raise AncestryError(
+                    "LLM_SERVICE_UNAVAILABLE",
+                    "Incremental LLM assistance requires the modular application service.",
                 )
-            return _execute_typed_command(
-                command,
-                core,
-                policy,
-                identity_resolver=identity_resolver,
-                cancellation_check=cancellation_check,
+            identity_resolver = resolver_factory(
+                command.provider,
+                parsed.model or "",
+                parsed.consent_id,
             )
-        if command_name == "rebase":
-            args = _build_rebase_parser().parse_args(list(argv[1:]))
-            command = _rebase_command_from_namespace(args)
-            return _execute_typed_command(
-                command,
-                core,
-                policy,
-                identity_resolver=None,
-                cancellation_check=cancellation_check,
-            )
-        raise SyncError(
-            "SYNC_CONFIGURATION",
-            f"Unknown incremental command: {command_name or '(missing)'}",
-            "Only update and rebase have defined provenance behavior.",
-            ["Use gedcom_merge.py update --help or rebase --help."],
+        return _execute_typed_command(
+            command,
+            core,
+            policy,
+            identity_resolver=identity_resolver,
+            cancellation_check=cancellation_check,
         )
 
     return _with_error_contract(parse_and_execute, raise_errors=raise_errors)

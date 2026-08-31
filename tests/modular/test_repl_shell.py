@@ -814,14 +814,26 @@ def test_repl_preserves_bounded_file_error_code_without_path_or_payload(
     assert app_context.prompts.list() == []
 
 
-@pytest.mark.parametrize("operation", ("merge", "subtree", "quality", "rootsmagic"))
+@pytest.mark.parametrize(
+    ("operation", "expected_code"),
+    (
+        ("merge", "FILE_INPUT_UNREADABLE"),
+        ("subtree", "FILE_INPUT_UNREADABLE"),
+        ("quality", "FILE_INPUT_UNREADABLE"),
+        ("rootsmagic", "FILE_INPUT_UNREADABLE"),
+    ),
+)
 def test_repl_path_normalization_matches_the_one_shot_sanitized_error(
     shell_module,
     app_context: AppContext,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
+    expected_code: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     suffix = "rmtree" if operation == "rootsmagic" else "ged"
     private_input = Path(f"~PRIVATE-NONEXISTENT/tree.{suffix}")
     private_detail = "PRIVATE path normalization failure"
@@ -849,10 +861,14 @@ def test_repl_path_normalization_matches_the_one_shot_sanitized_error(
         if operation != "merge":
             command += " --root-person 'Fictional Example'"
 
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == expected_code
     assert str(private_input) not in rendered
     assert private_detail not in rendered
     assert output.read_bytes() == b"sentinel\n"
@@ -941,6 +957,9 @@ def test_repl_gedcom_ingress_failure_preserves_subtree_and_quality_outputs(
     tmp_path: Path,
     action: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     source = tmp_path / f"private-{action}.ged"
     private_payload = "PRIVATE-PAYLOAD fictional genealogy"
     source.write_text(
@@ -951,15 +970,18 @@ def test_repl_gedcom_ingress_failure_preserves_subtree_and_quality_outputs(
     output.write_bytes(b"sentinel\n")
     _set_file_limit(app_context, FileKind.GEDCOM, max_bytes=8)
 
-    failed, rendered = _background_failure(
-        shell_module,
-        app_context,
+    command = (
         f"gedcom {action} {shlex.quote(str(source))} "
-        f"--output {shlex.quote(str(output))} --root-person @I1@",
+        f"--output {shlex.quote(str(output))} --root-person @I1@"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_TOO_LARGE"
     assert str(source) not in rendered
     assert private_payload not in rendered
     assert output.read_bytes() == b"sentinel\n"
@@ -1005,6 +1027,9 @@ def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
     tmp_path: Path,
     operation: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     master = tmp_path / f"private-{operation}-master.ged"
     private_payload = "PRIVATE-PAYLOAD fictional sync input"
     master.write_text(
@@ -1039,10 +1064,14 @@ def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
             "--reason fictional-regression"
         )
 
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_TOO_LARGE"
     assert str(master) not in rendered
     assert private_payload not in rendered
     assert not release_root.exists()
@@ -1536,6 +1565,9 @@ def test_repl_sync_path_normalization_reaches_typed_ingress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     private_master = Path("~PRIVATE-NONEXISTENT/master.ged")
     private_detail = "PRIVATE sync normalization failure"
     original_expanduser = Path.expanduser
@@ -1559,11 +1591,14 @@ def test_repl_sync_path_normalization_reaches_typed_ingress(
         f"--release-root={shlex.quote(str(release_root))} "
         "--no-quality-report"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
 
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_UNREADABLE"
     assert str(private_master) not in rendered
     assert private_detail not in rendered
     assert not release_root.exists()
@@ -1576,6 +1611,9 @@ def test_repl_sync_release_root_normalization_reaches_typed_ingress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     private_release_root = Path("~PRIVATE-NONEXISTENT/releases")
     private_detail = "PRIVATE release-root normalization failure"
     original_expanduser = Path.expanduser
@@ -1598,11 +1636,14 @@ def test_repl_sync_release_root_normalization_reaches_typed_ingress(
         f"--release-root {shlex.quote(str(private_release_root))} "
         "--no-quality-report"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
 
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_UNREADABLE"
     assert str(private_release_root) not in rendered
     assert private_detail not in rendered
 
