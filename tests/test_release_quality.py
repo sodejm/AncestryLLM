@@ -714,6 +714,36 @@ def test_incomplete_performance_evidence_is_rejected() -> None:
         _build(policy, desktop=desktop)
 
 
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    (
+        ("passed", 1),
+        ("observed", False),
+        ("ceiling", False),
+    ),
+)
+def test_performance_checks_require_exact_json_types(field: str, forged_value: Any) -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    metric = "rendererOutboundRequests"
+    desktop["targets"][0]["performance"]["checks"][metric][field] = forged_value
+
+    with pytest.raises(quality.ReleaseQualityError, match=rf"RQ006.*{metric}.*did not pass"):
+        _build(policy, desktop=desktop)
+
+
+def test_performance_ceiling_evidence_requires_exact_json_types() -> None:
+    policy = _policy()
+    desktop = _desktop(policy)
+    desktop["targets"][0]["performance"]["ceilings"] = copy.deepcopy(
+        desktop["targets"][0]["performance"]["ceilings"]
+    )
+    desktop["targets"][0]["performance"]["ceilings"]["rendererOutboundRequests"] = False
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*ceilings.*policy"):
+        _build(policy, desktop=desktop)
+
+
 def test_non_finite_performance_observation_is_rejected() -> None:
     policy = _policy()
     desktop = _desktop(policy)

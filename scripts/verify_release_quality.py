@@ -1156,7 +1156,7 @@ def _validate_performance(
         ):
             _reject("RQ006", f"{runner} performance identity or result is invalid")
         ceilings = contract["performanceCeilings"]
-        if evidence["ceilings"] != ceilings:
+        if not _matches_typed_value(evidence["ceilings"], ceilings):
             _reject("RQ006", f"{runner} performance ceilings do not match policy")
         observed = evidence["observed"]
         checks = evidence["checks"]
@@ -1174,12 +1174,14 @@ def _validate_performance(
             ):
                 _reject("RQ006", f"{runner} performance metric {metric} is invalid")
             if (
-                checks[metric]
-                != {
-                    "observed": value,
-                    "ceiling": ceilings[metric],
-                    "passed": True,
-                }
+                not _matches_typed_value(
+                    checks[metric],
+                    {
+                        "observed": value,
+                        "ceiling": ceilings[metric],
+                        "passed": True,
+                    },
+                )
                 or value > ceilings[metric]
             ):
                 _reject("RQ006", f"{runner} performance metric {metric} did not pass")
