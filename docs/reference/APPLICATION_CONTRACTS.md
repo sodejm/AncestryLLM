@@ -12,7 +12,8 @@ The public boundary is intentionally small:
 | Module | Ownership |
 |---|---|
 | `ancestryllm.application.dto` | Strict, immutable, deterministic JSON DTOs, opaque artifact and secret capabilities, and decision/progress records. |
-| `ancestryllm.application.operations` | One exact request/result pair for every `DispatchKey`. |
+| `ancestryllm.application.operations` | Exact command request/result pairs plus reusable transport-neutral GEDCOM inspection and decision DTOs. |
+| `ancestryllm.application.gedcom_jobs` | The bounded asynchronous façade shared by GEDCOM transports. |
 | `ancestryllm.application.ports` | Cancellation, progress, decision, identity-resolution, and quality-resolution protocols. |
 | `ancestryllm.application.errors` | Complete mapping from pure domain failures to stable coded application errors and transport envelopes. |
 | `ancestryllm.domain.errors` | Framework-independent failure categories and bounded safe detail values. |
@@ -56,6 +57,9 @@ This inventory is the only application-operation registry. Terminal, HTTP, and
 desktop adapters may translate their inputs into these requests but must not
 create a second UI-specific registry or redefine result semantics.
 
+`GedcomInspectRequest` and `GedcomInspectResult` are reusable façade contracts,
+not command routes. Their presence does not create a second operation registry.
+
 `RootsMagicQueryRequest` admits exactly one non-empty direct SQL statement or
 natural-language question. Direct SQL is deterministic and provider-free even
 when credentials are present. Questions require an explicit non-`none`
@@ -76,6 +80,37 @@ contract. A future renderer must expose only allowlisted query definitions and
 must translate schema-validated parameters to that trusted service request at
 the adapter/application composition boundary; it must not expose raw SQL or
 interpret file grants in the reusable RootsMagic core.
+
+## GEDCOM operation façade
+
+The public GEDCOM boundary exposes `GedcomInspectRequest` and
+`GedcomInspectResult`, `MergeRequest` and `MergeResult`, `SubtreeRequest` and
+`SubtreeResult`, `QualityRequest` and `QualityResult`, `SyncRequest` and
+`SyncResult`, and `MergeDecisionRequest`. Requests carry only purpose-bound
+`ArtifactGrantRef` values. Results, progress, and coded failures are bounded,
+serializable, and path-free; they never contain whole genealogy trees or
+arbitrary callbacks.
+
+GEDCOM 5.5.5 is the default output format. Callers may deliberately request
+5.5.1 compatibility, and publication never overwrites an input artifact. The
+merge decision contract declares `retain-both` as its conservative default, so
+a missing or cancelled decision preserves conflicting evidence. Optional AI
+adjudication requires an explicit `ProviderSelection`, the modular
+`LLMService`, and the existing policy and consent checks. `provider=none`
+remains deterministic and network-free even when ambient credentials exist.
+
+`GedcomJobFacade` submits all five operations through the shared bounded job
+lifecycle. Purpose-grant IDs become resource-lock keys; progress and
+cooperative cancellation pass through the application ports; domain failures
+retain their stable public codes; and cancellation becomes the lifecycle's
+cancelled state. A typed operation result is available only after completion.
+
+The authenticated FastAPI adapter exposes only the fixed
+`POST /api/v1/gedcom/inspect`, `/merge`, `/subtree`, `/quality`, and `/sync`
+routes plus `GET /api/v1/gedcom/jobs/{job_id}/result`. It translates strict
+transport payloads into the same application requests used by the CLI and REPL.
+It does not expose private GEDCOM engines, a generic command registry, renderer
+paths, or record trees.
 
 ## Ports and adapter responsibilities
 
@@ -185,6 +220,20 @@ locations, SQL, provider payloads, credentials, or genealogy content.
 - atomic publication, cancellation preservation, and absence of partial
   external output;
 - write-only secret capability use.
+
+The GEDCOM façade evidence adds:
+
+- `tests/modular/test_gedcom_service_contracts.py` for purpose-grant execution,
+  version selection, non-overwrite rules, conservative merge decisions,
+  explicit provider policy, offline socket denial, cancellation, and atomic
+  publication;
+- `tests/modular/test_gedcom_job_facade.py` for bounded lifecycle submission,
+  resource exclusion, progress, stable coded failures, cancellation state, and
+  completed-only typed results;
+- `tests/api/test_gedcom_operations.py` for authenticated fixed-route DTO
+  translation and path-free job/result envelopes; and
+- the CLI/REPL boundary suites for parity with the same typed service requests
+  and stable coded errors.
 
 The core-contract characterization suite remains the compatibility authority
 for shipped CLI/REPL behavior, JSON, errors, consent, network-free `none`,

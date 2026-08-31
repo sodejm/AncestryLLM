@@ -26,6 +26,7 @@ from ancestryllm.api.sidecar import (
     parse_launch_frame,
     readiness_line,
 )
+from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import ConfigurationError
 from ancestryllm.core.secrets import MemorySecretStore, SecretSourceMode
@@ -197,6 +198,87 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
     }
 
 
+def test_packaged_sidecar_executes_an_injected_opaque_gedcom_grant(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fictional-family.ged"
+    source.write_text(
+        "\n".join(
+            (
+                "0 HEAD",
+                "1 SOUR AncestryLLM-Fictional-Sidecar-Contract",
+                "1 GEDC",
+                "2 VERS 5.5.5",
+                "1 CHAR UTF-8",
+                "0 @I1@ INDI",
+                "1 NAME Ada /Example/",
+                "0 TRLR",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    artifacts = _ArtifactRegistry()
+    grant = artifacts.grant_input(
+        source,
+        operation="gedcom.inspect",
+        media_type="text/vnd.gedcom",
+        artifact_type="gedcom",
+    )
+    frame = LaunchFrame(
+        contract=API_CONTRACT,
+        app_build=SIDECAR_BUILD,
+        bearer_token="A" * 43,
+        diagnostic_run_id=DIAGNOSTIC_RUN_ID,
+        diagnostic_directory=DIAGNOSTIC_DIRECTORY,
+    )
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+        artifact_registry=artifacts,
+    )
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8421") as client:
+        submitted = client.post(
+            "/api/v1/gedcom/inspect",
+            headers=headers,
+            json={
+                "schema_version": 1,
+                "source": {
+                    "grant_id": grant.grant_id,
+                    "operation": grant.operation,
+                    "access": grant.access.value,
+                },
+            },
+        )
+        assert submitted.status_code == 200
+        job_id = submitted.json()["job_id"]
+        for _ in range(100):
+            snapshot = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
+            if snapshot.json()["state"] == "completed":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("fictional GEDCOM inspect job did not complete")
+        result = client.get(
+            f"/api/v1/gedcom/jobs/{job_id}/result",
+            headers=headers,
+        )
+
+    assert result.status_code == 200
+    assert result.json()["value"]["summary"]["individual_count"] == 1
+    assert str(tmp_path) not in result.text
+    assert source.name not in result.text
+    assert "Ada" not in result.text
+    assert "@I1@" not in result.text
+
+
 def test_packaged_sidecar_runtime_shutdown_is_authenticated_bodyless_and_private(
     tmp_path: Path,
 ) -> None:
@@ -355,6 +437,7 @@ def test_sidecar_cleanup_continues_after_an_interruption(tmp_path: Path) -> None
         chat_service=chat_service,
         chat_streaming_service=Mock(),
         llm_service=llm_service,
+        gedcom_service=Mock(),
     )
 
     with pytest.raises(KeyboardInterrupt, match="fictional cleanup interruption"):

@@ -6,6 +6,23 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Transport-neutral GEDCOM inspect, merge, subtree, quality, and sync DTOs; a
+  bounded typed job façade; and fixed authenticated submission/result API routes.
+
+### Changed
+
+- CLI and REPL GEDCOM entry points now compose the same application contracts,
+  with GEDCOM 5.5.5 as the default and deliberate 5.5.1 compatibility retained.
+
+### Security
+
+- Added purpose-scoped opaque grants, path-free results/progress/errors,
+  explicit provider and consent enforcement, network-free `provider=none`, a
+  conservative retain-both decision fallback, cancellation preservation, and
+  validated atomic publication for GEDCOM operations.
+
 ## [0.6.0] - 2026-08-14
 
 ### Added

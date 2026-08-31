@@ -27,6 +27,39 @@
         "title": "ApiVersion",
         "type": "object"
       },
+      "ArtifactGrantRequest": {
+        "additionalProperties": false,
+        "description": "Opaque, operation-scoped artifact capability accepted by the API.",
+        "properties": {
+          "access": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "grant_id": {
+            "pattern": "^grt_[0-9a-f]{64}$",
+            "title": "Grant Id",
+            "type": "string"
+          },
+          "operation": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant_id",
+          "operation",
+          "access"
+        ],
+        "title": "ArtifactGrantRequest",
+        "type": "object"
+      },
       "CapabilityAction": {
         "additionalProperties": false,
         "description": "Describe one command exposed by an internal API capability.",
@@ -1269,6 +1302,450 @@
         "title": "FailureDetail",
         "type": "object"
       },
+      "GedcomInspectOperationRequest": {
+        "additionalProperties": false,
+        "description": "Inspect one GEDCOM through a read-only scoped grant.",
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "GedcomInspectOperationRequest",
+        "type": "object"
+      },
+      "GedcomMergeOperationRequest": {
+        "additionalProperties": false,
+        "description": "Merge GEDCOM inputs into new GEDCOM and quality-report artifacts.",
+        "properties": {
+          "gedcom_version": {
+            "default": "5.5.5",
+            "enum": [
+              "5.5.5",
+              "5.5.1"
+            ],
+            "title": "Gedcom Version",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactGrantRequest"
+            },
+            "maxItems": 16,
+            "minItems": 2,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "output": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/GedcomProviderSelectionRequest"
+          },
+          "quality_report": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "root_person_ref": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:@+-]+$",
+            "title": "Root Person Ref",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "similarity_threshold": {
+            "default": 80,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Similarity Threshold",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "inputs",
+          "output",
+          "quality_report",
+          "root_person_ref"
+        ],
+        "title": "GedcomMergeOperationRequest",
+        "type": "object"
+      },
+      "GedcomProviderSelectionRequest": {
+        "additionalProperties": false,
+        "description": "Explicit offline, local, or consent-bound provider selection.",
+        "properties": {
+          "consent_id": {
+            "anyOf": [
+              {
+                "maxLength": 96,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 96,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 96,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "provider_id": {
+            "default": "none",
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Provider Id",
+            "type": "string"
+          }
+        },
+        "title": "GedcomProviderSelectionRequest",
+        "type": "object"
+      },
+      "GedcomQualityOperationRequest": {
+        "additionalProperties": false,
+        "description": "Analyze a rooted GEDCOM and publish a new quality report.",
+        "properties": {
+          "gedcom_version": {
+            "default": "5.5.5",
+            "enum": [
+              "5.5.5",
+              "5.5.1"
+            ],
+            "title": "Gedcom Version",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/GedcomProviderSelectionRequest"
+          },
+          "root_person_ref": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:@+-]+$",
+            "title": "Root Person Ref",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          }
+        },
+        "required": [
+          "source",
+          "output",
+          "root_person_ref"
+        ],
+        "title": "GedcomQualityOperationRequest",
+        "type": "object"
+      },
+      "GedcomResultResponse": {
+        "additionalProperties": false,
+        "description": "Structured completed GEDCOM result without paths or raw records.",
+        "properties": {
+          "operation": {
+            "enum": [
+              "gedcom.inspect",
+              "gedcom.merge",
+              "gedcom.subtree",
+              "gedcom.quality",
+              "gedcom.sync"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "value": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JSONValue"
+            },
+            "title": "Value",
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "value"
+        ],
+        "title": "GedcomResultResponse",
+        "type": "object"
+      },
+      "GedcomSubtreeOperationRequest": {
+        "additionalProperties": false,
+        "description": "Extract one rooted GEDCOM subtree into a new artifact.",
+        "properties": {
+          "gedcom_version": {
+            "default": "5.5.5",
+            "enum": [
+              "5.5.5",
+              "5.5.1"
+            ],
+            "title": "Gedcom Version",
+            "type": "string"
+          },
+          "generations": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generations"
+          },
+          "output": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "root_person_ref": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:@+-]+$",
+            "title": "Root Person Ref",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "scope": {
+            "default": "connected",
+            "enum": [
+              "connected",
+              "ancestors",
+              "descendants"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          }
+        },
+        "required": [
+          "source",
+          "output",
+          "root_person_ref"
+        ],
+        "title": "GedcomSubtreeOperationRequest",
+        "type": "object"
+      },
+      "GedcomSyncOperationRequest": {
+        "additionalProperties": false,
+        "description": "Run a typed update or rebase without accepting unrestricted paths.",
+        "properties": {
+          "accept_manual_deletions": {
+            "default": false,
+            "title": "Accept Manual Deletions",
+            "type": "boolean"
+          },
+          "automatic_identity_resolution": {
+            "default": true,
+            "title": "Automatic Identity Resolution",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "gedcom_version": {
+            "default": "5.5.5",
+            "enum": [
+              "5.5.5",
+              "5.5.1"
+            ],
+            "title": "Gedcom Version",
+            "type": "string"
+          },
+          "initialize_manifest": {
+            "default": false,
+            "title": "Initialize Manifest",
+            "type": "boolean"
+          },
+          "manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactGrantRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "master": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/GedcomProviderSelectionRequest"
+          },
+          "quality_report_enabled": {
+            "default": true,
+            "title": "Quality Report Enabled",
+            "type": "boolean"
+          },
+          "quality_root_person_ref": {
+            "anyOf": [
+              {
+                "maxLength": 96,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:@+-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Root Person Ref"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "release_root": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/GedcomSyncSnapshotRequest"
+            },
+            "maxItems": 16,
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "sync_command": {
+            "enum": [
+              "update",
+              "rebase"
+            ],
+            "title": "Sync Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sync_command",
+          "master",
+          "release_root"
+        ],
+        "title": "GedcomSyncOperationRequest",
+        "type": "object"
+      },
+      "GedcomSyncSnapshotRequest": {
+        "additionalProperties": false,
+        "description": "One path-free website export supplied to a sync update.",
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ArtifactGrantRequest"
+          },
+          "exported_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exported At"
+          },
+          "source_id": {
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "vendor": {
+            "enum": [
+              "ancestry",
+              "geni",
+              "myheritage",
+              "other"
+            ],
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "vendor",
+          "artifact"
+        ],
+        "title": "GedcomSyncSnapshotRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1322,6 +1799,37 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "JSONValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JSONValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JSONValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "JobArtifactResponse": {
         "additionalProperties": false,
@@ -4739,6 +5247,1127 @@
         "summary": "Revoke Consent",
         "tags": [
           "provider-configuration"
+        ]
+      }
+    },
+    "/api/v1/gedcom/inspect": {
+      "post": {
+        "operationId": "inspectInternalGedcom",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GedcomInspectOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Inspect Gedcom",
+        "tags": [
+          "gedcom"
+        ]
+      }
+    },
+    "/api/v1/gedcom/jobs/{job_id}/result": {
+      "get": {
+        "operationId": "getInternalGedcomResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GedcomResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Get Gedcom Result",
+        "tags": [
+          "gedcom"
+        ]
+      }
+    },
+    "/api/v1/gedcom/merge": {
+      "post": {
+        "operationId": "mergeInternalGedcom",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GedcomMergeOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Merge Gedcom",
+        "tags": [
+          "gedcom"
+        ]
+      }
+    },
+    "/api/v1/gedcom/quality": {
+      "post": {
+        "operationId": "analyzeInternalGedcomQuality",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GedcomQualityOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Analyze Gedcom Quality",
+        "tags": [
+          "gedcom"
+        ]
+      }
+    },
+    "/api/v1/gedcom/subtree": {
+      "post": {
+        "operationId": "extractInternalGedcomSubtree",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GedcomSubtreeOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Extract Gedcom Subtree",
+        "tags": [
+          "gedcom"
+        ]
+      }
+    },
+    "/api/v1/gedcom/sync": {
+      "post": {
+        "operationId": "syncInternalGedcom",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Ancestry-API-Version",
+            "required": true,
+            "schema": {
+              "const": "ancestryllm.internal-api/1",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Ancestry-App-Build",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GedcomSyncOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed closed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The private bearer is invalid."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Cloud-provider consent is absent, stale, mismatched, or revoked."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The resource or route is unavailable."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The method is not accepted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request conflicts with the current protected state."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded replay window has expired; fetch a fresh snapshot."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is too large."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The content type is not accepted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A bounded queue or subscriber limit was reached."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request failed safely."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A protected local dependency is unavailable."
+          }
+        },
+        "security": [
+          {
+            "PrivateBearer": []
+          }
+        ],
+        "summary": "Sync Gedcom",
+        "tags": [
+          "gedcom"
         ]
       }
     },

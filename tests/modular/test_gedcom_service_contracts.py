@@ -14,6 +14,7 @@ from ancestryllm.application.dto import (
     ProviderSelection,
 )
 from ancestryllm.application.operations import (
+    GedcomInspectRequest,
     GedcomMergeRequest,
     GedcomQualityRequest,
     GedcomSubtreeRequest,
@@ -114,6 +115,87 @@ def _unresolved_grant(
     )
 
 
+def test_local_profile_selection_defers_consent_and_uses_profile_selector() -> None:
+    selection = ProviderSelection(
+        provider_id="ollama",
+        profile_id="fictional-local",
+        model_id="fixture",
+    )
+    service = GedcomService()
+
+    assert service._consent_for(selection) is None
+    assert service._provider_selector(selection) == "fictional-local"
+
+
+def test_inspect_uses_only_the_gedc_version_and_source_binds_root_candidates(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first.ged"
+    second = tmp_path / "second.ged"
+    output = tmp_path / "rooted.ged"
+    first.write_text(
+        "\n".join(
+            (
+                "0 HEAD",
+                "1 SOUR AncestryLLM-Fictional-Contract",
+                "2 VERS 2019.1",
+                "1 GEDC",
+                "2 VERS 5.5.5",
+                "1 CHAR UTF-8",
+                "0 @I1@ INDI",
+                "1 NAME Ada /Example/",
+                "1 BIRT",
+                "2 DATE 1 JAN 1900",
+                "0 TRLR",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    _write_person(
+        second,
+        pointer="@I1@",
+        given_name="Grace",
+        birth_date="2 FEB 1910",
+    )
+    registry = _ArtifactRegistry()
+    service = GedcomService(artifacts=registry)
+
+    first_inspection = service.execute_inspect(
+        GedcomInspectRequest(source=_input_grant(registry, first, operation="gedcom.inspect"))
+    )
+    second_inspection = service.execute_inspect(
+        GedcomInspectRequest(source=_input_grant(registry, second, operation="gedcom.inspect"))
+    )
+
+    assert first_inspection.summary.gedcom_version == "5.5.5"
+    assert first_inspection.root_candidates[0] != second_inspection.root_candidates[0]
+
+    service.execute_merge(
+        GedcomMergeRequest(
+            inputs=(
+                _input_grant(registry, first, operation="gedcom.merge"),
+                _input_grant(registry, second, operation="gedcom.merge"),
+            ),
+            output=_output_grant(
+                registry,
+                output,
+                operation="gedcom.merge",
+                media_type=GEDCOM_MEDIA_TYPE,
+                artifact_type="gedcom",
+            ),
+            quality_report=None,
+            root_person_ref=second_inspection.root_candidates[0].person_ref,
+            provider=_offline_provider(),
+            similarity_threshold=70,
+        )
+    )
+
+    rooted = output.read_text(encoding="utf-8")
+    assert "Grace /Example/" in rooted
+    assert "Ada /Example/" not in rooted
+
+
 @pytest.mark.parametrize(
     "service_request",
     (
@@ -175,6 +257,13 @@ def _unresolved_grant(
             output=_unresolved_grant("gedcom.quality", ArtifactAccess.WRITE, "b"),
             root_person_ref=None,
             provider=_offline_provider(),
+        ),
+        GedcomQualityRequest(
+            source=_unresolved_grant("gedcom.quality", ArtifactAccess.READ, "a"),
+            output=_unresolved_grant("gedcom.quality", ArtifactAccess.WRITE, "b"),
+            root_person_ref="person:root",
+            provider=_offline_provider(),
+            gedcom_version="5.5.6",
         ),
     ),
 )

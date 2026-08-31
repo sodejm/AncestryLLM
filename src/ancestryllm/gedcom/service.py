@@ -21,15 +21,20 @@ from ancestryllm.application.errors import domain_failure_from_exception
 from ancestryllm.application.genealogy import GenealogyAggregate
 from ancestryllm.application.operations import (
     ChangeSummary,
+    GedcomInspectRequest,
+    GedcomInspectResult,
     GedcomMergeRequest,
     GedcomMergeResult,
     GedcomQualityRequest,
     GedcomQualityResult,
+    GedcomSourceSummary,
     GedcomSubtreeRequest,
     GedcomSubtreeResult,
     GedcomSyncRequest,
+    GedcomValidationFinding,
     ProvenanceRecord,
     QualitySummary,
+    RootCandidate,
 )
 from ancestryllm.application.operations import (
     GedcomSyncResult as GedcomSyncServiceResult,
@@ -70,6 +75,7 @@ from ancestryllm.gedcom.identity import (
     individual_from_record,
     merge_records,
 )
+from ancestryllm.gedcom.model import parse_gedcom_line
 from ancestryllm.gedcom.parser import GedcomParseError, GedcomRecord, load_sources
 from ancestryllm.gedcom.quality import (
     QUALITY_AI_LIMIT,
@@ -310,9 +316,16 @@ class GedcomService:
     def _consent_for(self, selection: ProviderSelection) -> ConsentGrant | None:
         if not selection.network_allowed:
             return None
+        if selection.provider_id == "ollama" and selection.consent_id is None:
+            return None
         if selection.consent_id is None or self.consent_lookup is None:
             raise DomainFailure(DomainFailureCode.PROVIDER_CONSENT_REQUIRED)
         return self.consent_lookup(selection.consent_id)
+
+    @staticmethod
+    def _provider_selector(selection: ProviderSelection) -> str:
+        """Select the configured profile while retaining legacy provider fallback."""
+        return selection.profile_id or selection.provider_id
 
     def _people_and_sources(
         self,
@@ -356,21 +369,55 @@ class GedcomService:
             self.ingress.verify(path, FileKind.GEDCOM, fingerprint)
 
     @staticmethod
+    def _source_bound_root_refs(
+        sources: list[Any],
+        fingerprints: dict[Path, FileFingerprint],
+    ) -> dict[str, str]:
+        """Bind opaque inspect candidates to both source content and original xref."""
+
+        candidates: dict[str, set[str]] = {}
+        for source in sources:
+            fingerprint = fingerprints[source.path]
+            individual_pointers = {
+                record.pointer for record in source.records if record.tag == "INDI"
+            }
+            for original_pointer, global_pointer in source.pointer_map.items():
+                if global_pointer not in individual_pointers:
+                    continue
+                person_ref = _opaque_ref(
+                    "person",
+                    f"{fingerprint.sha256}:{original_pointer}",
+                )
+                candidates.setdefault(person_ref, set()).add(global_pointer)
+        return {
+            person_ref: next(iter(pointers))
+            for person_ref, pointers in candidates.items()
+            if len(pointers) == 1
+        }
+
+    @staticmethod
     def _resolve_root_person(
         requested: str,
         records: list[IndividualRecord],
         source_pointer_maps: list[dict[str, str]],
         merged_pointer_map: dict[str, str],
+        source_bound_refs: dict[str, str] | None = None,
     ) -> str:
         """Resolve a root without exposing the requested genealogy value."""
 
         if requested.startswith("person:"):
-            matches = {
-                record.pointer
-                for record in records
-                if _opaque_ref("person", record.pointer) == requested
-            }
-            resolved = next(iter(matches)) if len(matches) == 1 else None
+            resolved = (source_bound_refs or {}).get(requested)
+            if resolved is not None:
+                resolved = merged_pointer_map.get(resolved, resolved)
+                if not any(record.pointer == resolved for record in records):
+                    resolved = None
+            if resolved is None:
+                matches = {
+                    record.pointer
+                    for record in records
+                    if _opaque_ref("person", record.pointer) == requested
+                }
+                resolved = next(iter(matches)) if len(matches) == 1 else None
         else:
             try:
                 resolved = resolve_root_person(
@@ -592,6 +639,7 @@ class GedcomService:
                 exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources(resolved_inputs)
+        source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
 
         def verify_inputs() -> None:
             self._verify_sources(fingerprints)
@@ -619,7 +667,11 @@ class GedcomService:
         root_pointer: str | None = None
         if root_person:
             root_pointer = self._resolve_root_person(
-                root_person, merged, [source.pointer_map for source in sources], pointer_map
+                root_person,
+                merged,
+                [source.pointer_map for source in sources],
+                pointer_map,
+                source_bound_refs,
             )
             include_people, include_families = connected_tree_pointers(
                 root_pointer, merged, source_records, pointer_map
@@ -748,11 +800,13 @@ class GedcomService:
                 exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
         root_pointer = self._resolve_root_person(
             root_person,
             people,
             [sources[0].pointer_map],
             {},
+            source_bound_refs,
         )
         keep_people, keep_families = scoped_tree_pointers(
             root_pointer, people, source_records, scope, generations
@@ -838,6 +892,7 @@ class GedcomService:
                 exit_code=2,
             )
         sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
 
         def verify_inputs() -> None:
             self._verify_sources(fingerprints)
@@ -847,6 +902,7 @@ class GedcomService:
             people,
             [sources[0].pointer_map],
             {},
+            source_bound_refs,
         )
         report = analyze_quality(
             people, source_records, sources, root_pointer, output_file=str(source_path)
@@ -898,6 +954,100 @@ class GedcomService:
             consent=consent,
         ).output_path
 
+    def execute_inspect(
+        self,
+        request: GedcomInspectRequest,
+        *,
+        cancellation: CancellationPort | None = None,
+    ) -> GedcomInspectResult:
+        """Inspect a granted source without exposing paths or record contents."""
+
+        return _at_contract_boundary(
+            lambda: self._execute_inspect(request, cancellation=cancellation)
+        )
+
+    def _execute_inspect(
+        self,
+        request: GedcomInspectRequest,
+        *,
+        cancellation: CancellationPort | None,
+    ) -> GedcomInspectResult:
+        operation = "gedcom.inspect"
+        registry = self._require_artifacts()
+        cancellation_port = cancellation or NeverCancelled()
+        cancellation_port.check_cancelled()
+        source_path = registry.resolve(
+            request.source,
+            operation=operation,
+            access=ArtifactAccess.READ,
+        )
+        sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
+        cancellation_port.check_cancelled()
+
+        version = ""
+        for source in sources:
+            for record in source.records:
+                if record.tag != "HEAD":
+                    continue
+                in_gedc = False
+                for line in record.lines[1:]:
+                    parsed = parse_gedcom_line(line)
+                    if parsed.level <= 1:
+                        in_gedc = parsed.level == 1 and parsed.tag == "GEDC"
+                    elif in_gedc and parsed.level == 2 and parsed.tag == "VERS":
+                        version = parsed.value.strip()
+                        break
+                if version:
+                    break
+            if version:
+                break
+
+        findings: tuple[GedcomValidationFinding, ...]
+        if version == "5.5.5":
+            findings = ()
+        elif version == "5.5.1":
+            findings = (
+                GedcomValidationFinding(
+                    code="gedcom-version-fallback",
+                    severity="info",
+                ),
+            )
+        else:
+            findings = (
+                GedcomValidationFinding(
+                    code="gedcom-version-unsupported",
+                    severity="warning",
+                ),
+            )
+
+        summary = GedcomSourceSummary(
+            source=registry.describe_input(request.source, operation=operation),
+            gedcom_version=version,
+            individual_count=sum(record.tag == "INDI" for record in source_records),
+            family_count=sum(record.tag == "FAM" for record in source_records),
+            other_record_count=sum(record.tag not in {"INDI", "FAM"} for record in source_records),
+        )
+        root_refs_by_pointer = {
+            pointer: person_ref for person_ref, pointer in source_bound_refs.items()
+        }
+        root_candidates = tuple(
+            RootCandidate(
+                person_ref=root_refs_by_pointer.get(
+                    person.pointer,
+                    _opaque_ref("person", person.pointer),
+                ),
+                reason_code="individual-record",
+            )
+            for person in sorted(people, key=lambda candidate: candidate.pointer)
+        )
+        cancellation_port.check_cancelled()
+        return GedcomInspectResult(
+            summary=summary,
+            findings=findings,
+            root_candidates=root_candidates,
+        )
+
     def execute_merge(
         self,
         request: GedcomMergeRequest,
@@ -919,8 +1069,7 @@ class GedcomService:
         operation = "gedcom.merge"
         if (
             len(request.inputs) < 2
-            or request.root_person_ref is None
-            or not request.root_person_ref.strip()
+            or (request.root_person_ref is not None and not request.root_person_ref.strip())
             or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
             or not 0 <= request.similarity_threshold <= 100
         ):
@@ -941,10 +1090,14 @@ class GedcomService:
             operation=operation,
             access=ArtifactAccess.WRITE,
         )
-        quality_report = registry.resolve(
-            request.quality_report,
-            operation=operation,
-            access=ArtifactAccess.WRITE,
+        quality_report = (
+            registry.resolve(
+                request.quality_report,
+                operation=operation,
+                access=ArtifactAccess.WRITE,
+            )
+            if request.quality_report is not None
+            else None
         )
         execution = self._merge(
             inputs,
@@ -952,21 +1105,27 @@ class GedcomService:
             root_person=request.root_person_ref,
             quality_path=quality_report,
             gedcom_version=request.gedcom_version,
-            provider_id=request.provider.provider_id,
+            provider_id=self._provider_selector(request.provider),
             model=request.provider.model_id or "",
             consent=self._consent_for(request.provider),
             threshold=request.similarity_threshold,
             cancellation=cancellation_port,
         )
-        if execution.root_person_ref is None:
-            raise DomainFailure(DomainFailureCode.INTERNAL)
         return GedcomMergeResult(
             gedcom=registry.describe_output(request.output, operation=operation),
-            quality_report=registry.describe_output(
-                request.quality_report,
-                operation=operation,
+            quality_report=(
+                registry.describe_output(
+                    request.quality_report,
+                    operation=operation,
+                )
+                if request.quality_report is not None
+                else None
             ),
-            root_person_ref=_opaque_ref("person", execution.root_person_ref),
+            root_person_ref=(
+                _opaque_ref("person", execution.root_person_ref)
+                if execution.root_person_ref is not None
+                else None
+            ),
             changes=execution.changes,
             quality=execution.quality,
             provenance=execution.provenance,
@@ -1048,7 +1207,11 @@ class GedcomService:
         cancellation: CancellationPort | None,
     ) -> GedcomQualityResult:
         operation = "gedcom.quality"
-        if request.root_person_ref is None or not request.root_person_ref.strip():
+        if (
+            request.root_person_ref is None
+            or not request.root_person_ref.strip()
+            or request.gedcom_version not in SUPPORTED_GEDCOM_VERSIONS
+        ):
             raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
         registry = self._require_artifacts()
         cancellation_port = cancellation or NeverCancelled()
@@ -1067,7 +1230,7 @@ class GedcomService:
             source,
             output,
             root_person=request.root_person_ref,
-            provider_id=request.provider.provider_id,
+            provider_id=self._provider_selector(request.provider),
             model=request.provider.model_id or "",
             consent=self._consent_for(request.provider),
             cancellation=cancellation_port,
@@ -1213,7 +1376,7 @@ class GedcomService:
             and request.automatic_identity_resolution
         ):
             identity_resolver = self._identity_resolver(
-                request.provider.provider_id,
+                self._provider_selector(request.provider),
                 request.provider.model_id or "",
                 self._consent_for(request.provider),
             )

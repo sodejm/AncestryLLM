@@ -15,6 +15,10 @@ from ancestryllm.application.dto import (
     ArtifactGrantRef,
     ArtifactRef,
     BoundaryDTO,
+    DecisionKind,
+    DecisionOption,
+    DecisionRequest,
+    IdentityCandidate,
     NamedValue,
     ProviderSelection,
     Scalar,
@@ -363,16 +367,103 @@ class RootsMagicExportArtifact(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class GedcomSourceSummary(BoundaryDTO):
+    """Sanitized structural metadata for one granted GEDCOM source."""
+
+    source: ArtifactRef
+    gedcom_version: str
+    individual_count: int
+    family_count: int
+    other_record_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomValidationFinding(BoundaryDTO):
+    """One coded GEDCOM validation outcome without record contents."""
+
+    code: str
+    severity: str
+    subject_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RootCandidate(BoundaryDTO):
+    """One opaque candidate for a rooted GEDCOM operation."""
+
+    person_ref: str
+    reason_code: str
+
+
+_DEFAULT_MERGE_DECISION_OPTIONS = (
+    DecisionOption(
+        option_id="retain-both",
+        label_code="gedcom.merge.retain-both",
+    ),
+    DecisionOption(
+        option_id="merge",
+        label_code="gedcom.merge.merge",
+        destructive=True,
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MergeDecisionRequest(BoundaryDTO):
+    """Duplicate adjudication with an explicit conservative default."""
+
+    decision_id: str
+    left_person_ref: str
+    right_person_ref: str
+    evidence_codes: tuple[str, ...]
+    options: tuple[DecisionOption, ...] = _DEFAULT_MERGE_DECISION_OPTIONS
+    default_option_id: str = "retain-both"
+
+    def __post_init__(self) -> None:
+        DecisionRequest(
+            decision_id=self.decision_id,
+            operation="gedcom.merge",
+            decision_code="possible-duplicate",
+            kind=DecisionKind.RESOLVE_CONFLICT,
+            options=self.options,
+            default_option_id=self.default_option_id,
+        )
+        IdentityCandidate(candidate_ref=self.left_person_ref, confidence=0)
+        IdentityCandidate(candidate_ref=self.right_person_ref, confidence=0)
+        if not 1 <= len(self.evidence_codes) <= 32:
+            raise ValueError("merge evidence codes must contain between 1 and 32 items.")
+        if len(set(self.evidence_codes)) != len(self.evidence_codes):
+            raise ValueError("merge evidence codes must be unique.")
+        for evidence_code in self.evidence_codes:
+            DecisionOption(option_id=evidence_code, label_code=evidence_code)
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectRequest(ServiceRequest):
+    """Inspect one granted GEDCOM without exposing its host path or records."""
+
+    source: ArtifactGrantRef
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectResult(ServiceResult):
+    """Structured, serializable inspection result for adapter presentation."""
+
+    summary: GedcomSourceSummary
+    findings: tuple[GedcomValidationFinding, ...]
+    root_candidates: tuple[RootCandidate, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GedcomMergeRequest(ServiceRequest):
     """Merge granted GEDCOM inputs into granted loss-minimal outputs."""
 
     inputs: tuple[ArtifactGrantRef, ...]
     output: ArtifactGrantRef
-    quality_report: ArtifactGrantRef
+    quality_report: ArtifactGrantRef | None
     root_person_ref: str | None
-    gedcom_version: str
     provider: ProviderSelection
     similarity_threshold: int
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,8 +471,8 @@ class GedcomMergeResult(ServiceResult):
     """Published merge artifacts and deterministic result contracts."""
 
     gedcom: ArtifactRef
-    quality_report: ArtifactRef
-    root_person_ref: str
+    quality_report: ArtifactRef | None
+    root_person_ref: str | None
     changes: ChangeSummary
     quality: QualitySummary
     provenance: tuple[ProvenanceRecord, ...]
@@ -396,7 +487,7 @@ class GedcomSubtreeRequest(ServiceRequest):
     root_person_ref: str
     scope: str
     generations: int | None
-    gedcom_version: str
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +508,7 @@ class GedcomQualityRequest(ServiceRequest):
     output: ArtifactGrantRef
     root_person_ref: str | None
     provider: ProviderSelection
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,6 +558,19 @@ class GedcomSyncResult(ServiceResult):
     changes: ChangeSummary
     quality: QualitySummary
     provenance: tuple[ProvenanceRecord, ...]
+
+
+# Short compatibility imports for existing CLI dispatch and service adapters.  Keep
+# the public concrete class names stable because BoundaryDTO serializes the class
+# name as its type discriminator.
+MergeRequest = GedcomMergeRequest
+MergeResult = GedcomMergeResult
+QualityRequest = GedcomQualityRequest
+QualityResult = GedcomQualityResult
+SubtreeRequest = GedcomSubtreeRequest
+SubtreeResult = GedcomSubtreeResult
+SyncRequest = GedcomSyncRequest
+SyncResult = GedcomSyncResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,10 +943,10 @@ _CONTRACT_TYPES = (
     ("rootsmagic", "list", RootsMagicListRequest, RootsMagicListResult),
     ("rootsmagic", "query", RootsMagicQueryRequest, RootsMagicQueryResult),
     ("rootsmagic", "export", RootsMagicExportRequest, RootsMagicExportResult),
-    ("gedcom", "merge", GedcomMergeRequest, GedcomMergeResult),
-    ("gedcom", "subtree", GedcomSubtreeRequest, GedcomSubtreeResult),
-    ("gedcom", "quality", GedcomQualityRequest, GedcomQualityResult),
-    ("gedcom", "sync", GedcomSyncRequest, GedcomSyncResult),
+    ("gedcom", "merge", MergeRequest, MergeResult),
+    ("gedcom", "subtree", SubtreeRequest, SubtreeResult),
+    ("gedcom", "quality", QualityRequest, QualityResult),
+    ("gedcom", "sync", SyncRequest, SyncResult),
     ("prompts", "list", PromptsListRequest, PromptsListResult),
     ("prompts", "save", PromptSaveRequest, PromptSaveResult),
     ("prompts", "show", PromptShowRequest, PromptShowResult),
@@ -910,15 +1015,22 @@ __all__ = [
     "DeploymentSwitchRequest",
     "DeploymentSwitchResult",
     "DiagnosticRecord",
+    "GedcomInspectRequest",
+    "GedcomInspectResult",
     "GedcomMergeRequest",
     "GedcomMergeResult",
     "GedcomQualityRequest",
     "GedcomQualityResult",
+    "GedcomSourceSummary",
     "GedcomSubtreeRequest",
     "GedcomSubtreeResult",
     "GedcomSyncRequest",
     "GedcomSyncResult",
     "GedcomSyncSnapshot",
+    "GedcomValidationFinding",
+    "MergeDecisionRequest",
+    "MergeRequest",
+    "MergeResult",
     "ModuleDisableRequest",
     "ModuleDisableResult",
     "ModuleEnableRequest",
@@ -954,9 +1066,12 @@ __all__ = [
     "ProviderRevokeResult",
     "ProvidersListRequest",
     "ProvidersListResult",
+    "QualityRequest",
+    "QualityResult",
     "QualitySummary",
     "QueryExecutionRecord",
     "QueryRow",
+    "RootCandidate",
     "RootsMagicExportArtifact",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",
@@ -975,5 +1090,9 @@ __all__ = [
     "SecretStatusRecord",
     "SecretStatusRequest",
     "SecretStatusResult",
+    "SubtreeRequest",
+    "SubtreeResult",
+    "SyncRequest",
+    "SyncResult",
     "TreeRecord",
 ]
