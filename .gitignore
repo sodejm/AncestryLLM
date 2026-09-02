@@ -95,6 +95,7 @@ Thumbs.db
 logs/
 node_modules
 desktop/out/
+desktop/coverage/
 desktop/release/
 desktop/release-file-grant-verification/
 desktop/release-native-verification/

@@ -8,16 +8,27 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Added
 
+- Versioned release-quality policy and exact-head approval evidence covering
+  QA, security, performance, and diagnostics ownership, commands, inputs, and
+  fail-closed exceptions.
 - Transport-neutral GEDCOM inspect, merge, subtree, quality, and sync DTOs; a
   bounded typed job façade; and fixed authenticated submission/result API routes.
 
 ### Changed
 
+- Desktop release evidence now pins its Python, Node.js, pnpm, Vitest, and
+  WebdriverIO versions; enforces V8 coverage, accessibility, source Webdriver,
+  target-specific packaged-performance ceilings, and privacy-safe diagnostic
+  canaries; and records those results in the aggregate receipt.
 - CLI and REPL GEDCOM entry points now compose the same application contracts,
   with GEDCOM 5.5.5 as the default and deliberate 5.5.1 compatibility retained.
 
 ### Security
 
+- Release and release-readiness workflows now verify the policy-bound
+  release-quality approval against the exact commit and both source artifacts.
+  Release verifies it again immediately before publication so stale, edited,
+  substituted, incomplete, or excepted-without-approval evidence fails closed.
 - Added purpose-scoped opaque grants, path-free results/progress/errors,
   explicit provider and consent enforcement, network-free `provider=none`, a
   conservative retain-both decision fallback, cancellation preservation, and

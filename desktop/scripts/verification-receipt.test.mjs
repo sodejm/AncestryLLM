@@ -25,6 +25,7 @@ async function cleanRepositoryFixture(prefix = 'ancestryllm-receipt-repository-'
   await execFileAsync('git', ['init', '--quiet'], { cwd: repositoryRoot })
   await execFileAsync('git', ['config', 'user.email', 'security-tests@example.invalid'], { cwd: repositoryRoot })
   await execFileAsync('git', ['config', 'user.name', 'Security Tests'], { cwd: repositoryRoot })
+  await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repositoryRoot })
   await writeFile(join(repositoryRoot, 'tracked.txt'), 'original\n')
   await execFileAsync('git', ['add', 'tracked.txt'], { cwd: repositoryRoot })
   await execFileAsync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: repositoryRoot })
@@ -64,6 +65,14 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function runReceipt(options) {
+  return runVerificationCommand({
+    runner: 'ubuntu-24.04',
+    sidecarTarget: 'none',
+    ...options,
+  })
+}
+
 test('receipt wrapper executes a command and writes exact-head output and artifact digests once', async () => {
   const { root, repositoryRoot, gitHead } = await cleanRepositoryFixture()
   const outputPath = join(root, 'audit.json')
@@ -71,8 +80,10 @@ test('receipt wrapper executes a command and writes exact-head output and artifa
   const artifact = Buffer.from('{"bomFormat":"CycloneDX"}\n')
   await writeFile(artifactPath, artifact)
 
-  const receipt = await runVerificationCommand({
+  const receipt = await runReceipt({
     gitHead,
+    runner: 'ubuntu-24.04',
+    sidecarTarget: 'none',
     outputPath,
     gates: ['auditPassed', 'sbomGeneratedPassed'],
     artifacts: { sbom: artifactPath },
@@ -88,13 +99,14 @@ test('receipt wrapper executes a command and writes exact-head output and artifa
   assert.deepEqual(receipt.artifacts.sbom, { sha256: sha256(artifact), bytes: artifact.byteLength })
   assert.equal(receipt.headBefore, gitHead)
   assert.equal(receipt.headAfter, gitHead)
+  assert.deepEqual(receipt.context, { runner: 'ubuntu-24.04', sidecarTarget: 'none' })
   assert.deepEqual(receipt.workspace.allowedOutputs, [])
   assert.equal(receipt.workspace.algorithm, 'git-workspace-v1')
   assert.equal(receipt.workspace.status, 'unchanged')
   assert.deepEqual(receipt.workspace.before, receipt.workspace.after)
   validateVerificationReceipt(JSON.parse(await (await import('node:fs/promises')).readFile(outputPath, 'utf8')), gitHead)
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead,
     outputPath,
     gates: ['auditPassed'],
@@ -108,7 +120,7 @@ test('receipt wrapper leaves no passing receipt for a failed command', async () 
   const { root, repositoryRoot, gitHead } = await cleanRepositoryFixture('ancestryllm-failed-receipt-')
   const outputPath = join(root, 'failed.json')
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead,
     outputPath,
     gates: ['secretsPassed'],
@@ -126,7 +138,7 @@ test('receipt wrapper rejects tracked and staged mutations without writing a rec
     const stage = staged
       ? "require('node:child_process').execFileSync('git', ['add', 'tracked.txt'])"
       : ''
-    await assert.rejects(runVerificationCommand({
+    await assert.rejects(runReceipt({
       gitHead,
       outputPath,
       gates: ['secretsPassed'],
@@ -142,7 +154,7 @@ test('receipt wrapper rejects tracked mutations hidden by index flags', async ()
   const fixture = await cleanRepositoryFixture('ancestryllm-hidden-index-mutation-')
   const outputPath = join(fixture.root, 'receipt.json')
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead: fixture.gitHead,
     outputPath,
     gates: ['auditPassed'],
@@ -160,7 +172,7 @@ test('receipt wrapper rejects tracked mutations hidden by index flags', async ()
 test('receipt wrapper rejects undeclared untracked output and accepts only an explicit output path', async () => {
   const rejected = await cleanRepositoryFixture('ancestryllm-undeclared-output-')
   const rejectedReceipt = join(rejected.root, 'rejected.json')
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead: rejected.gitHead,
     outputPath: rejectedReceipt,
     gates: ['buildInspectionPassed'],
@@ -172,7 +184,7 @@ test('receipt wrapper rejects undeclared untracked output and accepts only an ex
 
   const accepted = await cleanRepositoryFixture('ancestryllm-declared-output-')
   const acceptedReceipt = join(accepted.root, 'accepted.json')
-  const receipt = await runVerificationCommand({
+  const receipt = await runReceipt({
     gitHead: accepted.gitHead,
     outputPath: acceptedReceipt,
     gates: ['buildInspectionPassed'],
@@ -190,7 +202,7 @@ test('receipt wrapper protects a pre-existing exact allowed output', async () =>
   const outputPath = join(fixture.root, 'receipt.json')
   await writeFile(join(fixture.repositoryRoot, 'earlier-receipt.json'), '{}\n')
 
-  await runVerificationCommand({
+  await runReceipt({
     gitHead: fixture.gitHead,
     outputPath,
     gates: ['auditPassed'],
@@ -200,7 +212,7 @@ test('receipt wrapper protects a pre-existing exact allowed output', async () =>
     forwardOutput: false,
   })
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead: fixture.gitHead,
     outputPath: join(fixture.root, 'mutated-receipt.json'),
     gates: ['auditPassed'],
@@ -216,7 +228,7 @@ test('receipt wrapper rejects a directory as an allowed output', async () => {
   const outputPath = join(fixture.root, 'receipt.json')
   await mkdir(join(fixture.repositoryRoot, 'broad-output'))
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead: fixture.gitHead,
     outputPath,
     gates: ['auditPassed'],
@@ -234,7 +246,7 @@ test('receipt wrapper rejects mutation of a pre-existing input artifact', async 
   const artifactPath = join(fixture.root, 'input-artifact.txt')
   await writeFile(artifactPath, 'before\n')
 
-  await assert.rejects(runVerificationCommand({
+  await assert.rejects(runReceipt({
     gitHead: fixture.gitHead,
     outputPath,
     gates: ['auditPassed'],
@@ -275,10 +287,11 @@ test('workspace snapshots retry until two serialized git states agree', async ()
 test('receipt validation rejects claimed success, head drift, and malformed output digests', () => {
   const gitHead = '0123456789abcdef0123456789abcdef01234567'
   const base = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: 'verification-receipt',
     status: 'passed',
     gitHead,
+    context: { runner: 'ubuntu-24.04', sidecarTarget: 'none' },
     headBefore: gitHead,
     headAfter: gitHead,
     gates: ['auditPassed'],
@@ -299,6 +312,10 @@ test('receipt validation rejects claimed success, head drift, and malformed outp
     },
   }
   assert.equal(validateVerificationReceipt(base, gitHead), base)
+  assert.throws(
+    () => validateVerificationReceipt(base, gitHead, { runner: 'macos-15', sidecarTarget: 'darwin-arm64' }),
+    /requested execution context/,
+  )
   assert.throws(() => validateVerificationReceipt({ ...base, result: { ...base.result, exitCode: 1 } }, gitHead), /did not exit successfully/)
   assert.throws(() => validateVerificationReceipt({ ...base, headAfter: 'f'.repeat(40) }, gitHead), /headAfter differs/)
   assert.throws(() => validateVerificationReceipt({
@@ -317,6 +334,8 @@ test('receipt validation rejects claimed success, head drift, and malformed outp
 test('receipt CLI requires named gates and name=path artifacts before the executed command', () => {
   assert.deepEqual(parseReceiptArguments([
     '--git-head', 'a'.repeat(40),
+    '--runner', 'ubuntu-24.04',
+    '--sidecar-target', 'none',
     '--output', 'receipt.json',
     '--gate', 'auditPassed',
     '--artifact', 'sbom=sbom.json',
@@ -324,6 +343,8 @@ test('receipt CLI requires named gates and name=path artifacts before the execut
     '--', 'pnpm', 'audit',
   ]), {
     gitHead: 'a'.repeat(40),
+    runner: 'ubuntu-24.04',
+    sidecarTarget: 'none',
     outputPath: 'receipt.json',
     gates: ['auditPassed'],
     artifacts: { sbom: 'sbom.json' },

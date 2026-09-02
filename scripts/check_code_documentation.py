@@ -137,6 +137,8 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "config/dependency-audit-exclusions.json": "docs/reference/DEPENDENCY_MAINTENANCE.md",
     # Version 1 security dependency policy and its reviewed update procedure.
     "config/version-1-security-policy.json": "docs/RELEASING.md",
+    # Version 1 release-quality policy and its reviewed update procedure.
+    "config/release-quality-policy-v1.json": "docs/RELEASING.md",
     # Deterministic screenshot contract and its fictional fixture inputs.
     "config/docs-screenshot-fixture-v1.schema.json": "docs/DOCS_AUTHORING.md",
     "config/docs-screenshot-manifest-v1.schema.json": "docs/DOCS_AUTHORING.md",

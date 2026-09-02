@@ -37,6 +37,7 @@ export interface RuntimeBridge {
  */
 export interface RuntimeBridgeOptions {
   linuxKeyringVerificationRoot?: string | undefined
+  macosEphemeralWorkspaceVerification?: boolean | undefined
   diagnosticRunId?: string | undefined
   diagnosticDirectory?: string | undefined
   recordDiagnostic?: RecordDesktopDiagnostic | undefined
@@ -88,6 +89,9 @@ export async function startRuntimeBridge(
     maxRestarts: 2,
     maxManualRetries: 1,
     linuxKeyringVerificationRoot: options.linuxKeyringVerificationRoot,
+    ...(options.macosEphemeralWorkspaceVerification === undefined
+      ? {}
+      : { macosEphemeralWorkspaceVerification: options.macosEphemeralWorkspaceVerification }),
     ...(options.diagnosticRunId === undefined ? {} : { diagnosticRunId: options.diagnosticRunId }),
     ...(options.recordDiagnostic === undefined ? {} : { recordDiagnostic: options.recordDiagnostic }),
   })

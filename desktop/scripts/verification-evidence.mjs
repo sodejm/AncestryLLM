@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -17,48 +18,194 @@ const execFileAsync = promisify(execFile)
 const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
 const EVIDENCE_SCHEMA_VERSION = 2
+const AGGREGATE_EVIDENCE_SCHEMA_VERSION = 3
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
 const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
 const FILE_GRANT_EVIDENCE_KIND = 'ancestryllm-packaged-file-grant-evidence'
-const METRIC_NAMES = Object.freeze([
+const SECURITY_RECEIPT_CONTEXT = Object.freeze({ runner: 'ubuntu-24.04', sidecarTarget: 'none' })
+const REQUIRED_METRIC_NAMES = Object.freeze([
   'coldLaunchMs',
   'warmLaunchMs',
   'readyMs',
   'rssBytes',
   'rendererOutboundRequests',
 ])
+const REQUIRED_TOOL_NAMES = Object.freeze([
+  'python',
+  'node',
+  'pnpm',
+  'vitest',
+  'webdriverio',
+])
+const RELEASE_QUALITY_POLICY_ID = 'ancestryllm-release-quality-v1'
+const PERFORMANCE_RECEIPT_GATE = 'packageRuntimePassed'
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function policyRecord(value, label) {
+  assert.equal(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    true,
+    `${label} must be an object`,
+  )
+  return value
+}
+
+function exactPolicyKeys(value, expected, label) {
+  assert.deepEqual(Object.keys(value).sort(), [...expected].sort(), `${label} must use the exact schema`)
+}
+
+function requiredPolicyString(value, label) {
+  assert.equal(typeof value === 'string' && value.trim().length > 0, true, `${label} is required`)
+  return value
+}
+
+function frozenPolicyValues(value, names) {
+  return Object.freeze(Object.fromEntries(names.map((name) => [name, value[name]])))
+}
 
 /**
- * Identifies the immutable performance-threshold contract used by release evidence.
- * @type {string}
+ * Derives the desktop release-quality contract from the repository's central policy.
+ * @param {unknown} policy - Parsed release-quality policy document.
+ * @returns {Readonly<Record<string, unknown>>} Validated immutable desktop contract.
  */
-export const PERFORMANCE_POLICY_VERSION = 'desktop-unpacked-v1'
+export function deriveReleaseQualityContract(policy) {
+  const root = policyRecord(policy, 'release-quality policy')
+  assert.equal(root.schemaVersion, 1, 'unsupported release-quality policy schema')
+  assert.equal(root.policyId, RELEASE_QUALITY_POLICY_ID, 'unsupported release-quality policy identity')
 
-function ceilings(coldLaunchMs, warmLaunchMs, readyMs, rssBytes) {
+  const qa = policyRecord(root.qa, 'release-quality QA policy')
+  const toolVersions = policyRecord(qa.toolVersions, 'release-quality tool versions')
+  exactPolicyKeys(toolVersions, REQUIRED_TOOL_NAMES, 'release-quality tool versions')
+  for (const name of REQUIRED_TOOL_NAMES) {
+    requiredPolicyString(toolVersions[name], `release-quality tool version ${name}`)
+  }
+
+  const performance = policyRecord(root.performance, 'release-quality performance policy')
+  exactPolicyKeys(
+    performance,
+    ['policyVersion', 'method', 'metrics', 'targets'],
+    'release-quality performance policy',
+  )
+  const performancePolicyVersion = requiredPolicyString(
+    performance.policyVersion,
+    'release-quality performance policy version',
+  )
+  const method = policyRecord(performance.method, 'release-quality performance method')
+  exactPolicyKeys(
+    method,
+    ['receiptGate', 'measurementSource', 'validator', 'packageBoundary'],
+    'release-quality performance method',
+  )
+  for (const field of ['receiptGate', 'measurementSource', 'validator', 'packageBoundary']) {
+    requiredPolicyString(method[field], `release-quality performance method ${field}`)
+  }
+  assert.equal(
+    method.receiptGate,
+    PERFORMANCE_RECEIPT_GATE,
+    'release-quality performance method must identify the required receipt gate',
+  )
+  assert.equal(
+    method.packageBoundary,
+    'unpacked-native',
+    'release-quality performance method must validate the unpacked-native boundary',
+  )
+
+  assert.equal(Array.isArray(performance.metrics), true, 'release-quality performance metrics must be an array')
+  assert.deepEqual(
+    [...performance.metrics].sort(),
+    [...REQUIRED_METRIC_NAMES].sort(),
+    'release-quality performance metrics must use the exact inventory',
+  )
+  assert.equal(
+    new Set(performance.metrics).size,
+    REQUIRED_METRIC_NAMES.length,
+    'release-quality performance metrics must be unique',
+  )
+
+  assert.equal(
+    Array.isArray(performance.targets) && performance.targets.length > 0,
+    true,
+    'release-quality performance targets are required',
+  )
+  const targetRows = {}
+  for (const rawTarget of performance.targets) {
+    const target = policyRecord(rawTarget, 'release-quality performance target')
+    exactPolicyKeys(
+      target,
+      ['runner', 'sidecarTarget', 'expectedOs', 'arch', 'hostArch', 'performanceCeilings'],
+      'release-quality performance target',
+    )
+    for (const field of ['runner', 'sidecarTarget', 'expectedOs', 'arch', 'hostArch']) {
+      requiredPolicyString(target[field], `release-quality performance target ${field}`)
+    }
+    assert.equal(targetRows[target.runner], undefined, `duplicate release-quality runner ${target.runner}`)
+    const platform = target.sidecarTarget.split('-', 1)[0]
+    assert.equal(
+      ['darwin', 'win32', 'linux'].includes(platform),
+      true,
+      `unsupported release-quality platform ${platform}`,
+    )
+    const rawCeilings = policyRecord(
+      target.performanceCeilings,
+      `${target.runner} performance ceilings`,
+    )
+    exactPolicyKeys(rawCeilings, REQUIRED_METRIC_NAMES, `${target.runner} performance ceilings`)
+    for (const name of REQUIRED_METRIC_NAMES) {
+      assert.equal(
+        Number.isSafeInteger(rawCeilings[name]) && rawCeilings[name] >= 0,
+        true,
+        `${target.runner} performance ceiling ${name} must be a non-negative safe integer`,
+      )
+    }
+    targetRows[target.runner] = Object.freeze({
+      sidecarTarget: target.sidecarTarget,
+      platform,
+      expectedOs: target.expectedOs,
+      actualOs: target.expectedOs,
+      arch: target.arch,
+      hostArch: target.hostArch,
+      platformValidated: true,
+      ceilings: frozenPolicyValues(rawCeilings, REQUIRED_METRIC_NAMES),
+    })
+  }
+
   return Object.freeze({
-    coldLaunchMs,
-    warmLaunchMs,
-    readyMs,
-    rssBytes,
-    rendererOutboundRequests: 0,
+    metricNames: Object.freeze([...performance.metrics]),
+    performancePolicyVersion,
+    toolVersions: frozenPolicyValues(toolVersions, REQUIRED_TOOL_NAMES),
+    targetRows: Object.freeze(targetRows),
   })
 }
 
-const macAndLinuxCeilings = ceilings(30_000, 20_000, 45_000, 1_610_612_736)
-const windowsCeilings = ceilings(45_000, 30_000, 60_000, 2_147_483_648)
-
-/**
- * Defines the exact native runner, architecture, operating-system, and performance rows accepted as release evidence.
- * @type {Readonly<Record<string, Readonly<Record<string, unknown>>>>}
- */
-export const TARGET_ROWS = Object.freeze({
-  'macos-15': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-15-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 15', actualOs: 'macOS 15', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26': Object.freeze({ sidecarTarget: 'darwin-arm64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'macos-26-intel': Object.freeze({ sidecarTarget: 'darwin-x64', platform: 'darwin', expectedOs: 'macOS 26', actualOs: 'macOS 26', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
-  'windows-11-arm': Object.freeze({ sidecarTarget: 'win32-arm64', platform: 'win32', expectedOs: 'Windows 11', actualOs: 'Windows 11', arch: 'arm64', hostArch: 'arm64', platformValidated: true, ceilings: windowsCeilings }),
-  'ubuntu-24.04': Object.freeze({ sidecarTarget: 'linux-x64', platform: 'linux', expectedOs: 'Ubuntu 24.04', actualOs: 'Ubuntu 24.04', arch: 'x64', hostArch: 'x64', platformValidated: true, ceilings: macAndLinuxCeilings }),
+const releaseQualityPolicy = JSON.parse(readFileSync(
+  new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+  'utf8',
+))
+const releaseQualityPolicyReference = Object.freeze({
+  id: releaseQualityPolicy.policyId,
+  schemaVersion: releaseQualityPolicy.schemaVersion,
+  sha256: createHash('sha256').update(canonicalJson(releaseQualityPolicy)).digest('hex'),
 })
+const releaseQualityContract = deriveReleaseQualityContract(releaseQualityPolicy)
+const METRIC_NAMES = releaseQualityContract.metricNames
+
+/** Identifies the central performance-threshold contract used by release evidence. */
+export const PERFORMANCE_POLICY_VERSION = releaseQualityContract.performancePolicyVersion
+
+/** Identifies the exact central-policy toolchain represented by desktop evidence. */
+export const TOOL_VERSIONS = releaseQualityContract.toolVersions
+
+/** Defines the native target rows accepted by the central release-quality policy. */
+export const TARGET_ROWS = releaseQualityContract.targetRows
 
 function exactHead(value, label = 'gitHead') {
   assert.match(value, SHA, `${label} must be a lowercase full Git commit SHA`)
@@ -84,8 +231,8 @@ function validateDigest(value, label, { nonempty = true } = {}) {
   return value
 }
 
-function receiptSummary(record, gitHead) {
-  const receipt = validateVerificationReceipt(record.receipt, gitHead)
+function receiptSummary(record, gitHead, expectedContext) {
+  const receipt = validateVerificationReceipt(record.receipt, gitHead, expectedContext)
   validateDigest(record.file, 'receipt file')
   return Object.freeze({
     ...receipt,
@@ -93,11 +240,11 @@ function receiptSummary(record, gitHead) {
   })
 }
 
-function deriveReceiptGates(records, requiredGates, gitHead) {
+function deriveReceiptGates(records, requiredGates, gitHead, expectedContext) {
   assert.equal(Array.isArray(records) && records.length > 0, true, 'verification receipt records are required')
   const expected = new Set(requiredGates)
   for (const record of records) {
-    validateVerificationReceipt(record.receipt, gitHead)
+    validateVerificationReceipt(record.receipt, gitHead, expectedContext)
     for (const gate of record.receipt.gates) {
       assert.equal(expected.has(gate), true, `receipt claims out-of-scope gate ${gate}`)
     }
@@ -109,7 +256,7 @@ function deriveReceiptGates(records, requiredGates, gitHead) {
     const matches = records.filter((record) => record.receipt.gates.includes(gate))
     assert.equal(matches.length, 1, `expected exactly one successful exact-head receipt for ${gate}`)
     gates[gate] = true
-    receipts[gate] = receiptSummary(matches[0], gitHead)
+    receipts[gate] = receiptSummary(matches[0], gitHead, expectedContext)
   }
   return Object.freeze({ gates: Object.freeze(gates), receipts: Object.freeze(receipts) })
 }
@@ -350,7 +497,8 @@ function validateTargetRow(input) {
 export function createTargetEvidence(input) {
   const gitHead = exactHead(input.gitHead)
   const expected = validateTargetRow(input)
-  const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead)
+  const receiptContext = Object.freeze({ runner: input.runner, sidecarTarget: input.sidecarTarget })
+  const derived = deriveReceiptGates(input.receiptRecords, TARGET_RECEIPT_GATES, gitHead, receiptContext)
   const metricsArtifact = artifactDigest(input.metricsBytes)
   const fuseInspectionArtifact = artifactDigest(input.fuseInspectionBytes)
   const fileGrantEvidenceArtifact = artifactDigest(input.fileGrantEvidenceBytes)
@@ -424,7 +572,12 @@ export function createTargetEvidence(input) {
  */
 export function createSecurityEvidence(input) {
   const gitHead = exactHead(input.gitHead)
-  const derived = deriveReceiptGates(input.receiptRecords, SECURITY_RECEIPT_GATES, gitHead)
+  const derived = deriveReceiptGates(
+    input.receiptRecords,
+    SECURITY_RECEIPT_GATES,
+    gitHead,
+    SECURITY_RECEIPT_CONTEXT,
+  )
   const sbom = artifactDigest(input.sbomBytes)
   assertArtifactBound(derived.receipts.sbomGeneratedPassed, 'sbom', sbom, 'SBOM')
   return Object.freeze({
@@ -447,11 +600,11 @@ async function jsonFiles(root) {
   return output
 }
 
-function validateReceiptSummary(summary, gate, gitHead, receiptRecords) {
+function validateReceiptSummary(summary, gate, gitHead, receiptRecords, expectedContext) {
   assert.equal(summary !== null && typeof summary === 'object' && !Array.isArray(summary), true, `receipt summary for ${gate} is missing`)
   const { receiptFile, ...receipt } = summary
   validateDigest(receiptFile, `${gate} receipt file`)
-  validateVerificationReceipt(receipt, gitHead)
+  validateVerificationReceipt(receipt, gitHead, expectedContext)
   assert.equal(receipt.gates.includes(gate), true, `${gate} receipt does not claim its evidence gate`)
   const matches = receiptRecords.filter((record) => (
     record.file.sha256 === receiptFile.sha256
@@ -462,11 +615,19 @@ function validateReceiptSummary(summary, gate, gitHead, receiptRecords) {
   return receipt
 }
 
-function validateDerivedReceipts(value, requiredGates, gitHead, receiptRecords) {
+function validateDerivedReceipts(value, requiredGates, gitHead, receiptRecords, expectedContext) {
   assert.deepEqual(value.gates, Object.fromEntries(requiredGates.map((gate) => [gate, true])), 'evidence gate set is incomplete')
   assert.deepEqual(Object.keys(value.receipts ?? {}), [...requiredGates], 'evidence receipt set is incomplete')
   const receipts = {}
-  for (const gate of requiredGates) receipts[gate] = validateReceiptSummary(value.receipts[gate], gate, gitHead, receiptRecords)
+  for (const gate of requiredGates) {
+    receipts[gate] = validateReceiptSummary(
+      value.receipts[gate],
+      gate,
+      gitHead,
+      receiptRecords,
+      expectedContext,
+    )
+  }
   return receipts
 }
 
@@ -490,7 +651,13 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.platformValidated, expected.platformValidated, `${value.runner} platformValidated is not derived from the executed target`)
   assert.equal(value.artifactKind, 'unpublished-unpacked-native')
   assert.equal(value.signingVerified, false)
-  const receipts = validateDerivedReceipts(value, TARGET_RECEIPT_GATES, gitHead, receiptRecords)
+  const receipts = validateDerivedReceipts(
+    value,
+    TARGET_RECEIPT_GATES,
+    gitHead,
+    receiptRecords,
+    { runner: value.runner, sidecarTarget: value.sidecarTarget },
+  )
   assert.equal(value.packageRuntime, value.gates.packageRuntimePassed)
   assert.equal(value.sidecarSmoke, value.gates.sidecarSmokePassed)
   assert.equal(value.fusesInspected, value.gates.fusesInspectedPassed)
@@ -551,7 +718,13 @@ function validateSecurityEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.schemaVersion, EVIDENCE_SCHEMA_VERSION, 'unsupported security evidence schema')
   assert.equal(value.kind, 'security')
   assert.equal(value.gitHead, gitHead, 'security evidence is not from the exact head')
-  const receipts = validateDerivedReceipts(value, SECURITY_RECEIPT_GATES, gitHead, receiptRecords)
+  const receipts = validateDerivedReceipts(
+    value,
+    SECURITY_RECEIPT_GATES,
+    gitHead,
+    receiptRecords,
+    SECURITY_RECEIPT_CONTEXT,
+  )
   validateDigest(value.sbom, 'security SBOM')
   assertArtifactBound(receipts.sbomGeneratedPassed, 'sbom', value.sbom, 'SBOM')
   const sbomFile = findArtifactFile(files, value.sbom, 'security SBOM')
@@ -563,7 +736,7 @@ function validateSecurityEvidence(value, gitHead, receiptRecords, files) {
  * Validates and aggregates exactly six target rows plus one security row from downloaded evidence.
  * @param {string} root - Directory containing receipts, evidence JSON, and referenced artifacts.
  * @param {string} requestedHead - Full Git commit that every record must match.
- * @returns {Promise<Readonly<Record<string, unknown>>>} Deterministically ordered schema-v2 release evidence.
+ * @returns {Promise<Readonly<Record<string, unknown>>>} Deterministically ordered schema-v3 release evidence.
  */
 export async function aggregateEvidence(root, requestedHead) {
   const gitHead = exactHead(requestedHead)
@@ -592,18 +765,24 @@ export async function aggregateEvidence(root, requestedHead) {
     .filter((value) => value.kind === 'target')
     .map((value) => validateTargetEvidence(value, gitHead, receiptRecords, files))
   const security = evidence.filter((value) => value.kind === 'security')
-  assert.equal(targets.length, Object.keys(TARGET_ROWS).length, 'expected exactly six target evidence rows')
+  assert.equal(
+    targets.length,
+    Object.keys(TARGET_ROWS).length,
+    'target evidence count does not match the release-quality policy',
+  )
   assert.equal(security.length, 1, 'expected exactly one security evidence row')
   assert.equal(new Set(targets.map((target) => target.runner)).size, targets.length, 'duplicate target evidence row')
   assert.deepEqual(targets.map((target) => target.runner).sort(), Object.keys(TARGET_ROWS).sort(), 'target evidence matrix is incomplete')
   const checkedSecurity = validateSecurityEvidence(security[0], gitHead, receiptRecords, files)
 
   return Object.freeze({
-    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    schemaVersion: AGGREGATE_EVIDENCE_SCHEMA_VERSION,
     kind: 'aggregate',
     gitHead,
     status: 'passed',
     platformValidated: true,
+    toolVersions: TOOL_VERSIONS,
+    policy: releaseQualityPolicyReference,
     targets: Object.freeze(targets.sort((left, right) => left.runner.localeCompare(right.runner))),
     security: checkedSecurity,
     publicationRequirements: Object.freeze({

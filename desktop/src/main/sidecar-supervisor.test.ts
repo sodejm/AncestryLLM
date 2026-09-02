@@ -109,6 +109,29 @@ describe('sidecar launch boundary', () => {
     )
   })
 
+  it('uses an ephemeral macOS workspace only for an explicit verifier launch', () => {
+    const source = {
+      HOME: '/private/home',
+      LANG: 'en_US.UTF-8',
+      OPENAI_API_KEY: 'canary-openai',
+      PYTHON_KEYRING_BACKEND: 'keyrings.alt.file.PlaintextKeyring',
+      TMPDIR: '/private/tmp/verification',
+    }
+
+    expect(minimalSidecarEnvironment('darwin', source, undefined, undefined, true)).toEqual({
+      ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE: '1',
+      LANG: 'en_US.UTF-8',
+      TMPDIR: '/private/tmp/verification',
+    })
+    expect(minimalSidecarEnvironment('darwin', source)).toEqual({
+      LANG: 'en_US.UTF-8',
+      TMPDIR: '/private/tmp/verification',
+    })
+    expect(() => minimalSidecarEnvironment('linux', source, undefined, 1000, true)).toThrow(
+      'macOS only',
+    )
+  })
+
   it('resolves only supported native bundle targets', () => {
     expect(resolveSidecarExecutable('/app/resources', 'darwin', 'arm64')).toBe(
       '/app/resources/sidecar/darwin-arm64/ancestryllm-sidecar/ancestryllm-sidecar',
