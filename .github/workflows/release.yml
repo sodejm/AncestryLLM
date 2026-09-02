@@ -306,6 +306,13 @@ jobs:
           assert actual == expected
           assert all(row["platformValidated"] is True for row in evidence["targets"])
           PY
+          python scripts/verify_release_quality.py \
+            --version "$version" \
+            --commit "$commit" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output approved/release-quality-approval.json
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "readiness_run=$readiness_run" >> "$GITHUB_OUTPUT"
@@ -346,12 +353,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
+          DESKTOP_RUN: ${{ needs.validate.outputs.desktop_run }}
           VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           BINARY_SIGNING_MODE: ${{ needs.validate.outputs.binary_signing_mode }}
         run: |
           mkdir approved
           gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
             --name release-evidence --dir approved
+          mkdir approved-desktop
+          gh run download "$DESKTOP_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name desktop-evidence-aggregate --dir approved-desktop
           cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS
           cmp "docs/release-evidence/$VERSION/findings.json" \
             approved/findings-dispositions.json
@@ -364,6 +376,13 @@ jobs:
             dist/version-1-security-gate-report.json
           cp approved/release-evidence.md dist/readiness-evidence.md
           cp "docs/release-notes/$VERSION.md" dist/release-notes.md
+          python scripts/verify_release_quality.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output dist/release-quality-approval.json
           printf '\n\n' >> dist/release-notes.md
           python scripts/release_signing_policy.py \
             --version "$VERSION" \
@@ -674,7 +693,7 @@ jobs:
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Unmount macOS installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -760,7 +779,7 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
-          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches the selected packaged runtime normally without a debugging transport"
           if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows installation
         if: always() && runner.os == 'Windows'
@@ -906,7 +925,7 @@ jobs:
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Remove temporary Ubuntu signing and installation state
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -1263,7 +1282,7 @@ jobs:
           node desktop/scripts/run-wdio.mjs packaged \
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Unmount macOS validation installer
         if: always() && runner.os == 'macOS'
         shell: bash
@@ -1344,7 +1363,7 @@ jobs:
           $env:ANCESTRYLLM_PACKAGED_APP = $application
           node desktop/scripts/run-wdio.mjs packaged --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           if ($LASTEXITCODE -ne 0) { throw "packaged Electron test exited $LASTEXITCODE" }
-          node desktop/scripts/run-wdio.mjs packaged --grep "launches production normally without a debugging transport"
+          node desktop/scripts/run-wdio.mjs packaged --grep "launches the selected packaged runtime normally without a debugging transport"
           if ($LASTEXITCODE -ne 0) { throw "normal packaged Electron test exited $LASTEXITCODE" }
       - name: Remove temporary Windows validation installation
         if: always() && runner.os == 'Windows'
@@ -1444,7 +1463,7 @@ jobs:
             --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus xvfb-run --auto-servernum \
             node desktop/scripts/run-wdio.mjs packaged \
-            --grep "launches production normally without a debugging transport"
+            --grep "launches the selected packaged runtime normally without a debugging transport"
       - name: Remove temporary Ubuntu validation installation
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -1855,6 +1874,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: read # required to download the exact approved evidence artifacts by run ID
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1878,10 +1898,19 @@ jobs:
           path: desktop-release
       - name: Merge exact release assets and regenerate final evidence
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+          READINESS_RUN: ${{ needs.validate.outputs.readiness_run }}
+          DESKTOP_RUN: ${{ needs.validate.outputs.desktop_run }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          mkdir approved
+          gh run download "$READINESS_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name release-evidence --dir approved
+          mkdir approved-desktop
+          gh run download "$DESKTOP_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name desktop-evidence-aggregate --dir approved-desktop
           python - python-release desktop-release dist <<'PY'
           import shutil
           import sys
@@ -1890,7 +1919,10 @@ jobs:
           python_dir, desktop_dir, output_dir = map(Path, sys.argv[1:])
           output_dir.mkdir()
           for source_dir, skipped in (
-              (python_dir, {"SHA256SUMS", "release-evidence.md"}),
+              (
+                  python_dir,
+                  {"SHA256SUMS", "release-evidence.md", "release-quality-approval.json"},
+              ),
               (desktop_dir, set()),
           ):
               for source in source_dir.iterdir():
@@ -1903,6 +1935,14 @@ jobs:
                       raise SystemExit(f"release asset collision: {source.name}")
                   shutil.copyfile(source, destination)
           PY
+          cmp dist/gates.json approved/gates.json
+          python scripts/verify_release_quality.py \
+            --version "$VERSION" \
+            --commit "$COMMIT_SHA" \
+            --gates approved/gates.json \
+            --desktop-evidence approved-desktop/desktop-evidence.json \
+            --policy config/release-quality-policy-v1.json \
+            --output dist/release-quality-approval.json
           python scripts/create_release_evidence.py \
             --version "$VERSION" \
             --commit "$COMMIT_SHA" \
@@ -1941,10 +1981,40 @@ jobs:
         with:
           subject-path: dist/*
 
+  verify-build-provenance:
+    name: verify build provenance
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-build-provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      attestations: read # required to retrieve build provenance
+      contents: read # required to identify the repository and signer workflow
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: dist
+      - name: Verify all build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+        shell: bash
+        run: |
+          found=false
+          while IFS= read -r -d '' asset; do
+            found=true
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$COMMIT_SHA"
+          done < <(find dist -type f -print0)
+          test "$found" = "true"
+
   draft-github-release:
     name: prepare draft GitHub Release
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, publish-build-provenance]
+    needs: [validate, assemble-release-distributions, verify-build-provenance]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1988,7 +2058,7 @@ jobs:
   publish-testpypi:
     name: publish TestPyPI
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, publish-build-provenance, draft-github-release]
+    needs: [validate, assemble-release-distributions, publish-build-provenance, verify-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -2244,7 +2314,7 @@ jobs:
   publish-github-release:
     name: publish immutable GitHub Release
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, draft-github-release, verify-pypi-hashes, verify-pypi-install, verify-docs-publication]
+    needs: [validate, assemble-release-distributions, verify-build-provenance, draft-github-release, verify-pypi-hashes, verify-pypi-install, verify-docs-publication]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

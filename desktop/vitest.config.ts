@@ -10,5 +10,16 @@ export default defineConfig({
     setupFiles: ['./src/renderer/src/test-setup.ts'],
     include: ['src/**/*.test.{ts,tsx}', 'e2e/**/*.test.ts'],
     restoreMocks: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['e2e/**', 'src/**/*.d.ts', 'src/renderer/src/test-setup.ts'],
+      thresholds: {
+        branches: 70,
+        functions: 75,
+        lines: 75,
+        statements: 75,
+      },
+    },
   },
 })

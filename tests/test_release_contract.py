@@ -301,10 +301,21 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "generate_release_checksums.py --directory dist" in release
     assert "--notes-file dist/release-notes.md" in release
     assert "subject-path: dist/*" in release
+    assert "verify-build-provenance:" in release
+    assert 'gh attestation verify "$asset"' in release
+    assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"' in release
+    assert '--source-digest "$COMMIT_SHA"' in release
+    assert 'test "$found" = "true"' in release
     assert "verify_codeql_sarif.py --directory codeql-sarif" in readiness
+    assert "needs: [validate, assemble-release-distributions, verify-build-provenance]" in release
     assert (
         "needs: [validate, assemble-release-distributions, publish-build-provenance, "
-        "draft-github-release]" in release
+        "verify-build-provenance, draft-github-release]" in release
+    )
+    assert (
+        "needs: [validate, assemble-release-distributions, verify-build-provenance, "
+        "draft-github-release, verify-pypi-hashes, verify-pypi-install, "
+        "verify-docs-publication]" in release
     )
     assert "import-desktop-release-distributions:" in release
     assert "Desktop-Release-Artifact-ID:" in release
@@ -313,6 +324,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verified-pypi-attestations" in release
     assert "artifact: [wheel, sdist]" in release
     assert "verify_release_assets.py" in release
+
     assert "verify_pypi_attestations.py" in release
     assert "pypi-attestations==0.0.30" in release
     assert "uv sync --locked --no-default-groups --group release-verifier" in release
@@ -336,6 +348,29 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "--actual downloaded" in release
     assert "--json isDraft,name,body" in release
     assert "--clobber" not in release
+
+
+def test_release_build_revalidates_one_exact_head_quality_approval_after_assembly() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    final_assembly = release.split("  assemble-release-distributions:", maxsplit=1)[1].split(
+        "\n  publish-build-provenance:", maxsplit=1
+    )[0]
+
+    assert release.count("scripts/verify_release_quality.py") >= 3
+    assert "--policy config/release-quality-policy-v1.json" in release
+    assert "--desktop-evidence approved-desktop/desktop-evidence.json" in release
+    assert "--output dist/release-quality-approval.json" in release
+    normalized_assembly = " ".join(final_assembly.split())
+    assert (
+        'python_dir, {"SHA256SUMS", "release-evidence.md", '
+        '"release-quality-approval.json"},' in normalized_assembly
+    )
+    assert 'gh run download "$READINESS_RUN"' in final_assembly
+    assert 'gh run download "$DESKTOP_RUN"' in final_assembly
+    assert "cmp dist/gates.json approved/gates.json" in final_assembly
+    assert final_assembly.index("scripts/verify_release_quality.py") < final_assembly.index(
+        "scripts/create_release_evidence.py"
+    )
 
 
 def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
@@ -514,6 +549,12 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
         "draft-github-release",
         "publish-github-release",
     }
+    assert _jobs_with_permission(release, "attestations: read") == {
+        "build",
+        "desktop-installers",
+        "verify-build-provenance",
+        "verify-pypi-hashes",
+    }
     assert "id-token: write" not in readiness
     assert "contents: write" not in readiness
 
@@ -521,10 +562,24 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
 def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    policy = json.loads(
+        (ROOT / "config/release-quality-policy-v1.json").read_text(encoding="utf-8")
+    )
 
     assert "name: uv-bootstrap-readiness-package" in readiness
     assert "--bootstrap-receipt evidence/bootstrap/uv-bootstrap.json" in readiness
-    assert readiness.count('"bootstrap-verification"') == 1
+    assert "--slurpfile quality_policy config/release-quality-policy-v1.json" in readiness
+    assert "quality_policy_sha" in readiness
+    assert "schema_version: 2" in readiness
+    assert "policy: {" in readiness
+    assert "id: $quality_policy[0].policyId" in readiness
+    assert "schemaVersion: $quality_policy[0].schemaVersion" in readiness
+    assert "sha256: $policy_sha" in readiness
+    assert "$quality_policy[0].qa.readinessGates" in readiness
+    assert "bootstrap-verification" in policy["qa"]["readinessGates"]
+    assert '"bootstrap-verification",' in readiness
+    assert "$quality_policy[0].qa.readinessGates == $manifest_gates" in readiness
+    assert "release readiness gates do not match the quality policy" in readiness
 
     assert "--bootstrap-receipt .tools/receipts/uv-bootstrap.json" in release
     assert "name: uv-bootstrap-release-build" in release
@@ -546,6 +601,7 @@ def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
         "scripts/verify_release_configuration.py",
         "scripts/verify_release_milestone.py",
         "scripts/verify_release_project.py",
+        "scripts/verify_release_quality.py",
     ),
 )
 def test_release_helpers_expose_non_mutating_help(script: str) -> None:

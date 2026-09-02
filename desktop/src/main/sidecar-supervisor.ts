@@ -16,6 +16,8 @@ import {
 export const API_CONTRACT = 'ancestryllm.internal-api/1'
 /** Reviewed path marker permitted only for isolated Linux keyring verification roots. */
 export const LINUX_KEYRING_VERIFICATION_SWITCH = 'ancestryllm-linux-keyring-verification-root'
+/** Reviewed marker permitted only for unpublished macOS ephemeral-workspace verification packages. */
+export const MACOS_EPHEMERAL_VERIFICATION_SWITCH = 'ancestryllm-macos-ephemeral-verification'
 
 /** Single bounded readiness frame emitted by the launched sidecar on standard output. */
 export interface SidecarReadyFrame {
@@ -67,6 +69,7 @@ interface SidecarSupervisorOptions {
   platform?: NodeJS.Platform
   sourceEnvironment?: NodeJS.ProcessEnv
   linuxKeyringVerificationRoot?: string | undefined
+  macosEphemeralWorkspaceVerification?: boolean
   onFatal?: (diagnostics: SidecarDiagnostics) => void
 }
 
@@ -156,8 +159,10 @@ export function minimalSidecarEnvironment(
   source: NodeJS.ProcessEnv,
   linuxKeyringVerificationRoot?: string,
   linuxUserId?: number,
+  macosEphemeralWorkspaceVerification = false,
 ): NodeJS.ProcessEnv {
   validateLinuxKeyringVerificationRoot(platform, linuxKeyringVerificationRoot)
+  validateMacosEphemeralVerification(platform, macosEphemeralWorkspaceVerification)
   const platformAllowed = platform === 'win32'
     ? ['SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP']
     : platform === 'linux'
@@ -187,6 +192,9 @@ export function minimalSidecarEnvironment(
       environment.XDG_DATA_HOME = posix.join(home, '.local', 'share')
     }
   }
+  if (macosEphemeralWorkspaceVerification) {
+    environment.ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE = '1'
+  }
   return environment
 }
 
@@ -211,6 +219,16 @@ function validateLinuxKeyringVerificationRoot(
   }
   if (!root || !posix.isAbsolute(root)) {
     throw new Error('The Linux keyring verification root must be an absolute Linux path.')
+  }
+}
+
+/** Restricts the ephemeral sidecar workspace to an explicit macOS verifier launch. */
+function validateMacosEphemeralVerification(
+  platform: NodeJS.Platform,
+  enabled: boolean,
+): void {
+  if (enabled && platform !== 'darwin') {
+    throw new Error('The macOS ephemeral verification workspace is supported on macOS only.')
   }
 }
 
@@ -333,6 +351,10 @@ export class SidecarSupervisor {
     validateLinuxKeyringVerificationRoot(
       options.platform ?? process.platform,
       options.linuxKeyringVerificationRoot,
+    )
+    validateMacosEphemeralVerification(
+      options.platform ?? process.platform,
+      options.macosEphemeralWorkspaceVerification ?? false,
     )
     this.remainingRestarts = options.maxRestarts
     this.remainingManualRetries = options.maxManualRetries ?? 0
@@ -502,6 +524,8 @@ export class SidecarSupervisor {
           this.options.platform ?? process.platform,
           this.options.sourceEnvironment ?? process.env,
           this.options.linuxKeyringVerificationRoot,
+          undefined,
+          this.options.macosEphemeralWorkspaceVerification,
         ),
         launchFrame,
       })

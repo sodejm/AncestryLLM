@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "policyId": "ancestryllm-release-quality-v1",
+  "families": {
+    "qa": {
+      "owner": "release-owner",
+      "commands": [
+        "make test",
+        "make lint",
+        "make typecheck",
+        "pnpm --dir desktop run verify:source",
+        "pnpm --dir desktop run test:coverage",
+        "pnpm --dir desktop run test:accessibility",
+        "pnpm --dir desktop run test:e2e"
+      ]
+    },
+    "security": {
+      "owner": "security-owner",
+      "commands": [
+        "make security",
+        "make sbom",
+        "pnpm --dir desktop run audit",
+        "pnpm --dir desktop run check:secrets",
+        "pnpm --dir desktop run sbom"
+      ]
+    },
+    "performance": {
+      "owner": "desktop-owner",
+      "commands": [
+        "node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence",
+        "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence"
+      ]
+    },
+    "diagnostics": {
+      "owner": "desktop-owner",
+      "commands": [
+        "make test",
+        "pnpm --dir desktop run test:coverage"
+      ]
+    }
+  },
+  "evidence": {
+    "inputs": [
+      {
+        "artifact": "release-evidence",
+        "path": "gates.json"
+      },
+      {
+        "artifact": "desktop-evidence-aggregate",
+        "path": "desktop-evidence.json"
+      }
+    ],
+    "approvalPath": "release-quality-approval.json",
+    "verifier": "scripts/verify_release_quality.py"
+  },
+  "qa": {
+    "readinessGates": [
+      "bootstrap-verification",
+      "codeql",
+      "cross-platform-install",
+      "cyclonedx-sbom",
+      "dependency-audit",
+      "lifecycle-audit",
+      "mypy",
+      "privacy-regressions",
+      "project-release-gate",
+      "repository-safety",
+      "reproducible-distributions",
+      "ruff-format",
+      "secret-scan",
+      "semgrep",
+      "tests-and-coverage",
+      "version-1-security-dependencies",
+      "workflow-security-analysis"
+    ],
+    "toolVersions": {
+      "python": "3.12",
+      "node": "26.5.0",
+      "pnpm": "11.9.0",
+      "vitest": "3.2.7",
+      "webdriverio": "9.31.2"
+    },
+    "desktopCoverage": {
+      "provider": "v8",
+      "thresholds": {
+        "branches": 70,
+        "functions": 75,
+        "lines": 75,
+        "statements": 75
+      },
+      "reviewedExclusions": [
+        "e2e/**",
+        "src/**/*.d.ts",
+        "src/renderer/src/test-setup.ts"
+      ]
+    }
+  },
+  "security": {
+    "desktopReceiptGates": [
+      "runnerVersionsPassed",
+      "desktopLintPassed",
+      "desktopTypecheckPassed",
+      "desktopCoveragePassed",
+      "accessibilityPassed",
+      "sourceWebdriverPassed",
+      "diagnosticsContractPassed",
+      "jsStaticAnalysisPassed",
+      "auditPassed",
+      "secretsPassed",
+      "buildInspectionPassed",
+      "apiContractPassed",
+      "authBeforeParsingPassed",
+      "domainRoutesAbsentPassed",
+      "ipcSenderValidationPassed",
+      "sidecarCompatibilityPassed",
+      "sidecarIntegrityPassed",
+      "providerNoneNetworkFreePassed",
+      "redactionPassed",
+      "sbomGeneratedPassed"
+    ]
+  },
+  "performance": {
+    "policyVersion": "desktop-unpacked-v1",
+    "method": {
+      "receiptGate": "packageRuntimePassed",
+      "measurementSource": "desktop/e2e/packaged-shell.wdio.ts",
+      "validator": "desktop/scripts/verification-evidence.mjs",
+      "packageBoundary": "unpacked-native"
+    },
+    "metrics": [
+      "coldLaunchMs",
+      "warmLaunchMs",
+      "readyMs",
+      "rssBytes",
+      "rendererOutboundRequests"
+    ],
+    "targets": [
+      {
+        "runner": "macos-15",
+        "sidecarTarget": "darwin-arm64",
+        "expectedOs": "macOS 15",
+        "arch": "arm64",
+        "hostArch": "arm64",
+        "performanceCeilings": {
+          "coldLaunchMs": 30000,
+          "warmLaunchMs": 20000,
+          "readyMs": 45000,
+          "rssBytes": 1610612736,
+          "rendererOutboundRequests": 0
+        }
+      },
+      {
+        "runner": "macos-15-intel",
+        "sidecarTarget": "darwin-x64",
+        "expectedOs": "macOS 15",
+        "arch": "x64",
+        "hostArch": "x64",
+        "performanceCeilings": {
+          "coldLaunchMs": 30000,
+          "warmLaunchMs": 20000,
+          "readyMs": 45000,
+          "rssBytes": 1610612736,
+          "rendererOutboundRequests": 0
+        }
+      },
+      {
+        "runner": "macos-26",
+        "sidecarTarget": "darwin-arm64",
+        "expectedOs": "macOS 26",
+        "arch": "arm64",
+        "hostArch": "arm64",
+        "performanceCeilings": {
+          "coldLaunchMs": 30000,
+          "warmLaunchMs": 20000,
+          "readyMs": 45000,
+          "rssBytes": 1610612736,
+          "rendererOutboundRequests": 0
+        }
+      },
+      {
+        "runner": "macos-26-intel",
+        "sidecarTarget": "darwin-x64",
+        "expectedOs": "macOS 26",
+        "arch": "x64",
+        "hostArch": "x64",
+        "performanceCeilings": {
+          "coldLaunchMs": 30000,
+          "warmLaunchMs": 20000,
+          "readyMs": 45000,
+          "rssBytes": 1610612736,
+          "rendererOutboundRequests": 0
+        }
+      },
+      {
+        "runner": "windows-11-arm",
+        "sidecarTarget": "win32-arm64",
+        "expectedOs": "Windows 11",
+        "arch": "arm64",
+        "hostArch": "arm64",
+        "performanceCeilings": {
+          "coldLaunchMs": 45000,
+          "warmLaunchMs": 30000,
+          "readyMs": 60000,
+          "rssBytes": 2147483648,
+          "rendererOutboundRequests": 0
+        }
+      },
+      {
+        "runner": "ubuntu-24.04",
+        "sidecarTarget": "linux-x64",
+        "expectedOs": "Ubuntu 24.04",
+        "arch": "x64",
+        "hostArch": "x64",
+        "performanceCeilings": {
+          "coldLaunchMs": 30000,
+          "warmLaunchMs": 20000,
+          "readyMs": 45000,
+          "rssBytes": 1610612736,
+          "rendererOutboundRequests": 0
+        }
+      }
+    ]
+  },
+  "diagnostics": {
+    "schemaVersion": "ancestryllm.desktop-diagnostic/1",
+    "schemaPath": "schemas/desktop-diagnostic-v1.schema.json",
+    "schemaSha256": "9cf0976dd5222ddd3fdb6f8bd777a0b05b6c64fe02ec8a33e7860d33e4c34d9c",
+    "safeCodesSource": "schema properties.code.enum",
+    "syntheticCanaryGate": "diagnosticsContractPassed",
+    "retention": {
+      "maxBytesPerFile": 524288,
+      "maxFilesPerComponent": 3
+    },
+    "telemetry": false
+  },
+  "exceptions": []
+}

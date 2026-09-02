@@ -29,6 +29,45 @@ values and no open dependency. Draft or non-Issue Project items, unconfigured
 priorities, incomplete pagination, missing coordinates, or scope and state
 mismatches fail the gate closed.
 
+## Release quality approval contract
+
+`config/release-quality-policy-v1.json` is the versioned, authoritative
+contract for the QA, security, performance, and diagnostics evidence that may
+approve a release commit. The contract names each accountable owner, the exact
+readiness and desktop receipt gates, pinned tool versions, coverage policy,
+native performance method and ceilings, diagnostic schema and retention, and
+the commands that produce the evidence:
+
+| Family | Owner | Required commands |
+|---|---|---|
+| QA | `release-owner` | `make test`; `make lint`; `make typecheck`; `pnpm --dir desktop run verify:source`; `pnpm --dir desktop run test:coverage`; `pnpm --dir desktop run test:accessibility`; `pnpm --dir desktop run test:e2e` |
+| Security | `security-owner` | `make security`; `make sbom`; `pnpm --dir desktop run audit`; `pnpm --dir desktop run check:secrets`; `pnpm --dir desktop run sbom` |
+| Performance | `desktop-owner` | `node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence`; `desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence` |
+| Diagnostics | `desktop-owner` | `make test`; `pnpm --dir desktop run test:coverage` |
+
+Release readiness writes schema-v2 `release-evidence/gates.json`; the exact-head
+desktop aggregate writes schema-v3
+`desktop-evidence-aggregate/desktop-evidence.json`. Both source artifacts carry
+the canonical policy identity, schema version, and SHA-256 digest.
+`scripts/verify_release_quality.py` accepts only those closed-schema artifacts,
+recomputes the policy digest and policy reference, requires both artifacts and
+every nested receipt to name the requested full commit SHA, and writes
+`release-quality-approval.json`. Missing, extra, malformed, stale,
+wrong-version, wrong-tool, failed, or unapproved evidence is a blocking error.
+The verifier runs once before the release job can begin and again after final
+distribution assembly. The second pass re-downloads the two immutable source
+artifacts, checks the assembled readiness evidence against its approved copy,
+and regenerates the same deterministic approval in
+`dist/release-quality-approval.json` so it is covered by the release checksums
+and provenance.
+
+The schema permits only explicitly recorded, unexpired exception documents
+with a known family and gate, an owner, an independent approver, a reason, and
+an expiry no later than 90 days after verification. An exception is an
+auditable disclosure and never changes a failed gate into a pass. The v1 policy
+contains no exceptions. Any future waiver semantics require a reviewed
+policy-schema revision; editing an evidence artifact cannot create one.
+
 ## Future deployment-runtime release gate
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
@@ -471,12 +510,16 @@ then the verified repository contract requires exactly `uv` 0.12.1, selects
 only that system interpreter, and disables Python downloads. The workflow calls
 the same `make package` and `make sbom` interfaces used locally after its narrow
 locked synchronization.
-The workflow then attests the combined artifacts; prepares a draft GitHub
-Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
-not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
-artifact hashes; and pauses for required production approval. Production PyPI
-publishing explicitly requests `attestations: true`. The workflow then verifies
-the PEP 740 provenance for both the wheel and source distribution, including
+The workflow then attests the combined artifacts and immediately downloads the
+complete distribution artifact into a separate job. Before it may prepare a
+draft GitHub Release, publish to TestPyPI or PyPI, or publish the immutable
+GitHub Release, `gh attestation verify` must accept every release asset for the
+exact repository, `.github/workflows/release.yml` signer workflow, and release
+commit. TestPyPI publishing uses `attestations: false` because TestPyPI does not
+provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
+artifact hashes and then pauses for required production approval. Production
+PyPI publishing explicitly requests `attestations: true`. The workflow then
+verifies the PEP 740 provenance for both the wheel and source distribution, including
 exact repository, workflow, environment, filename, and SHA-256 identity, with
 the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. The workflow installs this tool

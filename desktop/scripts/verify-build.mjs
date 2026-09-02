@@ -27,6 +27,7 @@ const prohibitedPackagedFileGrantContent = [
 ]
 const prohibitedPackagedNativeVerificationContent = [
   /ancestryllm-linux-keyring-verification-root/,
+  /ancestryllm-macos-ephemeral-verification/,
 ]
 async function files(root) { return (await readdir(root, { withFileTypes: true })).flatMap((entry) => entry.isDirectory() ? [] : [join(root, entry.name)]) }
 async function walk(root) {

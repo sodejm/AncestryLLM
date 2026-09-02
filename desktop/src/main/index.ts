@@ -34,7 +34,10 @@ import {
   writeConcurrentLocalRuntimeCliFailure,
 } from './local-runtime-cli'
 import { createPackagedLocalRuntimeControl } from './local-runtime-control'
-import { requestedLinuxKeyringVerificationRoot } from './native-verification'
+import {
+  requestedLinuxKeyringVerificationRoot,
+  requestedMacosEphemeralVerification,
+} from './native-verification'
 import { createNativeFileDialogPort } from './native-file-dialogs'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 import {
@@ -304,6 +307,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
       armVerifiedSigtermHandler()
     }, {
       linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot(app.commandLine),
+      macosEphemeralWorkspaceVerification: requestedMacosEphemeralVerification(app.commandLine),
       diagnosticRunId,
       diagnosticDirectory,
       recordDiagnostic: recordDesktopDiagnostic,

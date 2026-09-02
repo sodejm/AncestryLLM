@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  normalLaunchInvocation,
   preparePackagedScenario,
   runWdio,
   runWdioPlan,
@@ -52,6 +53,23 @@ test('pnpm separator is not forwarded to WebdriverIO', () => {
     'task center streams one safe cancellation lifecycle',
   ])
   assert.equal(invocation.args.includes('--'), false)
+})
+
+test('normal packaged launch uses the direct process verifier without WebDriver', () => {
+  const invocation = normalLaunchInvocation({
+    desktopRoot: '/repo/desktop',
+    environment: { ANCESTRYLLM_PACKAGED_EXECUTABLE: '/repo/release/ancestryllm' },
+    executable: '/usr/bin/node',
+  })
+
+  assert.deepEqual(invocation.args, [
+    '/repo/desktop/scripts/verify-normal-launch.mjs',
+  ])
+  assert.equal(invocation.executable, '/usr/bin/node')
+  assert.equal(invocation.cwd, '/repo/desktop')
+  assert.equal(invocation.env.ANCESTRYLLM_PACKAGED_EXECUTABLE, '/repo/release/ancestryllm')
+  assert.equal(invocation.env.ANCESTRYLLM_WDIO_MODE, 'packaged')
+  assert.equal(invocation.args.some((argument) => argument.includes('wdio')), false)
 })
 
 test('source run selects the degraded fixture and removes its isolated profile', () => {
@@ -201,7 +219,7 @@ test('packaged grep rejects multiple declared scenario matches before preparatio
 
   assert.throws(
     () => runWdio('packaged', ['--grep', 'packaged'], runnerOptions(calls)),
-    /must match exactly one declared packaged scenario; matched 4/u,
+    /must match exactly one declared packaged scenario; matched 5/u,
   )
   assert.equal(calls.some((call) => call.preparation !== undefined), false)
   assert.equal(calls.some((call) => call.args !== undefined), false)
@@ -315,6 +333,10 @@ test('complete packaged plan prepares and cleans every isolated scenario', () =>
   assert.equal(invocations.every(({ options }) => (
     options.env.ANCESTRYLLM_PACKAGED_EXECUTABLE === '/repo/release/ancestryllm'
   )), true)
+  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).length, 5)
+  assert.equal(invocations.filter(({ args }) => (
+    args.includes('/repo/desktop/scripts/verify-normal-launch.mjs')
+  )).length, 1)
 })
 
 test('non-filter options are forwarded to every isolated packaged scenario', () => {
@@ -330,9 +352,12 @@ test('non-filter options are forwarded to every isolated packaged scenario', () 
   assert.equal(preparations.length, 6)
   assert.equal(new Set(preparations).size, 6)
   assert.equal(preparations.every((scenario) => scenario.length > 0), true)
-  assert.equal(invocations.every(({ args }) => (
+  assert.equal(invocations.slice(0, 5).every(({ args }) => (
     args.includes('--mochaOpts.grep')
       && args.includes('--logLevel')
       && args.includes('debug')
   )), true)
+  assert.deepEqual(invocations[5].args, [
+    '/repo/desktop/scripts/verify-normal-launch.mjs',
+  ])
 })

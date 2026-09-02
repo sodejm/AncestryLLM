@@ -331,6 +331,13 @@ def test_configures_reviewed_python_registry_bundle() -> None:
     )
     assert (
         runner.RuleRevision(
+            sha256="449934d9be1f6f2ea91ff5175a8629cc93c38f8f52ca3da44e43089bcca44260",
+            size=487_962,
+        )
+        in python.revisions
+    )
+    assert (
+        runner.RuleRevision(
             sha256="0b7d2717d79da2ce99bffa329d954833e2ecc034b7ff86f0932a38ce416b5946",
             size=487_962,
         )
@@ -381,6 +388,13 @@ def test_configures_reviewed_python_registry_bundle() -> None:
     assert (
         runner.RuleRevision(
             sha256="c8a84a1877ad8c93e189377b80c798ed27aec80ee85a977409af05a526c54b4b",
+            size=487_962,
+        )
+        in python.revisions
+    )
+    assert (
+        runner.RuleRevision(
+            sha256="7476830701b31be1c4a76432e23950b86ec76635888103877ca24708e7c01c76",
             size=487_962,
         )
         in python.revisions

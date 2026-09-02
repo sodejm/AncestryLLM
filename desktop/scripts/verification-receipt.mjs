@@ -15,7 +15,7 @@ const ARTIFACT_NAME = /^[A-Za-z][A-Za-z0-9]*$/
  * Selects the only verification-receipt schema emitted and accepted by current jobs.
  * @type {number}
  */
-export const RECEIPT_SCHEMA_VERSION = 2
+export const RECEIPT_SCHEMA_VERSION = 3
 /**
  * Enumerates the exact native-target gate names that receipts may claim.
  * @type {readonly string[]}
@@ -37,15 +37,23 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
  * @type {readonly string[]}
  */
 export const SECURITY_RECEIPT_GATES = Object.freeze([
+  'accessibilityPassed',
   'auditPassed',
-  'secretsPassed',
-  'buildInspectionPassed',
   'apiContractPassed',
   'authBeforeParsingPassed',
+  'buildInspectionPassed',
+  'desktopCoveragePassed',
+  'desktopLintPassed',
+  'desktopTypecheckPassed',
+  'diagnosticsContractPassed',
   'domainRoutesAbsentPassed',
   'ipcSenderValidationPassed',
+  'jsStaticAnalysisPassed',
+  'runnerVersionsPassed',
+  'secretsPassed',
   'sidecarCompatibilityPassed',
   'sidecarIntegrityPassed',
+  'sourceWebdriverPassed',
   'providerNoneNetworkFreePassed',
   'redactionPassed',
   'sbomGeneratedPassed',
@@ -93,6 +101,25 @@ function validateCommand(value) {
   return value
 }
 
+function validateReceiptContext(value) {
+  assert.deepEqual(
+    Object.keys(value ?? {}).sort(),
+    ['runner', 'sidecarTarget'],
+    'receipt context must use the exact schema',
+  )
+  assert.equal(
+    typeof value.runner === 'string' && value.runner.length > 0,
+    true,
+    'receipt context runner is missing',
+  )
+  assert.equal(
+    typeof value.sidecarTarget === 'string' && value.sidecarTarget.length > 0,
+    true,
+    'receipt context sidecarTarget is missing',
+  )
+  return value
+}
+
 function validateWorkspace(value) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
@@ -118,14 +145,16 @@ function validateWorkspace(value) {
  * Validates an exact-schema, successful receipt and all of its head, command, digest, and workspace bindings.
  * @param {Record<string, any>} value - Untrusted parsed receipt document.
  * @param {string} [requestedHead] - Optional full Git commit the receipt must prove.
+ * @param {{runner: string, sidecarTarget: string}} [requestedContext] - Optional exact execution context the receipt must prove.
  * @returns {Record<string, any>} The original document after fail-closed validation.
  */
-export function validateVerificationReceipt(value, requestedHead) {
+export function validateVerificationReceipt(value, requestedHead, requestedContext) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
     [
       'artifacts',
       'command',
+      'context',
       'gates',
       'gitHead',
       'headAfter',
@@ -141,6 +170,12 @@ export function validateVerificationReceipt(value, requestedHead) {
   assert.equal(value.schemaVersion, RECEIPT_SCHEMA_VERSION, 'unsupported verification receipt schema')
   assert.equal(value.kind, 'verification-receipt', 'unexpected receipt kind')
   assert.equal(value.status, 'passed', 'verification receipt did not pass')
+
+  validateReceiptContext(value.context)
+  if (requestedContext !== undefined) {
+    validateReceiptContext(requestedContext)
+    assert.deepEqual(value.context, requestedContext, 'receipt is not from the requested execution context')
+  }
 
   const gitHead = exactHead(value.gitHead)
   if (requestedHead !== undefined) assert.equal(gitHead, exactHead(requestedHead, 'requestedHead'), 'receipt is not from the requested exact head')
@@ -415,10 +450,12 @@ function executeCommand(executable, args, repositoryRoot, { forwardOutput }) {
 /**
  * Runs a gate only in a clean exact-head workspace and exclusively writes its validated receipt.
  * @param {Record<string, any>} options - Exact head, output, gate, artifact, allowed-output, command, and test-injection options.
- * @returns {Promise<Readonly<Record<string, unknown>>>} Schema-v2 receipt bound to command output, artifacts, and unchanged workspace state.
+ * @returns {Promise<Readonly<Record<string, unknown>>>} Schema-v3 receipt bound to execution context, command output, artifacts, and unchanged workspace state.
  */
 export async function runVerificationCommand({
   gitHead: requestedHead,
+  runner,
+  sidecarTarget,
   outputPath,
   gates,
   artifacts = {},
@@ -428,6 +465,8 @@ export async function runVerificationCommand({
   forwardOutput = true,
 }) {
   const expectedHead = exactHead(requestedHead, 'requestedHead')
+  const context = Object.freeze({ runner, sidecarTarget })
+  validateReceiptContext(context)
   assert.equal(typeof outputPath === 'string' && outputPath.length > 0, true, 'outputPath is required')
   assert.equal(Array.isArray(gates) && gates.length > 0, true, 'at least one receipt gate is required')
   const sortedGates = [...gates].sort()
@@ -479,6 +518,7 @@ export async function runVerificationCommand({
     kind: 'verification-receipt',
     status: 'passed',
     gitHead: expectedHead,
+    context,
     headBefore,
     headAfter,
     gates: Object.freeze(sortedGates),
@@ -493,7 +533,7 @@ export async function runVerificationCommand({
       status: 'unchanged',
     }),
   })
-  validateVerificationReceipt(receipt, expectedHead)
+  validateVerificationReceipt(receipt, expectedHead, context)
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, `${JSON.stringify(receipt, null, 2)}\n`, {
     encoding: 'utf8',
@@ -571,6 +611,12 @@ export function parseReceiptArguments(argv) {
     } else if (name === '--git-head') {
       assert.equal(parsed.gitHead, undefined, 'Duplicate --git-head')
       parsed.gitHead = value
+    } else if (name === '--runner') {
+      assert.equal(parsed.runner, undefined, 'Duplicate --runner')
+      parsed.runner = value
+    } else if (name === '--sidecar-target') {
+      assert.equal(parsed.sidecarTarget, undefined, 'Duplicate --sidecar-target')
+      parsed.sidecarTarget = value
     } else if (name === '--output') {
       assert.equal(parsed.outputPath, undefined, 'Duplicate --output')
       parsed.outputPath = value
@@ -581,6 +627,8 @@ export function parseReceiptArguments(argv) {
     }
   }
   assert.ok(parsed.gitHead, 'Missing --git-head')
+  assert.ok(parsed.runner, 'Missing --runner')
+  assert.ok(parsed.sidecarTarget, 'Missing --sidecar-target')
   assert.ok(parsed.outputPath, 'Missing --output')
   assert.equal(parsed.gates.length > 0, true, 'Missing --gate')
   return parsed

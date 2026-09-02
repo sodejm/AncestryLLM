@@ -59,15 +59,16 @@ test('production build inspection rejects packaged file-grant verification selec
   }
 })
 
-test('production build inspection rejects the native keyring verification selector', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
-  await mkdir(join(root, 'out'))
-  await writeFile(
-    join(root, 'out', 'index.js'),
-    "const argument = '--ancestryllm-linux-keyring-verification-root=/tmp/private'",
-  )
-
-  await assert.rejects(inspectBuild(join(root, 'out')))
+test('production build inspection rejects native storage verification selectors', async () => {
+  for (const selector of [
+    '--ancestryllm-linux-keyring-verification-root=/tmp/private',
+    '--ancestryllm-macos-ephemeral-verification',
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+    await mkdir(join(root, 'out'))
+    await writeFile(join(root, 'out', 'index.js'), `const argument = '${selector}'`)
+    await assert.rejects(inspectBuild(join(root, 'out')))
+  }
 })
 
 test('packaged native-verification build permits only its dedicated selector', async () => {
@@ -75,7 +76,7 @@ test('packaged native-verification build permits only its dedicated selector', a
   await mkdir(join(root, 'out'))
   await writeFile(
     join(root, 'out', 'index.js'),
-    "const argument = '--ancestryllm-linux-keyring-verification-root=/tmp/private'",
+    "const arguments = ['--ancestryllm-linux-keyring-verification-root=/tmp/private', '--ancestryllm-macos-ephemeral-verification']",
   )
   await inspectBuild(join(root, 'out'), { allowPackagedNativeVerification: true })
 

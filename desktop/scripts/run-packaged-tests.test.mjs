@@ -86,7 +86,7 @@ test('packaged test runner executes the exact invocation without a shell', () =>
   }])
 })
 
-test('packaged test runner preserves scenario isolation with non-filter options', () => {
+test('packaged test runner preserves WebDriver options without passing them to the direct verifier', () => {
   const calls = []
   const scenarios = []
   const status = runPackagedTests(['--logLevel', 'debug'], {
@@ -108,9 +108,12 @@ test('packaged test runner preserves scenario isolation with non-filter options'
   assert.equal(calls.length, 6)
   assert.equal(scenarios.length, 6)
   assert.equal(new Set(scenarios).size, 6)
-  assert.equal(calls.every(({ args }) => (
+  assert.equal(calls.slice(0, -1).every(({ args }) => (
     args.includes('--mochaOpts.grep')
       && args.includes('--logLevel')
       && args.includes('debug')
   )), true)
+  assert.deepEqual(calls.at(-1)?.args, [
+    '/repo/desktop/scripts/verify-normal-launch.mjs',
+  ])
 })

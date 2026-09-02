@@ -504,10 +504,12 @@ still requires its distribution and target-assurance gates to pass.
   through WebDriver and independently observes that both the packaged Main PID
   and active sidecar PID disappear within bounded deadlines. Because the secure
   packaged service session does not expose its child-process exit tuple, the row
-  also performs a separate ordinary production launch. Windows requests native
-  window closure through the launched PID's `CloseMainWindow()` operation;
-  macOS and Linux send `SIGTERM` through the production signal-to-quit path.
-  That ordinary launch must report the exact native result
+  also performs a separate transport-free launch of the selected packaged
+  runtime: the production package on Windows and the unpublished native
+  verifier package on Linux and macOS. Windows requests native window closure
+  through the launched PID's `CloseMainWindow()` operation; macOS and Linux
+  send `SIGTERM` through the shared production signal-to-quit path. That launch
+  must report the exact native result
   `{ code: 0, signal: null }`. A timeout, nonzero code, signal termination, or
   force-kill cleanup never satisfies the clean-shutdown proof. The harness does
   not use a broadcast, renderer close shortcut, raw CDP browser shutdown, or a
@@ -1606,6 +1608,27 @@ representation, storage schema, FastAPI contract, or Electron boundary. It
 continues to trust authorized GitHub maintainers and GitHub's Project, issue,
 dependency, API, and token enforcement. Missing access, incomplete data, or a
 mutated policy/report fails closed rather than weakening that residual trust.
+
+Release quality has a separate schema-v1 delivery contract in
+`config/release-quality-policy-v1.json`. It assigns QA, security, performance,
+and diagnostics to named evidence owners; declares their exact commands,
+toolchain versions, readiness and desktop receipt gates, coverage policy,
+native-target performance ceilings, and diagnostic schema and retention
+limits; and permits only explicit, owned, independently approved, unexpired
+exceptions. `scripts/verify_release_quality.py` consumes the release-readiness
+schema-v2 and desktop aggregate schema-v3 artifacts, requires both to describe
+the exact release commit and the canonical policy identity, schema version,
+and digest, and emits one deterministic approval manifest. Release evaluates
+the two source artifacts before packaging, revalidates the retained approval
+and inputs immediately before publication, and verifies build provenance for
+every assembled release asset before any publication path can proceed.
+
+This release-quality boundary is repository delivery governance only. It adds
+no application command, API, DTO, storage, provider, GEDCOM, FastAPI, Electron,
+diagnostic export, network, or telemetry authority. Its performance ceilings
+describe hosted unpacked-native package evidence rather than a runtime
+scheduler or service-level guarantee. Missing, stale, substituted, malformed,
+wrong-head, over-budget, or unapproved-exception evidence blocks delivery.
 
 CI may synchronize a purpose-specific PEP 735 dependency group before running
 a gate, but it invokes the same Make target and cannot vary the actual command

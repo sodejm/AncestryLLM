@@ -145,6 +145,18 @@ artifact. Missing, extra, unpinned, duplicate, unknown, or unused records fail
 closed. This completeness control supplements rather than replaces Semgrep,
 zizmor, CycloneDX, gitleaks, TruffleHog, and CodeQL.
 
+The release-quality contract in `config/release-quality-policy-v1.json`
+assigns QA, security, performance, and diagnostics evidence to named owners and
+binds one exact-head approval to the release-readiness and desktop aggregate
+artifacts. Its closed verifier checks the complete readiness inventory, pinned
+tool versions, required desktop security receipts, target-specific performance
+ceilings, the diagnostic schema digest and retention limits, and any explicitly
+approved unexpired exception. Release verifies the same approval again
+immediately before publication. The diagnostic canary uses fictional values,
+enables no telemetry or collection, and cannot substitute for the separate
+runtime controls. Passing this gate is release evidence, not proof that the
+application or its dependencies contain no vulnerability.
+
 Version 1 security sequencing is enforced by a checked-in schema-v1 policy and
 one shared GitHub Project query. Proof, readiness, and release reject missing or
 contradictory native dependencies, wrong issue ownership or iterations, cycles,

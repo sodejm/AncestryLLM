@@ -50,7 +50,7 @@ GOVERNED_JOB_TIMEOUTS = {
     },
     ".github/workflows/desktop-sidecar.yml": {
         "changes": 5,
-        "desktop-security": 30,
+        "desktop-security": 60,
         "native-package": 45,
         "desktop-gate": 10,
     },
@@ -64,6 +64,7 @@ GOVERNED_JOB_TIMEOUTS = {
         "import-desktop-release-distributions": 30,
         "assemble-release-distributions": 30,
         "publish-build-provenance": 20,
+        "verify-build-provenance": 20,
         "draft-github-release": 20,
         "publish-testpypi": 20,
         "verify-testpypi": 30,

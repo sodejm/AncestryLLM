@@ -11,3 +11,11 @@ export function requestedLinuxKeyringVerificationRoot(
   void commandLine
   return undefined
 }
+
+/** Production launchers cannot opt into the verifier's ephemeral macOS workspace. */
+export function requestedMacosEphemeralVerification(
+  commandLine: CommandLineSwitchReader,
+): false {
+  void commandLine
+  return false
+}

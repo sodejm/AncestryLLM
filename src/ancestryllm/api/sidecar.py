@@ -10,13 +10,15 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import json
+import os
 import socket
 import sys
-from collections.abc import Callable, Mapping
-from contextlib import suppress
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 from platformdirs import user_config_path, user_data_path
@@ -35,7 +37,7 @@ from ancestryllm.application.settings import SettingsService
 from ancestryllm.core.config import APP_NAME, AppConfig
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager
-from ancestryllm.core.secrets import KeyringSecretStore, SecretSourceMode
+from ancestryllm.core.secrets import KeyringSecretStore, MemorySecretStore, SecretSourceMode
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.llm.chat import ChatService
 from ancestryllm.llm.chat_streaming import ChatStreamingService
@@ -68,6 +70,7 @@ MAX_LAUNCH_FRAME_BYTES = 4096
 STARTUP_TIMEOUT_SECONDS = 10.0
 WINDOWS_KILL_ON_JOB_CLOSE = 0x00002000
 WINDOWS_EXTENDED_LIMIT_INFORMATION = 9
+NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE_ENV = "ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE"
 
 _process_tree_guard: object | None = None
 
@@ -574,7 +577,39 @@ def _packaged_fallback_config() -> AppConfig:
     )
 
 
+@contextmanager
+def _verification_sidecar_dependencies(
+    environment: Mapping[str, str],
+) -> Iterator[tuple[AppConfig | None, SecretStore | None]]:
+    """Provide isolated state only for the unpublished native verifier."""
+
+    if environment.get(NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE_ENV) != "1":
+        yield None, None
+        return
+
+    with TemporaryDirectory(prefix="ancestryllm-native-verification-") as directory:
+        root = Path(directory)
+        yield (
+            AppConfig(config_path=root / "config.toml", data_dir=root / "data"),
+            MemorySecretStore({}),
+        )
+
+
 async def _serve(frame: LaunchFrame) -> int:
+    with _verification_sidecar_dependencies(os.environ) as (config, secret_store):
+        return await _serve_with_dependencies(
+            frame,
+            config=config,
+            secret_store=secret_store,
+        )
+
+
+async def _serve_with_dependencies(
+    frame: LaunchFrame,
+    *,
+    config: AppConfig | None,
+    secret_store: SecretStore | None,
+) -> int:
     recorders = _create_sidecar_diagnostic_recorders(frame)
     recorders.core("PYTHON_CORE_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
     recorders.sidecar("SIDECAR_BOOTSTRAP_STARTED", DesktopDiagnosticSeverity.INFO)
@@ -593,6 +628,8 @@ async def _serve(frame: LaunchFrame) -> int:
         create_uvicorn_config(
             create_sidecar_app(
                 frame,
+                config=config,
+                secret_store=secret_store,
                 request_runtime_shutdown=request_runtime_shutdown,
                 record_diagnostic=recorders.core,
             )

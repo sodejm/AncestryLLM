@@ -1,7 +1,7 @@
 /** Verifies desktop evidence aggregation, coverage gates, and performance policy. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -11,6 +11,7 @@ import {
   aggregateEvidence,
   createSecurityEvidence,
   createTargetEvidence,
+  deriveReleaseQualityContract,
   runCli,
 } from './verification-evidence.mjs'
 import {
@@ -37,20 +38,50 @@ const metrics = {
   rendererOutboundRequests: 0,
 }
 
+const expectedFuseStates = {
+  RunAsNode: 'disabled',
+  EnableCookieEncryption: 'enabled',
+  EnableNodeOptionsEnvironmentVariable: 'disabled',
+  EnableNodeCliInspectArguments: 'disabled',
+  EnableEmbeddedAsarIntegrityValidation: 'enabled',
+  OnlyLoadAppFromAsar: 'enabled',
+  LoadBrowserProcessSpecificV8Snapshot: 'disabled',
+  GrantFileProtocolExtraPrivileges: 'disabled',
+}
+
 function encoded(value) {
   return Buffer.from(`${JSON.stringify(value)}\n`)
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 function digest(bytes) {
   return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength }
 }
 
-function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
+function receiptRecord(
+  gates,
+  artifacts = {},
+  command = ['node', '--test'],
+  context = { runner: 'ubuntu-24.04', sidecarTarget: 'none' },
+) {
   const receipt = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: 'verification-receipt',
     status: 'passed',
     gitHead,
+    context,
     headBefore: gitHead,
     headAfter: gitHead,
     gates: [...gates].sort(),
@@ -70,7 +101,7 @@ function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
       status: 'unchanged',
     },
   }
-  validateVerificationReceipt(receipt, gitHead)
+  validateVerificationReceipt(receipt, gitHead, context)
   const raw = encoded(receipt)
   return { receipt, file: digest(raw), raw }
 }
@@ -95,8 +126,13 @@ function fuseInspection(platform) {
     package: { executable: '/package/app', application: '/package', resources: '/package/resources' },
     fuses: {
       status: 'verified',
-      count: 1,
-      items: [{ name: 'RunAsNode', expected: 'disabled', actual: 'disabled', status: 'verified' }],
+      count: Object.keys(expectedFuseStates).length,
+      items: Object.entries(expectedFuseStates).map(([name, state]) => ({
+        name,
+        expected: state,
+        actual: state,
+        status: 'verified',
+      })),
     },
     asar: { path: '/package/resources/app.asar', presence: { status: 'verified' }, integrity },
   }
@@ -131,8 +167,12 @@ function fileGrantEvidence() {
   }
 }
 
-function targetFixture(row, observed = metrics) {
+function targetFixture(row, observed = metrics, receiptContext) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
+  const targetContext = receiptContext ?? { runner, sidecarTarget }
+  const targetReceipt = (gates, artifacts = {}, command = ['node', '--test']) => (
+    receiptRecord(gates, artifacts, command, targetContext)
+  )
   const metricsBytes = encoded(observed)
   const inspection = fuseInspection(TARGET_ROWS[runner].platform)
   const fuseInspectionBytes = encoded(inspection)
@@ -164,7 +204,7 @@ function targetFixture(row, observed = metrics) {
   const integrityEvidenceBytes = encoded(integrityEvidence)
   const fileGrantMediation = fileGrantEvidence()
   const fileGrantEvidenceBytes = encoded(fileGrantMediation)
-  const runtimeReceipt = receiptRecord(
+  const runtimeReceipt = targetReceipt(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed'],
     { metrics: digest(metricsBytes) },
     [
@@ -175,7 +215,7 @@ function targetFixture(row, observed = metrics) {
       'exercises first run, persistence, corrupt preferences, security, and resource evidence',
     ],
   )
-  const normalLaunchReceipt = receiptRecord(
+  const normalLaunchReceipt = targetReceipt(
     ['normalLaunchDebugSurfaceAbsentPassed'],
     {},
     [
@@ -183,21 +223,21 @@ function targetFixture(row, observed = metrics) {
       'desktop/scripts/run-wdio.mjs',
       'packaged',
       '--grep',
-      'launches production normally without a debugging transport',
+      'launches the selected packaged runtime normally without a debugging transport',
     ],
   )
-  const processTreeGuardReceipt = receiptRecord(
+  const processTreeGuardReceipt = targetReceipt(
     ['sidecarProcessTreeGuardPassed'],
     {},
     ['python', '-m', 'pytest', 'tests/api/test_sidecar_bootstrap.py'],
   )
-  const sidecarReceipt = receiptRecord(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
-  const fuseReceipt = receiptRecord(
+  const sidecarReceipt = targetReceipt(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
+  const fuseReceipt = targetReceipt(
     ['fusesInspectedPassed'],
     { fuseInspection: digest(fuseInspectionBytes) },
     ['node', 'scripts/inspect-package-fuses.mjs'],
   )
-  const fileGrantReceipt = receiptRecord(
+  const fileGrantReceipt = targetReceipt(
     ['packagedFileGrantSmokePassed'],
     { fileGrantEvidence: digest(fileGrantEvidenceBytes) },
     [
@@ -208,7 +248,7 @@ function targetFixture(row, observed = metrics) {
       'mediates opaque packaged open and save file grants',
     ],
   )
-  const withholdReceipt = receiptRecord(
+  const withholdReceipt = targetReceipt(
     ['packagedSidecarWithholdRetryPassed'],
     { faultEvidence: digest(withholdEvidenceBytes) },
     [
@@ -219,7 +259,7 @@ function targetFixture(row, observed = metrics) {
       'withholds and restores the packaged sidecar through Diagnostics retry',
     ],
   )
-  const restartReceipt = receiptRecord(
+  const restartReceipt = targetReceipt(
     ['packagedSidecarRestartExhaustionQuitPassed'],
     { faultEvidence: digest(restartEvidenceBytes) },
     [
@@ -230,7 +270,7 @@ function targetFixture(row, observed = metrics) {
       'exhausts packaged sidecar restarts and exits cleanly',
     ],
   )
-  const integrityReceipt = receiptRecord(
+  const integrityReceipt = targetReceipt(
     ['packagedSidecarIntegritySubstitutionPassed'],
     {
       faultEvidence: digest(integrityEvidenceBytes),
@@ -379,6 +419,27 @@ test('target evidence records every observed value, ceiling, and check and rejec
   const missing = { ...metrics }
   delete missing.readyMs
   assert.throws(() => targetFixture(rows[0], missing), /exact schema/)
+  assert.throws(
+    () => targetFixture(rows[0], metrics, { runner: rows[1][0], sidecarTarget: rows[1][1] }),
+    /requested execution context/,
+  )
+})
+
+test('release evidence derives performance ceilings from the central quality policy', async () => {
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  const changed = structuredClone(policy)
+  changed.performance.policyVersion = 'desktop-unpacked-test'
+  changed.performance.targets[0].performanceCeilings.coldLaunchMs = 1234
+  changed.qa.toolVersions.node = '26.6.0'
+
+  const contract = deriveReleaseQualityContract(changed)
+
+  assert.equal(contract.performancePolicyVersion, 'desktop-unpacked-test')
+  assert.equal(contract.targetRows['macos-15'].ceilings.coldLaunchMs, 1234)
+  assert.equal(contract.toolVersions.node, '26.6.0')
 })
 
 test('target evidence rejects a digest-unbound artifact and the wrong platform ASAR scope', () => {
@@ -414,7 +475,12 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
   const wrongBytes = encoded(wrong)
   const records = linuxFixture.receiptRecords.map((record) => (
     record.receipt.gates.includes('fusesInspectedPassed')
-      ? receiptRecord(['fusesInspectedPassed'], { fuseInspection: digest(wrongBytes) })
+      ? receiptRecord(
+          ['fusesInspectedPassed'],
+          { fuseInspection: digest(wrongBytes) },
+          ['node', '--test'],
+          { runner: linuxRow[0], sidecarTarget: linuxRow[1] },
+        )
       : record
   ))
   assert.throws(() => createTargetEvidence({
@@ -490,10 +556,27 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   await writeFile(join(securityRoot, 'receipt.json'), security.receiptRecords[0].raw)
 
   const aggregate = await aggregateEvidence(root, gitHead)
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  assert.equal(aggregate.schemaVersion, 3)
+  assert.deepEqual(aggregate.policy, {
+    id: policy.policyId,
+    schemaVersion: policy.schemaVersion,
+    sha256: createHash('sha256').update(canonicalJson(policy)).digest('hex'),
+  })
   assert.equal(aggregate.targets.length, 6)
   assert.equal(aggregate.platformValidated, true)
   assert.equal(aggregate.status, 'passed')
   assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
+  assert.deepEqual(aggregate.toolVersions, {
+    python: '3.12',
+    node: '26.5.0',
+    pnpm: '11.9.0',
+    vitest: '3.2.7',
+    webdriverio: '9.31.2',
+  })
 
   await writeFile(join(targetsRoot, 'windows-11-arm', 'evidence.json'), encoded({
     ...aggregate.targets.find((target) => target.runner === 'windows-11-arm'),
