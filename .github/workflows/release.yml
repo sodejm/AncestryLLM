@@ -1981,10 +1981,40 @@ jobs:
         with:
           subject-path: dist/*
 
+  verify-build-provenance:
+    name: verify build provenance
+    if: github.event_name == 'push'
+    needs: [validate, assemble-release-distributions, publish-build-provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      attestations: read # required to retrieve build provenance
+      contents: read # required to identify the repository and signer workflow
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-distributions
+          path: dist
+      - name: Verify all build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit }}
+        shell: bash
+        run: |
+          found=false
+          while IFS= read -r -d '' asset; do
+            found=true
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$COMMIT_SHA"
+          done < <(find dist -type f -print0)
+          test "$found" = "true"
+
   draft-github-release:
     name: prepare draft GitHub Release
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, publish-build-provenance]
+    needs: [validate, assemble-release-distributions, verify-build-provenance]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -2028,7 +2058,7 @@ jobs:
   publish-testpypi:
     name: publish TestPyPI
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, publish-build-provenance, draft-github-release]
+    needs: [validate, assemble-release-distributions, publish-build-provenance, verify-build-provenance, draft-github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -2284,7 +2314,7 @@ jobs:
   publish-github-release:
     name: publish immutable GitHub Release
     if: github.event_name == 'push'
-    needs: [validate, assemble-release-distributions, draft-github-release, verify-pypi-hashes, verify-pypi-install, verify-docs-publication]
+    needs: [validate, assemble-release-distributions, verify-build-provenance, draft-github-release, verify-pypi-hashes, verify-pypi-install, verify-docs-publication]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

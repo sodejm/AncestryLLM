@@ -366,16 +366,25 @@ jobs:
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          quality_policy_sha="$(
+            python -c 'import hashlib, json, pathlib; value = json.loads(pathlib.Path("config/release-quality-policy-v1.json").read_text(encoding="utf-8")); print(hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest())'
+          )"
           jq -n \
             --arg release "$VERSION" \
             --arg commit "$COMMIT_SHA" \
             --arg run_url "$RUN_URL" \
+            --arg policy_sha "$quality_policy_sha" \
             --slurpfile quality_policy config/release-quality-policy-v1.json \
             '{
-              schema_version: 1,
+              schema_version: 2,
               release: $release,
               commit: $commit,
               run_url: $run_url,
+              policy: {
+                id: $quality_policy[0].policyId,
+                schemaVersion: $quality_policy[0].schemaVersion,
+                sha256: $policy_sha
+              },
               gates: (
                 [
                   "bootstrap-verification",

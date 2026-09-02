@@ -53,6 +53,19 @@ function encoded(value) {
   return Buffer.from(`${JSON.stringify(value)}\n`)
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
 function digest(bytes) {
   return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength }
 }
@@ -543,6 +556,16 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   await writeFile(join(securityRoot, 'receipt.json'), security.receiptRecords[0].raw)
 
   const aggregate = await aggregateEvidence(root, gitHead)
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  assert.equal(aggregate.schemaVersion, 3)
+  assert.deepEqual(aggregate.policy, {
+    id: policy.policyId,
+    schemaVersion: policy.schemaVersion,
+    sha256: createHash('sha256').update(canonicalJson(policy)).digest('hex'),
+  })
   assert.equal(aggregate.targets.length, 6)
   assert.equal(aggregate.platformValidated, true)
   assert.equal(aggregate.status, 'passed')

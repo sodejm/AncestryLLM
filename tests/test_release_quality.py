@@ -80,13 +80,22 @@ def _policy() -> dict[str, Any]:
     return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
 
 
+def _policy_reference(policy: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": policy["policyId"],
+        "schemaVersion": policy["schemaVersion"],
+        "sha256": quality._canonical_sha256(policy),
+    }
+
+
 def _readiness(policy: dict[str, Any]) -> dict[str, Any]:
     run_url = "https://github.com/sodejm/AncestryLLM/actions/runs/123456789"
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "release": VERSION,
         "commit": HEAD,
         "run_url": run_url,
+        "policy": _policy_reference(policy),
         "gates": [
             {
                 "name": gate,
@@ -333,12 +342,13 @@ def _desktop(policy: dict[str, Any]) -> dict[str, Any]:
         for gate in security_gates
     }
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "kind": "aggregate",
         "gitHead": HEAD,
         "status": "passed",
         "platformValidated": True,
         "toolVersions": copy.deepcopy(policy["qa"]["toolVersions"]),
+        "policy": _policy_reference(policy),
         "targets": targets,
         "security": {
             "schemaVersion": 2,
@@ -441,12 +451,54 @@ def test_wrong_head_is_rejected() -> None:
         _build(policy, readiness=readiness)
 
 
+def test_family_commands_are_bound_to_receipted_commands() -> None:
+    policy = _policy()
+    expected_performance_commands: list[str] = []
+    for target in policy["performance"]["targets"]:
+        command = quality._command_text(
+            quality._target_receipt_commands(
+                target["runner"],
+                target["sidecarTarget"],
+            )["packageRuntimePassed"]
+        )
+        if command not in expected_performance_commands:
+            expected_performance_commands.append(command)
+
+    assert policy["families"]["performance"]["commands"] == expected_performance_commands
+    assert "pnpm --dir desktop run test:e2e:packaged" not in policy["families"]["qa"]["commands"]
+    assert policy["performance"]["method"]["receiptGate"] == "packageRuntimePassed"
+
+
+@pytest.mark.parametrize("source", ("readiness", "desktop"))
+def test_policy_source_evidence_must_match_approval_policy(source: str) -> None:
+    policy = _policy()
+    readiness = _readiness(policy)
+    desktop = _desktop(policy)
+    evidence = readiness if source == "readiness" else desktop
+    evidence["policy"]["sha256"] = "0" * 64
+
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ003.*policy"):
+        _build(policy, readiness=readiness, desktop=desktop)
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     (
         (
             lambda policy: policy["families"]["qa"].update({"commands": []}),
             "qa commands",
+        ),
+        (
+            lambda policy: policy["families"]["qa"]["commands"].append(
+                "pnpm --dir desktop run test:e2e:packaged"
+            ),
+            "qa commands",
+        ),
+        (
+            lambda policy: policy["families"]["performance"].update(
+                {"commands": ["pnpm --dir desktop run test:e2e:packaged"]}
+            ),
+            "performance commands",
         ),
         (
             lambda policy: policy["evidence"].update({"approvalPath": "approval.json"}),

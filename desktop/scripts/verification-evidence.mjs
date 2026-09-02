@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile)
 const SHA = /^[0-9a-f]{40}$/
 const SHA256 = /^[0-9a-f]{64}$/
 const EVIDENCE_SCHEMA_VERSION = 2
+const AGGREGATE_EVIDENCE_SCHEMA_VERSION = 3
 const FUSE_INSPECTION_KIND = 'ancestryllm-desktop-package-security-inspection'
 const FAULT_EVIDENCE_KIND = 'ancestryllm-packaged-fault-evidence'
 const FILE_GRANT_EVIDENCE_KIND = 'ancestryllm-packaged-file-grant-evidence'
@@ -37,6 +38,17 @@ const REQUIRED_TOOL_NAMES = Object.freeze([
   'webdriverio',
 ])
 const RELEASE_QUALITY_POLICY_ID = 'ancestryllm-release-quality-v1'
+const PERFORMANCE_RECEIPT_GATE = 'packageRuntimePassed'
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
 
 function policyRecord(value, label) {
   assert.equal(
@@ -90,12 +102,17 @@ export function deriveReleaseQualityContract(policy) {
   const method = policyRecord(performance.method, 'release-quality performance method')
   exactPolicyKeys(
     method,
-    ['command', 'measurementSource', 'validator', 'packageBoundary'],
+    ['receiptGate', 'measurementSource', 'validator', 'packageBoundary'],
     'release-quality performance method',
   )
-  for (const field of ['command', 'measurementSource', 'validator', 'packageBoundary']) {
+  for (const field of ['receiptGate', 'measurementSource', 'validator', 'packageBoundary']) {
     requiredPolicyString(method[field], `release-quality performance method ${field}`)
   }
+  assert.equal(
+    method.receiptGate,
+    PERFORMANCE_RECEIPT_GATE,
+    'release-quality performance method must identify the required receipt gate',
+  )
   assert.equal(
     method.packageBoundary,
     'unpacked-native',
@@ -173,6 +190,11 @@ const releaseQualityPolicy = JSON.parse(readFileSync(
   new URL('../../config/release-quality-policy-v1.json', import.meta.url),
   'utf8',
 ))
+const releaseQualityPolicyReference = Object.freeze({
+  id: releaseQualityPolicy.policyId,
+  schemaVersion: releaseQualityPolicy.schemaVersion,
+  sha256: createHash('sha256').update(canonicalJson(releaseQualityPolicy)).digest('hex'),
+})
 const releaseQualityContract = deriveReleaseQualityContract(releaseQualityPolicy)
 const METRIC_NAMES = releaseQualityContract.metricNames
 
@@ -714,7 +736,7 @@ function validateSecurityEvidence(value, gitHead, receiptRecords, files) {
  * Validates and aggregates exactly six target rows plus one security row from downloaded evidence.
  * @param {string} root - Directory containing receipts, evidence JSON, and referenced artifacts.
  * @param {string} requestedHead - Full Git commit that every record must match.
- * @returns {Promise<Readonly<Record<string, unknown>>>} Deterministically ordered schema-v2 release evidence.
+ * @returns {Promise<Readonly<Record<string, unknown>>>} Deterministically ordered schema-v3 release evidence.
  */
 export async function aggregateEvidence(root, requestedHead) {
   const gitHead = exactHead(requestedHead)
@@ -754,12 +776,13 @@ export async function aggregateEvidence(root, requestedHead) {
   const checkedSecurity = validateSecurityEvidence(security[0], gitHead, receiptRecords, files)
 
   return Object.freeze({
-    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    schemaVersion: AGGREGATE_EVIDENCE_SCHEMA_VERSION,
     kind: 'aggregate',
     gitHead,
     status: 'passed',
     platformValidated: true,
     toolVersions: TOOL_VERSIONS,
+    policy: releaseQualityPolicyReference,
     targets: Object.freeze(targets.sort((left, right) => left.runner.localeCompare(right.runner))),
     security: checkedSecurity,
     publicationRequirements: Object.freeze({

@@ -301,10 +301,21 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "generate_release_checksums.py --directory dist" in release
     assert "--notes-file dist/release-notes.md" in release
     assert "subject-path: dist/*" in release
+    assert "verify-build-provenance:" in release
+    assert 'gh attestation verify "$asset"' in release
+    assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"' in release
+    assert '--source-digest "$COMMIT_SHA"' in release
+    assert 'test "$found" = "true"' in release
     assert "verify_codeql_sarif.py --directory codeql-sarif" in readiness
+    assert "needs: [validate, assemble-release-distributions, verify-build-provenance]" in release
     assert (
         "needs: [validate, assemble-release-distributions, publish-build-provenance, "
-        "draft-github-release]" in release
+        "verify-build-provenance, draft-github-release]" in release
+    )
+    assert (
+        "needs: [validate, assemble-release-distributions, verify-build-provenance, "
+        "draft-github-release, verify-pypi-hashes, verify-pypi-install, "
+        "verify-docs-publication]" in release
     )
     assert "import-desktop-release-distributions:" in release
     assert "Desktop-Release-Artifact-ID:" in release
@@ -538,6 +549,12 @@ def test_release_workflow_permissions_are_job_scoped_and_least_privilege() -> No
         "draft-github-release",
         "publish-github-release",
     }
+    assert _jobs_with_permission(release, "attestations: read") == {
+        "build",
+        "desktop-installers",
+        "verify-build-provenance",
+        "verify-pypi-hashes",
+    }
     assert "id-token: write" not in readiness
     assert "contents: write" not in readiness
 
@@ -552,6 +569,12 @@ def test_release_evidence_requires_retained_bootstrap_receipts() -> None:
     assert "name: uv-bootstrap-readiness-package" in readiness
     assert "--bootstrap-receipt evidence/bootstrap/uv-bootstrap.json" in readiness
     assert "--slurpfile quality_policy config/release-quality-policy-v1.json" in readiness
+    assert "quality_policy_sha" in readiness
+    assert "schema_version: 2" in readiness
+    assert "policy: {" in readiness
+    assert "id: $quality_policy[0].policyId" in readiness
+    assert "schemaVersion: $quality_policy[0].schemaVersion" in readiness
+    assert "sha256: $policy_sha" in readiness
     assert "$quality_policy[0].qa.readinessGates" in readiness
     assert "bootstrap-verification" in policy["qa"]["readinessGates"]
     assert '"bootstrap-verification",' in readiness

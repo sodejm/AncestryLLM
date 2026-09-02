@@ -177,6 +177,16 @@ SECURITY_FAMILY_COMMANDS = (
     "make sbom",
     *(_command_text(SECURITY_RECEIPT_COMMANDS[gate]) for gate in SECURITY_FAMILY_RECEIPT_GATES),
 )
+QA_FAMILY_COMMANDS = (
+    "make test",
+    "make lint",
+    "make typecheck",
+    "pnpm --dir desktop run verify:source",
+    "pnpm --dir desktop run test:coverage",
+    "pnpm --dir desktop run test:accessibility",
+    "pnpm --dir desktop run test:e2e",
+)
+PERFORMANCE_RECEIPT_GATE = "packageRuntimePassed"
 
 
 def _target_receipt_commands(runner: str, sidecar_target: str) -> dict[str, dict[str, Any]]:
@@ -366,6 +376,25 @@ def _matches_typed_value(actual: Any, expected: Any) -> bool:
     return actual == expected
 
 
+def _policy_reference(policy: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": policy["policyId"],
+        "schemaVersion": policy["schemaVersion"],
+        "sha256": _canonical_sha256(policy),
+    }
+
+
+def _validate_policy_reference(
+    value: Any,
+    expected: dict[str, Any],
+    label: str,
+) -> None:
+    reference = _object(value, "RQ003", label)
+    _exact_keys(reference, {"id", "schemaVersion", "sha256"}, "RQ003", label)
+    if not _matches_typed_value(reference, expected):
+        _reject("RQ003", f"{label} does not match the release-quality policy")
+
+
 def _string_list(value: Any, code: str, label: str) -> list[str]:
     if not isinstance(value, list) or not value:
         _reject(code, f"{label} must be a non-empty array")
@@ -409,6 +438,11 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         _reject(
             "RQ001",
             "security commands must match the required readiness and desktop receipt evidence",
+        )
+    if families["qa"]["commands"] != list(QA_FAMILY_COMMANDS):
+        _reject(
+            "RQ001",
+            "qa commands must match the required readiness and desktop evidence",
         )
 
     evidence = _object(policy["evidence"], "RQ001", "evidence policy")
@@ -510,7 +544,7 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
     method = _object(performance["method"], "RQ001", "performance method")
     _exact_keys(
         method,
-        {"command", "measurementSource", "validator", "packageBoundary"},
+        {"receiptGate", "measurementSource", "validator", "packageBoundary"},
         "RQ001",
         "performance method",
     )
@@ -518,6 +552,8 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
         _reject("RQ001", "performance method fields are required")
     if method["packageBoundary"] != "unpacked-native":
         _reject("RQ001", "performance method must validate the unpacked-native boundary")
+    if method["receiptGate"] != PERFORMANCE_RECEIPT_GATE:
+        _reject("RQ001", "performance method must identify the required receipt gate")
     metrics = _string_list(performance["metrics"], "RQ001", "performance metrics")
     targets = performance["targets"]
     if not isinstance(targets, list) or not targets:
@@ -559,6 +595,21 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
             for value in ceilings.values()
         ):
             _reject("RQ001", f"{record['runner']} performance ceilings are invalid")
+    performance_commands = list(
+        dict.fromkeys(
+            _command_text(
+                _target_receipt_commands(item["runner"], item["sidecarTarget"])[
+                    PERFORMANCE_RECEIPT_GATE
+                ]
+            )
+            for item in targets
+        )
+    )
+    if families["performance"]["commands"] != performance_commands:
+        _reject(
+            "RQ001",
+            "performance commands must match the required desktop receipt evidence",
+        )
 
     diagnostics = _object(policy["diagnostics"], "RQ001", "diagnostics policy")
     _exact_keys(
@@ -662,19 +713,28 @@ def _validate_policy(policy: dict[str, Any], as_of: date) -> list[dict[str, Any]
 
 
 def _validate_readiness(
-    readiness: dict[str, Any], version: str, commit: str, required: list[str]
+    readiness: dict[str, Any],
+    version: str,
+    commit: str,
+    required: list[str],
+    expected_policy: dict[str, Any],
 ) -> dict[str, str]:
     _exact_keys(
         readiness,
-        {"schema_version", "release", "commit", "run_url", "gates"},
+        {"schema_version", "release", "commit", "run_url", "policy", "gates"},
         "RQ003",
         "readiness evidence",
     )
-    _schema_version(readiness["schema_version"], 1, "RQ003", "readiness evidence")
+    _schema_version(readiness["schema_version"], 2, "RQ003", "readiness evidence")
     if readiness["release"] != version:
         _reject("RQ003", "readiness evidence has the wrong release")
     if readiness["commit"] != commit:
         _reject("RQ002", "readiness evidence is not from the exact head")
+    _validate_policy_reference(
+        readiness["policy"],
+        expected_policy,
+        "readiness evidence policy",
+    )
     run_url = readiness["run_url"]
     if not isinstance(run_url, str) or not GITHUB_ACTIONS_RUN_URL.fullmatch(run_url):
         _reject("RQ003", "readiness evidence must identify the expected GitHub Actions run")
@@ -1213,6 +1273,7 @@ def build_manifest(
         _reject("RQ002", "commit must be a lowercase full Git SHA")
     checked_policy = copy.deepcopy(_object(policy, "RQ001", "quality policy"))
     exceptions = _validate_policy(checked_policy, as_of or datetime.now(UTC).date())
+    policy_reference = _policy_reference(checked_policy)
     checked_readiness = _object(copy.deepcopy(readiness), "RQ003", "readiness evidence")
     checked_desktop = _object(copy.deepcopy(desktop), "RQ003", "desktop evidence")
 
@@ -1221,6 +1282,7 @@ def build_manifest(
         version,
         commit,
         checked_policy["qa"]["readinessGates"],
+        policy_reference,
     )
     _exact_keys(
         checked_desktop,
@@ -1231,6 +1293,7 @@ def build_manifest(
             "status",
             "platformValidated",
             "toolVersions",
+            "policy",
             "targets",
             "security",
             "publicationRequirements",
@@ -1242,7 +1305,7 @@ def build_manifest(
         _reject("RQ002", "desktop evidence is not from the exact head")
     _schema_version(
         checked_desktop["schemaVersion"],
-        2,
+        3,
         "RQ003",
         "desktop aggregate evidence",
     )
@@ -1255,6 +1318,11 @@ def build_manifest(
         _reject("RQ003", "desktop aggregate identity or status is invalid")
     if checked_desktop["toolVersions"] != checked_policy["qa"]["toolVersions"]:
         _reject("RQ005", "desktop tool versions do not match the pinned policy")
+    _validate_policy_reference(
+        checked_desktop["policy"],
+        policy_reference,
+        "desktop aggregate evidence policy",
+    )
 
     security = _object(checked_desktop["security"], "RQ007", "desktop security evidence")
     if "receipts" not in security:
@@ -1302,11 +1370,7 @@ def build_manifest(
     return {
         "schemaVersion": 1,
         "kind": "release-quality-approval",
-        "policy": {
-            "id": checked_policy["policyId"],
-            "schemaVersion": checked_policy["schemaVersion"],
-            "sha256": _canonical_sha256(checked_policy),
-        },
+        "policy": policy_reference,
         "release": version,
         "commit": commit,
         "status": "approved",

@@ -1616,10 +1616,12 @@ toolchain versions, readiness and desktop receipt gates, coverage policy,
 native-target performance ceilings, and diagnostic schema and retention
 limits; and permits only explicit, owned, independently approved, unexpired
 exceptions. `scripts/verify_release_quality.py` consumes the release-readiness
-and desktop aggregate artifacts, requires both to describe the exact release
-commit and policy digest, and emits one deterministic approval manifest.
-Release evaluates the two source artifacts before packaging and revalidates
-the retained approval and inputs immediately before publication.
+schema-v2 and desktop aggregate schema-v3 artifacts, requires both to describe
+the exact release commit and the canonical policy identity, schema version,
+and digest, and emits one deterministic approval manifest. Release evaluates
+the two source artifacts before packaging, revalidates the retained approval
+and inputs immediately before publication, and verifies build provenance for
+every assembled release asset before any publication path can proceed.
 
 This release-quality boundary is repository delivery governance only. It adds
 no application command, API, DTO, storage, provider, GEDCOM, FastAPI, Electron,

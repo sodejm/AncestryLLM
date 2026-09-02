@@ -11,8 +11,7 @@
         "pnpm --dir desktop run verify:source",
         "pnpm --dir desktop run test:coverage",
         "pnpm --dir desktop run test:accessibility",
-        "pnpm --dir desktop run test:e2e",
-        "pnpm --dir desktop run test:e2e:packaged"
+        "pnpm --dir desktop run test:e2e"
       ]
     },
     "security": {
@@ -28,7 +27,8 @@
     "performance": {
       "owner": "desktop-owner",
       "commands": [
-        "pnpm --dir desktop run test:e2e:packaged"
+        "node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence",
+        "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence"
       ]
     },
     "diagnostics": {
@@ -122,7 +122,7 @@
   "performance": {
     "policyVersion": "desktop-unpacked-v1",
     "method": {
-      "command": "pnpm --dir desktop run test:e2e:packaged",
+      "receiptGate": "packageRuntimePassed",
       "measurementSource": "desktop/e2e/packaged-shell.wdio.ts",
       "validator": "desktop/scripts/verification-evidence.mjs",
       "packageBoundary": "unpacked-native"

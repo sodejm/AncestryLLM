@@ -61,13 +61,18 @@ versions, lint, type checking, coverage, accessibility, source WebDriver,
 JavaScript/TypeScript static analysis, dependency audit, secret scanning,
 diagnostics, packaged security, and SBOM generation. It rejects a missing,
 extra, failed, wrong-head, legacy, or digest-mismatched receipt and records the
-exact `toolVersions` object for the release verifier.
+exact `toolVersions` object for the release verifier. Aggregate schema v3 also
+records the canonical policy identity, schema version, and SHA-256 digest so a
+valid receipt set cannot be approved under a substituted policy.
 
 Native performance uses policy `desktop-unpacked-v1`. WebdriverIO measures
 cold launch, warm launch, readiness, process-tree RSS, and renderer outbound
 requests in `desktop/e2e/packaged-shell.wdio.ts`; the aggregate validator in
 `desktop/scripts/verification-evidence.mjs` compares every value with the
 target-specific ceiling. The package boundary is always `unpacked-native`.
+The performance family is authorized only by the declared
+`packageRuntimePassed` receipt gate, whose target-specific hosted commands are
+enumerated exactly in the central policy.
 The six native rows and their numeric ceilings live only in the central policy;
 missing, negative, non-finite, over-budget, or nonzero renderer-egress evidence
 fails the row.
