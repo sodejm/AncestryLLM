@@ -45,6 +45,33 @@
 - Use the OS keyring for secrets; environment injection is for headless/CI use. Do not auto-load `.env`.
 - Cloud calls require explicit provider selection and user consent.
 
+## Meaningful change standard
+
+Do not make churn-only edits.
+
+Avoid changing synonyms, wording, comments, variable names, formatting, or code
+structure unless the change materially improves correctness, safety, performance,
+accessibility, maintainability, clarity of domain meaning or behavior, consistency
+with an established project convention, testability, observability, operational
+support, or compliance with an explicit requirement, issue, review comment, or
+style rule.
+
+Before renaming a variable, function, type, file, or public API, verify that the
+new name resolves a real ambiguity, incorrect implication, collision, or
+domain-model mismatch. Do not rename merely because another synonym may sound
+preferable.
+
+Preserve stable terminology used by public APIs, schemas, documentation,
+configuration, tests, logs, and integrations unless a coordinated migration is
+explicitly required.
+
+For proposed wording-only or naming-only changes, state the concrete ambiguity or
+misunderstanding being removed. If none can be identified, leave the existing
+wording unchanged.
+
+Prefer focused diffs. Do not bundle cleanup, rewording, or stylistic normalization
+into behavior-changing work unless explicitly requested.
+
 ## SLSA v0.1 Level 1 maintenance
 
 - Treat [SLSA v0.1 Level 1](https://slsa.dev/spec/v0.1/levels) and its
