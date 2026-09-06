@@ -118,12 +118,19 @@ status noise. If no issue applies, use an authorized PR update or the final repo
 create an issue only when authorized and called for by the project or user.
 
 Before committing or posting, inspect the exact outgoing files, commit range,
-and text. Use the repository's secret and private-artifact checks, stage only
-intended paths, and inspect results with sensitive values redacted. Do not publish
-credentials, personal or customer records, private URLs or machine paths, runtime
-prompt/response payloads, logs, or unsanitized reports. Store only reusable
-instructions and synthetic placeholders in this library. A clean scanner result
-supports, but does not replace, manual scope and content review.
+and text. Stage only intended paths. Run the repository's documented secret and
+private-artifact checks where available. If none exist, use an available trusted
+secret scanner on the staged content and outgoing commit range, with sensitive
+values redacted. Record the command, coverage, and result; dependency or source
+vulnerability checks do not substitute for secret scanning. If a suitable scanner
+cannot run, report the missing check as a publication blocker and continue safe
+local work. Do not bypass required checks or claim unperformed scanning passed.
+
+Do not publish credentials, personal or customer records, private URLs or machine
+paths, runtime prompt/response payloads, logs, or unsanitized reports. Store only
+reusable instructions and synthetic placeholders in this library. A clean scanner
+result supports, but does not replace, manual scope and content review, including
+private information that a secret scanner may not recognize.
 
 ## Checkpoint and report
 
