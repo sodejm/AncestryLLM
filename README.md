@@ -151,3 +151,9 @@ Contributions should preserve the local-first, privacy-first boundary. Read the
 before opening a change, and use the
 [release runbook](https://github.com/sodejm/AncestryLLM/blob/main/docs/RELEASING.md)
 when preparing a release.
+
+## Milestone development workflow
+
+Use the [reusable goal prompt](prompts/next-milestone.md) to run a bounded
+milestone with an orchestrating agent. The [usage guide](prompts/README.md) covers
+the shared skill, task-specific model routing, decision summaries, and safe storage.
