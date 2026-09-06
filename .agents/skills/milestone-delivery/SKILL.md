@@ -119,12 +119,15 @@ create an issue only when authorized and called for by the project or user.
 
 Before committing or posting, inspect the exact outgoing files, commit range,
 and text. Stage only intended paths. Run the repository's documented secret and
-private-artifact checks where available. If none exist, use an available trusted
-secret scanner on the staged content and outgoing commit range, with sensitive
-values redacted. Record the command, coverage, and result; dependency or source
-vulnerability checks do not substitute for secret scanning. If a suitable scanner
-cannot run, report the missing check as a publication blocker and continue safe
-local work. Do not bypass required checks or claim unperformed scanning passed.
+private-artifact checks where available. If the repository has no documented
+secret-scanning check, use an available trusted secret scanner regardless of
+whether private-artifact checks exist. Scan the original staged content and
+outgoing commit range; redact only scanner diagnostics and recorded output,
+never the input before detection. Record the command, coverage, and result;
+dependency or source vulnerability checks do not substitute for secret scanning.
+If a suitable scanner cannot run, report the missing check as a publication
+blocker and continue safe local work. Do not bypass required checks or claim
+unperformed scanning passed.
 
 Do not publish credentials, personal or customer records, private URLs or machine
 paths, runtime prompt/response payloads, logs, or unsanitized reports. Store only
