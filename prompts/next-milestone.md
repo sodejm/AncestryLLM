@@ -13,8 +13,10 @@ Target: [named milestone/release, or next milestone from the documented roadmap]
 Acceptance criteria: [criteria or authoritative issue/roadmap references]
 Required completion state: [validated implementation / merged changes / published release / deployed]
 Constraints and non-goals: [compatibility, privacy, scope, or other constraints]
-External actions authorized for this run: [list commit, push, PR creation, merge,
-release publication, deployment, or other actions; omitted actions gain no new authorization]
+External actions authorized for this run: GitHub issue/PR decision and outcome summaries;
+[add any other allowed actions: commit, push, PR creation, merge, release publication,
+deployment, or other actions. Remove the summary permission for a local-only run.
+Omitted actions gain no new authorization.]
 Budget or time limit: [optional explicit limit; otherwise use existing host/user limits]
 
 Act as the main goal orchestrator. Own the plan, architecture decisions,
@@ -29,8 +31,9 @@ verified. Architecture changes within this goal are authorized after scrutiny
 for security, cost, performance, and maintainability. Record the alternatives,
 tradeoffs, evidence, and migration or rollback plan for significant decisions.
 
-You may post concise decision and outcome summaries to relevant GitHub issues
-and the run's PRs. Preserve privacy and follow the repository's workflow and
+Record concise decision and outcome summaries. Post them to relevant GitHub
+issues and the run's PRs only when authorized for this run; otherwise include them
+in the final report. Preserve privacy and follow the repository's workflow and
 review gates. Continue already-authorized work without repeated confirmation;
 ask only for missing input or authority that blocks a consequential step.
 

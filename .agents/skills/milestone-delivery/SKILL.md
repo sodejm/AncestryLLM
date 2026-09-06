@@ -107,12 +107,15 @@ do not continue into a later milestone without authorization.
 
 ## Record decisions and protect private information
 
-During an authorized run, summarize material decisions in the relevant existing
-GitHub issues: the decision and reason, alternatives and tradeoffs, acceptance
-impact, evidence, and linked PR or commit. Follow the applicable GitHub workflow
+Record material decisions: the decision and reason, alternatives and tradeoffs,
+acceptance impact, evidence, and linked PR or commit. Post summaries to relevant
+existing GitHub issues and the run's PRs only when those writes are authorized by
+the user's run inputs or existing session instructions. If posting is not
+authorized, keep the summaries in the final report. Local work or commit authority
+alone does not authorize GitHub comments. Follow the applicable GitHub workflow
 policy for timing and state transitions. Keep updates concise and avoid duplicate
-status noise. If no issue applies, use the PR or final report; create an issue only
-when the project workflow or the user calls for one.
+status noise. If no issue applies, use an authorized PR update or the final report;
+create an issue only when authorized and called for by the project or user.
 
 Before committing or posting, inspect the exact outgoing files, commit range,
 and text. Use the repository's secret and private-artifact checks, stage only
