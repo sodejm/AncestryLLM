@@ -59,5 +59,11 @@ Commit reusable instructions and synthetic placeholders only. Keep completed
 run prompts, credentials, personal data, local paths, logs, workboard databases,
 and unsanitized run reports out of Git. Store runtime checkpoints in the host's
 approved private or untracked location. Review exact diffs and outgoing commits
-with the project's secret checks before publishing. Public issue summaries and
-final reports must contain only information suitable for their audience.
+before publishing. Run the project's secret-scanning and private-artifact checks
+where available. If no documented secret scanner exists, use a trusted scanner
+on the original staged content and outgoing commit range, even when a separate
+private-artifact check exists. Redact only diagnostics and recorded output, not
+scan input. If a suitable scanner cannot run, publication is blocked; continue
+safe local work and report the missing check. See the skill's privacy procedure
+for full requirements. Public issue summaries and final reports must contain
+only information suitable for their audience.
