@@ -58,8 +58,11 @@ adapter should point to or be generated from the canonical skill.
 Commit reusable instructions and synthetic placeholders only. Keep completed
 run prompts, credentials, personal data, local paths, logs, workboard databases,
 and unsanitized run reports out of Git. Store runtime checkpoints in the host's
-approved private or untracked location. Review exact diffs and outgoing commits
-before publishing. Run the project's secret-scanning and private-artifact checks
+approved private or untracked location. Inspect and scan staged content before
+committing, and the exact outgoing content immediately before every push, PR or
+release publication, deployment, or public comment. This includes resumed runs
+that publish existing commits without creating a new commit. Recheck any changed
+content before sending it. Run the project's secret-scanning and private-artifact checks
 where available. If no documented secret scanner exists, use a trusted scanner
 on the original staged content and outgoing commit range, even when a separate
 private-artifact check exists. Redact only diagnostics and recorded output, not

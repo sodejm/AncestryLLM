@@ -43,8 +43,11 @@ Before each launch:
 
 1. Define the deliverable, allowed paths and mutations, prohibited actions,
    dependencies, acceptance checks, and required evidence in the task contract.
-   Assign distinct write ownership or isolated worktrees to avoid conflicting
-   edits. Subagents return results to the orchestrator; reserve pushes, merges,
+   Assign distinct path ownership to avoid conflicting edits. Concurrent agents
+   that stage or commit must use separate worktrees with separate Git indexes.
+   In a shared checkout, reserve all staging and commits for the orchestrator;
+   disjoint paths alone do not isolate the Git index. Subagents return results
+   to the orchestrator; reserve pushes, merges,
    issue updates, releases, and deployment for the orchestrator unless the task
    contract explicitly delegates an already-authorized action.
 2. Apply the available `subagent-model-router` and its required coordination
@@ -117,8 +120,14 @@ policy for timing and state transitions. Keep updates concise and avoid duplicat
 status noise. If no issue applies, use an authorized PR update or the final report;
 create an issue only when authorized and called for by the project or user.
 
-Before committing or posting, inspect the exact outgoing files, commit range,
-and text. Stage only intended paths. Run the repository's documented secret and
+Before committing, inspect and scan the intended staged content. Immediately
+before every push, PR or release publication, deployment, or public comment,
+inspect and scan the exact content being sent: outgoing commits, files, artifacts,
+and text as applicable. This gate also applies to resumed runs and existing local
+commits when no new commit is created. Recheck changed content before sending it;
+previous scans do not cover later changes. Stage only intended paths.
+
+Run the repository's documented secret and
 private-artifact checks where available. If the repository has no documented
 secret-scanning check, use an available trusted secret scanner regardless of
 whether private-artifact checks exist. Scan the original staged content and
