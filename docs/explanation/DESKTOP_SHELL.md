@@ -306,11 +306,14 @@ requires a native confirmation and identity revalidation; source/output aliases
 and concurrent output grants fail closed under main-owned locks.
 
 Only a trusted main-process adapter may redeem a grant through
-`resolveReadGrant` or `resolveWriteGrant`. A future genealogy integration must
-then pass the internal path to the shared Python file-ingress adapter, which
-reopens and revalidates the source under its own bounded policy before parsing
-or publication. Until that adapter ships, the grant broker provides no GEDCOM,
-RootsMagic, import, export, or report workflow.
+`resolveReadGrant`, `resolveWriteGrant`, or the private `stageReadGrant` copy
+boundary. Issue #115 adds a source-level read-only GEDCOM integration: Main
+consumes a `gedcom-read` grant into an immutable private stage, and Python
+reopens and revalidates its identity, size, fingerprint, and bounded parse
+before returning summaries or root-candidate pages. The renderer receives no
+path or raw tree. This adds no import, merge, export, RootsMagic, report,
+container-worker, or supported packaged workflow. See the
+[intake guide](../how-to/desktop-gedcom-intake.md).
 
 ## Source-level gated settings and credential-management foundation
 
@@ -584,6 +587,35 @@ real Chromium run also scans every route in light, dark, and high-contrast
 modes against WCAG 2.2 A/AA rules from the exact locked `axe-core` version. A
 separate `FilePreferencesStore` unit test proves that completion survives a
 fresh store instance, which models a new application process.
+
+For local source checks without showing Electron windows or taking keyboard
+focus, use the opt-in hidden-window command:
+
+```sh
+pnpm --dir desktop test:e2e:headless
+# Optionally select one scenario:
+pnpm --dir desktop test:e2e:headless -- --grep 'bounded recovery'
+```
+
+This runs five source scenarios: shell navigation and contracts, task
+cancellation, degraded-startup recovery, automated accessibility scans, and
+minimum-window layout. Each scenario checks that the real Electron windows
+remain hidden, unfocused, and non-focusable. The native skip-link and
+command-palette keyboard-focus scenario is excluded; explicitly selecting it
+in hidden mode fails instead of reporting a pass. DOM focus assertions remain
+useful here but do not prove operating-system keyboard focus.
+
+On macOS this is hidden-window automation, not display-less Electron: it still
+requires a logged-in graphical session. The source fixture uses an accessory
+activation policy to keep the app out of the Dock. Linux runners retain the
+existing WebdriverIO `autoXvfb` support for a virtual display. No sandbox or
+renderer security controls are disabled. The hidden selector is confined to
+the source E2E build; production and packaged builds reject that fixture code.
+
+Ordinary `make desktop-e2e`, the focused commands below, and packaged/native
+verification still use visible windows. The hidden command refuses packaged
+mode and cannot substitute for native keyboard-focus, packaged release, or
+manual screen-reader evidence.
 
 Use the focused checks during shell review:
 

@@ -1,6 +1,8 @@
 /** Implements the authenticated, bounded HTTP client for the native sidecar. */
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { StringDecoder } from 'node:string_decoder'
+import type { GedcomIntakeClient } from './gedcom-intake-broker'
+import { parseGedcomRootQuery } from '../shared-contract/gedcom'
 import {
   DESKTOP_PROTOCOL_VERSION,
   type ApplicationSettings,
@@ -44,6 +46,10 @@ import {
   parseJobEventResult,
   parseJobListResult,
   parseJobSnapshotResult,
+  parseJobRequest,
+  parseGedcomInspectionResult,
+  parseGedcomRootPageResult,
+  parseGedcomDiscardResult,
   parseProviderConfigurationResult,
   parseProviderEndpointValidationResult,
   parseSecretStatusResult,
@@ -65,6 +71,7 @@ const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
 const RUNTIME_SHUTDOWN_PATH = '/api/v1/runtime/shutdown' as const
 const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
 const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
+const GEDCOM_INTAKE_PATH = '/api/v1/gedcom/intake' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -86,6 +93,8 @@ type SidecarPath =
   | typeof RUNTIME_SHUTDOWN_PATH
   | typeof CHAT_CAPABILITY_PATH
   | typeof CHAT_SESSIONS_PATH
+  | typeof GEDCOM_INTAKE_PATH
+  | `/api/v1/gedcom/intake/${string}`
   | `/api/v1/jobs/${string}`
   | `/api/v1/jobs/${string}/cancel`
   | `/api/v1/jobs/${string}/events`
@@ -1109,6 +1118,51 @@ function parseJobShutdownAssessment(
     if (error instanceof SidecarClientError) throw error
     throw new SidecarClientError('invalid_response')
   }
+}
+
+/** Binds read-only intake to the current native session and validated opaque identities. */
+export function createGedcomIntakeClient(dependencies: Readonly<{
+  session(): Readonly<AuthenticatedSidecarSession> | undefined
+  request?: SidecarRequest
+}>): Readonly<GedcomIntakeClient> {
+  const transport = dependencies.request ?? requestFixedRoute
+  const perform = async <T>(path: SidecarPath,
+    parser: (value: unknown) => { ok: boolean; data?: Readonly<T> },
+    signal?: AbortSignal, options?: SidecarRequestOptions): Promise<Readonly<T>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      const response = await transport(session, path, signal, options)
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (response.statusCode !== 200) throw new SidecarClientError('request_failed')
+      return parseJson(response, parser)
+    } catch (cause) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (cause instanceof SidecarClientError) throw cause
+      throw new SidecarClientError('request_failed')
+    }
+  }
+  const jobPath = (jobId: string): `/api/v1/gedcom/intake/${string}` =>
+    `${GEDCOM_INTAKE_PATH}/${parseJobRequest({ schema_version: 1, job_id: jobId }).job_id}`
+  return Object.freeze<GedcomIntakeClient>({
+    async submit(request) {
+      return perform(GEDCOM_INTAKE_PATH, parseJobSnapshotResult, undefined,
+        { method: 'POST', body: JSON.stringify(request) })
+    },
+    async result(jobId, signal) {
+      return perform(jobPath(jobId), parseGedcomInspectionResult, signal)
+    },
+    async roots(input, signal) {
+      const { job_id, query, limit, cursor } = parseGedcomRootQuery(input)
+      return perform(`${jobPath(job_id)}/roots`, parseGedcomRootPageResult, signal,
+        { method: 'POST', body: JSON.stringify({ query, limit, cursor }) })
+    },
+    async discard(jobId) {
+      return perform(`${jobPath(jobId)}/discard`, parseGedcomDiscardResult,
+        undefined, { method: 'POST' })
+    },
+  })
 }
 
 /**

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import socket
@@ -301,6 +302,84 @@ def test_packaged_sidecar_executes_an_injected_opaque_gedcom_grant(
     assert source.name not in result.text
     assert "Ada" not in result.text
     assert "@I1@" not in result.text
+
+
+def test_packaged_sidecar_native_intake_is_read_only_and_session_private(tmp_path: Path) -> None:
+    stage = tmp_path / "private-intake"
+    stage.mkdir()
+    source = stage / ("a" * 64 + ".ged")
+    content = (
+        b"0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n"
+    )
+    source.write_bytes(content)
+    frame = parse_launch_frame(io.BytesIO(_launch_payload(gedcom_intake_directory=str(stage))))
+    assert str(stage) not in repr(frame)
+    app = create_sidecar_app(
+        frame,
+        config=AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path),
+        secret_store=MemorySecretStore({}),
+    )
+    headers = {
+        "Authorization": f"Bearer {frame.bearer_token}",
+        "X-Ancestry-API-Version": API_CONTRACT,
+        "X-Ancestry-App-Build": frame.app_build,
+    }
+    with TestClient(app, base_url="http://127.0.0.1:8421") as client:
+        payload = {
+            "schema_version": 1,
+            "stage_id": "a" * 64,
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        assert client.post("/api/v1/gedcom/intake", json=payload).status_code == 401
+        invalid = client.post(
+            "/api/v1/gedcom/intake", headers=headers, json={**payload, "stage_id": "../fictional"}
+        )
+        assert invalid.status_code == 400
+        submitted = client.post("/api/v1/gedcom/intake", headers=headers, json=payload)
+        assert submitted.status_code == 200, submitted.text
+        job_id = submitted.json()["job_id"]
+        for _ in range(100):
+            snapshot = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
+            if snapshot.json()["state"] == "completed":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("native GEDCOM intake did not complete")
+        result = client.get(f"/api/v1/gedcom/intake/{job_id}", headers=headers)
+        assert result.status_code == 200
+        assert result.json()["value"]["summary"]["individual_count"] == 1
+        for private in (str(stage), source.name, "Ada", "@I1@"):
+            assert private not in result.text
+        roots = client.post(
+            f"/api/v1/gedcom/intake/{job_id}/roots",
+            headers=headers,
+            json={"query": "Ada", "limit": 1},
+        )
+        assert roots.status_code == 200, roots.text
+        assert roots.json()["candidates"][0]["display_name"] == "Ada Example"
+        assert not source.exists()
+        assert client.post("/api/v1/gedcom/merge", headers=headers, json={}).status_code == 404
+        assert (
+            client.get(f"/api/v1/gedcom/jobs/{job_id}/result", headers=headers).status_code == 404
+        )
+        assert (
+            client.post(f"/api/v1/gedcom/intake/{job_id}/discard", headers=headers).status_code
+            == 200
+        )
+        assert client.get(f"/api/v1/gedcom/intake/{job_id}", headers=headers).status_code == 409
+        assert (
+            client.post(
+                f"/api/v1/gedcom/intake/{job_id}/roots", headers=headers, json={}
+            ).status_code
+            == 409
+        )
+
+
+@pytest.mark.parametrize("directory", ["relative/intake", "private\0intake"])
+def test_native_intake_launch_directory_must_be_private_absolute_path(directory: str) -> None:
+    with pytest.raises(ValueError):
+        parse_launch_frame(io.BytesIO(_launch_payload(gedcom_intake_directory=directory)))
 
 
 def test_packaged_sidecar_runtime_shutdown_is_authenticated_bodyless_and_private(

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly forty deterministic, deeply frozen methods', async () => {
+  it('exposes exactly forty-four deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
       'acknowledgeChatStream',
@@ -15,9 +15,11 @@ describe('versioned mock bridge', () => {
       'createChatSession',
       'createProviderProfile',
       'deleteSecret',
+      'discardGedcomInspection',
       'getAppInfo',
       'getCapabilities',
       'getChatCapability',
+      'getGedcomInspection',
       'getLocalRuntimeStatus',
       'getJob',
       'getPreferences',
@@ -25,6 +27,8 @@ describe('versioned mock bridge', () => {
       'getSecretStatus',
       'getSettings',
       'getStartupDiagnostics',
+      'inspectGedcom',
+      'queryGedcomRoots',
       'previewConsent',
       'previewLocalRuntime',
       'listJobs',

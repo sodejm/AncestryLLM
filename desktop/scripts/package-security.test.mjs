@@ -144,7 +144,7 @@ test('production shutdown owns the supervisor before asynchronous sidecar startu
   )
   assert.match(
     productionMain,
-    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(app\.commandLine\),\s*macosEphemeralWorkspaceVerification: requestedMacosEphemeralVerification\(app\.commandLine\),\s*diagnosticRunId,\s*diagnosticDirectory,\s*recordDiagnostic: recordDesktopDiagnostic,\s*\}\)/,
+    /startRuntimeBridge\(\(supervisor, prepareJobs\) => \{[\s\S]*?sidecarSupervisor = supervisor[\s\S]*?prepareJobShutdown = prepareJobs[\s\S]*?\}, \{\s*linuxKeyringVerificationRoot: requestedLinuxKeyringVerificationRoot\(app\.commandLine\),\s*macosEphemeralWorkspaceVerification: requestedMacosEphemeralVerification\(app\.commandLine\),\s*diagnosticRunId,\s*diagnosticDirectory,\s*gedcomIntakeDirectory,\s*recordDiagnostic: recordDesktopDiagnostic,\s*\}\)/,
   )
   assert.match(
     productionMain,

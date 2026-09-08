@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   cleanupStaleMediatedOperationMounts,
   directoryModeIsPrivate,
+  initializeGedcomIntakeStaging,
   initializeMediatedOperationStaging,
   MediatedMountPolicyError,
   prepareMediatedOperationMounts,
@@ -27,6 +28,39 @@ afterEach(async () => {
 })
 
 describe('mediated operation mount policy', () => {
+  it('keeps intake bytes private and recovers only generated stale files before startup', async () => {
+    const root = await runtimeRoot()
+    const staging = await initializeGedcomIntakeStaging(root)
+    expect(staging).toBe(join(root, 'gedcom-intake'))
+    expect((await lstat(staging)).mode & 0o077).toBe(0)
+    const stale = join(staging, `${'a'.repeat(64)}.ged`)
+    await writeFile(stale, 'fictional GEDCOM', { mode: 0o600 })
+    await expect(initializeGedcomIntakeStaging(root)).resolves.toBe(staging)
+    await expect(lstat(stale)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const unexpected = join(staging, 'keep.txt')
+    await writeFile(unexpected, 'preserve')
+    await expect(initializeGedcomIntakeStaging(root))
+      .rejects.toMatchObject({ code: 'STAGING_UNSAFE' })
+    await expect(lstat(unexpected)).resolves.toMatchObject({})
+  })
+
+  it('rejects linked intake directories and staged symlinks without touching their targets', async () => {
+    const root = await runtimeRoot()
+    const outside = await runtimeRoot()
+    await symlink(outside, join(root, 'gedcom-intake'), process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(initializeGedcomIntakeStaging(root))
+      .rejects.toMatchObject({ code: 'STAGING_UNSAFE' })
+    const safeRoot = await runtimeRoot()
+    const staging = await initializeGedcomIntakeStaging(safeRoot)
+    const target = join(outside, 'keep.ged')
+    await writeFile(target, 'preserve')
+    await symlink(target, join(staging, `${'a'.repeat(64)}.ged`))
+    await expect(initializeGedcomIntakeStaging(safeRoot))
+      .rejects.toMatchObject({ code: 'STAGING_UNSAFE' })
+    await expect(lstat(target)).resolves.toMatchObject({})
+  })
+
   it('enforces POSIX private modes without rejecting Windows directory metadata', () => {
     expect(directoryModeIsPrivate(0o700, 'linux')).toBe(true)
     expect(directoryModeIsPrivate(0o755, 'linux')).toBe(false)

@@ -129,11 +129,116 @@ def test_inspect_job_publishes_only_opaque_lifecycle_and_typed_result(
     assert isinstance(result, GedcomInspectResult)
     assert result.summary.source.status is ArtifactStatus.READY
     assert result.summary.individual_count == 1
-    serialized = completed.to_json() + result.to_json()
+    serialized = completed.to_json() + result.summary_result().to_json()
     assert str(tmp_path) not in serialized
     assert source.name not in serialized
     assert "@I1@" not in serialized
     assert "Ada" not in serialized
+
+
+def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fictional-family.ged"
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 @I1@ INDI\n1 NAME Ada /Example/\n1 BIRT\n2 DATE 1900\n"
+        "0 @I2@ INDI\n1 NAME Ada /Example/\n1 BIRT\n2 DATE 1920\n"
+        "0 @I3@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    artifacts = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=artifacts.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="text/vnd.gedcom",
+            artifact_type="gedcom",
+        )
+    )
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    facade = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+    try:
+        first_job = facade.submit_inspect(request).job_id
+        jobs.manager.wait(first_job, timeout=5)
+        first = facade.root_candidates(first_job, query="ADA", limit=1)
+        assert first.total_count == 2
+        assert len(first.candidates) == 1
+        assert first.candidates[0].display_name == "Ada Example"
+        assert first.candidates[0].source_identifier == "@I1@"
+        assert first.candidates[0].birth_date == "1900"
+        assert first.next_cursor is not None
+        second = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+        last = second.root_candidates(first_job, query="ADA", limit=1, cursor=first.next_cursor)
+        assert last.candidates[0].source_identifier == "@I2@"
+        assert last.candidates[0].birth_date == "1920"
+        assert last.candidates[0].person_ref != first.candidates[0].person_ref
+        assert last.next_cursor is None
+        assert facade.root_candidates(first_job, query="not present").candidates == ()
+        assert facade.root_candidates(first_job, query="@I3@").total_count == 1
+
+        other_job = facade.submit_inspect(request).job_id
+        jobs.manager.wait(other_job, timeout=5)
+        for job_id, query, cursor in (
+            (other_job, "ADA", first.next_cursor),
+            (first_job, "Grace", first.next_cursor),
+            (first_job, "ADA", first.next_cursor[:-1] + "!"),
+        ):
+            with pytest.raises(AncestryError) as invalid:
+                facade.root_candidates(job_id, query=query, cursor=cursor)
+            assert invalid.value.code == "GEDCOM_ROOT_CURSOR_INVALID"
+        assert "Ada" not in jobs.get(first_job).to_json()
+        assert str(source) not in first.to_json()
+    finally:
+        jobs.close()
+
+
+def test_finding_anchor_queries_match_only_an_exact_person_in_the_owned_inspection(
+    tmp_path: Path,
+) -> None:
+    fake_ref = "person:" + "0" * 32
+    source = tmp_path / "fictional-anchors.ged"
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 @I1@ INDI\n1 NAME Ada /Example/\n1 BIRT\n2 DATE invalid\n"
+        f"0 @I2@ INDI\n1 NAME {fake_ref} /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    other_source = tmp_path / "other-fictional.ged"
+    _write_person(other_source)
+    artifacts = _ArtifactRegistry()
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    facade = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+    try:
+        job_ids = []
+        for path in (source, other_source):
+            job_id = facade.submit_inspect(
+                GedcomInspectRequest(
+                    source=artifacts.grant_input(
+                        path,
+                        operation="gedcom.inspect",
+                        media_type="text/vnd.gedcom",
+                        artifact_type="gedcom",
+                    )
+                )
+            ).job_id
+            jobs.manager.wait(job_id, timeout=5)
+            job_ids.append(job_id)
+        first_job, other_job = job_ids
+        person = facade.root_candidates(first_job, query="Ada").candidates[0]
+        anchored = facade.root_candidates(first_job, query=person.person_ref, limit=1)
+        assert anchored.candidates == (person,)
+        assert anchored.total_count == 1
+        assert anchored.next_cursor is None
+        for owned_job, reference in ((first_job, fake_ref), (other_job, person.person_ref)):
+            missing = facade.root_candidates(owned_job, query=reference, limit=1)
+            assert missing.candidates == ()
+            assert missing.total_count == 0
+            assert missing.next_cursor is None
+        assert "Ada" not in jobs.get(first_job).to_json()
+        assert person.person_ref not in jobs.get(first_job).to_json()
+    finally:
+        jobs.close()
 
 
 def test_completed_job_restored_after_restart_has_stable_unavailable_result(

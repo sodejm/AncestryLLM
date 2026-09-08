@@ -235,6 +235,7 @@ class TextLine:
 
     text: str
     byte_count: int
+    encoding: str = "utf-8"
 
 
 class _BoundedRawReader(io.RawIOBase):
@@ -613,7 +614,7 @@ class FileIngressPolicy:
                                 limit_name="max_records",
                                 limit=maximum_records,
                             )
-                    yield TextLine(raw_line, line_bytes)
+                    yield TextLine(raw_line, line_bytes, byte_encoding)
                 current = FileSnapshot.from_stat(os.fstat(text.buffer.fileno()))
                 if current != opened:
                     raise self._error(

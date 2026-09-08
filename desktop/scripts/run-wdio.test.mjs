@@ -55,6 +55,72 @@ test('pnpm separator is not forwarded to WebdriverIO', () => {
   assert.equal(invocation.args.includes('--'), false)
 })
 
+test('hidden source invocation consumes its flag and a forwarded pnpm separator', () => {
+  const invocation = wdioInvocation('source', [
+    '--headless', '--', '--grep', 'bounded recovery',
+  ])
+
+  assert.equal(invocation.env.ANCESTRYLLM_E2E_HEADLESS, '1')
+  assert.equal(invocation.args.includes('--headless'), false)
+  assert.equal(invocation.args.includes('--'), false)
+  assert.deepEqual(invocation.args.slice(-2), ['--mochaOpts.grep', 'bounded recovery'])
+})
+
+test('ordinary source and packaged invocations cannot inherit hidden mode', () => {
+  const environment = { ANCESTRYLLM_E2E_HEADLESS: '1' }
+  for (const mode of ['source', 'packaged']) {
+    assert.equal(wdioInvocation(mode, [], { environment }).env.ANCESTRYLLM_E2E_HEADLESS, '0')
+  }
+  assert.equal(normalLaunchInvocation({ environment }).env.ANCESTRYLLM_E2E_HEADLESS, '0')
+})
+
+test('hidden plan runs five source scenarios without claiming native keyboard focus', () => {
+  const calls = []
+  assert.equal(runWdioPlan('source', ['--headless'], runnerOptions(calls)), 0)
+
+  const invocations = calls.filter((call) => call.args !== undefined)
+  assert.equal(invocations.length, 5)
+  assert.equal(calls.filter((call) => call.cleanup !== undefined).length, 5)
+  for (const invocation of invocations) {
+    assert.equal(invocation.options.env.ANCESTRYLLM_E2E_HEADLESS, '1')
+    assert.equal(invocation.args.includes('--headless'), false)
+    assert.equal(invocation.args.some((argument) => argument.includes('skip-link')), false)
+  }
+  assert.equal(invocations[2].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
+})
+
+test('hidden mode rejects native focus, unfiltered single runs, and packaged evidence before launch', () => {
+  for (const [runner, mode, args, expected] of [
+    [runWdioPlan, 'source', ['--headless', '--grep', 'skip-link'], /requires a visible Electron window/u],
+    [runWdio, 'source', ['--headless'], /requires one explicitly selected source scenario/u],
+    [runWdioPlan, 'packaged', ['--headless'], /only supported for source tests/u],
+    [runWdio, 'packaged', ['--headless', '--grep', 'normally'], /only supported for source tests/u],
+  ]) {
+    const calls = []
+    assert.throws(() => runner(mode, args, runnerOptions(calls)), expected)
+    assert.deepEqual(calls, [])
+  }
+})
+
+test('hidden filtered run preserves the selected scenario and its failing exit code', () => {
+  const calls = []
+  const options = runnerOptions(calls)
+  const status = runWdioPlan('source', ['--headless', '--', '--grep', 'bounded recovery'], {
+    ...options,
+    spawnSyncImpl(...args) {
+      options.spawnSyncImpl(...args)
+      return { error: undefined, signal: null, status: 7 }
+    },
+  })
+
+  assert.equal(status, 7)
+  assert.equal(calls.filter((call) => call.args !== undefined).length, 1)
+  assert.equal(calls[0].options.env.ANCESTRYLLM_DESKTOP_FIXTURE, 'degraded')
+  assert.equal(calls[0].options.env.ANCESTRYLLM_E2E_HEADLESS, '1')
+  assert.equal(calls[0].args.includes('--'), false)
+  assert.equal(calls[1].cleanup.path, '/tmp/ancestryllm-isolated-profile')
+})
+
 test('normal packaged launch uses the direct process verifier without WebDriver', () => {
   const invocation = normalLaunchInvocation({
     desktopRoot: '/repo/desktop',

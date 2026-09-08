@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import os
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -85,6 +86,7 @@ from ancestryllm.gedcom.quality import (
     quality_annotations_from_payload,
     quality_response_schema,
     refine_quality_report_with_ai,
+    valid_quality_date,
 )
 from ancestryllm.gedcom.serialization import (
     SUPPORTED_GEDCOM_VERSIONS,
@@ -982,7 +984,16 @@ class GedcomService:
             access=ArtifactAccess.READ,
         )
         sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        fingerprint = fingerprints[source_path]
+        if request.expected_sha256 is not None and (
+            fingerprint.sha256 != request.expected_sha256
+            or fingerprint.snapshot.size != request.expected_size_bytes
+        ):
+            raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
         source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
+        root_refs_by_pointer = {
+            pointer: person_ref for person_ref, pointer in source_bound_refs.items()
+        }
         cancellation_port.check_cancelled()
 
         version = ""
@@ -1021,16 +1032,48 @@ class GedcomService:
                 ),
             )
 
+        if any(source.preserved_extensions for source in sources):
+            findings += (GedcomValidationFinding("gedcom-extensions-preserved", "info"),)
+        if any(source.normalized_dates for source in sources):
+            findings += (GedcomValidationFinding("gedcom-date-normalized", "info"),)
+        invalid_date_findings: list[GedcomValidationFinding] = []
+        invalid_date_subjects: set[str | None] = set()
+        for record in source_records:
+            cancellation_port.check_cancelled()
+            for line in record.lines:
+                parsed = parse_gedcom_line(line)
+                if parsed.tag == "DATE" and not valid_quality_date(parsed.value):
+                    subject_ref = (
+                        root_refs_by_pointer.get(record.pointer) if record.tag == "INDI" else None
+                    )
+                    if subject_ref not in invalid_date_subjects:
+                        invalid_date_subjects.add(subject_ref)
+                        invalid_date_findings.append(
+                            GedcomValidationFinding("gedcom-date-invalid", "warning", subject_ref)
+                        )
+                    break
+        findings += tuple(invalid_date_findings)
+
+        def display_text(value: str, limit: int) -> str:
+            # Keep imported text inert and bounded, including bidi/control characters.
+            return "".join(
+                char for char in value[:limit] if not unicodedata.category(char).startswith("C")
+            ).strip()
+
         summary = GedcomSourceSummary(
             source=registry.describe_input(request.source, operation=operation),
-            gedcom_version=version,
+            gedcom_version=display_text(version, 32),
             individual_count=sum(record.tag == "INDI" for record in source_records),
             family_count=sum(record.tag == "FAM" for record in source_records),
             other_record_count=sum(record.tag not in {"INDI", "FAM"} for record in source_records),
+            encoding=source_records[0].encoding,
         )
-        root_refs_by_pointer = {
-            pointer: person_ref for person_ref, pointer in source_bound_refs.items()
+        identifiers = {
+            pointer: original
+            for source in sources
+            for original, pointer in source.pointer_map.items()
         }
+
         root_candidates = tuple(
             RootCandidate(
                 person_ref=root_refs_by_pointer.get(
@@ -1038,6 +1081,14 @@ class GedcomService:
                     _opaque_ref("person", person.pointer),
                 ),
                 reason_code="individual-record",
+                display_name=display_text(person.full_name, 128),
+                source_identifier=display_text(identifiers.get(person.pointer, ""), 96),
+                birth_date=display_text(person.birth_date, 64),
+                death_date=display_text(person.death_date, 64),
+                relationship_summary=(
+                    f"{len(person.parents)} parents; {len(person.partners)} partners; "
+                    f"{len(person.children)} children"
+                ),
             )
             for person in sorted(people, key=lambda candidate: candidate.pointer)
         )

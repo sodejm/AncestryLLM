@@ -19,8 +19,9 @@ import {
   type AppShutdownProgress,
   type UnsafeShutdownChoice,
 } from './app-shutdown'
-import { initializeMediatedOperationStaging } from './container-operation-mount-policy'
+import { initializeGedcomIntakeStaging, initializeMediatedOperationStaging } from './container-operation-mount-policy'
 import { FileGrantBroker } from './file-grant-broker'
+import { GedcomIntakeBroker } from './gedcom-intake-broker'
 import { externalLinkPrompt, openExternalLinkWithConfirmation } from './external-links'
 import {
   registerDesktopIpcHandlers,
@@ -64,15 +65,17 @@ import type { SidecarSupervisor } from './sidecar-supervisor'
 import type { JobShutdownAction } from './sidecar-client'
 import { acquireSingleInstanceLock, installSingleInstanceGuard } from './single-instance'
 import { WINDOW_READY_RECORD } from './window-readiness'
+import { createWindowPresentation } from './window-presentation'
 import { installKeyboardZoom, type KeyboardZoomTarget } from './zoom-policy'
 
 app.enableSandbox()
 const localRuntimeCliArguments = process.argv.slice(1)
 const localRuntimeCliRequested = isLocalRuntimeCliRequest(localRuntimeCliArguments)
+const windowPresentation = createWindowPresentation()
 const singleInstanceDependencies = {
   requestLock: () => app.requestSingleInstanceLock(),
   onSecondInstance: (listener: () => void) => { app.on('second-instance', listener) },
-  primaryWindow: () => BrowserWindow.getAllWindows()[0],
+  primaryWindow: () => windowPresentation.visible ? BrowserWindow.getAllWindows()[0] : undefined,
 }
 const primaryInstance = localRuntimeCliRequested
   ? acquireSingleInstanceLock(singleInstanceDependencies)
@@ -83,6 +86,7 @@ if (primaryInstance && !localRuntimeCliRequested) {
 
 let bridge: MainDesktopBridge | undefined
 let fileGrantBroker: FileGrantBroker | undefined
+let gedcomIntakeBroker: GedcomIntakeBroker | undefined
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -197,6 +201,7 @@ function registerIpcHandlers(): void {
       },
     }),
     recordDiagnostic: recordDesktopDiagnostic,
+    ...(gedcomIntakeBroker === undefined ? {} : { gedcomIntake: gedcomIntakeBroker }),
   })
 }
 
@@ -223,6 +228,7 @@ function createWindow(): void {
       height: 720,
       minHeight: 560,
       show: false,
+      ...(!windowPresentation.visible ? { focusable: false, skipTaskbar: true } : {}),
       webPreferences: preferences,
     })
   } finally {
@@ -242,7 +248,7 @@ function createWindow(): void {
     )
   })
   window.once('ready-to-show', () => {
-    window.show()
+    windowPresentation.showWindow(window)
     console.info(WINDOW_READY_RECORD)
     recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.rendererWindowReady, 'info')
   })
@@ -293,10 +299,13 @@ if (localRuntimeCliRequested && !primaryInstance) {
   // must never leave SIGTERM on its default process-termination path.
   armVerifiedSigtermHandler()
   app.whenReady().then(async () => {
+    windowPresentation.prepareApp()
     recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.appLaunchRequested, 'info')
     recordDesktopDiagnostic(DESKTOP_DIAGNOSTIC_CODES.electronReady, 'info')
+    let gedcomIntakeDirectory: string
     try {
-      await initializeMediatedOperationStaging(app.getPath('userData'))
+      const stagingRoot = await initializeMediatedOperationStaging(app.getPath('userData'))
+      gedcomIntakeDirectory = await initializeGedcomIntakeStaging(stagingRoot)
     } catch {
       app.exit(1)
       return
@@ -310,12 +319,18 @@ if (localRuntimeCliRequested && !primaryInstance) {
       macosEphemeralWorkspaceVerification: requestedMacosEphemeralVerification(app.commandLine),
       diagnosticRunId,
       diagnosticDirectory,
+      gedcomIntakeDirectory,
       recordDiagnostic: recordDesktopDiagnostic,
     })
     bridge = runtime.bridge
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
     fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
+    if (runtime.gedcomIntakeClient) {
+      gedcomIntakeBroker = new GedcomIntakeBroker({
+        directory: gedcomIntakeDirectory, files: fileGrantBroker, client: runtime.gedcomIntakeClient,
+      })
+    }
     registerIpcHandlers()
     removeSidecarSessionListener = sidecarSupervisor?.onSessionInvalidated(() => {
       ipcController?.invalidateSidecarSession()
@@ -344,6 +359,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
         },
         chooseUnsafeShutdownAction,
         async () => {
+          await gedcomIntakeBroker?.revokeAll().catch(() => undefined)
           await supervisor.stop()
           writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.sidecarStopped)
         },

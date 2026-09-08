@@ -46,6 +46,7 @@ def iter_gedcom_records(
     record_lines = 0
     record_nesting = 0
     saw_content = False
+    encoding = "utf-8"
     for line_number, item in enumerate(
         policy.iter_text_line_items(
             file_path,
@@ -56,13 +57,14 @@ def iter_gedcom_records(
         1,
     ):
         cancellation_checkpoint()
+        encoding = item.encoding
         line = item.text.rstrip("\r\n")
         if not line.strip():
             continue
         saw_content = True
         parsed = parse_gedcom_line(line, line_number)
         if parsed.level == 0 and current:
-            yield GedcomRecord(current, str(file_path), sequence)
+            yield GedcomRecord(current, str(file_path), sequence, encoding)
             sequence += 1
             current = []
             record_bytes = 0
@@ -80,7 +82,7 @@ def iter_gedcom_records(
         )
         current.append(line)
     if current:
-        yield GedcomRecord(current, str(file_path), sequence)
+        yield GedcomRecord(current, str(file_path), sequence, encoding)
     if not saw_content:
         raise FileIngressError(
             "FILE_INPUT_EMPTY",
@@ -168,14 +170,22 @@ def load_sources(
             cancellation_checkpoint()
             pointer_map[xref] = _unique_pointer(xref, used, source_number)
         rewritten: list[GedcomRecord] = []
+        normalized_dates = False
+        preserved_extensions = False
         for record in original_records:
             cancellation_checkpoint()
+            preserved_extensions |= any(
+                parse_gedcom_line(line).tag.startswith("_") for line in record.lines
+            )
             lines = _normalise_record_dates(
                 [_rewrite_xrefs(line, pointer_map) for line in record.lines]
             )
-            rewritten.append(GedcomRecord(lines, str(path), record.sequence))
-        sources.append(ParsedSource(path, rewritten, pointer_map))
-        log.info("Loaded %d records from %s", len(rewritten), path.name)
+            normalized_dates |= len(lines) > len(record.lines)
+            rewritten.append(GedcomRecord(lines, str(path), record.sequence, record.encoding))
+        sources.append(
+            ParsedSource(path, rewritten, pointer_map, normalized_dates, preserved_extensions)
+        )
+        log.info("Loaded %d GEDCOM records", len(rewritten))
     return sources
 
 

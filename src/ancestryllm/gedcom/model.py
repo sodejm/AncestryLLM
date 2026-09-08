@@ -67,6 +67,7 @@ class GedcomRecord:
     lines: list[str]
     source_file: str
     sequence: int
+    encoding: str = "utf-8"
 
     @property
     def header(self) -> GedcomLine:
@@ -91,6 +92,8 @@ class ParsedSource:
     path: Path
     records: list[GedcomRecord]
     pointer_map: dict[str, str]
+    normalized_dates: bool = False
+    preserved_extensions: bool = False
 
 
 __all__ = [

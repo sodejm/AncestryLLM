@@ -37,6 +37,7 @@ test('production build inspection rejects fixture bridge and test-hook machinery
     'createMockAncestryBridge("success")',
     'process.env.ANCESTRYLLM_DESKTOP_FIXTURE',
     'process.env.ANCESTRYLLM_DESKTOP_SECURITY_E2E',
+    'process.env.ANCESTRYLLM_E2E_HEADLESS',
     'globalThis.__ancestryllmSecurityStateForTests = () => ({})',
   ]) {
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
@@ -44,6 +45,17 @@ test('production build inspection rejects fixture bridge and test-hook machinery
     await writeFile(join(root, 'out', 'index.js'), contents)
     await assert.rejects(inspectBuild(join(root, 'out')))
   }
+})
+
+test('hidden-window selector is allowed only in source fixture builds', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ancestryllm-build-'))
+  await writeFile(join(root, 'index.js'), 'process.env.ANCESTRYLLM_E2E_HEADLESS')
+  await inspectBuild(root, { allowFixtures: true })
+  for (const options of [
+    {},
+    { allowPackagedNativeVerification: true },
+    { allowPackagedNativeVerification: true, allowPackagedFileGrants: true },
+  ]) await assert.rejects(inspectBuild(root, options))
 })
 
 test('production build inspection rejects packaged file-grant verification selectors', async () => {

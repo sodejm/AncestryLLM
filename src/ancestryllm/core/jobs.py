@@ -110,6 +110,7 @@ class _JobRecord:
     future: Future[Any] | None = None
     cancellation_was_deferred: bool = False
     cancellation_accepted_at: str | None = None
+    result_discarded: bool = False
 
 
 def _timestamp() -> str:
@@ -542,6 +543,8 @@ class JobManager:
                 "cancellation_deferred_by": current.cancellation_deferred_by,
             }
             values.update(changes)
+            if record.result_discarded:
+                values["result"] = None
             record.snapshot = JobSnapshot(**values)
             snapshot = record.snapshot
         self._notify(snapshot)
@@ -661,6 +664,18 @@ class JobManager:
                 listener(snapshot)
             except BaseException as exc:  # noqa: BLE001 - listeners cannot break job execution
                 logger.warning("Job listener failed: %s", type(exc).__name__)
+
+    def discard_result(self, job_id: str) -> None:
+        """Release private result data, including results of still-running jobs.
+
+        Lifecycle metadata remains available. This is deliberately irreversible:
+        a late completion cannot restore data that its consumer has discarded.
+        """
+        with self._lock:
+            self.get(job_id)
+            record = self._records[job_id]
+            record.result_discarded = True
+            record.snapshot = replace(record.snapshot, result=None)
 
     def get(self, job_id: str) -> JobSnapshot:
         """Return the current snapshot for one job or raise ``JOB_NOT_FOUND``."""

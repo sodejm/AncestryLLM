@@ -41,6 +41,14 @@ An accepted byte-order mark is counted in the total input budget and in the
 first physical-line and logical-record budgets; it is never a free prefix
 outside the configured limits.
 
+GEDCOM inspection reports the physical decoder selected from the bytes:
+UTF-8, UTF-8 with BOM, or BOM-declared UTF-16 LE/BE. The `HEAD/CHAR` value
+does not override that decoder. UTF-32 and BOM-less UTF-16 are rejected,
+not guessed. The parser accumulates one logical record at a time; the
+inspection service retains the parsed source in private process memory for
+bounded root queries, so streaming ingress is not a constant-memory claim
+for a complete inspection.
+
 Multi-pass GEDCOM synchronization and RootsMagic query/export bind every parse,
 hash, database read, provider preflight, and copy to the identity first verified
 for that operation. The identity includes device, inode, size, modification
@@ -125,6 +133,24 @@ cannot invoke either resolver. The mediated-operation broker consumes those
 resolvers internally and preserves their descriptor/fingerprint checks through
 private staging, trusted adapter execution, output validation, and atomic
 publication.
+
+### Native read-only GEDCOM intake
+
+Issue #115 uses `stageReadGrant` to consume a renderer-owned `gedcom-read`
+grant into a private immutable copy. Main supplies only a random stage ID,
+size, and SHA-256 to the private sidecar. Python resolves the stage inside its
+configured private directory and verifies its identity, size, and fingerprint
+through parsing before publishing a summary. Neither adapter accepts a
+renderer path. At most eight inspections, including pending work, are retained;
+the 512 MiB source limit and shared GEDCOM limits above still apply.
+
+Terminal inspection removes staged bytes. Bounded summaries and parser results
+remain transient until discarded or the sidecar closes. Source removal and
+workspace exit request disposal; document replacement, runtime invalidation,
+and shutdown also revoke Main ownership. Startup cleanup accepts only exact
+generated regular-file leaves and fails closed on unexpected entries. These
+private temporary copies are not encrypted workspace persistence or backups.
+No output grant, container worker, remote adapter, or provider is involved.
 
 ### Mediated operations and private staging
 

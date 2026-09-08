@@ -91,8 +91,9 @@ path templates and operations:
 - `POST /api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel`
   idempotently requests cancellation of that exact session-owned run.
 
-The `0.7.0` source-level gated #114 code adds six fixed, capability-scoped
-GEDCOM path templates:
+The `0.7.0` source-level gated #114 façade and #115 bounded root queries expose
+seven fixed, capability-scoped GEDCOM path templates when an artifact registry
+is explicitly supplied:
 
 - `POST /api/v1/gedcom/inspect` submits a deterministic source inspection.
 - `POST /api/v1/gedcom/merge` submits a loss-minimal merge into new artifacts.
@@ -101,18 +102,32 @@ GEDCOM path templates:
 - `POST /api/v1/gedcom/sync` submits a typed incremental synchronization.
 - `GET /api/v1/gedcom/jobs/{job_id}/result` returns one completed, bounded,
   path-free structured result while it remains in process memory.
+- `POST /api/v1/gedcom/jobs/{job_id}/root-candidates` queries one completed
+  inspection's bounded root-candidate pages.
 
-The default packaged sidecar has twenty-five exact path templates. The
-committed contract composition explicitly supplies the scoped GEDCOM artifact
-registry and has thirty-one. A composition without that registry omits all six
-GEDCOM routes instead of advertising operations that cannot resolve grants.
-There is no generic command or route dispatcher and no genealogy, RootsMagic,
-storage, host-file, direct-provider, tool-capable, or other domain-operation
-route. The fixed chat and explicitly composed GEDCOM routes are the only
-provider-execution surfaces. Credential and provider-configuration routes
-cannot read a secret value or execute a provider. General job routes expose
-lifecycle metadata only; they do not admit work. Separately owned follow-on
-work must adapt the same transport-neutral application services.
+Issue #115 separately adds four private native intake path templates when Main
+supplies its canonical staging directory through the private launch frame:
+
+- `POST /api/v1/gedcom/intake` consumes one opaque staging identifier with its
+  size and SHA-256 fingerprint and submits a read-only inspection.
+- `GET /api/v1/gedcom/intake/{job_id}` returns that intake session's summary.
+- `POST /api/v1/gedcom/intake/{job_id}/roots` returns a bounded page of root
+  labels for that session-owned inspection.
+- `POST /api/v1/gedcom/intake/{job_id}/discard` revokes access, forgets the
+  result, and requests cancellation if inspection is still running.
+
+The base control composition has twenty-five exact path templates; native
+intake adds four, and the committed OpenAPI composition includes all thirty-six
+by explicitly supplying both adapters. A composition without the corresponding
+authority omits those routes instead of advertising unusable operations. This
+is source-level capability, not evidence of supported packaged GEDCOM workflows.
+There is no generic command or route dispatcher, RootsMagic, storage, host-file,
+direct-provider, or tool-capable route. Only the fixed chat and explicitly
+composed provider-capable GEDCOM operations can execute a provider; native
+intake is deterministic and network-free. Credential and provider-configuration
+routes cannot read a secret value or execute a provider. General job routes
+expose lifecycle metadata only; they do not admit work. Follow-on workflows
+must adapt the same transport-neutral application services.
 
 ## Security boundary
 
@@ -193,10 +208,21 @@ host paths. Offline selection rejects provider authority; local Ollama requires
 an explicit profile and model but no remote-data consent, while cloud providers
 also require an explicit consent identifier. Execution selects the named
 profile and re-enters the central provider preflight before any cloud call.
-Inputs remain immutable, outputs are new artifacts, supported GEDCOM versions
-are checked at the boundary, and structured responses omit record content and
-paths. Completed results are retained only by the process that executed the
-job; after restart, a durably known completed job returns the stable
+Inputs remain immutable, outputs are new artifacts, and supported output GEDCOM
+versions are checked at the boundary. Inspection reports unfamiliar header
+versions as coded findings. Structured responses omit raw records and paths;
+the separate root-query response deliberately carries bounded genealogy display
+labels for explicit selection. Queries are limited to 128 characters and pages
+to 100 candidates (25 by default), with cursors bound to the job, source
+fingerprint, and query. Names, dates, root choices, and search text are not job
+persistence or log fields. Native intake retains at most eight sources of at
+most 512 MiB each, verifies staged fingerprints, and releases staged bytes when
+inspection terminates. Removing a source or revoking its owning document
+discards its private results; the renderer cannot select an arbitrary path or
+execute a provider through this boundary.
+
+Completed results are retained only by the process that executed the
+job; after restart, a durably known completed façade job returns the stable
 `GEDCOM_JOB_RESULT_UNAVAILABLE` code rather than being misreported as unknown.
 
 Job snapshots and events use strict schema version 1 and expose only bounded,

@@ -68,6 +68,7 @@ from ancestryllm.application.operations import (
     GedcomSyncSnapshot,
     MergeResult,
     QualityResult,
+    RootCandidatePage,
     SubtreeResult,
     SyncResult,
 )
@@ -1126,6 +1127,60 @@ type GedcomApplicationResult = (
 )
 
 
+class GedcomIntakeRequest(BaseModel):
+    """Private main-process staging capability, never a filesystem path."""
+
+    model_config = _STRICT_MODEL
+    schema_version: Literal[1] = 1
+    stage_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64)]
+    size_bytes: Annotated[int, Field(ge=0, le=512 * 1024 * 1024)]
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64)]
+
+
+class GedcomIntakeDiscardResponse(BaseModel):
+    """Idempotent acknowledgement without private source metadata."""
+
+    model_config = _STRICT_MODEL
+    schema_version: Literal[1] = 1
+
+
+class GedcomRootCandidateQuery(BaseModel):
+    """Bounded private search body; names never appear in request URLs."""
+
+    model_config = _STRICT_MODEL
+    query: Annotated[str, Field(max_length=128)] = ""
+    limit: Annotated[int, Field(ge=1, le=100)] = 25
+    cursor: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+
+
+class GedcomRootCandidateResponse(BaseModel):
+    """Minimal display metadata, not a raw GEDCOM record."""
+
+    model_config = _STRICT_MODEL
+    person_ref: _SafeCode
+    reason_code: _SafeCode
+    display_name: Annotated[str, Field(max_length=128)]
+    source_identifier: Annotated[str, Field(max_length=96)]
+    birth_date: Annotated[str, Field(max_length=64)]
+    death_date: Annotated[str, Field(max_length=64)]
+    relationship_summary: Annotated[str, Field(max_length=128)]
+
+
+class GedcomRootCandidatePageResponse(BaseModel):
+    """Bounded authenticated candidate page kept out of job history."""
+
+    model_config = _STRICT_MODEL
+    schema_version: Literal[1] = 1
+    candidates: Annotated[list[GedcomRootCandidateResponse], Field(max_length=100)]
+    total_count: Annotated[int, Field(ge=0)]
+    next_cursor: Annotated[str, Field(max_length=256)] | None
+
+    @classmethod
+    def from_application(cls, page: RootCandidatePage) -> GedcomRootCandidatePageResponse:
+        """Validate the bounded service page before crossing the API boundary."""
+        return cls.model_validate(json.loads(page.to_json())["value"])
+
+
 class GedcomResultResponse(BaseModel):
     """Structured completed GEDCOM result without paths or raw records."""
 
@@ -1154,7 +1209,8 @@ class GedcomResultResponse(BaseModel):
             operation = "gedcom.quality"
         else:
             operation = "gedcom.sync"
-        envelope = json.loads(result.to_json())
+        boundary = result.summary_result() if isinstance(result, GedcomInspectResult) else result
+        envelope = json.loads(boundary.to_json())
         if not isinstance(envelope, dict):
             raise TypeError("GEDCOM result must serialize as an envelope")
         value = envelope.get("value")

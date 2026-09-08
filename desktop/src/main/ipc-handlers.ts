@@ -77,6 +77,9 @@ import {
   parseFileGrantId,
   parseFileGrantResult,
   parseFileGrantRevocationResult,
+  parseGedcomInspectionResult,
+  parseGedcomRootPageResult,
+  parseGedcomDiscardResult,
   parseLocalRuntimeApplyRequest,
   parseLocalRuntimePreviewResult,
   parseLocalRuntimeRequest,
@@ -109,6 +112,8 @@ import {
   parseStartupDiagnosticsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
+import type { GedcomIntakeBroker } from './gedcom-intake-broker'
+import { parseGedcomRootQuery } from '../shared-contract/gedcom'
 import { ChatStreamController } from './chat-stream-controller'
 import {
   SidecarClientError,
@@ -148,6 +153,10 @@ export interface BridgeWebContents {
 export interface MainDesktopBridge extends Omit<
   AncestryBridge,
   | 'getProviderConfiguration'
+  | 'inspectGedcom'
+  | 'getGedcomInspection'
+  | 'queryGedcomRoots'
+  | 'discardGedcomInspection'
   | 'createProviderProfile'
   | 'validateProviderEndpoint'
   | 'previewConsent'
@@ -301,6 +310,7 @@ export interface RegistrationOptions {
   readonly runtimeOperationTimeoutMs?: number
   readonly nativeActionTimeoutMs?: number
   readonly nativeActions?: MainNativeActions
+  readonly gedcomIntake?: Pick<GedcomIntakeBroker, 'inspect' | 'result' | 'roots' | 'discard' | 'revokeOwner' | 'revokeAll'>
   readonly recordDiagnostic?: RecordDesktopDiagnostic
 }
 interface Authorization {
@@ -439,6 +449,9 @@ function success<T>(data: T): BridgeResult<T> {
 }
 
 function fileGrantFailure<T>(cause: unknown): BridgeResult<T> {
+  if (cause instanceof SidecarClientError) {
+    return error('SIDECAR_REQUEST_FAILED', 'The local service could not complete the request.', 'Check the local service status and try again.')
+  }
   if (!(cause instanceof FileGrantBrokerError)) return internalError<T>()
   switch (cause.code) {
     case 'FILE_SELECTION_INVALID':
@@ -778,12 +791,14 @@ function removeAuthorization(
   state: Authorization,
   bridge: MainDesktopBridge,
   fileGrants: MainFileGrantBroker,
+  gedcomIntake?: RegistrationOptions['gedcomIntake'],
 ): void {
   if (authorizations.get(state.contents) !== state) return
   authorizations.delete(state.contents)
   state.removeLifecycleListeners()
   invalidate(state, bridge)
   fileGrants.revokeOwner(state.contents)
+  void gedcomIntake?.revokeOwner(state.contents).catch(() => undefined)
 }
 
 /** Registers a zero-argument IPC route that authorizes its sender before scheduling work. */
@@ -1085,6 +1100,39 @@ export function registerDesktopIpcHandlers(
       parseProviderConfigurationResult,
     )
   })
+  const registerIntake = <Request, Result>(
+    channel: string,
+    parseRequest: (value: unknown) => Request,
+    operation: (intake: NonNullable<RegistrationOptions['gedcomIntake']>, owner: BridgeWebContents, request: Request, signal: AbortSignal) => Promise<Result>,
+    parseResponse: (value: unknown) => BridgeResult<Result>,
+    deadline = timeoutMs,
+  ): void => {
+    ipc.handle(channel, async (event, ...args) => {
+      const state = authorize(event)
+      if (!state) return unauthorized<Result>()
+      if (args.length !== 1) return invalidRequest<Result>()
+      let request: Request
+      try {
+        validateStructuredClone(args[0], requestLimits)
+        request = parseRequest(args[0])
+      } catch {
+        return invalidRequest<Result>()
+      }
+      const intake = options.gedcomIntake
+      if (!intake) return error('SIDECAR_UNAVAILABLE', 'GEDCOM intake is unavailable.', 'Start the packaged local service and try again.')
+      return schedule(state, deadline,
+        (signal) => fileGrantOperation(() => operation(intake, state.contents, request, signal)), parseResponse)
+    })
+  }
+  registerIntake(desktopChannels.inspectGedcom, parseFileGrantId,
+    (intake, owner, request, signal) => intake.inspect(owner, request, signal), parseJobSnapshotResult, fileDialogTimeoutMs)
+  registerIntake(desktopChannels.getGedcomInspection, parseJobRequest,
+    (intake, owner, request, signal) => intake.result(owner, request, signal), parseGedcomInspectionResult)
+  registerIntake(desktopChannels.queryGedcomRoots, parseGedcomRootQuery,
+    (intake, owner, request, signal) => intake.roots(owner, request, signal), parseGedcomRootPageResult)
+  registerIntake(desktopChannels.discardGedcomInspection, parseJobRequest,
+    (intake, owner, request) => intake.discard(owner, request), parseGedcomDiscardResult)
+
   ipc.handle(desktopChannels.requestOpenFileGrant, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<FileGrant | null>()
@@ -1591,8 +1639,8 @@ export function registerDesktopIpcHandlers(
     ): () => void {
       if (disposed || contents.isDestroyed()) throw new Error('Cannot authorize unavailable WebContents.')
       const previous = authorizations.get(contents)
-      if (previous) removeAuthorization(authorizations, previous, bridge, fileGrants)
-      const revoke = () => removeAuthorization(authorizations, state, bridge, fileGrants)
+      if (previous) removeAuthorization(authorizations, previous, bridge, fileGrants, options.gedcomIntake)
+      const revoke = () => removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
       const navigate = (event: unknown) => {
         const details = parseNavigationStartDetails(event)
         if (details?.isMainFrame === false) return
@@ -1600,6 +1648,7 @@ export function registerDesktopIpcHandlers(
         state.navigating = true
         invalidate(state, bridge)
         fileGrants.revokeOwner(state.contents)
+        void options.gedcomIntake?.revokeOwner(state.contents).catch(() => undefined)
       }
       const commitNavigation = (
         _event: unknown,
@@ -1639,18 +1688,19 @@ export function registerDesktopIpcHandlers(
       return () => {
         if (unsubscribed) return
         unsubscribed = true
-        removeAuthorization(authorizations, state, bridge, fileGrants)
+        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
       }
     },
     invalidateSidecarSession(): void {
       fileGrants.revokeAll()
+      void options.gedcomIntake?.revokeAll().catch(() => undefined)
       for (const state of authorizations.values()) invalidate(state, bridge, true)
     },
     dispose(): void {
       if (disposed) return
       disposed = true
       for (const state of [...authorizations.values()]) {
-        removeAuthorization(authorizations, state, bridge, fileGrants)
+        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
       }
       fileGrants.dispose()
     },

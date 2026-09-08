@@ -1,6 +1,7 @@
 # Desktop reference
 
-This page is the lookup reference for the v0.6 desktop source contracts. It
+This page is the lookup reference for the desktop source contracts, including
+the v0.7 read-only GEDCOM intake. It
 does not turn a development build into a supported release or expand the
 released 0.5 installer. The desktop remains a sandboxed presentation over fixed
 typed bridges and a private authenticated loopback sidecar; it is not a public
@@ -13,6 +14,7 @@ or LAN API.
 | **Home** | `#/` | <kbd>H</kbd> | Application, offline posture, startup state, and sanitized capabilities |
 | **Chat** | `#/chat` | <kbd>C</kbd> | Transient provider conversation with no domain or tool authority |
 | **Tasks** | `#/tasks` | <kbd>T</kbd> | Presentation of backend-owned job lifecycle state |
+| **GEDCOM** | `#/gedcom` | <kbd>G</kbd> | Read-only, temporary source inspection and explicit root choice |
 | **Diagnostics** | `#/diagnostics` | <kbd>D</kbd> | Sanitized startup state and bounded recovery |
 | **Settings** | `#/settings` | <kbd>S</kbd> | Reviewed preferences, profiles, consent, deployment, runtime, and write-only credentials |
 
@@ -165,6 +167,29 @@ This is a source-level Main-process foundation for future genealogy adapters.
 No renderer route or supported RootsMagic/GEDCOM product workflow is claimed by
 this contract alone.
 
+### Read-only GEDCOM intake
+
+Issue #115 adds a separate native-sidecar intake adapter and the **GEDCOM**
+workspace. Four fixed requests, `inspectGedcom`, `getGedcomInspection`,
+`queryGedcomRoots`, and `discardGedcomInspection`, consume a single-use read
+grant and return bounded, path-free contracts. This is a source-level gate,
+not a claim of supported packaged genealogy workflows.
+
+At most eight inspections are retained, including pending submissions. Each
+source is limited to 512 MiB and the shared parser limits. Summaries report
+the source SHA-256, byte size, physical encoding, declared GEDCOM version,
+record counts, and at most 100 coded findings with a total finding count.
+Root queries accept at most 128 characters and return 25 candidates per UI
+page (100 maximum at the service boundary). Names, source identifiers, dates,
+and relationship counts distinguish candidates; no candidate is selected
+automatically. **Continue without a root** is an explicit choice.
+
+Source order and root choices are temporary. Removal or leaving the workspace
+requests cancellation and disposal; Main also revokes ownership on document
+replacement, runtime invalidation, and shutdown. Original files are unchanged.
+There is no import, merge, export, output destination, provider call, or remote
+upload. See [Inspect GEDCOM sources](../how-to/desktop-gedcom-intake.md).
+
 ## Chat limits and states
 
 Chat accepts at most 32 concurrent sessions, 32 stored messages per session,
@@ -191,6 +216,7 @@ code. Unknown bridge failures normalize to `UNEXPECTED_ERROR` or
 | File grants | `FILE_SELECTION_INVALID`, `FILE_TOO_LARGE`, `FILE_GRANT_FORBIDDEN`, `FILE_GRANT_REVOKED`, `FILE_GRANT_STALE`, `FILE_GRANT_CONFLICT`, `FILE_DIALOG_FAILED`, `FILE_OPERATION_CANCELLED` |
 | File mediation | `INVALID_REQUEST`, `OPERATION_REPLAYED`, `OPERATION_CONFLICT`, `LIMIT_EXCEEDED`, `CANCELLED`, `TIMED_OUT`, `GRANT_REJECTED`, `ADAPTER_FAILED`, `OUTPUT_INVALID`, `MOUNT_MISMATCH`, `CLEANUP_FAILED` |
 | Tasks | `JOB_ID_INVALID`, `JOB_NOT_FOUND`, `JOB_EVENT_CURSOR_INVALID`, `JOB_EVENT_REPLAY_EXPIRED`, `JOB_SERVICE_UNAVAILABLE`, `JOB_SUBSCRIBER_LIMIT`, `JOB_SUBSCRIPTION_CLOSED`, `JOB_SUBSCRIPTION_CONFLICT`, `JOB_EVENT_STREAM_FAILED` |
+| GEDCOM intake | `GEDCOM_INTAKE_INVALID`, `GEDCOM_INTAKE_CAPACITY`, `GEDCOM_INTAKE_UNAVAILABLE`, `GEDCOM_JOB_RESULT_UNAVAILABLE`, `GEDCOM_ROOT_QUERY_INVALID`, `GEDCOM_ROOT_CURSOR_INVALID`, `GEDCOM_PARSE_INVALID`, `ARTIFACT_INVALID` |
 | Chat sessions | `CHAT_SESSION_INVALID`, `CHAT_SESSION_NOT_FOUND`, `CHAT_SESSION_LIMIT`, `CHAT_SESSION_BUSY`, `CHAT_SERVICE_UNAVAILABLE` |
 | Chat streams | `CHAT_STREAM_NOT_FOUND`, `CHAT_STREAM_CURSOR_INVALID`, `CHAT_STREAM_REPLAY_EXPIRED`, `CHAT_STREAM_SERVICE_UNAVAILABLE`, `CHAT_STREAM_LIMIT`, `CHAT_STREAM_BACKPRESSURE_TIMEOUT`, `CHAT_STREAM_STALLED`, `CHAT_STREAM_EVENT_INVALID` |
 

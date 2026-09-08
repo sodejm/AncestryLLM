@@ -115,6 +115,54 @@ describe('preload job bridge', () => {
     electron.removeListener.mockReset()
   })
 
+  it('validates path-free GEDCOM intake, root queries, and discard across the preload boundary', async () => {
+    const inspection = { schema_version: 1, operation: 'gedcom.inspect', value: {
+      summary: { source: { artifact_id: `art_${'a'.repeat(64)}`, media_type: 'text/vnd.gedcom',
+        artifact_type: 'gedcom', size_bytes: 90, status: 'ready', sha256: 'b'.repeat(64) },
+      gedcom_version: '5.5.5', encoding: 'UTF-8', individual_count: 0, family_count: 0, other_record_count: 2 },
+      findings: [], finding_count: 0, root_candidate_count: 0,
+    } }
+    const page = { schema_version: 1, candidates: [], total_count: 0, next_cursor: null }
+    const discarded = { schema_version: 1 }
+    electron.invoke.mockImplementation((channel: string) => Promise.resolve(success(
+      channel === desktopChannels.inspectGedcom ? runningJob
+        : channel === desktopChannels.getGedcomInspection ? inspection
+          : channel === desktopChannels.queryGedcomRoots ? page : discarded,
+    )))
+    const bridge = await loadBridge()
+    const grantId = `grt_${'a'.repeat(64)}` as const
+    const request = { schema_version: 1 as const, job_id: runningJob.job_id }
+    const query = { ...request, query: 'Ada', limit: 25, cursor: null }
+
+    await expect(bridge.inspectGedcom(grantId)).resolves.toEqual(success(runningJob))
+    await expect(bridge.getGedcomInspection(request)).resolves.toEqual(success(inspection))
+    await expect(bridge.queryGedcomRoots(query)).resolves.toEqual(success(page))
+    await expect(bridge.discardGedcomInspection(request)).resolves.toEqual(success(discarded))
+    expect(electron.invoke).toHaveBeenNthCalledWith(1, desktopChannels.inspectGedcom, grantId)
+    expect(electron.invoke).toHaveBeenNthCalledWith(2, desktopChannels.getGedcomInspection, request)
+    expect(electron.invoke).toHaveBeenNthCalledWith(3, desktopChannels.queryGedcomRoots, query)
+    expect(electron.invoke).toHaveBeenNthCalledWith(4, desktopChannels.discardGedcomInspection, request)
+
+    await expect(bridge.inspectGedcom('/private/source.ged' as typeof grantId)).rejects.toThrow()
+    await expect(bridge.getGedcomInspection({ ...request, job_id: '../private' })).rejects.toThrow()
+    await expect(bridge.queryGedcomRoots({ ...query, query: 'x'.repeat(129) })).rejects.toThrow()
+    await expect(bridge.queryGedcomRoots({ ...query, limit: 101 })).rejects.toThrow()
+    await expect(bridge.queryGedcomRoots({ ...query, cursor: '/private/source.ged' })).rejects.toThrow()
+    await expect(bridge.discardGedcomInspection({ ...request, job_id: '../private' })).rejects.toThrow()
+    expect(electron.invoke).toHaveBeenCalledTimes(4)
+  })
+
+  it('rejects malformed GEDCOM responses on every new preload method', async () => {
+    electron.invoke.mockResolvedValue(success({ path: '/private/source.ged' }))
+    const bridge = await loadBridge()
+    const request = { schema_version: 1 as const, job_id: runningJob.job_id }
+
+    await expect(bridge.inspectGedcom(`grt_${'a'.repeat(64)}`)).rejects.toThrow()
+    await expect(bridge.getGedcomInspection(request)).rejects.toThrow()
+    await expect(bridge.queryGedcomRoots({ ...request, query: '', limit: 25, cursor: null })).rejects.toThrow()
+    await expect(bridge.discardGedcomInspection(request)).rejects.toThrow()
+  })
+
   it('validates chat session lifecycle requests and responses', async () => {
     electron.invoke.mockImplementation((channel: string) => {
       if (channel === desktopChannels.getChatCapability) {

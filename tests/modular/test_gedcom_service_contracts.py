@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,8 +27,6 @@ from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom.service import GedcomService
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from ancestryllm.llm.policy import ConsentGrant
 
 GEDCOM_MEDIA_TYPE = "text/vnd.gedcom"
@@ -194,6 +194,121 @@ def test_inspect_uses_only_the_gedc_version_and_source_binds_root_candidates(
     rooted = output.read_text(encoding="utf-8")
     assert "Grace /Example/" in rooted
     assert "Ada /Example/" not in rooted
+
+
+@pytest.mark.parametrize(
+    ("codec", "prefix", "detected"),
+    (
+        ("utf-8", b"", "utf-8"),
+        ("utf-8", codecs.BOM_UTF8, "utf-8"),
+        ("utf-16-le", codecs.BOM_UTF16_LE, "utf-16-le"),
+        ("utf-16-be", codecs.BOM_UTF16_BE, "utf-16-be"),
+    ),
+)
+def test_inspect_reports_detected_encoding_not_the_declared_charset(
+    tmp_path: Path, codec: str, prefix: bytes, detected: str
+) -> None:
+    source = tmp_path / "fictional.ged"
+    _write_person(source, pointer="@I1@", given_name="Zoë", birth_date="1900")
+    content = source.read_text(encoding="utf-8")
+    source.write_bytes(prefix + content.encode(codec))
+    registry = _ArtifactRegistry()
+    result = GedcomService(artifacts=registry).execute_inspect(
+        GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+    )
+    assert result.summary.encoding == detected
+    assert result.root_candidates[0].display_name == "Zoë Example"
+
+
+def test_inspect_reports_preservation_and_normalization_without_leaking_source_text(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    source = tmp_path / "PRIVATE-FICTIONAL-FILENAME.ged"
+    fixture = Path(__file__).parents[1] / "fixtures/gedcom_adversarial/preserve-extensions.ged"
+    content = fixture.read_bytes()
+    source.write_bytes(content)
+    registry = _ArtifactRegistry()
+    with caplog.at_level("INFO"):
+        result = GedcomService(artifacts=registry).execute_inspect(
+            GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+        )
+    assert {finding.code for finding in result.findings} >= {
+        "gedcom-extensions-preserved",
+        "gedcom-date-normalized",
+        "gedcom-date-invalid",
+    }
+    assert source.read_bytes() == content
+    summary = str(result.summary_result().to_serializable())
+    for private_text in (
+        source.name,
+        str(source),
+        "definitelynotadate",
+        "Zoë",
+        "fictional-portrait.jpg",
+    ):
+        assert private_text not in summary
+        assert private_text not in caplog.text
+    assert all(
+        finding.subject_ref == result.root_candidates[0].person_ref
+        if finding.code == "gedcom-date-invalid"
+        else finding.subject_ref is None
+        for finding in result.findings
+    )
+
+
+@pytest.mark.parametrize("person_count", (2, 105))
+def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findings(
+    tmp_path: Path, person_count: int
+) -> None:
+    source = tmp_path / "fictional-anchors.ged"
+    content = (
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 @VALID@ INDI\n1 NAME Valid /Example/\n1 BIRT\n2 DATE 1900\n"
+        + "".join(
+            f"0 @I{index}@ INDI\n1 NAME Fictional /Person{index}/\n"
+            "1 BIRT\n2 DATE invalid\n1 DEAT\n2 DATE invalid\n"
+            for index in range(person_count)
+        )
+        + "0 @F1@ FAM\n1 MARR\n2 DATE invalid\n"
+        "0 @F2@ FAM\n1 MARR\n2 DATE invalid\n0 TRLR\n"
+    )
+    source.write_text(content, encoding="utf-8")
+    registry = _ArtifactRegistry()
+    result = GedcomService(artifacts=registry).execute_inspect(
+        GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+    )
+    invalid_dates = [
+        finding for finding in result.findings if finding.code == "gedcom-date-invalid"
+    ]
+    assert len(invalid_dates) == person_count + 1
+    assert {finding.subject_ref for finding in invalid_dates} == {
+        None,
+        *(
+            person.person_ref
+            for person in result.root_candidates
+            if person.source_identifier != "@VALID@"
+        ),
+    }
+    summary = result.summary_result()
+    assert summary.finding_count == person_count + 1
+    assert len(summary.findings) == min(person_count + 1, 100)
+    assert source.read_text(encoding="utf-8") == content
+    serialized = summary.to_json()
+    for private_text in (str(source), source.name, "Fictional", "@I0@", "2 DATE invalid"):
+        assert private_text not in serialized
+
+
+def test_inspect_bounds_untrusted_version_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "fictional.ged"
+    _write_person(source, pointer="@I1@", given_name="Ada", birth_date="1900")
+    source.write_text(source.read_text().replace("5.5.5", "5.5.5\u202e" + "x" * 100))
+    registry = _ArtifactRegistry()
+    result = GedcomService(artifacts=registry).execute_inspect(
+        GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+    )
+    assert len(result.summary.gedcom_version) <= 32
+    assert "\u202e" not in result.summary.gedcom_version
+    assert "gedcom-version-unsupported" in {finding.code for finding in result.findings}
 
 
 @pytest.mark.parametrize(

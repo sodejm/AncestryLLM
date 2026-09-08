@@ -1193,6 +1193,10 @@ export type BridgeResult<T> =
  * Defines the callable ancestry bridge surface exposed by the isolated preload boundary.
  */
 export interface AncestryBridge {
+  inspectGedcom(grantId: FileGrantId): Promise<BridgeResult<JobSnapshot>>
+  getGedcomInspection(request: JobRequest): Promise<BridgeResult<import('./gedcom').GedcomInspection>>
+  queryGedcomRoots(request: import('./gedcom').GedcomRootQuery): Promise<BridgeResult<import('./gedcom').GedcomRootPage>>
+  discardGedcomInspection(request: JobRequest): Promise<BridgeResult<import('./gedcom').GedcomDiscard>>
   getAppInfo(): Promise<BridgeResult<AppInfo>>
   getStartupDiagnostics(): Promise<BridgeResult<StartupDiagnostics>>
   getCapabilities(): Promise<BridgeResult<CapabilityManifest>>
@@ -1239,6 +1243,10 @@ export interface AncestryBridge {
  * Maps the versioned desktop IPC protocol operations to stable Electron IPC channel names.
  */
 export const desktopChannels = Object.freeze({
+  inspectGedcom: 'ancestry:desktop:inspect-gedcom',
+  getGedcomInspection: 'ancestry:desktop:get-gedcom-inspection',
+  queryGedcomRoots: 'ancestry:desktop:query-gedcom-roots',
+  discardGedcomInspection: 'ancestry:desktop:discard-gedcom-inspection',
   getAppInfo: 'ancestry:desktop:get-app-info',
   getStartupDiagnostics: 'ancestry:desktop:get-startup-diagnostics',
   getCapabilities: 'ancestry:desktop:get-capabilities',

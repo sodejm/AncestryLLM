@@ -13,6 +13,14 @@ All notable changes to AncestryLLM are recorded here. The project follows
   fail-closed exceptions.
 - Transport-neutral GEDCOM inspect, merge, subtree, quality, and sync DTOs; a
   bounded typed job façade; and fixed authenticated submission/result API routes.
+- Source-level read-only desktop GEDCOM intake with ordered temporary sources,
+  bounded validation summaries, physical encoding and fingerprint metadata,
+  on-demand single-person finding previews, paged individual search, and explicit
+  root or no-root selection. This adds no
+  import, merge, export, provider call, or packaged-support claim.
+- Opt-in hidden-window Electron source checks that avoid showing app windows
+  or taking keyboard focus, while keeping native-focus and packaged checks
+  separate and ordinary desktop launches visible.
 
 ### Changed
 
@@ -22,6 +30,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
   canaries; and records those results in the aggregate receipt.
 - CLI and REPL GEDCOM entry points now compose the same application contracts,
   with GEDCOM 5.5.5 as the default and deliberate 5.5.1 compatibility retained.
+- GEDCOM inspection recognizes BOM-marked UTF-16, reads the GEDCOM version from
+  `HEAD/GEDC/VERS` rather than a producer version, and reports extension
+  preservation and in-memory date normalization without changing source bytes.
 
 ### Security
 
