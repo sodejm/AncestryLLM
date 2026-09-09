@@ -240,19 +240,19 @@ class GedcomJobFacade:
         if not normalized_query:
             total_count = len(result.root_candidates)
             page_candidates = result.root_candidates[offset : offset + limit]
-            next_offset = offset + len(page_candidates)
+            page_next_offset = offset + len(page_candidates)
             return RootCandidatePage(
                 candidates=page_candidates,
                 total_count=total_count,
                 next_cursor=(
-                    self._cursor(job_id, result, normalized_query, next_offset)
-                    if next_offset < total_count
+                    self._cursor(job_id, result, normalized_query, page_next_offset)
+                    if page_next_offset < total_count
                     else None
                 ),
             )
         candidates: list[RootCandidate] = []
         total_count = 0
-        next_offset = None
+        next_offset: int | None = None
         for index, candidate in enumerate(result.root_candidates):
             if is_person_ref:
                 # Finding anchors never fall back to a fuzzy match in imported text.
