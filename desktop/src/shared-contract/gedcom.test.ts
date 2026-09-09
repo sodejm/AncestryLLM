@@ -17,7 +17,15 @@ describe('GEDCOM presentation contract', () => {
       findings: [], finding_count: 0, root_candidate_count: 0,
     } }
     expect(parseGedcomInspection(value)).toEqual(value)
+    expect(parseGedcomInspection({
+      ...value,
+      value: { ...value.value, finding_count: 5_000_003, root_candidate_count: 5_000_000 },
+    })).toMatchObject({ value: { finding_count: 5_000_003 } })
     expect(() => parseGedcomInspection({ ...value, value: { ...value.value, root_candidates: [] } })).toThrow()
+    expect(() => parseGedcomInspection({
+      ...value,
+      value: { ...value.value, finding_count: 5_000_004 },
+    })).toThrow()
   })
 
   it('preserves duplicate names with distinct source-bound identities', () => {

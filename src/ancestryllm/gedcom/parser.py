@@ -30,6 +30,7 @@ from ancestryllm.gedcom.model import (
 from ancestryllm.gedcom.validator import validate_gedcom_555
 
 log = logging.getLogger(__name__)
+_EXTENSION_TAG = re.compile(r"^\d+\s+(?:@[^@\s]+@\s+)?_[^\s]+(?:\s|$)")
 
 
 def iter_gedcom_records(
@@ -174,9 +175,10 @@ def load_sources(
         preserved_extensions = False
         for record in original_records:
             cancellation_checkpoint()
-            preserved_extensions |= any(
-                parse_gedcom_line(line).tag.startswith("_") for line in record.lines
-            )
+            if not preserved_extensions:
+                preserved_extensions = any(
+                    _EXTENSION_TAG.match(line) is not None for line in record.lines
+                )
             lines = _normalise_record_dates(
                 [_rewrite_xrefs(line, pointer_map) for line in record.lines]
             )

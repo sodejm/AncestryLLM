@@ -1,6 +1,6 @@
 /** Builds and verifies the only host bind mounts permitted for one mediated operation. */
 
-import { lstat, mkdir, readdir, realpath, rm, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, realpath, rm, unlink } from 'node:fs/promises'
 import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import type { HostRealizedContainerMount } from './container-supervisor'
 
@@ -133,7 +133,11 @@ export async function initializeGedcomIntakeStaging(runtimeProfileRoot: string):
     // Validate the entire set before removing anything; never traverse an unexpected entry.
     if (entries.some((entry) => !/^[a-f0-9]{64}\.ged$/.test(entry.name)
       || !entry.isFile() || entry.isSymbolicLink())) fail('STAGING_UNSAFE')
-    for (const entry of entries) await unlink(join(stagingRoot, entry.name))
+    for (const entry of entries) {
+      const stagedPath = join(stagingRoot, entry.name)
+      await chmod(stagedPath, 0o600)
+      await unlink(stagedPath)
+    }
     return stagingRoot
   } catch {
     return fail('STAGING_UNSAFE')

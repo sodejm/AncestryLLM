@@ -34,7 +34,7 @@ describe('mediated operation mount policy', () => {
     expect(staging).toBe(join(root, 'gedcom-intake'))
     expect((await lstat(staging)).mode & 0o077).toBe(0)
     const stale = join(staging, `${'a'.repeat(64)}.ged`)
-    await writeFile(stale, 'fictional GEDCOM', { mode: 0o600 })
+    await writeFile(stale, 'fictional GEDCOM', { mode: 0o400 })
     await expect(initializeGedcomIntakeStaging(root)).resolves.toBe(staging)
     await expect(lstat(stale)).rejects.toMatchObject({ code: 'ENOENT' })
 

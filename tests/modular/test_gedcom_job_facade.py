@@ -193,6 +193,38 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         jobs.close()
 
 
+def test_pointerless_individuals_keep_distinct_root_candidate_refs(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fictional-pointerless.ged"
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 INDI\n1 NAME Ada /Example/\n"
+        "0 INDI\n1 NAME Ada /Example/\n"
+        "0 TRLR\n",
+        encoding="utf-8",
+    )
+    artifacts = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=artifacts.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="text/vnd.gedcom",
+            artifact_type="gedcom",
+        )
+    )
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    facade = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+    try:
+        job_id = facade.submit_inspect(request).job_id
+        jobs.manager.wait(job_id, timeout=5)
+        page = facade.root_candidates(job_id, query="", limit=25)
+        assert len(page.candidates) == 2
+        assert page.candidates[0].person_ref != page.candidates[1].person_ref
+    finally:
+        jobs.close()
+
+
 def test_finding_anchor_queries_match_only_an_exact_person_in_the_owned_inspection(
     tmp_path: Path,
 ) -> None:

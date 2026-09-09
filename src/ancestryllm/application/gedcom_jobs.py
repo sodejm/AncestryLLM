@@ -237,6 +237,19 @@ class GedcomJobFacade:
                     "The root candidate cursor is invalid or stale.",
                     "Restart the search for this inspected source.",
                 )
+        if not normalized_query:
+            total_count = len(result.root_candidates)
+            candidates = result.root_candidates[offset : offset + limit]
+            next_offset = offset + len(candidates)
+            return RootCandidatePage(
+                candidates=candidates,
+                total_count=total_count,
+                next_cursor=(
+                    self._cursor(job_id, result, normalized_query, next_offset)
+                    if next_offset < total_count
+                    else None
+                ),
+            )
         candidates: list[RootCandidate] = []
         total_count = 0
         next_offset = None

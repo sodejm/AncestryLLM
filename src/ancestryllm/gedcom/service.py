@@ -1078,7 +1078,7 @@ class GedcomService:
             RootCandidate(
                 person_ref=root_refs_by_pointer.get(
                     person.pointer,
-                    _opaque_ref("person", person.pointer),
+                    _opaque_ref("person", f"{person.pointer}:{sequence:08x}"),
                 ),
                 reason_code="individual-record",
                 display_name=display_text(person.full_name, 128),
@@ -1090,7 +1090,9 @@ class GedcomService:
                     f"{len(person.children)} children"
                 ),
             )
-            for person in sorted(people, key=lambda candidate: candidate.pointer)
+            for sequence, person in enumerate(
+                sorted(people, key=lambda candidate: candidate.pointer)
+            )
         )
         cancellation_port.check_cancelled()
         return GedcomInspectResult(

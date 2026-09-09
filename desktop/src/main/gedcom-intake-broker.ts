@@ -41,7 +41,9 @@ export class GedcomIntakeBroker {
   /** Consumes a native read grant and binds its inspection to the originating renderer. */
   async inspect(owner: object, grantId: FileGrantId, signal?: AbortSignal): Promise<Readonly<JobSnapshot>> {
     if (signal?.aborted) throw new FileGrantBrokerError('FILE_OPERATION_CANCELLED')
-    if (this.entries.size >= 8) throw new FileGrantBrokerError('FILE_GRANT_CONFLICT')
+    if ([...this.entries].filter((entry) => !entry.revoked).length >= 8) {
+      throw new FileGrantBrokerError('FILE_GRANT_CONFLICT')
+    }
     const stageId = randomBytes(32).toString('hex')
     const entry: Entry = { owner, path: join(this.options.directory, `${stageId}.ged`),
       controller: new AbortController(), revoked: false, disposed: false }

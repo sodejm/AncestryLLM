@@ -44,6 +44,7 @@ export interface GedcomRootQuery extends JobRequest {
 export interface GedcomDiscard { schema_version: 1 }
 
 function fail(): never { throw new Error('Invalid GEDCOM contract') }
+const GEDCOM_FINDING_COUNT_LIMIT = 5_000_003
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).sort().join(',') !== [...keys].sort().join(',')) fail()
@@ -110,7 +111,7 @@ export function parseGedcomInspection(value: unknown): Readonly<GedcomInspection
   count(source.size_bytes, 512 * 1024 * 1024)
   text(summary.gedcom_version, 32); text(summary.encoding, 32)
   count(summary.individual_count); count(summary.family_count); count(summary.other_record_count)
-  count(data.finding_count); count(data.root_candidate_count)
+  count(data.finding_count, GEDCOM_FINDING_COUNT_LIMIT); count(data.root_candidate_count)
   if (!Array.isArray(data.findings) || data.findings.length > 100 || data.findings.length > data.finding_count) fail()
   for (const item of data.findings) {
     const finding = object(item, ['code', 'severity', 'subject_ref'])

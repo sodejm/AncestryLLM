@@ -77,6 +77,19 @@ describe('native GEDCOM intake broker', () => {
     expect(client.discard).toHaveBeenCalledTimes(2)
   })
 
+  it('does not count revoked retry entries against the eight-source intake bound', async () => {
+    const { broker, client } = await fixture()
+    const owner = {}
+    const request = { schema_version: 1 as const, job_id: job.job_id }
+    for (let index = 0; index < 8; index++) {
+      await broker.inspect(owner, grant)
+      client.discard.mockRejectedValueOnce(new Error('temporary transport failure'))
+      await expect(broker.discard(owner, request)).rejects.toThrow('temporary transport failure')
+    }
+    await expect(broker.inspect(owner, grant)).resolves.toEqual(job)
+    await broker.revokeOwner(owner)
+  })
+
   it('coalesces overlapping cleanup requests', async () => {
     const { broker, client } = await fixture()
     const owner = {}
