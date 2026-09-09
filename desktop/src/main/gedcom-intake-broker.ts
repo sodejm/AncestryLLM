@@ -41,7 +41,7 @@ export class GedcomIntakeBroker {
   /** Consumes a native read grant and binds its inspection to the originating renderer. */
   async inspect(owner: object, grantId: FileGrantId, signal?: AbortSignal): Promise<Readonly<JobSnapshot>> {
     if (signal?.aborted) throw new FileGrantBrokerError('FILE_OPERATION_CANCELLED')
-    if ([...this.entries].filter((entry) => !entry.revoked).length >= 8) {
+    if (this.activeEntryCount() >= 8) {
       throw new FileGrantBrokerError('FILE_GRANT_CONFLICT')
     }
     const stageId = randomBytes(32).toString('hex')
@@ -114,6 +114,10 @@ export class GedcomIntakeBroker {
     if (entry.revoked || entry.controller.signal.aborted || !this.entries.has(entry)) {
       throw new FileGrantBrokerError('FILE_OPERATION_CANCELLED')
     }
+  }
+
+  private activeEntryCount(): number {
+    return [...this.entries].filter((entry) => !entry.revoked && !entry.disposed).length
   }
 
   private owned(owner: object, jobId: string): Entry {

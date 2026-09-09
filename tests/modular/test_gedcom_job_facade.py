@@ -161,6 +161,19 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
     try:
         first_job = facade.submit_inspect(request).job_id
         jobs.manager.wait(first_job, timeout=5)
+        empty = facade.root_candidates(first_job, query="", limit=2)
+        assert empty.total_count == 3
+        assert len(empty.candidates) == 2
+        assert empty.next_cursor is not None
+        empty_last = facade.root_candidates(
+            first_job,
+            query="",
+            limit=2,
+            cursor=empty.next_cursor,
+        )
+        assert empty_last.total_count == 3
+        assert len(empty_last.candidates) == 1
+        assert empty_last.next_cursor is None
         first = facade.root_candidates(first_job, query="ADA", limit=1)
         assert first.total_count == 2
         assert len(first.candidates) == 1

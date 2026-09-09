@@ -19,7 +19,7 @@ from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import FileIngressError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind, FileSnapshot
 from ancestryllm.gedcom.graph import _exact_pointer_references, _rewrite_xrefs
-from ancestryllm.gedcom.identity import _normalise_record_dates
+from ancestryllm.gedcom.identity import _normalise_record_dates_with_metadata
 from ancestryllm.gedcom.model import (
     GedcomLine,
     GedcomParseError,
@@ -30,7 +30,6 @@ from ancestryllm.gedcom.model import (
 from ancestryllm.gedcom.validator import validate_gedcom_555
 
 log = logging.getLogger(__name__)
-_EXTENSION_TAG = re.compile(r"^\d+\s+(?:@[^@\s]+@\s+)?_[^\s]+(?:\s|$)")
 
 
 def iter_gedcom_records(
@@ -175,13 +174,10 @@ def load_sources(
         preserved_extensions = False
         for record in original_records:
             cancellation_checkpoint()
-            if not preserved_extensions:
-                preserved_extensions = any(
-                    _EXTENSION_TAG.match(line) is not None for line in record.lines
-                )
-            lines = _normalise_record_dates(
+            lines, record_has_extensions = _normalise_record_dates_with_metadata(
                 [_rewrite_xrefs(line, pointer_map) for line in record.lines]
             )
+            preserved_extensions |= record_has_extensions
             normalized_dates |= len(lines) > len(record.lines)
             rewritten.append(GedcomRecord(lines, str(path), record.sequence, record.encoding))
         sources.append(

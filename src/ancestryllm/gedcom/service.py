@@ -6,7 +6,7 @@ import datetime as dt
 import hashlib
 import os
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -156,6 +156,11 @@ class GedcomSyncResult:
 def _opaque_ref(namespace: str, value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
     return f"{namespace}:{digest}"
+
+
+def _pointerless_person_pointer(fingerprint: FileFingerprint, sequence: int) -> str:
+    """Give a pointerless INDI a deterministic internal identity for graph work."""
+    return f"@X{fingerprint.sha256[:24]}_{sequence}@"
 
 
 def _at_contract_boundary[ResultT](operation: Callable[[], ResultT]) -> ResultT:
@@ -356,9 +361,19 @@ class GedcomService:
             ) from exc
         self._verify_sources(fingerprints)
         source_records = [record for source in sources for record in source.records]
-        people = [
-            individual_from_record(record) for record in source_records if record.tag == "INDI"
-        ]
+        people: list[IndividualRecord] = []
+        for source in sources:
+            fingerprint = fingerprints[source.path]
+            for record in source.records:
+                if record.tag != "INDI":
+                    continue
+                person = individual_from_record(record)
+                if not person.pointer:
+                    person = replace(
+                        person,
+                        pointer=_pointerless_person_pointer(fingerprint, record.sequence),
+                    )
+                people.append(person)
         return (
             sources,
             source_records,
@@ -391,6 +406,16 @@ class GedcomService:
                     f"{fingerprint.sha256}:{original_pointer}",
                 )
                 candidates.setdefault(person_ref, set()).add(global_pointer)
+            for record in source.records:
+                if record.tag != "INDI" or record.pointer:
+                    continue
+                person_ref = _opaque_ref(
+                    "person",
+                    f"{fingerprint.sha256}:sequence:{record.sequence}",
+                )
+                candidates.setdefault(person_ref, set()).add(
+                    _pointerless_person_pointer(fingerprint, record.sequence)
+                )
         return {
             person_ref: next(iter(pointers))
             for person_ref, pointers in candidates.items()
