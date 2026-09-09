@@ -239,10 +239,10 @@ class GedcomJobFacade:
                 )
         if not normalized_query:
             total_count = len(result.root_candidates)
-            candidates = result.root_candidates[offset : offset + limit]
-            next_offset = offset + len(candidates)
+            page_candidates = result.root_candidates[offset : offset + limit]
+            next_offset = offset + len(page_candidates)
             return RootCandidatePage(
-                candidates=candidates,
+                candidates=page_candidates,
                 total_count=total_count,
                 next_cursor=(
                     self._cursor(job_id, result, normalized_query, next_offset)
