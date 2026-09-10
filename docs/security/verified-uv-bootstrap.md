@@ -81,7 +81,7 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - exact release archive names, reviewed byte sizes, archive SHA-256 values,
   paths, and extracted executable SHA-256 values for Linux, macOS, and Windows
   on x86-64 and ARM64;
-- GitHub CLI 2.97.0 as the pinned provenance verifier, with an exact archive and
+- GitHub CLI 2.100.0 as the pinned provenance verifier, with an exact archive and
   reviewed byte size and SHA-256 for every supported platform;
 - `astral-sh/setup-uv` v9.0.0 at its exact reviewed commit; and
 - `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
@@ -213,6 +213,12 @@ reporting a failure; do not attach download responses, temporary directories,
 environment dumps, or credentials.
 
 ## Reviewed policy updates
+
+The GitHub CLI verifier pin is currently 2.100.0. This focused refresh preserves
+the same fail-closed attestation command and payload checks after the previous
+2.97.0 binary returned upstream trust-metadata failures for the exact reviewed
+`uv` attestation; the newer official release verified that same artifact
+without relaxing any identity, digest, or provenance requirement.
 
 Update the policy only in a focused, reviewed pull request. The same change must
 review and update all of the following where applicable:
