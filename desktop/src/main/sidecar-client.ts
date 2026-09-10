@@ -142,6 +142,10 @@ export type SidecarClientFailure =
   | 'chat_stream_limit'
   | 'chat_event_stream_interrupted'
   | 'chat_event_stream_failed'
+  | 'GEDCOM_INTAKE_INVALID'
+  | 'GEDCOM_INTAKE_CAPACITY'
+  | 'GEDCOM_JOB_RESULT_UNAVAILABLE'
+  | 'GEDCOM_ROOT_CURSOR_INVALID'
 
 /**
  * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
@@ -482,6 +486,17 @@ function failureCode(response: Readonly<SidecarHttpResponse>): string | undefine
   } catch {
     return undefined
   }
+}
+
+function gedcomFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'GEDCOM_INTAKE_INVALID'
+    || code === 'GEDCOM_INTAKE_CAPACITY'
+    || code === 'GEDCOM_JOB_RESULT_UNAVAILABLE'
+    || code === 'GEDCOM_ROOT_CURSOR_INVALID') {
+    return new SidecarClientError(code)
+  }
+  return new SidecarClientError('request_failed')
 }
 
 function providerFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
@@ -1135,7 +1150,7 @@ export function createGedcomIntakeClient(dependencies: Readonly<{
     try {
       const response = await transport(session, path, signal, options)
       if (signal?.aborted) throw new SidecarClientError('cancelled')
-      if (response.statusCode !== 200) throw new SidecarClientError('request_failed')
+      if (response.statusCode !== 200) throw gedcomFailure(response)
       return parseJson(response, parser)
     } catch (cause) {
       if (signal?.aborted) throw new SidecarClientError('cancelled')

@@ -199,7 +199,7 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
     release(source)
   }
 
-  async function inspectProgress(source: Source, snapshot: JobSnapshot, attempt = 0): Promise<void> {
+  async function inspectProgress(source: Source, snapshot: JobSnapshot): Promise<void> {
     if (!source.active || !mounted.current) return
     try {
       if (snapshot.state === 'completed') {
@@ -207,14 +207,14 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
         if (!source.active || !mounted.current) return
         if (result.ok) update(source, { inspection: result.data })
         else fail(source, result.error.code)
-      } else if (snapshot.state === 'failed' || snapshot.state === 'cancelled' || attempt >= 300) {
+      } else if (snapshot.state === 'failed' || snapshot.state === 'cancelled') {
         fail(source, snapshot.error_code ?? 'GEDCOM_INTAKE_UNAVAILABLE')
       } else {
         source.timer = setTimeout(() => {
           if (!source.active || !mounted.current) return
           void bridge.getJob({ schema_version: 1, job_id: snapshot.job_id }).then((result) => {
             if (!source.active || !mounted.current) return
-            if (result.ok) void inspectProgress(source, result.data, attempt + 1)
+            if (result.ok) void inspectProgress(source, result.data)
             else fail(source, result.error.code)
           }).catch(() => fail(source, 'GEDCOM_INTAKE_UNAVAILABLE'))
         }, 1000)

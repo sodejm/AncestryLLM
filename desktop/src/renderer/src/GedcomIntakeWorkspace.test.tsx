@@ -161,6 +161,34 @@ describe('GEDCOM intake workspace', () => {
     expect(screen.queryByRole('button', { name: /upload|merge|export|import/i })).not.toBeInTheDocument()
   })
 
+  it('continues polling a valid inspection beyond 300 attempts', async () => {
+    const bridge = bridgeFor()
+    const queued = { ...job, state: 'running' as const, finished_at: null }
+    let polls = 0
+    vi.mocked(bridge.inspectGedcom).mockResolvedValue(success(queued))
+    vi.mocked(bridge.getJob).mockImplementation(async () => {
+      polls += 1
+      return success(polls > 300 ? job : queued)
+    })
+    const nativeSetTimeout = globalThis.setTimeout
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler,
+      delay?: number, ...args: unknown[]) => {
+      if (delay === 1000 && typeof callback === 'function') {
+        queueMicrotask(() => callback(...args))
+        return 0 as unknown as ReturnType<typeof setTimeout>
+      }
+      return nativeSetTimeout(callback, delay, ...args)
+    }) as typeof setTimeout)
+    try {
+      render(<GedcomIntakeWorkspace bridge={bridge} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Add GEDCOM source' }))
+      await waitFor(() => expect(vi.mocked(bridge.getJob)).toHaveBeenCalledTimes(301), { timeout: 2000 })
+      expect(await screen.findByText('GEDCOM 5.5.5 · UTF-8')).toBeVisible()
+    } finally {
+      timer.mockRestore()
+    }
+  })
+
   it('replaces bounded search pages without losing an explicit choice', async () => {
     const bridge = bridgeFor()
     const cursor = `c1_00000019_${'c'.repeat(64)}`

@@ -534,6 +534,21 @@ describe('desktop IPC handlers', () => {
     expect(intake.revokeAll).toHaveBeenCalled()
   })
 
+  it('preserves allowlisted GEDCOM sidecar errors through the bridge', async () => {
+    const intake = {
+      inspect: vi.fn(), result: vi.fn().mockRejectedValue(new SidecarClientError('GEDCOM_ROOT_CURSOR_INVALID')),
+      roots: vi.fn(), discard: vi.fn(), revokeOwner: vi.fn().mockResolvedValue(undefined),
+      revokeAll: vi.fn().mockResolvedValue(undefined),
+    }
+    const { handlers, event } = harness(bridge(), { gedcomIntake: intake })
+    await expect(handlers.get(desktopChannels.getGedcomInspection)!(event(), {
+      schema_version: 1, job_id: 'j000001',
+    })).resolves.toMatchObject({ ok: false, error: {
+      code: 'GEDCOM_ROOT_CURSOR_INVALID',
+      message: 'The GEDCOM root query cursor is no longer valid.',
+    } })
+  })
+
   it('routes strict native actions through the authorized main-process adapter', async () => {
     const native = nativeActionHarness()
     const { event, handlers } = harness(bridge(), { nativeActions: native.actions })

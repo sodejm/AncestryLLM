@@ -33,4 +33,29 @@ describe('native GEDCOM HTTP client', () => {
     await expect(createGedcomIntakeClient({ session: () => undefined, request })
       .result('j000001')).rejects.toMatchObject({ reason: 'unavailable' })
   })
+
+  it.each([
+    'GEDCOM_INTAKE_INVALID',
+    'GEDCOM_INTAKE_CAPACITY',
+    'GEDCOM_JOB_RESULT_UNAVAILABLE',
+    'GEDCOM_ROOT_CURSOR_INVALID',
+  ] as const)('preserves the documented GEDCOM error code %s', async (code) => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ code, message: 'bounded', remediation: 'retry', details: [] }),
+    })
+    const client = createGedcomIntakeClient({ session: () => session, request })
+    await expect(client.result('j000001')).rejects.toMatchObject({ reason: code })
+  })
+
+  it('maps undocumented or malformed GEDCOM errors to the generic failure', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'INTERNAL_HOST_PATH', message: '/private/tree.ged' }),
+    })
+    const client = createGedcomIntakeClient({ session: () => session, request })
+    await expect(client.result('j000001')).rejects.toMatchObject({ reason: 'request_failed' })
+  })
 })

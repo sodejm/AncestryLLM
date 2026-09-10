@@ -450,6 +450,16 @@ function success<T>(data: T): BridgeResult<T> {
 
 function fileGrantFailure<T>(cause: unknown): BridgeResult<T> {
   if (cause instanceof SidecarClientError) {
+    switch (cause.reason) {
+      case 'GEDCOM_INTAKE_INVALID':
+        return error(cause.reason, 'The GEDCOM intake request was invalid.', 'Review the selected file and try again.')
+      case 'GEDCOM_INTAKE_CAPACITY':
+        return error(cause.reason, 'GEDCOM intake is at capacity.', 'Wait for another inspection to finish and try again.')
+      case 'GEDCOM_JOB_RESULT_UNAVAILABLE':
+        return error(cause.reason, 'The GEDCOM inspection is no longer available.', 'Select the file again and retry the inspection.')
+      case 'GEDCOM_ROOT_CURSOR_INVALID':
+        return error(cause.reason, 'The GEDCOM root query cursor is no longer valid.', 'Refresh the root list and try again.')
+    }
     return error('SIDECAR_REQUEST_FAILED', 'The local service could not complete the request.', 'Check the local service status and try again.')
   }
   if (!(cause instanceof FileGrantBrokerError)) return internalError<T>()
