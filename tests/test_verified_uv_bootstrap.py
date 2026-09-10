@@ -664,11 +664,160 @@ def test_attestation_timeout_is_coded_receipted_and_blocks_uv_execution(
             temporary_root=tmp_path / "temporary",
         )
 
-    assert observed_timeout == bootstrap_module.ATTESTATION_TIMEOUT_SECONDS
+    assert observed_timeout is not None
+    assert 0 < observed_timeout <= bootstrap_module.ATTESTATION_TIMEOUT_SECONDS
     assert json.loads(receipt_path.read_text(encoding="utf-8"))["failure_category"] == (
         "ATTESTATION_VERIFICATION_TIMEOUT"
     )
     assert not any(Path(command[0]).name == "uv" for command in fixture_runner.commands)
+
+
+@pytest.mark.parametrize("status_code", [500, 502, 503, 504])
+def test_transient_attestation_failure_retries_within_one_deadline(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    policy_path, downloader, fixture_runner, _ = _valid_fixture(tmp_path)
+    clock = [0.0]
+    delays: list[float] = []
+    attempts = 0
+
+    def sleep(delay: float) -> None:
+        delays.append(delay)
+        clock[0] += delay
+
+    def recovering_runner(
+        command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        result = fixture_runner(command, env=env, timeout=timeout)
+        if "attestation" in command:
+            attempts += 1
+            clock[0] += 10
+            assert not any(Path(call[0]).name == "uv" for call in fixture_runner.commands)
+            if attempts < 3:
+                return subprocess.CompletedProcess(
+                    command, 1, stdout="", stderr=f"\nError: HTTP {status_code}: unavailable\n"
+                )
+        return result
+
+    monkeypatch.setattr(bootstrap_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(bootstrap_module.time, "sleep", sleep)
+    receipt = bootstrap_module.bootstrap_uv(
+        policy_path=policy_path,
+        install_dir=tmp_path / "tools",
+        receipt_path=tmp_path / "receipt.json",
+        downloader=downloader,
+        runner=recovering_runner,
+        platform_id=("linux", "x86_64"),
+        temporary_root=tmp_path / "temporary",
+    )
+
+    assert receipt["status"] == "success"
+    assert attempts == 3
+    assert delays == [1, 2]
+    assert [
+        timeout
+        for command, timeout in zip(fixture_runner.commands, fixture_runner.timeouts, strict=True)
+        if "attestation" in command
+    ] == [60, 49, 37]
+
+
+def test_persistent_attestation_outage_is_bounded_and_sanitized(
+    tmp_path: Path,
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
+    runner.attestation_returncode = 1
+    secret = "github_pat_fixture-secret"
+    runner.attestation_stderr = f"Error: HTTP 503: unavailable; token={secret}; path={tmp_path}"
+    delays: list[float] = []
+    monkeypatch.setattr(bootstrap_module.time, "sleep", delays.append)
+    receipt_path = tmp_path / "receipt.json"
+
+    with pytest.raises(
+        bootstrap_module.BootstrapError, match="ATTESTATION_SERVICE_UNAVAILABLE"
+    ) as failure:
+        bootstrap_module.bootstrap_uv(
+            policy_path=policy_path,
+            install_dir=tmp_path / "tools",
+            receipt_path=receipt_path,
+            downloader=downloader,
+            runner=runner,
+            platform_id=("linux", "x86_64"),
+            temporary_root=tmp_path / "temporary",
+        )
+
+    assert sum("attestation" in command for command in runner.commands) == 3
+    assert delays == [1, 2]
+    assert not any(Path(command[0]).name == "uv" for command in runner.commands)
+    assert not (tmp_path / "tools" / "uv").exists()
+    receipt_text = receipt_path.read_text(encoding="utf-8")
+    assert json.loads(receipt_text)["failure_category"] == "ATTESTATION_SERVICE_UNAVAILABLE"
+    for text in (str(failure.value), receipt_text):
+        assert secret not in text
+        assert str(tmp_path) not in text
+    assert "retry" in str(failure.value).lower()
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "signature verification failed",
+        "Error: HTTP 401: unauthorized",
+        "Error: HTTP 403: forbidden",
+        "Error: HTTP 404: not found",
+        "Error: HTTP 429: rate limited",
+    ],
+)
+def test_nontransient_attestation_failure_is_not_retried(
+    bootstrap_module: Any,
+    stderr: str,
+) -> None:
+    runner = FixtureRunner("", attestation_returncode=1, attestation_stderr=stderr)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="ATTESTATION_VERIFICATION_FAILED"):
+        bootstrap_module._verify_attestation(runner, ("gh", "attestation", "verify", "uv.tar.gz"))
+
+    assert len(runner.commands) == 1
+
+
+def test_attestation_retry_cannot_extend_the_deadline(
+    bootstrap_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    timeouts: list[float | None] = []
+
+    def sleep(delay: float) -> None:
+        clock[0] += delay
+
+    def slow_runner(
+        command: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]:
+        timeouts.append(timeout)
+        clock[0] += 59.5
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="Error: HTTP 503: down")
+
+    monkeypatch.setattr(bootstrap_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(bootstrap_module.time, "sleep", sleep)
+
+    with pytest.raises(bootstrap_module.BootstrapError, match="ATTESTATION_VERIFICATION_TIMEOUT"):
+        bootstrap_module._verify_attestation(
+            slow_runner, ("gh", "attestation", "verify", "uv.tar.gz")
+        )
+
+    assert timeouts == [60]
+    assert clock[0] == 60
 
 
 def test_wrong_uv_identity_is_never_published_to_the_cache(
