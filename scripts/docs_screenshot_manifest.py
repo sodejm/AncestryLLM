@@ -472,6 +472,19 @@ def _validate_scenarios(
                 "DOCSHOT_GEOMETRY_MISMATCH",
                 "scenario geometry does not match its capture surface",
             )
+        if scenario["surface"] == "electron":
+            crop = scenario["crop"]
+            geometry = scenario["geometry"]
+            if (
+                crop["x"] + crop["width"] > geometry["width"]
+                or crop["y"] + crop["height"] > geometry["height"]
+                or crop["width"] > 1000
+                or (crop["width"] < 750 and not scenario["inclusion"].get("narrow_exception"))
+            ):
+                _fail(
+                    "DOCSHOT_CROP_INVALID",
+                    "crop must fit the viewport and publication width contract",
+                )
 
         fixture_id = scenario["fixture_id"]
         fixture = fixture_by_id.get(fixture_id)
@@ -685,6 +698,72 @@ def _rendered_markdown_images(
     return tuple(images), tuple(raw_html_destinations)
 
 
+def image_quality_failures(content: bytes, scenario: dict[str, Any]) -> list[str]:
+    """Measure publication constraints; report only paths and safe numeric metadata."""
+    output = str(scenario["output_path"])
+    failures: list[str] = []
+
+    def report(observed: str, expected: str, remediation: str) -> None:
+        failures.append(
+            f"{output}: observed {observed}; expected {expected}; remediation: {remediation}",
+        )
+
+    if len(content) > 250_000:
+        report(
+            f"{len(content)} bytes", "at most 250000 bytes", "crop or losslessly optimize the PNG"
+        )
+    try:
+        validate_png_bytes(content)
+    except ScreenshotManifestError:
+        report("invalid image encoding", "a valid static PNG", "recapture and export a static PNG")
+        return failures
+
+    width = struct.unpack_from(">I", content, 16)[0]
+    narrow = scenario.get("inclusion", {}).get("narrow_exception")
+    if width > 1000 or (width < 750 and not narrow):
+        report(
+            f"{width} px wide",
+            "750-1000 px (or a reviewed narrow-image exception)",
+            "crop around the target UI with orienting context; record review for a narrower image",
+        )
+    resolutions: list[tuple[int, int, int]] = []
+    malformed_resolution = False
+    animated = False
+    offset = len(_PNG_SIGNATURE)
+    seen_pixels = False
+    while offset < len(content):
+        length = struct.unpack_from(">I", content, offset)[0]
+        kind = content[offset + 4 : offset + 8]
+        if kind == b"pHYs":
+            if length != 9 or seen_pixels:
+                malformed_resolution = True
+            else:
+                resolutions.append(struct.unpack_from(">IIB", content, offset + 8))
+        if kind in {b"acTL", b"fcTL", b"fdAT"}:
+            animated = True
+        seen_pixels = seen_pixels or kind == b"IDAT"
+        offset += length + 12
+    if animated:
+        report(
+            "animation chunks", "a static PNG", "export a single still image without APNG chunks"
+        )
+    if malformed_resolution or len(resolutions) != 1:
+        report(
+            "missing, duplicate, or malformed physical resolution",
+            "144 dpi on both axes",
+            "export one pHYs chunk before pixels with 5669 pixels/metre and metre units",
+        )
+    else:
+        horizontal, vertical, unit = resolutions[0]
+        if unit != 1 or any(abs(value * 0.0254 - 144) > 0.02 for value in (horizontal, vertical)):
+            report(
+                f"pHYs({horizontal}, {vertical}, unit={unit})",
+                "144 dpi on both axes",
+                "export at 144 dpi (5669 pixels/metre, unit=1) without resampling text",
+            )
+    return failures
+
+
 def validate_published_assets(
     manifest: ValidatedManifest,
     *,
@@ -699,6 +778,10 @@ def validate_published_assets(
         for reference in scenario["documentation"]
     }
 
+    quality_failures: list[str] = []
+    scenarios_by_output = {
+        str(scenario["output_path"]): scenario for scenario in manifest.scenarios
+    }
     for output_path in sorted(declared_outputs):
         output = _safe_repository_path(
             output_path,
@@ -715,7 +798,10 @@ def validate_published_assets(
             _fail("DOCSHOT_ASSET_MISSING", "a declared screenshot asset is unreadable")
         if any(canary.encode("utf-8") in content for canary in manifest.privacy_canaries):
             _fail("DOCSHOT_PRIVACY_CANARY_LEAKED", "a published PNG contains a privacy canary")
-        validate_png_bytes(content)
+        quality_failures.extend(image_quality_failures(content, scenarios_by_output[output_path]))
+
+    if quality_failures:
+        _fail("DOCSHOT_QUALITY_INVALID", "\n".join(quality_failures))
 
     screenshot_root = resolved_repository / "docs/assets/screenshots"
     if screenshot_root.is_symlink():
@@ -806,7 +892,10 @@ def main(argv: list[str] | None = None) -> int:
         try:
             validate_published_assets(manifest, repository_root=args.repository_root)
         except ScreenshotManifestError as error:
-            print(error.code, file=sys.stderr)
+            print(
+                str(error) if error.code == "DOCSHOT_QUALITY_INVALID" else error.code,
+                file=sys.stderr,
+            )
             return 2
         print('{"schema_version":1,"status":"valid"}')
     return 0

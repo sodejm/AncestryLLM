@@ -36,21 +36,80 @@ from scripts.docs_screenshots import (
 )
 
 
-def _png(red: int, green: int, blue: int, *, filter_type: int = 0) -> bytes:
+def _png(
+    red: int,
+    green: int,
+    blue: int,
+    *,
+    filter_type: int = 0,
+    width: int = 800,
+    pixels_per_metre: int | None = 5669,
+    animated: bool = False,
+    padding: int = 0,
+) -> bytes:
     def chunk(kind: bytes, content: bytes) -> bytes:
         checksum = zlib.crc32(kind)
         checksum = zlib.crc32(content, checksum)
         return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", checksum)
 
-    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    pixels = zlib.compress(bytes((filter_type, red, green, blue)))
+    header = struct.pack(">IIBBBBB", width, 1, 8, 2, 0, 0, 0)
+    pixels = zlib.compress(bytes((filter_type,)) + bytes((red, green, blue)) * width)
+    metadata = b""
+    if pixels_per_metre is not None:
+        metadata += chunk(b"pHYs", struct.pack(">IIB", pixels_per_metre, pixels_per_metre, 1))
+    if animated:
+        metadata += chunk(b"acTL", struct.pack(">II", 1, 0))
+    if padding:
+        metadata += chunk(b"tEXt", b"Comment\x00" + b"x" * padding)
     return (
-        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + metadata
+        + chunk(b"IDAT", pixels)
+        + chunk(b"IEND", b"")
     )
 
 
 PNG = _png(25, 91, 143)
 DIFFERENT_PNG = _png(143, 91, 25)
+
+
+@pytest.mark.parametrize(
+    ("options", "diagnostic"),
+    [
+        ({"pixels_per_metre": None}, "144 dpi"),
+        ({"pixels_per_metre": 2835}, "144 dpi"),
+        ({"width": 1440}, "750-1000 px"),
+        ({"width": 749}, "750-1000 px"),
+        ({"animated": True}, "static PNG"),
+        ({"padding": 250_000}, "250000 bytes"),
+    ],
+)
+def test_published_image_quality_is_measured_from_bytes(
+    tmp_path: Path,
+    options: dict[str, Any],
+    diagnostic: str,
+) -> None:
+    _write_published_contract(tmp_path, image=_png(25, 91, 143, **options))
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(_manifest(), repository_root=tmp_path)
+    assert caught.value.code == "DOCSHOT_QUALITY_INVALID"
+    assert diagnostic in str(caught.value)
+    assert "docs/assets/screenshots/terminal/example.png" in str(caught.value)
+    assert "remediation" in str(caught.value)
+
+
+def test_quality_diagnostics_aggregate_constraints_and_assets(tmp_path: Path) -> None:
+    manifest = _manifest()
+    _write_published_contract(tmp_path, image=_png(25, 91, 143, width=1440, pixels_per_metre=None))
+    second = dict(manifest.scenarios[0], output_path="docs/assets/screenshots/terminal/second.png")
+    manifest.payload["scenarios"].append(second)
+    (tmp_path / second["output_path"]).write_bytes(_png(25, 91, 143, animated=True))
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(manifest, repository_root=tmp_path)
+    message = str(caught.value)
+    assert "example.png" in message and "second.png" in message
+    assert "144 dpi" in message and "750-1000 px" in message and "static PNG" in message
 
 
 def _manifest(
@@ -222,7 +281,7 @@ def test_published_assets_reject_structurally_invalid_pngs(
     with pytest.raises(ScreenshotManifestError) as exc_info:
         validate_published_assets(manifest, repository_root=tmp_path)
 
-    assert exc_info.value.code == "DOCSHOT_ASSET_INVALID"
+    assert exc_info.value.code == "DOCSHOT_QUALITY_INVALID"
 
 
 def test_published_assets_reject_broken_or_undeclared_screenshot_references(
@@ -545,7 +604,7 @@ def test_check_rejects_structurally_invalid_staged_png(tmp_path: Path) -> None:
             capture_runner=capture_runner,
         )
 
-    assert exc_info.value.code == "DOCSHOT_CAPTURE_INVALID"
+    assert exc_info.value.code == "DOCSHOT_QUALITY_INVALID"
 
 
 def test_check_rejects_privacy_canaries_in_captured_bytes(tmp_path: Path) -> None:

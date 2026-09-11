@@ -75,7 +75,6 @@ def test_checked_in_manifest_is_valid_complete_and_deterministic() -> None:
     assert manifest.schema_version == 1
     assert {scenario["surface"] for scenario in manifest.scenarios} == {
         "electron",
-        "terminal",
     }
     assert {fixture["state"] for fixture in manifest.fixtures} == {
         "success",
@@ -150,6 +149,18 @@ def test_manifest_schema_rejects_unknown_and_missing_fields() -> None:
     assert isinstance(scenarios, list) and isinstance(scenarios[0], dict)
     del scenarios[0]["ready_signal"]
     _assert_error(missing_ready_signal, "DOCSHOT_SCHEMA_INVALID")
+
+
+def test_manifest_requires_screenshot_inclusion_decision() -> None:
+    payload = _payload()
+    payload["scenarios"][0].pop("inclusion", None)
+    _assert_error(payload, "DOCSHOT_SCHEMA_INVALID")
+
+
+def test_electron_manifest_requires_exact_appearance() -> None:
+    payload = _payload()
+    payload["scenarios"][0].pop("appearance", None)
+    _assert_error(payload, "DOCSHOT_SCHEMA_INVALID")
 
 
 def test_manifest_rejects_duplicate_ids_and_destinations() -> None:
@@ -344,3 +355,45 @@ def test_contract_ownership_and_impact_are_documented() -> None:
     assert "Issue #418 deterministic Electron-capture evidence" in threat_model
     assert "Issue #420 screenshot-publication evidence" in threat_model
     assert "privacy-canary" in threat_model
+
+
+@pytest.mark.parametrize(
+    "crop",
+    [
+        {"x": 1200, "y": 0, "width": 800, "height": 300},
+        {"x": 0, "y": 800, "width": 800, "height": 300},
+        {"x": 0, "y": 0, "width": 1001, "height": 300},
+        {"x": 0, "y": 0, "width": 749, "height": 300},
+    ],
+)
+def test_manifest_rejects_unpublishable_crop_bounds(crop) -> None:
+    payload = _payload()
+    payload["scenarios"][0]["crop"] = crop
+    _assert_error(payload, "DOCSHOT_CROP_INVALID")
+
+
+@pytest.mark.parametrize("mode", ["system", "dark"])
+def test_nonlight_appearance_requires_explicit_review(mode) -> None:
+    payload = _payload()
+    payload["scenarios"][0]["appearance"]["mode"] = mode
+    _assert_error(payload, "DOCSHOT_SCHEMA_INVALID")
+
+
+def test_reviewed_narrow_crop_and_resolved_system_appearance() -> None:
+    payload = _payload()
+    scenario = payload["scenarios"][0]
+    review = {
+        "rationale": "This fixture tests an explicitly reviewed exception.",
+        "review_url": "https://example.invalid/review",
+    }
+    scenario["crop"]["width"] = 600
+    scenario["inclusion"]["narrow_exception"] = review
+    scenario["appearance"] = {
+        "mode": "system",
+        "source": "project-owned",
+        "reviewed_exception": review,
+        "resolved": "light",
+    }
+    _validate(payload)
+    del scenario["appearance"]["resolved"]
+    _assert_error(payload, "DOCSHOT_SCHEMA_INVALID")

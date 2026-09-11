@@ -52,15 +52,15 @@ CLI, REPL, and bounded desktop shell remain the only product surfaces.
 
 ## v0.6 desktop learning path
 
-![AncestryLLM desktop Home view showing the fictional provider-none ready state](assets/screenshots/electron/ready-home.png)
-
-Start with the local, provider-none Home state above, then use
+Start with the local, provider-none Home state, then use
 [Desktop shell](explanation/DESKTOP_SHELL.md) to understand the bounded
 control surface and its sanitized recovery path. Continue with the
 [interactive console guide](CONSOLE.md) for genealogy commands, and use the
 [CLI reference](reference/CLI.md) when a one-shot command is more appropriate.
 These surfaces share application contracts, but the desktop shell does not
 silently grant provider, network, filesystem, or genealogy authority.
+
+![Home shows the local desktop shell, Ready status, and local action cards.](assets/screenshots/electron/ready-home.png)
 
 ## Tutorials
 

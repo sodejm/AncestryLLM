@@ -23,7 +23,7 @@ from scripts.docs_terminal_capture import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "config" / "docs-screenshot-manifest.json"
+MANIFEST = ROOT / "tests/fixtures/docs_screenshots/terminal-adapter-manifest.json"
 POLICY = ROOT / "config" / "docs-terminal-capture-policy.json"
 POLICY_SCHEMA = ROOT / "config" / "docs-terminal-capture-policy-v1.schema.json"
 
@@ -703,3 +703,17 @@ def test_terminal_capture_operations_and_security_disposition_are_documented() -
     assert "true PTY" in architecture
     assert "Issue #419 deterministic terminal-capture evidence" in threat_model
     assert "The local Docker daemon" in threat_model
+
+
+def test_canonical_manifest_has_no_terminal_capture_or_backend_work(tmp_path: Path) -> None:
+    backend = FakeCaptureBackend()
+    result = capture_terminal_screenshots(
+        manifest_path=ROOT / "config/docs-screenshot-manifest.json",
+        policy_path=POLICY,
+        repository_root=ROOT,
+        output_root=tmp_path,
+        temporary_root=tmp_path,
+        backend=backend,
+    )
+    assert result == ()
+    assert not backend.prepared
