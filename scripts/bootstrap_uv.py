@@ -850,7 +850,9 @@ def _verify_attestation(
                 "from a secret manager for headless use",
             )
         if result.returncode != 1 or not re.search(
-            r"(?m)^Error: HTTP (?:500|502|503|504):", result.stderr
+            r"(?m)^Error: (?:HTTP (?:500|502|503|504):|failed to fetch bundle with URL: "
+            r"attestation bundle with URL \S+ returned status code (?:500|502|503|504)\r?$)",
+            result.stderr,
         ):
             _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
         if attempt + 1 < ATTESTATION_MAX_ATTEMPTS:

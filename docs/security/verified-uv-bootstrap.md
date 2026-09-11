@@ -112,8 +112,9 @@ The utility then downloads the exact policy-selected `uv` release URL, verifies
 the archive digest, and asks the verified GitHub CLI to verify the release
 attestation against `github.com` within a shared 60-second deadline;
 ambient `GH_HOST` configuration cannot select another host. HTTP 500, 502, 503,
-and 504 service errors allow up to three verification attempts, with one- and
-two-second retry delays included in that deadline. Authentication and provenance
+and 504 service errors from the GitHub API or attestation bundle downloads allow
+up to three verification attempts, with one- and two-second retry delays included
+in that deadline. Authentication and provenance
 failures are not retried. A timeout fails as `ATTESTATION_VERIFICATION_TIMEOUT`
 before extraction or `uv` execution. The returned statement must bind the
 selected asset digest to the exact source

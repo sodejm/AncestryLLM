@@ -673,11 +673,21 @@ def test_attestation_timeout_is_coded_receipted_and_blocks_uv_execution(
 
 
 @pytest.mark.parametrize("status_code", [500, 502, 503, 504])
+@pytest.mark.parametrize(
+    "stderr_template",
+    [
+        "\nError: HTTP {status_code}: unavailable\n",
+        "\nError: failed to fetch bundle with URL: attestation bundle with URL "
+        "https://example.invalid/bundle returned status code {status_code}\n",
+    ],
+    ids=["github-api", "attestation-bundle"],
+)
 def test_transient_attestation_failure_retries_within_one_deadline(
     tmp_path: Path,
     bootstrap_module: Any,
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
+    stderr_template: str,
 ) -> None:
     policy_path, downloader, fixture_runner, _ = _valid_fixture(tmp_path)
     clock = [0.0]
@@ -702,7 +712,10 @@ def test_transient_attestation_failure_retries_within_one_deadline(
             assert not any(Path(call[0]).name == "uv" for call in fixture_runner.commands)
             if attempts < 3:
                 return subprocess.CompletedProcess(
-                    command, 1, stdout="", stderr=f"\nError: HTTP {status_code}: unavailable\n"
+                    command,
+                    1,
+                    stdout="",
+                    stderr=stderr_template.format(status_code=status_code),
                 )
         return result
 
@@ -728,15 +741,25 @@ def test_transient_attestation_failure_retries_within_one_deadline(
     ] == [60, 49, 37]
 
 
+@pytest.mark.parametrize(
+    "stderr_template",
+    [
+        "Error: HTTP 503: unavailable; token={secret}; path={path}",
+        "Error: failed to fetch bundle with URL: attestation bundle with URL "
+        "https://example.invalid/bundle?token={secret}&path={path} returned status code 503",
+    ],
+    ids=["github-api", "attestation-bundle"],
+)
 def test_persistent_attestation_outage_is_bounded_and_sanitized(
     tmp_path: Path,
     bootstrap_module: Any,
     monkeypatch: pytest.MonkeyPatch,
+    stderr_template: str,
 ) -> None:
     policy_path, downloader, runner, _ = _valid_fixture(tmp_path)
     runner.attestation_returncode = 1
     secret = "github_pat_fixture-secret"
-    runner.attestation_stderr = f"Error: HTTP 503: unavailable; token={secret}; path={tmp_path}"
+    runner.attestation_stderr = stderr_template.format(secret=secret, path=tmp_path)
     delays: list[float] = []
     monkeypatch.setattr(bootstrap_module.time, "sleep", delays.append)
     receipt_path = tmp_path / "receipt.json"
@@ -774,6 +797,12 @@ def test_persistent_attestation_outage_is_bounded_and_sanitized(
         "Error: HTTP 403: forbidden",
         "Error: HTTP 404: not found",
         "Error: HTTP 429: rate limited",
+        "Error: failed to fetch bundle with URL: attestation bundle with URL "
+        "https://example.invalid/bundle returned status code 403",
+        "Error: failed to fetch bundle with URL: attestation bundle with URL "
+        "https://example.invalid/bundle returned status code 5030",
+        "Error: signature verification failed: HTTP 503: unavailable",
+        "Warning: HTTP 503: unavailable\nError: signature verification failed",
     ],
 )
 def test_nontransient_attestation_failure_is_not_retried(
