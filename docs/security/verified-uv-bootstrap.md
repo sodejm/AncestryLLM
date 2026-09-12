@@ -110,10 +110,14 @@ verified GitHub CLI may execute.
 
 The utility then downloads the exact policy-selected `uv` release URL, verifies
 the archive digest, and asks the verified GitHub CLI to verify the release
-attestation against `github.com` within a 60-second subprocess deadline;
-ambient `GH_HOST` configuration cannot select another host. A timeout fails as
-`ATTESTATION_VERIFICATION_TIMEOUT` before extraction or `uv` execution. The
-returned statement must bind the selected asset digest to the exact source
+attestation against `github.com` within a shared 60-second deadline;
+ambient `GH_HOST` configuration cannot select another host. HTTP 500, 502, 503,
+and 504 service errors from the GitHub API or attestation bundle downloads allow
+up to three verification attempts, with one- and two-second retry delays included
+in that deadline. Authentication and provenance
+failures are not retried. A timeout fails as `ATTESTATION_VERIFICATION_TIMEOUT`
+before extraction or `uv` execution. The returned statement must bind the
+selected asset digest to the exact source
 repository, source commit and ref, signer workflow, OIDC issuer, and SLSA
 predicate. The extracted `uv` executable receives a second digest check and
 exact-version check before an atomic repository-local installation. Extraction
@@ -194,9 +198,14 @@ Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `INSTALL_WRITE_FAILED`, `RECEIPT_PATH_UNSAFE`, `RECEIPT_WRITE_FAILED`,
 `VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
 `VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_VERIFICATION_TIMEOUT`,
-`ATTESTATION_IDENTITY_MISMATCH`, and `UV_VERSION_MISMATCH`. Treat every failure
-as a trust-chain failure until its cause is understood. Do not bypass it with a
+`ATTESTATION_SERVICE_UNAVAILABLE`, `ATTESTATION_IDENTITY_MISMATCH`, and
+`UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
+cause is understood. Do not bypass it with a
 global installation or by editing the receipt.
+
+`ATTESTATION_SERVICE_UNAVAILABLE` means GitHub returned a temporary service error
+on all three attempts. Wait for the service to recover and rerun setup; no `uv`
+binary is installed or executed without successful provenance verification.
 
 For an interrupted download or a cache mismatch, leave user files untouched,
 remove only the repository-local ignored `.tools/uv/` cache, and retry. For a
