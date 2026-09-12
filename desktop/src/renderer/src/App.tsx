@@ -27,6 +27,7 @@ import {
   secretReferences,
 } from '../../shared-contract/desktop'
 import { ChatWorkspace } from './ChatWorkspace'
+import { GedcomIntakeWorkspace } from './GedcomIntakeWorkspace'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
 import { TaskCenter } from './TaskCenter'
@@ -1152,6 +1153,10 @@ function Shell() {
       title: 'Diagnostics',
       description: 'Review local startup state and bounded recovery guidance.',
     },
+    gedcom: {
+      title: 'GEDCOM',
+      description: 'Inspect ordered local sources and explicitly choose roots without modifying records.',
+    },
     settings: {
       title: 'Settings',
       description: 'Choose local preferences, application behavior, and write-only credentials.',
@@ -1280,6 +1285,9 @@ function Shell() {
       {route === 'tasks' && <TaskCenter />}
 
       {route === 'chat' && <ChatWorkspace />}
+
+      {route === 'gedcom' && (startupAllowsMutations ? <GedcomIntakeWorkspace />
+        : <p role="status">GEDCOM intake is unavailable until local startup diagnostics pass.</p>)}
 
       {route === 'diagnostics' && <>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">

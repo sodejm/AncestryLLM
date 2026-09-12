@@ -209,7 +209,7 @@ describe('accessible desktop shell', () => {
     expect(await screen.findByRole('heading', { name: 'Home' })).toHaveFocus()
     expect(updatePreferences).not.toHaveBeenCalled()
   })
-  it('supports keyboard navigation across Home, Chat, Tasks, Diagnostics, and Settings', async () => {
+  it('supports keyboard navigation across Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings', async () => {
     const bridge = await createCompletedBridge()
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
@@ -222,6 +222,11 @@ describe('accessible desktop shell', () => {
     tasks.focus()
     await userEvent.keyboard('{Enter}')
     expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toHaveFocus()
+    const gedcom = screen.getByRole('link', { name: 'GEDCOM' })
+    gedcom.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByRole('heading', { level: 1, name: 'GEDCOM' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeVisible()
     const diagnostics = screen.getByRole('link', { name: 'Diagnostics' })
     diagnostics.focus()
     await userEvent.keyboard('{Enter}')

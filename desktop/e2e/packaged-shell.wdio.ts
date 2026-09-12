@@ -543,7 +543,7 @@ async function expectAccessibleShell(): Promise<void> {
   assert.deepEqual(await browser.execute(() => Array.from(
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
-  )), ['Home', 'Chat', 'Tasks', 'Diagnostics', 'Settings'])
+  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
 
   await click('a=Settings')
   await expectFocusedHeading('Settings')

@@ -18,6 +18,7 @@ const prohibitedProductionFixtureContent = [
   /createMockAncestryBridge/,
   /ANCESTRYLLM_DESKTOP_FIXTURE/,
   /ANCESTRYLLM_DESKTOP_SECURITY_E2E/,
+  /ANCESTRYLLM_E2E_HEADLESS/,
   /__ancestryllmSecurityStateForTests/,
 ]
 const prohibitedPackagedFileGrantContent = [

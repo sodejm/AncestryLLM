@@ -26,6 +26,7 @@ from uvicorn import Server
 
 from ancestryllm.api.app import create_app
 from ancestryllm.api.contracts import API_CONTRACT
+from ancestryllm.api.gedcom_intake import GedcomIntake
 from ancestryllm.api.server import LOOPBACK_HOST, create_uvicorn_config
 from ancestryllm.api.settings import ApiSettings
 from ancestryllm.application._artifacts import _ArtifactRegistry
@@ -87,6 +88,7 @@ class LaunchFrame:
     bearer_token: str = field(repr=False)
     diagnostic_run_id: str = field(repr=False)
     diagnostic_directory: str = field(repr=False)
+    gedcom_intake_directory: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.contract != API_CONTRACT:
@@ -96,6 +98,11 @@ class LaunchFrame:
         validate_desktop_diagnostic_run_id(self.diagnostic_run_id)
         if "\0" in self.diagnostic_directory or not Path(self.diagnostic_directory).is_absolute():
             raise ValueError("diagnostic directory must be an absolute path")
+        if self.gedcom_intake_directory is not None and (
+            "\0" in self.gedcom_intake_directory
+            or not Path(self.gedcom_intake_directory).is_absolute()
+        ):
+            raise ValueError("intake directory must be an absolute path")
         # Reuse the API boundary's validation rather than creating a second
         # token/build/host policy here.
         self.settings()
@@ -219,6 +226,9 @@ class _SidecarLifecycle:
     llm_service: LLMService
     gedcom_service: GedcomService
     chat_streaming_service: ChatStreamingService
+    intake_directory: Path | None = None
+    intake_artifacts: _ArtifactRegistry | None = None
+    intake: GedcomIntake | None = field(init=False, default=None, repr=False)
     job_lifecycle: JobLifecycleService | None = field(init=False, default=None, repr=False)
 
     def _close_owned_resources(
@@ -229,6 +239,9 @@ class _SidecarLifecycle:
         job_service = startup_job_service or self.job_lifecycle
         self.job_lifecycle = None
         actions = []
+        if self.intake is not None:
+            actions.append(self.intake.close)
+            self.intake = None
         if job_service is not None:
             actions.append(job_service.close)
         actions.extend((self.chat_service.close, self.llm_service.close, self.database.close))
@@ -256,6 +269,13 @@ class _SidecarLifecycle:
             )
             service.startup()
             await self.chat_streaming_service.startup()
+            if self.intake_directory is not None and self.intake_artifacts is not None:
+                self.intake = GedcomIntake(
+                    directory=self.intake_directory,
+                    artifacts=self.intake_artifacts,
+                    service=self.gedcom_service,
+                    jobs=service,
+                )
         except BaseException:
             with suppress(BaseException):
                 await self.chat_streaming_service.shutdown()
@@ -280,6 +300,13 @@ class _SidecarLifecycle:
         """Bind GEDCOM operations to the ready background-job service."""
 
         return GedcomJobFacade(service=self.gedcom_service, jobs=self.jobs())
+
+    def gedcom_intake(self) -> GedcomIntake:
+        """Return the native-only read adapter after successful startup."""
+        self.jobs()
+        if self.intake is None:
+            raise AncestryError("GEDCOM_JOB_RESULT_UNAVAILABLE", "GEDCOM intake is unavailable.")
+        return self.intake
 
     def prepare_job_shutdown(self, action: str, timeout_seconds: float) -> ShutdownAssessment:
         """Authorize degraded shutdown or delegate to the live job boundary."""
@@ -420,13 +447,17 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         document = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("invalid sidecar launch frame") from error
-    if not isinstance(document, dict) or set(document) != {
+    required_fields = {
         "contract",
         "app_build",
         "bearer_token",
         "diagnostic_run_id",
         "diagnostic_directory",
-    }:
+    }
+    if not isinstance(document, dict) or set(document) not in (
+        required_fields,
+        required_fields | {"gedcom_intake_directory"},
+    ):
         raise ValueError("invalid sidecar launch frame fields")
     if not all(isinstance(value, str) for value in document.values()):
         raise ValueError("invalid sidecar launch frame values")
@@ -436,6 +467,7 @@ def parse_launch_frame(stream: BinaryIO) -> LaunchFrame:
         bearer_token=document["bearer_token"],
         diagnostic_run_id=document["diagnostic_run_id"],
         diagnostic_directory=document["diagnostic_directory"],
+        gedcom_intake_directory=document.get("gedcom_intake_directory"),
     )
 
 
@@ -544,6 +576,12 @@ def create_sidecar_app(
         llm_service=llm_service,
         gedcom_service=gedcom_service,
         chat_streaming_service=chat_streaming_service,
+        intake_directory=(
+            Path(frame.gedcom_intake_directory)
+            if frame.gedcom_intake_directory is not None
+            else None
+        ),
+        intake_artifacts=resolved_artifact_registry,
     )
     return create_app(
         settings=frame.settings(),
@@ -563,6 +601,9 @@ def create_sidecar_app(
         mutations_allowed=lambda: startup_report().mutations_allowed,
         job_service=lifecycle.jobs,
         gedcom_job_service=(lifecycle.gedcom_jobs if artifact_registry is not None else None),
+        gedcom_intake=(
+            lifecycle.gedcom_intake if frame.gedcom_intake_directory is not None else None
+        ),
         job_shutdown=lifecycle.prepare_job_shutdown,
         runtime_shutdown=request_runtime_shutdown,
     )

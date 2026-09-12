@@ -498,7 +498,7 @@ function harness(
 }
 
 describe('desktop IPC handlers', () => {
-  it('registers exactly the thirty-eight declared static channels', () => {
+  it('registers exactly the declared static channels', () => {
     const handlers = new Map<string, Handler>()
     registerDesktopIpcHandlers(
       { handle: (channel, handler) => { handlers.set(channel, handler) } },
@@ -506,7 +506,47 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(38)
+    expect(handlers.size).toBe(42)
+  })
+
+  it('authorizes and bounds GEDCOM intake before entering its native owner port', async () => {
+    const intake = {
+      inspect: vi.fn().mockResolvedValue(runningJob),
+      result: vi.fn(), roots: vi.fn(),
+      discard: vi.fn().mockResolvedValue({ schema_version: 1 }),
+      revokeOwner: vi.fn().mockResolvedValue(undefined),
+      revokeAll: vi.fn().mockResolvedValue(undefined),
+    }
+    const { handlers, event, contents, controller } = harness(bridge(), { gedcomIntake: intake })
+    const inspect = handlers.get(desktopChannels.inspectGedcom)!
+    await expect(inspect(event(), `grt_${'a'.repeat(64)}`)).resolves.toEqual(result(runningJob))
+    expect(intake.inspect).toHaveBeenCalledWith(contents, `grt_${'a'.repeat(64)}`, expect.any(AbortSignal))
+    await expect(inspect(event(new FakeWebContents()), `grt_${'a'.repeat(64)}`)).resolves.toMatchObject({ ok: false })
+    await expect(inspect(event(), '/private/selected.ged')).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    await expect(handlers.get(desktopChannels.queryGedcomRoots)!(event(), {
+      schema_version: 1, job_id: 'j000001', query: 'x'.repeat(129), limit: 25, cursor: null,
+    })).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    expect(intake.inspect).toHaveBeenCalledTimes(1)
+    expect(intake.roots).not.toHaveBeenCalled()
+    contents.destroy()
+    expect(intake.revokeOwner).toHaveBeenCalledWith(contents)
+    controller.invalidateSidecarSession()
+    expect(intake.revokeAll).toHaveBeenCalled()
+  })
+
+  it('preserves allowlisted GEDCOM sidecar errors through the bridge', async () => {
+    const intake = {
+      inspect: vi.fn(), result: vi.fn().mockRejectedValue(new SidecarClientError('GEDCOM_ROOT_CURSOR_INVALID')),
+      roots: vi.fn(), discard: vi.fn(), revokeOwner: vi.fn().mockResolvedValue(undefined),
+      revokeAll: vi.fn().mockResolvedValue(undefined),
+    }
+    const { handlers, event } = harness(bridge(), { gedcomIntake: intake })
+    await expect(handlers.get(desktopChannels.getGedcomInspection)!(event(), {
+      schema_version: 1, job_id: 'j000001',
+    })).resolves.toMatchObject({ ok: false, error: {
+      code: 'GEDCOM_ROOT_CURSOR_INVALID',
+      message: 'The GEDCOM root query cursor is no longer valid.',
+    } })
   })
 
   it('routes strict native actions through the authorized main-process adapter', async () => {

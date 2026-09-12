@@ -6,6 +6,7 @@ import { createPackagedLocalRuntimeControl } from './local-runtime-control'
 import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
 import {
+  createGedcomIntakeClient,
   createSidecarClient,
   requestSidecarRuntimeShutdown,
   type JobShutdownAction,
@@ -22,6 +23,7 @@ import {
   SidecarSupervisor,
 } from './sidecar-supervisor'
 import type { RecordDesktopDiagnostic } from './structured-diagnostics'
+import type { GedcomIntakeClient } from './gedcom-intake-broker'
 
 /**
  * Returns the composed bridge plus the sidecar lifecycle hooks owned by the Electron main process.
@@ -30,6 +32,7 @@ export interface RuntimeBridge {
   bridge: MainDesktopBridge
   supervisor?: SidecarSupervisor
   prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
+  gedcomIntakeClient?: Readonly<GedcomIntakeClient>
 }
 
 /**
@@ -40,6 +43,7 @@ export interface RuntimeBridgeOptions {
   macosEphemeralWorkspaceVerification?: boolean | undefined
   diagnosticRunId?: string | undefined
   diagnosticDirectory?: string | undefined
+  gedcomIntakeDirectory?: string | undefined
   recordDiagnostic?: RecordDesktopDiagnostic | undefined
 }
 
@@ -93,6 +97,7 @@ export async function startRuntimeBridge(
       ? {}
       : { macosEphemeralWorkspaceVerification: options.macosEphemeralWorkspaceVerification }),
     ...(options.diagnosticRunId === undefined ? {} : { diagnosticRunId: options.diagnosticRunId }),
+    ...(options.gedcomIntakeDirectory === undefined ? {} : { gedcomIntakeDirectory: options.gedcomIntakeDirectory }),
     ...(options.recordDiagnostic === undefined ? {} : { recordDiagnostic: options.recordDiagnostic }),
   })
   const sidecarClient = createSidecarClient({ session: () => supervisor.session() })
@@ -124,5 +129,8 @@ export async function startRuntimeBridge(
     bridge,
     supervisor,
     prepareJobShutdown,
+    ...(options.gedcomIntakeDirectory === undefined ? {} : {
+      gedcomIntakeClient: createGedcomIntakeClient({ session: () => supervisor.session() }),
+    }),
   }
 }

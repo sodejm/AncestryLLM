@@ -53,6 +53,7 @@ interface SidecarSupervisorOptions {
   appBuild: string
   diagnosticRunId?: string
   diagnosticDirectory: string
+  gedcomIntakeDirectory?: string
   recordDiagnostic?: RecordDesktopDiagnostic
   executablePath: string
   verify: () => Promise<void>
@@ -330,6 +331,10 @@ export class SidecarSupervisor {
     if (!isAbsolute(options.diagnosticDirectory) || options.diagnosticDirectory.includes('\0')) {
       throw new Error('diagnosticDirectory must be an absolute path.')
     }
+    if (options.gedcomIntakeDirectory !== undefined
+      && (!isAbsolute(options.gedcomIntakeDirectory) || options.gedcomIntakeDirectory.includes('\0'))) {
+      throw new Error('gedcomIntakeDirectory must be an absolute path.')
+    }
     if (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0) {
       throw new Error('maxRestarts must be a non-negative integer.')
     }
@@ -514,6 +519,8 @@ export class SidecarSupervisor {
       bearer_token: token,
       diagnostic_run_id: this.diagnosticRunId,
       diagnostic_directory: this.options.diagnosticDirectory,
+      ...(this.options.gedcomIntakeDirectory === undefined
+        ? {} : { gedcom_intake_directory: this.options.gedcomIntakeDirectory }),
     })}\n`
     this.record(DESKTOP_DIAGNOSTIC_CODES.sidecarSpawnRequested, 'info')
     let sidecar: RunningSidecar

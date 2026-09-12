@@ -65,6 +65,47 @@ def test_job_manager_tracks_success_and_failure_with_sanitized_snapshots() -> No
     assert [item.job_id for item in manager.list(JobState.FAILED)] == [failed.job_id]
 
 
+def test_discard_result_releases_private_result_without_removing_history() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    try:
+        job = manager.submit("private inspection", lambda: {"private": "fictional"})
+        completed = manager.wait(job.job_id, timeout=2)
+        assert completed.result is not None
+
+        manager.discard_result(job.job_id)
+        manager.discard_result(job.job_id)
+
+        retained = manager.get(job.job_id)
+        assert retained.result is None
+        assert retained.state is JobState.COMPLETED
+        assert retained.finished_at == completed.finished_at
+    finally:
+        manager.shutdown()
+
+
+def test_discard_result_prevents_late_completion_from_retaining_private_data() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    started = threading.Event()
+    release = threading.Event()
+
+    def work() -> dict[str, str]:
+        started.set()
+        assert release.wait(2)
+        return {"private": "fictional"}
+
+    try:
+        job = manager.submit("private inspection", work)
+        assert started.wait(2)
+        manager.discard_result(job.job_id)
+        release.set()
+        retained = manager.wait(job.job_id, timeout=2)
+        assert retained.state is JobState.COMPLETED
+        assert retained.result is None
+    finally:
+        release.set()
+        manager.shutdown()
+
+
 def test_job_snapshots_expose_opaque_resource_references_without_paths(
     tmp_path: Path,
 ) -> None:

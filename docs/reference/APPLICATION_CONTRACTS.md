@@ -86,8 +86,9 @@ interpret file grants in the reusable RootsMagic core.
 The public GEDCOM boundary exposes `GedcomInspectRequest` and
 `GedcomInspectResult`, `MergeRequest` and `MergeResult`, `SubtreeRequest` and
 `SubtreeResult`, `QualityRequest` and `QualityResult`, `SyncRequest` and
-`SyncResult`, and `MergeDecisionRequest`. Requests carry only purpose-bound
-`ArtifactGrantRef` values. Results, progress, and coded failures are bounded,
+`SyncResult`, and `MergeDecisionRequest`. File authority is carried only by
+purpose-bound `ArtifactGrantRef` values, alongside explicit typed operation
+options. Results, progress, and coded failures are bounded,
 serializable, and path-free; they never contain whole genealogy trees or
 arbitrary callbacks.
 
@@ -105,12 +106,29 @@ cooperative cancellation pass through the application ports; domain failures
 retain their stable public codes; and cancellation becomes the lifecycle's
 cancelled state. A typed operation result is available only after completion.
 
-The authenticated FastAPI adapter exposes only the fixed
+Inspection reports physical encoding, the header's `HEAD/GEDC/VERS` declaration,
+source fingerprint, record counts, at most 100 coded findings, and total finding
+and root-candidate counts. It does not eagerly serialize every candidate.
+`RootCandidatePage` separately exposes at most 100 bounded person labels per
+query (25 by default); names, source identifiers, dates, and relationship
+summaries are genealogy content held transiently for explicit root selection.
+Search is limited to 128 characters, and authenticated continuation cursors bind
+the inspection job, source fingerprint, and query. Progress, job persistence,
+and logs do not contain these labels or search text.
+
+With an explicitly supplied artifact registry, the authenticated FastAPI
+adapter exposes the fixed
 `POST /api/v1/gedcom/inspect`, `/merge`, `/subtree`, `/quality`, and `/sync`
-routes plus `GET /api/v1/gedcom/jobs/{job_id}/result`. It translates strict
-transport payloads into the same application requests used by the CLI and REPL.
-It does not expose private GEDCOM engines, a generic command registry, renderer
-paths, or record trees.
+routes, `GET /api/v1/gedcom/jobs/{job_id}/result`, and
+`POST /api/v1/gedcom/jobs/{job_id}/root-candidates`. It translates strict
+transport payloads into the same application services used by the CLI and REPL.
+The private native intake composition supplies four separate fixed routes for
+staged inspection, result retrieval, bounded root queries, and discard under
+`/api/v1/gedcom/intake`. Electron Main consumes a native file grant into private
+immutable staging; only its opaque stage identifier, size, and SHA-256 reach
+that adapter. This read-only composition does not grant the renderer merge,
+publication, or provider authority. Neither composition exposes private GEDCOM
+engines, a generic command registry, renderer paths, or record trees.
 
 ## Ports and adapter responsibilities
 

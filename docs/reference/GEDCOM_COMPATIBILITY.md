@@ -99,6 +99,24 @@ guessed relationship.
 Characterization tests establish deterministic local behavior, not compatibility
 with a third-party importer.
 
+### Read-only intake findings
+
+The #115 inspection uses this same public parser and service boundary. The
+declared version comes only from `HEAD/GEDC/VERS`, never the producer's
+`HEAD/SOUR/VERS`. Physical encoding is detected from the input bytes, not
+asserted from `HEAD/CHAR`. Inspection reports bounded coded findings for a
+5.5.1 fallback, an unknown or unsupported declared version, preserved vendor
+extensions, normalized dates, and invalid dates. These findings carry no raw
+record lines or values and do not certify full GEDCOM conformance.
+
+The fictional `preserve-extensions.ged` fixture exercises Unicode, nested
+extensions, `CONC`/`CONT`, citations, media references, and malformed dates.
+Representable structures remain in the parsed source. Supported date
+normalization is in memory and retains original-date evidence; intake writes
+neither the original source nor an output file. Root-query responses are a
+separate, bounded presentation of individual names, source identifiers, dates,
+and relationship counts, not a serialization of the complete source tree.
+
 The safe offline fixture demo uses the structurally valid fictional fixtures
 `xref-source-a.ged`, `xref-source-b.ged`, and root `Aster Fiction`:
 

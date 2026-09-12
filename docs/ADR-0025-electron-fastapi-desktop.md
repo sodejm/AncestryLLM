@@ -281,6 +281,18 @@ regular-file type, realpath/fingerprint, size, source/output aliasing, and
 immutability at use time. Large parsing and publication occur in bounded
 workers and app-owned scratch/output locations.
 
+Issue #115 adds four fixed read-only intake requests through Main and the
+private native sidecar. Native file grants become immutable staged copies;
+Python verifies the expected size and SHA-256 while applying the shared
+GEDCOM parser limits. At most eight inspections are retained, including
+pending submissions. Summaries and paged root queries are separate bounded
+contracts; source order and explicit root/no-root choices are transient.
+The renderer receives bounded genealogy labels but never original paths,
+complete records, a parser, or an unbounded search endpoint. Disposal revokes
+ownership and drops private results. This source-level addition does not
+activate mutation, output publication, container execution, remote upload,
+provider calls, or a packaged-support claim.
+
 ## Secure-development and assurance gates
 
 The issue/control ledger in `THREAT_MODEL.md` is part of the change contract:

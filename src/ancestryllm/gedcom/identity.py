@@ -182,13 +182,15 @@ KNOWN_COUNTRY_NAMES = frozenset(COUNTRY_ALIASES.values()) | frozenset(
 )
 
 
-def _normalise_record_dates(lines: list[str]) -> list[str]:
-    """Normalise BIRT/DEAT dates and retain changed originals with a custom tag."""
+def _normalise_record_dates_with_metadata(lines: list[str]) -> tuple[list[str], bool]:
+    """Normalise dates while reporting custom extension tags in the same pass."""
     output: list[str] = []
     event_tag = ""
     event_level = -1
+    has_extensions = False
     for line in lines:
         parsed = parse_gedcom_line(line)
+        has_extensions |= parsed.tag.startswith("_")
         if parsed.level <= 1:
             event_tag = parsed.tag if parsed.level == 1 else ""
             event_level = parsed.level if parsed.level == 1 else -1
@@ -203,7 +205,12 @@ def _normalise_record_dates(lines: list[str]) -> list[str]:
                 output.append(f"{parsed.level} _ORIGDATE {parsed.value}")
                 continue
         output.append(line)
-    return output
+    return output, has_extensions
+
+
+def _normalise_record_dates(lines: list[str]) -> list[str]:
+    """Normalise BIRT/DEAT dates and retain changed originals with a custom tag."""
+    return _normalise_record_dates_with_metadata(lines)[0]
 
 
 def normalise_gedcom_date(raw_date: str) -> str:

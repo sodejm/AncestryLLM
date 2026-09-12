@@ -94,8 +94,16 @@ import {
   fileGrantPurposes,
   startupDiagnosticComponents,
 } from './desktop'
+import { parseGedcomDiscard, parseGedcomInspection, parseGedcomRootPage } from './gedcom'
 
 type Parser<T> = (value: unknown) => T
+
+/** Validates the envelope around private, bounded GEDCOM metadata. */
+export const parseGedcomInspectionResult = (value: unknown) => parseBridgeResult(value, parseGedcomInspection)
+/** Validates the envelope around one private root-candidate page. */
+export const parseGedcomRootPageResult = (value: unknown) => parseBridgeResult(value, parseGedcomRootPage)
+/** Validates the envelope acknowledging source revocation. */
+export const parseGedcomDiscardResult = (value: unknown) => parseBridgeResult(value, parseGedcomDiscard)
 
 const colorSchemes: readonly DesktopColorScheme[] = ['system', 'light', 'dark']
 const bridgeErrorCodes: readonly BridgeErrorCode[] = [
@@ -153,6 +161,10 @@ const bridgeErrorCodes: readonly BridgeErrorCode[] = [
   'JOB_SUBSCRIPTION_CLOSED',
   'JOB_SUBSCRIPTION_CONFLICT',
   'JOB_EVENT_STREAM_FAILED',
+  'GEDCOM_INTAKE_INVALID',
+  'GEDCOM_INTAKE_CAPACITY',
+  'GEDCOM_JOB_RESULT_UNAVAILABLE',
+  'GEDCOM_ROOT_CURSOR_INVALID',
   'CHAT_SESSION_INVALID',
   'CHAT_SESSION_NOT_FOUND',
   'CHAT_SESSION_LIMIT',

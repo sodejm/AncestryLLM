@@ -33,6 +33,7 @@
     "build:packaged-native-verification": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification",
     "build:packaged-file-grants": "pnpm typecheck && electron-vite build && node scripts/verify-build.mjs --packaged-native-verification --packaged-file-grants",
     "test:e2e": "pnpm build:e2e && node scripts/run-wdio.mjs source",
+    "test:e2e:headless": "pnpm build:e2e && node scripts/run-wdio.mjs source --headless",
     "test:e2e:packaged": "node scripts/run-wdio.mjs packaged",
     "audit": "pnpm audit --audit-level high",
     "check:secrets": "node scripts/check-secrets.mjs",

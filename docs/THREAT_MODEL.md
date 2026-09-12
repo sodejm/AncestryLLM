@@ -131,6 +131,13 @@ and native-evidence portions of `TM-K01`, `TM-N01`, `TM-O01`, and `TM-B01`.
 Issue #352 implements source-level portions of `TM-F01`, `TM-F02`, `TM-D01`,
 and `TM-C01`, plus the exact mount-policy subset of `TM-K01`; it does not make
 the topology workload-capable.
+Issue #115 adds source-level read-only GEDCOM intake controls relevant to
+`TM-F01`, `TM-F02`, `TM-D01`, and `TM-O01`: native grants, private immutable
+staging, fingerprint verification, at most eight retained sources of 512 MiB
+each, the shared Python parser, bounded summaries and root queries, and
+owner/generation-bound result delivery and cleanup. It adds neither genealogy
+mutation nor provider execution. These controls do not claim encrypted
+persistent intake, a workload-capable container, or packaged adversarial proof.
 No workload-capable AncestryLLM application container or remote runtime is
 implemented or supported. The deployment diagrams, remaining controls,
 `STR-H-*` through `STR-M-*` and `STR-B-*`, AB-11 through AB-23, and G5 through
@@ -146,8 +153,9 @@ Sensitive assets are genealogy records, living-person status, notes, provider
 credentials, SQLCipher keys, prompts/responses, consent grants, RootsMagic
 source files, `0.6.0` source-level opaque desktop file grants, private operation
 staging, mediated operation and artifact identifiers, bounded remote file
-streams, and internal API bootstrap material. Later desktop assets additionally
-include event streams
+streams, internal API bootstrap material, and `0.7.0` source-level transient
+root labels, search text, query cursors, and explicit root selections. Later
+desktop assets additionally include event streams
 and plugin packages, update metadata, release signatures, support evidence,
 OCI images and digests,
 generated Compose configuration, Docker contexts and sockets, workload
@@ -171,6 +179,18 @@ Issue #352 file data crosses from native grants into private Main-owned staging,
 then either to a trusted local adapter through exact mounts or to a trusted
 remote adapter through one-use bounded streams. Local paths do not cross the
 shared operation DTO or renderer boundary.
+Issue #115 crosses from the same native grant authority through private
+Main-owned staging into the native Python inspection façade. Only fingerprint
+metadata, bounded coded findings, and explicitly queried person labels return
+to the renderer; complete trees and original paths do not. Finding previews
+require an explicit request for a single source-bound person reference, reject
+non-unique or mismatched results, and ignore late responses after source removal.
+They expose no root-selection or mutation authority. The original file
+is immutable, staged bytes are removed when inspection terminates, and
+inspection results remain in process memory until source removal or owner
+cleanup. Search, selection, and person labels are not written to job history,
+diagnostics, logs, or provider requests. This transient display is genealogy
+content, not sanitized operational telemetry.
 The current deployment-profile control plane crosses
 the versioned config, application service, and canonical command executor
 without crossing a network boundary. Proposed deployment

@@ -5,6 +5,11 @@ file chooser and an opaque grant. It does not expose a standalone file-grant
 workspace, and selecting a file does not itself import, merge, export, or open
 genealogy data.
 
+The v0.7 source-level **GEDCOM** workspace now consumes a `gedcom-read` grant
+for [read-only inspection and root selection](desktop-gedcom-intake.md).
+It does not implement import, merge, export, or RootsMagic workflows, and it
+does not establish packaged-release support.
+
 Use fictional files and placeholder locations such as
 `<choose-a-fictional-file>`. Never publish a real path, family tree, database,
 backup, report, log, prompt, response, or credential in documentation or an

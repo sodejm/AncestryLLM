@@ -375,6 +375,7 @@ class GedcomSourceSummary(BoundaryDTO):
     individual_count: int
     family_count: int
     other_record_count: int
+    encoding: str = "utf-8"
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,10 +389,41 @@ class GedcomValidationFinding(BoundaryDTO):
 
 @dataclass(frozen=True, slots=True)
 class RootCandidate(BoundaryDTO):
-    """One opaque candidate for a rooted GEDCOM operation."""
+    """Bounded, private presentation of one explicitly selectable person."""
 
     person_ref: str
     reason_code: str
+    display_name: str = ""
+    source_identifier: str = ""
+    birth_date: str = ""
+    death_date: str = ""
+    relationship_summary: str = ""
+
+    def __post_init__(self) -> None:
+        for value, maximum in (
+            (self.display_name, 128),
+            (self.source_identifier, 96),
+            (self.birth_date, 64),
+            (self.death_date, 64),
+            (self.relationship_summary, 128),
+        ):
+            if len(value) > maximum:
+                raise ValueError("Root candidate display text exceeds its limit.")
+
+
+@dataclass(frozen=True, slots=True)
+class RootCandidatePage(BoundaryDTO):
+    """One bounded private page; never persisted in public job history."""
+
+    candidates: tuple[RootCandidate, ...]
+    total_count: int
+    next_cursor: str | None
+
+    def __post_init__(self) -> None:
+        if len(self.candidates) > 100 or self.total_count < len(self.candidates):
+            raise ValueError("Invalid root candidate page bounds.")
+        if self.next_cursor is not None and len(self.next_cursor) > 256:
+            raise ValueError("Root candidate cursor exceeds its limit.")
 
 
 _DEFAULT_MERGE_DECISION_OPTIONS = (
@@ -442,15 +474,47 @@ class GedcomInspectRequest(ServiceRequest):
     """Inspect one granted GEDCOM without exposing its host path or records."""
 
     source: ArtifactGrantRef
+    expected_sha256: str | None = None
+    expected_size_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.expected_sha256 is None) != (self.expected_size_bytes is None):
+            raise ValueError("An expected source fingerprint requires both size and digest.")
+        if self.expected_sha256 is not None and (
+            len(self.expected_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.expected_sha256)
+            or type(self.expected_size_bytes) is not int
+            or not 0 <= self.expected_size_bytes <= 512 * 1024 * 1024
+        ):
+            raise ValueError("Invalid expected source fingerprint.")
 
 
 @dataclass(frozen=True, slots=True)
 class GedcomInspectResult(ServiceResult):
-    """Structured, serializable inspection result for adapter presentation."""
+    """Private retained inspection; adapters expose a summary and bounded pages."""
 
     summary: GedcomSourceSummary
     findings: tuple[GedcomValidationFinding, ...]
     root_candidates: tuple[RootCandidate, ...]
+
+    def summary_result(self) -> GedcomInspectSummary:
+        """Project metadata without serializing the complete candidate collection."""
+        return GedcomInspectSummary(
+            summary=self.summary,
+            findings=self.findings[:100],
+            finding_count=len(self.findings),
+            root_candidate_count=len(self.root_candidates),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectSummary(ServiceResult):
+    """Bounded inspection metadata without names or the complete person index."""
+
+    summary: GedcomSourceSummary
+    findings: tuple[GedcomValidationFinding, ...]
+    finding_count: int
+    root_candidate_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1017,6 +1081,7 @@ __all__ = [
     "DiagnosticRecord",
     "GedcomInspectRequest",
     "GedcomInspectResult",
+    "GedcomInspectSummary",
     "GedcomMergeRequest",
     "GedcomMergeResult",
     "GedcomQualityRequest",
@@ -1072,6 +1137,7 @@ __all__ = [
     "QueryExecutionRecord",
     "QueryRow",
     "RootCandidate",
+    "RootCandidatePage",
     "RootsMagicExportArtifact",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",
