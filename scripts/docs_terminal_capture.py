@@ -989,10 +989,13 @@ def capture_terminal_screenshots(
         label="temporary root",
     )
     manifest = load_manifest(manifest_path, repository_root=resolved_repository)
-    policy = load_capture_policy(policy_path)
     scenarios = _terminal_scenarios(manifest)
+    selected = _select_terminal_scenarios(scenarios, scenario_ids)
+    if not selected:
+        return ()
+    policy = load_capture_policy(policy_path)
     _ensure_closed_scenario_contract(manifest, scenarios, policy)
-    scenarios = _select_terminal_scenarios(scenarios, scenario_ids)
+    scenarios = selected
 
     backend.prepare(repository_root=resolved_repository, policy=policy)
     staged: list[tuple[Path, bytes]] = []

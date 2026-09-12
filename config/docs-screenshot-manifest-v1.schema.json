@@ -305,7 +305,8 @@
         "ready_signal",
         "output_path",
         "documentation",
-        "comparison"
+        "comparison",
+        "inclusion"
       ],
       "properties": {
         "id": {
@@ -358,8 +359,234 @@
         },
         "comparison": {
           "$ref": "#/$defs/exact_comparison"
+        },
+        "inclusion": {
+          "$ref": "#/$defs/inclusion"
+        },
+        "crop": {
+          "$ref": "#/$defs/crop"
+        },
+        "appearance": {
+          "$ref": "#/$defs/appearance"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "electron"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "crop": {
+                "$ref": "#/$defs/crop"
+              },
+              "appearance": {
+                "$ref": "#/$defs/appearance"
+              }
+            },
+            "required": [
+              "crop",
+              "appearance"
+            ]
+          },
+          "else": {
+            "properties": {
+              "inclusion": {
+                "properties": {
+                  "ui_location_exception": {
+                    "$ref": "#/$defs/reviewed_exception"
+                  }
+                },
+                "required": [
+                  "ui_location_exception"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "reviewed_exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rationale",
+        "review_url"
+      ],
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "review_url": {
+          "type": "string",
+          "pattern": "^https://[^\\s]+$"
         }
       }
+    },
+    "inclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_ui_element",
+        "placement",
+        "text_insufficiency",
+        "crop_context",
+        "alt_text"
+      ],
+      "properties": {
+        "target_ui_element": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "placement": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "text_insufficiency": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "crop_context": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "alt_text": {
+          "type": "string",
+          "minLength": 12,
+          "pattern": "\\S"
+        },
+        "narrow_exception": {
+          "$ref": "#/$defs/reviewed_exception"
+        },
+        "ui_location_exception": {
+          "$ref": "#/$defs/reviewed_exception"
+        }
+      }
+    },
+    "crop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "source"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "light",
+            "dark",
+            "system"
+          ]
+        },
+        "source": {
+          "const": "project-owned"
+        },
+        "reviewed_exception": {
+          "$ref": "#/$defs/reviewed_exception"
+        },
+        "resolved": {
+          "enum": [
+            "light",
+            "dark"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "dark",
+                  "system"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reviewed_exception": {
+                "$ref": "#/$defs/reviewed_exception"
+              }
+            },
+            "required": [
+              "reviewed_exception"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "system"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolved": {
+                "enum": [
+                  "light",
+                  "dark"
+                ]
+              }
+            },
+            "required": [
+              "resolved"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "resolved"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

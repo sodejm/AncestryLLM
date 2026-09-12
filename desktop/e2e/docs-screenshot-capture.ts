@@ -1,6 +1,7 @@
 /** Enforces the deterministic, private Electron documentation-capture contract. */
 
 import { randomUUID } from 'node:crypto'
+import { crc32 } from 'node:zlib'
 import { constants } from 'node:fs'
 import {
   access,
@@ -31,6 +32,8 @@ type CaptureFailureCode =
   | 'DOCSHOT_BINARY_MISSING'
   | 'DOCSHOT_BINARY_UNTRUSTED'
   | 'DOCSHOT_CAPTURE_MISMATCH'
+  | 'DOCSHOT_CROP_INVALID'
+  | 'DOCSHOT_PNG_INVALID'
   | 'DOCSHOT_FIXTURE_INVALID'
   | 'DOCSHOT_FIXTURE_MISSING'
   | 'DOCSHOT_FONT_MISSING'
@@ -90,6 +93,12 @@ interface ManifestScenario {
   readonly surface: 'electron' | 'terminal'
   readonly launch: readonly string[]
   readonly fixture_id: string
+  readonly crop: Readonly<{ x: number; y: number; width: number; height: number }>
+  readonly appearance: Readonly<{
+    mode: 'light' | 'dark' | 'system'
+    resolved?: 'light' | 'dark'
+  }>
+  readonly inclusion: Readonly<{ narrow_exception?: unknown }>
   readonly geometry:
     | Readonly<{
       kind: 'viewport'
@@ -134,6 +143,8 @@ interface ManifestPayload {
 export interface ElectronCaptureScenario {
   readonly id: string
   readonly outputPath: string
+  readonly crop: Readonly<{ x: number; y: number; width: number; height: number }>
+  readonly appearance: 'light' | 'dark'
   readonly fixture: Readonly<{
     id: string
     state: 'success' | 'degraded'
@@ -198,6 +209,7 @@ export function electronLaunchArguments(
   userDataDirectory: string,
 ): readonly string[] {
   return Object.freeze([
+    '--disable-gpu',
     `--force-device-scale-factor=${geometry.deviceScaleFactor}`,
     '--lang=en-US',
     `--user-data-dir=${userDataDirectory}`,
@@ -381,6 +393,16 @@ export async function loadElectronCapturePlan(options: Readonly<{
       fail('DOCSHOT_MANIFEST_INVALID')
     }
     if (scenario.geometry.kind !== 'viewport') fail('DOCSHOT_MANIFEST_INVALID')
+    if (
+      scenario.crop.x + scenario.crop.width > scenario.geometry.width
+      || scenario.crop.y + scenario.crop.height > scenario.geometry.height
+      || scenario.crop.width > 1000
+      || (scenario.crop.width < 750 && scenario.inclusion.narrow_exception === undefined)
+    ) fail('DOCSHOT_CROP_INVALID')
+    const appearance = scenario.appearance.mode === 'system'
+      ? scenario.appearance.resolved
+      : scenario.appearance.mode
+    if (appearance === undefined) fail('DOCSHOT_MANIFEST_INVALID')
     if (!isSafeDeclaredOutput(scenario.output_path, payload.output_allowlist)) {
       fail('DOCSHOT_OUTPUT_UNDECLARED')
     }
@@ -398,6 +420,8 @@ export async function loadElectronCapturePlan(options: Readonly<{
     electronScenarios.push(deepFreeze({
       id: scenario.id,
       outputPath: scenario.output_path,
+      crop: scenario.crop,
+      appearance,
       fixture: {
         id: fixture.fixture_id,
         state: fixture.state,
@@ -660,4 +684,38 @@ function deepFreeze<T>(value: T): Readonly<T> {
     for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child)
   }
   return value
+}
+
+/** Adds canonical 144-dpi metadata without resampling the captured pixels. */
+export function withPublicationDensity(png: Buffer): Buffer {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  if (!png.subarray(0, 8).equals(signature)) fail('DOCSHOT_PNG_INVALID')
+  const density = Buffer.alloc(21)
+  density.writeUInt32BE(9, 0)
+  density.write('pHYs', 4, 'ascii')
+  density.writeUInt32BE(5669, 8)
+  density.writeUInt32BE(5669, 12)
+  density[16] = 1
+  density.writeUInt32BE(crc32(density.subarray(4, 17)), 17)
+  const chunks: Buffer[] = [signature]
+  let offset = 8
+  let inserted = false
+  let ended = false
+  while (offset < png.length) {
+    if (offset + 12 > png.length || ended) fail('DOCSHOT_PNG_INVALID')
+    const length = png.readUInt32BE(offset)
+    const end = offset + length + 12
+    if (end > png.length) fail('DOCSHOT_PNG_INVALID')
+    const kind = png.toString('ascii', offset + 4, offset + 8)
+    if (offset === 8 && (kind !== 'IHDR' || length !== 13)) fail('DOCSHOT_PNG_INVALID')
+    if (kind === 'IDAT' && !inserted) {
+      chunks.push(density)
+      inserted = true
+    }
+    if (kind !== 'pHYs') chunks.push(png.subarray(offset, end))
+    if (kind === 'IEND') ended = true
+    offset = end
+  }
+  if (!inserted || !ended) fail('DOCSHOT_PNG_INVALID')
+  return Buffer.concat(chunks)
 }

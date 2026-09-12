@@ -1,14 +1,11 @@
 {
   "schema_version": 1,
   "launch_allowlist": [
-    ".venv/bin/ancestry",
     "pnpm"
   ],
   "output_allowlist": [
-    "docs/assets/screenshots/electron/degraded-diagnostics.png",
     "docs/assets/screenshots/electron/ready-home.png",
-    "docs/assets/screenshots/terminal/cli-help.png",
-    "docs/assets/screenshots/terminal/interactive-console.png"
+    "docs/assets/screenshots/electron/degraded-diagnostics.png"
   ],
   "determinism": {
     "locale": "en_US.UTF-8",
@@ -108,6 +105,23 @@
       ],
       "comparison": {
         "mode": "exact"
+      },
+      "appearance": {
+        "mode": "light",
+        "source": "project-owned"
+      },
+      "crop": {
+        "x": 256,
+        "y": 112,
+        "width": 864,
+        "height": 540
+      },
+      "inclusion": {
+        "target_ui_element": "Home status and local action cards",
+        "placement": "After the written Home state checklist in each owning section.",
+        "text_insufficiency": "Shows the relative locations of status badges and local action cards so readers can recognize the ready state.",
+        "crop_context": "Retain the page heading, status and action cards; omit sidebar, help rail and empty lower canvas.",
+        "alt_text": "Home shows the local desktop shell, Ready status, and local action cards."
       }
     },
     {
@@ -139,65 +153,23 @@
       ],
       "comparison": {
         "mode": "exact"
-      }
-    },
-    {
-      "id": "terminal-cli-help",
-      "surface": "terminal",
-      "launch": [
-        ".venv/bin/ancestry",
-        "--help"
-      ],
-      "fixture_id": "success",
-      "geometry": {
-        "kind": "terminal",
-        "columns": 120,
-        "rows": 36
       },
-      "ready_signal": {
-        "kind": "text",
-        "value": "usage: ancestry"
+      "appearance": {
+        "mode": "light",
+        "source": "project-owned"
       },
-      "output_path": "docs/assets/screenshots/terminal/cli-help.png",
-      "documentation": [
-        {
-          "path": "docs/reference/CLI.md",
-          "anchor": "command-line-reference"
-        }
-      ],
-      "comparison": {
-        "mode": "exact"
-      }
-    },
-    {
-      "id": "terminal-interactive-console",
-      "surface": "terminal",
-      "launch": [
-        ".venv/bin/ancestry"
-      ],
-      "fixture_id": "success",
-      "geometry": {
-        "kind": "terminal",
-        "columns": 120,
-        "rows": 36
+      "crop": {
+        "x": 256,
+        "y": 112,
+        "width": 864,
+        "height": 666
       },
-      "ready_signal": {
-        "kind": "text",
-        "value": "ancestry >"
-      },
-      "output_path": "docs/assets/screenshots/terminal/interactive-console.png",
-      "documentation": [
-        {
-          "path": "docs/how-to/explore-the-interactive-console.md",
-          "anchor": "inspect-the-supported-gedcom-commands"
-        },
-        {
-          "path": "docs/CONSOLE.md",
-          "anchor": "navigation-and-controls"
-        }
-      ],
-      "comparison": {
-        "mode": "exact"
+      "inclusion": {
+        "target_ui_element": "Diagnostics service status, error and recovery controls",
+        "placement": "After the written explanation of sanitized Diagnostics and recovery.",
+        "text_insufficiency": "Shows the relative locations of the sanitized error, service status and recovery controls so readers can locate them.",
+        "crop_context": "Retain the Diagnostics heading, service status and complete recovery panel; omit sidebar and help rail.",
+        "alt_text": "Diagnostics shows a degraded service, sanitized startup error, and recovery controls."
       }
     }
   ]

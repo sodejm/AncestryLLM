@@ -106,8 +106,28 @@ describe('Electron documentation screenshot capture contract', () => {
       'degraded',
       'success',
     ])
+    expect(plan.scenarios.every((scenario) => scenario.appearance === 'light')).toBe(true)
+    expect(plan.scenarios.map((scenario) => scenario.crop.width)).toEqual([864, 864])
     expect(JSON.stringify(plan)).not.toContain('SCREENSHOT-PRIVATE-CANARY-7F4C')
     expect(JSON.stringify(plan)).not.toContain(repositoryRoot)
+  })
+
+  test.each([
+    { x: 1000, y: 0, width: 864, height: 540 },
+    { x: 0, y: 800, width: 864, height: 540 },
+    { x: 0, y: 0, width: 1001, height: 540 },
+    { x: 0, y: 0, width: 749, height: 540 },
+  ])('rejects an unpublishable crop %j', async (crop) => {
+    const root = await temporaryRoot()
+    const dependencies = await fixtureDependencies(root)
+    const copiedRepository = await contractRepository(root)
+    const manifestPath = join(copiedRepository, 'config/docs-screenshot-manifest.json')
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    manifest.scenarios[0].crop = crop
+    await writeFile(manifestPath, JSON.stringify(manifest))
+    await expect(loadElectronCapturePlan({
+      repositoryRoot: copiedRepository, ...dependencies,
+    })).rejects.toMatchObject({ code: 'DOCSHOT_CROP_INVALID' })
   })
 
   test('selects declared Electron scenarios in manifest order and fails closed', async () => {
@@ -142,10 +162,12 @@ describe('Electron documentation screenshot capture contract', () => {
     const scenario = plan.scenarios[0]
     if (scenario === undefined) throw new Error('fixture scenario missing')
 
-    expect(electronLaunchArguments({
+    const launchArguments = electronLaunchArguments({
       ...scenario.geometry,
       deviceScaleFactor: 2,
-    }, join(root, 'profile'))).toContain('--force-device-scale-factor=2')
+    }, join(root, 'profile'))
+    expect(launchArguments).toContain('--force-device-scale-factor=2')
+    expect(launchArguments).toContain('--disable-gpu')
 
     const styles = captureDeterminismStyles(plan.determinism.font)
     expect(styles).toContain('*, *::before, *::after {')

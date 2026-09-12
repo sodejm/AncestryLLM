@@ -37,13 +37,25 @@ rendering, publication, and drift detection.
    is an exact member of `output_allowlist`, and every fixture is fictional with
    provider `none` and network `disabled`. Unknown selectors, unsafe or
    symlinked destinations, and writes outside the repository are failures.
-4. On macOS, require a running Docker Desktop or compatible engine capable of
-   native Linux containers. In CI, require the reviewed Linux setup. Treat a
-   missing engine, unsupported architecture, missing dependency, or incomplete
-   platform result as a failure rather than a pass.
-5. The canonical pipeline must verify the pinned rendering tool versions before
+4. Review the inclusion record before capture: identify the target UI element,
+   placement after complete written instructions, text-insufficiency rationale,
+   crop context, and purpose-oriented alt text. Prefer omission and selectable
+   text when a UI location does not need illustration. Verify review URLs and
+   rationales for narrow-width, terminal UI-location, or appearance exceptions.
+   Show a menu open only when its choices are the instructional target.
+5. Check the viewport-bounded crop and per-scenario project-owned appearance.
+   Use light unless a reviewed exception applies; system appearance must pin its
+   resolved output. Require static PNGs at 144 dpi, 750–1000 pixels wide unless
+   reviewed otherwise, and at most 250,000 bytes. Density metadata must not be
+   used as a substitute for correct pixel dimensions or as a reason to upscale.
+6. On macOS, require the pinned Node, pnpm, Electron, and font toolchain for
+   Electron capture. Require a running Docker Desktop or compatible native Linux
+   engine only for declared terminal scenarios. In CI, require the reviewed Linux
+   setup. Missing dependencies or incomplete platform results are failures.
+7. The canonical pipeline must verify the pinned rendering tool versions before
    publication and enforce its privacy canary, isolated temporary state,
-   deterministic double capture, and allowlisted-write controls. Do not bypass
+   deterministic repeats under light and dark host preferences for Electron,
+   and allowlisted-write controls. Do not bypass
    or relax a failed preflight.
 
 ## Capture the reviewed selection
@@ -69,8 +81,11 @@ workflow.
 1. Re-run `git status --short --untracked-files=all` and inspect the selected
    image diff. Fail if any undeclared path changed or if a selected output is not
    attributable to the completed capture.
-2. Visually review each selected fictional image against its owning
-   documentation. Classify each scenario as `changed/regenerated` when its
+2. Visually review each selected fictional image in its rendered owning
+   documentation, including crop context, text readability, and alt text. Review
+   the page with images disabled to confirm every procedure remains complete.
+   Check any highlight against the authoring guide; current media has no motion.
+   Classify each scenario as `changed/regenerated` when its
    committed bytes changed or `unchanged` when the deterministic output already
    matched.
 3. Run the complete, unfiltered gate:
@@ -81,7 +96,7 @@ workflow.
 
    This full-manifest check is required even after a focused capture. Preserve
    its real status and treat changed pixels, missing images, privacy canaries,
-   invalid PNGs, broken ownership, or incomplete architecture coverage as
+   invalid PNG quality or appearance, broken ownership, or incomplete architecture coverage as
    failures.
 4. Confirm once more that only the selected allowlisted images changed. Leave
    all changes unstaged.

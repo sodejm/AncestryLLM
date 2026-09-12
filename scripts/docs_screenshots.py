@@ -23,8 +23,8 @@ if __package__:
     from scripts.docs_screenshot_manifest import (
         ScreenshotManifestError,
         ValidatedManifest,
+        image_quality_failures,
         load_manifest,
-        validate_png_bytes,
         validate_published_assets,
     )
     from scripts.docs_terminal_capture import (
@@ -36,8 +36,8 @@ else:
     from docs_screenshot_manifest import (
         ScreenshotManifestError,
         ValidatedManifest,
+        image_quality_failures,
         load_manifest,
-        validate_png_bytes,
         validate_published_assets,
     )
     from docs_terminal_capture import (
@@ -334,6 +334,7 @@ def _validate_staged_outputs(
             "DOCSHOT_CAPTURE_INVENTORY_MISMATCH",
             "staged output inventory differs from the selected manifest outputs",
         )
+    quality_failures: list[str] = []
     for scenario in scenarios:
         image = output_root / _relative_output(str(scenario["output_path"]))
         try:
@@ -342,10 +343,9 @@ def _validate_staged_outputs(
             _fail("DOCSHOT_CAPTURE_INVENTORY_MISMATCH", "staged screenshot is unreadable")
         if any(canary.encode("utf-8") in content for canary in manifest.privacy_canaries):
             _fail("DOCSHOT_PRIVACY_CANARY_LEAKED", "staged screenshot contains a canary")
-        try:
-            validate_png_bytes(content)
-        except ScreenshotManifestError:
-            _fail("DOCSHOT_CAPTURE_INVALID", "staged screenshot is not a valid PNG")
+        quality_failures.extend(image_quality_failures(content, scenario))
+    if quality_failures:
+        _fail("DOCSHOT_QUALITY_INVALID", "\n".join(quality_failures))
 
 
 def _sha256(path: Path) -> str:
@@ -493,7 +493,7 @@ def check_screenshots(
     try:
         validate_published_assets(manifest, repository_root=repository_root)
     except ScreenshotManifestError as error:
-        if error.code not in {"DOCSHOT_ASSET_INVALID", "DOCSHOT_ASSET_MISSING"}:
+        if error.code not in {"DOCSHOT_QUALITY_INVALID", "DOCSHOT_ASSET_MISSING"}:
             raise
         published_error = error
     selected_manifest = _selected_manifest_path(manifest_path, repository_root=repository_root)
@@ -718,7 +718,9 @@ def main(argv: list[str] | None = None) -> int:
                 scenario_ids=tuple(args.scenario),
             )
     except (DocsScreenshotError, ScreenshotManifestError, TerminalCaptureError) as error:
-        print(error.code, file=sys.stderr)
+        print(
+            str(error) if error.code == "DOCSHOT_QUALITY_INVALID" else error.code, file=sys.stderr
+        )
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0

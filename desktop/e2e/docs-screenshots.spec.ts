@@ -24,10 +24,12 @@ import {
   publishCaptureAtomically,
   requireCaptureOutputRoot,
   selectElectronCaptureScenarios,
+  withPublicationDensity,
   type ElectronCapturePlan,
   type ElectronCaptureScenario,
 } from './docs-screenshot-capture'
 import { APP_ENTRY_URL as TRUSTED_RENDERER_URL } from '../src/main/security-policy'
+import type { AncestryBridge } from '../src/shared-contract/desktop'
 
 const desktopRoot = process.cwd()
 const repositoryRoot = resolve(desktopRoot, '..')
@@ -56,8 +58,12 @@ test('captures the declared Electron documentation states deterministically', as
   )
 
   for (const scenario of scenarios) {
-    const first = await captureScenario(plan, scenario)
-    const second = await captureScenario(plan, scenario)
+    const first = await captureScenario(plan, scenario, 'light')
+    const second = await captureScenario(plan, scenario, 'dark')
+    if (!first.equals(second)) {
+      await test.info().attach(`${scenario.id}-host-light`, { body: first, contentType: 'image/png' })
+      await test.info().attach(`${scenario.id}-host-dark`, { body: second, contentType: 'image/png' })
+    }
     assertExactCapture(first, second)
     await publishCaptureAtomically(plan, scenario.outputPath, first)
   }
@@ -66,6 +72,7 @@ test('captures the declared Electron documentation states deterministically', as
 async function captureScenario(
   plan: ElectronCapturePlan,
   scenario: Readonly<ElectronCaptureScenario>,
+  hostAppearance: 'light' | 'dark',
 ): Promise<Buffer> {
   const userDataDirectory = await mkdtemp(join(tmpdir(), 'ancestryllm-docshot-electron-'))
   let app: ElectronApplication | undefined
@@ -96,7 +103,7 @@ async function captureScenario(
 
     const page = await app.firstWindow()
     await page.waitForURL(TRUSTED_RENDERER_URL, { waitUntil: 'load' })
-    await configureWindow(app, page, plan, scenario)
+    await configureWindow(app, page, plan, scenario, hostAppearance)
     await assertNoNetworkActivity(page, unexpectedNetwork)
 
     if (scenario.fixture.state === 'success') {
@@ -113,14 +120,23 @@ async function captureScenario(
     await assertNoNetworkActivity(page, unexpectedNetwork)
     const capturedDom = await page.evaluate(() => document.documentElement.outerHTML)
     assertPlanCaptureIsPrivate(plan, capturedDom)
-    const screenshot = await page.screenshot({
-      animations: 'disabled',
-      caret: 'hide',
-      scale: 'css',
-      type: 'png',
-    })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scenario.appearance)
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    let screenshot: Buffer = Buffer.alloc(0)
+    await expect.poll(async () => {
+      const current = await page.screenshot({
+        clip: scenario.crop,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'css',
+        type: 'png',
+      })
+      const settled = current.equals(screenshot)
+      screenshot = current
+      return settled
+    }, { message: 'Documentation capture pixels must settle before host comparison.' }).toBe(true)
     await assertNoNetworkActivity(page, unexpectedNetwork)
-    return screenshot
+    return withPublicationDensity(screenshot)
   } finally {
     await app?.close().catch(() => undefined)
     await rm(userDataDirectory, { force: true, recursive: true })
@@ -132,19 +148,38 @@ async function configureWindow(
   page: Page,
   plan: ElectronCapturePlan,
   scenario: Readonly<ElectronCaptureScenario>,
+  hostAppearance: 'light' | 'dark',
 ): Promise<void> {
-  await app.evaluate(({ BrowserWindow }, geometry) => {
+  await page.evaluate(async (appearance) => {
+    const bridge = (window as unknown as { ancestry: AncestryBridge }).ancestry
+    const preferences = await bridge.getPreferences()
+    if (!preferences.ok) throw new Error('Documentation capture preferences are unavailable.')
+    const updated = await bridge.updatePreferences({
+      expectedRevision: preferences.data.revision,
+      colorScheme: appearance,
+      reducedMotion: true,
+    })
+    if (!updated.ok) throw new Error('Documentation capture appearance could not be saved.')
+  }, scenario.appearance)
+  await page.reload({ waitUntil: 'load' })
+  await expect(page.locator('html')).toHaveAttribute('data-theme', scenario.appearance)
+  await app.evaluate(({ BrowserWindow, nativeTheme }, { geometry, hostAppearance }) => {
+    nativeTheme.themeSource = hostAppearance
     const window = BrowserWindow.getAllWindows()[0]
     if (!window) throw new Error('Documentation capture BrowserWindow is unavailable.')
     window.setContentSize(geometry.width, geometry.height)
     window.webContents.setZoomFactor(1)
-  }, scenario.geometry)
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  }, { geometry: scenario.geometry, hostAppearance })
+  expect(await app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors))
+    .toBe(hostAppearance === 'dark')
+  await page.emulateMedia({ colorScheme: hostAppearance, reducedMotion: 'reduce' })
+  expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches))
+    .toBe(hostAppearance === 'dark')
   await page.clock.setFixedTime(plan.determinism.fixedTimestamp)
 
   const fontBytes = await readFile(fontPath)
   const determinismStyles = captureDeterminismStyles(plan.determinism.font)
-  await page.evaluate(async ({ determinismStyles, fontBase64, font, theme }) => {
+  await page.evaluate(async ({ determinismStyles, fontBase64, font }) => {
     const binary = atob(fontBase64)
     const bytes = new Uint8Array(binary.length)
     for (let index = 0; index < binary.length; index += 1) {
@@ -161,9 +196,6 @@ async function configureWindow(
     style.dataset.docsScreenshotDeterminism = 'true'
     style.textContent = determinismStyles
     document.head.append(style)
-    document.documentElement.dataset.theme = theme
-    document.documentElement.dataset.reducedMotion = 'true'
-    document.documentElement.style.colorScheme = theme
     await document.fonts.ready
     if (!document.fonts.check(`${font.weight} ${font.sizePx}px ${JSON.stringify(font.family)}`)) {
       throw new Error('Bundled documentation capture font did not load.')
@@ -172,7 +204,6 @@ async function configureWindow(
     determinismStyles,
     fontBase64: fontBytes.toString('base64'),
     font: plan.determinism.font,
-    theme: plan.determinism.theme,
   })
 
   await expect.poll(() => page.evaluate(() => ({
@@ -186,7 +217,7 @@ async function configureWindow(
     deviceScaleFactor: scenario.geometry.deviceScaleFactor,
     height: scenario.geometry.height,
     locale: 'en-US',
-    theme: plan.determinism.theme,
+    theme: scenario.appearance,
     timezone: plan.determinism.timezone,
     width: scenario.geometry.width,
   })

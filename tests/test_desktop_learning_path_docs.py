@@ -80,8 +80,7 @@ def test_first_run_screenshot_is_accessible_and_manifest_owned() -> None:
     )
 
     assert (
-        "![AncestryLLM desktop Home showing the fictional provider-none ready state]"
-        "(../assets/screenshots/electron/ready-home.png)"
+        f"![{ready_home['inclusion']['alt_text']}](../assets/screenshots/electron/ready-home.png)"
     ) in tutorial
     assert {
         "path": "docs/tutorials/desktop-first-run.md",

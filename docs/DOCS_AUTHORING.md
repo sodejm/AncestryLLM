@@ -52,6 +52,55 @@ later capability as a current tutorial.
 
 ## Deterministic screenshot contract
 
+Decide whether to omit an image before planning capture. Procedures must remain
+complete with images disabled: put commands and terminal output in selectable
+text, and describe the control and action in prose. Retain a screenshot only
+when it helps the reader locate a UI element or understand a spatial relationship
+that text alone cannot explain adequately. The current inventory contains only
+the Home and degraded Diagnostics Electron images; CLI and console guidance uses
+text. A future terminal image requires a reviewed UI-location exception.
+
+Every scenario declares an `inclusion` record: `target_ui_element`, intended
+`placement` after the written context, `text_insufficiency` rationale,
+`crop_context`, and purpose-oriented `alt_text`. A `narrow_exception` or terminal
+`ui_location_exception` must contain a rationale and review URL. These are
+reviewable decisions, not permission to bypass the remaining quality checks.
+
+Crop to the smallest useful UI context. Keep the target, its relevant heading,
+and enough surrounding controls for orientation; omit unrelated navigation,
+window chrome, and empty margins. Show a menu open when its choices are the
+instruction target, or closed when the reader needs to locate its trigger. The
+retained Home and Diagnostics captures contain no open menu. Electron `crop`
+coordinates must fit inside the declared viewport; capture those pixels directly
+without resampling a full-window image.
+
+Published assets must be static PNGs, 750–1000 pixels wide unless a reviewed
+narrow-width exception applies, at most 250,000 bytes, and carry 144-dpi density
+on both axes. PNG `pHYs` must occur once before image data, use metre units, and
+record 5669 pixels per metre (144 dpi after rounding). Adding density metadata
+does not resize pixels or improve image detail. The capture adapter adds only
+this metadata after cropping; it does not upscale, stretch, or retouch the UI.
+Both staged and published validation inspect actual bytes, reject APNG animation
+chunks and corrupt PNGs, and report all quality failures across the inventory
+with the observed value, expected constraint, and remediation.
+
+Declare each Electron scenario's project-owned `appearance`, normally `light`.
+A dark or `system` selection needs a reviewed rationale and URL; `system` also
+pins the resolved light or dark output, so the host preference cannot choose the
+baseline. Capture repeats with both light and dark native/renderer host
+preferences must produce identical bytes for that declared appearance. The
+current application has no separate theme-family or theme-schema version
+contract; do not invent one for screenshots. If such a contract is introduced,
+extend and validate the manifest before using it for capture.
+
+Write alt text that names the UI state and the information the image conveys,
+not generic phrases such as "image of". Keep the actionable instructions in the
+page. Review each rendered page with images enabled and disabled. If a future
+image needs a highlight, use the GitHub-guided `#BC4C00` rounded 4-pixel outline
+and describe the highlighted element in alt text. The current images use no
+highlight or motion; animation is rejected. Motion media needs a separately
+reviewed format, accessibility fallback, and validation contract before use.
+
 The schema-v1 contract in `config/docs-screenshot-manifest.json` is the single
 reviewed inventory for documentation screenshots. Its closed schemas live in
 `config/docs-screenshot-manifest-v1.schema.json` and
@@ -69,7 +118,7 @@ validation to the canonical Make targets and never authorizes staging, commits,
 pushes, or pull requests.
 
 `scripts/docs_screenshots.py` is the shared publication and drift-check
-orchestrator. `make docs-screenshots` captures all four declared scenarios into
+orchestrator. `make docs-screenshots` captures both declared Electron scenarios into
 an isolated staging tree, validates the complete inventory, then replaces the
 published set transactionally with repository-readable `0644` modes. A failed
 replacement restores both the previous bytes and their modes.
@@ -101,13 +150,21 @@ uses the repository's canonical locked desktop installer there, and sets
 adapter builds the fixture-only desktop bundle, launches a real Electron
 `BrowserWindow` through Playwright, waits for each manifest-declared ready
 signal, and captures the fictional provider-none Home/Ready state and sanitized
-degraded-diagnostics state twice. It requires byte-identical repeats under the
-manifest viewport, device scale, light theme, UTC clock, locale, bundled Inter
-font, and disabled animation controls. It inherits only a narrow environment
+degraded-diagnostics state with fresh light and dark host preferences. It requires
+byte-identical repeats under the
+manifest viewport, crop, device scale, per-scenario appearance, UTC clock, locale, bundled Inter
+font, and disabled animation controls. Capture uses software rendering and waits
+for consecutive identical frames to avoid GPU rasterization drift. It inherits only a narrow environment
 allowlist, blocks unexpected renderer networking, scans the rendered document
 for every privacy canary, and writes only the two selected allowlisted paths.
 
-The terminal adapter runs through `make docs-terminal-screenshots`. It validates
+The retained terminal adapter runs through `make docs-terminal-screenshots`.
+With no terminal scenarios in the canonical inventory, that target fails with
+`DOCSHOT_SCENARIO_UNKNOWN` before starting an engine. The adapter itself accepts
+an empty terminal inventory without engine setup. Its separate test manifest
+retains the two fictional terminal plans for adapter security regression coverage;
+it is not publication approval.
+When a reviewed manifest includes terminal scenarios, the adapter validates
 `config/docs-terminal-capture-policy.json`, builds a native Linux container
 from exact digest-pinned VHS and uv images, verifies the expected VHS, ttyd,
 Chromium, FFmpeg, and JetBrains Mono identities, and then drives the real
@@ -133,10 +190,11 @@ target, selected locale name, and matching `LANG` and `LC_ALL` values before any
 capture. This avoids a mutable locale-package installation while keeping the
 shared Electron and terminal determinism contract unchanged.
 
-For local macOS capture, install and start Docker Desktop (or another engine
-that can run native Linux containers), run `make setup`, then run
-`make docs-screenshots-check`. Host copies of VHS, ttyd, Chromium, FFmpeg, and
-JetBrains Mono are neither used nor supported by this contract. The reference CI setup
+For local macOS capture, run `make setup`, install the pinned Node and pnpm
+versions, then run `make docs-screenshots-check`. A running Docker Desktop or
+compatible native Linux engine is required only when the selected manifest has
+terminal scenarios. Host copies of VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono
+are neither used nor supported for terminal capture. The reference CI setup
 uses a hosted Linux runner with exact Node 26.5.0 and pnpm 11.9.0, the frozen desktop
 lock, the digest-pinned native terminal images, the manifest-owned locale,
 timezone, viewport, fonts, and animation settings, and a pinned virtual display
@@ -144,7 +202,8 @@ package. A missing engine, dependency, architecture result, or capture is an
 incomplete failure rather than a passing comparison.
 
 Issue #420 owns documentation embedding, drift comparison, and CI enforcement
-through this shared manifest and orchestrator.
+through this shared manifest and orchestrator. Issue #465 adds the inclusion,
+quality, crop, accessibility, and per-scenario appearance gates.
 
 To update the terminal toolchain, change the VHS image index digest, both
 reviewed native descriptor digests, uv image digest, exact preflight version
@@ -168,7 +227,7 @@ at the Electron adapter's fixed manifest path only inside the disposable capture
 workspace, which is discarded without modifying the checkout. A custom manifest
 is never silently replaced by the repository default.
 
-Every publishable scenario must:
+Every publishable scenario must satisfy the inclusion and quality rules above and:
 
 1. Use a tokenized, allowlisted launch command and the geometry for its declared
    `electron` or `terminal` surface.
@@ -192,7 +251,9 @@ values. A missing determinism control, unsafe or symlinked path, shell or URL
 syntax, unknown schema field, undeclared output, or unapproved network behavior
 fails closed with a stable `DOCSHOT_*` code.
 
-To add a screenshot, first add or reuse a fictional fixture, then add the
+To add a screenshot, first document why text is insufficient and review its
+placement, crop, appearance, and any exception. Add or reuse a fictional fixture,
+then add the
 scenario, output allowlist entry, every owning documentation reference, and
 meaningful alt text in one change. Run focused manifest and publication tests,
 run `make docs-screenshots`, visually review every changed fictional image, run
