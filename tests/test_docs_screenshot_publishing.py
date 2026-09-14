@@ -741,6 +741,11 @@ def test_electron_capture_uses_locked_installer_and_selected_manifest(
     monkeypatch.setattr(docs_screenshots, "_copy_repository_snapshot", copy_snapshot)
     monkeypatch.setattr(docs_screenshots, "_run_electron_command", run_command)
     monkeypatch.setattr(docs_screenshots, "_electron_build_environment", lambda _root: {})
+    monkeypatch.setattr(docs_screenshots.sys, "platform", "linux")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        "platform.freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"}
+    )
 
     _default_capture_runner(
         surface="electron",
@@ -757,6 +762,44 @@ def test_electron_capture_uses_locked_installer_and_selected_manifest(
         ("node", "desktop/scripts/install-locked.mjs"),
         ("pnpm", "--dir", "desktop", "capture:docs"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("host_platform", "machine", "release"),
+    [
+        ("darwin", "arm64", {}),
+        ("win32", "AMD64", {}),
+        ("linux", "aarch64", {"ID": "ubuntu", "VERSION_ID": "24.04"}),
+        ("linux", "x86_64", {"ID": "ubuntu", "VERSION_ID": "22.04"}),
+        ("linux", "x86_64", {"ID": "debian", "VERSION_ID": "24.04"}),
+        ("linux", "x86_64", {}),
+    ],
+)
+def test_electron_capture_rejects_noncanonical_platform_before_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    host_platform: str,
+    machine: str,
+    release: dict[str, str],
+) -> None:
+    monkeypatch.setattr(docs_screenshots.sys, "platform", host_platform)
+    monkeypatch.setattr("platform.machine", lambda: machine)
+    monkeypatch.setattr("platform.freedesktop_os_release", lambda: release)
+
+    def reject_staging(*_arguments: Any) -> None:
+        pytest.fail("unsupported capture must fail before staging or tool installation")
+
+    monkeypatch.setattr(docs_screenshots, "_copy_repository_snapshot", reject_staging)
+    with pytest.raises(DocsScreenshotError) as caught:
+        _default_capture_runner(
+            surface="electron",
+            scenario_ids=("electron-example",),
+            output_root=tmp_path,
+            temporary_root=tmp_path,
+            repository_root=tmp_path,
+            manifest_path=tmp_path / "manifest.json",
+        )
+    assert caught.value.code == "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED"
 
 
 def test_electron_commands_cannot_wait_for_interactive_prompts(

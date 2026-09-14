@@ -1516,8 +1516,9 @@ plugins:
   appearance, and actual-byte static PNG width, size, and 144-dpi checks.
   `scripts/docs_screenshots.py` coordinates the Electron and terminal adapters
   through isolated staging, forwards the selected manifest across both adapter
-  boundaries, uses the canonical locked desktop installer, publishes complete
-  sets transactionally with stable repository-readable modes, performs
+  boundaries, rejects Electron capture outside Ubuntu 24.04 x86_64 before staging
+  to match CI text rendering, uses the canonical locked desktop installer,
+  publishes complete sets transactionally with stable repository-readable modes, performs
   exact-byte drift comparison, and emits a closed hash-only failure report even
   when a committed asset is missing or invalid. Check mode uses a temporary
   source snapshot and leaves the repository unchanged. This is repository

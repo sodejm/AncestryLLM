@@ -190,16 +190,26 @@ target, selected locale name, and matching `LANG` and `LC_ALL` values before any
 capture. This avoids a mutable locale-package installation while keeping the
 shared Electron and terminal determinism contract unchanged.
 
-For local macOS capture, run `make setup`, install the pinned Node and pnpm
-versions, then run `make docs-screenshots-check`. A running Docker Desktop or
-compatible native Linux engine is required only when the selected manifest has
-terminal scenarios. Host copies of VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono
-are neither used nor supported for terminal capture. The reference CI setup
-uses a hosted Linux runner with exact Node 26.5.0 and pnpm 11.9.0, the frozen desktop
-lock, the digest-pinned native terminal images, the manifest-owned locale,
-timezone, viewport, fonts, and animation settings, and a pinned virtual display
-package. A missing engine, dependency, architecture result, or capture is an
-incomplete failure rather than a passing comparison.
+Electron publication and drift checks require Ubuntu 24.04 on x86_64, matching
+the CI runner. The orchestrator rejects other operating systems, distributions,
+and architectures with `DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED` before staging
+source or installing tools. Operating-system text rendering can change PNG
+bytes even with the same bundled font; a native macOS capture is therefore not
+a publication baseline. From macOS or Windows, run the canonical commands
+inside an Ubuntu 24.04 x86_64 VM or container with the reviewed dependencies
+from `.github/workflows/ci.yml`. Run `make setup`, install exact Node 26.5.0 and
+pnpm 11.9.0, and use `xvfb-run --auto-servernum make docs-screenshots` followed
+by `xvfb-run --auto-servernum make docs-screenshots-check`. Review the resulting
+images before committing them. The frozen desktop lock, manifest-owned locale,
+timezone, viewport, fonts, animation settings, and pinned virtual display
+package remain part of the capture contract.
+
+A running Docker Desktop or compatible native Linux engine is additionally
+required when the selected manifest has terminal scenarios. Host copies of
+VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono are neither used nor supported
+for terminal capture; its digest-pinned native images retain their separate
+platform policy. A missing engine, dependency, architecture result, or capture
+is an incomplete failure rather than a passing comparison.
 
 Issue #420 owns documentation embedding, drift comparison, and CI enforcement
 through this shared manifest and orchestrator. Issue #465 adds the inclusion,

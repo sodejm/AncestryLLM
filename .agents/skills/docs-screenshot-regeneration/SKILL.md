@@ -48,10 +48,14 @@ rendering, publication, and drift detection.
    resolved output. Require static PNGs at 144 dpi, 750–1000 pixels wide unless
    reviewed otherwise, and at most 250,000 bytes. Density metadata must not be
    used as a substitute for correct pixel dimensions or as a reason to upscale.
-6. On macOS, require the pinned Node, pnpm, Electron, and font toolchain for
-   Electron capture. Require a running Docker Desktop or compatible native Linux
-   engine only for declared terminal scenarios. In CI, require the reviewed Linux
-   setup. Missing dependencies or incomplete platform results are failures.
+6. Require Ubuntu 24.04 x86_64 and the reviewed `.github/workflows/ci.yml`
+   dependencies for Electron capture, including pinned Node, pnpm, Electron,
+   fonts, locale, and virtual display. From macOS or Windows, run the canonical
+   commands inside a matching VM or container. The orchestrator rejects other
+   platforms before staging or installation; do not accept native host baselines.
+   Require a running Docker Desktop or compatible native Linux engine for
+   declared terminal scenarios. Missing dependencies or incomplete platform
+   results are failures.
 7. The canonical pipeline must verify the pinned rendering tool versions before
    publication and enforce its privacy canary, isolated temporary state,
    deterministic repeats under light and dark host preferences for Electron,

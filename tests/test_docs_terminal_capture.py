@@ -694,8 +694,8 @@ def test_terminal_capture_operations_and_security_disposition_are_documented() -
     normalized_authoring = " ".join(authoring.split())
 
     assert "make docs-terminal-screenshots" in authoring
-    assert "For local macOS capture" in authoring
-    assert "The reference CI setup" in authoring
+    assert "Electron publication and drift checks require Ubuntu 24.04 on x86_64" in authoring
+    assert "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED" in authoring
     assert "To update the terminal toolchain" in authoring
     assert "documentation embedding, drift comparison, and CI enforcement" in normalized_authoring
     assert "make docs-screenshots-check" in authoring

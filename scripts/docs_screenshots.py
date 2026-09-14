@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -266,6 +267,24 @@ def _stage_electron_manifest(manifest_path: Path, *, workspace: Path) -> None:
         _fail("DOCSHOT_ELECTRON_CAPTURE_FAILED", "selected manifest could not be staged")
 
 
+def _require_electron_capture_platform() -> None:
+    """Keep published pixels on the same OS and architecture as the CI baseline."""
+    if sys.platform != "linux" or platform.machine() != "x86_64":
+        _fail(
+            "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED", "Electron capture requires Ubuntu 24.04 x86_64"
+        )
+    try:
+        release = platform.freedesktop_os_release()
+    except OSError:
+        _fail(
+            "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED", "Electron capture OS identity is unavailable"
+        )
+    if release.get("ID") != "ubuntu" or release.get("VERSION_ID") != "24.04":
+        _fail(
+            "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED", "Electron capture requires Ubuntu 24.04 x86_64"
+        )
+
+
 def _default_capture_runner(
     *,
     surface: str,
@@ -289,6 +308,7 @@ def _default_capture_runner(
     if surface != "electron":
         _fail("DOCSHOT_SURFACE_UNSUPPORTED", "capture surface is unsupported")
 
+    _require_electron_capture_platform()
     workspace = temporary_root / "electron-workspace"
     _copy_repository_snapshot(repository_root, workspace)
     _stage_electron_manifest(manifest_path, workspace=workspace)
