@@ -137,6 +137,7 @@ DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 10
 DOWNLOAD_DEADLINE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 ATTESTATION_TIMEOUT_SECONDS = 60
+ATTESTATION_MAX_ATTEMPTS = 3
 POST_PREFLIGHT_FAILURE_CATEGORIES = frozenset(
     {
         "GITHUB_OUTPUT_WRITE_FAILED",
@@ -820,27 +821,46 @@ def _verify_attestation(
     runner: Runner,
     command: Sequence[str],
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        result = runner(
-            command,
-            env=_runner_environment(allow_github_credentials=True),
-            timeout=ATTESTATION_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise BootstrapError(
-            "ATTESTATION_VERIFICATION_TIMEOUT",
-            "GitHub attestation verification exceeded its bounded deadline",
-        ) from exc
-    if result.returncode == 4:
-        _fail(
-            "VERIFIER_AUTHENTICATION_FAILED",
-            "GitHub attestation authentication is required; run "
-            "gh auth login --hostname github.com locally or set GH_TOKEN "
-            "from a secret manager for headless use",
-        )
-    if result.returncode != 0:
-        _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
-    return result
+    deadline = time.monotonic() + ATTESTATION_TIMEOUT_SECONDS
+    for attempt in range(ATTESTATION_MAX_ATTEMPTS):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail(
+                "ATTESTATION_VERIFICATION_TIMEOUT",
+                "GitHub attestation verification exceeded its bounded deadline",
+            )
+        try:
+            result = runner(
+                command,
+                env=_runner_environment(allow_github_credentials=True),
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise BootstrapError(
+                "ATTESTATION_VERIFICATION_TIMEOUT",
+                "GitHub attestation verification exceeded its bounded deadline",
+            ) from exc
+        if result.returncode == 0:
+            return result
+        if result.returncode == 4:
+            _fail(
+                "VERIFIER_AUTHENTICATION_FAILED",
+                "GitHub attestation authentication is required; run "
+                "gh auth login --hostname github.com locally or set GH_TOKEN "
+                "from a secret manager for headless use",
+            )
+        if result.returncode != 1 or not re.search(
+            r"(?m)^Error: (?:HTTP (?:500|502|503|504):|failed to fetch bundle with URL: "
+            r"attestation bundle with URL \S+ returned status code (?:500|502|503|504)\r?$)",
+            result.stderr,
+        ):
+            _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
+        if attempt + 1 < ATTESTATION_MAX_ATTEMPTS:
+            time.sleep(min(2**attempt, max(0.0, deadline - time.monotonic())))
+    _fail(
+        "ATTESTATION_SERVICE_UNAVAILABLE",
+        "GitHub attestation service is temporarily unavailable; retry setup later",
+    )
 
 
 def _release_url(tool: Mapping[str, Any], asset: Mapping[str, Any]) -> str:
