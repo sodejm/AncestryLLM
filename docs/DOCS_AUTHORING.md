@@ -94,8 +94,10 @@ contract; do not invent one for screenshots. If such a contract is introduced,
 extend and validate the manifest before using it for capture.
 
 Write alt text that names the UI state and the information the image conveys,
-not generic phrases such as "image of". Keep the actionable instructions in the
-page. Review each rendered page with images enabled and disabled. If a future
+not generic phrases such as "image of". Every rendered Markdown embedding must
+match the scenario's reviewed `inclusion.alt_text`; update the manifest and all
+owning pages together when that description changes. Keep the actionable
+instructions in the page. Review each rendered page with images enabled and disabled. If a future
 image needs a highlight, use the GitHub-guided `#BC4C00` rounded 4-pixel outline
 and describe the highlighted element in alt text. The current images use no
 highlight or motion; animation is rejected. Motion media needs a separately
@@ -210,6 +212,12 @@ VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono are neither used nor supported
 for terminal capture; its digest-pinned native images retain their separate
 platform policy. A missing engine, dependency, architecture result, or capture
 is an incomplete failure rather than a passing comparison.
+
+For reviewed terminal UI-location exceptions, the retained adapter captures a
+native 960×720 window with 96 columns and 36 rows. It replaces only PNG density
+metadata with 144 dpi, preserving dimensions and compressed pixels, and checks
+the same static-PNG, width, and file-size gates before publishing. Wider output
+fails; it is never resampled to make terminal text fit the documentation column.
 
 Issue #420 owns documentation embedding, drift comparison, and CI enforcement
 through this shared manifest and orchestrator. Issue #465 adds the inclusion,

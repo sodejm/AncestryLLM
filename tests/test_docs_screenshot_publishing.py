@@ -128,6 +128,9 @@ def _manifest(
                     "surface": "terminal",
                     "comparison": {"mode": "exact"},
                     "output_path": "docs/assets/screenshots/terminal/example.png",
+                    "inclusion": {
+                        "alt_text": "Ancestry terminal showing fictional example output",
+                    },
                     "documentation": [
                         {"path": documentation_path, "anchor": "example"},
                     ],
@@ -194,6 +197,43 @@ def test_published_assets_require_meaningful_alt_text(tmp_path: Path) -> None:
         validate_published_assets(manifest, repository_root=tmp_path)
 
     assert exc_info.value.code == "DOCSHOT_DOC_ALT_INVALID"
+
+
+@pytest.mark.parametrize("reference_style", (False, True))
+def test_published_assets_reject_alt_text_different_from_reviewed_manifest(
+    tmp_path: Path,
+    reference_style: bool,
+) -> None:
+    _write_published_contract(tmp_path, alt_text="Ancestry terminal showing stale module settings")
+    if reference_style:
+        documentation = tmp_path / "docs/guide.md"
+        documentation.write_text(
+            documentation.read_text().replace(
+                "](assets/screenshots/terminal/example.png)",
+                "][example]\n\n[example]: assets/screenshots/terminal/example.png",
+            ),
+        )
+
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(_manifest(), repository_root=tmp_path)
+
+    assert caught.value.code == "DOCSHOT_DOC_ALT_INVALID"
+    assert "manifest" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "alt_text",
+    (
+        "Ancestry **terminal** &amp; example output",
+        "Ancestry `terminal` &#38; example output",
+    ),
+)
+def test_published_assets_compare_rendered_alt_text(tmp_path: Path, alt_text: str) -> None:
+    manifest = _manifest()
+    manifest.payload["scenarios"][0]["inclusion"]["alt_text"] = "Ancestry terminal & example output"
+    _write_published_contract(tmp_path, alt_text=alt_text)
+
+    validate_published_assets(manifest, repository_root=tmp_path)
 
 
 def test_published_assets_reject_multiword_generic_alt_text(tmp_path: Path) -> None:

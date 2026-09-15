@@ -79,7 +79,7 @@
       "fixture_id": "success",
       "geometry": {
         "kind": "terminal",
-        "columns": 120,
+        "columns": 96,
         "rows": 36
       },
       "ready_signal": {
@@ -117,7 +117,7 @@
       "fixture_id": "success",
       "geometry": {
         "kind": "terminal",
-        "columns": 120,
+        "columns": 96,
         "rows": 36
       },
       "ready_signal": {

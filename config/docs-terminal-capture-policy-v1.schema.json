@@ -199,13 +199,13 @@
           "const": 14
         },
         "width": {
-          "const": 1200
+          "const": 960
         },
         "height": {
           "const": 720
         },
         "columns": {
-          "const": 120
+          "const": 96
         },
         "rows": {
           "const": 36

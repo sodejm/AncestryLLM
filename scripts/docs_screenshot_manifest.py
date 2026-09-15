@@ -677,6 +677,19 @@ class _RawHtmlImageParser(HTMLParser):
         self.handle_starttag(tag, attrs)
 
 
+def _image_alt_text(tokens: list[Any] | None) -> str:
+    """Read an image description as plain text, preserving decoded entities and code."""
+    fragments: list[str] = []
+    for token in tokens or []:
+        if token.type in {"text", "text_special", "code_inline", "html_inline"}:
+            fragments.append(token.content)
+        elif token.type in {"softbreak", "hardbreak"}:
+            fragments.append("\n")
+        elif token.type == "image":
+            fragments.append(_image_alt_text(token.children))
+    return "".join(fragments)
+
+
 def _rendered_markdown_images(
     markdown: str,
 ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
@@ -686,7 +699,8 @@ def _rendered_markdown_images(
     def collect(tokens: list[Any] | None) -> None:
         for token in tokens or []:
             if token.type == "image":
-                images.append((token.content, token.attrGet("src") or ""))
+                alt_text = _image_alt_text(token.children)
+                images.append((alt_text, token.attrGet("src") or ""))
             elif token.type in {"html_block", "html_inline"}:
                 parser = _RawHtmlImageParser()
                 parser.feed(token.content)
@@ -851,6 +865,11 @@ def validate_published_assets(
                 )
             if not _meaningful_alt_text(alt_text, resolved_image):
                 _fail("DOCSHOT_DOC_ALT_INVALID", "screenshot alt text is not meaningful")
+            if alt_text != scenarios_by_output[resolved_image]["inclusion"]["alt_text"]:
+                _fail(
+                    "DOCSHOT_DOC_ALT_INVALID",
+                    "rendered screenshot alt text differs from the reviewed manifest",
+                )
             discovered_references.add((relative_documentation.as_posix(), resolved_image))
 
     undeclared_references = discovered_references - allowed_references
