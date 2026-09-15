@@ -70,9 +70,9 @@
   "terminal": {
     "shell": "bash",
     "font_size": 14,
-    "width": 1200,
+    "width": 960,
     "height": 720,
-    "columns": 120,
+    "columns": 96,
     "rows": 36,
     "typing_speed": "1ms",
     "startup_wait": "2s",

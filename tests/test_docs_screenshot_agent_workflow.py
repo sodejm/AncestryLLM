@@ -124,7 +124,7 @@ def test_make_never_evaluates_selector_values_as_make_syntax(
     ("scenario_id", "surface"),
     (
         ("electron-ready-home", "electron"),
-        ("terminal-cli-help", "terminal"),
+        ("electron-degraded-diagnostics", "electron"),
     ),
 )
 def test_fixture_dry_run_reports_one_scenario_without_repository_writes(

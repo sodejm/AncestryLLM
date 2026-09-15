@@ -153,6 +153,7 @@ NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
     "tests/fixtures/docs_screenshots/electron-degraded.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/privacy-canary.json": "docs/DOCS_AUTHORING.md",
     "tests/fixtures/docs_screenshots/success.json": "docs/DOCS_AUTHORING.md",
+    "tests/fixtures/docs_screenshots/terminal-adapter-manifest.json": "tests/test_docs_terminal_capture.py",
 }
 
 # ---------------------------------------------------------------------------

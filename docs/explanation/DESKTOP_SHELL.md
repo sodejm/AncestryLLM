@@ -21,8 +21,6 @@ the supported 0.6.0 installer claim below.
 
 ## Supported surface
 
-![AncestryLLM desktop Home view showing the fictional provider-none ready state](../assets/screenshots/electron/ready-home.png)
-
 The supported desktop destinations are deliberately small:
 
 - **Home** identifies the application, its offline posture, and sanitized
@@ -33,6 +31,8 @@ The supported desktop destinations are deliberately small:
   retry or restart recovery.
 - **Settings** stores local visual preferences only: color scheme and reduced
   motion. The internal onboarding flag is not a user-facing setting.
+
+![Home shows the local desktop shell, Ready status, and local action cards.](../assets/screenshots/electron/ready-home.png)
 
 The 0.6.0 source from Issue #109 adds a **Tasks** destination to present
 backend-owned work. It remains outside the supported 0.6.0 installer claim.
@@ -532,8 +532,6 @@ checksum and version-required platform signature still verify.
 
 ## Sanitized diagnostics and recovery
 
-![AncestryLLM desktop Diagnostics view showing a fictional sanitized startup failure](../assets/screenshots/electron/degraded-diagnostics.png)
-
 When startup is degraded, use the reviewed remediation beside the affected
 configuration, SQLCipher, keyring, or workspace code. The report never includes
 a username, hostname, full path, environment value, record, prompt, payload,
@@ -553,15 +551,18 @@ response body, raw exception, or stack. Keep recovery bounded and generic:
    code shown by the shell. Do not include local paths, environment values,
    process details, genealogy data, or raw error output.
 
+![Diagnostics shows a degraded service, sanitized startup error, and recovery controls.](../assets/screenshots/electron/degraded-diagnostics.png)
+
 Generic recovery text is part of the security boundary: the capability summary
 and diagnostics must not turn private runtime state into renderer-visible
 details.
 
 ## Deterministic documentation capture
 
-The four reviewed desktop and terminal screenshots are published from the
+The two reviewed Electron screenshots are published from the
 shared manifest. `make docs-screenshots` captures every declared scenario into
-an isolated staging tree, validates its ownership and privacy contract, and
+an isolated staging tree, validates its inclusion, crop, 144-dpi PNG quality,
+ownership, and privacy contract, and
 publishes the complete set transactionally. `make docs-screenshots-check`
 recaptures into a temporary tree and fails on any missing, changed, undeclared,
 or orphaned asset without modifying the checkout.
