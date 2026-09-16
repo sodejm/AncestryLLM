@@ -29,7 +29,7 @@ const suiteTitles = Object.freeze({
   source: 'source-built desktop shell',
 })
 const sourceScenarios = Object.freeze([
-  'built shell exposes the bounded production Home, Chat, Tasks, Diagnostics, and Settings surfaces',
+  'built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings surfaces',
   'task center streams one safe cancellation lifecycle and reloads the terminal backend snapshot',
   'built degraded shell offers one bounded recovery and renders the ready result',
   'built shell has deterministic skip-link and command-palette focus',
@@ -194,20 +194,20 @@ export function preparePackagedScenario(scenario, environment, {
   }
 }
 
-/**
- * Removes a package-manager separator and converts the retained public grep flag
- * to WebdriverIO's Mocha option.
- * @param {string[]} argv - Additional runner arguments.
- * @returns {string[]} WebdriverIO-compatible arguments.
- */
-export function normalizedWdioArguments(argv) {
+function parsedWdioArguments(argv) {
   assert.equal(Array.isArray(argv), true, 'WebdriverIO arguments must be an array')
   assert.equal(argv.every((item) => typeof item === 'string'), true, 'WebdriverIO arguments must be strings')
   const normalized = []
+  let headless = false
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
-    if (index === 0 && argument === '--') continue
-    if (argument === '--grep') {
+    if (argument === '--') continue
+    if (argument === '--headless') {
+      headless = true
+      continue
+    }
+    assert.equal(argument.startsWith('--headless='), false, 'Use --headless without a value')
+    if (argument === '--grep' || argument === '--mochaOpts.grep') {
       const pattern = argv[index + 1]
       assert.equal(typeof pattern, 'string', '--grep requires a pattern')
       normalized.push('--mochaOpts.grep', pattern)
@@ -216,7 +216,21 @@ export function normalizedWdioArguments(argv) {
     }
     normalized.push(argument)
   }
-  return normalized
+  return { args: normalized, headless }
+}
+
+function validatePresentationMode(mode, headless) {
+  assert.match(mode, /^(?:source|packaged)$/u, 'unknown WebdriverIO suite')
+  assert.ok(!headless || mode === 'source', 'Hidden mode is only supported for source tests, not packaged/native evidence')
+}
+
+/**
+ * Consumes package-manager separators and the hidden-mode switch, and normalizes grep.
+ * @param {string[]} argv - Additional runner arguments.
+ * @returns {string[]} WebdriverIO-compatible arguments.
+ */
+export function normalizedWdioArguments(argv) {
+  return parsedWdioArguments(argv).args
 }
 
 /**
@@ -232,7 +246,8 @@ export function wdioInvocation(mode, argv, {
   environment = {},
   executable = process.execPath,
 } = {}) {
-  assert.match(mode, /^(?:source|packaged)$/u, 'unknown WebdriverIO suite')
+  const { args, headless } = parsedWdioArguments(argv)
+  validatePresentationMode(mode, headless)
   return Object.freeze({
     executable,
     args: Object.freeze([
@@ -241,10 +256,15 @@ export function wdioInvocation(mode, argv, {
       'wdio.conf.ts',
       '--suite',
       mode,
-      ...normalizedWdioArguments(argv),
+      ...args,
     ]),
     cwd: desktopRoot,
-    env: Object.freeze({ ...process.env, ...environment, ANCESTRYLLM_WDIO_MODE: mode }),
+    env: Object.freeze({
+      ...process.env,
+      ...environment,
+      ANCESTRYLLM_WDIO_MODE: mode,
+      ANCESTRYLLM_E2E_HEADLESS: headless ? '1' : '0',
+    }),
     shell: false,
   })
 }
@@ -264,7 +284,12 @@ export function normalLaunchInvocation({
     executable,
     args: Object.freeze([scriptPath]),
     cwd: desktopRoot,
-    env: Object.freeze({ ...process.env, ...environment, ANCESTRYLLM_WDIO_MODE: 'packaged' }),
+    env: Object.freeze({
+      ...process.env,
+      ...environment,
+      ANCESTRYLLM_WDIO_MODE: 'packaged',
+      ANCESTRYLLM_E2E_HEADLESS: '0',
+    }),
     shell: false,
   })
 }
@@ -285,8 +310,14 @@ export function runWdio(mode, argv, {
   userDataDirectory,
   ...invocationOptions
 } = {}) {
+  const { args, headless } = parsedWdioArguments(argv)
+  validatePresentationMode(mode, headless)
   const scenarios = mode === 'source' ? sourceScenarios : packagedScenarios
-  const scenario = selectedScenario(argv, scenarios, mode)
+  const scenario = selectedScenario(args, scenarios, mode)
+  if (headless) {
+    assert.ok(scenario, 'Hidden mode requires one explicitly selected source scenario')
+    assert.notEqual(scenario, sourceScenarios[3], 'Native keyboard focus requires a visible Electron window')
+  }
   const createdUserDataDirectory = userDataDirectory === undefined
   const isolatedUserDataDirectory = userDataDirectory
     ?? mkdtempSyncImpl(join(tmpdir(), 'ancestryllm-wdio-'))
@@ -350,13 +381,19 @@ export function runWdio(mode, argv, {
  * @returns {number} First nonzero exit code, or zero when every invocation passes.
  */
 export function runWdioPlan(mode, argv, options = {}) {
-  const scenarios = mode === 'source' ? sourceScenarios : packagedScenarios
-  const hasScenarioFilter = argv.some((argument) => (
-    argument === '--grep' || argument === '--mochaOpts.grep'
-  ))
+  const { args, headless } = parsedWdioArguments(argv)
+  validatePresentationMode(mode, headless)
+  const scenarios = mode === 'source'
+    ? sourceScenarios.filter((scenario) => !headless || scenario !== sourceScenarios[3])
+    : packagedScenarios
+  const hasScenarioFilter = args.includes('--mochaOpts.grep')
+  const presentationArguments = headless ? ['--headless'] : []
+  if (headless) {
+    console.info('Hidden source checks only: native keyboard focus and packaged/native verification are excluded.')
+  }
   const invocations = hasScenarioFilter
-    ? [argv]
-    : scenarios.map((scenario) => ['--grep', scenario, ...argv])
+    ? [[...presentationArguments, ...args]]
+    : scenarios.map((scenario) => [...presentationArguments, '--grep', scenario, ...args])
   for (const invocationArguments of invocations) {
     const status = runWdio(mode, invocationArguments, options)
     if (status !== 0) return status

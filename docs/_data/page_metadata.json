@@ -129,6 +129,10 @@
     "title": "Grant desktop file access — AncestryLLM",
     "description": "How scoped opaque grants protect paths while RootsMagic sources stay immutable and GEDCOM handling stays loss-minimal."
   },
+  "how-to/desktop-gedcom-intake.md": {
+    "title": "Inspect desktop GEDCOM sources — AncestryLLM",
+    "description": "How to inspect local GEDCOM sources, review bounded findings, and choose roots in the source-level desktop workspace."
+  },
   "how-to/desktop-provider-consent.md": {
     "title": "Configure a desktop provider and consent — AncestryLLM",
     "description": "How to test a provider endpoint, review the exact disclosure scope, save explicit consent, and revoke the grant."

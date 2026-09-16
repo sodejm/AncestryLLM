@@ -14,6 +14,9 @@ const packagedNativeVerificationBuild = [
   'build:packaged-file-grants',
 ].includes(lifecycle)
 const mainAliases = {
+  ...(lifecycle === 'build:e2e'
+    ? { './window-presentation': resolve('e2e/window-presentation.fixture.ts') }
+    : {}),
   ...(fixtureBuild
     ? { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') }
     : {}),

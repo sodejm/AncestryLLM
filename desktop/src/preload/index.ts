@@ -1,5 +1,6 @@
 /** Exposes the narrow versioned Electron bridge through the isolated preload world. */
 import { contextBridge, ipcRenderer } from 'electron'
+import { parseGedcomRootQuery, type GedcomRootQuery } from '../shared-contract/gedcom'
 import {
   desktopChannels,
   desktopEventChannels,
@@ -63,6 +64,9 @@ import {
   parseJobListResult,
   parseJobRequest,
   parseJobSnapshotResult,
+  parseGedcomInspectionResult,
+  parseGedcomRootPageResult,
+  parseGedcomDiscardResult,
   parseLocalRuntimeApplyRequest,
   parseLocalRuntimePreviewResult,
   parseLocalRuntimeRequest,
@@ -88,6 +92,18 @@ import {
 } from '../shared-contract/runtime'
 
 const ancestry: AncestryBridge = Object.freeze({
+  inspectGedcom: async (grantId: FileGrantId) => parseJobSnapshotResult(
+    await ipcRenderer.invoke(desktopChannels.inspectGedcom, parseFileGrantId(grantId)),
+  ),
+  getGedcomInspection: async (request: JobRequest) => parseGedcomInspectionResult(
+    await ipcRenderer.invoke(desktopChannels.getGedcomInspection, parseJobRequest(request)),
+  ),
+  queryGedcomRoots: async (request: GedcomRootQuery) => parseGedcomRootPageResult(
+    await ipcRenderer.invoke(desktopChannels.queryGedcomRoots, parseGedcomRootQuery(request)),
+  ),
+  discardGedcomInspection: async (request: JobRequest) => parseGedcomDiscardResult(
+    await ipcRenderer.invoke(desktopChannels.discardGedcomInspection, parseJobRequest(request)),
+  ),
   getAppInfo: async () => parseAppInfoResult(await ipcRenderer.invoke(desktopChannels.getAppInfo)),
   getStartupDiagnostics: async () => parseStartupDiagnosticsResult(await ipcRenderer.invoke(desktopChannels.getStartupDiagnostics)),
   getCapabilities: async () => parseCapabilitiesResult(await ipcRenderer.invoke(desktopChannels.getCapabilities)),

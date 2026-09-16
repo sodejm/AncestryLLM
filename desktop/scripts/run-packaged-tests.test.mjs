@@ -28,7 +28,11 @@ test('packaged test invocation keeps a multiword grep filter as one argument', (
         scenario,
       ],
       cwd: 'C:\\repo\\desktop',
-      env: { ...process.env, ANCESTRYLLM_WDIO_MODE: 'packaged' },
+      env: {
+        ...process.env,
+        ANCESTRYLLM_E2E_HEADLESS: '0',
+        ANCESTRYLLM_WDIO_MODE: 'packaged',
+      },
       shell: false,
     },
   )
@@ -76,6 +80,7 @@ test('packaged test runner executes the exact invocation without a shell', () =>
       env: {
         ...process.env,
         ANCESTRYLLM_DESKTOP_FIXTURE: 'success',
+        ANCESTRYLLM_E2E_HEADLESS: '0',
         ANCESTRYLLM_PACKAGED_EXECUTABLE: '/repo/release/ancestryllm',
         ANCESTRYLLM_WDIO_USER_DATA: '/tmp/ancestryllm-test-profile',
         ANCESTRYLLM_WDIO_MODE: 'packaged',

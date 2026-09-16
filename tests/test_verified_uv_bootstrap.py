@@ -71,34 +71,34 @@ EXPECTED_UV_ARCHIVES = {
 
 EXPECTED_GH_ARCHIVES = {
     "linux-x86_64": (
-        "gh_2.97.0_linux_amd64.tar.gz",
-        "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112",
-        14770812,
+        "gh_2.100.0_linux_amd64.tar.gz",
+        "e4d4bb4498e8d007abe545b6568926793ace1b6447da598294a610018cb164be",
+        15152253,
     ),
     "linux-arm64": (
-        "gh_2.97.0_linux_arm64.tar.gz",
-        "73ea440ecad9c9e284429997ee6f93577bc6f7bc6fba357ef62c53ad8fb641a5",
-        13428558,
+        "gh_2.100.0_linux_arm64.tar.gz",
+        "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961",
+        13783869,
     ),
     "macos-x86_64": (
-        "gh_2.97.0_macOS_amd64.zip",
-        "63298c998cc2a924c9e254c6af6a1caad6ece281122687a91f079bc0a462700e",
-        15418698,
+        "gh_2.100.0_macOS_amd64.zip",
+        "fcd7799e85eb575f3c7d2b1679bfbfedaefa1269d4bc7d096b51e10939b4812b",
+        15818005,
     ),
     "macos-arm64": (
-        "gh_2.97.0_macOS_arm64.zip",
-        "a58b8fd77b417a38f47a0b54d1370c59b0fcdb324ccc9ca002b0998f7c4c999e",
-        13845290,
+        "gh_2.100.0_macOS_arm64.zip",
+        "45f9a62da2f6e641a7fad57e2ce39656dfd7ef331372d80a2a2aed65abb01642",
+        14212224,
     ),
     "windows-x86_64": (
-        "gh_2.97.0_windows_amd64.zip",
-        "35d7fe05c4dd1411ffda1e73dfc7c6f44b75c936ca51fa6595c657fdc0350cec",
-        14938517,
+        "gh_2.100.0_windows_amd64.zip",
+        "227e35230b25db3fa1b997bab7cf4d67df0470a3b75b99e4ee66bce1a7cd4e72",
+        15326700,
     ),
     "windows-arm64": (
-        "gh_2.97.0_windows_arm64.zip",
-        "3e2d4a166da4ee5020c592737b65eec0e724946d5d5b962f5fe59d99116dc4bf",
-        13391688,
+        "gh_2.100.0_windows_arm64.zip",
+        "7beaeb4743cf255809a8e574a2724c685b566545e04eabea284fe38a56c15b02",
+        13746870,
     ),
 }
 
@@ -232,7 +232,7 @@ class FixtureRunner:
         self,
         attestation_stdout: str,
         *,
-        gh_version: str = "gh version 2.97.0 (fixture)",
+        gh_version: str = "gh version 2.100.0 (fixture)",
         uv_version: str = "uv 0.12.1",
         attestation_returncode: int = 0,
         attestation_stderr: str = "",
@@ -277,7 +277,7 @@ def _valid_fixture(
 ) -> tuple[Path, FixtureDownloader, FixtureRunner, bytes]:
     gh_binary = b"verified fixture gh"
     uv_binary = b"verified fixture uv"
-    gh_archive = _tar_archive("gh_2.97.0_linux_amd64/bin/gh", gh_binary)
+    gh_archive = _tar_archive("gh_2.100.0_linux_amd64/bin/gh", gh_binary)
     uv_archive = _tar_archive("uv-x86_64-unknown-linux-gnu/uv", uv_binary)
     policy_path = _fixture_policy(
         tmp_path,
@@ -285,7 +285,7 @@ def _valid_fixture(
         gh_archive=gh_archive,
         uv_binary=uv_binary,
     )
-    gh_url = "https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_linux_amd64.tar.gz"
+    gh_url = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_amd64.tar.gz"
     uv_url = (
         "https://github.com/astral-sh/uv/releases/download/0.12.1/"
         "uv-x86_64-unknown-linux-gnu.tar.gz"
@@ -336,7 +336,7 @@ def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
     } == EXPECTED_UV_ARCHIVES
 
     gh = payload["github_cli"]
-    assert gh["version"] == "2.97.0"
+    assert gh["version"] == "2.100.0"
     assert gh["release_repository"] == "cli/cli"
     assert {
         key: (asset["archive_name"], asset["sha256"], asset["size_bytes"])
@@ -395,7 +395,7 @@ def test_windows_uv_archives_use_the_reviewed_flat_executable_member(
 
     policy_path = tmp_path / "windows-policy.json"
     policy_path.write_text(json.dumps(payload), encoding="utf-8")
-    gh_url = f"https://github.com/cli/cli/releases/download/v2.97.0/{gh_asset['archive_name']}"
+    gh_url = f"https://github.com/cli/cli/releases/download/v2.100.0/{gh_asset['archive_name']}"
     uv_url = f"https://github.com/astral-sh/uv/releases/download/0.12.1/{uv_asset['archive_name']}"
     downloader = FixtureDownloader({gh_url: gh_archive, uv_url: uv_archive})
     runner = FixtureRunner(_attestation_payload(uv_asset["archive_name"], _sha256(uv_archive)))

@@ -10,6 +10,9 @@ const mode = process.env.ANCESTRYLLM_WDIO_MODE
 if (mode !== 'source' && mode !== 'packaged') {
   throw new Error('ANCESTRYLLM_WDIO_MODE must be source or packaged')
 }
+if (mode === 'packaged' && process.env.ANCESTRYLLM_E2E_HEADLESS === '1') {
+  throw new Error('Hidden mode is only supported for source tests, not packaged/native evidence')
+}
 
 const packagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 if (mode === 'packaged' && !packagedExecutable) {

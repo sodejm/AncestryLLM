@@ -220,8 +220,10 @@ def write_gedcom(
             cancellation_checkpoint()
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
-            source_lines = survivor_lines.get(record.pointer) or (
-                _record_to_gedcom_lines(record).rstrip("\n").splitlines()
+            source_lines = (
+                record.raw_lines
+                or survivor_lines.get(record.pointer)
+                or (_record_to_gedcom_lines(record).rstrip("\n").splitlines())
             )
             person_lines.extend(_rewrite_xrefs(line, pointer_rewrites) for line in source_lines)
         rooted_export = include_individuals is not None or include_families is not None

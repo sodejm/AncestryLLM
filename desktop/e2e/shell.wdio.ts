@@ -52,12 +52,27 @@ async function expectIsolatedUserData() {
   assert.equal(realpathSync(actual), realpathSync(expected))
 }
 
+async function expectHiddenSourceWindows() {
+  if (process.env.ANCESTRYLLM_E2E_HEADLESS !== '1') return
+  const windows = await browser.electron.execute((electron) => (
+    electron.BrowserWindow.getAllWindows().map((window) => ({
+      visible: window.isVisible(),
+      focused: window.isFocused(),
+      focusable: window.isFocusable(),
+    }))
+  ))
+  assert.ok(windows.length > 0, 'Hidden tests must exercise a real Electron window')
+  for (const window of windows) {
+    assert.deepEqual(window, { visible: false, focused: false, focusable: false })
+  }
+}
+
 async function expectProductionNavigation() {
   const labels = await browser.execute(() => Array.from(
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
   ))
-  assert.deepEqual(labels, ['Home', 'Chat', 'Tasks', 'Diagnostics', 'Settings'])
+  assert.deepEqual(labels, ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
 }
 
 async function expectNoUnsupportedSurfaces(allowProviderSettings = false) {
@@ -250,7 +265,10 @@ async function expectBoundedBridgeAndSecurity() {
 }
 
 describe('source-built desktop shell', () => {
-  it('built shell exposes the bounded production Home, Chat, Tasks, Diagnostics, and Settings surfaces', async () => {
+  beforeEach(expectHiddenSourceWindows)
+  afterEach(expectHiddenSourceWindows)
+
+  it('built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings surfaces', async () => {
     await expectIsolatedUserData()
     await expectFocusedHeading('Welcome to AncestryLLM')
     await expectProductionNavigation()
@@ -284,6 +302,16 @@ describe('source-built desktop shell', () => {
     await expectFocusedHeading('Home')
     await (await $('button=Review welcome')).waitForDisplayed()
     assert.equal(await $$('h1=Welcome to AncestryLLM').length, 0)
+
+    await click('a=GEDCOM')
+    await expectFocusedHeading('GEDCOM')
+    const gedcomText = await text('main')
+    assert.match(gedcomText, /Read-only local intake\./u)
+    assert.match(gedcomText, /Nothing is uploaded and no output file is created\./u)
+    assert.match(gedcomText, /does not establish packaged-release support\./u)
+    assert.match(gedcomText, /Sources and root choices are temporary\./u)
+    assert.match(gedcomText, /0 of 8 source slots used\./u)
+    await visible('button=Add GEDCOM source')
 
     await click('a=Diagnostics')
     await expectFocusedHeading('Diagnostics')
@@ -478,6 +506,7 @@ describe('source-built desktop shell', () => {
   })
 
   it('built shell has deterministic skip-link and command-palette focus', async () => {
+    assert.notEqual(process.env.ANCESTRYLLM_E2E_HEADLESS, '1', 'Native keyboard focus requires a visible Electron window')
     await expectFocusedHeading('Welcome to AncestryLLM')
     const skipLink = await $('a=Skip to workspace')
     for (let attempt = 0; attempt < 8 && !(await skipLink.isFocused()); attempt += 1) {
@@ -508,7 +537,7 @@ describe('source-built desktop shell', () => {
     await expectNoAccessibilityViolations()
     await click('button=Continue to Home')
     await expectNoAccessibilityViolations()
-    for (const destination of ['Tasks', 'Diagnostics', 'Settings']) {
+    for (const destination of ['Tasks', 'GEDCOM', 'Diagnostics', 'Settings']) {
       await click(`a=${destination}`)
       await expectFocusedHeading(destination)
       await expectNoAccessibilityViolations()
@@ -528,7 +557,7 @@ describe('source-built desktop shell', () => {
     })
     await browser.waitUntil(async () => (await browser.execute(() => window.innerWidth)) <= 365)
     await expectNoHorizontalClipping()
-    for (const destination of ['Tasks', 'Diagnostics', 'Settings']) {
+    for (const destination of ['Tasks', 'GEDCOM', 'Diagnostics', 'Settings']) {
       await click(`a=${destination}`)
       await expectNoHorizontalClipping()
     }

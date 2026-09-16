@@ -304,6 +304,24 @@ describe('SidecarSupervisor', () => {
     })
   })
 
+  it('opts into read-only GEDCOM intake only through the private launch frame', async () => {
+    const directory = join(process.cwd(), 'fictional-app-data', 'gedcom-intake')
+    const launch = vi.fn<(request: SidecarLaunchRequest) => Promise<FakeSidecar>>(
+      async () => new FakeSidecar(Promise.resolve(ready)),
+    )
+    const supervisor = new SidecarSupervisor({
+      diagnosticDirectory, gedcomIntakeDirectory: directory,
+      appBuild: '0.5.0-dev', executablePath: '/bundle/sidecar', verify, launch,
+      probe: async () => undefined, tokenFactory: () => 'T'.repeat(43),
+      startupTimeoutMs: 100, maxRestarts: 0,
+    })
+    await supervisor.start()
+    const request = launch.mock.calls[0]?.[0]
+    expect(JSON.parse(request?.launchFrame ?? '{}')).toMatchObject({ gedcom_intake_directory: directory })
+    expect(JSON.stringify(request?.environment)).not.toContain(directory)
+    expect(JSON.stringify(supervisor.diagnostics())).not.toContain(directory)
+  })
+
   it('keeps lifecycle control operational when the diagnostic recorder fails', async () => {
     const sidecar = new FakeSidecar(Promise.resolve(ready))
     const diagnosticCodes: string[] = []
