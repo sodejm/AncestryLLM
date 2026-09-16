@@ -53,14 +53,14 @@ path, or fall back to plaintext storage.
 
 ## 3. Confirm the local Home state
 
-![AncestryLLM desktop Home showing the fictional provider-none ready state](../assets/screenshots/electron/ready-home.png)
-
 On Home, confirm the following cards are present:
 
 - **Application** identifies the desktop build.
 - **Offline posture** reports the local-first boundary.
 - **Startup state** reports **Ready** for this tutorial.
 - **Capabilities** contains only sanitized capability metadata.
+
+![Home shows the local desktop shell, Ready status, and local action cards.](../assets/screenshots/electron/ready-home.png)
 
 The shell must still be safe when credentials happen to exist in the
 environment: `provider=none` remains network-free and ambient credentials do

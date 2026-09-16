@@ -243,7 +243,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10" in job
     assert 'version: "11.9.0"' in job
     for package in (
-        "locales=2.39-0ubuntu8.8",
+        "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
         "xvfb=2:21.1.12-1ubuntu1.6",
     ):

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import platform
+import struct
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
 from scripts import docs_terminal_preflight
-from scripts.docs_screenshot_manifest import load_manifest
+from scripts.docs_screenshot_manifest import image_quality_failures, load_manifest
 from scripts.docs_terminal_capture import (
     PNG_SIGNATURE,
     DockerCaptureBackend,
@@ -23,7 +25,7 @@ from scripts.docs_terminal_capture import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "config" / "docs-screenshot-manifest.json"
+MANIFEST = ROOT / "tests/fixtures/docs_screenshots/terminal-adapter-manifest.json"
 POLICY = ROOT / "config" / "docs-terminal-capture-policy.json"
 POLICY_SCHEMA = ROOT / "config" / "docs-terminal-capture-policy-v1.schema.json"
 
@@ -38,9 +40,33 @@ def _assert_policy_error(payload: dict[str, object], code: str) -> None:
     assert caught.value.code == code
 
 
-def _minimal_png(marker: bytes = b"") -> bytes:
-    """Return enough PNG-shaped bytes for orchestration contract tests."""
-    return PNG_SIGNATURE + b"contract-fixture" + marker
+def _minimal_png(
+    marker: bytes = b"",
+    *,
+    width: int = 960,
+    pixels_per_metre: int | None = None,
+) -> bytes:
+    """Return a decodable synthetic capture with an optional source density."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        )
+
+    header = struct.pack(">IIBBBBB", width, 720, 8, 2, 0, 0, 0)
+    row = b"\x00" + (b"\xff\x00\x00" if marker else b"\x00\x00\xff") * width
+    density = (
+        b""
+        if pixels_per_metre is None
+        else chunk(b"pHYs", struct.pack(">IIB", pixels_per_metre, pixels_per_metre, 1))
+    )
+    return (
+        PNG_SIGNATURE
+        + chunk(b"IHDR", header)
+        + density
+        + chunk(b"IDAT", zlib.compress(row * 720))
+        + chunk(b"IEND", b"")
+    )
 
 
 class FakeCaptureBackend:
@@ -304,7 +330,7 @@ def test_tape_fixes_terminal_geometry_theme_font_prompt_and_timing() -> None:
     assert 'Set Shell "bash"' in tape
     assert 'Set FontFamily "JetBrains Mono"' in tape
     assert "Set FontSize 14" in tape
-    assert "Set Width 1200" in tape
+    assert "Set Width 960" in tape
     assert "Set Height 720" in tape
     assert "Set TypingSpeed 1ms" in tape
     assert (
@@ -340,8 +366,56 @@ def test_capture_runs_each_real_terminal_scenario_twice_and_publishes_only_pngs(
         "docs/assets/screenshots/terminal/cli-help.png",
         "docs/assets/screenshots/terminal/interactive-console.png",
     )
-    assert all(path.read_bytes() == _minimal_png() for path in captured)
+    assert all(path.read_bytes() == _minimal_png(pixels_per_metre=5669) for path in captured)
     assert {path.suffix for path in (tmp_path / "output").rglob("*") if path.is_file()} == {".png"}
+
+
+@pytest.mark.parametrize("source_density", (None, 2835, 5669))
+def test_terminal_capture_meets_shared_quality_gate_without_resampling(
+    tmp_path: Path,
+    source_density: int | None,
+) -> None:
+    source = _minimal_png(pixels_per_metre=source_density)
+
+    class DensityBackend(FakeCaptureBackend):
+        def capture(self, **kwargs: object) -> ScenarioCaptureResult:
+            result = super().capture(**kwargs)
+            image_path = kwargs["image_path"]
+            assert isinstance(image_path, Path)
+            image_path.write_bytes(source)
+            return result
+
+    captured = _capture(tmp_path, DensityBackend())
+    manifest = load_manifest(MANIFEST, repository_root=ROOT)
+    for output, scenario in zip(captured, manifest.scenarios, strict=True):
+        image = output.read_bytes()
+        assert image_quality_failures(image, scenario) == []
+        # Only density changes: dimensions and compressed pixels are preserved byte for byte.
+        assert image == _minimal_png(pixels_per_metre=5669)
+
+
+@pytest.mark.parametrize(
+    "image",
+    (_minimal_png(width=1200), _minimal_png()[:-1]),
+    ids=("too-wide", "truncated-png"),
+)
+def test_terminal_capture_rejects_invalid_quality_before_publication(
+    tmp_path: Path,
+    image: bytes,
+) -> None:
+    class InvalidQualityBackend(FakeCaptureBackend):
+        def capture(self, **kwargs: object) -> ScenarioCaptureResult:
+            result = super().capture(**kwargs)
+            image_path = kwargs["image_path"]
+            assert isinstance(image_path, Path)
+            image_path.write_bytes(image)
+            return result
+
+    with pytest.raises(TerminalCaptureError) as caught:
+        _capture(tmp_path, InvalidQualityBackend())
+    assert caught.value.code == "DOCSHOT_TERMINAL_OUTPUT_INVALID"
+    assert list((tmp_path / "output").rglob("*")) == []
+    assert list((tmp_path / "temporary").iterdir()) == []
 
 
 def test_capture_can_select_one_declared_scenario_after_full_contract_validation(
@@ -694,8 +768,8 @@ def test_terminal_capture_operations_and_security_disposition_are_documented() -
     normalized_authoring = " ".join(authoring.split())
 
     assert "make docs-terminal-screenshots" in authoring
-    assert "For local macOS capture" in authoring
-    assert "The reference CI setup" in authoring
+    assert "Electron publication and drift checks require Ubuntu 24.04 on x86_64" in authoring
+    assert "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED" in authoring
     assert "To update the terminal toolchain" in authoring
     assert "documentation embedding, drift comparison, and CI enforcement" in normalized_authoring
     assert "make docs-screenshots-check" in authoring
@@ -703,3 +777,17 @@ def test_terminal_capture_operations_and_security_disposition_are_documented() -
     assert "true PTY" in architecture
     assert "Issue #419 deterministic terminal-capture evidence" in threat_model
     assert "The local Docker daemon" in threat_model
+
+
+def test_canonical_manifest_has_no_terminal_capture_or_backend_work(tmp_path: Path) -> None:
+    backend = FakeCaptureBackend()
+    result = capture_terminal_screenshots(
+        manifest_path=ROOT / "config/docs-screenshot-manifest.json",
+        policy_path=POLICY,
+        repository_root=ROOT,
+        output_root=tmp_path,
+        temporary_root=tmp_path,
+        backend=backend,
+    )
+    assert result == ()
+    assert not backend.prepared

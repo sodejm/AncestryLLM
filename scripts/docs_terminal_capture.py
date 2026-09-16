@@ -10,9 +10,11 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -25,15 +27,19 @@ if __package__:
     from scripts.docs_screenshot_manifest import (
         ScreenshotManifestError,
         ValidatedManifest,
+        image_quality_failures,
         load_manifest,
         validate_capture_text,
+        validate_png_bytes,
     )
 else:
     from docs_screenshot_manifest import (
         ScreenshotManifestError,
         ValidatedManifest,
+        image_quality_failures,
         load_manifest,
         validate_capture_text,
+        validate_png_bytes,
     )
 
 SCHEMA_VERSION = 1
@@ -911,12 +917,32 @@ def _validate_result(
             "DOCSHOT_TERMINAL_OUTPUT_INVALID",
             "terminal capture backend did not produce the declared PNG",
         )
-    if not image.startswith(PNG_SIGNATURE):
+    try:
+        validate_png_bytes(image)
+    except ScreenshotManifestError:
         _fail(
             "DOCSHOT_TERMINAL_OUTPUT_INVALID",
-            "terminal capture output does not have a PNG signature",
+            "terminal capture output is not a valid PNG",
         )
-    return image
+    # Preserve native dimensions and compressed pixels; replace only print density.
+    density = b"pHYs" + struct.pack(">IIB", 5669, 5669, 1)
+    density_chunk = struct.pack(">I", 9) + density + struct.pack(">I", zlib.crc32(density))
+    chunks = [PNG_SIGNATURE]
+    offset = len(PNG_SIGNATURE)
+    while offset < len(image):
+        length = struct.unpack_from(">I", image, offset)[0]
+        kind = image[offset + 4 : offset + 8]
+        end = offset + length + 12
+        if kind != b"pHYs":
+            chunks.append(image[offset:end])
+        if kind == b"IHDR":
+            chunks.append(density_chunk)
+        offset = end
+    publication_image = b"".join(chunks)
+    failures = image_quality_failures(publication_image, scenario)
+    if failures:
+        _fail("DOCSHOT_TERMINAL_OUTPUT_INVALID", "; ".join(failures))
+    return publication_image
 
 
 def _publish_atomically(
@@ -989,10 +1015,13 @@ def capture_terminal_screenshots(
         label="temporary root",
     )
     manifest = load_manifest(manifest_path, repository_root=resolved_repository)
-    policy = load_capture_policy(policy_path)
     scenarios = _terminal_scenarios(manifest)
+    selected = _select_terminal_scenarios(scenarios, scenario_ids)
+    if not selected:
+        return ()
+    policy = load_capture_policy(policy_path)
     _ensure_closed_scenario_contract(manifest, scenarios, policy)
-    scenarios = _select_terminal_scenarios(scenarios, scenario_ids)
+    scenarios = selected
 
     backend.prepare(repository_root=resolved_repository, policy=policy)
     staged: list[tuple[Path, bytes]] = []

@@ -36,21 +36,80 @@ from scripts.docs_screenshots import (
 )
 
 
-def _png(red: int, green: int, blue: int, *, filter_type: int = 0) -> bytes:
+def _png(
+    red: int,
+    green: int,
+    blue: int,
+    *,
+    filter_type: int = 0,
+    width: int = 800,
+    pixels_per_metre: int | None = 5669,
+    animated: bool = False,
+    padding: int = 0,
+) -> bytes:
     def chunk(kind: bytes, content: bytes) -> bytes:
         checksum = zlib.crc32(kind)
         checksum = zlib.crc32(content, checksum)
         return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", checksum)
 
-    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    pixels = zlib.compress(bytes((filter_type, red, green, blue)))
+    header = struct.pack(">IIBBBBB", width, 1, 8, 2, 0, 0, 0)
+    pixels = zlib.compress(bytes((filter_type,)) + bytes((red, green, blue)) * width)
+    metadata = b""
+    if pixels_per_metre is not None:
+        metadata += chunk(b"pHYs", struct.pack(">IIB", pixels_per_metre, pixels_per_metre, 1))
+    if animated:
+        metadata += chunk(b"acTL", struct.pack(">II", 1, 0))
+    if padding:
+        metadata += chunk(b"tEXt", b"Comment\x00" + b"x" * padding)
     return (
-        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + metadata
+        + chunk(b"IDAT", pixels)
+        + chunk(b"IEND", b"")
     )
 
 
 PNG = _png(25, 91, 143)
 DIFFERENT_PNG = _png(143, 91, 25)
+
+
+@pytest.mark.parametrize(
+    ("options", "diagnostic"),
+    [
+        ({"pixels_per_metre": None}, "144 dpi"),
+        ({"pixels_per_metre": 2835}, "144 dpi"),
+        ({"width": 1440}, "750-1000 px"),
+        ({"width": 749}, "750-1000 px"),
+        ({"animated": True}, "static PNG"),
+        ({"padding": 250_000}, "250000 bytes"),
+    ],
+)
+def test_published_image_quality_is_measured_from_bytes(
+    tmp_path: Path,
+    options: dict[str, Any],
+    diagnostic: str,
+) -> None:
+    _write_published_contract(tmp_path, image=_png(25, 91, 143, **options))
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(_manifest(), repository_root=tmp_path)
+    assert caught.value.code == "DOCSHOT_QUALITY_INVALID"
+    assert diagnostic in str(caught.value)
+    assert "docs/assets/screenshots/terminal/example.png" in str(caught.value)
+    assert "remediation" in str(caught.value)
+
+
+def test_quality_diagnostics_aggregate_constraints_and_assets(tmp_path: Path) -> None:
+    manifest = _manifest()
+    _write_published_contract(tmp_path, image=_png(25, 91, 143, width=1440, pixels_per_metre=None))
+    second = dict(manifest.scenarios[0], output_path="docs/assets/screenshots/terminal/second.png")
+    manifest.payload["scenarios"].append(second)
+    (tmp_path / second["output_path"]).write_bytes(_png(25, 91, 143, animated=True))
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(manifest, repository_root=tmp_path)
+    message = str(caught.value)
+    assert "example.png" in message and "second.png" in message
+    assert "144 dpi" in message and "750-1000 px" in message and "static PNG" in message
 
 
 def _manifest(
@@ -69,6 +128,9 @@ def _manifest(
                     "surface": "terminal",
                     "comparison": {"mode": "exact"},
                     "output_path": "docs/assets/screenshots/terminal/example.png",
+                    "inclusion": {
+                        "alt_text": "Ancestry terminal showing fictional example output",
+                    },
                     "documentation": [
                         {"path": documentation_path, "anchor": "example"},
                     ],
@@ -135,6 +197,43 @@ def test_published_assets_require_meaningful_alt_text(tmp_path: Path) -> None:
         validate_published_assets(manifest, repository_root=tmp_path)
 
     assert exc_info.value.code == "DOCSHOT_DOC_ALT_INVALID"
+
+
+@pytest.mark.parametrize("reference_style", (False, True))
+def test_published_assets_reject_alt_text_different_from_reviewed_manifest(
+    tmp_path: Path,
+    reference_style: bool,
+) -> None:
+    _write_published_contract(tmp_path, alt_text="Ancestry terminal showing stale module settings")
+    if reference_style:
+        documentation = tmp_path / "docs/guide.md"
+        documentation.write_text(
+            documentation.read_text().replace(
+                "](assets/screenshots/terminal/example.png)",
+                "][example]\n\n[example]: assets/screenshots/terminal/example.png",
+            ),
+        )
+
+    with pytest.raises(ScreenshotManifestError) as caught:
+        validate_published_assets(_manifest(), repository_root=tmp_path)
+
+    assert caught.value.code == "DOCSHOT_DOC_ALT_INVALID"
+    assert "manifest" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "alt_text",
+    (
+        "Ancestry **terminal** &amp; example output",
+        "Ancestry `terminal` &#38; example output",
+    ),
+)
+def test_published_assets_compare_rendered_alt_text(tmp_path: Path, alt_text: str) -> None:
+    manifest = _manifest()
+    manifest.payload["scenarios"][0]["inclusion"]["alt_text"] = "Ancestry terminal & example output"
+    _write_published_contract(tmp_path, alt_text=alt_text)
+
+    validate_published_assets(manifest, repository_root=tmp_path)
 
 
 def test_published_assets_reject_multiword_generic_alt_text(tmp_path: Path) -> None:
@@ -222,7 +321,7 @@ def test_published_assets_reject_structurally_invalid_pngs(
     with pytest.raises(ScreenshotManifestError) as exc_info:
         validate_published_assets(manifest, repository_root=tmp_path)
 
-    assert exc_info.value.code == "DOCSHOT_ASSET_INVALID"
+    assert exc_info.value.code == "DOCSHOT_QUALITY_INVALID"
 
 
 def test_published_assets_reject_broken_or_undeclared_screenshot_references(
@@ -545,7 +644,7 @@ def test_check_rejects_structurally_invalid_staged_png(tmp_path: Path) -> None:
             capture_runner=capture_runner,
         )
 
-    assert exc_info.value.code == "DOCSHOT_CAPTURE_INVALID"
+    assert exc_info.value.code == "DOCSHOT_QUALITY_INVALID"
 
 
 def test_check_rejects_privacy_canaries_in_captured_bytes(tmp_path: Path) -> None:
@@ -682,6 +781,11 @@ def test_electron_capture_uses_locked_installer_and_selected_manifest(
     monkeypatch.setattr(docs_screenshots, "_copy_repository_snapshot", copy_snapshot)
     monkeypatch.setattr(docs_screenshots, "_run_electron_command", run_command)
     monkeypatch.setattr(docs_screenshots, "_electron_build_environment", lambda _root: {})
+    monkeypatch.setattr(docs_screenshots.sys, "platform", "linux")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        "platform.freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"}
+    )
 
     _default_capture_runner(
         surface="electron",
@@ -698,6 +802,44 @@ def test_electron_capture_uses_locked_installer_and_selected_manifest(
         ("node", "desktop/scripts/install-locked.mjs"),
         ("pnpm", "--dir", "desktop", "capture:docs"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("host_platform", "machine", "release"),
+    [
+        ("darwin", "arm64", {}),
+        ("win32", "AMD64", {}),
+        ("linux", "aarch64", {"ID": "ubuntu", "VERSION_ID": "24.04"}),
+        ("linux", "x86_64", {"ID": "ubuntu", "VERSION_ID": "22.04"}),
+        ("linux", "x86_64", {"ID": "debian", "VERSION_ID": "24.04"}),
+        ("linux", "x86_64", {}),
+    ],
+)
+def test_electron_capture_rejects_noncanonical_platform_before_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    host_platform: str,
+    machine: str,
+    release: dict[str, str],
+) -> None:
+    monkeypatch.setattr(docs_screenshots.sys, "platform", host_platform)
+    monkeypatch.setattr("platform.machine", lambda: machine)
+    monkeypatch.setattr("platform.freedesktop_os_release", lambda: release)
+
+    def reject_staging(*_arguments: Any) -> None:
+        pytest.fail("unsupported capture must fail before staging or tool installation")
+
+    monkeypatch.setattr(docs_screenshots, "_copy_repository_snapshot", reject_staging)
+    with pytest.raises(DocsScreenshotError) as caught:
+        _default_capture_runner(
+            surface="electron",
+            scenario_ids=("electron-example",),
+            output_root=tmp_path,
+            temporary_root=tmp_path,
+            repository_root=tmp_path,
+            manifest_path=tmp_path / "manifest.json",
+        )
+    assert caught.value.code == "DOCSHOT_ELECTRON_PLATFORM_UNSUPPORTED"
 
 
 def test_electron_commands_cannot_wait_for_interactive_prompts(

@@ -217,13 +217,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
-            locales=2.39-0ubuntu8.8 \
+            locales=2.39-0ubuntu8.9 \
             xauth=1:1.1.2-1build1 \
             xvfb=2:21.1.12-1ubuntu1.6
           sudo locale-gen en_US.UTF-8
           test "$(node --version)" = "v26.5.0"
           test "$(pnpm --version)" = "11.9.0"
-          test "$(dpkg-query --showformat='${Version}' --show locales)" = "2.39-0ubuntu8.8"
+          test "$(dpkg-query --showformat='${Version}' --show locales)" = "2.39-0ubuntu8.9"
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
           test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.6"
       - name: Verify deterministic documentation screenshots
