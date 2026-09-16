@@ -176,17 +176,24 @@ grant and return bounded, path-free contracts. This is a source-level gate,
 not a claim of supported packaged genealogy workflows.
 
 At most eight inspections are retained, including pending submissions. Each
-source is limited to 512 MiB and the shared parser limits. Summaries report
-the source SHA-256, byte size, physical encoding, declared GEDCOM version,
-record counts, and at most 100 coded findings with a total finding count.
-Root queries accept at most 128 characters and return 25 candidates per UI
-page (100 maximum at the service boundary). Names, source identifiers, dates,
-and relationship counts distinguish candidates; no candidate is selected
-automatically. **Continue without a root** is an explicit choice.
+source is limited to 512 MiB and the shared parser limits. A streaming
+preflight rejects more than 250,000 individual records before full-tree and
+root-candidate materialization. Summaries report the source SHA-256, byte size,
+physical encoding, declared GEDCOM version, record counts, and at most 100
+coded findings with an exact total finding count. Root queries accept at most
+128 characters and return 25 candidates per UI page (100 maximum at the
+service boundary). Filtered requests scan at most 4,096 candidates and may
+return an unknown total plus a continuation cursor, including after an empty
+page. Exact person-reference searches do not become fuzzy name searches.
+Names, source identifiers, dates, and relationship counts distinguish
+candidates; no candidate is selected automatically. **Continue without a
+root** is an explicit choice.
 
 Source order and root choices are temporary. Removal or leaving the workspace
 requests cancellation and disposal; Main also revokes ownership on document
-replacement, runtime invalidation, and shutdown. Original files are unchanged.
+replacement, runtime invalidation, and shutdown. Removing a pending native
+selection cancels its owner-scoped request and revokes the matching unsubmitted
+grant; late completion is ignored. Original files are unchanged.
 There is no import, merge, export, output destination, provider call, or remote
 upload. See [Inspect GEDCOM sources](../how-to/desktop-gedcom-intake.md).
 

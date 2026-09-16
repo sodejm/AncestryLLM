@@ -29,7 +29,7 @@ export interface GedcomRootCandidate {
 export interface GedcomRootPage {
   schema_version: 1
   candidates: readonly GedcomRootCandidate[]
-  total_count: number
+  total_count: number | null
   next_cursor: string | null
 }
 
@@ -82,8 +82,10 @@ export function parseGedcomRootQuery(value: unknown): Readonly<GedcomRootQuery> 
 export function parseGedcomRootPage(value: unknown): Readonly<GedcomRootPage> {
   const data = object(value, ['schema_version', 'candidates', 'total_count', 'next_cursor'])
   if (data.schema_version !== 1 || !Array.isArray(data.candidates) || data.candidates.length > 100) fail()
-  count(data.total_count)
-  if (data.total_count < data.candidates.length) fail()
+  if (data.total_count !== null) {
+    count(data.total_count)
+    if (data.total_count < data.candidates.length) fail()
+  }
   cursor(data.next_cursor)
   for (const item of data.candidates) {
     const person = object(item, ['person_ref', 'reason_code', 'display_name', 'source_identifier',

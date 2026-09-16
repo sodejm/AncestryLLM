@@ -32,6 +32,15 @@ _TERMINAL = {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED}
 MAX_RETAINED_SOURCES = 8
 
 
+def _remove_staged_source(path: Path) -> None:
+    """Remove a staged GEDCOM after restoring owner write permission."""
+    try:
+        path.chmod(0o600)
+    except FileNotFoundError:
+        return
+    path.unlink(missing_ok=True)
+
+
 def _unavailable() -> AncestryError:
     return AncestryError(
         "GEDCOM_JOB_RESULT_UNAVAILABLE",
@@ -106,7 +115,7 @@ class GedcomIntake:
                 )
             except BaseException:
                 self._artifacts.revoke(grant)
-                path.unlink(missing_ok=True)
+                _remove_staged_source(path)
                 raise
             self._sources[submitted.job_id] = _IntakeSource(path, grant)
             # A tiny job may complete before registration; reconcile that race.
@@ -121,7 +130,7 @@ class GedcomIntake:
             if source is None:
                 return
             self._artifacts.revoke(source.grant)
-            source.path.unlink(missing_ok=True)
+            _remove_staged_source(source.path)
             if source.discarded or self._closed:
                 self._jobs.manager.discard_result(snapshot.job_id)
                 self._sources.pop(snapshot.job_id, None)

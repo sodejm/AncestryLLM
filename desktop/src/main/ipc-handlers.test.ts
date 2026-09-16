@@ -514,6 +514,7 @@ describe('desktop IPC handlers', () => {
       inspect: vi.fn().mockResolvedValue(runningJob),
       result: vi.fn(), roots: vi.fn(),
       discard: vi.fn().mockResolvedValue({ schema_version: 1 }),
+      revokeGrant: vi.fn().mockResolvedValue(undefined),
       revokeOwner: vi.fn().mockResolvedValue(undefined),
       revokeAll: vi.fn().mockResolvedValue(undefined),
     }
@@ -526,6 +527,12 @@ describe('desktop IPC handlers', () => {
     await expect(handlers.get(desktopChannels.queryGedcomRoots)!(event(), {
       schema_version: 1, job_id: 'j000001', query: 'x'.repeat(129), limit: 25, cursor: null,
     })).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    const revoke = handlers.get(desktopChannels.revokeFileGrant)!
+    await expect(revoke(event(new FakeWebContents()), `grt_${'a'.repeat(64)}`)).resolves.toMatchObject({ ok: false })
+    await expect(revoke(event(), '/private/selected.ged')).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+    expect(intake.revokeGrant).not.toHaveBeenCalled()
+    await expect(revoke(event(), `grt_${'a'.repeat(64)}`)).resolves.toEqual(result({ revoked: true }))
+    expect(intake.revokeGrant).toHaveBeenCalledWith(contents, `grt_${'a'.repeat(64)}`)
     expect(intake.inspect).toHaveBeenCalledTimes(1)
     expect(intake.roots).not.toHaveBeenCalled()
     contents.destroy()
@@ -537,7 +544,8 @@ describe('desktop IPC handlers', () => {
   it('preserves allowlisted GEDCOM sidecar errors through the bridge', async () => {
     const intake = {
       inspect: vi.fn(), result: vi.fn().mockRejectedValue(new SidecarClientError('GEDCOM_ROOT_CURSOR_INVALID')),
-      roots: vi.fn(), discard: vi.fn(), revokeOwner: vi.fn().mockResolvedValue(undefined),
+      roots: vi.fn(), discard: vi.fn(), revokeGrant: vi.fn().mockResolvedValue(undefined),
+      revokeOwner: vi.fn().mockResolvedValue(undefined),
       revokeAll: vi.fn().mockResolvedValue(undefined),
     }
     const { handlers, event } = harness(bridge(), { gedcomIntake: intake })

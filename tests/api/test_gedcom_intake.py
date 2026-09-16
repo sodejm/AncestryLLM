@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,7 +17,6 @@ from ancestryllm.gedcom.service import GedcomService
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 CONTENT = b"0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n"
 IntakeFixture = tuple[GedcomIntake, JobLifecycleService]
@@ -68,6 +68,29 @@ def test_intake_rejects_replaced_contents(intake: IntakeFixture, tmp_path: Path)
     assert snapshot.state is JobState.FAILED
     assert snapshot.result is None
     assert not list(tmp_path.glob("*.ged"))
+
+
+def test_intake_removes_read_only_staging_and_releases_capacity(
+    intake: IntakeFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    boundary, jobs = intake
+    original_unlink = Path.unlink
+
+    def windows_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path.exists() and not path.stat().st_mode & 0o200:
+            raise PermissionError("Windows read-only file")
+        original_unlink(path, missing_ok=missing_ok)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", windows_unlink)
+        for number in range(9):
+            stage_id = stage(tmp_path, number)
+            path = tmp_path / f"{stage_id}.ged"
+            path.chmod(0o400)
+            job = boundary.submit(stage_id, len(CONTENT), hashlib.sha256(CONTENT).hexdigest())
+            assert jobs.manager.wait(job.job_id, timeout=5).state is JobState.COMPLETED
+            boundary.discard(job.job_id)
+            assert not path.exists()
 
 
 @pytest.mark.parametrize("stage_id", ["../outside", "/tmp/source", "a" * 65, "A" * 64])

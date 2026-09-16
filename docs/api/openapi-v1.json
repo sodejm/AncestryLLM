@@ -1605,9 +1605,16 @@
             "type": "integer"
           },
           "total_count": {
-            "minimum": 0.0,
-            "title": "Total Count",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Count"
           }
         },
         "required": [

@@ -1172,7 +1172,7 @@ class GedcomRootCandidatePageResponse(BaseModel):
     model_config = _STRICT_MODEL
     schema_version: Literal[1] = 1
     candidates: Annotated[list[GedcomRootCandidateResponse], Field(max_length=100)]
-    total_count: Annotated[int, Field(ge=0)]
+    total_count: Annotated[int, Field(ge=0)] | None
     next_cursor: Annotated[str, Field(max_length=256)] | None
 
     @classmethod

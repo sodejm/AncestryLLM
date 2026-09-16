@@ -260,6 +260,7 @@ def test_completed_inspect_result_stays_structured_and_path_free(
         root_candidates=(
             RootCandidate(person_ref="person:fictional-root", reason_code="single-root"),
         ),
+        finding_count=0,
     )
 
     response = api_client.get(
@@ -300,6 +301,7 @@ def test_completed_inspection_returns_a_bounded_summary_for_a_large_source() -> 
             )
             for index in range(12_000)
         ),
+        finding_count=0,
     )
 
     response = GedcomResultResponse.from_application(result)
@@ -367,6 +369,28 @@ def test_root_candidate_query_returns_a_bounded_private_page(
     gedcom_job_facade.root_candidates.assert_called_once_with(
         "j000001", query="Ada", limit=1, cursor=None
     )
+
+
+def test_root_candidate_query_allows_an_unknown_filtered_total(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    gedcom_job_facade: Mock,
+) -> None:
+    gedcom_job_facade.root_candidates.return_value = RootCandidatePage(
+        candidates=(),
+        total_count=None,
+        next_cursor="c1_00001000_" + "a" * 64,
+    )
+
+    response = api_client.post(
+        f"{API_NAMESPACE}/gedcom/jobs/j000001/root-candidates",
+        headers=api_headers,
+        json={"query": "Ada", "limit": 25},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_count"] is None
+    assert response.json()["next_cursor"] is not None
 
 
 @pytest.mark.parametrize(

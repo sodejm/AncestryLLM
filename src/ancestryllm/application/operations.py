@@ -416,11 +416,13 @@ class RootCandidatePage(BoundaryDTO):
     """One bounded private page; never persisted in public job history."""
 
     candidates: tuple[RootCandidate, ...]
-    total_count: int
+    total_count: int | None
     next_cursor: str | None
 
     def __post_init__(self) -> None:
-        if len(self.candidates) > 100 or self.total_count < len(self.candidates):
+        if len(self.candidates) > 100 or (
+            self.total_count is not None and self.total_count < len(self.candidates)
+        ):
             raise ValueError("Invalid root candidate page bounds.")
         if self.next_cursor is not None and len(self.next_cursor) > 256:
             raise ValueError("Root candidate cursor exceeds its limit.")
@@ -496,13 +498,14 @@ class GedcomInspectResult(ServiceResult):
     summary: GedcomSourceSummary
     findings: tuple[GedcomValidationFinding, ...]
     root_candidates: tuple[RootCandidate, ...]
+    finding_count: int
 
     def summary_result(self) -> GedcomInspectSummary:
         """Project metadata without serializing the complete candidate collection."""
         return GedcomInspectSummary(
             summary=self.summary,
             findings=self.findings[:100],
-            finding_count=len(self.findings),
+            finding_count=self.finding_count,
             root_candidate_count=len(self.root_candidates),
         )
 

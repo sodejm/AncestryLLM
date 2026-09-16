@@ -21,10 +21,12 @@ evidence.
    order; source identity and root choices remain attached to their source.
 
 Each source must fit the 512 MiB byte ceiling and the shared
-[file-ingress limits](../reference/FILE_INGRESS.md). At most 100 findings are
-displayed, with the full finding count shown separately. Inspection checks do
-not certify genealogy accuracy, complete GEDCOM conformance, or lossless
-conversion by another product. See the
+[file-ingress limits](../reference/FILE_INGRESS.md). Inspection rejects more
+than 250,000 individual records before constructing the in-memory tree and
+root-candidate list. At most 100 findings are displayed, with the exact full
+finding count shown separately. Inspection checks do not certify genealogy
+accuracy, complete GEDCOM conformance, or lossless conversion by another
+product. See the
 [compatibility reference](../reference/GEDCOM_COMPATIBILITY.md) for accepted,
 rejected, and preserved input classes.
 
@@ -46,7 +48,11 @@ source; responses arriving after source removal are ignored.
 For each completed source, enter a name or source identifier in **Find a root**
 and activate **Search candidates**. Queries are limited to 128 characters;
 each UI page shows at most 25 candidates. **Next candidates** continues the
-same query. An empty query starts from the first page.
+same query. An empty query starts from the first page and reports an exact
+total. A filtered request scans at most 4,096 candidates, so its total may be
+shown as **Unknown** and a continuation can be available even when the current
+page is empty. Exact `person:<identifier>` searches remain exact rather than
+falling back to a fuzzy name match, and may also require continuation.
 
 Use the source identifier, birth/death dates, and relationship counts to
 distinguish duplicate names. Candidate text is bounded and may be shortened;
@@ -64,6 +70,9 @@ saved projects or encrypted workspace records.
 **Remove** or leaving the workspace requests cancellation and disposal of the
 inspection. Closing or replacing the document, invalidating the native
 runtime, or closing the application revokes its Main-process authority.
+Removing a source while its native chooser is still open also cancels that
+selection and revokes any matching grant returned before submission; late
+callbacks cannot repopulate the removed slot.
 Private staged bytes are normally removed when inspection reaches a terminal
 state; results remain in process memory only until disposal or shutdown.
 

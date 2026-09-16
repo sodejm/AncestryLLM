@@ -1,6 +1,6 @@
 /** Presents read-only, session-local GEDCOM sources without filesystem or provider authority. */
 import { useEffect, useRef, useState } from 'react'
-import type { AncestryBridge, JobSnapshot } from '../../shared-contract/desktop'
+import type { AncestryBridge, FileGrantId, JobSnapshot } from '../../shared-contract/desktop'
 import type { GedcomInspection, GedcomRootCandidate, GedcomRootPage } from '../../shared-contract/gedcom'
 import { Button } from './components/Button'
 import { CodedErrorView } from './design-system/CodedErrorView'
@@ -12,6 +12,7 @@ const PAGE_SIZE = 25
 interface Source {
   id: number
   active: boolean
+  grantId?: FileGrantId
   jobId?: string
   timer?: ReturnType<typeof setTimeout>
 }
@@ -33,6 +34,7 @@ function FindingPreview({ bridge, jobId, label, code, subjectRef }: {
   const [person, setPerson] = useState<GedcomRootCandidate | null>(null)
   const [pending, setPending] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [cursor, setCursor] = useState<string | null>(null)
   const generation = useRef(0)
 
   useEffect(() => () => { generation.current += 1 }, [bridge, jobId, subjectRef])
@@ -44,17 +46,25 @@ function FindingPreview({ bridge, jobId, label, code, subjectRef }: {
     setPerson(null)
     try {
       const result = await bridge.queryGedcomRoots({ schema_version: 1, job_id: jobId,
-        query: subjectRef, limit: 1, cursor: null })
+        query: subjectRef, limit: 1, cursor })
       if (generation.current !== request) return
       const candidate = result.ok ? result.data.candidates[0] : undefined
       if (result.ok && result.data.candidates.length === 1 && result.data.total_count === 1
         && result.data.next_cursor === null && candidate?.person_ref === subjectRef) {
         setPerson(candidate)
+        setCursor(null)
+      } else if (result.ok && result.data.candidates.length === 0
+        && result.data.total_count === null && result.data.next_cursor !== null) {
+        setCursor(result.data.next_cursor)
       } else {
+        setCursor(null)
         setFailed(true)
       }
     } catch {
-      if (generation.current === request) setFailed(true)
+      if (generation.current === request) {
+        setCursor(null)
+        setFailed(true)
+      }
     } finally {
       if (generation.current === request) setPending(false)
     }
@@ -62,7 +72,7 @@ function FindingPreview({ bridge, jobId, label, code, subjectRef }: {
 
   return <>
     <Button type="button" variant="quiet" disabled={pending} onClick={() => { void review() }}>
-      Review affected person
+      {cursor ? 'Continue finding affected person' : 'Review affected person'}
     </Button>
     {pending && <p role="status">Finding affected person…</p>}
     {failed && <CodedErrorView code="GEDCOM_INTAKE_UNAVAILABLE" title="The affected person is unavailable."
@@ -145,8 +155,10 @@ function RootSelector({ bridge, jobId, label }: { bridge: AncestryBridge; jobId:
         {' · '}{candidate.relationship_summary}
       </label>)}
     </fieldset>
-    {page && <p>{page.total_count} matching individuals; at most {PAGE_SIZE} shown per page.</p>}
-    {page?.candidates.length === 0 && <p>No matching individuals.</p>}
+    {page && <p>{page.total_count === null ? 'Total matches not yet known' : `${page.total_count} matching individuals`}; at most {PAGE_SIZE} shown per page.</p>}
+    {page?.candidates.length === 0 && <p>{page.next_cursor
+      ? 'No matches in this page. Continue searching the remaining individuals.'
+      : page.total_count === 0 ? 'No matching individuals.' : 'No more matching individuals.'}</p>}
     {page?.next_cursor && <Button type="button" variant="quiet" disabled={pending}
       onClick={() => { void search(query, page.next_cursor) }}>Next candidates</Button>}
     <p role="status">{selection === null ? 'No root selected.' : selection === 'none'
@@ -161,7 +173,7 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
   const [picking, setPicking] = useState(false)
   const entries = useRef(new Map<number, Source>())
   const nextId = useRef(0)
-  const pickerBusy = useRef(false)
+  const pickerOwner = useRef<number | null>(null)
   const mounted = useRef(true)
 
   const discard = (jobId: string) => {
@@ -171,6 +183,11 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
     source.active = false
     if (source.timer !== undefined) clearTimeout(source.timer)
     if (source.jobId) discard(source.jobId)
+    else if (source.grantId) void bridge.revokeFileGrant(source.grantId).catch(() => undefined)
+    if (pickerOwner.current === source.id) {
+      pickerOwner.current = null
+      if (mounted.current) setPicking(false)
+    }
   }
 
   useEffect(() => {
@@ -223,10 +240,10 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
   }
 
   async function add() {
-    if (pickerBusy.current || entries.current.size >= MAX_SOURCES) return
-    pickerBusy.current = true
+    if (pickerOwner.current !== null || entries.current.size >= MAX_SOURCES) return
     setPicking(true)
     const source: Source = { id: ++nextId.current, active: true }
+    pickerOwner.current = source.id
     entries.current.set(source.id, source)
     setSources((current) => [...current, { id: source.id }])
     try {
@@ -234,6 +251,7 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
       if (!picked.ok) { fail(source, picked.error.code); return }
       const grant = picked.data
       if (!grant) { remove(source); return }
+      source.grantId = grant.grantId
       try {
         if (!source.active || !mounted.current) return
         update(source, { displayName: grant.metadata.displayName })
@@ -244,11 +262,14 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
         await inspectProgress(source, result.data)
       } finally {
         await bridge.revokeFileGrant(grant.grantId).catch(() => undefined)
+        delete source.grantId
       }
     } catch { fail(source, 'GEDCOM_INTAKE_UNAVAILABLE') }
     finally {
-      pickerBusy.current = false
-      if (mounted.current) setPicking(false)
+      if (pickerOwner.current === source.id) {
+        pickerOwner.current = null
+        if (mounted.current) setPicking(false)
+      }
     }
   }
 

@@ -33,6 +33,7 @@ describe('GEDCOM presentation contract', () => {
       { ...candidate, person_ref: `person:${'b'.repeat(32)}`, source_identifier: '@I2@' }],
     total_count: 2, next_cursor: null }
     expect(parseGedcomRootPage(page)).toEqual(page)
+    expect(parseGedcomRootPage({ ...page, total_count: null })).toMatchObject({ total_count: null })
     expect(() => parseGedcomRootPage({ ...page, candidates: Array(101).fill(candidate) })).toThrow()
     expect(() => parseGedcomRootPage({ ...page, candidates: [{ ...candidate, path: '/private/source.ged' }] })).toThrow()
     expect(() => parseGedcomRootPage({ ...page, candidates: [{ ...candidate, display_name: 'a'.repeat(129) }] })).toThrow()

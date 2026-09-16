@@ -19,6 +19,7 @@ export interface GedcomIntakeClient {
 
 interface Entry {
   owner: object
+  grantId: FileGrantId
   path: string
   controller: AbortController
   revoked: boolean
@@ -45,7 +46,7 @@ export class GedcomIntakeBroker {
       throw new FileGrantBrokerError('FILE_GRANT_CONFLICT')
     }
     const stageId = randomBytes(32).toString('hex')
-    const entry: Entry = { owner, path: join(this.options.directory, `${stageId}.ged`),
+    const entry: Entry = { owner, grantId, path: join(this.options.directory, `${stageId}.ged`),
       controller: new AbortController(), revoked: false, disposed: false }
     const abort = (): void => { entry.revoked = true; entry.controller.abort() }
     signal?.addEventListener('abort', abort, { once: true })
@@ -68,6 +69,16 @@ export class GedcomIntakeBroker {
       }
     })()
     return entry.pending
+  }
+
+  /** Aborts pending intake for exactly one owner-bound grant, not a submitted inspection. */
+  revokeGrant(owner: object, grantId: FileGrantId): void {
+    for (const entry of this.entries) {
+      if (entry.owner === owner && entry.grantId === grantId && !entry.jobId) {
+        entry.revoked = true
+        entry.controller.abort()
+      }
+    }
   }
 
   /** Reads metadata only from an inspection retained by this owner. */

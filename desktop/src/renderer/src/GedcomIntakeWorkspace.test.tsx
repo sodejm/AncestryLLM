@@ -74,6 +74,57 @@ async function addSource() {
 }
 
 describe('GEDCOM intake workspace', () => {
+  it('continues a bounded finding search only on request without changing the root', async () => {
+    const bridge = bridgeWithFinding()
+    render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    const noRoot = await screen.findByRole('radio', { name: 'Continue without a root' })
+    await userEvent.click(noRoot)
+    const cursor = `c1_00001000_${'d'.repeat(64)}`
+    vi.mocked(bridge.queryGedcomRoots).mockResolvedValueOnce(success({ schema_version: 1,
+      candidates: [], total_count: null, next_cursor: cursor }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review affected person' }))
+    const more = await screen.findByRole('button', { name: 'Continue finding affected person' })
+    expect(bridge.queryGedcomRoots).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText('Code: GEDCOM_INTAKE_UNAVAILABLE')).not.toBeInTheDocument()
+    await userEvent.click(more)
+    expect(bridge.queryGedcomRoots).toHaveBeenLastCalledWith({ schema_version: 1, job_id: job.job_id,
+      query: affectedPerson.person_ref, limit: 1, cursor })
+    expect(await screen.findByRole('region', { name: /Affected person for/ })).toBeVisible()
+    expect(noRoot).toBeChecked()
+  })
+
+  it('does not report an empty bounded page as an exhausted root search', async () => {
+    const bridge = bridgeFor()
+    render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    await screen.findByRole('radio', { name: 'Continue without a root' })
+    vi.mocked(bridge.queryGedcomRoots).mockResolvedValueOnce(success({ schema_version: 1,
+      candidates: [], total_count: null, next_cursor: `c1_00001000_${'d'.repeat(64)}` }))
+    await userEvent.click(screen.getByRole('button', { name: 'Search candidates' }))
+    expect(await screen.findByText('No matches in this page. Continue searching the remaining individuals.')).toBeVisible()
+    expect(screen.queryByText('No matching individuals.')).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('null matching')
+    expect(screen.getByRole('button', { name: 'Next candidates' })).toBeEnabled()
+  })
+
+  it('does not let a removed intake release a newer pending picker', async () => {
+    const bridge = bridgeFor()
+    let first!: (result: BridgeResult<JobSnapshot>) => void
+    let second!: (result: BridgeResult<FileGrant | null>) => void
+    vi.mocked(bridge.inspectGedcom).mockImplementationOnce(() => new Promise((resolve) => { first = resolve }))
+    render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    await waitFor(() => expect(bridge.inspectGedcom).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Source 1' }))
+    vi.mocked(bridge.requestOpenFileGrant).mockImplementationOnce(() => new Promise((resolve) => { second = resolve }))
+    await addSource()
+    await act(async () => { first(success(job)) })
+    expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeDisabled()
+    await act(async () => { second(success(null)) })
+    expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeEnabled()
+  })
+
   it('opens a bounded finding anchor by keyboard without changing the chosen root', async () => {
     const bridge = bridgeWithFinding()
     render(<GedcomIntakeWorkspace bridge={bridge} />)
@@ -239,6 +290,8 @@ describe('GEDCOM intake workspace', () => {
     await addSource()
     await waitFor(() => expect(bridge.inspectGedcom).toHaveBeenCalled())
     await userEvent.click(screen.getByRole('button', { name: 'Remove Source 1' }))
+    expect(bridge.revokeFileGrant).toHaveBeenCalledWith(grant.grantId)
+    expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeEnabled()
     await act(async () => { resolve(success(job)) })
     expect(bridge.discardGedcomInspection).toHaveBeenCalledWith({ schema_version: 1, job_id: job.job_id })
     expect(bridge.getGedcomInspection).not.toHaveBeenCalled()

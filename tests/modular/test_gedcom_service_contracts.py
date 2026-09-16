@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,7 @@ from ancestryllm.application.operations import (
     GedcomSyncRequest,
     GedcomSyncSnapshot,
 )
+from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom.service import GedcomService
 
@@ -220,6 +222,41 @@ def test_inspect_reports_detected_encoding_not_the_declared_charset(
     assert result.root_candidates[0].display_name == "Zoë Example"
 
 
+def test_inspect_rejects_excess_root_candidates_before_tree_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "fictional-large.ged"
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 @I1@ INDI\n1 NAME Ada /Example/\n"
+        "0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    defaults = FileIngressLimits()
+    ingress = FileIngressPolicy(
+        replace(
+            defaults,
+            gedcom=replace(defaults.gedcom, max_collection_items=1),
+        )
+    )
+    registry = _ArtifactRegistry()
+
+    def unexpected_materialization(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the GEDCOM tree was materialized before the person limit")
+
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.service.load_sources",
+        unexpected_materialization,
+    )
+
+    with pytest.raises(DomainFailure) as raised:
+        GedcomService(ingress=ingress, artifacts=registry).execute_inspect(
+            GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+        )
+
+    assert raised.value.code is DomainFailureCode.ARTIFACT_TOO_LARGE
+
+
 def test_inspect_reports_preservation_and_normalization_without_leaking_source_text(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -257,15 +294,17 @@ def test_inspect_reports_preservation_and_normalization_without_leaking_source_t
 
 
 @pytest.mark.parametrize("person_count", (2, 105))
+@pytest.mark.parametrize("pointerless", (False, True))
 def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findings(
-    tmp_path: Path, person_count: int
+    tmp_path: Path, person_count: int, pointerless: bool
 ) -> None:
     source = tmp_path / "fictional-anchors.ged"
     content = (
         "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
         "0 @VALID@ INDI\n1 NAME Valid /Example/\n1 BIRT\n2 DATE 1900\n"
         + "".join(
-            f"0 @I{index}@ INDI\n1 NAME Fictional /Person{index}/\n"
+            ("0 INDI\n" if pointerless else f"0 @I{index}@ INDI\n")
+            + f"1 NAME Fictional /Person{index}/\n"
             "1 BIRT\n2 DATE invalid\n1 DEAT\n2 DATE invalid\n"
             for index in range(person_count)
         )
@@ -280,8 +319,8 @@ def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findi
     invalid_dates = [
         finding for finding in result.findings if finding.code == "gedcom-date-invalid"
     ]
-    assert len(invalid_dates) == person_count + 1
-    assert {finding.subject_ref for finding in invalid_dates} == {
+    assert len(invalid_dates) == min(person_count + 1, 100)
+    expected_subjects = {
         None,
         *(
             person.person_ref
@@ -289,6 +328,11 @@ def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findi
             if person.source_identifier != "@VALID@"
         ),
     }
+    subjects = {finding.subject_ref for finding in invalid_dates}
+    assert subjects <= expected_subjects
+    assert len(subjects) == len(invalid_dates)
+    if person_count < 100:
+        assert subjects == expected_subjects
     summary = result.summary_result()
     assert summary.finding_count == person_count + 1
     assert len(summary.findings) == min(person_count + 1, 100)

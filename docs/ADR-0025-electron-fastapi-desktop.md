@@ -285,11 +285,20 @@ Issue #115 adds four fixed read-only intake requests through Main and the
 private native sidecar. Native file grants become immutable staged copies;
 Python verifies the expected size and SHA-256 while applying the shared
 GEDCOM parser limits. At most eight inspections are retained, including
-pending submissions. Summaries and paged root queries are separate bounded
-contracts; source order and explicit root/no-root choices are transient.
+pending submissions. A streaming preflight rejects more than 250,000
+individual records before full-tree and root-candidate materialization;
+findings retain at most 100 entries with an exact total. Filtered root requests
+scan at most 4,096 candidates and carry an unknown total plus continuation when
+more bounded work remains. Exact person references never degrade to fuzzy
+matching. Summaries and paged root queries are separate bounded contracts;
+source order and explicit root/no-root choices are transient.
 The renderer receives bounded genealogy labels but never original paths,
 complete records, a parser, or an unbounded search endpoint. Disposal revokes
-ownership and drops private results. This source-level addition does not
+ownership and drops private results. Removing a pending native selection also
+cancels its owner-scoped request and revokes any matching unsubmitted grant;
+late completion is ignored. Terminal staging cleanup repairs owner write
+permission before unlinking read-only Windows files. This source-level
+addition does not
 activate mutation, output publication, container execution, remote upload,
 provider calls, or a packaged-support claim.
 

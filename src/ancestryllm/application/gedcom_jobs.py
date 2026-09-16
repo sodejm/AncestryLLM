@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 _GedcomResult = GedcomInspectResult | MergeResult | SubtreeResult | QualityResult | SyncResult
 _CURSOR_SECRET = secrets.token_bytes(32)
 _CURSOR_PATTERN = re.compile(r"c1_([0-9a-f]{8})_([0-9a-f]{64})\Z")
+MAX_ROOT_SCAN_CANDIDATES = 4096
 
 
 class GedcomJobFacade:
@@ -219,7 +220,7 @@ class GedcomJobFacade:
         if not isinstance(result, GedcomInspectResult):
             raise self._result_unavailable()
         normalized_query = query.strip().casefold()
-        is_person_ref = normalized_query.startswith("person:")
+        is_person_ref = re.fullmatch(r"person:[0-9a-f]{32}", normalized_query) is not None
         offset = 0
         if cursor is not None:
             match = _CURSOR_PATTERN.fullmatch(cursor) if isinstance(cursor, str) else None
@@ -251,9 +252,10 @@ class GedcomJobFacade:
                 ),
             )
         candidates: list[RootCandidate] = []
-        total_count = 0
-        next_offset: int | None = None
-        for index, candidate in enumerate(result.root_candidates):
+        scan_end = min(offset + MAX_ROOT_SCAN_CANDIDATES, len(result.root_candidates))
+        next_offset: int | None = scan_end if scan_end < len(result.root_candidates) else None
+        for index in range(offset, scan_end):
+            candidate = result.root_candidates[index]
             if is_person_ref:
                 # Finding anchors never fall back to a fuzzy match in imported text.
                 if normalized_query != candidate.person_ref:
@@ -269,16 +271,19 @@ class GedcomJobFacade:
                 ).casefold()
                 if normalized_query not in searchable:
                     continue
-            total_count += 1
-            if index < offset:
-                continue
             if len(candidates) < limit:
                 candidates.append(candidate)
-            elif next_offset is None:
+                if is_person_ref:
+                    # Source-bound person references are unique within an inspection.
+                    return RootCandidatePage(
+                        candidates=tuple(candidates), total_count=1, next_cursor=None
+                    )
+            else:
                 next_offset = index
+                break
         return RootCandidatePage(
             candidates=tuple(candidates),
-            total_count=total_count,
+            total_count=(len(candidates) if offset == 0 and next_offset is None else None),
             next_cursor=(
                 self._cursor(job_id, result, normalized_query, next_offset)
                 if next_offset is not None

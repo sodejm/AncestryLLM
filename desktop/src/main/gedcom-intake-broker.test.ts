@@ -23,6 +23,44 @@ async function fixture() {
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 
 describe('native GEDCOM intake broker', () => {
+  it('aborts staging only for the owner and grant being revoked', async () => {
+    const { broker, files, client } = await fixture()
+    const owner = {}
+    let stagingSignal!: AbortSignal
+    files.stageReadGrant.mockImplementationOnce((...args: unknown[]) => new Promise((_resolve, reject) => {
+      stagingSignal = args[4] as AbortSignal
+      stagingSignal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })
+    }))
+    const pending = broker.inspect(owner, grant)
+    const rejected = expect(pending).rejects.toThrow('cancelled')
+    broker.revokeGrant({}, grant)
+    broker.revokeGrant(owner, `grt_${'b'.repeat(64)}`)
+    expect(stagingSignal.aborted).toBe(false)
+    broker.revokeGrant(owner, grant)
+    expect(stagingSignal.aborted).toBe(true)
+    await rejected
+    expect(client.submit).not.toHaveBeenCalled()
+    await expect(broker.inspect(owner, grant)).resolves.toEqual(job)
+    broker.revokeGrant(owner, grant)
+    await broker.result(owner, { schema_version: 1, job_id: job.job_id })
+    expect(client.discard).not.toHaveBeenCalled()
+    await broker.revokeAll()
+  })
+
+  it('discards a late submission when its pending grant is revoked', async () => {
+    const { broker, client } = await fixture()
+    let finish!: (value: JobSnapshot) => void
+    client.submit.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const owner = {}
+    const pending = broker.inspect(owner, grant)
+    const rejected = expect(pending).rejects.toThrow('FILE_OPERATION_CANCELLED')
+    await vi.waitFor(() => expect(client.submit).toHaveBeenCalled())
+    broker.revokeGrant(owner, grant)
+    finish(job)
+    await rejected
+    expect(client.discard).toHaveBeenCalledWith(job.job_id)
+  })
+
   it('stages only a native read grant and never sends its path over HTTP', async () => {
     const { broker, files, client, directory } = await fixture()
     const owner = {}

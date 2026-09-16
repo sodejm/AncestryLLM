@@ -310,7 +310,7 @@ export interface RegistrationOptions {
   readonly runtimeOperationTimeoutMs?: number
   readonly nativeActionTimeoutMs?: number
   readonly nativeActions?: MainNativeActions
-  readonly gedcomIntake?: Pick<GedcomIntakeBroker, 'inspect' | 'result' | 'roots' | 'discard' | 'revokeOwner' | 'revokeAll'>
+  readonly gedcomIntake?: Pick<GedcomIntakeBroker, 'inspect' | 'result' | 'roots' | 'discard' | 'revokeGrant' | 'revokeOwner' | 'revokeAll'>
   readonly recordDiagnostic?: RecordDesktopDiagnostic
 }
 interface Authorization {
@@ -1193,7 +1193,10 @@ export function registerDesktopIpcHandlers(
     return schedule(
       state,
       timeoutMs,
-      () => fileGrantOperation(() => fileGrants.revokeGrant(state.contents, grantId)),
+      () => fileGrantOperation(() => {
+        options.gedcomIntake?.revokeGrant(state.contents, grantId)
+        return fileGrants.revokeGrant(state.contents, grantId)
+      }),
       parseFileGrantRevocationResult,
     )
   })

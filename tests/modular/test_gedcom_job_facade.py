@@ -138,6 +138,7 @@ def test_inspect_job_publishes_only_opaque_lifecycle_and_typed_result(
 
 def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "fictional-family.ged"
     source.write_text(
@@ -175,7 +176,7 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         assert len(empty_last.candidates) == 1
         assert empty_last.next_cursor is None
         first = facade.root_candidates(first_job, query="ADA", limit=1)
-        assert first.total_count == 2
+        assert first.total_count is None
         assert len(first.candidates) == 1
         assert first.candidates[0].display_name == "Ada Example"
         assert first.candidates[0].source_identifier == "@I1@"
@@ -189,6 +190,26 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         assert last.next_cursor is None
         assert facade.root_candidates(first_job, query="not present").candidates == ()
         assert facade.root_candidates(first_job, query="@I3@").total_count == 1
+
+        monkeypatch.setattr("ancestryllm.application.gedcom_jobs.MAX_ROOT_SCAN_CANDIDATES", 2)
+        partial = facade.root_candidates(first_job, query="Grace")
+        assert partial.candidates == ()
+        assert partial.total_count is None
+        assert partial.next_cursor is not None
+        continued = facade.root_candidates(first_job, query="Grace", cursor=partial.next_cursor)
+        assert continued.candidates[0].source_identifier == "@I3@"
+        assert continued.total_count is None
+        assert continued.next_cursor is None
+        anchor = continued.candidates[0].person_ref
+        partial_anchor = facade.root_candidates(first_job, query=anchor)
+        assert partial_anchor.candidates == ()
+        assert partial_anchor.next_cursor is not None
+        found_anchor = facade.root_candidates(
+            first_job, query=anchor, cursor=partial_anchor.next_cursor
+        )
+        assert found_anchor.candidates == continued.candidates
+        assert found_anchor.total_count == 1
+        assert found_anchor.next_cursor is None
 
         other_job = facade.submit_inspect(request).job_id
         jobs.manager.wait(other_job, timeout=5)
@@ -246,7 +267,8 @@ def test_finding_anchor_queries_match_only_an_exact_person_in_the_owned_inspecti
     source.write_text(
         "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
         "0 @I1@ INDI\n1 NAME Ada /Example/\n1 BIRT\n2 DATE invalid\n"
-        f"0 @I2@ INDI\n1 NAME {fake_ref} /Example/\n0 TRLR\n",
+        f"0 @I2@ INDI\n1 NAME {fake_ref} /Example/\n"
+        "0 @I3@ INDI\n1 NAME person: Jane /Example/\n0 TRLR\n",
         encoding="utf-8",
     )
     other_source = tmp_path / "other-fictional.ged"
@@ -270,6 +292,9 @@ def test_finding_anchor_queries_match_only_an_exact_person_in_the_owned_inspecti
             jobs.manager.wait(job_id, timeout=5)
             job_ids.append(job_id)
         first_job, other_job = job_ids
+        named = facade.root_candidates(first_job, query="person: Jane")
+        assert len(named.candidates) == 1
+        assert named.candidates[0].display_name == "person: Jane Example"
         person = facade.root_candidates(first_job, query="Ada").candidates[0]
         anchored = facade.root_candidates(first_job, query=person.person_ref, limit=1)
         assert anchored.candidates == (person,)

@@ -134,7 +134,10 @@ the topology workload-capable.
 Issue #115 adds source-level read-only GEDCOM intake controls relevant to
 `TM-F01`, `TM-F02`, `TM-D01`, and `TM-O01`: native grants, private immutable
 staging, fingerprint verification, at most eight retained sources of 512 MiB
-each, the shared Python parser, bounded summaries and root queries, and
+each, a 250,000-individual preflight before full-tree materialization, at most
+100 retained findings with an exact total, 4,096-candidate filtered-search
+windows, owner-scoped native selection cancellation and grant revocation, the
+shared Python parser, bounded summaries and root queries, and
 owner/generation-bound result delivery and cleanup. It adds neither genealogy
 mutation nor provider execution. These controls do not claim encrypted
 persistent intake, a workload-capable container, or packaged adversarial proof.
@@ -185,8 +188,11 @@ metadata, bounded coded findings, and explicitly queried person labels return
 to the renderer; complete trees and original paths do not. Finding previews
 require an explicit request for a single source-bound person reference, reject
 non-unique or mismatched results, and ignore late responses after source removal.
-They expose no root-selection or mutation authority. The original file
-is immutable, staged bytes are removed when inspection terminates, and
+Filtered root searches expose an unknown total while bounded work remains and
+preserve exact person-reference semantics across continuation windows. They
+expose no root-selection or mutation authority. The original file is
+immutable, staged bytes are removed when inspection terminates (including
+owner-permission repair before Windows unlink), and
 inspection results remain in process memory until source removal or owner
 cleanup. Search, selection, and person labels are not written to job history,
 diagnostics, logs, or provider requests. This transient display is genealogy
