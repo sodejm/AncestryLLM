@@ -292,7 +292,7 @@ def ancestor_generations(
     return generations, cycles
 
 
-def _valid_quality_date(value: str) -> bool:
+def valid_quality_date(value: str) -> bool:
     """Return whether a date contains a plausible GEDCOM year expression."""
     if not value:
         return True
@@ -733,7 +733,7 @@ def analyze_quality(
                     **common,
                 )
                 for fact in facts
-                if fact.date and not _valid_quality_date(fact.date)
+                if fact.date and not valid_quality_date(fact.date)
             )
             distinct = {fact.summary() for fact in facts if fact.summary()}
             if len(distinct) > 1:
@@ -984,7 +984,7 @@ def analyze_quality(
                     continue
                 marriage = _fact_from_block(block)
                 marriage_year = _extract_year(marriage.date)
-                if marriage.date and not _valid_quality_date(marriage.date):
+                if marriage.date and not valid_quality_date(marriage.date):
                     findings.append(
                         _quality_finding(
                             "INVALID_MARRIAGE_DATE",
@@ -1440,5 +1440,6 @@ __all__ = [
     "quality_response_schema",
     "refine_quality_report_with_ai",
     "render_quality_report",
+    "valid_quality_date",
     "write_quality_report",
 ]

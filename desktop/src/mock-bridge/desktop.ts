@@ -658,6 +658,10 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     async requestOpenFileGrant() {
       return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: null }) as BridgeResult<FileGrant | null>
     },
+    async inspectGedcom() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
+    async getGedcomInspection() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
+    async queryGedcomRoots() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
+    async discardGedcomInspection() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
     async requestSaveFileGrant() {
       return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: null }) as BridgeResult<FileGrant | null>
     },

@@ -1,6 +1,6 @@
 /** Builds and verifies the only host bind mounts permitted for one mediated operation. */
 
-import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, realpath, rm, unlink } from 'node:fs/promises'
 import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import type { HostRealizedContainerMount } from './container-supervisor'
 
@@ -121,6 +121,27 @@ export async function initializeMediatedOperationStaging(
   requireDescendant(appDataRoot, runtimeProfileRoot)
   await cleanupStaleMediatedOperationMounts(runtimeProfileRoot)
   return runtimeProfileRoot
+}
+
+/** Recovers generated intake copies before the single owning application starts its sidecar. */
+export async function initializeGedcomIntakeStaging(runtimeProfileRoot: string): Promise<string> {
+  const profileRoot = await inspectPrivateDirectory(runtimeProfileRoot)
+  const stagingRoot = await ensurePrivateDirectory(join(profileRoot, 'gedcom-intake'))
+  requireDescendant(profileRoot, stagingRoot)
+  try {
+    const entries = await readdir(stagingRoot, { withFileTypes: true })
+    // Validate the entire set before removing anything; never traverse an unexpected entry.
+    if (entries.some((entry) => !/^[a-f0-9]{64}\.ged$/.test(entry.name)
+      || !entry.isFile() || entry.isSymbolicLink())) fail('STAGING_UNSAFE')
+    for (const entry of entries) {
+      const stagedPath = join(stagingRoot, entry.name)
+      await chmod(stagedPath, 0o600)
+      await unlink(stagedPath)
+    }
+    return stagingRoot
+  } catch {
+    return fail('STAGING_UNSAFE')
+  }
 }
 
 /**

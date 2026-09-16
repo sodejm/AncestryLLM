@@ -5,7 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import os
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -85,6 +86,7 @@ from ancestryllm.gedcom.quality import (
     quality_annotations_from_payload,
     quality_response_schema,
     refine_quality_report_with_ai,
+    valid_quality_date,
 )
 from ancestryllm.gedcom.serialization import (
     SUPPORTED_GEDCOM_VERSIONS,
@@ -154,6 +156,11 @@ class GedcomSyncResult:
 def _opaque_ref(namespace: str, value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
     return f"{namespace}:{digest}"
+
+
+def _pointerless_person_pointer(fingerprint: FileFingerprint, sequence: int) -> str:
+    """Give a pointerless INDI a deterministic internal identity for graph work."""
+    return f"@X{fingerprint.sha256[:24]}_{sequence}@"
 
 
 def _at_contract_boundary[ResultT](operation: Callable[[], ResultT]) -> ResultT:
@@ -330,6 +337,8 @@ class GedcomService:
     def _people_and_sources(
         self,
         paths: list[Path],
+        *,
+        enforce_individual_limit: bool = False,
     ) -> tuple[
         list[Any],
         list[GedcomRecord],
@@ -337,6 +346,33 @@ class GedcomService:
         dict[Path, FileFingerprint],
     ]:
         fingerprints = {path: self.ingress.fingerprint(path, FileKind.GEDCOM) for path in paths}
+        if enforce_individual_limit:
+            try:
+                individual_count = 0
+                for path in paths:
+                    for line_number, line in enumerate(
+                        self.ingress.iter_text_lines(
+                            path,
+                            FileKind.GEDCOM,
+                            expected=fingerprints[path].snapshot,
+                        ),
+                        start=1,
+                    ):
+                        parsed = parse_gedcom_line(line, line_number)
+                        if parsed.level == 0 and parsed.tag == "INDI":
+                            individual_count += 1
+                            self.ingress.validate_collection_items(
+                                FileKind.GEDCOM,
+                                individual_count,
+                            )
+            except GedcomParseError as exc:
+                raise AncestryError(
+                    "GEDCOM_PARSE_INVALID",
+                    "A GEDCOM input contains invalid syntax.",
+                    "Correct the malformed GEDCOM structure and try again.",
+                    exit_code=2,
+                    details={"error_type": type(exc).__name__},
+                ) from exc
         try:
             sources = load_sources(
                 paths,
@@ -354,9 +390,19 @@ class GedcomService:
             ) from exc
         self._verify_sources(fingerprints)
         source_records = [record for source in sources for record in source.records]
-        people = [
-            individual_from_record(record) for record in source_records if record.tag == "INDI"
-        ]
+        people: list[IndividualRecord] = []
+        for source in sources:
+            fingerprint = fingerprints[source.path]
+            for record in source.records:
+                if record.tag != "INDI":
+                    continue
+                person = individual_from_record(record)
+                if not person.pointer:
+                    person = replace(
+                        person,
+                        pointer=_pointerless_person_pointer(fingerprint, record.sequence),
+                    )
+                people.append(person)
         return (
             sources,
             source_records,
@@ -389,6 +435,16 @@ class GedcomService:
                     f"{fingerprint.sha256}:{original_pointer}",
                 )
                 candidates.setdefault(person_ref, set()).add(global_pointer)
+            for record in source.records:
+                if record.tag != "INDI" or record.pointer:
+                    continue
+                person_ref = _opaque_ref(
+                    "person",
+                    f"{fingerprint.sha256}:sequence:{record.sequence}",
+                )
+                candidates.setdefault(person_ref, set()).add(
+                    _pointerless_person_pointer(fingerprint, record.sequence)
+                )
         return {
             person_ref: next(iter(pointers))
             for person_ref, pointers in candidates.items()
@@ -981,8 +1037,20 @@ class GedcomService:
             operation=operation,
             access=ArtifactAccess.READ,
         )
-        sources, source_records, people, fingerprints = self._people_and_sources([source_path])
+        sources, source_records, people, fingerprints = self._people_and_sources(
+            [source_path],
+            enforce_individual_limit=True,
+        )
+        fingerprint = fingerprints[source_path]
+        if request.expected_sha256 is not None and (
+            fingerprint.sha256 != request.expected_sha256
+            or fingerprint.snapshot.size != request.expected_size_bytes
+        ):
+            raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
         source_bound_refs = self._source_bound_root_refs(sources, fingerprints)
+        root_refs_by_pointer = {
+            pointer: person_ref for person_ref, pointer in source_bound_refs.items()
+        }
         cancellation_port.check_cancelled()
 
         version = ""
@@ -1021,31 +1089,82 @@ class GedcomService:
                 ),
             )
 
+        if any(source.preserved_extensions for source in sources):
+            findings += (GedcomValidationFinding("gedcom-extensions-preserved", "info"),)
+        if any(source.normalized_dates for source in sources):
+            findings += (GedcomValidationFinding("gedcom-date-normalized", "info"),)
+        finding_count = len(findings)
+        finding_preview = list(findings)
+        unanchored_date_found = False
+        for record in source_records:
+            cancellation_port.check_cancelled()
+            for line in record.lines:
+                parsed = parse_gedcom_line(line)
+                if parsed.tag == "DATE" and not valid_quality_date(parsed.value):
+                    subject_ref = None
+                    if record.tag == "INDI":
+                        pointer = record.pointer or _pointerless_person_pointer(
+                            fingerprint, record.sequence
+                        )
+                        subject_ref = root_refs_by_pointer[pointer]
+                    elif unanchored_date_found:
+                        break
+                    else:
+                        unanchored_date_found = True
+                    finding_count += 1
+                    if len(finding_preview) < 100:
+                        finding_preview.append(
+                            GedcomValidationFinding("gedcom-date-invalid", "warning", subject_ref)
+                        )
+                    break
+        findings = tuple(finding_preview)
+
+        def display_text(value: str, limit: int) -> str:
+            # Keep imported text inert and bounded, including bidi/control characters.
+            return "".join(
+                char for char in value[:limit] if not unicodedata.category(char).startswith("C")
+            ).strip()
+
         summary = GedcomSourceSummary(
             source=registry.describe_input(request.source, operation=operation),
-            gedcom_version=version,
+            gedcom_version=display_text(version, 32),
             individual_count=sum(record.tag == "INDI" for record in source_records),
             family_count=sum(record.tag == "FAM" for record in source_records),
             other_record_count=sum(record.tag not in {"INDI", "FAM"} for record in source_records),
+            encoding=source_records[0].encoding,
         )
-        root_refs_by_pointer = {
-            pointer: person_ref for person_ref, pointer in source_bound_refs.items()
+        identifiers = {
+            pointer: original
+            for source in sources
+            for original, pointer in source.pointer_map.items()
         }
+
         root_candidates = tuple(
             RootCandidate(
                 person_ref=root_refs_by_pointer.get(
                     person.pointer,
-                    _opaque_ref("person", person.pointer),
+                    _opaque_ref("person", f"{person.pointer}:{sequence:08x}"),
                 ),
                 reason_code="individual-record",
+                display_name=display_text(person.full_name, 128),
+                source_identifier=display_text(identifiers.get(person.pointer, ""), 96),
+                birth_date=display_text(person.birth_date, 64),
+                death_date=display_text(person.death_date, 64),
+                relationship_summary=(
+                    f"{len(person.parents)} parents; {len(person.partners)} partners; "
+                    f"{len(person.children)} children"
+                ),
             )
-            for person in sorted(people, key=lambda candidate: candidate.pointer)
+            for sequence, person in enumerate(
+                sorted(people, key=lambda candidate: candidate.pointer)
+            )
         )
         cancellation_port.check_cancelled()
         return GedcomInspectResult(
             summary=summary,
             findings=findings,
             root_candidates=root_candidates,
+            finding_count=finding_count,
         )
 
     def execute_merge(

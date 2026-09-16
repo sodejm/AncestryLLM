@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import StreamingResponse
+from fastapi.routing import APIRoute
 
 from ancestryllm.api.capabilities import (
     ModuleDescriptorRegistry,
@@ -37,9 +38,13 @@ from ancestryllm.api.contracts import (
     EndpointValidationResponse,
     ErrorEnvelope,
     GedcomInspectOperationRequest,
+    GedcomIntakeDiscardResponse,
+    GedcomIntakeRequest,
     GedcomMergeOperationRequest,
     GedcomQualityOperationRequest,
     GedcomResultResponse,
+    GedcomRootCandidatePageResponse,
+    GedcomRootCandidateQuery,
     GedcomSubtreeOperationRequest,
     GedcomSyncOperationRequest,
     HealthResponse,
@@ -83,6 +88,7 @@ if TYPE_CHECKING:
 
     from fastapi.responses import JSONResponse
 
+    from ancestryllm.api.gedcom_intake import GedcomIntake
     from ancestryllm.api.settings import ApiSettings
     from ancestryllm.application.executor import CommandExecutor
     from ancestryllm.application.gedcom_jobs import GedcomJobFacade
@@ -526,6 +532,7 @@ def create_app(
     chat_streaming_service: ChatStreamingService | None = None,
     job_service: Callable[[], JobLifecycleService] | None = None,
     gedcom_job_service: Callable[[], GedcomJobFacade] | None = None,
+    gedcom_intake: Callable[[], GedcomIntake] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     runtime_shutdown: Callable[[], None] | None = None,
     lifecycle: ApiLifecycle | None = None,
@@ -880,8 +887,74 @@ def create_app(
     def get_gedcom_result(job_id: str) -> GedcomResultResponse:
         return GedcomResultResponse.from_application(gedcom_jobs().result(job_id))
 
+    @gedcom_router.post(
+        f"{API_NAMESPACE}/gedcom/jobs/{{job_id}}/root-candidates",
+        response_model=GedcomRootCandidatePageResponse,
+        responses=_ERROR_RESPONSES,
+        openapi_extra={"parameters": _HANDSHAKE_PARAMETERS, "security": [{"PrivateBearer": []}]},
+        operation_id="queryInternalGedcomRootCandidates",
+        tags=["gedcom"],
+    )
+    def query_gedcom_roots(
+        job_id: str,
+        request: GedcomRootCandidateQuery,
+    ) -> GedcomRootCandidatePageResponse:
+        return GedcomRootCandidatePageResponse.from_application(
+            gedcom_jobs().root_candidates(
+                job_id,
+                query=request.query,
+                limit=request.limit,
+                cursor=request.cursor,
+            )
+        )
+
     if gedcom_job_service is not None:
         app.include_router(gedcom_router)
+
+    if gedcom_intake is not None:
+        intake_router = APIRouter(
+            prefix=f"{API_NAMESPACE}/gedcom/intake",
+            tags=["gedcom"],
+            responses=_ERROR_RESPONSES,
+        )
+
+        @intake_router.post("", operation_id="submitInternalGedcomIntake")
+        def submit_intake(request: GedcomIntakeRequest) -> JobSnapshotResponse:
+            assert_mutations_allowed()
+            assert gedcom_intake is not None
+            return _job_snapshot_response(
+                gedcom_intake().submit(request.stage_id, request.size_bytes, request.sha256)
+            )
+
+        @intake_router.get("/{job_id}", operation_id="getInternalGedcomIntake")
+        def get_intake(job_id: str) -> GedcomResultResponse:
+            assert gedcom_intake is not None
+            return GedcomResultResponse.from_application(gedcom_intake().result(job_id))
+
+        @intake_router.post("/{job_id}/roots", operation_id="queryInternalGedcomIntakeRoots")
+        def query_intake_roots(
+            job_id: str, request: GedcomRootCandidateQuery
+        ) -> GedcomRootCandidatePageResponse:
+            assert gedcom_intake is not None
+            return GedcomRootCandidatePageResponse.from_application(
+                gedcom_intake().roots(
+                    job_id, query=request.query, limit=request.limit, cursor=request.cursor
+                )
+            )
+
+        @intake_router.post("/{job_id}/discard", operation_id="discardInternalGedcomIntake")
+        def discard_intake(job_id: str) -> GedcomIntakeDiscardResponse:
+            assert gedcom_intake is not None
+            gedcom_intake().discard(job_id)
+            return GedcomIntakeDiscardResponse()
+
+        for route in intake_router.routes:
+            if isinstance(route, APIRoute):
+                route.openapi_extra = {
+                    "parameters": _HANDSHAKE_PARAMETERS,
+                    "security": [{"PrivateBearer": []}],
+                }
+        app.include_router(intake_router)
 
     @app.get(
         f"{API_NAMESPACE}/jobs",

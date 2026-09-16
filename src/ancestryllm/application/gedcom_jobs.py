@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import re
+import secrets
 from typing import TYPE_CHECKING
 
 from ancestryllm.application.errors import map_domain_failure
@@ -13,6 +18,7 @@ from ancestryllm.application.operations import (
     MergeResult,
     QualityRequest,
     QualityResult,
+    RootCandidatePage,
     SubtreeRequest,
     SubtreeResult,
     SyncRequest,
@@ -28,10 +34,14 @@ if TYPE_CHECKING:
 
     from ancestryllm.application.dto import ArtifactGrantRef, ServiceResult
     from ancestryllm.application.jobs import JobLifecycleService, PublicJobSnapshot
+    from ancestryllm.application.operations import RootCandidate
     from ancestryllm.application.ports import GedcomOperationsPort
     from ancestryllm.core.jobs import JobReporter
 
 _GedcomResult = GedcomInspectResult | MergeResult | SubtreeResult | QualityResult | SyncResult
+_CURSOR_SECRET = secrets.token_bytes(32)
+_CURSOR_PATTERN = re.compile(r"c1_([0-9a-f]{8})_([0-9a-f]{64})\Z")
+MAX_ROOT_SCAN_CANDIDATES = 4096
 
 
 class GedcomJobFacade:
@@ -170,6 +180,116 @@ class GedcomJobFacade:
                 "Review the coded job outcome before retrying.",
             )
         return snapshot.result
+
+    @staticmethod
+    def _cursor(job_id: str, result: GedcomInspectResult, query: str, offset: int) -> str:
+        binding = json.dumps(
+            (
+                job_id,
+                result.summary.source.artifact_id,
+                result.summary.source.sha256,
+                query,
+                offset,
+            ),
+            ensure_ascii=True,
+        ).encode()
+        signature = hmac.new(_CURSOR_SECRET, binding, hashlib.sha256).hexdigest()
+        return f"c1_{offset:08x}_{signature}"
+
+    def root_candidates(
+        self,
+        job_id: str,
+        *,
+        query: str = "",
+        limit: int = 25,
+        cursor: str | None = None,
+    ) -> RootCandidatePage:
+        """Search retained inspection metadata using a job/query-bound opaque cursor."""
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= 100
+            or not isinstance(query, str)
+            or len(query) > 128
+        ):
+            raise AncestryError(
+                "GEDCOM_ROOT_QUERY_INVALID",
+                "The root candidate query exceeds its limits.",
+                "Use at most 128 search characters and a page size between 1 and 100.",
+            )
+        result = self.result(job_id)
+        if not isinstance(result, GedcomInspectResult):
+            raise self._result_unavailable()
+        normalized_query = query.strip().casefold()
+        is_person_ref = re.fullmatch(r"person:[0-9a-f]{32}", normalized_query) is not None
+        offset = 0
+        if cursor is not None:
+            match = _CURSOR_PATTERN.fullmatch(cursor) if isinstance(cursor, str) else None
+            if match is not None:
+                offset = int(match[1], 16)
+            if (
+                match is None
+                or offset >= len(result.root_candidates)
+                or not hmac.compare_digest(
+                    cursor, self._cursor(job_id, result, normalized_query, offset)
+                )
+            ):
+                raise AncestryError(
+                    "GEDCOM_ROOT_CURSOR_INVALID",
+                    "The root candidate cursor is invalid or stale.",
+                    "Restart the search for this inspected source.",
+                )
+        if not normalized_query:
+            total_count = len(result.root_candidates)
+            page_candidates = result.root_candidates[offset : offset + limit]
+            page_next_offset = offset + len(page_candidates)
+            return RootCandidatePage(
+                candidates=page_candidates,
+                total_count=total_count,
+                next_cursor=(
+                    self._cursor(job_id, result, normalized_query, page_next_offset)
+                    if page_next_offset < total_count
+                    else None
+                ),
+            )
+        candidates: list[RootCandidate] = []
+        scan_end = min(offset + MAX_ROOT_SCAN_CANDIDATES, len(result.root_candidates))
+        next_offset: int | None = scan_end if scan_end < len(result.root_candidates) else None
+        for index in range(offset, scan_end):
+            candidate = result.root_candidates[index]
+            if is_person_ref:
+                # Finding anchors never fall back to a fuzzy match in imported text.
+                if normalized_query != candidate.person_ref:
+                    continue
+            else:
+                searchable = " ".join(
+                    (
+                        candidate.display_name,
+                        candidate.source_identifier,
+                        candidate.birth_date,
+                        candidate.death_date,
+                    )
+                ).casefold()
+                if normalized_query not in searchable:
+                    continue
+            if len(candidates) < limit:
+                candidates.append(candidate)
+                if is_person_ref:
+                    # Source-bound person references are unique within an inspection.
+                    return RootCandidatePage(
+                        candidates=tuple(candidates), total_count=1, next_cursor=None
+                    )
+            else:
+                next_offset = index
+                break
+        return RootCandidatePage(
+            candidates=tuple(candidates),
+            total_count=(len(candidates) if offset == 0 and next_offset is None else None),
+            next_cursor=(
+                self._cursor(job_id, result, normalized_query, next_offset)
+                if next_offset is not None
+                else None
+            ),
+        )
 
     @staticmethod
     def _result_unavailable() -> AncestryError:

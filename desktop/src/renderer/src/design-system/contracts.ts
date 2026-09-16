@@ -3,14 +3,14 @@
 /**
  * Defines the renderer-only app route contract shared by accessible design-system components.
  */
-export type AppRoute = 'home' | 'chat' | 'tasks' | 'diagnostics' | 'settings'
+export type AppRoute = 'home' | 'chat' | 'tasks' | 'gedcom' | 'diagnostics' | 'settings'
 
 /**
  * Defines the renderer-only navigation item contract shared by accessible design-system components.
  */
 export interface NavigationItem {
   readonly route: AppRoute
-  readonly href: '#/' | '#/chat' | '#/tasks' | '#/diagnostics' | '#/settings'
+  readonly href: '#/' | '#/chat' | '#/tasks' | '#/gedcom' | '#/diagnostics' | '#/settings'
   readonly label: string
   readonly description: string
   readonly shortcut: string
@@ -79,6 +79,13 @@ export const navigationItems: readonly NavigationItem[] = Object.freeze([
     shortcut: 'T',
   }),
   Object.freeze({
+    route: 'gedcom',
+    href: '#/gedcom',
+    label: 'GEDCOM',
+    description: 'Inspect local GEDCOM sources and explicitly choose roots without changing records.',
+    shortcut: 'G',
+  }),
+  Object.freeze({
     route: 'diagnostics',
     href: '#/diagnostics',
     label: 'Diagnostics',
@@ -98,6 +105,7 @@ export const navigationItems: readonly NavigationItem[] = Object.freeze([
 export function routeFromHash(hash: string): AppRoute {
   if (hash === '#/chat') return 'chat'
   if (hash === '#/tasks') return 'tasks'
+  if (hash === '#/gedcom') return 'gedcom'
   if (hash === '#/diagnostics') return 'diagnostics'
   if (hash === '#/settings') return 'settings'
   return 'home'

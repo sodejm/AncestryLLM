@@ -34,7 +34,7 @@ from typing import Any, NoReturn, Protocol
 POLICY_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
 UV_VERSION = "0.12.1"
-GH_VERSION = "2.97.0"
+GH_VERSION = "2.100.0"
 RELEASE_URL_TEMPLATE = "https://github.com/{repository}/releases/download/{tag}/{asset}"
 UV_REPOSITORY = "astral-sh/uv"
 UV_SOURCE_REPOSITORY = "https://github.com/astral-sh/uv"
@@ -97,27 +97,27 @@ UV_TARGET_TRIPLES = {
 }
 GH_ASSET_SHAPE = {
     "linux-x86_64": (
-        "gh_2.97.0_linux_amd64.tar.gz",
-        "gh_2.97.0_linux_amd64/bin/gh",
+        "gh_2.100.0_linux_amd64.tar.gz",
+        "gh_2.100.0_linux_amd64/bin/gh",
     ),
     "linux-arm64": (
-        "gh_2.97.0_linux_arm64.tar.gz",
-        "gh_2.97.0_linux_arm64/bin/gh",
+        "gh_2.100.0_linux_arm64.tar.gz",
+        "gh_2.100.0_linux_arm64/bin/gh",
     ),
     "macos-x86_64": (
-        "gh_2.97.0_macOS_amd64.zip",
-        "gh_2.97.0_macOS_amd64/bin/gh",
+        "gh_2.100.0_macOS_amd64.zip",
+        "gh_2.100.0_macOS_amd64/bin/gh",
     ),
     "macos-arm64": (
-        "gh_2.97.0_macOS_arm64.zip",
-        "gh_2.97.0_macOS_arm64/bin/gh",
+        "gh_2.100.0_macOS_arm64.zip",
+        "gh_2.100.0_macOS_arm64/bin/gh",
     ),
     "windows-x86_64": (
-        "gh_2.97.0_windows_amd64.zip",
+        "gh_2.100.0_windows_amd64.zip",
         "bin/gh.exe",
     ),
     "windows-arm64": (
-        "gh_2.97.0_windows_arm64.zip",
+        "gh_2.100.0_windows_arm64.zip",
         "bin/gh.exe",
     ),
 }

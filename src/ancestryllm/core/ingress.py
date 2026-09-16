@@ -235,6 +235,7 @@ class TextLine:
 
     text: str
     byte_count: int
+    encoding: str = "utf-8"
 
 
 class _BoundedRawReader(io.RawIOBase):
@@ -613,7 +614,7 @@ class FileIngressPolicy:
                                 limit_name="max_records",
                                 limit=maximum_records,
                             )
-                    yield TextLine(raw_line, line_bytes)
+                    yield TextLine(raw_line, line_bytes, byte_encoding)
                 current = FileSnapshot.from_stat(os.fstat(text.buffer.fileno()))
                 if current != opened:
                     raise self._error(
@@ -712,6 +713,19 @@ class FileIngressPolicy:
                 kind,
                 limit_name="max_collection_items",
                 limit=limit.max_collection_items,
+            )
+
+    def validate_collection_items(self, kind: FileKind, count: int) -> None:
+        """Reject a retained input-derived collection that exceeds its budget."""
+
+        maximum = self.limit(kind).max_collection_items
+        if maximum is not None and count > maximum:
+            raise self._error(
+                "FILE_COLLECTION_LIMIT_EXCEEDED",
+                f"The {kind.value} input exceeds the configured collection limit ({maximum}).",
+                kind,
+                limit_name="max_collection_items",
+                limit=maximum,
             )
 
     def read_text(
