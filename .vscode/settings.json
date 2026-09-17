@@ -1,27 +1,28 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
   "python.terminal.activateEnvironment": true,
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestArgs": ["tests"],
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
   "files.eol": "\n",
-  "editor.rulers": [88],
+  "editor.rulers": [
+    100
+  ],
   "ruff.enable": true,
-  "ruff.configuration": "${workspaceFolder}/pyproject.toml",
   "ruff.configurationPreference": "filesystemFirst",
   "ruff.lint.enable": true,
   "ruff.fixAll": false,
   "ruff.organizeImports": false,
-  "ruff.codeAction.fixViolation.enable": false,
-  "ruff.codeAction.disableRuleComment.enable": false,
   "mypy-type-checker.importStrategy": "fromEnvironment",
   "mypy-type-checker.args": [
     "--config-file",
     "${workspaceFolder}/pyproject.toml"
   ],
-  "mypy-type-checker.reportingScope": "workspace",
+  "mypy-type-checker.reportingScope": "file",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
@@ -33,15 +34,46 @@
     "**/.pytest_cache": true,
     "**/.mypy_cache": true,
     "**/.ruff_cache": true,
-    "**/*.egg-info": true
+    "**/*.egg-info": true,
+    "**/.venv": true,
+    "**/.tools": true,
+    "**/node_modules": true
   },
   "search.exclude": {
     "**/.venv": true,
     "**/__pycache__": true,
-    "**/.pytest_cache": true
+    "**/.pytest_cache": true,
+    "**/.tools": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/out": true,
+    "**/coverage": true,
+    "**/htmlcov": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true
   },
   "files.watcherExclude": {
     "**/.venv/**": true,
-    "**/__pycache__/**": true
+    "**/__pycache__/**": true,
+    "**/.tools/**": true,
+    "**/node_modules/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/dist/**": true,
+    "**/out/**": true,
+    "**/coverage/**": true
+  },
+  "python.envFile": "",
+  "python.testing.cwd": "${workspaceFolder}",
+  "mypy-type-checker.cwd": "${workspaceFolder}",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/src"
+  ],
+  "explorer.compactFolders": false,
+  "ruff.codeAction.fixViolation": {
+    "enable": false
+  },
+  "ruff.codeAction.disableRuleComment": {
+    "enable": false
   }
 }

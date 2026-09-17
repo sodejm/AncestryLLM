@@ -206,7 +206,11 @@ def classify(rel: str) -> str:
         return "generated-vendor"
 
     # IDE config directories.
-    if parts[0] in IDE_CONFIG_DIRS or (len(parts) > 1 and parts[1] in IDE_CONFIG_DIRS):
+    if (
+        parts[0] in IDE_CONFIG_DIRS
+        or (len(parts) > 1 and parts[1] in IDE_CONFIG_DIRS)
+        or suffix == ".code-workspace"
+    ):
         return "ide-config"
 
     # Extensionless known basenames.
