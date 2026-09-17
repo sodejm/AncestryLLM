@@ -17,25 +17,26 @@ def test_vscode_uses_ruff_and_authoritative_mypy_without_env_autoload() -> None:
     extensions = json.loads(_read(".vscode/extensions.json"))["recommendations"]
 
     assert settings["ruff.enable"] is True
-    assert settings["ruff.configuration"] == "${workspaceFolder}/pyproject.toml"
+    # Let Ruff discover pyproject.toml for both repository and nested folder roots.
+    assert "ruff.configuration" not in settings
     assert settings["ruff.configurationPreference"] == "filesystemFirst"
     assert settings["ruff.lint.enable"] is True
     assert settings["ruff.fixAll"] is False
     assert settings["ruff.organizeImports"] is False
-    assert settings["ruff.codeAction.fixViolation.enable"] is False
-    assert settings["ruff.codeAction.disableRuleComment.enable"] is False
+    assert settings["ruff.codeAction.fixViolation"] == {"enable": False}
+    assert settings["ruff.codeAction.disableRuleComment"] == {"enable": False}
 
     assert settings["mypy-type-checker.importStrategy"] == "fromEnvironment"
     assert settings["mypy-type-checker.args"] == [
         "--config-file",
         "${workspaceFolder}/pyproject.toml",
     ]
-    assert settings["mypy-type-checker.reportingScope"] == "workspace"
+    assert settings["mypy-type-checker.reportingScope"] == "file"
     assert settings["[python]"]["editor.defaultFormatter"] == "charliermarsh.ruff"
     assert settings["[python]"]["editor.formatOnSave"] is True
 
     assert "python.terminal.useEnvFile" not in settings
-    assert "python.envFile" not in settings
+    assert settings["python.envFile"] == ""
     assert not any(key.startswith("ty.") for key in settings)
     assert "charliermarsh.ruff" in extensions
     assert "ms-python.mypy-type-checker" in extensions

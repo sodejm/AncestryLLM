@@ -5,9 +5,11 @@
     "ms-python.debugpy",
     "charliermarsh.ruff",
     "ms-python.mypy-type-checker",
-    "ms-azuretools.vscode-docker",
+    "ms-azuretools.vscode-containers",
     "redhat.vscode-yaml",
     "mads-hartmann.bash-ide-vscode",
-    "mtxr.sqltools"
+    "mtxr.sqltools",
+    "dbaeumer.vscode-eslint",
+    "github.vscode-github-actions"
   ]
 }

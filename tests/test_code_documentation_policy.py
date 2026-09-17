@@ -104,6 +104,7 @@ _CLASSIFICATION_CASES: dict[str, tuple[str, str]] = {
         "generated-vendor",
     ),
     "vscode-settings": (".vscode/settings.json", "ide-config"),
+    "vscode-workspace": ("AncestryLLM.code-workspace", "ide-config"),
     "env-example": (".env.example", "non-comment-format"),
     "gitignore": (".gitignore", "non-code-doc"),
     "manifest-in": ("MANIFEST.in", "first-party-config-exec"),

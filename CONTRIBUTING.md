@@ -23,6 +23,40 @@ must be explicit built-ins with one-shot and console parity; follow the
 [module-authoring contract](docs/reference/MODULE_AUTHORING.md) rather than adding a
 second command registry.
 
+## VS Code workspace
+
+Open `AncestryLLM.code-workspace` with **File > Open Workspace from File**, or run
+`code AncestryLLM.code-workspace` from the checkout. The Explorer gives each
+tracked top-level directory a descriptive name, including **Python Application**,
+**Electron Desktop**, **Tests and Fixtures**, and **Documentation**. **Repository**
+retains the complete tree and top-level files; these display names do not rename
+directories on disk. Opening the repository folder alone remains supported.
+
+Install the recommended extensions when VS Code prompts. Use **Tasks: Run Task**
+to run **Setup: Python environment**, then select the checkout's `.venv` through
+**Python: Select Interpreter** if an older interpreter selection is still saved.
+The default interpreter setting works with both Unix and Windows virtual
+environments. Repository Make tasks require `make` and the shell/tool prerequisites
+used by the Makefile; on Windows, use VS Code with WSL for those tasks.
+
+The workspace discovers Python tests only under **Repository**, avoiding duplicate
+Test Explorer entries from the additional folder roots. **Tasks: Run Test Task**
+runs the canonical Python suite, while **Tasks: Run Build Task** runs the desktop
+checks and build. The task menu also includes lint, type checking, security,
+all pre-push gates, and the interactive console. For desktop development, run
+**Setup: desktop dependencies** before **Desktop: development server**; stop the
+server with Ctrl+C in its task terminal. These tasks use the same checked-in
+commands as terminal development and do not run automatically when opening the
+workspace.
+
+In **Run and Debug**, select the Python interactive console, CLI help, or current
+pytest file configuration and press F5. Open a Python test file before using the
+pytest configuration. Debugging uses the repository's `.venv` and working
+directory. Python editing follows the project's Ruff configuration and 100-column
+ruler. Generated dependencies and caches are excluded from routine Explorer and
+search views. The Python extension and debug configurations do not load a local
+`.env` file; use the project's keyring and explicit provider-consent workflow.
+
 ## GitHub Flow branch strategy
 
 AncestryLLM follows the
