@@ -14,6 +14,20 @@ from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.mutation import LocalMutationCoordinator
 
 
+def test_atomic_publication_without_posix_fchmod(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(os, "fchmod", raising=False)
+    target = tmp_path / "settings"
+    content = b"fictional\r\nsettings\x1a\n"
+    with (
+        LocalMutationCoordinator(tmp_path / "journal") as coordinator,
+        AtomicFileMutation(target, coordinator) as mutation,
+    ):
+        assert mutation.publish(content).state is MutationState.COMMITTED
+    assert target.read_bytes() == content
+
+
 def _terminate_at(namespace: str, target: str, boundary: str) -> None:
     def terminate(self: AtomicFileMutation, reached: str) -> None:
         if reached == boundary:

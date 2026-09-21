@@ -18,6 +18,21 @@ if TYPE_CHECKING:
 SID = "S-1-5-21-100-200-300-1001"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Requires native Windows file timestamps")
+def test_windows_publication_path_and_descriptor_agree(tmp_path: Path) -> None:
+    from ancestryllm.core.publication import _identity, _PathIdentity
+
+    path = tmp_path / "fictional"
+    path.write_bytes(b"old")
+    with path.open("r+b") as stream:
+        stream.write(b"new fictional content\r\n\x1a")
+        stream.flush()
+        os.fsync(stream.fileno())
+        held = _PathIdentity.from_stat(os.fstat(stream.fileno()))
+        assert held.pristine(_identity(path)), (held, _identity(path))
+    assert held.pristine(_identity(path))
+
+
 @pytest.mark.parametrize(
     "descriptor",
     [

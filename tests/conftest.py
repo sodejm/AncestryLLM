@@ -41,5 +41,5 @@ def isolate_mutation_journal(
     """Keep in-process test writes out of the account's production journal."""
     from ancestryllm.core import mutation
 
-    journal = tmp_path_factory.mktemp("mutation-journal")
+    journal = tmp_path_factory.mktemp("mutation-journal") / "private"
     monkeypatch.setattr(mutation, "coordinator_namespace", lambda: journal)

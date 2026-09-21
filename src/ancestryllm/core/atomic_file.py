@@ -67,7 +67,9 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
         return None
     if not stat.S_ISREG(before.st_mode):
         raise _recovery_required()
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    )
     try:
         opened = os.fstat(descriptor)
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
@@ -249,7 +251,8 @@ class AtomicFileMutation:
             0o600,
         )
         try:
-            os.fchmod(descriptor, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
             self.record = replace(
                 self.record, stage_identity=_identity(self.coordinator, os.fstat(descriptor))
             )

@@ -220,7 +220,61 @@ def _path_key(path: Path) -> str:
 
 
 def _identity(path: Path) -> _PathIdentity:
+    if os.name == "nt":
+        return _windows_path_identity(path)
     return _PathIdentity.from_stat(os.lstat(path))
+
+
+def _windows_path_identity(path: Path) -> _PathIdentity:
+    """Observe native change time consistently with descriptor observations.
+
+    Python 3.12 Windows lstat exposes creation time as ctime, while fstat exposes
+    change time. Use a no-follow attribute handle so strict comparisons retain
+    the actual change time and cannot silently follow a replaced reparse point.
+    """
+
+    ctypes = importlib.import_module("ctypes")
+    wintypes = importlib.import_module("ctypes.wintypes")
+    msvcrt = importlib.import_module("msvcrt")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = create_file(
+        os.fspath(path),
+        0x00000080,  # FILE_READ_ATTRIBUTES
+        0x00000007,  # FILE_SHARE_READ | WRITE | DELETE
+        None,
+        3,  # OPEN_EXISTING
+        0x00200000 | 0x02000000,  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS
+        None,
+    )
+    handle_value = ctypes.cast(handle, ctypes.c_void_p).value
+    if handle_value in {None, ctypes.c_void_p(-1).value}:
+        raise ctypes.WinError(ctypes.get_last_error())
+    descriptor: int | None = None
+    try:
+        descriptor = msvcrt.open_osfhandle(handle_value, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        info = os.fstat(descriptor)
+        attributes = getattr(info, "st_file_attributes", None)
+        if attributes is None or attributes & 0x00000400:  # FILE_ATTRIBUTE_REPARSE_POINT
+            raise OSError("A publication pathname is a reparse point.")
+        return _PathIdentity.from_stat(info)
+    finally:
+        if descriptor is None:
+            kernel.CloseHandle(handle)
+        else:
+            os.close(descriptor)
 
 
 def _identity_or_none(path: Path) -> _PathIdentity | None:
@@ -314,7 +368,7 @@ def _remove_directory_if_owned(path: Path, expected: _PathIdentity) -> bool:
     if expected.file_type != stat.S_IFDIR:
         return False
     if os.rmdir in os.supports_dir_fd and os.stat in os.supports_dir_fd:
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_DIRECTORY"):
@@ -399,7 +453,7 @@ def _create_private_quarantine(
         identity = current
         prepared.quarantine_identity = identity
         if _supports_directory_fd_cleanup():
-            flags = os.O_RDONLY
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
             if hasattr(os, "O_CLOEXEC"):
                 flags |= os.O_CLOEXEC
             if hasattr(os, "O_DIRECTORY"):
@@ -611,7 +665,7 @@ def _restore_open_descriptor(
 
     if source_identity.file_type != stat.S_IFREG:
         return False
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -723,7 +777,7 @@ def _unlink_if_owned(
     if descriptor is None and expected.inode <= 0:
         return False
     if descriptor is None and actual.file_type == stat.S_IFREG and _supports_directory_fd_cleanup():
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
@@ -864,7 +918,7 @@ def seal_staged_path(path: Path) -> StagedFileToken:
     if reservation.sealed:
         raise OSError("The publication staging pathname is already sealed.")
 
-    flags = os.O_RDWR
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1027,7 +1081,7 @@ def write_staged_bytes(path: Path, payload: bytes) -> StagedFileToken:
     if reservation.sealed:
         raise OSError("The publication staging pathname is already sealed.")
 
-    flags = os.O_RDWR
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1105,7 +1159,7 @@ def write_staged_text(path: Path, payload: str) -> StagedFileToken:
 
 
 def _token_candidate(path: Path) -> tuple[_PathIdentity, bytes]:
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1188,14 +1242,14 @@ def _copy_regular_no_clobber(
     """Copy one verified regular file into an exclusive destination."""
 
     _assert_pristine(source.path, source.identity)
-    source_flags = os.O_RDONLY
+    source_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         source_flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         source_flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         source_flags |= os.O_NONBLOCK
-    destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         destination_flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1400,7 +1454,7 @@ def _reserve_displacement(
 ) -> None:
     """Reserve an empty path after registering its name with the caller."""
 
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1642,7 +1696,7 @@ def _open_directory_capability(
     if _PLATFORM == "win32":
         descriptor = _windows_open_directory_descriptor(path)
     else:
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_DIRECTORY"):
@@ -1772,7 +1826,7 @@ def _open_verified_install_candidate(
 ) -> None:
     """Open and reverify the sealed private candidate before its namespace commit."""
 
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):

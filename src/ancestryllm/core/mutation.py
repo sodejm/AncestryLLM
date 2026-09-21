@@ -76,7 +76,11 @@ def _secure_directory(path: Path) -> None:
 def _open_private(path: Path) -> int:
     descriptor = os.open(
         path,
-        os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        os.O_RDWR
+        | os.O_CREAT
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_BINARY", 0),
         0o600,
     )
     try:

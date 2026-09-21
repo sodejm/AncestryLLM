@@ -371,7 +371,8 @@ class DirectoryMutation:
             complete=complete,
         )
         for child in stage.iterdir():
-            descriptor = os.open(child, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            # Windows FlushFileBuffers requires a handle opened for writing.
+            descriptor = os.open(child, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
             try:
                 os.fsync(descriptor)
             finally:

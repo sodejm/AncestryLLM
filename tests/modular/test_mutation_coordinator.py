@@ -22,6 +22,19 @@ from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.mutation import LocalMutationCoordinator
 
 
+def test_namespace_key_preserves_binary_control_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    namespace = tmp_path / "journal"
+    key = b"\r\n\x1a" + bytes(range(29))
+    monkeypatch.setattr(os, "urandom", lambda size: key if size == 32 else bytes(size))
+    with LocalMutationCoordinator(namespace) as coordinator:
+        expected = coordinator._digest("fictional resource")
+    assert (namespace / "namespace.key").read_bytes() == key
+    with LocalMutationCoordinator(namespace) as reopened:
+        assert reopened._digest("fictional resource") == expected
+
+
 def request(coordinator: LocalMutationCoordinator, path: Path) -> MutationRequest:
     return MutationRequest(
         operation_id=uuid4().hex,
