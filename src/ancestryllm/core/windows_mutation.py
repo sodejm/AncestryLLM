@@ -12,19 +12,28 @@ import re
 import stat
 from ctypes import wintypes
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import AncestryError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _unsafe() -> AncestryError:
     return AncestryError("MUTATION_JOURNAL_UNSAFE", "The mutation journal access policy is unsafe.")
 
 
-def private_descriptor(descriptor: str, sid: str) -> bool:
+def private_descriptor(
+    descriptor: str, sid: str, *, resolve_sid: Callable[[str], str] | None = None
+) -> bool:
     """Accept only an account-owned DACL with no grants to other ordinary users."""
 
     match = re.fullmatch(r"O:([^:]+?)(?:G:[^:]+?)?D:((?:P|AI|AR)*)(.*)", descriptor)
-    if match is None or match[1] != sid:
+    if match is None:
+        return False
+    owner = resolve_sid(match[1]) if resolve_sid else match[1]
+    if owner != sid:
         return False
     entries = re.findall(r"\(([^()]*)\)", match[3])
     if "".join(f"({entry})" for entry in entries) != match[3]:
@@ -33,8 +42,10 @@ def private_descriptor(descriptor: str, sid: str) -> bool:
         parts = entry.split(";")
         if len(parts) != 6 or parts[0] not in ("A", "D") or parts[3] or parts[4]:
             return False
-        if parts[0] == "A" and parts[5] not in (sid, "BA", "SY", "S-1-5-32-544", "S-1-5-18"):
-            return False
+        if parts[0] == "A":
+            trustee = resolve_sid(parts[5]) if resolve_sid else parts[5]
+            if trustee not in (sid, "BA", "SY", "S-1-5-32-544", "S-1-5-18"):
+                return False
     return True
 
 
@@ -78,6 +89,8 @@ class _Windows:
             out_dword,
         ]
         self.security.GetTokenInformation.restype = wintypes.BOOL
+        self.security.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, out_pointer]
+        self.security.ConvertStringSidToSidW.restype = wintypes.BOOL
         self.security.ConvertSidToStringSidW.argtypes = [pointer, out_pointer]
         self.security.ConvertSidToStringSidW.restype = wintypes.BOOL
         self.security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
@@ -146,6 +159,22 @@ class _Windows:
         finally:
             self.kernel.CloseHandle(token)
 
+    def resolve_sid(self, value: str) -> str:
+        """Resolve SDDL aliases using Windows' account context before comparison."""
+        sid = ctypes.c_void_p()
+        if not self.security.ConvertStringSidToSidW(value, ctypes.byref(sid)):
+            raise _unsafe()
+        try:
+            text = ctypes.c_void_p()
+            if not self.security.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+                raise _unsafe()
+            try:
+                return ctypes.wstring_at(text)
+            finally:
+                self.kernel.LocalFree(text)
+        finally:
+            self.kernel.LocalFree(sid)
+
     def descriptor(self, path: Path) -> str:
         descriptor = ctypes.c_void_p()
         # SE_FILE_OBJECT; OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION.
@@ -179,7 +208,7 @@ def validate_private(path: Path) -> None:
     info = path.lstat()
     attributes = getattr(info, "st_file_attributes", stat.FILE_ATTRIBUTE_REPARSE_POINT)
     if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or not private_descriptor(
-        windows.descriptor(path), sid
+        windows.descriptor(path), sid, resolve_sid=windows.resolve_sid
     ):
         raise _unsafe()
 

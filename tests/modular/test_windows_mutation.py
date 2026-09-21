@@ -47,6 +47,18 @@ def test_unsafe_windows_acl(descriptor: str) -> None:
     assert not private_descriptor(descriptor, SID)
 
 
+def test_windows_acl_resolves_native_sid_aliases() -> None:
+    aliases = {"LA": SID, "BA": "S-1-5-32-544", "SY": "S-1-5-18"}
+
+    def resolve(value: str) -> str:
+        return aliases.get(value, value)
+
+    descriptor = "O:LAD:P(A;OICI;FA;;;LA)(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)"
+    assert private_descriptor(descriptor, SID, resolve_sid=resolve)
+    assert not private_descriptor(descriptor, SID + "0", resolve_sid=resolve)
+    assert not private_descriptor(f"O:{SID}D:(A;;FA;;;LA)", SID)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Requires native Windows ACL APIs")
 def test_windows_private_directory_descriptor_round_trip(tmp_path: Path) -> None:
     from ancestryllm.core.windows_mutation import _Windows, create_private_directory
@@ -64,7 +76,7 @@ def test_windows_private_directory_descriptor_round_trip(tmp_path: Path) -> None
             f"descriptor={windows.descriptor(directory)}, "
             f"attributes={directory.lstat().st_file_attributes}"
         )
-    assert private_descriptor(windows.descriptor(directory), sid)
+    assert private_descriptor(windows.descriptor(directory), sid, resolve_sid=windows.resolve_sid)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Requires native Windows account and ACL APIs")
