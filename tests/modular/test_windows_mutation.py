@@ -47,6 +47,26 @@ def test_unsafe_windows_acl(descriptor: str) -> None:
     assert not private_descriptor(descriptor, SID)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Requires native Windows ACL APIs")
+def test_windows_private_directory_descriptor_round_trip(tmp_path: Path) -> None:
+    from ancestryllm.core.windows_mutation import _Windows, create_private_directory
+
+    directory = tmp_path / "private"
+    windows = _Windows()
+    _, sid = windows.account()
+    try:
+        create_private_directory(directory)
+    except AncestryError:
+        # Only this fictional test directory is inspected; application errors
+        # remain path-free and never disclose account or ACL metadata.
+        pytest.fail(
+            f"Private directory creation failed: account={sid}, "
+            f"descriptor={windows.descriptor(directory)}, "
+            f"attributes={directory.lstat().st_file_attributes}"
+        )
+    assert private_descriptor(windows.descriptor(directory), sid)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Requires native Windows account and ACL APIs")
 def test_windows_namespace_ignores_environment_and_has_private_acl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
