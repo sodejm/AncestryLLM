@@ -80,6 +80,13 @@ for the distinction between coordination recovery and genealogy backups.
 Errors are path-free. No error grants permission to delete an unknown object or
 bypass a resource lock.
 
+Settings and deployment services translate coordinator conflicts and stale
+revisions into their existing `SETTINGS_REVISION_CONFLICT` and
+`DEPLOYMENT_REVISION_CONFLICT` contracts. The settings API returns HTTP 409 so
+clients can reload and retry. Other coordinator failures use
+`SETTINGS_SAVE_FAILED` or `DEPLOYMENT_PERSISTENCE_FAILED`; failed saves leave the
+active configuration and revision unchanged.
+
 ## Acceptance evidence and remaining delivery gates
 
 All fixtures are fictional. The following tests are source-level evidence,
@@ -96,7 +103,7 @@ not a claim of target-matched packaged acceptance:
 | Private journal and cross-platform adapter | `test_windows_mutation.py`: ACL parsing and Windows-only native account/ACL checks; coordinator tests cover private bootstrap. |
 | Existing integrations | Settings, incremental sync, shared publication, RootsMagic/export and GEDCOM suites exercise their existing behavior through the shared coordinator. |
 
-The CI `mutation-recovery` job runs all six focused modules on Ubuntu, macOS,
+The CI `mutation-recovery` job runs seven focused modules on Ubuntu, macOS,
 and Windows with Python 3.12, and is required by `pr-gate`. Adding that job does
 not establish that a hosted run has passed. Canonical local test, lint,
 typecheck, security, applicable desktop checks, signed commits, required review,

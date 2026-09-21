@@ -25,7 +25,13 @@ from ancestryllm.application.mutations import (
     MutationTransition,
 )
 from ancestryllm.core import publication as pub
-from ancestryllm.core.atomic_file import _fingerprint, _identity, _recovery_required, _sync_parent
+from ancestryllm.core.atomic_file import (
+    _fingerprint,
+    _identity,
+    _open_flush_descriptor,
+    _recovery_required,
+    _sync_parent,
+)
 from ancestryllm.core.cancellation import cancellation_checkpoint
 
 if TYPE_CHECKING:
@@ -372,7 +378,7 @@ class DirectoryMutation:
         )
         for child in stage.iterdir():
             # Windows FlushFileBuffers requires a handle opened for writing.
-            descriptor = os.open(child, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+            descriptor = _open_flush_descriptor(child)
             try:
                 os.fsync(descriptor)
             finally:

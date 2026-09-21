@@ -20,7 +20,7 @@ import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Self, cast
+from typing import TYPE_CHECKING, Literal, Self, cast, overload
 from uuid import uuid4
 
 from ancestryllm.application.mutations import (
@@ -403,7 +403,17 @@ class LocalMutationCoordinator:
 
         return self._acquire(request, recovery=True)
 
-    def _acquire(self, request: MutationRequest, *, recovery: bool) -> MutationLease:
+    @overload
+    def _acquire(self, request: MutationRequest, *, recovery: Literal[True]) -> MutationLease: ...
+
+    @overload
+    def _acquire(
+        self, request: MutationRequest, *, recovery: Literal[False]
+    ) -> MutationLease | MutationOutcome: ...
+
+    def _acquire(
+        self, request: MutationRequest, *, recovery: bool
+    ) -> MutationLease | MutationOutcome:
         if request.deadline_ms <= _now_ms():
             raise _error("MUTATION_DEADLINE_EXCEEDED", "The mutation deadline has expired.")
         descriptors: list[int] = []
@@ -431,6 +441,12 @@ class LocalMutationCoordinator:
                         "MUTATION_RECOVERY_INVALID", "No interrupted mutation matches this request."
                     )
                 if row is not None and not recovery:
+                    if row["outcome"] is not None:
+                        outcome = MutationOutcome.from_json(row["outcome"])
+                        for descriptor in reversed(descriptors):
+                            _unlock(descriptor)
+                        descriptors.clear()
+                        return outcome
                     raise _error(
                         "MUTATION_RECOVERY_REQUIRED", "An interrupted mutation requires recovery."
                     )

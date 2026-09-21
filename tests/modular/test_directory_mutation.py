@@ -283,3 +283,27 @@ def test_missing_sync_root_aliases_contend(tmp_path: Path, names: tuple[str, str
         with pytest.raises(AncestryError) as failure:
             alias.acquire()
         assert failure.value.code == "MUTATION_CONFLICT"
+
+
+def test_staging_flush_uses_shared_writable_descriptor(tmp_path, monkeypatch):
+    from ancestryllm.core import directory_mutation
+
+    stage = tmp_path / (".gedcom-sync-" + "d" * 32)
+    stage.mkdir()
+    marker = ".ancestryllm-staging-" + "e" * 32
+    (stage / marker).write_bytes(b"private marker")
+    opened = []
+
+    def shared_descriptor(path):
+        opened.append(path)
+        return os.open(path, os.O_RDWR)
+
+    monkeypatch.setattr(
+        directory_mutation, "_open_flush_descriptor", shared_descriptor, raising=False
+    )
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        mutation = directory_mutation.DirectoryMutation(tmp_path / "export", coordinator)
+        mutation.acquire()
+        mutation.prepare(stage, marker)
+        assert opened == [stage / marker]
+        mutation.finish()

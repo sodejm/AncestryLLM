@@ -73,6 +73,10 @@ class _PathIdentity:
             other.file_type,
         ):
             return False
+        # Windows name tunneling can replace creation time during rename.
+        # Volume/file ID remains stable; sealed observations still compare times.
+        if _PLATFORM == "win32":
+            return True
         if (self.created_ns is None) != (other.created_ns is None):
             return False
         return self.created_ns is None or self.created_ns == other.created_ns
@@ -91,7 +95,11 @@ class _PathIdentity:
     def pristine(self, other: _PathIdentity) -> bool:
         """Compare fields that must not change after a staged file is sealed."""
 
-        return self.unchanged(other) and self.changed_ns == other.changed_ns
+        return (
+            self.unchanged(other)
+            and self.changed_ns == other.changed_ns
+            and self.created_ns == other.created_ns
+        )
 
     def same_observation(self, other: _PathIdentity) -> bool:
         """Compare every available field, including unreliable zero inode values."""
@@ -333,7 +341,7 @@ def _descriptor_survived_move(
     before: _PathIdentity,
     after: _PathIdentity,
 ) -> bool:
-    """Verify a held descriptor across a rename that may update ctime."""
+    """Verify a held descriptor across rename bookkeeping and Windows tunneling."""
 
     return (
         before.device,
@@ -341,14 +349,14 @@ def _descriptor_survived_move(
         before.file_type,
         before.size,
         before.modified_ns,
-        before.created_ns,
+        before.created_ns if _PLATFORM != "win32" else None,
     ) == (
         after.device,
         after.inode,
         after.file_type,
         after.size,
         after.modified_ns,
-        after.created_ns,
+        after.created_ns if _PLATFORM != "win32" else None,
     )
 
 

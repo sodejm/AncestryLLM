@@ -533,3 +533,41 @@ def test_metadata_rejects_unknown_purpose(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError) as raised:
         DeploymentService(_config(tmp_path)).metadata("telemetry")
     _assert_code(raised, "DEPLOYMENT_METADATA_PURPOSE_INVALID")
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("MUTATION_CONFLICT", "DEPLOYMENT_REVISION_CONFLICT"),
+        ("MUTATION_REVISION_STALE", "DEPLOYMENT_REVISION_CONFLICT"),
+        ("MUTATION_RECOVERY_REQUIRED", "DEPLOYMENT_PERSISTENCE_FAILED"),
+    ],
+)
+def test_deployment_translates_mutation_failures_without_changing_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str, expected: str
+) -> None:
+    from ancestryllm.core.errors import AncestryError
+
+    config = _config(tmp_path, provider="openai")
+    config.deployment = _remote_profile()
+    service = DeploymentService(config)
+    target = DeploymentProfile.local()
+    preview = service.preview(target, schema_version=1, expected_revision=0)
+
+    def fail_save(self: AppConfig, *, expected_revision: int | None = None) -> bool:
+        raise AncestryError(code, "Private internal context must not escape")
+
+    monkeypatch.setattr(AppConfig, "save", fail_save)
+    with pytest.raises(ConfigurationError) as failure:
+        service.switch(
+            target,
+            schema_version=1,
+            expected_revision=0,
+            confirmation=preview.confirmation,
+            unattended=True,
+        )
+    assert failure.value.code == expected
+    assert "Private internal" not in failure.value.render()
+    assert config.deployment == _remote_profile()
+    assert config.revision == 0
+    assert not config.config_path.exists()

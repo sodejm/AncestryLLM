@@ -2,6 +2,7 @@
 
 import ctypes
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,12 +96,13 @@ def test_absolute_directory_rename_buffer_is_terminated(monkeypatch):
     assert calls == [True]
 
 
-def test_fingerprint_read_shares_delete_and_transfers_handle(monkeypatch):
+@pytest.mark.parametrize("writable", [False, True])
+def test_fingerprint_read_shares_delete_and_transfers_handle(monkeypatch, writable):
     calls = []
 
     def create(path, access, share, security, creation, flags, template):
         assert path == "marker"
-        assert access == 0x80000000
+        assert access == (0xC0000000 if writable else 0x80000000)
         assert share == 7
         assert creation == 3
         assert flags & 0x00200000
@@ -116,7 +118,9 @@ def test_fingerprint_read_shares_delete_and_transfers_handle(monkeypatch):
         "msvcrt",
         SimpleNamespace(open_osfhandle=lambda handle, flags: 202),
     )
-    assert atomic_file._windows_open_fingerprint_descriptor(Path("marker")) == 202
+    assert (
+        atomic_file._windows_open_fingerprint_descriptor(Path("marker"), writable=writable) == 202
+    )
     assert calls == [True]
 
 
@@ -135,3 +139,26 @@ def test_fingerprint_read_closes_native_handle_if_transfer_fails(monkeypatch):
     with pytest.raises(OSError, match="CRT transfer failed"):
         atomic_file._windows_open_fingerprint_descriptor(Path("marker"))
     assert closed == [101]
+
+
+def test_windows_rename_can_tunnel_creation_time_without_changing_file_identity(monkeypatch):
+    monkeypatch.setattr(publication, "_PLATFORM", "win32")
+    before = publication._PathIdentity(1, 2, 0o100000, 10, 20, 30, 40)
+    after = replace(before, created_ns=5, changed_ns=50)
+    assert before.unchanged(after)
+    assert publication._descriptor_survived_move(before, after)
+    # Sealed, unmoved paths must still match every mutation field.
+    assert not before.pristine(after)
+    assert not before.pristine(replace(before, created_ns=5))
+    assert not before.same_object(after)
+    for field in ("device", "inode", "file_type", "size", "modified_ns"):
+        altered = replace(after, **{field: getattr(after, field) + 1})
+        assert not before.unchanged(altered)
+        assert not publication._descriptor_survived_move(before, altered)
+
+
+def test_non_windows_rename_retains_creation_time_check(monkeypatch):
+    monkeypatch.setattr(publication, "_PLATFORM", "darwin")
+    before = publication._PathIdentity(1, 2, 0o100000, 10, 20, 30, 40)
+    assert not before.unchanged(replace(before, created_ns=5))
+    assert not publication._descriptor_survived_move(before, replace(before, created_ns=5))

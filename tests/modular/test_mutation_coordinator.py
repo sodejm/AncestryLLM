@@ -130,6 +130,36 @@ def test_recorded_outcome_and_mismatched_retry(tmp_path: Path) -> None:
     assert MutationRequest.from_json(operation.to_json()) == operation
 
 
+@pytest.mark.parametrize("terminal", [MutationState.COMMITTED, MutationState.ABORTED])
+def test_matching_retry_completed_between_lookup_and_lock_returns_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: MutationState
+) -> None:
+    from ancestryllm.core import mutation
+
+    namespace, target = tmp_path / "journal", tmp_path / "target"
+    with LocalMutationCoordinator(namespace) as retry, LocalMutationCoordinator(namespace) as owner:
+        operation = request(retry, target)
+        owner.bind((target,))
+        original_lock = mutation._lock
+        outcome = None
+
+        def complete_before_lock(path: Path) -> int:
+            nonlocal outcome
+            monkeypatch.setattr(mutation, "_lock", original_lock)
+            lease = owner.acquire(operation)
+            if terminal is MutationState.COMMITTED:
+                lease = owner.transition(lease, MutationTransition(MutationState.COMMITTING, ()))
+            outcome = owner.transition(lease, MutationTransition(terminal, ()))
+            return original_lock(path)
+
+        monkeypatch.setattr(mutation, "_lock", complete_before_lock)
+        assert retry.acquire(operation) == outcome
+        assert isinstance(outcome, MutationOutcome)
+        # A terminal retry must release every lock without retaining a lease.
+        assert not retry._held
+        assert contend(namespace, target) == "acquired"
+
+
 def test_expired_owner_remains_exclusive_and_is_fenced(tmp_path: Path) -> None:
     with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
         operation = replace(request(coordinator, tmp_path / "target"), lease_ms=1)

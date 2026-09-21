@@ -62,8 +62,8 @@ def _identity(coordinator: LocalMutationCoordinator, info: os.stat_result) -> st
     )
 
 
-def _windows_open_fingerprint_descriptor(path: Path) -> int:
-    """Read an owned object without conflicting with a held delete capability."""
+def _windows_open_fingerprint_descriptor(path: Path, *, writable: bool = False) -> int:
+    """Read or flush an owned object while sharing a held delete capability."""
 
     import msvcrt
 
@@ -83,7 +83,7 @@ def _windows_open_fingerprint_descriptor(path: Path) -> int:
     close_handle.argtypes = (wintypes.HANDLE,)
     close_handle.restype = wintypes.BOOL
     handle = create_file(
-        os.fspath(path), 0x80000000, 7, None, 3, 0x00200000, None
+        os.fspath(path), 0xC0000000 if writable else 0x80000000, 7, None, 3, 0x00200000, None
     )  # GENERIC_READ, SHARE_READ|WRITE|DELETE, OPEN_EXISTING, OPEN_REPARSE_POINT
     value = ctypes.cast(handle, ctypes.c_void_p).value
     if value in {None, ctypes.c_void_p(-1).value}:
@@ -91,7 +91,10 @@ def _windows_open_fingerprint_descriptor(path: Path) -> int:
     try:
         return int(
             msvcrt.open_osfhandle(  # type: ignore[attr-defined]
-                value, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+                value,
+                (os.O_RDWR if writable else os.O_RDONLY)
+                | getattr(os, "O_BINARY", 0)
+                | getattr(os, "O_NOINHERIT", 0),
             )
         )
     except BaseException:
@@ -103,6 +106,13 @@ def _open_fingerprint_descriptor(path: Path) -> int:
     if os.name == "nt":
         return _windows_open_fingerprint_descriptor(path)
     return os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+
+
+def _open_flush_descriptor(path: Path) -> int:
+    # FlushFileBuffers requires write access and must share held DELETE handles.
+    if os.name == "nt":
+        return _windows_open_fingerprint_descriptor(path, writable=True)
+    return os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
 
 
 def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | None:
