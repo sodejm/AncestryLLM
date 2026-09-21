@@ -41,13 +41,13 @@ def test_atomic_publication_rejects_new_stage_hard_link(
 def test_fingerprint_rejects_hard_link_created_during_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
-    from ancestryllm.core.atomic_file import _fingerprint
+    from ancestryllm.core import atomic_file
 
     target = tmp_path / "stage"
     target.write_bytes(b"fictional stage")
     alias = tmp_path / "alias"
     with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
-        original = os.open if boundary == "opened" else os.read
+        original = atomic_file._open_fingerprint_descriptor if boundary == "opened" else os.read
 
         def add_link(*args: object, **kwargs: object) -> object:
             result = original(*args, **kwargs)  # type: ignore[arg-type]
@@ -55,9 +55,13 @@ def test_fingerprint_rejects_hard_link_created_during_read(
                 os.link(target, alias)
             return result
 
-        monkeypatch.setattr(os, "open" if boundary == "opened" else "read", add_link)
+        monkeypatch.setattr(
+            atomic_file if boundary == "opened" else os,
+            "_open_fingerprint_descriptor" if boundary == "opened" else "read",
+            add_link,
+        )
         with pytest.raises(AncestryError, match="requires recovery"):
-            _fingerprint(coordinator, target)
+            atomic_file._fingerprint(coordinator, target)
 
 
 def test_atomic_publication_without_posix_fchmod(

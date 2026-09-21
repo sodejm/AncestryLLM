@@ -1787,38 +1787,51 @@ def _windows_rename_descriptor_no_replace(
     ctypes = importlib.import_module("ctypes")
     wintypes = importlib.import_module("ctypes.wintypes")
     msvcrt = importlib.import_module("msvcrt")
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    set_file_information = kernel32.SetFileInformationByHandle
-    set_file_information.argtypes = (
+    # The Win32 FileRenameInfo wrapper rejects a non-null RootDirectory on
+    # supported Windows hosts. The native API accepts the held directory handle.
+    ntdll = ctypes.WinDLL("ntdll")
+    set_information = ntdll.NtSetInformationFile
+    set_information.argtypes = (
         wintypes.HANDLE,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
         ctypes.c_int,
-        wintypes.LPVOID,
-        wintypes.DWORD,
     )
-    set_file_information.restype = wintypes.BOOL
+    set_information.restype = ctypes.c_int32
+
+    class _IoStatusBlock(ctypes.Structure):  # type: ignore[misc,name-defined]
+        _fields_ = (("status", ctypes.c_void_p), ("information", ctypes.c_size_t))
 
     class _FileRenameInfo(ctypes.Structure):  # type: ignore[misc,name-defined]
         _fields_ = (
-            ("replace_if_exists", wintypes.BYTE),
-            ("root_directory", wintypes.HANDLE),
-            ("file_name_length", wintypes.DWORD),
-            ("file_name", wintypes.WCHAR * (len(target_name) + 1)),
+            ("replace_if_exists", ctypes.c_ubyte),
+            ("root_directory", ctypes.c_void_p),
+            ("file_name_length", ctypes.c_uint32),
+            ("file_name", ctypes.c_uint16 * 1),
         )
 
-    information = _FileRenameInfo()
+    name = target_name.encode("utf-16-le")
+    size = max(ctypes.sizeof(_FileRenameInfo), _FileRenameInfo.file_name.offset + len(name) + 2)
+    buffer = ctypes.create_string_buffer(size)
+    information = _FileRenameInfo.from_buffer(buffer)
     information.replace_if_exists = 0
     information.root_directory = msvcrt.get_osfhandle(destination.descriptor)
-    information.file_name_length = len(target_name.encode("utf-16-le"))
-    information.file_name = target_name
-    file_rename_info = 3
-    if not set_file_information(
+    information.file_name_length = len(name)
+    ctypes.memmove(ctypes.addressof(buffer) + _FileRenameInfo.file_name.offset, name, len(name))
+    status_block = _IoStatusBlock()
+    status = set_information(
         msvcrt.get_osfhandle(source_descriptor),
-        file_rename_info,
-        ctypes.byref(information),
-        ctypes.sizeof(information),
-    ):
-        error = ctypes.get_last_error()
-        raise ctypes.WinError(error)
+        ctypes.byref(status_block),
+        buffer,
+        size,
+        10,  # FileRenameInformation
+    )
+    if status < 0:
+        translate = ntdll.RtlNtStatusToDosError
+        translate.argtypes = (ctypes.c_int32,)
+        translate.restype = ctypes.c_uint32
+        raise ctypes.WinError(translate(status))
 
 
 def _windows_delete_descriptor(descriptor: int) -> bool:

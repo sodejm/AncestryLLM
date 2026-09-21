@@ -177,6 +177,7 @@ jobs:
           tests/modular/test_directory_mutation.py
           tests/modular/test_sync_mutation_recovery.py
           tests/modular/test_windows_mutation.py
+          tests/modular/test_windows_publication_api.py
 
   quality:
     name: quality

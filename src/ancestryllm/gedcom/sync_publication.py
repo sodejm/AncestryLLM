@@ -448,7 +448,7 @@ def _windows_rename_held_directory(descriptor: int, destination: Path) -> None:
         )
 
     name = os.fspath(destination.absolute()).encode("utf-16-le")
-    size = max(ctypes.sizeof(RenameInformation), RenameInformation.name.offset + len(name))
+    size = max(ctypes.sizeof(RenameInformation), RenameInformation.name.offset + len(name) + 2)
     buffer = ctypes.create_string_buffer(size)
     information = RenameInformation.from_buffer(buffer)
     information.replace = 0

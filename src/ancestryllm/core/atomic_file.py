@@ -7,11 +7,13 @@ desktop permission from the journal. Publication is one same-directory rename.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import os
 import re
 import stat
 import time
+from ctypes import wintypes
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Self
 from uuid import uuid4
@@ -60,6 +62,49 @@ def _identity(coordinator: LocalMutationCoordinator, info: os.stat_result) -> st
     )
 
 
+def _windows_open_fingerprint_descriptor(path: Path) -> int:
+    """Read an owned object without conflicting with a held delete capability."""
+
+    import msvcrt
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    create_file = kernel.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    close_handle = kernel.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    handle = create_file(
+        os.fspath(path), 0x80000000, 7, None, 3, 0x00200000, None
+    )  # GENERIC_READ, SHARE_READ|WRITE|DELETE, OPEN_EXISTING, OPEN_REPARSE_POINT
+    value = ctypes.cast(handle, ctypes.c_void_p).value
+    if value in {None, ctypes.c_void_p(-1).value}:
+        raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+    try:
+        return int(
+            msvcrt.open_osfhandle(  # type: ignore[attr-defined]
+                value, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+            )
+        )
+    except BaseException:
+        close_handle(handle)
+        raise
+
+
+def _open_fingerprint_descriptor(path: Path) -> int:
+    if os.name == "nt":
+        return _windows_open_fingerprint_descriptor(path)
+    return os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+
+
 def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | None:
     try:
         before = path.lstat()
@@ -67,14 +112,17 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
         return None
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise _recovery_required()
-    descriptor = os.open(
-        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    )
+    descriptor = _open_fingerprint_descriptor(path)
     try:
         opened = os.fstat(descriptor)
-        if opened.st_nlink != 1 or (opened.st_dev, opened.st_ino) != (
-            before.st_dev,
-            before.st_ino,
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino)
+            != (
+                before.st_dev,
+                before.st_ino,
+            )
         ):
             raise _recovery_required()
         digest = hashlib.sha256()
