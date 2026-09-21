@@ -435,3 +435,72 @@ def test_missing_name_aliases_share_contention_without_rebinding_authority(
         restarted.rebind(operation, (original,))
         lease = restarted.recover(operation)
         restarted.transition(lease, MutationTransition(MutationState.ABORTED, ()))
+
+
+def test_internal_history_is_bounded_without_losing_retry_or_recovery(tmp_path, monkeypatch):
+    import ancestryllm.core.mutation as module
+    from ancestryllm.core.atomic_file import AtomicFileMutation
+    from ancestryllm.core.bundle_mutation import BundleMutation
+    from ancestryllm.core.directory_mutation import DirectoryMutation
+
+    monkeypatch.setattr(module, "_TERMINAL_HISTORY_LIMIT", 4, raising=False)
+    namespace = tmp_path / "journal"
+    with LocalMutationCoordinator(namespace) as coordinator:
+        AtomicFileMutation._initialize(coordinator)
+        BundleMutation._initialize(coordinator)
+        DirectoryMutation._initialize(coordinator)
+        retry = request(coordinator, tmp_path / "external")
+        outcome = coordinator.transition(
+            coordinator.acquire(retry), MutationTransition(MutationState.ABORTED, ())
+        )
+        pending = replace(request(coordinator, tmp_path / "pending"), retain_outcome=False)
+        coordinator.acquire(pending)
+        for index in range(16):
+            selected = replace(
+                request(coordinator, tmp_path / f"internal-{index}"), retain_outcome=False
+            )
+            lease = coordinator.acquire(selected)
+            with coordinator._transaction() as database:
+                for statement in (
+                    "INSERT INTO file_replacements VALUES (?,?)",
+                    "INSERT INTO bundle_publications VALUES (?,?)",
+                    "INSERT INTO directory_publications VALUES (?,?)",
+                ):
+                    database.execute(statement, (selected.operation_id, "{}"))
+                database.execute(
+                    "INSERT INTO sync_destinations VALUES (?,?,NULL)",
+                    (selected.operation_id, "g0001-20260921T000000Z"),
+                )
+            coordinator.transition(lease, MutationTransition(MutationState.ABORTED, ()))
+        assert coordinator.acquire(retry) == outcome
+        assert coordinator.interrupted((tmp_path / "pending",)) == (pending,)
+        with coordinator._transaction() as database:
+            assert database.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 6
+            for statement in (
+                "SELECT COUNT(*) FROM file_replacements",
+                "SELECT COUNT(*) FROM bundle_publications",
+                "SELECT COUNT(*) FROM directory_publications",
+                "SELECT COUNT(*) FROM sync_destinations",
+            ):
+                assert database.execute(statement).fetchone()[0] == 4
+            assert (
+                database.execute("SELECT COUNT(DISTINCT operation_id) FROM bindings").fetchone()[0]
+                == 6
+            )
+        assert len(list((namespace / "locks").iterdir())) == len(pending.resources)
+        assert contend(namespace, tmp_path / "pending") == "MUTATION_CONFLICT"
+    with LocalMutationCoordinator(namespace) as reopened:
+        assert reopened.interrupted((tmp_path / "pending",)) == (pending,)
+        assert reopened.acquire(retry) == outcome
+        assert not list((namespace / "locks").iterdir())
+
+
+def test_retention_policy_is_part_of_retry_intent(tmp_path):
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        selected = request(coordinator, tmp_path / "target")
+        coordinator.transition(
+            coordinator.acquire(selected), MutationTransition(MutationState.ABORTED, ())
+        )
+        with pytest.raises(AncestryError) as error:
+            coordinator.acquire(replace(selected, retain_outcome=False))
+        assert error.value.code == "MUTATION_IDEMPOTENCY_MISMATCH"

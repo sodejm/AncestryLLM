@@ -7,6 +7,7 @@ filenames have recoverable set semantics, not simultaneous atomic visibility.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from contextlib import suppress
@@ -99,6 +100,7 @@ class _Entry(BoundaryDTO):
     restoration: _Owned | None = None
     restored: _Owned | None = None
     directories: tuple[_Owned, ...] = ()
+    partial_files: tuple[_Owned, ...] = ()
     displacement_attempted: bool = False
 
 
@@ -141,6 +143,7 @@ class BundleMutation:
             deadline_ms=time.time_ns() // 1_000_000 + 300_000,
             lease_ms=300_000,
             artifacts=(),
+            retain_outcome=False,
         )
         lease = self.coordinator.acquire(request)
         assert isinstance(lease, MutationLease)
@@ -185,7 +188,9 @@ class BundleMutation:
         reservation: pub._OwnedPath | None = None,
     ) -> None:
         """Journal the ownership boundary reached by the shared publisher."""
-        assert self.record is not None
+        assert self.record is not None and self.lease is not None
+        if event in {"candidate", "displacing", "installing"}:
+            self.coordinator.validate(self.lease)
         index = next(i for i, value in enumerate(self.artifacts) if value is artifact)
         target = self.targets[index]
         entry = self.record.entries[index]
@@ -198,10 +203,15 @@ class BundleMutation:
             displacement_attempted=artifact.displacement_attempted,
         )
         if reservation is not None:
-            entry = replace(entry, reservation=_Owned.save(reservation, target))
+            saved = _Owned.save(reservation, target)
+            assert saved is not None
+            if event.endswith("copy_created"):
+                entry = replace(entry, partial_files=(*entry.partial_files, saved))
+            else:
+                entry = replace(entry, reservation=saved)
         if prepared is not None:
             candidate = _Owned.save(prepared.candidate, target)
-            if event in {"restoring", "restored"}:
+            if prepared.restoration or event in {"restoring", "restored"}:
                 entry = replace(entry, restoration=candidate)
             else:
                 entry = replace(entry, candidate=candidate)
@@ -216,6 +226,15 @@ class BundleMutation:
                 assert directory is not None
                 if directory not in entry.directories:
                     entry = replace(entry, directories=(*entry.directories, directory))
+        sealed = {
+            item.components for item in (entry.backup, entry.candidate, entry.restoration) if item
+        }
+        entry = replace(
+            entry,
+            partial_files=tuple(
+                item for item in entry.partial_files if item.components not in sealed
+            ),
+        )
         entries = list(self.record.entries)
         entries[index] = entry
         self.record = replace(self.record, entries=tuple(entries))
@@ -234,7 +253,8 @@ class BundleMutation:
 
     def validated(self) -> None:
         """Durably record successful validation of the complete new set."""
-        assert self.record is not None
+        assert self.record is not None and self.lease is not None
+        self.coordinator.validate(self.lease)
         self.record = replace(self.record, validated=True)
         self._persist()
         self._checkpoint("validated")
@@ -296,6 +316,41 @@ class BundleMutation:
     def _cleanup_private(self) -> None:
         assert self.record is not None
         for target, entry in zip(self.targets, self.record.entries, strict=True):
+            # An unsealed copy may have arbitrary length after interruption.
+            # Its exclusive file identity and private parent authorize cleanup,
+            # never installation or restoration from its incomplete contents.
+            for partial in entry.partial_files:
+                owned = partial.restore(target)
+                if len(partial.components) == 2:
+                    parent = next(
+                        (
+                            item
+                            for item in entry.directories
+                            if item.components == partial.components[:1]
+                        ),
+                        None,
+                    )
+                    if parent is None:
+                        raise _recovery_required()
+                    actual_parent = pub._identity_or_none(owned.path.parent)
+                    if actual_parent is None:
+                        continue
+                    if not parent.identity.restore().same_file_id(actual_parent):
+                        raise _recovery_required()
+                actual = pub._identity_or_none(owned.path)
+                if actual is None:
+                    continue
+                # Copying source timestamps can adjust creation time on macOS.
+                # This unsealed record authorizes deletion of the exclusive
+                # inode only; it never authorizes consuming incomplete bytes.
+                if (
+                    owned.identity.inode <= 0
+                    or (owned.identity.device, owned.identity.inode, owned.identity.file_type)
+                    != (actual.device, actual.inode, actual.file_type)
+                    or os.lstat(owned.path).st_nlink != 1
+                ):
+                    raise _recovery_required()
+                pub._cleanup_owned(pub._OwnedPath(owned.path, actual))
             for saved in (
                 entry.source,
                 entry.backup,

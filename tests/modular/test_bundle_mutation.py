@@ -126,3 +126,178 @@ def test_bundle_recovery_preserves_changed_destinations(
             BundleMutation.reconcile(targets, coordinator)
         assert len(coordinator.interrupted(targets)) == 1
     assert {path: path.read_bytes() for path in targets} == before
+
+
+@pytest.mark.parametrize("boundary", ["candidate", "displaced", "installed"])
+def test_expired_bundle_lease_rolls_back_complete_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    from ancestryllm.core import mutation, publication
+    from ancestryllm.core.bundle_mutation import BundleMutation
+    from ancestryllm.core.errors import AncestryError
+
+    namespace = tmp_path / "journal"
+    monkeypatch.setattr(mutation, "coordinator_namespace", lambda: namespace)
+    original_clock = mutation._now_ms
+    expired = False
+
+    def checkpoint(self: BundleMutation, reached: str) -> None:
+        nonlocal expired
+        if reached == boundary:
+            expired = True
+
+    monkeypatch.setattr(BundleMutation, "_checkpoint", checkpoint)
+    monkeypatch.setattr(mutation, "_now_ms", lambda: original_clock() + (600_000 if expired else 0))
+    pairs = []
+    for name in ("tree.ged", "report.json"):
+        target = tmp_path / name
+        target.write_bytes(b"old fictional")
+        stage = publication.staging_path(target)
+        publication.write_staged_bytes(stage, b"new fictional")
+        pairs.append((stage, target))
+    with pytest.raises(AncestryError) as error:
+        publication.publish_staged_bundle(pairs, replace=os.replace)
+    assert error.value.code == "MUTATION_LEASE_EXPIRED"
+    assert all(target.read_bytes() == b"old fictional" for _, target in pairs)
+    with LocalMutationCoordinator(namespace) as coordinator:
+        assert coordinator.interrupted(target for _, target in pairs) == ()
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def _terminate_copy(namespace: str, directory: str, phase: str, boundary: str) -> None:
+    from ancestryllm.core import mutation, publication
+
+    mutation.coordinator_namespace = lambda: Path(namespace)
+    copying = False
+    restoring = False
+    original_copy = publication._copy_regular_no_clobber
+    original_write = os.write
+    original_quarantine = publication._create_private_quarantine
+
+    def copy(source, target, **kwargs):
+        nonlocal copying
+        selected = (
+            "backup" if "-backup-" in target.name else ("restoration" if restoring else "candidate")
+        )
+        copying = selected == phase
+        owner = kwargs.get("owner")
+
+        def completed(owned):
+            if copying and boundary == "copied":
+                os._exit(32)
+            if owner is not None:
+                owner(owned)
+
+        kwargs["owner"] = completed
+        try:
+            return original_copy(source, target, **kwargs)
+        finally:
+            copying = False
+
+    def write(fd, data):
+        result = original_write(fd, data)
+        if copying and boundary == "mid_copy":
+            os._exit(32)
+        return result
+
+    def quarantine(target, prepared):
+        original_quarantine(target, prepared)
+        if (
+            prepared.artifact is not None
+            and boundary == "quarantine"
+            and ("restoration" if restoring else "candidate") == phase
+        ):
+            os._exit(32)
+
+    def reject():
+        nonlocal restoring
+        restoring = True
+        raise OSError("Injected post-publication validation failure")
+
+    publication._copy_regular_no_clobber = copy
+    publication._create_private_quarantine = quarantine
+    os.write = write
+    pairs = []
+    for name in ("tree.ged", "report.json"):
+        target = Path(directory) / name
+        stage = publication.staging_path(target)
+        publication.write_staged_bytes(stage, b"n" * (2 * 1024 * 1024))
+        pairs.append((stage, target))
+    publication.publish_staged_bundle(
+        pairs, replace=os.replace, validate_after=reject if phase == "restoration" else None
+    )
+
+
+@pytest.mark.parametrize("phase", ["backup", "candidate", "restoration"])
+@pytest.mark.parametrize("boundary", ["quarantine", "mid_copy", "copied"])
+def test_interrupted_copy_cleans_only_owned_private_files(tmp_path, phase, boundary):
+    from ancestryllm.core.bundle_mutation import BundleMutation
+
+    if phase == "backup" and boundary == "quarantine":
+        pytest.skip("Backups do not create a quarantine directory")
+    targets = tuple(tmp_path / name for name in ("tree.ged", "report.json"))
+    for target in targets:
+        target.write_bytes(b"o" * (2 * 1024 * 1024))
+    unrelated = tmp_path / ".ancestry-publish-unrelated"
+    unrelated.write_bytes(b"preserve this independent file")
+    namespace = tmp_path / "journal"
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_copy, args=(str(namespace), str(tmp_path), phase, boundary)
+    )
+    process.start()
+    process.join(30)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Publisher never reached the copy boundary")
+    assert process.exitcode == 32
+    with LocalMutationCoordinator(namespace) as coordinator:
+        BundleMutation.reconcile(targets, coordinator)
+        BundleMutation.reconcile(targets, coordinator)
+        assert coordinator.interrupted(targets) == ()
+    assert all(target.read_bytes() == b"o" * (2 * 1024 * 1024) for target in targets)
+    assert unrelated.read_bytes() == b"preserve this independent file"
+    assert list(tmp_path.glob(".ancestry-publish-*")) == [unrelated]
+
+
+@pytest.mark.parametrize("replacement", ["file", "hardlink", "parent"])
+def test_interrupted_copy_preserves_changed_ownership(tmp_path: Path, replacement: str) -> None:
+    from ancestryllm.core.bundle_mutation import BundleMutation, _Record
+    from ancestryllm.core.errors import AncestryError
+
+    targets = tuple(tmp_path / name for name in ("tree.ged", "report.json"))
+    for target in targets:
+        target.write_bytes(b"old fictional")
+    namespace = tmp_path / "journal"
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_copy,
+        args=(str(namespace), str(tmp_path), "candidate", "mid_copy"),
+    )
+    process.start()
+    process.join(30)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Publisher never reached the copy boundary")
+    assert process.exitcode == 32
+    with LocalMutationCoordinator(namespace) as coordinator:
+        with coordinator._transaction() as database:
+            record = _Record.from_json(
+                database.execute("SELECT record FROM bundle_publications").fetchone()[0]
+            )
+        partial = record.entries[0].partial_files[0].restore(targets[0]).path
+        if replacement == "file":
+            partial.rename(tmp_path / "preserved-partial")
+            partial.write_bytes(b"unrelated replacement")
+        elif replacement == "hardlink":
+            os.link(partial, tmp_path / "unrelated-link")
+        else:
+            partial.parent.rename(tmp_path / "preserved-parent")
+            partial.parent.mkdir()
+            partial.write_bytes(b"unrelated replacement")
+        expected = partial.read_bytes()
+        with pytest.raises(AncestryError) as error:
+            BundleMutation.reconcile(targets, coordinator)
+        assert error.value.code == "MUTATION_RECOVERY_REQUIRED"
+        assert coordinator.interrupted(targets)
+        assert partial.read_bytes() == expected

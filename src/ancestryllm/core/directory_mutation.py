@@ -35,6 +35,7 @@ from ancestryllm.core.atomic_file import (
 from ancestryllm.core.cancellation import cancellation_checkpoint
 
 if TYPE_CHECKING:
+    import sqlite3
     from pathlib import Path
 
     from ancestryllm.core.mutation import LocalMutationCoordinator
@@ -169,17 +170,19 @@ class DirectoryMutation:
             deadline_ms=time.time_ns() // 1_000_000 + 300_000,
             lease_ms=300_000,
             artifacts=(),
+            retain_outcome=False,
         )
-        if self.sync_root:
-            # Generated release names carry no host paths or genealogy payload.
-            # Persist before acquisition so every acquired reservation is resolvable
-            # through a later authorized invocation for the same release root.
-            with self.coordinator._transaction() as database:
+
+        def prepare(database: sqlite3.Connection) -> None:
+            if self.sync_root:
+                # Commit generated, path-free recovery metadata with ownership;
+                # failed acquisition cannot leave an orphan destination row.
                 database.execute(
                     "INSERT INTO sync_destinations(operation_id,destination) VALUES (?,?)",
                     (request.operation_id, self.target.name),
                 )
-        lease = self.coordinator.acquire(request)
+
+        lease = self.coordinator._acquire(request, recovery=False, prepare=prepare)
         assert isinstance(lease, MutationLease)
         self.lease = lease
         if self.sync_root and self.target.parent.exists():

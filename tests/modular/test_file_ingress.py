@@ -3953,8 +3953,9 @@ def test_candidate_copy_return_interruption_uses_registered_ownership(
         destination: Path,
         *,
         owner: Any = None,
+        created: Any = None,
     ) -> Any:
-        original_copy(source, destination, owner=owner)
+        original_copy(source, destination, owner=owner, created=created)
         raise error_type("fictional candidate return interruption")
 
     monkeypatch.setattr(
@@ -5061,3 +5062,30 @@ def test_rootsmagic_missing_paths_use_sanitized_stable_errors(tmp_path: Path) ->
     assert relative_error.value.code == "ROOTSMAGIC_TREE_NOT_FOUND"
     assert str(explicit) not in explicit_error.value.render()
     assert "private-relative-name" not in relative_error.value.render()
+
+
+def test_windows_ingress_uses_descriptor_consistent_path_metadata(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    source = tmp_path / "fictional.ged"
+    source.write_bytes(b"0 HEAD\n0 TRLR\n")
+    observed = []
+
+    def native_stat(path):
+        observed.append(path)
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            return os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def legacy_stat(path):
+        raise AssertionError("Windows lstat ctime is not descriptor change time")
+
+    monkeypatch.setattr(publication_module, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(publication_module, "_windows_path_stat", native_stat, raising=False)
+    monkeypatch.setattr(ingress_module, "os", SimpleNamespace(**{**vars(os), "lstat": legacy_stat}))
+    policy = FileIngressPolicy()
+    fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
+    policy.assert_unchanged(source, FileKind.GEDCOM, fingerprint.snapshot)
+    assert len(observed) >= 2

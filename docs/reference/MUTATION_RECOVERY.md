@@ -30,9 +30,10 @@ selector and parent identity. Independent resource scopes can proceed together.
 
 Bounded leases do not release OS ownership locks. A paused process cannot lose
 its scope merely because its lease expires and then race a replacement owner.
-Every publication boundary validates ownership; token and monotonic fence
-checks reject stale owners. Current helper operations use a five-minute bound;
-an expired operation must reconcile before further mutation.
+Every publication boundary validates ownership and lease validity; token and
+monotonic fence checks reject stale owners. Current helper operations use a
+five-minute bound. Expiry stops installation and complete-set validation while
+the original owner retains authority to roll back and release its locks.
 
 ## Publication and restart
 
@@ -40,6 +41,15 @@ The durable lifecycle is `prepared` → `committing` → `committed` or `aborted
 Interrupted or ambiguous operations retain `recovery_required` ownership.
 Matching idempotency keys return a recorded terminal result, or require recovery
 of the original intent. Reusing a key with different intent is rejected.
+
+`MutationRequest.retain_outcome` defaults to `true`, preserving recorded outcomes
+for callers that reuse idempotency keys. Internal publication helpers use unique
+keys and set it to `false`; maintenance retains the newest 256 terminal internal
+operations and removes older operation metadata together. Nonterminal recovery
+records and retained retry outcomes are never pruned. An account-scoped catalog
+lock coordinates resource-lock creation and collection so removing an unused
+lock file cannot split ownership across two inodes. Maintenance failures are
+retried on later invocations without changing an already recorded outcome.
 
 | Integration | Publication and recovery contract |
 |---|---|
@@ -59,6 +69,13 @@ modified content, and missing ownership evidence stop recovery and preserve
 ambiguous state. Cleanup removes only proven operation-owned objects, preserving
 unrelated files. Narrow creation-to-journal interruption windows deliberately
 fail closed when ownership cannot be proved.
+
+Copy fallbacks record private-directory and exclusive-file ownership before
+copying bytes. Recovery may delete an interrupted copy only after checking its
+file identity, single-link state, and private parent. Unsealed bytes never
+authorize installation or restoration. Replaced files, hard links, or changed
+parents preserve the recovery barrier. Sync destination metadata commits in the
+same transaction as ownership, so failed acquisition leaves no orphan row.
 
 Do not remove the journal or staging to clear a conflict. Preserve them and
 retry the original authorized selection. See [backup procedures](../ENCRYPTED_BACKUPS.md)
@@ -94,11 +111,11 @@ not a claim of target-matched packaged acceptance:
 
 | Requirement | Evidence |
 |---|---|
-| Strict transport-neutral requests, retry intent, terminal outcomes | `test_mutation_coordinator.py`: DTO boundaries, matching/mismatched retries, recorded outcomes. |
+| Strict transport-neutral requests, retry intent, terminal outcomes | `test_mutation_coordinator.py`: DTO boundaries, matching/mismatched retries, recorded outcomes, bounded internal history and lock collection with retry/recovery authority preserved. |
 | Cross-process contention, independent scopes, aliases, revisions | `test_mutation_coordinator.py`: spawned-process ownership, independent resources, inode/canonical/name aliases, stale revisions. |
 | Leases, fencing, cancellation, deadlines | `test_mutation_coordinator.py` and `test_atomic_file_mutation.py`: expired owner cannot transfer live ownership; stale owner rejected; cancellation and timeout boundaries. |
 | Single-file process interruption | `test_atomic_file_mutation.py`: forced process exit at persisted and publication checkpoints, existing/absent destinations, repeated reconciliation and unrelated-file preservation. |
-| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, old/new complete state, terminal outcome, replaced or modified objects preserved. |
+| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, lease expiry at publication boundaries, forced exit during backup/install/restore copies, old/new complete state, terminal outcome, replaced or modified objects preserved. |
 | Directory and sync recovery | `test_directory_mutation.py` and `test_sync_mutation_recovery.py`: update/rebase checkpoints, individual member writes, exact owned cleanup, complete generation validation, late cancellation, unexpected-file preservation. |
 | Private journal and cross-platform adapter | `test_windows_mutation.py`: ACL parsing and Windows-only native account/ACL checks; coordinator tests cover private bootstrap. |
 | Existing integrations | Settings, incremental sync, shared publication, RootsMagic/export and GEDCOM suites exercise their existing behavior through the shared coordinator. |

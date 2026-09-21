@@ -237,6 +237,7 @@ class AtomicFileMutation:
             deadline_ms=time.time_ns() // 1_000_000 + 300_000,
             lease_ms=300_000,
             artifacts=(),
+            retain_outcome=False,
         )
         lease = self.coordinator.acquire(request)
         assert isinstance(lease, MutationLease)

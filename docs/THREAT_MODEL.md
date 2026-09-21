@@ -519,6 +519,13 @@ publishing under stale ownership. The SQLite journal stores only coordination
 metadata and opaque resource identities, with POSIX ownership/mode and Windows
 ACL checks. It does not persist source data, private host paths, or desktop grants.
 
+Interrupted copy cleanup requires journaled exclusive-file and private-parent
+identity; unsealed bytes cannot authorize restoration. Lease expiry stops new
+installations while preserving the current owner's rollback authority. Bounded
+internal terminal-history retention preserves unresolved recovery and explicit
+idempotent outcomes; catalog-serialized lock-file collection cannot transfer
+ownership away from a live resource lock.
+
 Process-exit tests cover old/new reconciliation, one terminal outcome, unexpected
 object preservation, owned cleanup, and cancellation at publication boundaries.
 Missing-name case and Unicode aliases contend conservatively without granting

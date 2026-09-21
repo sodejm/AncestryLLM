@@ -198,6 +198,13 @@ class _PreparedRegularInstall:
     descriptor: int | None = None
     complete: bool = False
     active: bool = True
+    artifact: _Artifact | None = None
+    restoration: bool = False
+
+    def observe(self, event: str, owned: _OwnedPath | None = None) -> None:
+        if self.artifact is not None:
+            prefix = "restoration_" if self.restoration else ""
+            self.artifact.observe(prefix + event, self, owned)
 
 
 @dataclass(slots=True)
@@ -228,12 +235,19 @@ def _path_key(path: Path) -> str:
 
 
 def _identity(path: Path) -> _PathIdentity:
-    if os.name == "nt":
-        return _windows_path_identity(path)
-    return _PathIdentity.from_stat(os.lstat(path))
+    return _PathIdentity.from_stat(path_stat(path))
+
+
+def path_stat(path: Path) -> os.stat_result:
+    """No-follow metadata using the same timestamp semantics as an open descriptor."""
+    return _windows_path_stat(path) if os.name == "nt" else os.lstat(path)
 
 
 def _windows_path_identity(path: Path) -> _PathIdentity:
+    return _PathIdentity.from_stat(_windows_path_stat(path))
+
+
+def _windows_path_stat(path: Path) -> os.stat_result:
     """Observe native change time consistently with descriptor observations.
 
     Python 3.12 Windows lstat exposes creation time as ctime, while fstat exposes
@@ -277,7 +291,7 @@ def _windows_path_identity(path: Path) -> _PathIdentity:
         attributes = getattr(info, "st_file_attributes", None)
         if attributes is None or attributes & 0x00000400:  # FILE_ATTRIBUTE_REPARSE_POINT
             raise OSError("A publication pathname is a reparse point.")
-        return _PathIdentity.from_stat(info)
+        return info
     finally:
         if descriptor is None:
             kernel.CloseHandle(handle)
@@ -482,6 +496,7 @@ def _create_private_quarantine(
             descriptor,
             identity,
         )
+        prepared.observe("quarantine")
         return
     except BaseException:
         if descriptor is not None:
@@ -1281,6 +1296,7 @@ def _copy_regular_no_clobber(
     target: Path,
     *,
     owner: Callable[[_OwnedPath], None] | None = None,
+    created: Callable[[_OwnedPath], None] | None = None,
 ) -> _OwnedPath:
     """Copy one verified regular file into an exclusive destination."""
 
@@ -1313,6 +1329,8 @@ def _copy_regular_no_clobber(
             destination_flags,
             stat.S_IMODE(source_stat.st_mode),
         )
+        if created is not None:
+            created(_OwnedPath(target, _PathIdentity.from_stat(os.fstat(destination_descriptor))))
         digest = hashlib.sha256()
         while chunk := os.read(source_descriptor, 1024 * 1024):
             digest.update(chunk)
@@ -1442,6 +1460,7 @@ def _backup_target(artifact: _Artifact) -> None:
                 _OwnedPath(target, expected),
                 candidate,
                 owner=lambda backup: _record_backup(artifact, backup),
+                created=lambda owned: artifact.observe("copy_created", reservation=owned),
             )
             return
         except FileExistsError:
@@ -2154,6 +2173,7 @@ def _prepare_regular_install(
             source,
             quarantine.path,
             owner=lambda candidate: setattr(prepared, "candidate", candidate),
+            created=lambda owned: prepared.observe("copy_created", owned),
         )
         candidate = prepared.candidate
         if candidate is None:
@@ -2270,7 +2290,7 @@ def _install_no_clobber(
             return installed
         if source.identity.file_type != stat.S_IFREG:
             raise OSError("Only regular files and symbolic links can be published.")
-        prepared = _PreparedRegularInstall(target)
+        prepared = _PreparedRegularInstall(target, artifact=restoration, restoration=True)
         try:
             _prepare_regular_install(source, prepared)
             return _commit_prepared_install(
@@ -2346,7 +2366,7 @@ def _publish_artifact(
     _assert_pristine(artifact.source.path, artifact.source.identity)
     if artifact.source.identity.file_type != stat.S_IFREG:
         raise OSError("Publication staging files must remain regular files.")
-    prepared = _PreparedRegularInstall(artifact.target)
+    prepared = _PreparedRegularInstall(artifact.target, artifact=artifact)
     try:
         _prepare_regular_install(artifact.source, prepared)
         artifact.observe("candidate", prepared)

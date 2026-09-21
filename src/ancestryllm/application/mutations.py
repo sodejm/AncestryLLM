@@ -63,6 +63,7 @@ class MutationRequest(BoundaryDTO):
     deadline_ms: int
     lease_ms: int
     artifacts: tuple[ArtifactRef, ...]
+    retain_outcome: bool = True
 
     def __post_init__(self) -> None:
         for value in (self.operation_id, self.owner_id, self.session_id):
@@ -81,6 +82,8 @@ class MutationRequest(BoundaryDTO):
             raise ValueError("A mutation requires a deadline.")
         if type(self.lease_ms) is not int or not 1 <= self.lease_ms <= 300_000:
             raise ValueError("Mutation leases must be bounded to at most five minutes.")
+        if type(self.retain_outcome) is not bool:
+            raise ValueError("Mutation outcome retention must be boolean.")
         _artifacts(self.artifacts)
 
 

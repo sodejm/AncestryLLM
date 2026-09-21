@@ -34,7 +34,10 @@ from ancestryllm.application.mutations import (
 from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
+
+
+_TERMINAL_HISTORY_LIMIT = 256
 
 
 def _error(code: str, message: str) -> AncestryError:
@@ -210,6 +213,77 @@ class LocalMutationCoordinator:
                 )
         finally:
             _unlock(bootstrap)
+        self._maintain()
+
+    @contextmanager
+    def _catalog(self) -> Iterator[None]:
+        # Serialize opening lock inodes with collection. Resource locks remain
+        # nonblocking and independent after this short catalog transaction.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                descriptor = _lock(self.namespace / "catalog.lock")
+                break
+            except AncestryError as exc:
+                if exc.code != "MUTATION_CONFLICT" or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            _unlock(descriptor)
+
+    def _maintain(self) -> None:
+        """Bound internal history without discarding retry or recovery authority.
+
+        Failure is retried by the next invocation; it must not turn a recorded
+        terminal outcome into a reported publication failure.
+        """
+        try:
+            with self._transaction() as database:
+                tables = {
+                    row[0]
+                    for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+                obsolete = database.execute(
+                    "SELECT operation_id FROM operations WHERE outcome IS NOT NULL "
+                    "AND json_extract(request,'$.value.retain_outcome')=0 "
+                    "ORDER BY rowid DESC LIMIT -1 OFFSET ?",
+                    (_TERMINAL_HISTORY_LIMIT,),
+                ).fetchall()
+                for row in obsolete:
+                    for table, statement in (
+                        ("file_replacements", "DELETE FROM file_replacements WHERE operation_id=?"),
+                        (
+                            "directory_publications",
+                            "DELETE FROM directory_publications WHERE operation_id=?",
+                        ),
+                        (
+                            "bundle_publications",
+                            "DELETE FROM bundle_publications WHERE operation_id=?",
+                        ),
+                        ("sync_destinations", "DELETE FROM sync_destinations WHERE operation_id=?"),
+                        ("bindings", "DELETE FROM bindings WHERE operation_id=?"),
+                    ):
+                        if table in tables:
+                            database.execute(statement, (row[0],))
+                    database.execute("DELETE FROM operations WHERE operation_id=?", (row[0],))
+            with self._catalog():
+                for path in (self.namespace / "locks").iterdir():
+                    if len(path.name) != 64 or any(
+                        char not in "0123456789abcdef" for char in path.name
+                    ):
+                        continue
+                    try:
+                        descriptor = _lock(path)
+                    except AncestryError:
+                        continue
+                    # Windows requires closing the handle before deletion. The
+                    # catalog still prevents another process opening this inode.
+                    _unlock(descriptor)
+                    path.unlink()
+        except (OSError, AncestryError):
+            pass
 
     def __enter__(self) -> Self:
         return self
@@ -371,6 +445,7 @@ class LocalMutationCoordinator:
                         (r.resource_id, r.expected_revision) for r in request.resources
                     ),
                     "artifacts": [item.to_json() for item in request.artifacts],
+                    **({"retain_outcome": False} if not request.retain_outcome else {}),
                 },
                 sort_keys=True,
             )
@@ -408,11 +483,19 @@ class LocalMutationCoordinator:
 
     @overload
     def _acquire(
-        self, request: MutationRequest, *, recovery: Literal[False]
+        self,
+        request: MutationRequest,
+        *,
+        recovery: Literal[False],
+        prepare: Callable[[sqlite3.Connection], None] | None = None,
     ) -> MutationLease | MutationOutcome: ...
 
     def _acquire(
-        self, request: MutationRequest, *, recovery: bool
+        self,
+        request: MutationRequest,
+        *,
+        recovery: bool,
+        prepare: Callable[[sqlite3.Connection], None] | None = None,
     ) -> MutationLease | MutationOutcome:
         if request.deadline_ms <= _now_ms():
             raise _error("MUTATION_DEADLINE_EXCEEDED", "The mutation deadline has expired.")
@@ -433,7 +516,8 @@ class LocalMutationCoordinator:
                 current_paths = {self._bindings[key].path for key in resources}
                 resources.update({item.resource_id: item for item in self.bind(current_paths)})
             ordered_ids = tuple(sorted(resources))
-            descriptors.extend(_lock(self.namespace / "locks" / key) for key in ordered_ids)
+            with self._catalog():
+                descriptors.extend(_lock(self.namespace / "locks" / key) for key in ordered_ids)
             with self._transaction() as database:
                 row = self._record(database, request)
                 if recovery and (row is None or row["outcome"] is not None):
@@ -527,6 +611,8 @@ class LocalMutationCoordinator:
                             binding.parent_identity,
                         ),
                     )
+                if prepare is not None:
+                    prepare(database)
             self._held[lease.token] = _Held(lease, descriptors, request, os.getpid(), ordered_ids)
             return lease
         except BaseException:
@@ -638,6 +724,7 @@ class LocalMutationCoordinator:
             del self._held[lease.token]
             for descriptor in reversed(held.descriptors):
                 _unlock(descriptor)
+            self._maintain()
             return outcome
         held.lease = replace(lease, state=transition.state)
         return held.lease
