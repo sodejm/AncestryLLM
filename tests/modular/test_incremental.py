@@ -7,6 +7,7 @@ import os
 import socket
 import stat
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -16,6 +17,7 @@ import pytest
 
 import ancestryllm.gedcom.engine as engine
 import ancestryllm.gedcom.incremental as incremental
+from ancestryllm.core.directory_mutation import DirectoryMutation
 from ancestryllm.core.errors import AncestryError, FileIngressError, ProviderError
 from ancestryllm.core.ingress import (
     FileFingerprint,
@@ -42,6 +44,24 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+@pytest.mark.parametrize("operation", ("update", "rebase"))
+def test_sync_rejects_conflicting_mutation_before_staging(tmp_path: Path, operation: str) -> None:
+    arguments = _new_publication_args(tmp_path, operation, tmp_path / "releases")
+    conflict = AncestryError("MUTATION_CONFLICT", "Another mutation owns this resource.")
+    with (
+        patch.object(DirectoryMutation, "acquire", side_effect=conflict) as acquire,
+        patch.object(
+            sync_publication, "_ensure_release_root", wraps=sync_publication._ensure_release_root
+        ) as release_root,
+        patch.object(sync_publication, "_create_staging_directory") as stage,
+        pytest.raises(AncestryError, match="Another mutation"),
+    ):
+        run_sync(arguments, raise_errors=True)
+    acquire.assert_called_once()
+    release_root.assert_not_called()
+    stage.assert_not_called()
 
 
 def test_legacy_module_facades_reexport_supported_owner_contracts() -> None:
@@ -489,9 +509,12 @@ def _assert_cleanup_residue(release_root: Path, operation: str) -> None:
     if os.name == "nt":
         assert not residues
         return
-    assert len(residues) == 1
-    assert residues[0].is_dir()
-    assert not any(residues[0].iterdir())
+    # Journaled cleanup can remove the owned stage completely. Fail-closed
+    # legacy cleanup may retain one empty directory when ownership is uncertain.
+    assert len(residues) <= 1
+    for residue in residues:
+        assert residue.is_dir()
+        assert not any(residue.iterdir())
 
 
 def _assert_candidate_cleanup_residue(parent: Path) -> None:
@@ -705,6 +728,7 @@ class _LateCopyFailurePolicy(FileIngressPolicy):
         kind: FileKind,
         *,
         expected: FileFingerprint,
+        on_created: Callable[[Path, int], None] | None = None,
     ) -> None:
         del path, destination, expected
         raise FileIngressError(
@@ -2954,6 +2978,15 @@ def test_raw_close_interruption_after_commit_preserves_success(
     arguments = _new_publication_args(tmp_path, operation, releases)
     original_close = sync_publication.os.close
     interrupted = False
+    committed = False
+    original_finalize = sync_publication._remove_published_staging_marker
+
+    def arm_committed_close(*args, **kwargs):
+        nonlocal committed
+        # New durability checks also open the root before publication. Limit
+        # this fault to the committed outcome named by this test.
+        committed = True
+        return original_finalize(*args, **kwargs)
 
     def interrupt_marker_close_once(descriptor: int) -> None:
         nonlocal interrupted
@@ -2982,15 +3015,16 @@ def test_raw_close_interruption_after_commit_preserves_success(
                 and selected == releases
             )
         )
-        if not interrupted and selected_target:
+        if committed and not interrupted and selected_target:
             interrupted = True
             raise interruption("fictional raw close interruption")
         original_close(descriptor)
 
-    with patch.object(
-        sync_publication.os,
-        "close",
-        side_effect=interrupt_marker_close_once,
+    with (
+        patch.object(
+            sync_publication, "_remove_published_staging_marker", side_effect=arm_committed_close
+        ),
+        patch.object(sync_publication.os, "close", side_effect=interrupt_marker_close_once),
     ):
         assert run_sync(arguments) == 0
 

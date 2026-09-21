@@ -41,6 +41,10 @@
     "title": "Release runbook — AncestryLLM",
     "description": "Step-by-step instructions for preparing, validating, and publishing an AncestryLLM release."
   },
+  "reference/MUTATION_RECOVERY.md": {
+    "title": "Durable mutation coordination and recovery — AncestryLLM",
+    "description": "Native process ownership, journal privacy, atomic publication, and authorized recovery for settings, sync generations, and exported artifacts."
+  },
   "ENCRYPTED_BACKUPS.md": {
     "title": "Encrypted backup and recovery — AncestryLLM",
     "description": "How to create, verify, and restore encrypted backups of your AncestryLLM configuration and data."

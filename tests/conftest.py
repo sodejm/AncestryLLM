@@ -32,3 +32,14 @@ def isolate_tests_from_invoking_git_repository(monkeypatch: pytest.MonkeyPatch) 
 
     for variable in _GIT_LOCAL_ENVIRONMENT:
         monkeypatch.delenv(variable, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def isolate_mutation_journal(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep in-process test writes out of the account's production journal."""
+    from ancestryllm.core import mutation
+
+    journal = tmp_path_factory.mktemp("mutation-journal")
+    monkeypatch.setattr(mutation, "coordinator_namespace", lambda: journal)

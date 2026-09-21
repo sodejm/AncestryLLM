@@ -120,6 +120,40 @@ def test_config_save_finishes_fallible_permission_work_before_publication(
     assert permission_hardened is True
 
 
+def test_config_save_respects_shared_mutation_ownership(tmp_path: Path) -> None:
+    from ancestryllm.core.atomic_file import AtomicFileMutation
+    from ancestryllm.core.errors import AncestryError
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
+    config = _config(tmp_path)
+    config.config_path.parent.mkdir()
+    with (
+        LocalMutationCoordinator() as coordinator,
+        AtomicFileMutation(config.config_path, coordinator),
+    ):
+        with pytest.raises(AncestryError) as conflict:
+            config.save()
+        assert conflict.value.code == "MUTATION_CONFLICT"
+        assert str(tmp_path) not in conflict.value.render()
+        assert not config.config_path.exists()
+    assert config.save()
+
+
+def test_config_save_recovers_interrupted_replacement(tmp_path: Path) -> None:
+    from ancestryllm.core.atomic_file import AtomicFileMutation
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
+    config = _config(tmp_path)
+    config.config_path.parent.mkdir()
+    with LocalMutationCoordinator() as coordinator:
+        interrupted = AtomicFileMutation(config.config_path, coordinator)
+        interrupted.__enter__()
+    assert config.save()
+    with LocalMutationCoordinator() as coordinator:
+        assert coordinator.interrupted((config.config_path,)) == ()
+    assert AppConfig.load(config.config_path).revision == 0
+
+
 @pytest.mark.parametrize(
     ("schema_version", "changes", "expected_code"),
     [

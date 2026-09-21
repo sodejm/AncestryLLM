@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint, non_interruptible_section
+from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -139,6 +140,18 @@ class _Artifact:
     published: _OwnedPath | None = None
     restored: _OwnedPath | None = None
     displacement_attempted: bool = False
+    observer: (
+        Callable[[str, _Artifact, _PreparedRegularInstall | None, _OwnedPath | None], None] | None
+    ) = None
+
+    def observe(
+        self,
+        event: str,
+        prepared: _PreparedRegularInstall | None = None,
+        reservation: _OwnedPath | None = None,
+    ) -> None:
+        if self.observer is not None:
+            self.observer(event, self, prepared, reservation)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1325,6 +1338,7 @@ def _backup_target(artifact: _Artifact) -> None:
                 if candidate.readlink() != link_value:
                     raise OSError("A publication backup changed while it was created.")
                 artifact.backup = _OwnedPath(candidate, symlink_identity)
+                artifact.observe("backup")
             except BaseException:
                 try:
                     current = _identity(candidate)
@@ -1338,12 +1352,17 @@ def _backup_target(artifact: _Artifact) -> None:
             _copy_regular_no_clobber(
                 _OwnedPath(target, expected),
                 candidate,
-                owner=lambda backup: setattr(artifact, "backup", backup),
+                owner=lambda backup: _record_backup(artifact, backup),
             )
             return
         except FileExistsError:
             continue
     raise OSError("A publication backup name could not be reserved safely.")
+
+
+def _record_backup(artifact: _Artifact, backup: _OwnedPath) -> None:
+    artifact.backup = backup
+    artifact.observe("backup")
 
 
 def _cleanup_displacement_lifecycle(lifecycle: _DisplacementLifecycle) -> None:
@@ -2083,6 +2102,9 @@ def _commit_prepared_install(
     if destination is None or not prepared.complete:
         raise OSError("A private publication candidate was not fully prepared.")
     try:
+        tracked = artifact if artifact is not None else restoration
+        if tracked is not None:
+            tracked.observe("installing" if artifact is not None else "restoring", prepared)
         _commit_prepared_namespace(prepared, target)
         _fsync_directory_capability(destination)
         installed = _verify_committed_install(prepared, target)
@@ -2090,6 +2112,8 @@ def _commit_prepared_install(
             artifact.published = installed
         if restoration is not None:
             restoration.restored = installed
+        if tracked is not None:
+            tracked.observe("installed" if artifact is not None else "restored", prepared)
     except BaseException as exc:
         recorded = artifact.published if artifact is not None else None
         if recorded is None and restoration is not None:
@@ -2178,6 +2202,7 @@ def _displace_original(
         reservation = lifecycle.reservation
         if reservation is None:
             raise OSError("A displacement reservation was not retained.")
+        artifact.observe("displacing", reservation=reservation)
         replace(artifact.target, reservation.path)
         moved_identity = _identity(reservation.path)
         if not expected.unchanged(moved_identity):
@@ -2195,6 +2220,7 @@ def _displace_original(
         lifecycle.transferred = True
         if destination is not None:
             _fsync_directory_capability(destination)
+        artifact.observe("displaced")
     except BaseException:
         reservation = lifecycle.reservation
         if artifact.displaced is None and reservation is not None:
@@ -2221,6 +2247,7 @@ def _publish_artifact(
     prepared = _PreparedRegularInstall(artifact.target)
     try:
         _prepare_regular_install(artifact.source, prepared)
+        artifact.observe("candidate", prepared)
         destination = prepared.destination
         if destination is None:
             raise OSError("A publication destination capability was not retained.")
@@ -2247,7 +2274,7 @@ def _publish_artifact(
 def _restore_original(artifact: _Artifact) -> OSError | None:
     if artifact.original_target is None:
         return None
-    if not artifact.displacement_attempted:
+    if not artifact.displacement_attempted and artifact.backup is None:
         return None
     current_target = _identity_or_none(artifact.target)
     if current_target is not None:
@@ -2258,6 +2285,10 @@ def _restore_original(artifact: _Artifact) -> OSError | None:
             return None
         return OSError(
             "A concurrent replacement was preserved; the prior target remains in recovery storage."
+        )
+    if not artifact.displacement_attempted:
+        return OSError(
+            "A publication target disappeared; the prior target remains in recovery storage."
         )
     # The sealed backup retains metadata captured before its source was read.
     # Prefer it because reading the original can advance the displaced inode's
@@ -2397,14 +2428,24 @@ def publish_staged_bundle(
     handles, so namespace crash durability cannot be strengthened there.
     """
 
+    from ancestryllm.core.bundle_mutation import BundleMutation
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
     cancellation_checkpoint()
-    selected = [(Path(source), Path(target)) for source, target in artifacts]
+    selected = [(Path(source).absolute(), Path(target).absolute()) for source, target in artifacts]
+    if not selected:
+        return
     for index, (_source, target) in enumerate(selected):
         for _other_source, other_target in selected[index + 1 :]:
             if paths_alias(target, other_target):
                 raise OSError("Publication bundle targets must not alias each other.")
 
-    with non_interruptible_section("publishing output bundle"):
+    with (
+        LocalMutationCoordinator() as coordinator,
+        non_interruptible_section("publishing output bundle"),
+    ):
+        journal = BundleMutation((target for _source, target in selected), coordinator)
+        journal.acquire()
         prepared = [
             _Artifact(
                 source=_claim_for_publication(source),
@@ -2420,10 +2461,12 @@ def publish_staged_bundle(
             }:
                 raise OSError("Publication targets must be regular files or symbolic links.")
 
+        journal.track(prepared)
         try:
             for artifact in prepared:
                 if artifact.original_target is not None:
                     _backup_target(artifact)
+            journal.committing()
             for artifact in prepared:
                 _publish_artifact(artifact, replace)
             if validate_after is not None:
@@ -2431,14 +2474,20 @@ def publish_staged_bundle(
             for artifact in prepared:
                 assert artifact.published is not None
                 _assert_pristine(artifact.target, artifact.published.identity)
+            journal.validated()
         except BaseException as publish_error:
             rollback_error = _rollback_bundle(prepared)
             if rollback_error is not None:
                 raise rollback_error from publish_error
+            # A foreign replacement leaves the journal unresolved and blocked.
+            # Preserve the publication error that explains how we got here.
+            with suppress(AncestryError):
+                journal.finish()
             raise
         else:
             with suppress(BaseException):  # The validated commit is authoritative.
                 _cleanup_committed_bundle(prepared)
+            journal.finish()
 
 
 __all__ = [

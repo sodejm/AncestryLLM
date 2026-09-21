@@ -12,7 +12,7 @@ from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,
@@ -20,6 +20,9 @@ from ancestryllm.core.cancellation import (
 from ancestryllm.gedcom.sync_contracts import (
     SyncError,
 )
+
+if TYPE_CHECKING:
+    from ancestryllm.core.directory_mutation import DirectoryMutation
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +73,17 @@ class _PublicationTransactionState:
     committed: bool = False
 
 
-def _write_bytes(path: Path, payload: bytes) -> None:
+def _write_bytes(path: Path, payload: bytes, *, mutation: DirectoryMutation | None = None) -> None:
     """Write a new artifact inside an unpublished staging directory."""
     cancellation_checkpoint()
     with path.open("xb") as handle:
+        if mutation is not None:
+            mutation.track_member(path, handle.fileno())
         handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if mutation is not None:
+        mutation.finish_member(path)
     cancellation_checkpoint()
 
 
@@ -1018,6 +1027,20 @@ def _cleanup_preselected_empty_directory(path: Path) -> None:
         _close_descriptor_quietly(parent_descriptor)
 
 
+def _validate_release_parent(path: Path) -> None:
+    """Validate an output parent without creating an ownership marker."""
+    try:
+        _directory_identity(path.parent)
+    except (OSError, SyncError, ValueError) as exc:
+        raise SyncError(
+            "SYNC_OUTPUT",
+            "The release directory could not be created safely.",
+            "Its parent must already be a stable, writable local directory.",
+            ["Create the parent directory explicitly, then retry."],
+            details=(f"Error class: {type(exc).__name__}",),
+        ) from exc
+
+
 def _ensure_release_root(path: Path) -> _DirectoryCapability:
     """Return a held capability for a preexisting or exclusively created root."""
 
@@ -1036,16 +1059,7 @@ def _ensure_release_root(path: Path) -> _DirectoryCapability:
     else:
         return _open_directory_capability(path, owned=False)
 
-    try:
-        _directory_identity(path.parent)
-    except (OSError, SyncError, ValueError) as exc:
-        raise SyncError(
-            "SYNC_OUTPUT",
-            "The release directory could not be created safely.",
-            "Its parent must already be a stable, writable local directory.",
-            ["Create the parent directory explicitly, then retry."],
-            details=(f"Error class: {type(exc).__name__}",),
-        ) from exc
+    _validate_release_parent(path)
     candidate: Path | None = None
     creation_error: BaseException | None = None
     for _attempt in range(8):
@@ -1102,6 +1116,8 @@ def _ensure_release_root(path: Path) -> _DirectoryCapability:
 def _create_staging_directory(
     release_root: _DirectoryCapability,
     prefix: str,
+    *,
+    mutation: DirectoryMutation | None = None,
 ) -> tuple[
     Path,
     str,
@@ -1116,6 +1132,8 @@ def _create_staging_directory(
     _require_selected_capability(release_root)
     name = f"{prefix}{uuid.uuid4().hex}"
     path = _capability_current_path(release_root) / name
+    if mutation is not None:
+        mutation.plan_staging(path)
     created = False
     identity: _DirectoryIdentity | None = None
     descriptor: int | None = None
@@ -1169,6 +1187,8 @@ def _create_staging_directory(
         os.fsync(marker_descriptor)
         marker_identity = _DirectoryIdentity.from_stat(os.fstat(marker_descriptor))
         _require_selected_capability(release_root)
+        if mutation is not None:
+            mutation.track_staging(path, marker_name)
         return (
             path,
             name,

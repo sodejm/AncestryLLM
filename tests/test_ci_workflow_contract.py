@@ -25,6 +25,7 @@ GOVERNED_JOB_TIMEOUTS = {
         "changes": 5,
         "lockfile": 15,
         "test": 20,
+        "mutation-recovery": 20,
         "quality": 20,
         "docs-screenshots": 40,
         "security": 30,
@@ -189,6 +190,7 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
     assert "make lock-check" in lockfile_job
     for job in (
         "test",
+        "mutation-recovery",
         "quality",
         "docs-screenshots",
         "security",
@@ -209,6 +211,7 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
         "changes",
         "lockfile",
         "test",
+        "mutation-recovery",
         "quality",
         "docs-screenshots",
         "security",
@@ -221,6 +224,8 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
         assert f"      - {dependency}\n" in gate
     assert "CHANGES_RESULT: ${{ needs.changes.result }}" in gate
     assert "DOCS_SCREENSHOTS_RESULT: ${{ needs.docs-screenshots.result }}" in gate
+    assert "MUTATION_RECOVERY_RESULT: ${{ needs.mutation-recovery.result }}" in gate
+    assert 'require_success mutation-recovery "$MUTATION_RECOVERY_RESULT"' in gate
     assert 'require_success changes "$CHANGES_RESULT"' in gate
     assert 'require_success docs-screenshots "$DOCS_SCREENSHOTS_RESULT"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "success"' in gate
@@ -351,7 +356,7 @@ def test_ci_timeout_proof_is_manual_deterministic_and_fail_closed() -> None:
 
 def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:
     expected_counts = {
-        ".github/workflows/ci.yml": 7,
+        ".github/workflows/ci.yml": 8,
         ".github/workflows/release-readiness.yml": 3,
         ".github/workflows/release.yml": 3,
         ".github/workflows/desktop-sidecar.yml": 2,
@@ -370,6 +375,7 @@ def test_verified_uv_calling_jobs_grant_attestation_read_permission() -> None:
         ".github/workflows/ci.yml": (
             "lockfile",
             "test",
+            "mutation-recovery",
             "quality",
             "docs-screenshots",
             "security",

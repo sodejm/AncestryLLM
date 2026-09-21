@@ -124,9 +124,12 @@ earlier priority.
 5. **Preserve genealogy evidence.** GEDCOM processing is loss-minimizing:
    citations, custom/vendor structures, relationships, conflicts, and unknown
    records are retained whenever they can be represented safely.
-6. **Publish atomically and make loss visible.** Configuration, GEDCOM exports,
-   and sync generations are staged before replacement or publication. Export
-   and sync reports disclose omissions and unsupported source data.
+6. **Stage publication and make loss visible.** Configuration files and sync
+   directories publish through atomic filesystem operations under durable
+   cross-process ownership. Legacy exports with separate filenames retain
+   recoverable complete-set semantics; they do not become visible in one
+   filesystem operation. Export and sync reports disclose omissions and
+   unsupported source data.
 7. **Keep interfaces replaceable.** Adapters render and route; services own use
    cases; infrastructure implements storage, provider, and file boundaries.
 
@@ -238,7 +241,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. The `0.6.0` source-level `SettingsService`, `SecretManagementService`, and `DeploymentService` own reviewed non-secret settings, write-only credentials, and explicit deployment intent. Issue #104's `JobLifecycleService` owns strict schema-v1 job snapshots/events, replay, cooperative cancellation, terminal-state reconciliation, and shutdown assessment without depending on API or Electron types. Issue #110's standard-library-only chat DTOs define bounded schema-v1 session and run contracts without importing API, provider, database, or presentation types; Issue #111 extends them with immutable owner-scoped run and lifecycle-event contracts. |
 | `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, deployment profiles, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
-| `src/ancestryllm/core/` | Configuration, typed deployment-profile schema, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
+| `src/ancestryllm/core/` | Configuration, typed deployment-profile schema, dependency composition, module registry, cancellation, secret boundary, compatibility errors, and the shared durable local mutation coordinator. Its account-scoped metadata journal and OS resource locks coordinate configuration replacement, artifact/RootsMagic export publication, and sync generations across native processes. Recovery requires newly authorized resource binding; it never restores desktop grants. See [mutation recovery](docs/reference/MUTATION_RECOVERY.md) for visibility and evidence limits. |
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
 | `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, diagnostics, and the `0.6.0` bounded job snapshot/event repository. |
 | `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. Issue #110's `ChatService` owns transient synchronous chat history, exact-profile preflight, fresh consent, bounded generation, and payload-free audit composition. Issue #56's internal bridge adapts authorized synchronous provider iterators to bounded asynchronous consumption without adding transport authority. Issue #111's `ChatStreamingService` owns bounded replay, monotonic lifecycle events, cancellation, shutdown, restart reconciliation, and exactly one payload-free terminal audit outcome. |

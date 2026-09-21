@@ -194,6 +194,35 @@ def write_gedcom(
     out_path = Path(output_path).resolve()
     if out_path.parent and not out_path.parent.exists():
         raise OSError(f"Output directory does not exist: {out_path.parent}")
+    payload = render_gedcom(
+        records,
+        source_parsers,
+        source_documents,
+        pointer_map,
+        include_individuals,
+        include_families,
+        gedcom_version,
+    )
+    token = stage_text_atomically(out_path, payload)
+    log.info("Wrote %d individuals to %s", len(records), out_path)
+    return token
+
+
+def render_gedcom(
+    records: list[IndividualRecord],
+    source_parsers: list[Any] | None = None,
+    source_documents: list[ParsedSource] | None = None,
+    pointer_map: dict[str, str] | None = None,
+    include_individuals: set[str] | None = None,
+    include_families: set[str] | None = None,
+    gedcom_version: str = "5.5.5",
+) -> str:
+    """Render and validate GEDCOM without publishing a filesystem artifact."""
+    cancellation_checkpoint()
+    if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
+        raise ValueError(
+            f"Unsupported GEDCOM version {gedcom_version}; choose from {SUPPORTED_GEDCOM_VERSIONS}"
+        )
     lines: list[str] = []
     synthetic_submitter: list[str] = []
     if source_documents:
@@ -313,14 +342,12 @@ def write_gedcom(
     lines = _wrap_long_gedcom_lines(lines)
     if gedcom_version == "5.5.5":
         validate_gedcom_555(lines)
-    payload = "\n".join(lines) + "\n"
-    token = stage_text_atomically(out_path, payload)
-    log.info("Wrote %d individuals to %s", len(records), out_path)
-    return token
+    return "\n".join(lines) + "\n"
 
 
 __all__ = [
     "SUPPORTED_GEDCOM_VERSIONS",
+    "render_gedcom",
     "validate_gedcom_555",
     "wrap_long_gedcom_lines",
     "write_gedcom",

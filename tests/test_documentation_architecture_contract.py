@@ -35,6 +35,7 @@ MIGRATED_READER_DOCS = {
 CREATED_READER_DOCS = {
     "reference/DESKTOP.md": "Create in #262; retain basename",
     "reference/DESKTOP_DIAGNOSTICS.md": "Create in #461; retain basename",
+    "reference/MUTATION_RECOVERY.md": "Create in #200; retain basename",
 }
 
 

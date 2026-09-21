@@ -1038,6 +1038,7 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         expected: FileFingerprint,
+        on_created: Callable[[Path, int], None] | None = None,
     ) -> None:
         """Copy only the verified source identity and reject mid-copy changes."""
 
@@ -1055,6 +1056,8 @@ class FileIngressPolicy:
                 target.open("xb", buffering=0) as output,
             ):
                 try:
+                    if on_created is not None:
+                        on_created(target, output.fileno())
                     for chunk in self._bounded_chunks(source, kind):
                         digest.update(chunk)
                         remaining = memoryview(chunk)

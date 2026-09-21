@@ -14,7 +14,8 @@ The public boundary is intentionally small:
 | `ancestryllm.application.dto` | Strict, immutable, deterministic JSON DTOs, opaque artifact and secret capabilities, and decision/progress records. |
 | `ancestryllm.application.operations` | Exact command request/result pairs plus reusable transport-neutral GEDCOM inspection and decision DTOs. |
 | `ancestryllm.application.gedcom_jobs` | The bounded asynchronous façade shared by GEDCOM transports. |
-| `ancestryllm.application.ports` | Cancellation, progress, decision, identity-resolution, and quality-resolution protocols. |
+| `ancestryllm.application.ports` | Cancellation, progress, decision, identity-resolution, quality-resolution, and mutation-coordination protocols. |
+| `ancestryllm.application.mutations` | Strict path-free resource, request, lease, transition, and outcome DTOs for durable mutation ownership. |
 | `ancestryllm.application.errors` | Complete mapping from pure domain failures to stable coded application errors and transport envelopes. |
 | `ancestryllm.domain.errors` | Framework-independent failure categories and bounded safe detail values. |
 
@@ -23,7 +24,7 @@ The private modules `application._artifacts`, `application._compat`,
 application composition. `application._rootsmagic` owns RootsMagic query
 runtime orchestration behind the public operation DTOs and the
 `rootsmagic.query.RootsMagicQueryService` compatibility façade.
-`application._rootsmagic_export` owns export validation, staging, and atomic
+`application._rootsmagic_export` owns export validation, staging, and recoverable
 publication behind the public export boundary and legacy exporter compatibility
 façade. These modules are not alternate service APIs or operation registries.
 
@@ -132,8 +133,10 @@ engines, a generic command registry, renderer paths, or record trees.
 
 ## Ports and adapter responsibilities
 
-Services depend on five narrow structural protocols:
+Services depend on narrow structural protocols:
 
+- `MutationCoordinator` acquires and renews fenced ownership, validates owners,
+  records transitions, and returns recorded terminal outcomes for matching retries.
 - `CancellationPort` checks for cooperative cancellation at safe boundaries.
 - `ProgressPort` emits operation/stage codes, bounded counters, sequence
   numbers, and optional opaque artifact IDs. It cannot carry genealogy
@@ -164,11 +167,25 @@ Command results preserve that rule: tabular artifact listings contain only
 plus any related artifacts as opaque references. Terminal adapters render
 those references but do not recover or expose their adapter-owned paths.
 
-Output publication is staged, claimed, cancellation-checked, and atomically
-published through the hardened publication helpers. Cancellation before
-publication removes the staged artifact and preserves any previous
-destination. Publication failures map to a sanitized code; partial external
-outputs and raw exception details are not returned.
+Output publication is staged, claimed, and cancellation-checked through the
+hardened publication helpers and shared durable coordinator. A single file or
+complete directory uses atomic filesystem publication. Legacy CLI outputs at
+separate filenames are installed individually under one journaled operation;
+recovery restores the old complete set or finishes the verified new set. They
+are not simultaneously visible through one filesystem operation, and an
+incomplete set is never recorded committed. Cancellation before publication
+preserves the previous destination. Publication failures map to sanitized
+codes; raw exception details are not returned.
+
+Mutation requests bind opaque canonical resource IDs and expected revisions to
+an operation ID, intent digest, idempotency key, owner, session, deadline, bounded
+lease, and existing artifact references. Matching retries return a recorded
+terminal outcome or require recovery; changed intent under the same key is
+rejected. OS ownership locks remain held after lease expiry, while token and
+fence checks reject stale owners. Recovery requires fresh private resource
+resolution and parent identity validation. An expired grant supplies no recovery
+authority. See [mutation recovery](MUTATION_RECOVERY.md) for the operational
+contract, stable failures, and acceptance evidence.
 
 `MediatedOperationRequest` and `MediatedOperationResult` extend this capability
 model without adding an operation registry. A request binds one unpredictable
