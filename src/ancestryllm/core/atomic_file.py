@@ -65,25 +65,30 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
         before = path.lstat()
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(before.st_mode):
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise _recovery_required()
     descriptor = os.open(
         path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     )
     try:
         opened = os.fstat(descriptor)
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+        if opened.st_nlink != 1 or (opened.st_dev, opened.st_ino) != (
+            before.st_dev,
+            before.st_ino,
+        ):
             raise _recovery_required()
         digest = hashlib.sha256()
         while block := os.read(descriptor, 1024 * 1024):
             digest.update(block)
         after = os.fstat(descriptor)
         at_path = path.lstat()
-        if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
-            opened.st_size,
-            opened.st_mtime_ns,
-            opened.st_ctime_ns,
-        ) or (at_path.st_dev, at_path.st_ino) != (after.st_dev, after.st_ino):
+        if (
+            after.st_nlink != 1
+            or at_path.st_nlink != 1
+            or (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+            != (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
+            or (at_path.st_dev, at_path.st_ino) != (after.st_dev, after.st_ino)
+        ):
             raise _recovery_required()
         return coordinator._digest(
             f"content:{_identity(coordinator, after)}:{after.st_size}:"

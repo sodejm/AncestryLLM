@@ -14,6 +14,52 @@ from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.mutation import LocalMutationCoordinator
 
 
+@pytest.mark.parametrize("boundary", ["created", "staged", "committing"])
+def test_atomic_publication_rejects_new_stage_hard_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    target = tmp_path / "settings"
+    target.write_bytes(b"old settings")
+    alias = tmp_path / "external-alias"
+
+    def link_stage(self: AtomicFileMutation, reached: str) -> None:
+        if reached == boundary:
+            os.link(self._stage, alias)
+
+    monkeypatch.setattr(AtomicFileMutation, "_checkpoint", link_stage)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        with (
+            pytest.raises(AncestryError, match="requires recovery"),
+            AtomicFileMutation(target, coordinator) as mutation,
+        ):
+            mutation.publish(b"new settings")
+        assert target.read_bytes() == b"old settings"
+        assert alias.exists()
+
+
+@pytest.mark.parametrize("boundary", ["opened", "read"])
+def test_fingerprint_rejects_hard_link_created_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    from ancestryllm.core.atomic_file import _fingerprint
+
+    target = tmp_path / "stage"
+    target.write_bytes(b"fictional stage")
+    alias = tmp_path / "alias"
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        original = os.open if boundary == "opened" else os.read
+
+        def add_link(*args: object, **kwargs: object) -> object:
+            result = original(*args, **kwargs)  # type: ignore[arg-type]
+            if not alias.exists():
+                os.link(target, alias)
+            return result
+
+        monkeypatch.setattr(os, "open" if boundary == "opened" else "read", add_link)
+        with pytest.raises(AncestryError, match="requires recovery"):
+            _fingerprint(coordinator, target)
+
+
 def test_atomic_publication_without_posix_fchmod(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -232,7 +232,7 @@ def test_partial_owned_member_recovery(tmp_path: Path, replace_member: bool) -> 
     assert not destination.exists()
 
 
-@pytest.mark.parametrize("change", ["unknown", "replaced", "modified", "unfinished"])
+@pytest.mark.parametrize("change", ["unknown", "replaced", "modified", "unfinished", "linked"])
 def test_preparation_rejects_unowned_or_unsealed_members(tmp_path: Path, change: str) -> None:
     from ancestryllm.core.directory_mutation import DirectoryMutation
 
@@ -256,6 +256,8 @@ def test_preparation_rejects_unowned_or_unsealed_members(tmp_path: Path, change:
             replacement.replace(member)
         elif change == "modified":
             member.write_bytes(b"modified")
+        elif change == "linked":
+            os.link(member, tmp_path / "external-alias")
         with pytest.raises(AncestryError, match="requires recovery"):
             mutation.prepare(stage)
         assert not (tmp_path / "export").exists()

@@ -656,6 +656,49 @@ def _restore_quarantined_path(
     return True
 
 
+def _windows_set_descriptor_times(descriptor: int, accessed_ns: int, modified_ns: int) -> None:
+    """Preserve timestamps without reopening a replaceable recovery pathname."""
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    def file_time(nanoseconds: int) -> wintypes.FILETIME:
+        ticks = nanoseconds // 100 + 116444736000000000
+        return wintypes.FILETIME(ticks & 0xFFFFFFFF, ticks >> 32)
+
+    accessed = file_time(accessed_ns)
+    modified = file_time(modified_ns)
+    library = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    set_file_time = library.SetFileTime
+    set_file_time.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    set_file_time.restype = wintypes.BOOL
+    if not set_file_time(
+        msvcrt.get_osfhandle(descriptor),  # type: ignore[attr-defined]
+        None,
+        ctypes.byref(accessed),
+        ctypes.byref(modified),
+    ):
+        raise OSError(
+            ctypes.get_last_error(),  # type: ignore[attr-defined]
+            "Windows could not preserve recovery file timestamps.",
+        )
+
+
+def _set_descriptor_times(descriptor: int, accessed_ns: int, modified_ns: int) -> None:
+    if os.utime in os.supports_fd:
+        os.utime(descriptor, ns=(accessed_ns, modified_ns))
+    elif sys.platform == "win32":
+        _windows_set_descriptor_times(descriptor, accessed_ns, modified_ns)
+    else:
+        raise OSError(errno.ENOTSUP, "Descriptor timestamp preservation is unavailable.")
+
+
 def _restore_open_descriptor(
     source_descriptor: int,
     source_identity: _PathIdentity,
@@ -690,17 +733,9 @@ def _restore_open_descriptor(
                 remaining = remaining[written:]
         if hasattr(os, "fchmod"):
             os.fchmod(destination_descriptor, stat.S_IMODE(source_stat.st_mode))
-        if os.utime in os.supports_fd:
-            os.utime(
-                destination_descriptor,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-            )
-        else:
-            os.utime(
-                target,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                follow_symlinks=False,
-            )
+        _set_descriptor_times(
+            destination_descriptor, source_stat.st_atime_ns, source_stat.st_mtime_ns
+        )
         os.fsync(destination_descriptor)
         restored = _PathIdentity.from_stat(os.fstat(destination_descriptor))
         destination_identity = restored
@@ -1281,17 +1316,9 @@ def _copy_regular_no_clobber(
                 remaining = remaining[written:]
         if hasattr(os, "fchmod"):
             os.fchmod(destination_descriptor, stat.S_IMODE(source_stat.st_mode))
-        if os.utime in os.supports_fd:
-            os.utime(
-                destination_descriptor,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-            )
-        else:
-            os.utime(
-                target,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                follow_symlinks=False,
-            )
+        _set_descriptor_times(
+            destination_descriptor, source_stat.st_atime_ns, source_stat.st_mtime_ns
+        )
         os.fsync(destination_descriptor)
         copied = _PathIdentity.from_stat(os.fstat(destination_descriptor))
         source_after = _PathIdentity.from_stat(os.fstat(source_descriptor))

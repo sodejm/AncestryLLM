@@ -97,3 +97,41 @@ def test_publication_failure_wins_when_it_races_cancellation(tmp_path: Path) -> 
 
     assert target.read_bytes() == b"existing sentinel\n"
     assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_copy_preserves_times_through_held_descriptor_without_fd_utime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restore: bool
+) -> None:
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.write_bytes(b"fictional recovery payload\n")
+    os.utime(source, ns=(1_700_000_000_000_000_000, 1_700_000_001_000_000_000))
+    source_stat = source.stat()
+    calls: list[int] = []
+
+    def set_windows_times(descriptor: int, accessed_ns: int, modified_ns: int) -> None:
+        calls.append(descriptor)
+        assert os.fstat(descriptor).st_ino == target.stat().st_ino
+        assert (accessed_ns, modified_ns) == (source_stat.st_atime_ns, source_stat.st_mtime_ns)
+        os.utime(target, ns=(accessed_ns, modified_ns))
+
+    monkeypatch.setattr(publication_module.os, "supports_fd", set())
+    monkeypatch.setattr(publication_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        publication_module, "_windows_set_descriptor_times", set_windows_times, raising=False
+    )
+    identity = publication_module._identity(source)
+    if restore:
+        descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            assert publication_module._restore_open_descriptor(descriptor, identity, target)
+        finally:
+            os.close(descriptor)
+    else:
+        publication_module._copy_regular_no_clobber(
+            publication_module._OwnedPath(source, identity), target
+        )
+    assert len(calls) == 1
+    assert target.stat().st_mtime_ns == source_stat.st_mtime_ns
+    assert target.read_bytes() == source.read_bytes()

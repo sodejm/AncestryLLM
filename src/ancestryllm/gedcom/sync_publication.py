@@ -276,6 +276,8 @@ def _held_file_path(descriptor: int) -> Path:
 def _capability_current_path(capability: _DirectoryCapability) -> Path:
     """Return the directory containing the held, unguessable marker."""
 
+    if not stat.S_ISREG(os.fstat(capability.marker_descriptor).st_mode):
+        raise OSError("The release capability no longer holds a regular marker.")
     return _held_file_path(capability.marker_descriptor).parent
 
 
@@ -432,6 +434,112 @@ def _open_windows_delete_descriptor(path: Path, *, directory: bool) -> int:
         raise
 
 
+def _windows_rename_held_directory(descriptor: int, destination: Path) -> None:
+    """Rename the held directory itself, refusing an existing destination."""
+
+    import msvcrt
+
+    class RenameInformation(ctypes.Structure):
+        _fields_ = (
+            ("replace", ctypes.c_ubyte),
+            ("root", wintypes.HANDLE),
+            ("length", wintypes.DWORD),
+            ("name", wintypes.WCHAR * 1),
+        )
+
+    name = os.fspath(destination.absolute()).encode("utf-16-le")
+    size = max(ctypes.sizeof(RenameInformation), RenameInformation.name.offset + len(name))
+    buffer = ctypes.create_string_buffer(size)
+    information = RenameInformation.from_buffer(buffer)
+    information.replace = 0
+    information.root = None
+    information.length = len(name)
+    ctypes.memmove(ctypes.addressof(buffer) + RenameInformation.name.offset, name, len(name))
+    library = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    set_information = library.SetFileInformationByHandle
+    set_information.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    set_information.restype = wintypes.BOOL
+    if not set_information(
+        msvcrt.get_osfhandle(descriptor),  # type: ignore[attr-defined]
+        3,  # FileRenameInfo
+        buffer,
+        size,
+    ):
+        raise ctypes.WinError(  # type: ignore[attr-defined]
+            ctypes.get_last_error(),  # type: ignore[attr-defined]
+            "Windows could not rename an owned release directory.",
+        )
+
+
+def _rename_directory_with_marker(
+    source: Path,
+    destination: Path,
+    marker_descriptor: int,
+    *,
+    source_dir_fd: int | None = None,
+    destination_dir_fd: int | None = None,
+) -> None:
+    """Retain ownership while Windows requires child handles closed for rename."""
+
+    if not _uses_windows_capability_handles():
+        _exclusive_rename_directory(
+            source,
+            destination,
+            source_dir_fd=source_dir_fd,
+            destination_dir_fd=destination_dir_fd,
+        )
+        return
+    if source_dir_fd is not None or destination_dir_fd is not None:
+        raise OSError("Windows directory rename requires absolute paths.")
+    marker_stat = os.fstat(marker_descriptor)
+    marker_identity = _DirectoryIdentity.from_stat(marker_stat)
+    marker_path = _held_file_path(marker_descriptor)
+    if not stat.S_ISREG(marker_stat.st_mode) or marker_stat.st_nlink != 1:
+        raise OSError("The held release marker is not an exclusive regular file.")
+    directory_descriptor = _open_windows_delete_descriptor(source, directory=True)
+    try:
+        directory_stat = os.fstat(directory_descriptor)
+        directory_path = _held_file_path(directory_descriptor)
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or not _DirectoryIdentity.from_stat(directory_stat).same_object(
+                _DirectoryIdentity.from_stat(os.lstat(source))
+            )
+            or marker_path.parent != directory_path
+            or not marker_identity.same_object(_DirectoryIdentity.from_stat(os.lstat(marker_path)))
+        ):
+            raise OSError("The held release directory or marker changed before rename.")
+        offset = os.lseek(marker_descriptor, 0, os.SEEK_CUR)
+        os.lseek(marker_descriptor, 0, os.SEEK_SET)
+        payload = os.read(marker_descriptor, 33)
+        if len(payload) != 32:
+            raise OSError("The held release marker has an invalid size.")
+        # Keep the original descriptor number continuously owned. Its temporary
+        # directory handle also prevents an unowned pathname rename after a swap.
+        os.dup2(directory_descriptor, marker_descriptor, inheritable=False)
+        try:
+            _windows_rename_held_directory(directory_descriptor, destination)
+        finally:
+            reopened = _open_windows_shared_marker(
+                _held_file_path(directory_descriptor) / marker_path.name, create=False
+            )
+            try:
+                reopened_stat = os.fstat(reopened)
+                if (
+                    not stat.S_ISREG(reopened_stat.st_mode)
+                    or reopened_stat.st_nlink != 1
+                    or not marker_identity.same_object(_DirectoryIdentity.from_stat(reopened_stat))
+                    or os.read(reopened, 33) != payload
+                ):
+                    raise OSError("The release marker changed while its directory was renamed.")
+                os.lseek(reopened, offset, os.SEEK_SET)
+                os.dup2(reopened, marker_descriptor, inheritable=False)
+            finally:
+                os.close(reopened)
+    finally:
+        os.close(directory_descriptor)
+
+
 def _marker_identity_at(
     marker_name: str,
     *,
@@ -462,7 +570,10 @@ def _delete_held_marker(
 
     deleted = False
     try:
-        held = _DirectoryIdentity.from_stat(os.fstat(marker_descriptor))
+        held_stat = os.fstat(marker_descriptor)
+        if not stat.S_ISREG(held_stat.st_mode) or held_stat.st_nlink != 1:
+            raise OSError("The release capability no longer holds an exclusive regular marker.")
+        held = _DirectoryIdentity.from_stat(held_stat)
         current = _marker_identity_at(
             marker_name,
             directory_descriptor=directory_descriptor,
@@ -589,7 +700,25 @@ def _capability_matches_selected(capability: _DirectoryCapability) -> bool:
         selected_identity = _DirectoryIdentity.from_stat(selected)
         marker_identity = _DirectoryIdentity.from_stat(marker)
         marker_held_identity = _DirectoryIdentity.from_stat(marker_held)
-        if not stat.S_ISDIR(selected.st_mode) or marker_identity != marker_held_identity:
+        if (
+            not stat.S_ISDIR(selected.st_mode)
+            or not stat.S_ISREG(marker.st_mode)
+            or not stat.S_ISREG(marker_held.st_mode)
+            or marker.st_nlink != 1
+            or marker_held.st_nlink != 1
+        ):
+            return False
+        if _uses_windows_capability_handles():
+            # Python 3.12 pathname stat reports Windows creation time as ctime;
+            # descriptor stat reports change time. Compare the stable identity
+            # and content metadata instead of those incompatible timestamps.
+            if (
+                not marker_identity.same_object(marker_held_identity)
+                or marker.st_size != marker_held.st_size
+                or marker.st_mtime_ns != marker_held.st_mtime_ns
+            ):
+                return False
+        elif marker_identity != marker_held_identity:
             return False
         if capability.descriptor is not None:
             held = _DirectoryIdentity.from_stat(os.fstat(capability.descriptor))
@@ -1089,7 +1218,7 @@ def _ensure_release_root(path: Path) -> _DirectoryCapability:
         ) from creation_error
     candidate_capability = _open_directory_capability(candidate, owned=True)
     try:
-        _exclusive_rename_directory(candidate, path)
+        _rename_directory_with_marker(candidate, path, candidate_capability.marker_descriptor)
     except OSError as exc:
         _cleanup_capability_tree(candidate_capability)
         if exc.errno in {errno.EEXIST, errno.ENOTEMPTY, errno.EISDIR, errno.ENOTDIR}:
@@ -1447,6 +1576,7 @@ def _rollback_published_directory(
     staging_name: str,
     destination_name: str,
     release_root: _DirectoryCapability,
+    marker_descriptor: int,
 ) -> bool:
     """Move a not-yet-finalized commit back to its private staging name."""
 
@@ -1462,9 +1592,10 @@ def _rollback_published_directory(
             if release_root.descriptor is not None
             else physical_root / staging_name
         )
-        _exclusive_rename_directory(
+        _rename_directory_with_marker(
             source,
             destination,
+            marker_descriptor,
             source_dir_fd=release_root.descriptor,
             destination_dir_fd=release_root.descriptor,
         )
@@ -1513,6 +1644,7 @@ def _publish_directory_no_clobber(
     staging_name: str,
     destination_name: str,
     release_root: _DirectoryCapability,
+    marker_descriptor: int,
 ) -> None:
     """Publish within the held root, rollback, and fail if its selected path moved."""
 
@@ -1527,9 +1659,10 @@ def _publish_directory_no_clobber(
     )
     try:
         _require_selected_capability(release_root)
-        _exclusive_rename_directory(
+        _rename_directory_with_marker(
             source,
             destination,
+            marker_descriptor,
             source_dir_fd=release_root.descriptor,
             destination_dir_fd=release_root.descriptor,
         )
@@ -1551,9 +1684,10 @@ def _publish_directory_no_clobber(
     if _capability_matches_selected(release_root):
         return
     with suppress(OSError):
-        _exclusive_rename_directory(
+        _rename_directory_with_marker(
             destination,
             source,
+            marker_descriptor,
             source_dir_fd=release_root.descriptor,
             destination_dir_fd=release_root.descriptor,
         )
@@ -1725,12 +1859,13 @@ def _recover_interrupted_publication(
         marker_identity,
         transaction,
     )
-    if location == destination_name:
+    if location == destination_name and transaction.marker_descriptor is not None:
         try:
             _rollback_published_directory(
                 staging_name,
                 destination_name,
                 release_root,
+                transaction.marker_descriptor,
             )
         except BaseException as rollback_error:  # noqa: BLE001 - best-effort rollback
             del rollback_error
@@ -1775,10 +1910,13 @@ def _publish_and_finalize_directory(
     """Treat no-clobber publication and marker finalization as one transaction."""
 
     try:
+        if transaction.marker_descriptor is None:
+            raise OSError("Publication requires a held staging marker.")
         _publish_directory_no_clobber(
             staging_name,
             destination_name,
             release_root,
+            transaction.marker_descriptor,
         )
         return _finalize_published_directory(
             staging_name,
