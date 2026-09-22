@@ -755,6 +755,36 @@ jobs:
             --file-grant-evidence "$ROW_ROOT/file-grant-mediation.json" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
+      - name: Exercise packaged RootsMagic workbench
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
+          mkdir -p "$ROW_ROOT/rootsmagic-fixtures"
+          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
+          export ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1
+          export ANCESTRYLLM_ROOTSMAGIC_VERIFICATION=1
+          export ANCESTRYLLM_FILE_GRANT_OPEN_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree"
+          export ANCESTRYLLM_ROOTSMAGIC_OUTPUT_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/export"
+          export ANCESTRYLLM_ROOTSMAGIC_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-workbench.json"
+          package_launcher=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$ROW_ROOT/rootsmagic-receipt.json" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/tree.ged" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/report.md" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/manifest.json" \
+            --gate packagedRootsMagicWorkbenchPassed \
+            --artifact rootsMagicEvidence="$ANCESTRYLLM_ROOTSMAGIC_EVIDENCE" \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "queries and exports an immutable RootsMagic source through the native workbench"
       - name: Upload partial native-package diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

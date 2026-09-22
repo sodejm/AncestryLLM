@@ -37,6 +37,12 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
     assert committed.endswith("\n")
     assert json.loads(committed)["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/rootsmagic/sources",
+        f"{API_NAMESPACE}/rootsmagic/sources/{{source_ref}}/discard",
+        f"{API_NAMESPACE}/rootsmagic/presets",
+        f"{API_NAMESPACE}/rootsmagic/queries",
+        f"{API_NAMESPACE}/rootsmagic/exports",
+        f"{API_NAMESPACE}/rootsmagic/jobs/{{job_id}}/result",
         f"{API_NAMESPACE}/chat/capability",
         f"{API_NAMESPACE}/chat/sessions",
         f"{API_NAMESPACE}/chat/sessions/{{session_id}}",

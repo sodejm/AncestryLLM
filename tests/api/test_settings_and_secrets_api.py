@@ -225,6 +225,12 @@ def test_openapi_marks_secret_input_write_only_and_has_no_readback_contract() ->
 
     assert schema["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/rootsmagic/sources",
+        f"{API_NAMESPACE}/rootsmagic/sources/{{source_ref}}/discard",
+        f"{API_NAMESPACE}/rootsmagic/presets",
+        f"{API_NAMESPACE}/rootsmagic/queries",
+        f"{API_NAMESPACE}/rootsmagic/exports",
+        f"{API_NAMESPACE}/rootsmagic/jobs/{{job_id}}/result",
         f"{API_NAMESPACE}/chat/capability",
         f"{API_NAMESPACE}/chat/sessions",
         f"{API_NAMESPACE}/chat/sessions/{{session_id}}",

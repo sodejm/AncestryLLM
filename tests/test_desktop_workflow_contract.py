@@ -136,7 +136,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
-    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 7
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
@@ -273,6 +273,7 @@ def test_packaged_scenarios_forward_webdriverio_filters_without_a_pnpm_separator
         "rejects a substituted packaged sidecar before launch",
         "mediates opaque packaged open and save file grants",
         "launches the selected packaged runtime normally without a debugging transport",
+        "queries and exports an immutable RootsMagic source through the native workbench",
     )
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == len(expected_scenarios)
     for scenario in expected_scenarios:
@@ -309,7 +310,7 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
 
     assert workflow.count(install) == 1
     assert release.count(install) == 2
-    assert workflow.count(verifier_launcher) == 2
+    assert workflow.count(verifier_launcher) == 3
     # Both the private build validation and the public artifact validation run
     # the automated and normal-launch packaged scenarios on Linux.
     assert release.count(production_launcher) == 4

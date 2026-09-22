@@ -110,10 +110,22 @@ import {
   parseSettingsPatch,
   parseSettingsResult,
   parseStartupDiagnosticsResult,
+  parseRootsMagicAcknowledgementResult,
+  parseRootsMagicJobResultResult,
+  parseRootsMagicOutputSelectionResult,
+  parseRootsMagicPresetDefinitionsResult,
 } from '../shared-contract/runtime'
 import { FileGrantBrokerError } from './file-grant-broker'
 import type { GedcomIntakeBroker } from './gedcom-intake-broker'
 import { parseGedcomRootQuery } from '../shared-contract/gedcom'
+import {
+  parseRootsMagicArtifactRequest,
+  parseRootsMagicExportRequest,
+  parseRootsMagicOutputDisplayName,
+  parseRootsMagicQueryRequest,
+  parseRootsMagicSourceReferenceRequest,
+} from '../shared-contract/rootsmagic'
+import type { RootsMagicWorkbenchBroker } from './rootsmagic-workbench-broker'
 import { ChatStreamController } from './chat-stream-controller'
 import {
   SidecarClientError,
@@ -157,6 +169,14 @@ export interface MainDesktopBridge extends Omit<
   | 'getGedcomInspection'
   | 'queryGedcomRoots'
   | 'discardGedcomInspection'
+  | 'inspectRootsMagicSource'
+  | 'getRootsMagicPresets'
+  | 'queryRootsMagic'
+  | 'requestRootsMagicOutput'
+  | 'exportRootsMagic'
+  | 'getRootsMagicJobResult'
+  | 'discardRootsMagicSource'
+  | 'revealRootsMagicArtifact'
   | 'createProviderProfile'
   | 'validateProviderEndpoint'
   | 'previewConsent'
@@ -311,6 +331,7 @@ export interface RegistrationOptions {
   readonly nativeActionTimeoutMs?: number
   readonly nativeActions?: MainNativeActions
   readonly gedcomIntake?: Pick<GedcomIntakeBroker, 'inspect' | 'result' | 'roots' | 'discard' | 'revokeGrant' | 'revokeOwner' | 'revokeAll'>
+  readonly rootsMagic?: Pick<RootsMagicWorkbenchBroker, 'inspect' | 'presets' | 'query' | 'selectOutput' | 'export' | 'result' | 'discard' | 'reveal' | 'observeJob' | 'revokeGrant' | 'revokeOwner' | 'revokeAll'>
   readonly recordDiagnostic?: RecordDesktopDiagnostic
 }
 interface Authorization {
@@ -739,6 +760,7 @@ function deliverJobEvent(
   state: Authorization,
   subscription: JobSubscription,
   event: Readonly<JobEvent>,
+  rootsMagic?: RegistrationOptions['rootsMagic'],
 ): void {
   if (state.jobSubscriptions.get(subscription.request.subscription_id) !== subscription
     || state.generation !== subscription.generation) return
@@ -753,6 +775,7 @@ function deliverJobEvent(
     })
     validateStructuredClone(delivery, responseLimits)
     if (delivery.event === null || delivery.event.sequence <= subscription.lastSequence) return
+    rootsMagic?.observeJob(delivery.event.snapshot)
     if (state.contents.isDestroyed() || state.navigating
       || !state.trustedUrl(state.contents.mainFrame.url)) throw new Error('Renderer unavailable')
     state.contents.send(desktopEventChannels.jobEvent, delivery)
@@ -802,6 +825,7 @@ function removeAuthorization(
   bridge: MainDesktopBridge,
   fileGrants: MainFileGrantBroker,
   gedcomIntake?: RegistrationOptions['gedcomIntake'],
+  rootsMagic?: RegistrationOptions['rootsMagic'],
 ): void {
   if (authorizations.get(state.contents) !== state) return
   authorizations.delete(state.contents)
@@ -809,6 +833,7 @@ function removeAuthorization(
   invalidate(state, bridge)
   fileGrants.revokeOwner(state.contents)
   void gedcomIntake?.revokeOwner(state.contents).catch(() => undefined)
+  void rootsMagic?.revokeOwner(state.contents).catch(() => undefined)
 }
 
 /** Registers a zero-argument IPC route that authorizes its sender before scheduling work. */
@@ -1143,6 +1168,54 @@ export function registerDesktopIpcHandlers(
   registerIntake(desktopChannels.discardGedcomInspection, parseJobRequest,
     (intake, owner, request) => intake.discard(owner, request), parseGedcomDiscardResult)
 
+  const registerRootsMagic = <Request, Result>(
+    channel: string,
+    parseRequest: (value: unknown) => Request,
+    operation: (broker: NonNullable<RegistrationOptions['rootsMagic']>, owner: BridgeWebContents, request: Request, signal: AbortSignal) => Promise<Result>,
+    parseResponse: (value: unknown) => BridgeResult<Result>,
+    deadline = timeoutMs,
+  ): void => {
+    ipc.handle(channel, async (event, ...args) => {
+      const state = authorize(event)
+      if (!state) return unauthorized<Result>()
+      if (args.length !== 1) return invalidRequest<Result>()
+      let request: Request
+      try {
+        validateStructuredClone(args[0], requestLimits)
+        request = parseRequest(args[0])
+      } catch {
+        return invalidRequest<Result>()
+      }
+      const broker = options.rootsMagic
+      if (!broker) return error('SIDECAR_UNAVAILABLE', 'RootsMagic workbench is unavailable.', 'Start the packaged local service and try again.')
+      return schedule(state, deadline,
+        (signal) => fileGrantOperation(() => operation(broker, state.contents, request, signal)), parseResponse)
+    })
+  }
+  registerRootsMagic(desktopChannels.inspectRootsMagicSource, parseFileGrantId,
+    (broker, owner, request, signal) => broker.inspect(owner, request, signal), parseJobSnapshotResult, fileDialogTimeoutMs)
+  ipc.handle(desktopChannels.getRootsMagicPresets, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized()
+    if (args.length !== 0) return invalidRequest()
+    const broker = options.rootsMagic
+    if (!broker) return error('SIDECAR_UNAVAILABLE', 'RootsMagic workbench is unavailable.', 'Start the packaged local service and try again.')
+    return schedule(state, timeoutMs,
+      (signal) => fileGrantOperation(() => broker.presets(signal)), parseRootsMagicPresetDefinitionsResult)
+  })
+  registerRootsMagic(desktopChannels.queryRootsMagic, parseRootsMagicQueryRequest,
+    (broker, owner, request, signal) => broker.query(owner, request, signal), parseJobSnapshotResult)
+  registerRootsMagic(desktopChannels.requestRootsMagicOutput, parseRootsMagicOutputDisplayName,
+    (broker, owner, request, signal) => broker.selectOutput(owner, request, signal), parseRootsMagicOutputSelectionResult, fileDialogTimeoutMs)
+  registerRootsMagic(desktopChannels.exportRootsMagic, parseRootsMagicExportRequest,
+    (broker, owner, request, signal) => broker.export(owner, request, signal), parseJobSnapshotResult)
+  registerRootsMagic(desktopChannels.getRootsMagicJobResult, parseJobRequest,
+    (broker, owner, request, signal) => broker.result(owner, request, signal), parseRootsMagicJobResultResult)
+  registerRootsMagic(desktopChannels.discardRootsMagicSource, parseRootsMagicSourceReferenceRequest,
+    (broker, owner, request) => broker.discard(owner, request), parseRootsMagicAcknowledgementResult)
+  registerRootsMagic(desktopChannels.revealRootsMagicArtifact, parseRootsMagicArtifactRequest,
+    (broker, owner, request) => broker.reveal(owner, request), parseRootsMagicAcknowledgementResult)
+
   ipc.handle(desktopChannels.requestOpenFileGrant, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<FileGrant | null>()
@@ -1195,6 +1268,7 @@ export function registerDesktopIpcHandlers(
       timeoutMs,
       () => fileGrantOperation(() => {
         options.gedcomIntake?.revokeGrant(state.contents, grantId)
+        options.rootsMagic?.revokeGrant(state.contents, grantId)
         return fileGrants.revokeGrant(state.contents, grantId)
       }),
       parseFileGrantRevocationResult,
@@ -1498,15 +1572,17 @@ export function registerDesktopIpcHandlers(
     )
     return safeResponse(response, parseChatStreamAcknowledgementResult)
   })
-  registerNoArgumentHandler(
-    ipc,
-    desktopChannels.listJobs,
-    authorize,
-    (signal) => bridge.listJobs(signal),
-    parseJobListResult,
-    timeoutMs,
-    rejectRoute,
-  )
+  ipc.handle(desktopChannels.listJobs, async (event, ...args) => {
+    const state = authorize(event)
+    if (!state) return unauthorized()
+    if (args.length !== 0) {
+      rejectRoute()
+      return invalidRequest()
+    }
+    const response = await schedule(state, timeoutMs, (signal) => bridge.listJobs(signal), parseJobListResult)
+    if (response.ok) for (const job of response.data.jobs) options.rootsMagic?.observeJob(job)
+    return response
+  })
   ipc.handle(desktopChannels.getJob, async (event, ...args) => {
     const state = authorize(event)
     if (!state) return unauthorized<JobSnapshot>()
@@ -1518,12 +1594,14 @@ export function registerDesktopIpcHandlers(
     } catch {
       return invalidRequest<JobSnapshot>()
     }
-    return schedule(
+    const response = await schedule(
       state,
       timeoutMs,
       (signal) => bridge.getJob(request, signal),
       parseJobSnapshotResult,
     )
+    if (response.ok) options.rootsMagic?.observeJob(response.data)
+    return response
   })
   ipc.handle(desktopChannels.cancelJob, async (event, ...args) => {
     const state = authorize(event)
@@ -1536,12 +1614,14 @@ export function registerDesktopIpcHandlers(
     } catch {
       return invalidRequest<JobSnapshot>()
     }
-    return schedule(
+    const response = await schedule(
       state,
       timeoutMs,
       (signal) => bridge.cancelJob(request, signal),
       parseJobSnapshotResult,
     )
+    if (response.ok) options.rootsMagic?.observeJob(response.data)
+    return response
   })
   ipc.handle(desktopChannels.subscribeJobEvents, async (event, ...args) => {
     const state = authorize(event)
@@ -1580,7 +1660,7 @@ export function registerDesktopIpcHandlers(
     try {
       stream = bridge.streamJobEvents(
         request,
-        (next) => deliverJobEvent(state, subscription, next),
+        (next) => deliverJobEvent(state, subscription, next, options.rootsMagic),
         subscription.controller.signal,
       )
     } catch (cause) {
@@ -1652,8 +1732,8 @@ export function registerDesktopIpcHandlers(
     ): () => void {
       if (disposed || contents.isDestroyed()) throw new Error('Cannot authorize unavailable WebContents.')
       const previous = authorizations.get(contents)
-      if (previous) removeAuthorization(authorizations, previous, bridge, fileGrants, options.gedcomIntake)
-      const revoke = () => removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
+      if (previous) removeAuthorization(authorizations, previous, bridge, fileGrants, options.gedcomIntake, options.rootsMagic)
+      const revoke = () => removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake, options.rootsMagic)
       const navigate = (event: unknown) => {
         const details = parseNavigationStartDetails(event)
         if (details?.isMainFrame === false) return
@@ -1662,6 +1742,7 @@ export function registerDesktopIpcHandlers(
         invalidate(state, bridge)
         fileGrants.revokeOwner(state.contents)
         void options.gedcomIntake?.revokeOwner(state.contents).catch(() => undefined)
+        void options.rootsMagic?.revokeOwner(state.contents).catch(() => undefined)
       }
       const commitNavigation = (
         _event: unknown,
@@ -1701,19 +1782,20 @@ export function registerDesktopIpcHandlers(
       return () => {
         if (unsubscribed) return
         unsubscribed = true
-        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
+        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake, options.rootsMagic)
       }
     },
     invalidateSidecarSession(): void {
       fileGrants.revokeAll()
       void options.gedcomIntake?.revokeAll().catch(() => undefined)
+      void options.rootsMagic?.revokeAll().catch(() => undefined)
       for (const state of authorizations.values()) invalidate(state, bridge, true)
     },
     dispose(): void {
       if (disposed) return
       disposed = true
       for (const state of [...authorizations.values()]) {
-        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake)
+        removeAuthorization(authorizations, state, bridge, fileGrants, options.gedcomIntake, options.rootsMagic)
       }
       fileGrants.dispose()
     },

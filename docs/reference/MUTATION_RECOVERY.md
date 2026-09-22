@@ -1,8 +1,9 @@
 # Durable native mutation coordination
 
 Issue #200 supplies one local coordination boundary for native CLI, REPL,
-worker, and sidecar processes using the shared publication helpers. It does not
-implement remote coordination or the Issue #119 RootsMagic desktop workbench.
+worker, and sidecar processes using the shared publication helpers. Issue #119
+uses that merged foundation for native RootsMagic export folders. Remote
+coordination remains outside this boundary.
 
 ## Ownership and privacy
 
@@ -56,6 +57,7 @@ retried on later invocations without changing an already recorded outcome.
 | Settings persistence | Stage, synchronize, and verify a complete file before replacement; reconcile an interrupted replacement against the owned old/new identities. Existing in-memory synchronization and optimistic revision checks remain. |
 | Sync update and rebase | Reserve the generation root across processes; track owned stage members and verify the complete generation before exclusive directory publication. A committed directory remains the successful outcome if cancellation arrives afterward. If a retry recovers a committed generation, it stops before staging another generation; select the recovered master and manifest to continue. |
 | Shared artifacts and RootsMagic exports | Journal destination, backup, installation, verification, and cleanup ownership. Legacy CLI paths remain compatible. Recovery restores the old complete set or finishes the verified new set. |
+| Native RootsMagic export folder | Stage and validate `tree.ged`, `report.md`, and `manifest.json` together; publish one previously absent folder by exclusive same-filesystem rename. Source revocation and final publication share a short ownership guard. A committed folder remains successful after concurrent cancellation. |
 
 **Legacy separate filenames do not become simultaneously visible through one
 filesystem operation.** Readers outside the coordinator can observe individual
@@ -141,6 +143,8 @@ not establish that a hosted run has passed. Canonical local test, lint,
 typecheck, security, applicable desktop checks, signed commits, required review,
 and hosted gates must be recorded against the final revision before closure.
 Target-matched packaged acceptance and power-loss durability are not established
-by process-exit tests. Issue #200 remains open until its integrations and required
-recovery evidence are reviewed and merged; Issue #119 starts on that merged
-foundation without changing either milestone.
+by process-exit tests. Issue #200 is merged and closed. Issue #119 must reconcile
+its additional source, query, export, desktop, and packaged evidence before
+closure, without changing either milestone. A restarted desktop must obtain
+fresh source and destination authority; journal metadata cannot reconstruct
+private paths or resurrect grants.

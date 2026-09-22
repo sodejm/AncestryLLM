@@ -13,7 +13,9 @@ endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
 request methods and one validated job-event listener, Issue #348 adds three fixed
 local-runtime status/preview/apply methods, Issue #111 adds three fixed chat-stream
 methods and one validated chat-event listener, and Issue #112 adds three fixed
-chat-lifecycle methods plus two fixed native-action methods. Development uses
+chat-lifecycle methods plus two fixed native-action methods. Issue #119 adds eight
+fixed RootsMagic source, preset-query, output-folder, export, and artifact methods.
+Development uses
 deterministic fictional fixtures; packaged main is the sole authenticated client
 for the fixed sidecar routes. Packaged main stores the bounded local-preference
 schema in `preferences.json` beneath Electron's OS app-data directory. The
@@ -82,6 +84,29 @@ identifiers, counters, and content hashes.
 
 Issue #103 is a source-level gated security foundation, not a supported 0.6 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
 
+Issue #119 adds the native-sidecar-only **RootsMagic** workspace for 0.7.0. Main
+consumes a picker grant and retains a private, window-bound source session for
+People, Family links, and Events queries. The sidecar verifies the database and
+validated SQLite companions without modifying their original bytes. Discard,
+window teardown, and sidecar replacement revoke the session; restart requires a
+new selection. The renderer receives friendly source metadata, bounded plain-text
+rows, and opaque references. Arbitrary SQL and paths are not bridge inputs.
+
+The scripted sidecar build explicitly includes SQLGlot's dynamically loaded
+SQLite dialect. The packaged workbench scenario exercises schema inspection and
+queries against the bundled parser; source-only tests cannot establish that the
+native payload contains this dependency.
+
+Exports require a selected person, a displayed scope, and a native grant to create
+one new folder. Defaults are portable GEDCOM 5.5.5, generic destination, connected
+scope, and living people excluded. The Python application service stages the
+GEDCOM, loss/provenance report, and digest manifest and publishes the complete
+folder through the shared mutation coordinator. Existing destinations are refused.
+Cancellation before publication leaves no export folder; a completed atomic
+publication remains committed if cancellation arrives concurrently. Task Center
+tracks inspection, queries, and exports, and Main mediates artifact reveal. See the
+[RootsMagic workbench guide](../docs/how-to/desktop-rootsmagic-workbench.md).
+
 The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
 
 ## Reproducible setup and gates
@@ -116,6 +141,13 @@ route in light, dark, and high-contrast modes with the exact locked `axe-core`
 version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
 200% zoom for horizontal clipping. Neither command replaces the manual
 screen-reader review in the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
+The native package matrix also runs a fictional RootsMagic workflow that checks
+paging, family links, events, rooted export contents, digests, unchanged source
+bytes, keyboard operation, automated accessibility, and artifact reveal. Its
+`packagedRootsMagicWorkbenchPassed` receipt binds the target-specific evidence
+separately from the existing 0.6 core receipts. Local execution proves only the
+target on which it ran; manual screen-reader review and the other supported
+target rows remain separate acceptance requirements.
 `desktop-security` runs the high-severity dependency audit, source secret scan,
 produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
 package after verifying the native sidecar resource, and inspects the resulting

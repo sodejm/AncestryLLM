@@ -2,7 +2,13 @@
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { StringDecoder } from 'node:string_decoder'
 import type { GedcomIntakeClient } from './gedcom-intake-broker'
+import type { RootsMagicWorkbenchClient } from './rootsmagic-workbench-broker'
 import { parseGedcomRootQuery } from '../shared-contract/gedcom'
+import {
+  parseRootsMagicExportRequest,
+  parseRootsMagicQueryRequest,
+  parseRootsMagicSourceReferenceRequest,
+} from '../shared-contract/rootsmagic'
 import {
   DESKTOP_PROTOCOL_VERSION,
   type ApplicationSettings,
@@ -50,6 +56,9 @@ import {
   parseGedcomInspectionResult,
   parseGedcomRootPageResult,
   parseGedcomDiscardResult,
+  parseRootsMagicAcknowledgementResult,
+  parseRootsMagicJobResultResult,
+  parseRootsMagicPresetDefinitionsResult,
   parseProviderConfigurationResult,
   parseProviderEndpointValidationResult,
   parseSecretStatusResult,
@@ -72,6 +81,7 @@ const RUNTIME_SHUTDOWN_PATH = '/api/v1/runtime/shutdown' as const
 const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
 const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
 const GEDCOM_INTAKE_PATH = '/api/v1/gedcom/intake' as const
+const ROOTSMAGIC_PATH = '/api/v1/rootsmagic' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -94,7 +104,9 @@ type SidecarPath =
   | typeof CHAT_CAPABILITY_PATH
   | typeof CHAT_SESSIONS_PATH
   | typeof GEDCOM_INTAKE_PATH
+  | typeof ROOTSMAGIC_PATH
   | `/api/v1/gedcom/intake/${string}`
+  | `/api/v1/rootsmagic/${string}`
   | `/api/v1/jobs/${string}`
   | `/api/v1/jobs/${string}/cancel`
   | `/api/v1/jobs/${string}/events`
@@ -1175,6 +1187,66 @@ export function createGedcomIntakeClient(dependencies: Readonly<{
     },
     async discard(jobId) {
       return perform(`${jobPath(jobId)}/discard`, parseGedcomDiscardResult,
+        undefined, { method: 'POST' })
+    },
+  })
+}
+
+/** Binds the path-free RootsMagic workbench to the current authenticated sidecar session. */
+export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
+  session(): Readonly<AuthenticatedSidecarSession> | undefined
+  request?: SidecarRequest
+}>): Readonly<RootsMagicWorkbenchClient> {
+  const transport = dependencies.request ?? requestFixedRoute
+  const perform = async <T>(path: SidecarPath,
+    parser: (value: unknown) => { ok: boolean; data?: Readonly<T> },
+    signal?: AbortSignal, options?: SidecarRequestOptions): Promise<Readonly<T>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      const response = await transport(session, path, signal, options)
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (response.statusCode !== 200) throw gedcomFailure(response)
+      return parseJson(response, parser)
+    } catch (cause) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (cause instanceof SidecarClientError) throw cause
+      throw new SidecarClientError('request_failed')
+    }
+  }
+  const jobId = (value: string) => parseJobRequest({ schema_version: 1, job_id: value }).job_id
+  return Object.freeze<RootsMagicWorkbenchClient>({
+    inspect(sourceCapability, signal) {
+      return perform(`${ROOTSMAGIC_PATH}/sources`, parseJobSnapshotResult, signal, {
+        method: 'POST', body: JSON.stringify({ schema_version: 1, source_capability: sourceCapability }),
+      })
+    },
+    presets(signal) {
+      return perform(`${ROOTSMAGIC_PATH}/presets`, parseRootsMagicPresetDefinitionsResult, signal)
+    },
+    query(request, signal) {
+      const parsed = parseRootsMagicQueryRequest(request)
+      return perform(`${ROOTSMAGIC_PATH}/queries`, parseJobSnapshotResult, signal, {
+        method: 'POST', body: JSON.stringify(parsed),
+      })
+    },
+    export(request, signal) {
+      const parsed = parseRootsMagicExportRequest(request)
+      return perform(`${ROOTSMAGIC_PATH}/exports`, parseJobSnapshotResult, signal, {
+        method: 'POST', body: JSON.stringify(parsed),
+      })
+    },
+    result(value, signal) {
+      return perform(`${ROOTSMAGIC_PATH}/jobs/${jobId(value)}/result`, parseRootsMagicJobResultResult, signal)
+    },
+    discard(sourceRef) {
+      const parsed = parseRootsMagicSourceReferenceRequest({ schema_version: 1, source_ref: sourceRef })
+      return perform(`${ROOTSMAGIC_PATH}/sources/${parsed.source_ref}/discard`, parseRootsMagicAcknowledgementResult,
+        undefined, { method: 'POST', body: JSON.stringify({ schema_version: 1 }) })
+    },
+    cancel(value) {
+      return perform(`/api/v1/jobs/${jobId(value)}/cancel`, parseJobSnapshotResult,
         undefined, { method: 'POST' })
     },
   })

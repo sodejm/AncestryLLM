@@ -29,7 +29,7 @@ const suiteTitles = Object.freeze({
   source: 'source-built desktop shell',
 })
 const sourceScenarios = Object.freeze([
-  'built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings surfaces',
+  'built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, RootsMagic, Diagnostics, and Settings surfaces',
   'task center streams one safe cancellation lifecycle and reloads the terminal backend snapshot',
   'built degraded shell offers one bounded recovery and renders the ready result',
   'built shell has deterministic skip-link and command-palette focus',
@@ -43,6 +43,7 @@ const packagedScenarios = Object.freeze([
   'rejects a substituted packaged sidecar before launch',
   'mediates opaque packaged open and save file grants',
   'launches the selected packaged runtime normally without a debugging transport',
+  'queries and exports an immutable RootsMagic source through the native workbench',
 ])
 
 function selectedScenario(argv, scenarios, mode) {

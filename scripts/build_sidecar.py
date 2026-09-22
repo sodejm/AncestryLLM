@@ -86,6 +86,8 @@ def pyinstaller_arguments(
         str(temporary / "spec"),
         "--paths",
         str(ROOT / "src"),
+        "--hidden-import",
+        "sqlglot.dialects.sqlite",
     ]
     for package in PYINSTALLER_DATA_PACKAGES:
         arguments.extend(("--collect-data", package))

@@ -179,6 +179,23 @@ describe('Task Center', () => {
     expect(document.body).not.toHaveTextContent('fictional private parser details')
   })
 
+  it('requests cancellation from its keyboard-accessible control', async () => {
+    const active = snapshot()
+    const bridge = bridgeFor([active])
+    const user = userEvent.setup()
+
+    render(<TaskCenter bridge={bridge} />)
+
+    const cancel = await screen.findByRole('button', { name: `Cancel ${active.name}` })
+    cancel.focus()
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(bridge.cancelJob).toHaveBeenCalledWith({
+      schema_version: 1,
+      job_id: active.job_id,
+    }))
+  })
+
   it('preserves one cancellation failure when a sibling cancellation succeeds', async () => {
     const first = snapshot()
     const second = snapshot({

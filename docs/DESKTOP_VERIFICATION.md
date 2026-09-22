@@ -430,6 +430,44 @@ consumes no automatic restart. The file-grant scenario proves path-free public
 DTOs and the grant lifecycle against native open/save behavior in a package
 whose verification adapter is excluded from production output.
 
+The 0.7 RootsMagic workbench runs an additional packaged scenario on each native
+row. It exercises a fictional source, paginated presets, person-rooted export,
+digest agreement, source immutability, artifact reveal requests, and keyboard navigation
+with automated WCAG checks. Its `packagedRootsMagicWorkbenchPassed` receipt and
+`rootsmagic-workbench.json` observation document are uploaded beside the core
+evidence. This standalone receipt is outside the core receipt directory and does
+not expand the 0.6 aggregate gate set. A successful local run proves only its
+recorded native target; manual screen-reader acceptance and the remaining hosted
+targets require their own evidence before #119 closes.
+The verification-only dialog adapter supplies the selected fixture paths and
+checks that reveal receives the exact authorized export folder. It does not open
+the operating system's file browser. Native picker interaction and visible file
+browser reveal therefore require separate manual acceptance evidence.
+
+The #119 acceptance criteria map to the following checks. Passing an automated
+check establishes its stated boundary; it does not substitute for the remaining
+native-target or assistive-technology evidence.
+
+| Acceptance criterion | Automated evidence | Remaining closure evidence |
+|---|---|---|
+| Select, summarize, query, and export an immutable source | `tests/api/test_rootsmagic_workbench.py`; `desktop/e2e/rootsmagic-workbench.packaged.wdio.ts` | Successful packaged receipt for every supported native target; native picker acceptance |
+| Byte-identical source before and after use | WAL and companion-file checks in `tests/modular/test_rootsmagic_workbench.py` and `tests/modular/test_rootsmagic_directory_export.py`; packaged fixture digest | Target-matched packaged receipts |
+| Malformed or unsupported input returns stable errors | Reader, schema-capability, source-session, and HTTP tests | Reconcile any target-specific failures; vendor version metadata may honestly remain unknown |
+| Reject unknown fields, SQL, and invalid parameters | `tests/modular/test_rootsmagic_presets.py`; strict API and desktop contract tests | Required source gates on the final commit |
+| Bound large result sets and keep paging responsive | Large fictional fixture, timeout, payload, literal-filter, and stable-page tests in `tests/modular/test_rootsmagic_presets.py`; renderer and packaged paging | Required source gates and target-matched packaged receipts |
+| Cancellation publishes no partial result | Precommit cancellation, post-rename committed outcome, and both HTTP export/discard orderings | Required source gates on the final commit |
+| Refuse aliases and publish a complete new folder atomically | `tests/modular/test_rootsmagic_directory_export.py`; broker output-grant tests; packaged file/digest assertions | Target-matched packaged receipts |
+| Complete keyboard and screen-reader workflow | Renderer focus/live-region tests, packaged Tab/Enter/Space navigation, and automated WCAG checks | Manual screen-reader, native picker, and visible file-browser reveal acceptance |
+
+Manual acceptance must record the tested commit, native OS/architecture,
+assistive technology and version, and observed result. Cover source selection,
+inspection announcements, each preset and pagination, root selection, export
+scope and immutable-source confirmation, Task Center progress/cancellation,
+errors and focus recovery, artifact reveal, and source disposal. Do not mark the
+screen-reader criterion complete from axe or keyboard automation alone. Signed
+commits, hosted review, and the required final-commit gates remain delivery
+requirements in addition to this behavior evidence.
+
 Every native row also binds `sidecar-process-tree-guard.json` to the
 `sidecarProcessTreeGuardPassed` receipt. On the exact-head Windows ARM64 hosted
 runner, the test proves that closing the packaged sidecar's kill-on-close Job

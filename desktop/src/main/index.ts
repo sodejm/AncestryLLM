@@ -22,6 +22,7 @@ import {
 import { initializeGedcomIntakeStaging, initializeMediatedOperationStaging } from './container-operation-mount-policy'
 import { FileGrantBroker } from './file-grant-broker'
 import { GedcomIntakeBroker } from './gedcom-intake-broker'
+import { RootsMagicWorkbenchBroker } from './rootsmagic-workbench-broker'
 import { externalLinkPrompt, openExternalLinkWithConfirmation } from './external-links'
 import {
   registerDesktopIpcHandlers,
@@ -87,6 +88,7 @@ if (primaryInstance && !localRuntimeCliRequested) {
 let bridge: MainDesktopBridge | undefined
 let fileGrantBroker: FileGrantBroker | undefined
 let gedcomIntakeBroker: GedcomIntakeBroker | undefined
+let rootsMagicBroker: RootsMagicWorkbenchBroker | undefined
 const rendererRoot = join(__dirname, '../renderer')
 const rendererPath = join(rendererRoot, 'index.html')
 const preloadPath = join(__dirname, '../preload/index.cjs')
@@ -202,6 +204,7 @@ function registerIpcHandlers(): void {
     }),
     recordDiagnostic: recordDesktopDiagnostic,
     ...(gedcomIntakeBroker === undefined ? {} : { gedcomIntake: gedcomIntakeBroker }),
+    ...(rootsMagicBroker === undefined ? {} : { rootsMagic: rootsMagicBroker }),
   })
 }
 
@@ -325,10 +328,19 @@ if (localRuntimeCliRequested && !primaryInstance) {
     bridge = runtime.bridge
     await protocol.handle('app', createAppProtocolHandler(async (file) => readFile(join(rendererRoot, file))))
     installSessionPolicy(session.defaultSession as unknown as Parameters<typeof installSessionPolicy>[0])
-    fileGrantBroker = new FileGrantBroker(createNativeFileDialogPort())
+    const nativeDialogs = createNativeFileDialogPort()
+    fileGrantBroker = new FileGrantBroker(nativeDialogs)
     if (runtime.gedcomIntakeClient) {
       gedcomIntakeBroker = new GedcomIntakeBroker({
         directory: gedcomIntakeDirectory, files: fileGrantBroker, client: runtime.gedcomIntakeClient,
+      })
+    }
+    if (runtime.rootsMagicClient) {
+      rootsMagicBroker = new RootsMagicWorkbenchBroker({
+        directory: gedcomIntakeDirectory,
+        files: fileGrantBroker,
+        client: runtime.rootsMagicClient,
+        native: nativeDialogs,
       })
     }
     registerIpcHandlers()
@@ -360,6 +372,7 @@ if (localRuntimeCliRequested && !primaryInstance) {
         chooseUnsafeShutdownAction,
         async () => {
           await gedcomIntakeBroker?.revokeAll().catch(() => undefined)
+          await rootsMagicBroker?.revokeAll().catch(() => undefined)
           await supervisor.stop()
           writeAppShutdownDiagnostic(APP_SHUTDOWN_DIAGNOSTICS.sidecarStopped)
         },
