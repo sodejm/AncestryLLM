@@ -1469,7 +1469,7 @@ def _publication_incomplete_error(cause: BaseException) -> SyncError:
         "An incomplete generation directory with an ownership marker may remain.",
         [
             "Do not use or rename the incomplete generation as a release.",
-            "Inspect the release root and remove only an empty app-owned residue.",
+            "Preserve journaled staging and restore the original release root before retrying.",
             "Retry with a new patch version after the filesystem issue is resolved.",
         ],
         details=(f"Error class: {type(cause).__name__}",),

@@ -307,3 +307,24 @@ def test_staging_flush_uses_shared_writable_descriptor(tmp_path, monkeypatch):
         mutation.prepare(stage, marker)
         assert opened == [stage / marker]
         mutation.finish()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_directory_rejects_permission_change_after_sealing(tmp_path):
+    from ancestryllm.core.directory_mutation import DirectoryMutation
+
+    stage = tmp_path / (".ancestry-export-" + "f" * 32)
+    stage.mkdir()
+    member = stage / "master.ged"
+    member.write_bytes(b"fictional GEDCOM")
+    member.chmod(0o600)
+    target = tmp_path / "export"
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        mutation = DirectoryMutation(target, coordinator)
+        mutation.acquire()
+        mutation.prepare(stage)
+        member.chmod(0o644)
+        with pytest.raises(AncestryError, match="requires recovery"):
+            mutation.committing()
+        assert coordinator.interrupted((target,))
+    assert not target.exists()

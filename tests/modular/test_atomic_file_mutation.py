@@ -198,3 +198,99 @@ def test_windows_identity_survives_creation_time_tunneling(tmp_path, monkeypatch
         assert atomic_file._identity(coordinator, before) != atomic_file._identity(
             coordinator, replaced
         )
+
+
+def _fingerprint_fifo_race(namespace: str, filename: str) -> None:
+    from ancestryllm.core import atomic_file
+
+    path = Path(filename)
+    original = atomic_file._open_fingerprint_descriptor
+
+    def replace_with_fifo(selected: Path) -> int:
+        selected.unlink()
+        os.mkfifo(selected)
+        return original(selected)
+
+    atomic_file._open_fingerprint_descriptor = replace_with_fifo
+    with LocalMutationCoordinator(Path(namespace)) as coordinator:
+        try:
+            atomic_file._fingerprint(coordinator, path)
+        except AncestryError as error:
+            assert error.code == "MUTATION_RECOVERY_REQUIRED"
+        else:
+            raise AssertionError("A FIFO cannot be fingerprinted as a regular file")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO race")
+def test_fingerprint_fifo_replacement_does_not_block(tmp_path: Path) -> None:
+    import stat
+
+    target = tmp_path / "stage"
+    target.write_bytes(b"fictional stage")
+    process = multiprocessing.get_context("spawn").Process(
+        target=_fingerprint_fifo_race, args=(str(tmp_path / "journal"), str(target))
+    )
+    process.start()
+    process.join(5)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Fingerprint open blocked on a replacement FIFO")
+    assert process.exitcode == 0
+    assert stat.S_ISFIFO(target.lstat().st_mode)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("boundary", ["staged", "committing"])
+def test_atomic_publication_rejects_sealed_permission_change(tmp_path, monkeypatch, boundary):
+    target = tmp_path / "settings"
+    target.write_bytes(b"old")
+
+    def change_mode(self, reached):
+        if reached == boundary:
+            self._stage.chmod(0o644)
+
+    monkeypatch.setattr(AtomicFileMutation, "_checkpoint", change_mode)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        with (
+            pytest.raises(AncestryError, match="requires recovery"),
+            AtomicFileMutation(target, coordinator) as mutation,
+        ):
+            mutation.publish(b"new")
+        assert coordinator.interrupted((target,))
+    assert target.read_bytes() == b"old"
+
+
+def test_atomic_abort_preserves_stage_replaced_after_fingerprint(tmp_path, monkeypatch):
+    from ancestryllm.core import atomic_file
+
+    target = tmp_path / "settings"
+    original = atomic_file._fingerprint
+    stage = None
+
+    def stop(self, boundary):
+        nonlocal stage
+        if boundary == "staged":
+            stage = self._stage
+            raise RuntimeError("abort before publication")
+
+    def swap_after_check(coordinator, path):
+        result = original(coordinator, path)
+        if path == stage:
+            replacement = tmp_path / "foreign"
+            replacement.write_bytes(b"foreign bytes")
+            replacement.replace(path)
+        return result
+
+    monkeypatch.setattr(AtomicFileMutation, "_checkpoint", stop)
+    monkeypatch.setattr(atomic_file, "_fingerprint", swap_after_check)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        with (
+            pytest.raises(AncestryError, match="requires recovery"),
+            AtomicFileMutation(target, coordinator) as mutation,
+        ):
+            mutation.publish(b"new")
+        assert stage is not None
+        assert stage.read_bytes() == b"foreign bytes"
+        assert coordinator.interrupted((target,))
+    assert not target.exists()

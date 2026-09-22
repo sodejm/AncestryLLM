@@ -504,3 +504,27 @@ def test_retention_policy_is_part_of_retry_intent(tmp_path):
         with pytest.raises(AncestryError) as error:
             coordinator.acquire(replace(selected, retain_outcome=False))
         assert error.value.code == "MUTATION_IDEMPOTENCY_MISMATCH"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink cycle binding")
+def test_cyclic_final_link_reserves_parent_alias(tmp_path):
+    directory = tmp_path / "destination"
+    directory.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(directory, target_is_directory=True)
+    target = directory / "tree.ged"
+    target.symlink_to(target.name)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        lease = coordinator.acquire(request(coordinator, target))
+        assert contend(tmp_path / "journal", alias / target.name) == "MUTATION_CONFLICT"
+        coordinator.transition(lease, MutationTransition(MutationState.ABORTED, ()))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink cycle binding")
+def test_cyclic_parent_returns_coded_reauthorization(tmp_path):
+    parent = tmp_path / "cycle"
+    parent.symlink_to(parent.name)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        with pytest.raises(AncestryError) as error:
+            coordinator.bind((parent / "tree.ged",))
+        assert error.value.code == "MUTATION_REAUTHORIZATION_REQUIRED"

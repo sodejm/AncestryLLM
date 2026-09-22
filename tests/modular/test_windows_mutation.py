@@ -128,3 +128,46 @@ def test_windows_rejects_inherited_public_acl(tmp_path: Path) -> None:
     with pytest.raises(AncestryError) as failure:
         validate_private(public)
     assert failure.value.code == "MUTATION_JOURNAL_UNSAFE"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows reparse point policy")
+def test_windows_publication_replaces_symlink_without_changing_source(tmp_path: Path) -> None:
+    from ancestryllm.core import publication
+
+    source = tmp_path / "original.ged"
+    source.write_bytes(b"fictional original")
+    target = tmp_path / "tree.ged"
+    try:
+        target.symlink_to(source.name)
+    except OSError:
+        pytest.skip("Creating symbolic links requires platform privileges")
+    stage = publication.staging_path(target)
+    publication.write_staged_bytes(stage, b"fictional replacement")
+    publication.publish_staged_bundle([(stage, target)], replace=os.replace)
+    assert source.read_bytes() == b"fictional original"
+    assert not target.is_symlink()
+    assert target.read_bytes() == b"fictional replacement"
+
+
+@pytest.mark.parametrize("tag", [0, 0xA0000003, 0x8000001B])
+def test_windows_publication_rejects_unsupported_reparse_tags(tmp_path: Path, tag: int) -> None:
+    from ancestryllm.core.publication import _windows_reparse_stat
+
+    path = tmp_path / "fictional"
+    path.touch()
+    with pytest.raises(OSError, match="unsupported reparse tag"):
+        _windows_reparse_stat(path.stat(), tag)
+
+
+def test_windows_symlink_metadata_retains_descriptor_timestamps(tmp_path: Path) -> None:
+    import stat
+
+    from ancestryllm.core.publication import _windows_reparse_stat
+
+    path = tmp_path / "fictional"
+    path.touch()
+    info = path.stat()
+    normalized = _windows_reparse_stat(info, 0xA000000C)
+    assert stat.S_ISLNK(normalized.st_mode)
+    for name in ("st_ino", "st_dev", "st_size", "st_mtime_ns", "st_ctime_ns", "st_birthtime_ns"):
+        assert getattr(normalized, name, None) == getattr(info, name, None)

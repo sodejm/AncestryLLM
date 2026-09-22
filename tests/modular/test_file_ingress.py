@@ -4932,7 +4932,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     assert raced
     assert target.read_bytes() == b"concurrent\n"
     assert victim.read_bytes() == b"victim\n"
-    assert len(recovery) == 2
+    assert len(recovery) == 1  # The journaled displacement retains the original symlink.
     assert all(path.is_symlink() for path in recovery)
     for path in recovery:
         path.unlink()

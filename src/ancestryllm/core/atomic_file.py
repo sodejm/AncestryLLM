@@ -26,6 +26,7 @@ from ancestryllm.application.mutations import (
     MutationState,
     MutationTransition,
 )
+from ancestryllm.core import publication as pub
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError
 
@@ -106,7 +107,7 @@ def _windows_open_fingerprint_descriptor(path: Path, *, writable: bool = False) 
 def _open_fingerprint_descriptor(path: Path) -> int:
     if os.name == "nt":
         return _windows_open_fingerprint_descriptor(path)
-    return os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    return os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
 
 
 def _open_flush_descriptor(path: Path) -> int:
@@ -129,6 +130,7 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
         if (
             not stat.S_ISREG(opened.st_mode)
             or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != stat.S_IMODE(before.st_mode)
             or (opened.st_dev, opened.st_ino)
             != (
                 before.st_dev,
@@ -144,6 +146,8 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
         if (
             after.st_nlink != 1
             or at_path.st_nlink != 1
+            or stat.S_IMODE(after.st_mode) != stat.S_IMODE(opened.st_mode)
+            or stat.S_IMODE(at_path.st_mode) != stat.S_IMODE(after.st_mode)
             or (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
             != (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
             or (at_path.st_dev, at_path.st_ino) != (after.st_dev, after.st_ino)
@@ -151,7 +155,7 @@ def _fingerprint(coordinator: LocalMutationCoordinator, path: Path) -> str | Non
             raise _recovery_required()
         return coordinator._digest(
             f"content:{_identity(coordinator, after)}:{after.st_size}:"
-            f"{after.st_mtime_ns}:{digest.hexdigest()}"
+            f"{after.st_mtime_ns}:{stat.S_IMODE(after.st_mode)}:{digest.hexdigest()}"
         )
     finally:
         os.close(descriptor)
@@ -285,7 +289,7 @@ class AtomicFileMutation:
         else:
             raise _recovery_required()
         try:
-            staged = self._stage.lstat()
+            staged = pub.path_stat(self._stage)
         except FileNotFoundError:
             pass
         else:
@@ -297,7 +301,8 @@ class AtomicFileMutation:
                 _fingerprint(self.coordinator, self._stage) != self.record.staged
             ):
                 raise _recovery_required()
-            self._stage.unlink()
+            if not pub._unlink_if_owned(self._stage, pub._PathIdentity.from_stat(staged)):
+                raise _recovery_required()
         _sync_parent(self.target)
         outcome = self.coordinator.transition(self.lease, MutationTransition(state, ()))
         assert isinstance(outcome, MutationOutcome)

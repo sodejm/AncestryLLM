@@ -354,3 +354,75 @@ def test_restart_after_symlink_restoration(tmp_path):
     assert target.readlink() == Path(original.name)
     assert original.read_bytes() == b"fictional original"
     assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+@pytest.mark.parametrize("cycle", ["self", "pair"])
+def test_bundle_replaces_cyclic_final_symlink(tmp_path, cycle):
+    from ancestryllm.core import publication
+
+    target = tmp_path / "tree.ged"
+    alias = tmp_path / "alias.ged"
+    target.symlink_to(target.name if cycle == "self" else alias.name)
+    if cycle == "pair":
+        alias.symlink_to(target.name)
+    stage = publication.staging_path(target)
+    publication.write_staged_bytes(stage, b"fictional new tree")
+    publication.publish_staged_bundle([(stage, target)], replace=os.replace)
+    assert not target.is_symlink()
+    assert target.read_bytes() == b"fictional new tree"
+    if cycle == "pair":
+        assert alias.is_symlink()
+        assert alias.readlink() == Path(target.name)
+    assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+def _terminate_symlink_publication(namespace, directory, boundary):
+    from ancestryllm.core import mutation, publication
+    from ancestryllm.core.bundle_mutation import BundleMutation
+
+    mutation.coordinator_namespace = lambda: Path(namespace)
+    original = Path.symlink_to
+
+    def create_then_terminate(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        os._exit(39)
+
+    def checkpoint(self, reached):
+        if reached == boundary:
+            os._exit(39)
+
+    Path.symlink_to = create_then_terminate
+    BundleMutation._checkpoint = checkpoint
+    target = Path(directory) / "tree.ged"
+    stage = publication.staging_path(target)
+    publication.write_staged_bytes(stage, b"fictional new tree")
+    publication.publish_staged_bundle([(stage, target)], replace=os.replace)
+
+
+@pytest.mark.parametrize("boundary", ["displacing", "displaced", "installed"])
+def test_symlink_payload_is_owned_at_every_crash_boundary(tmp_path, boundary):
+    from ancestryllm.core.bundle_mutation import BundleMutation
+
+    original = tmp_path / "original.ged"
+    original.write_bytes(b"fictional original")
+    target = tmp_path / "tree.ged"
+    target.symlink_to(original.name)
+    namespace = tmp_path / "journal"
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_symlink_publication, args=(str(namespace), str(tmp_path), boundary)
+    )
+    process.start()
+    process.join(20)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Publisher did not reach the symlink boundary")
+    assert process.exitcode == 39
+    with LocalMutationCoordinator(namespace) as coordinator:
+        BundleMutation.reconcile((target,), coordinator)
+        BundleMutation.reconcile((target,), coordinator)
+        assert coordinator.interrupted((target,)) == ()
+    assert target.is_symlink()
+    assert target.readlink() == Path(original.name)
+    assert original.read_bytes() == b"fictional original"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))

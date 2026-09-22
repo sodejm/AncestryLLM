@@ -8,6 +8,7 @@ authorized invocation rebinds and reconciles the actual publication.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import hmac
 import importlib
@@ -320,10 +321,27 @@ class LocalMutationCoordinator:
     def _digest(self, value: str) -> str:
         return hmac.new(self._key, value.encode(), hashlib.sha256).hexdigest()
 
-    def _revision(self, path: Path) -> str:
+    def _resource_stat(self, path: Path) -> os.stat_result | None:
         try:
-            info = path.stat()
+            return path.stat()
         except FileNotFoundError:
+            return None
+        except OSError as error:
+            if error.errno != errno.ELOOP:
+                raise
+            # A final link may be replaced even when its referent is cyclic.
+            # Resolve the parent first so a cyclic ancestor cannot be authorized.
+            self._binding(path, "")
+            info = path.lstat()
+            if not stat.S_ISLNK(info.st_mode):
+                raise _error(
+                    "MUTATION_REAUTHORIZATION_REQUIRED", "Reauthorize the mutation resources."
+                ) from None
+            return info
+
+    def _revision(self, path: Path) -> str:
+        info = self._resource_stat(path)
+        if info is None:
             return self._digest("missing")
         return self._digest(
             f"revision:{info.st_dev}:{info.st_ino}:{info.st_mode}:{info.st_size}:"
@@ -336,9 +354,15 @@ class LocalMutationCoordinator:
         resources: dict[str, MutationResource] = {}
         for selected in paths:
             path = selected.absolute()
-            canonical = path.resolve()
             revision = self._revision(path)
             binding = self._binding(path, revision)
+            try:
+                canonical = path.resolve()
+            except (OSError, RuntimeError) as error:
+                if isinstance(error, OSError) and error.errno != errno.ELOOP:
+                    raise
+                # Parent validity was checked by _binding; retain the final link.
+                canonical = path.parent.resolve(strict=True) / path.name
             keys = {
                 f"path:{os.path.normcase(str(path))}",
                 f"path:{os.path.normcase(str(canonical))}",
@@ -348,11 +372,8 @@ class LocalMutationCoordinator:
                 f"name:{binding.parent_identity}:"
                 + unicodedata.normalize("NFD", path.name).casefold(),
             }
-            try:
-                info = path.stat()
-            except FileNotFoundError:
-                pass
-            else:
+            info = self._resource_stat(path)
+            if info is not None:
                 keys.add(f"object:{info.st_dev}:{info.st_ino}")
             for key in keys:
                 identity = self._digest(key)
@@ -364,7 +385,7 @@ class LocalMutationCoordinator:
         try:
             parent = path.parent.resolve(strict=True)
             info = parent.stat()
-        except OSError:
+        except (OSError, RuntimeError):
             raise _error(
                 "MUTATION_REAUTHORIZATION_REQUIRED", "Reauthorize the mutation resources."
             ) from None

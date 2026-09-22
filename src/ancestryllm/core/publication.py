@@ -247,6 +247,69 @@ def _windows_path_identity(path: Path) -> _PathIdentity:
     return _PathIdentity.from_stat(_windows_path_stat(path))
 
 
+def _windows_descriptor_stat(descriptor: int) -> os.stat_result:
+    """Read a reparse tag from the held object, retaining native change time."""
+
+    info = os.fstat(descriptor)
+    attributes = getattr(info, "st_file_attributes", None)
+    if attributes is None:
+        raise OSError("Publication attributes are unavailable.")
+    if not attributes & 0x00000400:  # FILE_ATTRIBUTE_REPARSE_POINT
+        return info
+    # CPython 3.12 fstat passes a zero reparse tag when constructing its result.
+    # Query the same no-follow handle instead of resolving the pathname again.
+    ctypes = importlib.import_module("ctypes")
+    wintypes = importlib.import_module("ctypes.wintypes")
+    msvcrt = importlib.import_module("msvcrt")
+
+    class AttributeTagInfo(ctypes.Structure):  # type: ignore[misc,name-defined]
+        _fields_ = (("attributes", wintypes.DWORD), ("tag", wintypes.DWORD))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = kernel.GetFileInformationByHandleEx
+    get_info.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    get_info.restype = wintypes.BOOL
+    tag_info = AttributeTagInfo()
+    if not get_info(
+        msvcrt.get_osfhandle(descriptor), 9, ctypes.byref(tag_info), ctypes.sizeof(tag_info)
+    ):  # FileAttributeTagInfo
+        raise ctypes.WinError(ctypes.get_last_error())
+    return _windows_reparse_stat(info, tag_info.tag)
+
+
+def _windows_reparse_stat(info: os.stat_result, tag: int) -> os.stat_result:
+    """Normalize a verified symlink without admitting other reparse mechanisms."""
+
+    if tag != 0xA000000C:  # IO_REPARSE_TAG_SYMLINK
+        raise OSError("A publication pathname has an unsupported reparse tag.")
+    fields = list(info)
+    fields[0] = stat.S_IFLNK | stat.S_IMODE(info.st_mode)
+    extra = {
+        name: getattr(info, name)
+        for name in (
+            "st_atime",
+            "st_mtime",
+            "st_ctime",
+            "st_atime_ns",
+            "st_mtime_ns",
+            "st_ctime_ns",
+            "st_birthtime",
+            "st_birthtime_ns",
+            "st_file_attributes",
+            "st_reparse_tag",
+            "st_flags",
+            "st_gen",
+            "st_blocks",
+            "st_blksize",
+            "st_rdev",
+        )
+        if hasattr(info, name)
+    }
+    if "st_reparse_tag" in extra:
+        extra["st_reparse_tag"] = tag
+    return os.stat_result(fields, extra)
+
+
 def _windows_path_stat(path: Path) -> os.stat_result:
     """Observe native change time consistently with descriptor observations.
 
@@ -287,11 +350,7 @@ def _windows_path_stat(path: Path) -> os.stat_result:
     descriptor: int | None = None
     try:
         descriptor = msvcrt.open_osfhandle(handle_value, os.O_RDONLY | getattr(os, "O_BINARY", 0))
-        info = os.fstat(descriptor)
-        attributes = getattr(info, "st_file_attributes", None)
-        if attributes is None or attributes & 0x00000400:  # FILE_ATTRIBUTE_REPARSE_POINT
-            raise OSError("A publication pathname is a reparse point.")
-        return info
+        return _windows_descriptor_stat(descriptor)
     finally:
         if descriptor is None:
             kernel.CloseHandle(handle)
@@ -608,7 +667,7 @@ def _windows_unlink_if_owned(path: Path, expected: _PathIdentity) -> bool:
             os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
         )
         handle = None
-        opened = _PathIdentity.from_stat(os.fstat(descriptor))
+        opened = _PathIdentity.from_stat(_windows_descriptor_stat(descriptor))
         if not expected.pristine(opened):
             return False
         delete_file = ctypes.c_ubyte(1)
@@ -1430,31 +1489,14 @@ def _backup_target(artifact: _Artifact) -> None:
     if expected.file_type not in {stat.S_IFREG, stat.S_IFLNK}:
         raise OSError("Publication targets must be regular files or symbolic links.")
 
+    if expected.file_type == stat.S_IFLNK:
+        # The journaled displacement retains the original link itself. Creating
+        # another symlink would expose its payload before ownership is durable.
+        return
+
     for _attempt in range(100):
         _assert_pristine(target, expected)
         candidate = _candidate(target, "backup")
-        if expected.file_type == stat.S_IFLNK:
-            link_value = target.readlink()
-            try:
-                try:
-                    candidate.symlink_to(link_value)
-                except FileExistsError:
-                    continue
-                symlink_identity = _identity(candidate)
-                _assert_pristine(target, expected)
-                if candidate.readlink() != link_value:
-                    raise OSError("A publication backup changed while it was created.")
-                artifact.backup = _OwnedPath(candidate, symlink_identity)
-                artifact.observe("backup")
-            except BaseException:
-                try:
-                    current = _identity(candidate)
-                    if current.file_type == stat.S_IFLNK and candidate.readlink() == link_value:
-                        _unlink_if_owned(candidate, current)
-                except BaseException:  # noqa: BLE001, S110 - preserve the creation failure
-                    pass
-                raise
-            return
         try:
             _copy_regular_no_clobber(
                 _OwnedPath(target, expected),

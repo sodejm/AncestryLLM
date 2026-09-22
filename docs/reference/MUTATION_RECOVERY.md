@@ -70,6 +70,18 @@ ambiguous state. Cleanup removes only proven operation-owned objects, preserving
 unrelated files. Narrow creation-to-journal interruption windows deliberately
 fail closed when ownership cannot be proved.
 
+Once sync staging belongs to the journal, a failed recovery cannot fall back to
+filename-based cleanup. A replaced staged member remains behind the recovery
+barrier. POSIX fingerprint reads open without blocking and reject nonregular
+objects, including a FIFO swapped in before the open. Sealed file fingerprints
+include permission bits, and cleanup revalidates ownership at removal.
+
+On POSIX, replacing a final symbolic link preserves the original link through
+journaled displacement, including a cyclic final link; a cyclic parent requires
+reauthorization. Recovery does not create a separate symlink backup. Native
+Windows publication verifies symbolic-link tags through a held no-follow handle
+and rejects other reparse-point kinds before changing them.
+
 Copy fallbacks record private-directory and exclusive-file ownership before
 copying bytes. Recovery may delete an interrupted copy only after checking its
 file identity, single-link state, and private parent. Unsealed bytes never

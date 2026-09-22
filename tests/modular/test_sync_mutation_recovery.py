@@ -253,3 +253,50 @@ def test_sync_retry_stops_after_recovering_committed_generation(
     with LocalMutationCoordinator(namespace) as coordinator:
         assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),)) == ()
     assert not list(root.glob(".gedcom-*"))
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+def test_sync_failure_preserves_foreign_staged_member(tmp_path, monkeypatch, operation):
+    from ancestryllm.core.errors import AncestryError
+
+    root = tmp_path / "releases"
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional foreign member test",
+        ]
+    replaced = []
+
+    def replace_member(self, boundary):
+        if boundary != "member_written" or replaced:
+            return
+        stage = self.target.parent / self.record.stage
+        member = next(stage.glob("master.ged"))
+        member.rename(tmp_path / "preserved-owned-master")
+        member.write_bytes(b"foreign fictional content")
+        replaced.append(member)
+        raise OSError("Injected failure after a foreign replacement")
+
+    monkeypatch.setattr(DirectoryMutation, "_checkpoint", replace_member)
+    with pytest.raises(AncestryError) as failure:
+        run_sync(arguments, raise_errors=True)
+    assert failure.value.code == "SYNC_OUTPUT"
+    assert len(replaced) == 1
+    assert replaced[0].read_bytes() == b"foreign fictional content"
+    with LocalMutationCoordinator() as coordinator:
+        assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),))
+        with pytest.raises(AncestryError) as error:
+            DirectoryMutation.reconcile_root(root, coordinator)
+        assert error.value.code == "MUTATION_RECOVERY_REQUIRED"
+    assert replaced[0].read_bytes() == b"foreign fictional content"

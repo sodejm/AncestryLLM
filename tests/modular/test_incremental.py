@@ -518,6 +518,37 @@ def _assert_cleanup_residue(release_root: Path, operation: str) -> None:
         assert not any(residue.iterdir())
 
 
+def _assert_recovery_residue(release_root: Path, operation: str, *, empty: bool = False) -> None:
+    """Retained payloads must belong to a nonterminal journal reservation."""
+
+    from ancestryllm.core.directory_mutation import _Record
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
+    prefix = ".gedcom-sync-" if operation == "update" else ".gedcom-rebase-"
+    residues = list(release_root.glob(f"{prefix}*"))
+    assert len(residues) == 1
+    stage = residues[0]
+    assert stage.is_dir()
+    assert bool(list(stage.iterdir())) is not empty
+    with LocalMutationCoordinator() as coordinator:
+        with coordinator._transaction() as database:
+            rows = database.execute(
+                "SELECT record,state,outcome FROM directory_publications "
+                "JOIN operations USING(operation_id)"
+            ).fetchall()
+        matching = [row for row in rows if _Record.from_json(row["record"]).stage == stage.name]
+        assert len(matching) == 1
+        row = matching[0]
+        assert row["state"] == "recovery_required"
+        assert row["outcome"] is None
+        record = _Record.from_json(row["record"])
+        owned = {member.name for member in record.members}
+        assert all(
+            member.name == record.marker or coordinator._digest(member.name) in owned
+            for member in stage.iterdir()
+        )
+
+
 def _assert_candidate_cleanup_residue(parent: Path) -> None:
     candidates = list(parent.glob(".ancestryllm-release-root-*"))
     if os.name == "nt":
@@ -1719,7 +1750,7 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
     assert (concurrent_destination / "concurrent-sentinel.txt").read_text(
         encoding="utf-8"
     ) == "preserve concurrent owner"
-    _assert_cleanup_residue(releases, operation)
+    _assert_recovery_residue(releases, operation)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
@@ -1780,7 +1811,7 @@ def test_sync_detects_release_root_swap_during_final_rename_without_touching_for
         assert (moved_root / original_sentinel.name).read_text(
             encoding="utf-8"
         ) == "preserve original owner"
-    _assert_cleanup_residue(moved_root, operation)
+    _assert_recovery_residue(moved_root, operation)
 
 
 @pytest.mark.parametrize(
@@ -2545,12 +2576,7 @@ def test_release_root_swap_at_marker_removal_rolls_back_in_held_root(
         encoding="utf-8"
     ) == "preserve original owner"
     assert not list(moved_root.glob("g*-*"))
-    residues = list(moved_root.glob(".gedcom-*"))
-    if os.name == "nt":
-        assert not residues
-    else:
-        assert len(residues) == 1
-        assert not any(residues[0].iterdir())
+    _assert_recovery_residue(moved_root, operation)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
@@ -2587,12 +2613,7 @@ def test_release_root_swap_during_staging_mkdir_uses_held_root_for_cleanup(
     assert (moved_root / original_sentinel.name).read_text(
         encoding="utf-8"
     ) == "preserve original owner"
-    residues = list(moved_root.glob(".gedcom-*"))
-    if os.name == "nt":
-        assert not residues
-    else:
-        assert len(residues) == 1
-        assert not any(residues[0].iterdir())
+    _assert_recovery_residue(moved_root, operation, empty=True)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))

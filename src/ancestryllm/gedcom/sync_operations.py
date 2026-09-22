@@ -498,8 +498,17 @@ def _perform_update(
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
+        journal_owns_stage = mutation is not None and mutation.record is not None
+        if journal_owns_stage:
+            # A rejected recovery must retain foreign entries and its reservation.
+            # The legacy name allowlist cannot supersede durable member ownership.
+            sync_publication._close_descriptor_quietly(staging_descriptor)
+            sync_publication._close_descriptor_quietly(cleanup_marker_descriptor)
+            staging_descriptor = None
+            staging_marker_descriptor = None
         if (
-            release_root_capability is not None
+            not journal_owns_stage
+            and release_root_capability is not None
             and staging_name is not None
             and staging_identity is not None
             and staging_marker_name is not None
@@ -864,8 +873,17 @@ def _perform_rebase(
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
+        journal_owns_stage = mutation is not None and mutation.record is not None
+        if journal_owns_stage:
+            # A rejected recovery must retain foreign entries and its reservation.
+            # The legacy name allowlist cannot supersede durable member ownership.
+            sync_publication._close_descriptor_quietly(staging_descriptor)
+            sync_publication._close_descriptor_quietly(cleanup_marker_descriptor)
+            staging_descriptor = None
+            staging_marker_descriptor = None
         if (
-            release_root_capability is not None
+            not journal_owns_stage
+            and release_root_capability is not None
             and staging_name is not None
             and staging_identity is not None
             and staging_marker_name is not None
