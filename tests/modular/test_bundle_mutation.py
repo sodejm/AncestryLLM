@@ -303,15 +303,35 @@ def test_interrupted_copy_preserves_changed_ownership(tmp_path: Path, replacemen
         assert partial.read_bytes() == expected
 
 
-def _terminate_symlink_restoration(namespace, directory):
+def _terminate_symlink_restoration(namespace, directory, boundary):
     from ancestryllm.core import mutation, publication
 
     mutation.coordinator_namespace = lambda: Path(namespace)
     original = publication._install_no_clobber
+    restoring = False
+
+    def namespace_boundary(operation):
+        def apply(*args, **kwargs):
+            result = operation(*args, **kwargs)
+            if restoring and boundary == "namespace":
+                os._exit(38)
+            return result
+
+        return apply
+
+    Path.symlink_to = namespace_boundary(Path.symlink_to)
+    for name in (
+        "_macos_rename_no_replace_at",
+        "_linux_rename_no_replace_at",
+        "_windows_rename_descriptor_no_replace",
+    ):
+        setattr(publication, name, namespace_boundary(getattr(publication, name)))
 
     def restore(*args, **kwargs):
+        nonlocal restoring
+        restoring = kwargs.get("restoration") is not None
         result = original(*args, **kwargs)
-        if kwargs.get("restoration") is not None:
+        if restoring:
             os._exit(38)
         return result
 
@@ -325,7 +345,8 @@ def _terminate_symlink_restoration(namespace, directory):
     publication.publish_staged_bundle([(stage, target)], replace=os.replace, validate_after=reject)
 
 
-def test_restart_after_symlink_restoration(tmp_path):
+@pytest.mark.parametrize("boundary", ["namespace", "recorded"])
+def test_restart_after_symlink_restoration(tmp_path, boundary):
     from ancestryllm.core.bundle_mutation import BundleMutation
 
     original = tmp_path / "original.ged"
@@ -337,7 +358,7 @@ def test_restart_after_symlink_restoration(tmp_path):
         pytest.skip("Creating symbolic links requires platform privileges")
     namespace = tmp_path / "journal"
     process = multiprocessing.get_context("spawn").Process(
-        target=_terminate_symlink_restoration, args=(str(namespace), str(tmp_path))
+        target=_terminate_symlink_restoration, args=(str(namespace), str(tmp_path), boundary)
     )
     process.start()
     process.join(20)

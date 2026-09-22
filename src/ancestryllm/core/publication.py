@@ -2301,6 +2301,67 @@ def _commit_prepared_install(
     return installed
 
 
+def _restore_symlink_no_clobber(
+    source: _OwnedPath,
+    target: Path,
+    restoration: _Artifact | None,
+) -> _OwnedPath:
+    """Move the journaled original link without creating an unowned replacement."""
+
+    origin = _PreparedRegularInstall(source.path)
+    prepared = _PreparedRegularInstall(target, candidate=source, restoration=True)
+    descriptor: int | None = None
+    try:
+        _open_directory_capability(source.path.parent, origin)
+        _open_directory_capability(target.parent, prepared)
+        source_parent = origin.destination
+        destination = prepared.destination
+        assert source_parent is not None and destination is not None
+        if _PLATFORM == "win32":
+            descriptor = _windows_open_shared_descriptor(source.path)
+            held = _PathIdentity.from_stat(_windows_descriptor_stat(descriptor))
+            if not source.identity.pristine(held):
+                raise OSError("The original symbolic link changed before restoration.")
+        _assert_pristine(source.path, source.identity)
+        if restoration is not None:
+            # Persist the existing inode before the only namespace mutation.
+            restoration.observe("restoring", prepared)
+        if not all(
+            _directory_capability_matches_path(parent) for parent in (source_parent, destination)
+        ):
+            raise OSError("A symbolic-link restoration directory changed before commit.")
+        _assert_pristine(source.path, source.identity)
+        if _PLATFORM == "win32":
+            assert descriptor is not None
+            _windows_rename_descriptor_no_replace(descriptor, destination, target.name)
+        elif _PLATFORM == "darwin":
+            _macos_rename_no_replace_at(
+                source_parent.descriptor, source.path.name, destination.descriptor, target.name
+            )
+        elif _PLATFORM.startswith("linux"):
+            _linux_rename_no_replace_at(
+                source_parent.descriptor, source.path.name, destination.descriptor, target.name
+            )
+        else:
+            raise OSError(errno.ENOTSUP, "Symbolic-link restoration is unsupported.")
+        _fsync_directory_capability(source_parent)
+        _fsync_directory_capability(destination)
+        actual = _identity_in_directory(destination, target.name)
+        if actual is None or not source.identity.unchanged(actual):
+            raise OSError("The restored symbolic link changed during publication.")
+        installed = _OwnedPath(target, actual)
+        if restoration is not None:
+            restoration.restored = installed
+            restoration.observe("restored", prepared)
+        return installed
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        for lifecycle in (origin, prepared):
+            if lifecycle.destination is not None:
+                _close_directory_capability(lifecycle.destination)
+
+
 def _install_no_clobber(
     source: _OwnedPath,
     target: Path,
@@ -2312,25 +2373,7 @@ def _install_no_clobber(
     _assert_pristine(source.path, source.identity)
     try:
         if source.identity.file_type == stat.S_IFLNK:
-            link_value = source.path.readlink()
-            try:
-                target.symlink_to(link_value)
-            except FileExistsError as exc:
-                raise OSError("A publication target appeared during the operation.") from exc
-            installed = _OwnedPath(target, _identity(target))
-            try:
-                if installed.identity.file_type != stat.S_IFLNK:
-                    raise OSError("The restored symbolic-link target changed during publication.")
-                _assert_pristine(source.path, source.identity)
-                if target.readlink() != link_value:
-                    raise OSError("The restored symbolic-link target changed during publication.")
-            except BaseException:
-                _unlink_if_owned(installed.path, installed.identity)
-                raise
-            if restoration is not None:
-                restoration.restored = installed
-                restoration.observe("restored")
-            return installed
+            return _restore_symlink_no_clobber(source, target, restoration)
         if source.identity.file_type != stat.S_IFREG:
             raise OSError("Only regular files and symbolic links can be published.")
         prepared = _PreparedRegularInstall(target, artifact=restoration, restoration=True)

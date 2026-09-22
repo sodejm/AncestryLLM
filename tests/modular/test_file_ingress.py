@@ -4879,7 +4879,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     target.symlink_to(victim)
     staged = _staged_bytes(target, b"new\n")
     original_link = publication_module.os.link
-    original_symlink = publication_module.os.symlink
+    original_restore = publication_module._restore_symlink_no_clobber
     raced = False
 
     def deny_symlink_hardlinks(
@@ -4893,27 +4893,20 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
         original_link(source, destination, follow_symlinks=follow_symlinks)
 
     def create_concurrent_target_before_restore(
-        source: str | bytes,
-        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-        target_is_directory: bool = False,
-        *,
-        dir_fd: int | None = None,
-    ) -> None:
+        source: publication_module._OwnedPath,
+        destination: Path,
+        restoration: publication_module._Artifact | None,
+    ) -> publication_module._OwnedPath:
         nonlocal raced
-        if Path(destination) == target and not raced:
+        if destination == target and not raced:
             target.write_bytes(b"concurrent\n")
             raced = True
-        original_symlink(
-            source,
-            destination,
-            target_is_directory=target_is_directory,
-            dir_fd=dir_fd,
-        )
+        return original_restore(source, destination, restoration)
 
     monkeypatch.setattr(publication_module.os, "link", deny_symlink_hardlinks)
     monkeypatch.setattr(
-        publication_module.os,
-        "symlink",
+        publication_module,
+        "_restore_symlink_no_clobber",
         create_concurrent_target_before_restore,
     )
 

@@ -78,7 +78,9 @@ include permission bits, and cleanup revalidates ownership at removal.
 
 On POSIX, replacing a final symbolic link preserves the original link through
 journaled displacement, including a cyclic final link; a cyclic parent requires
-reauthorization. Recovery does not create a separate symlink backup. Native
+reauthorization. Recovery does not create a separate symlink backup. Restoration journals the
+original link identity before moving that link back with an exclusive rename, so
+a crash between the rename and its completion record remains recoverable. Native
 Windows publication verifies symbolic-link tags through a held no-follow handle
 and rejects other reparse-point kinds before changing them.
 
@@ -128,7 +130,7 @@ not a claim of target-matched packaged acceptance:
 | Cross-process contention, independent scopes, aliases, revisions | `test_mutation_coordinator.py`: spawned-process ownership, independent resources, inode/canonical/name aliases, stale revisions. |
 | Leases, fencing, cancellation, deadlines | `test_mutation_coordinator.py` and `test_atomic_file_mutation.py`: expired owner cannot transfer live ownership; stale owner rejected; cancellation and timeout boundaries. |
 | Single-file process interruption | `test_atomic_file_mutation.py`: forced process exit at persisted and publication checkpoints, existing/absent destinations, repeated reconciliation, unrelated-file preservation, and Windows creation-time tunneling without losing file identity. |
-| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, lease expiry at publication boundaries, forced exit during backup/install/restore copies and after symlink restoration, old/new complete state, terminal outcome, replaced or modified objects preserved. |
+| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, lease expiry at publication boundaries, forced exit during backup/install/restore copies and immediately after the symlink restoration rename and completion record, old/new complete state, terminal outcome, replaced or modified objects preserved. |
 | Directory and sync recovery | `test_directory_mutation.py` and `test_sync_mutation_recovery.py`: update/rebase checkpoints, individual member writes, exact owned cleanup, complete generation validation, late cancellation, unexpected-file preservation, and stale retries stopped after recovering a committed generation. |
 | Private journal and cross-platform adapter | `test_windows_mutation.py`: ACL parsing and Windows-only native account/ACL checks; coordinator tests cover private bootstrap. |
 | Existing integrations | Settings, incremental sync, shared publication, RootsMagic/export and GEDCOM suites exercise their existing behavior through the shared coordinator. |
