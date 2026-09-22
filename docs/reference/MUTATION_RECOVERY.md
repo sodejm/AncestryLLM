@@ -54,7 +54,7 @@ retried on later invocations without changing an already recorded outcome.
 | Integration | Publication and recovery contract |
 |---|---|
 | Settings persistence | Stage, synchronize, and verify a complete file before replacement; reconcile an interrupted replacement against the owned old/new identities. Existing in-memory synchronization and optimistic revision checks remain. |
-| Sync update and rebase | Reserve the generation root across processes; track owned stage members and verify the complete generation before exclusive directory publication. A committed directory remains the successful outcome if cancellation arrives afterward. |
+| Sync update and rebase | Reserve the generation root across processes; track owned stage members and verify the complete generation before exclusive directory publication. A committed directory remains the successful outcome if cancellation arrives afterward. If a retry recovers a committed generation, it stops before staging another generation; select the recovered master and manifest to continue. |
 | Shared artifacts and RootsMagic exports | Journal destination, backup, installation, verification, and cleanup ownership. Legacy CLI paths remain compatible. Recovery restores the old complete set or finishes the verified new set. |
 
 **Legacy separate filenames do not become simultaneously visible through one
@@ -93,6 +93,7 @@ for the distinction between coordination recovery and genealogy backups.
 | `MUTATION_REAUTHORIZATION_REQUIRED` | Recovery needs renewed authority for the original resource. |
 | `MUTATION_RECOVERY_REQUIRED`, `MUTATION_RECOVERY_INVALID` | Recovery cannot prove a safe complete state. Preserve the files and journal for investigation. |
 | `MUTATION_JOURNAL_UNSAFE`, `MUTATION_JOURNAL_UNAVAILABLE` | The private journal cannot safely coordinate writes. Restore valid account permissions or availability before retrying. |
+| `SYNC_RECOVERED_GENERATION` | Recovery completed an interrupted sync generation. Select its recovered master and manifest before starting another generation, so a retry does not reuse the previous generation number. |
 
 Errors are path-free. No error grants permission to delete an unknown object or
 bypass a resource lock.
@@ -114,9 +115,9 @@ not a claim of target-matched packaged acceptance:
 | Strict transport-neutral requests, retry intent, terminal outcomes | `test_mutation_coordinator.py`: DTO boundaries, matching/mismatched retries, recorded outcomes, bounded internal history and lock collection with retry/recovery authority preserved. |
 | Cross-process contention, independent scopes, aliases, revisions | `test_mutation_coordinator.py`: spawned-process ownership, independent resources, inode/canonical/name aliases, stale revisions. |
 | Leases, fencing, cancellation, deadlines | `test_mutation_coordinator.py` and `test_atomic_file_mutation.py`: expired owner cannot transfer live ownership; stale owner rejected; cancellation and timeout boundaries. |
-| Single-file process interruption | `test_atomic_file_mutation.py`: forced process exit at persisted and publication checkpoints, existing/absent destinations, repeated reconciliation and unrelated-file preservation. |
-| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, lease expiry at publication boundaries, forced exit during backup/install/restore copies, old/new complete state, terminal outcome, replaced or modified objects preserved. |
-| Directory and sync recovery | `test_directory_mutation.py` and `test_sync_mutation_recovery.py`: update/rebase checkpoints, individual member writes, exact owned cleanup, complete generation validation, late cancellation, unexpected-file preservation. |
+| Single-file process interruption | `test_atomic_file_mutation.py`: forced process exit at persisted and publication checkpoints, existing/absent destinations, repeated reconciliation, unrelated-file preservation, and Windows creation-time tunneling without losing file identity. |
+| Legacy separate-file recovery | `test_bundle_mutation.py`: installation/backup checkpoints, lease expiry at publication boundaries, forced exit during backup/install/restore copies and after symlink restoration, old/new complete state, terminal outcome, replaced or modified objects preserved. |
+| Directory and sync recovery | `test_directory_mutation.py` and `test_sync_mutation_recovery.py`: update/rebase checkpoints, individual member writes, exact owned cleanup, complete generation validation, late cancellation, unexpected-file preservation, and stale retries stopped after recovering a committed generation. |
 | Private journal and cross-platform adapter | `test_windows_mutation.py`: ACL parsing and Windows-only native account/ACL checks; coordinator tests cover private bootstrap. |
 | Existing integrations | Settings, incremental sync, shared publication, RootsMagic/export and GEDCOM suites exercise their existing behavior through the shared coordinator. |
 

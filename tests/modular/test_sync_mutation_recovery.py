@@ -190,3 +190,66 @@ def test_sync_committed_outcome_wins_over_late_cancellation(
     assert result.exit_code == 0
     assert len(result.artifacts) == 5
     assert all(path.is_file() for path in result.artifacts)
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+@pytest.mark.parametrize("boundary", ["published", "finalized"])
+def test_sync_retry_stops_after_recovering_committed_generation(
+    tmp_path, monkeypatch, operation, boundary
+):
+    import datetime
+    from types import SimpleNamespace
+
+    from ancestryllm.core import mutation
+    from ancestryllm.core.errors import AncestryError
+    from ancestryllm.gedcom import sync_operations
+
+    namespace = tmp_path / "journal"
+    monkeypatch.setattr(mutation, "coordinator_namespace", lambda: namespace)
+    root = tmp_path / "releases"
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional retry",
+        ]
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_sync, args=(str(namespace), arguments, boundary, 1)
+    )
+    process.start()
+    process.join(20)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Sync did not reach publication")
+    assert process.exitcode == 37
+    release = next(root.glob("g*"))
+    before = {
+        path.name: path.read_bytes() for path in release.iterdir() if path.suffix != ".marker"
+    }
+
+    class Later(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return super().now(tz) + datetime.timedelta(days=1)
+
+    monkeypatch.setattr(sync_operations, "dt", SimpleNamespace(datetime=Later, UTC=datetime.UTC))
+    with pytest.raises(AncestryError) as failure:
+        run_sync(arguments, raise_errors=True)
+    assert failure.value.code == "SYNC_RECOVERED_GENERATION"
+    assert list(root.glob("g*")) == [release]
+    for name in ("master.ged", "manifest.json", "rollback.json", "quality.md", "update.md"):
+        assert (release / name).read_bytes() == before[name]
+    with LocalMutationCoordinator(namespace) as coordinator:
+        assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),)) == ()
+    assert not list(root.glob(".gedcom-*"))

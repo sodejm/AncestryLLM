@@ -180,3 +180,21 @@ def test_completed_rename_records_commit_after_lease_expiry(
         assert outcome.state is MutationState.COMMITTED
         assert coordinator.interrupted((target,)) == ()
     assert target.read_bytes() == b"complete"
+
+
+def test_windows_identity_survives_creation_time_tunneling(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from ancestryllm.core import atomic_file
+
+    monkeypatch.setattr(atomic_file, "os", SimpleNamespace(name="nt"))
+    before = SimpleNamespace(st_dev=7, st_ino=19, st_birthtime_ns=100)
+    after = SimpleNamespace(st_dev=7, st_ino=19, st_birthtime_ns=200)
+    replaced = SimpleNamespace(st_dev=7, st_ino=20, st_birthtime_ns=200)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        assert atomic_file._identity(coordinator, before) == atomic_file._identity(
+            coordinator, after
+        )
+        assert atomic_file._identity(coordinator, before) != atomic_file._identity(
+            coordinator, replaced
+        )

@@ -301,3 +301,56 @@ def test_interrupted_copy_preserves_changed_ownership(tmp_path: Path, replacemen
         assert error.value.code == "MUTATION_RECOVERY_REQUIRED"
         assert coordinator.interrupted(targets)
         assert partial.read_bytes() == expected
+
+
+def _terminate_symlink_restoration(namespace, directory):
+    from ancestryllm.core import mutation, publication
+
+    mutation.coordinator_namespace = lambda: Path(namespace)
+    original = publication._install_no_clobber
+
+    def restore(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get("restoration") is not None:
+            os._exit(38)
+        return result
+
+    def reject():
+        raise OSError("Injected validation failure")
+
+    publication._install_no_clobber = restore
+    target = Path(directory) / "tree.ged"
+    stage = publication.staging_path(target)
+    publication.write_staged_bytes(stage, b"fictional replacement")
+    publication.publish_staged_bundle([(stage, target)], replace=os.replace, validate_after=reject)
+
+
+def test_restart_after_symlink_restoration(tmp_path):
+    from ancestryllm.core.bundle_mutation import BundleMutation
+
+    original = tmp_path / "original.ged"
+    original.write_bytes(b"fictional original")
+    target = tmp_path / "tree.ged"
+    try:
+        target.symlink_to(original.name)
+    except OSError:
+        pytest.skip("Creating symbolic links requires platform privileges")
+    namespace = tmp_path / "journal"
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_symlink_restoration, args=(str(namespace), str(tmp_path))
+    )
+    process.start()
+    process.join(20)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Publisher did not reach symlink restoration")
+    assert process.exitcode == 38
+    with LocalMutationCoordinator(namespace) as coordinator:
+        BundleMutation.reconcile((target,), coordinator)
+        BundleMutation.reconcile((target,), coordinator)
+        assert coordinator.interrupted((target,)) == ()
+    assert target.is_symlink()
+    assert target.readlink() == Path(original.name)
+    assert original.read_bytes() == b"fictional original"
+    assert not list(tmp_path.glob(".ancestry-publish-*"))

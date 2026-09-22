@@ -33,6 +33,7 @@ from ancestryllm.core.atomic_file import (
     _sync_parent,
 )
 from ancestryllm.core.cancellation import cancellation_checkpoint
+from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
     import sqlite3
@@ -156,7 +157,12 @@ class DirectoryMutation:
         if self.sync_root:
             if re.fullmatch(r"g[0-9]{4,}-[0-9]{8}T[0-9]{6}Z", self.target.name) is None:
                 raise ValueError("Invalid generated release identifier.")
-            self.reconcile_root(self.target.parent, self.coordinator)
+            if self.reconcile_root(self.target.parent, self.coordinator):
+                raise AncestryError(
+                    "SYNC_RECOVERED_GENERATION",
+                    "An interrupted sync generation was committed. "
+                    "Select its recovered master and manifest before starting another generation.",
+                )
         else:
             self.reconcile(self.target, self.coordinator)
         cancellation_checkpoint()
@@ -458,7 +464,7 @@ class DirectoryMutation:
             self._checkpoint("cleanup_directory")
         _sync_parent(path)
 
-    def finish(self) -> None:
+    def finish(self) -> MutationState:
         """Commit only a verified published directory; otherwise recover the old state."""
         assert self.lease is not None
         self._verify_bindings()
@@ -484,11 +490,13 @@ class DirectoryMutation:
         self.coordinator.transition(self.lease, MutationTransition(state, ()))
         self.lease = None
         self._checkpoint(state.value)
+        return state
 
     @classmethod
-    def reconcile_root(cls, root: Path, coordinator: LocalMutationCoordinator) -> None:
-        """Reconcile generated releases beneath a newly authorized sync root."""
+    def reconcile_root(cls, root: Path, coordinator: LocalMutationCoordinator) -> bool:
+        """Reconcile authorized releases and report whether a generation committed."""
         cls._initialize(coordinator)
+        committed = False
         for interrupted in coordinator.interrupted((cls._root_scope(root, coordinator),)):
             with coordinator._transaction() as database:
                 row = database.execute(
@@ -500,7 +508,9 @@ class DirectoryMutation:
                 or re.fullmatch(r"g[0-9]{4,}-[0-9]{8}T[0-9]{6}Z", row["destination"]) is None
             ):
                 raise _recovery_required()
-            cls._reconcile_request(root / row["destination"], coordinator, interrupted)
+            state = cls._reconcile_request(root / row["destination"], coordinator, interrupted)
+            committed = committed or state is MutationState.COMMITTED
+        return committed
 
     @classmethod
     def reconcile(cls, target: Path, coordinator: LocalMutationCoordinator) -> None:
@@ -512,7 +522,7 @@ class DirectoryMutation:
     @classmethod
     def _reconcile_request(
         cls, target: Path, coordinator: LocalMutationCoordinator, interrupted: MutationRequest
-    ) -> None:
+    ) -> MutationState:
         if interrupted.intent_digest != coordinator._digest("directory-publication-v1"):
             raise _recovery_required()
         with coordinator._transaction() as database:
@@ -537,7 +547,7 @@ class DirectoryMutation:
         )
         coordinator.rebind(request, mutation._paths())
         mutation.lease = coordinator.recover(request)
-        mutation.finish()
+        return mutation.finish()
 
     def _checkpoint(self, boundary: str) -> None:
         """Fault-injection boundary for deterministic process-termination tests."""

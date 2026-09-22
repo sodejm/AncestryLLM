@@ -57,9 +57,10 @@ class _ReplacementRecord(BoundaryDTO):
 
 
 def _identity(coordinator: LocalMutationCoordinator, info: os.stat_result) -> str:
-    return coordinator._digest(
-        f"file:{info.st_dev}:{info.st_ino}:{getattr(info, 'st_birthtime_ns', '')}"
-    )
+    # Windows name tunneling can change creation time when this same file is
+    # renamed over an existing name. Device and file ID survive that rename.
+    birthtime = "" if os.name == "nt" else getattr(info, "st_birthtime_ns", "")
+    return coordinator._digest(f"file:{info.st_dev}:{info.st_ino}:{birthtime}")
 
 
 def _windows_open_fingerprint_descriptor(path: Path, *, writable: bool = False) -> int:

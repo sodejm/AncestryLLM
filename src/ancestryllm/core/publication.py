@@ -2287,6 +2287,7 @@ def _install_no_clobber(
                 raise
             if restoration is not None:
                 restoration.restored = installed
+                restoration.observe("restored")
             return installed
         if source.identity.file_type != stat.S_IFREG:
             raise OSError("Only regular files and symbolic links can be published.")
