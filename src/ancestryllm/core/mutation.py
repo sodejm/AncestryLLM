@@ -49,6 +49,11 @@ def _now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
+def _is_link_resolution_error(error: OSError) -> bool:
+    # Windows reports ERROR_CANT_RESOLVE_FILENAME for cyclic symbolic links.
+    return error.errno == errno.ELOOP or getattr(error, "winerror", None) == 1921
+
+
 def coordinator_namespace() -> Path:
     """Use the account home, never workspace/configuration directory overrides."""
 
@@ -327,7 +332,7 @@ class LocalMutationCoordinator:
         except FileNotFoundError:
             return None
         except OSError as error:
-            if error.errno != errno.ELOOP:
+            if not _is_link_resolution_error(error):
                 raise
             # A final link may be replaced even when its referent is cyclic.
             # Resolve the parent first so a cyclic ancestor cannot be authorized.
@@ -359,7 +364,7 @@ class LocalMutationCoordinator:
             try:
                 canonical = path.resolve()
             except (OSError, RuntimeError) as error:
-                if isinstance(error, OSError) and error.errno != errno.ELOOP:
+                if isinstance(error, OSError) and not _is_link_resolution_error(error):
                     raise
                 # Parent validity was checked by _binding; retain the final link.
                 canonical = path.parent.resolve(strict=True) / path.name

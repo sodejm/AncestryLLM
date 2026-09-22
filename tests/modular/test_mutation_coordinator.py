@@ -528,3 +528,22 @@ def test_cyclic_parent_returns_coded_reauthorization(tmp_path):
         with pytest.raises(AncestryError) as error:
             coordinator.bind((parent / "tree.ged",))
         assert error.value.code == "MUTATION_REAUTHORIZATION_REQUIRED"
+
+
+@pytest.mark.parametrize("operation", ["stat", "resolve"])
+def test_windows_cyclic_final_link_error_can_be_bound(tmp_path, monkeypatch, operation):
+    target = tmp_path / "tree.ged"
+    target.symlink_to(target.name)
+    original = getattr(Path, operation)
+
+    def windows_cycle(path, *args, **kwargs):
+        if path == target and kwargs.get("follow_symlinks", True):
+            error = OSError("The name of the file cannot be resolved by the system")
+            error.winerror = 1921
+            raise error
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, operation, windows_cycle)
+    with LocalMutationCoordinator(tmp_path / "journal") as coordinator:
+        lease = coordinator.acquire(request(coordinator, target))
+        coordinator.transition(lease, MutationTransition(MutationState.ABORTED, ()))
