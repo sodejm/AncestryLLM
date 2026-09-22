@@ -230,7 +230,7 @@ class SyncError(RuntimeError):
             lines.extend(
                 [
                     "",
-                    "No release was committed. An empty app-owned cleanup directory may remain.",
+                    "No release was committed. Journaled staging may remain for an authorized retry.",
                 ]
             )
         return "\n".join(lines) + "\n"

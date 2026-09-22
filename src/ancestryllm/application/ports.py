@@ -14,6 +14,12 @@ if TYPE_CHECKING:
         QualityResolutionResult,
     )
     from ancestryllm.application.events import ProgressEvent
+    from ancestryllm.application.mutations import (
+        MutationLease,
+        MutationOutcome,
+        MutationRequest,
+        MutationTransition,
+    )
     from ancestryllm.application.operations import (
         GedcomInspectRequest,
         GedcomInspectResult,
@@ -34,6 +40,27 @@ class CancellationPort(Protocol):
 
     def check_cancelled(self) -> None:
         """Raise the adapter's cancellation signal when cancellation is requested."""
+
+
+class MutationCoordinator(Protocol):
+    """Coordinate authorized resource scopes across local processes."""
+
+    def acquire(self, request: MutationRequest) -> MutationLease | MutationOutcome:
+        """Acquire all scopes or return the recorded matching terminal result."""
+
+    def recover(self, request: MutationRequest) -> MutationLease:
+        """Rebind an interrupted operation through an authorized invocation."""
+
+    def validate(self, lease: MutationLease) -> None:
+        """Check ownership, fencing, and lease lifetime before a side effect."""
+
+    def renew(self, lease: MutationLease) -> MutationLease:
+        """Renew live ownership without exceeding the operation deadline."""
+
+    def transition(
+        self, lease: MutationLease, transition: MutationTransition
+    ) -> MutationLease | MutationOutcome:
+        """Persist one legal transition before releasing terminal ownership."""
 
 
 @runtime_checkable
@@ -144,6 +171,7 @@ __all__ = [
     "DiscardProgress",
     "GedcomOperationsPort",
     "IdentityResolutionPort",
+    "MutationCoordinator",
     "NeverCancelled",
     "ProgressPort",
     "QualityResolutionPort",

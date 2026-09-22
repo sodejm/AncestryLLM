@@ -8,7 +8,7 @@ from copy import copy
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from ancestryllm.core.errors import ConfigurationError
+from ancestryllm.core.errors import AncestryError, ConfigurationError
 
 SettingValue = str | int | float
 SettingType = Literal["string", "integer", "number"]
@@ -229,6 +229,19 @@ class SettingsService:
                     candidate.provider_timeout_seconds = float(validated)
             try:
                 saved = candidate.save(expected_revision=expected_revision)
+            except AncestryError as exc:
+                if exc.code in {"MUTATION_CONFLICT", "MUTATION_REVISION_STALE"}:
+                    raise _settings_error(
+                        "SETTINGS_REVISION_CONFLICT",
+                        "Configuration changed or is being updated; reload and retry.",
+                    ) from exc
+                if not exc.code.startswith("MUTATION_"):
+                    raise
+                raise _settings_error(
+                    "SETTINGS_SAVE_FAILED",
+                    "Configuration could not be stored safely.",
+                    exit_code=1,
+                ) from exc
             except OSError as exc:
                 raise _settings_error(
                     "SETTINGS_SAVE_FAILED",

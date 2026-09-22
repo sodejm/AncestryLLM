@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import datetime as dt
 from collections import Counter, defaultdict
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -16,17 +17,19 @@ if TYPE_CHECKING:
     from ancestryllm.gedcom.contracts import IdentityResolver
 
 from ancestryllm.core.cancellation import (
-    CancellationError,
     cancellation_checkpoint,
     non_interruptible_section,
 )
+from ancestryllm.core.directory_mutation import DirectoryMutation
 from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.core.ingress import (
     FileIngressPolicy,
     FileKind,
     FileSnapshot,
 )
+from ancestryllm.core.mutation import LocalMutationCoordinator
 from ancestryllm.gedcom import sync_publication
+from ancestryllm.gedcom.serialization import render_gedcom
 from ancestryllm.gedcom.sync_algorithms import (
     _block_key,
     _block_logical_identity,
@@ -313,7 +316,7 @@ def _perform_update(
             output=report,
             accounting=_sync_accounting(stats),
         )
-    release_root_capability = sync_publication._ensure_release_root(release_root)
+    release_root_capability: sync_publication._DirectoryCapability | None = None
     final_dir = release_root / release_name
     published_artifacts = tuple(
         final_dir / name
@@ -334,7 +337,15 @@ def _perform_update(
     staging_marker_descriptor: int | None = None
     staging_marker_identity: sync_publication._DirectoryIdentity | None = None
     transaction: sync_publication._PublicationTransactionState | None = None
+    coordinator: LocalMutationCoordinator | None = None
+    mutation: DirectoryMutation | None = None
     try:
+        sync_publication._validate_release_parent(release_root)
+        coordinator = LocalMutationCoordinator()
+        mutation = DirectoryMutation(final_dir, coordinator, sync_root=True)
+        mutation.acquire()
+        release_root_capability = sync_publication._ensure_release_root(release_root)
+        mutation.bind_root()
         (
             staging,
             staging_name,
@@ -343,15 +354,21 @@ def _perform_update(
             staging_marker_name,
             staging_marker_descriptor,
             staging_marker_identity,
-        ) = sync_publication._create_staging_directory(release_root_capability, ".gedcom-sync-")
+        ) = sync_publication._create_staging_directory(
+            release_root_capability,
+            ".gedcom-sync-",
+            mutation=mutation,
+        )
         _checkpoint(cancellation_check)
         staged_master = staging / "master.ged"
-        core.write_gedcom(
+        master_payload = render_gedcom(
             people,
-            staged_master,
             source_documents=[output_source],
             pointer_map=dict(pointer_map),
             gedcom_version=args.gedcom_version,
+        )
+        sync_publication._write_bytes(
+            staged_master, master_payload.encode("utf-8"), mutation=mutation
         )
         master_sha = _sha256_file(staged_master)
         parent_master = copy.deepcopy(manifest.get("master"))
@@ -385,7 +402,9 @@ def _perform_update(
             provider_id=args.provider,
             dry_run=False,
         )
-        sync_publication._write_bytes(staging / "update.md", report_text.encode("utf-8"))
+        sync_publication._write_bytes(
+            staging / "update.md", report_text.encode("utf-8"), mutation=mutation
+        )
         if not args.no_quality_report:
             assert args.quality_root_person is not None
             quality = _quality_report(
@@ -399,11 +418,13 @@ def _perform_update(
             sync_publication._write_bytes(
                 staging / "quality.md",
                 core.render_quality_report(quality).encode("utf-8"),
+                mutation=mutation,
             )
         else:
             sync_publication._write_bytes(
                 staging / "quality.md",
                 b"# Quality Report Disabled\n\nNo quality analysis was requested.\n",
+                mutation=mutation,
             )
         rollback = {
             "schema_version": 1,
@@ -416,21 +437,27 @@ def _perform_update(
                 "and manifest.json for the next update. Do not overwrite releases."
             ),
         }
-        sync_publication._write_bytes(staging / "rollback.json", _json_bytes(rollback))
+        sync_publication._write_bytes(
+            staging / "rollback.json", _json_bytes(rollback), mutation=mutation
+        )
         manifest["artifact_checksums"] = {
             name: _sha256_file(staging / name)
             for name in ("master.ged", "quality.md", "rollback.json", "update.md")
         }
         manifest_payload = _json_bytes(manifest)
-        sync_publication._write_bytes(staging / "manifest.json", manifest_payload)
+        sync_publication._write_bytes(
+            staging / "manifest.json", manifest_payload, mutation=mutation
+        )
         verify_inputs()
         _checkpoint(cancellation_check)
         assert staging_marker_descriptor is not None
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
         assert staging_identity is not None
+        mutation.prepare(staging, staging_marker_name)
         transaction = sync_publication._PublicationTransactionState(staging_marker_descriptor)
         with non_interruptible_section("publishing incremental release"):
+            mutation.committing()
             finalization_error = sync_publication._publish_and_finalize_directory(
                 staging_name,
                 release_name,
@@ -443,6 +470,8 @@ def _perform_update(
             )
             if finalization_error is not None:
                 raise finalization_error
+            if transaction.committed:
+                mutation.finish()
         if not transaction.committed:
             raise SyncError(
                 "SYNC_OUTPUT",
@@ -450,23 +479,37 @@ def _perform_update(
                 "Publication stopped before the ownership marker was removed.",
                 ["Inspect the release root and retry with a new patch version."],
             )
-    except BaseException as exc:
+    except BaseException:
         if transaction is not None and transaction.committed:
+            if mutation is not None and mutation.lease is not None:
+                mutation.finish()
             sync_publication._close_descriptor_quietly(staging_descriptor)
+            assert release_root_capability is not None
             sync_publication._close_capability_quietly(release_root_capability)
-            if isinstance(exc, CancellationError):
-                raise
             return SyncExecutionResult(
                 exit_code=0,
                 committed=True,
                 artifacts=published_artifacts,
                 accounting=_sync_accounting(stats, quality),
             )
+        if mutation is not None and mutation.lease is not None and not final_dir.exists():
+            with suppress(AncestryError, OSError):
+                mutation.finish()
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
+        journal_owns_stage = mutation is not None and mutation.record is not None
+        if journal_owns_stage:
+            # A rejected recovery must retain foreign entries and its reservation.
+            # The legacy name allowlist cannot supersede durable member ownership.
+            sync_publication._close_descriptor_quietly(staging_descriptor)
+            sync_publication._close_descriptor_quietly(cleanup_marker_descriptor)
+            staging_descriptor = None
+            staging_marker_descriptor = None
         if (
-            staging_name is not None
+            not journal_owns_stage
+            and release_root_capability is not None
+            and staging_name is not None
             and staging_identity is not None
             and staging_marker_name is not None
             and staging_marker_identity is not None
@@ -482,9 +525,14 @@ def _perform_update(
             )
             staging_descriptor = None
             staging_marker_descriptor = None
-        sync_publication._cleanup_empty_release_root(release_root_capability)
+        if release_root_capability is not None:
+            sync_publication._cleanup_empty_release_root(release_root_capability)
         raise
+    finally:
+        if coordinator is not None:
+            coordinator.close()
     sync_publication._close_descriptor_quietly(staging_descriptor)
+    assert release_root_capability is not None
     sync_publication._close_capability_quietly(release_root_capability)
     return SyncExecutionResult(
         exit_code=0,
@@ -670,7 +718,7 @@ def _perform_rebase(
             output=summary,
             accounting=_rebase_accounting(additions, deletions),
         )
-    release_root_capability = sync_publication._ensure_release_root(release_root)
+    release_root_capability: sync_publication._DirectoryCapability | None = None
     timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     final_dir = release_root / f"g{next_generation:04d}-{timestamp}"
     published_artifacts = tuple(
@@ -691,7 +739,15 @@ def _perform_rebase(
     staging_marker_descriptor: int | None = None
     staging_marker_identity: sync_publication._DirectoryIdentity | None = None
     transaction: sync_publication._PublicationTransactionState | None = None
+    coordinator: LocalMutationCoordinator | None = None
+    mutation: DirectoryMutation | None = None
     try:
+        sync_publication._validate_release_parent(release_root)
+        coordinator = LocalMutationCoordinator()
+        mutation = DirectoryMutation(final_dir, coordinator, sync_root=True)
+        mutation.acquire()
+        release_root_capability = sync_publication._ensure_release_root(release_root)
+        mutation.bind_root()
         (
             staging,
             staging_name,
@@ -700,14 +756,20 @@ def _perform_rebase(
             staging_marker_name,
             staging_marker_descriptor,
             staging_marker_identity,
-        ) = sync_publication._create_staging_directory(release_root_capability, ".gedcom-rebase-")
+        ) = sync_publication._create_staging_directory(
+            release_root_capability,
+            ".gedcom-rebase-",
+            mutation=mutation,
+        )
         _checkpoint(cancellation_check)
         ingress.copy_to(
             master,
             staging / "master.ged",
             FileKind.GEDCOM,
             expected=master_fingerprint,
+            on_created=mutation.track_member,
         )
+        mutation.finish_member(staging / "master.ged")
         master_sha = _sha256_file(staging / "master.ged")
         prior = copy.deepcopy(manifest.get("master"))
         manifest["generation"] = next_generation
@@ -731,10 +793,13 @@ def _perform_rebase(
                 "kind": "manual-rebase",
             }
         )
-        sync_publication._write_bytes(staging / "update.md", summary.encode("utf-8"))
+        sync_publication._write_bytes(
+            staging / "update.md", summary.encode("utf-8"), mutation=mutation
+        )
         sync_publication._write_bytes(
             staging / "quality.md",
             b"# Quality Report\n\nRun the next update or basic quality command.\n",
+            mutation=mutation,
         )
         rollback = {
             "schema_version": 1,
@@ -742,12 +807,16 @@ def _perform_rebase(
             "previous": manifest["parent_release"],
             "instructions": "Select the previous matching master and manifest to roll back.",
         }
-        sync_publication._write_bytes(staging / "rollback.json", _json_bytes(rollback))
+        sync_publication._write_bytes(
+            staging / "rollback.json", _json_bytes(rollback), mutation=mutation
+        )
         manifest["artifact_checksums"] = {
             name: _sha256_file(staging / name)
             for name in ("master.ged", "quality.md", "rollback.json", "update.md")
         }
-        sync_publication._write_bytes(staging / "manifest.json", _json_bytes(manifest))
+        sync_publication._write_bytes(
+            staging / "manifest.json", _json_bytes(manifest), mutation=mutation
+        )
         ingress.verify(master, FileKind.GEDCOM, master_fingerprint)
         ingress.verify(previous_path, FileKind.GEDCOM, previous_fingerprint)
         ingress.verify(
@@ -760,8 +829,10 @@ def _perform_rebase(
         assert staging_marker_name is not None
         assert staging_marker_identity is not None
         assert staging_identity is not None
+        mutation.prepare(staging, staging_marker_name)
         transaction = sync_publication._PublicationTransactionState(staging_marker_descriptor)
         with non_interruptible_section("publishing incremental release"):
+            mutation.committing()
             finalization_error = sync_publication._publish_and_finalize_directory(
                 staging_name,
                 final_dir.name,
@@ -774,6 +845,8 @@ def _perform_rebase(
             )
             if finalization_error is not None:
                 raise finalization_error
+            if transaction.committed:
+                mutation.finish()
         if not transaction.committed:
             raise SyncError(
                 "SYNC_OUTPUT",
@@ -781,23 +854,37 @@ def _perform_rebase(
                 "Publication stopped before the ownership marker was removed.",
                 ["Inspect the release root and retry with a new patch version."],
             )
-    except BaseException as exc:
+    except BaseException:
         if transaction is not None and transaction.committed:
+            if mutation is not None and mutation.lease is not None:
+                mutation.finish()
             sync_publication._close_descriptor_quietly(staging_descriptor)
+            assert release_root_capability is not None
             sync_publication._close_capability_quietly(release_root_capability)
-            if isinstance(exc, CancellationError):
-                raise
             return SyncExecutionResult(
                 exit_code=0,
                 committed=True,
                 artifacts=published_artifacts,
                 accounting=_rebase_accounting(additions, deletions),
             )
+        if mutation is not None and mutation.lease is not None and not final_dir.exists():
+            with suppress(AncestryError, OSError):
+                mutation.finish()
         cleanup_marker_descriptor = (
             transaction.marker_descriptor if transaction is not None else staging_marker_descriptor
         )
+        journal_owns_stage = mutation is not None and mutation.record is not None
+        if journal_owns_stage:
+            # A rejected recovery must retain foreign entries and its reservation.
+            # The legacy name allowlist cannot supersede durable member ownership.
+            sync_publication._close_descriptor_quietly(staging_descriptor)
+            sync_publication._close_descriptor_quietly(cleanup_marker_descriptor)
+            staging_descriptor = None
+            staging_marker_descriptor = None
         if (
-            staging_name is not None
+            not journal_owns_stage
+            and release_root_capability is not None
+            and staging_name is not None
             and staging_identity is not None
             and staging_marker_name is not None
             and staging_marker_identity is not None
@@ -813,9 +900,14 @@ def _perform_rebase(
             )
             staging_descriptor = None
             staging_marker_descriptor = None
-        sync_publication._cleanup_empty_release_root(release_root_capability)
+        if release_root_capability is not None:
+            sync_publication._cleanup_empty_release_root(release_root_capability)
         raise
+    finally:
+        if coordinator is not None:
+            coordinator.close()
     sync_publication._close_descriptor_quietly(staging_descriptor)
+    assert release_root_capability is not None
     sync_publication._close_capability_quietly(release_root_capability)
     return SyncExecutionResult(
         exit_code=0,

@@ -7,6 +7,7 @@ import os
 import socket
 import stat
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -16,6 +17,7 @@ import pytest
 
 import ancestryllm.gedcom.engine as engine
 import ancestryllm.gedcom.incremental as incremental
+from ancestryllm.core.directory_mutation import DirectoryMutation
 from ancestryllm.core.errors import AncestryError, FileIngressError, ProviderError
 from ancestryllm.core.ingress import (
     FileFingerprint,
@@ -42,6 +44,24 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+@pytest.mark.parametrize("operation", ("update", "rebase"))
+def test_sync_rejects_conflicting_mutation_before_staging(tmp_path: Path, operation: str) -> None:
+    arguments = _new_publication_args(tmp_path, operation, tmp_path / "releases")
+    conflict = AncestryError("MUTATION_CONFLICT", "Another mutation owns this resource.")
+    with (
+        patch.object(DirectoryMutation, "acquire", side_effect=conflict) as acquire,
+        patch.object(
+            sync_publication, "_ensure_release_root", wraps=sync_publication._ensure_release_root
+        ) as release_root,
+        patch.object(sync_publication, "_create_staging_directory") as stage,
+        pytest.raises(AncestryError, match="Another mutation"),
+    ):
+        run_sync(arguments, raise_errors=True)
+    acquire.assert_called_once()
+    release_root.assert_not_called()
+    stage.assert_not_called()
 
 
 def test_legacy_module_facades_reexport_supported_owner_contracts() -> None:
@@ -407,11 +427,12 @@ def test_cancellation_during_incremental_publication_finishes_complete_bundle(
         staging_name: str,
         destination_name: str,
         release_root,
+        marker_descriptor: int,
     ) -> None:
         if destination_name.startswith("g0002-"):
             publication_started.set()
             assert allow_publication.wait(2)
-        original_publish(staging_name, destination_name, release_root)
+        original_publish(staging_name, destination_name, release_root, marker_descriptor)
 
     monkeypatch.setattr(
         sync_publication,
@@ -489,9 +510,43 @@ def _assert_cleanup_residue(release_root: Path, operation: str) -> None:
     if os.name == "nt":
         assert not residues
         return
+    # Journaled cleanup can remove the owned stage completely. Fail-closed
+    # legacy cleanup may retain one empty directory when ownership is uncertain.
+    assert len(residues) <= 1
+    for residue in residues:
+        assert residue.is_dir()
+        assert not any(residue.iterdir())
+
+
+def _assert_recovery_residue(release_root: Path, operation: str, *, empty: bool = False) -> None:
+    """Retained payloads must belong to a nonterminal journal reservation."""
+
+    from ancestryllm.core.directory_mutation import _Record
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
+    prefix = ".gedcom-sync-" if operation == "update" else ".gedcom-rebase-"
+    residues = list(release_root.glob(f"{prefix}*"))
     assert len(residues) == 1
-    assert residues[0].is_dir()
-    assert not any(residues[0].iterdir())
+    stage = residues[0]
+    assert stage.is_dir()
+    assert bool(list(stage.iterdir())) is not empty
+    with LocalMutationCoordinator() as coordinator:
+        with coordinator._transaction() as database:
+            rows = database.execute(
+                "SELECT record,state,outcome FROM directory_publications "
+                "JOIN operations USING(operation_id)"
+            ).fetchall()
+        matching = [row for row in rows if _Record.from_json(row["record"]).stage == stage.name]
+        assert len(matching) == 1
+        row = matching[0]
+        assert row["state"] == "recovery_required"
+        assert row["outcome"] is None
+        record = _Record.from_json(row["record"])
+        owned = {member.name for member in record.members}
+        assert all(
+            member.name == record.marker or coordinator._digest(member.name) in owned
+            for member in stage.iterdir()
+        )
 
 
 def _assert_candidate_cleanup_residue(parent: Path) -> None:
@@ -546,7 +601,7 @@ def simulated_windows_capabilities(monkeypatch):
         else:
             path.unlink()
 
-    def rename_with_share_delete_assertion(
+    def rename_without_open_children(
         source: Path,
         destination: Path,
         *,
@@ -554,24 +609,30 @@ def simulated_windows_capabilities(monkeypatch):
         destination_dir_fd: int | None = None,
     ) -> None:
         source_path = Path(source)
-        if source_path.name.startswith((".gedcom-sync-", ".gedcom-rebase-")):
-            held_marker = False
-            for descriptor in shared_marker_descriptors:
-                try:
-                    marker_path = sync_publication._held_file_path(descriptor)
-                except (OSError, sync_contracts.SyncError, ValueError):
-                    continue
-                if marker_path.parent == source_path:
-                    held_marker = True
-                    break
-            assert held_marker, "publication must retain a share-delete marker"
-            state["published_renames"] += 1
+        for descriptor in shared_marker_descriptors:
+            try:
+                marker_path = sync_publication._held_file_path(descriptor)
+            except (OSError, sync_contracts.SyncError, ValueError):
+                continue
+            if marker_path.parent == source_path:
+                raise PermissionError("Windows cannot rename a directory with an open child")
         original_rename(
             source,
             destination,
             source_dir_fd=source_dir_fd,
             destination_dir_fd=destination_dir_fd,
         )
+
+    def rename_held_directory(descriptor: int, destination: Path) -> None:
+        assert stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        source = sync_publication._held_file_path(descriptor)
+        if source.name.startswith((".gedcom-sync-", ".gedcom-rebase-")):
+            state["published_renames"] += 1
+        rename_without_open_children(source, destination)
+
+    monkeypatch.setattr(
+        sync_publication, "_windows_rename_held_directory", rename_held_directory, raising=False
+    )
 
     monkeypatch.setattr(sync_publication, "_uses_windows_capability_handles", lambda: True)
     monkeypatch.setattr(sync_publication, "_open_windows_shared_marker", open_shared_marker)
@@ -588,7 +649,7 @@ def simulated_windows_capabilities(monkeypatch):
     monkeypatch.setattr(
         sync_publication,
         "_exclusive_rename_directory",
-        rename_with_share_delete_assertion,
+        rename_without_open_children,
     )
     return state
 
@@ -705,6 +766,7 @@ class _LateCopyFailurePolicy(FileIngressPolicy):
         kind: FileKind,
         *,
         expected: FileFingerprint,
+        on_created: Callable[[Path, int], None] | None = None,
     ) -> None:
         del path, destination, expected
         raise FileIngressError(
@@ -1661,6 +1723,7 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
         staging_name: str,
         destination_name: str,
         release_root: sync_publication._DirectoryCapability,
+        marker_descriptor: int,
     ) -> None:
         nonlocal concurrent_destination
         concurrent_destination = (
@@ -1668,7 +1731,7 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
         )
         concurrent_destination.mkdir()
         try:
-            original_publish(staging_name, destination_name, release_root)
+            original_publish(staging_name, destination_name, release_root, marker_descriptor)
         except Exception:
             (concurrent_destination / "concurrent-sentinel.txt").write_text(
                 "preserve concurrent owner",
@@ -1687,7 +1750,7 @@ def test_sync_publish_never_replaces_a_concurrent_final_directory(
     assert (concurrent_destination / "concurrent-sentinel.txt").read_text(
         encoding="utf-8"
     ) == "preserve concurrent owner"
-    _assert_cleanup_residue(releases, operation)
+    _assert_recovery_residue(releases, operation)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
@@ -1748,7 +1811,7 @@ def test_sync_detects_release_root_swap_during_final_rename_without_touching_for
         assert (moved_root / original_sentinel.name).read_text(
             encoding="utf-8"
         ) == "preserve original owner"
-    _assert_cleanup_residue(moved_root, operation)
+    _assert_recovery_residue(moved_root, operation)
 
 
 @pytest.mark.parametrize(
@@ -1860,7 +1923,7 @@ def test_windows_marker_handle_uses_delete_sharing_for_create_and_reopen() -> No
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
 @pytest.mark.parametrize("preexisting", (False, True))
-def test_simulated_windows_publication_keeps_share_delete_markers_open(
+def test_simulated_windows_publication_holds_directory_while_child_marker_is_closed(
     tmp_path: Path,
     operation: str,
     preexisting: bool,
@@ -2228,13 +2291,14 @@ def test_marker_delete_failure_retains_descriptor_through_rollback(
         staging_name: str,
         destination_name: str,
         release_root: sync_publication._DirectoryCapability,
+        marker_descriptor: int,
     ) -> bool:
         nonlocal retained_during_rollback
         assert retained_descriptor is not None
         assert os.fstat(retained_descriptor).st_ino > 0
         assert sync_publication._held_file_path(retained_descriptor).parent.name == destination_name
         retained_during_rollback = True
-        return original_rollback(staging_name, destination_name, release_root)
+        return original_rollback(staging_name, destination_name, release_root, marker_descriptor)
 
     with (
         patch.object(
@@ -2301,6 +2365,7 @@ def test_moved_destination_and_failed_rollback_never_claims_commit(
         _staging_name: str,
         destination_name: str,
         release_root: sync_publication._DirectoryCapability,
+        marker_descriptor: int,
     ) -> bool:
         assert marker_descriptor is not None
         assert os.fstat(marker_descriptor).st_ino > 0
@@ -2511,12 +2576,7 @@ def test_release_root_swap_at_marker_removal_rolls_back_in_held_root(
         encoding="utf-8"
     ) == "preserve original owner"
     assert not list(moved_root.glob("g*-*"))
-    residues = list(moved_root.glob(".gedcom-*"))
-    if os.name == "nt":
-        assert not residues
-    else:
-        assert len(residues) == 1
-        assert not any(residues[0].iterdir())
+    _assert_recovery_residue(moved_root, operation)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
@@ -2553,12 +2613,7 @@ def test_release_root_swap_during_staging_mkdir_uses_held_root_for_cleanup(
     assert (moved_root / original_sentinel.name).read_text(
         encoding="utf-8"
     ) == "preserve original owner"
-    residues = list(moved_root.glob(".gedcom-*"))
-    if os.name == "nt":
-        assert not residues
-    else:
-        assert len(residues) == 1
-        assert not any(residues[0].iterdir())
+    _assert_recovery_residue(moved_root, operation, empty=True)
 
 
 @pytest.mark.parametrize("operation", ("update", "rebase"))
@@ -2954,6 +3009,15 @@ def test_raw_close_interruption_after_commit_preserves_success(
     arguments = _new_publication_args(tmp_path, operation, releases)
     original_close = sync_publication.os.close
     interrupted = False
+    committed = False
+    original_finalize = sync_publication._remove_published_staging_marker
+
+    def arm_committed_close(*args, **kwargs):
+        nonlocal committed
+        # New durability checks also open the root before publication. Limit
+        # this fault to the committed outcome named by this test.
+        committed = True
+        return original_finalize(*args, **kwargs)
 
     def interrupt_marker_close_once(descriptor: int) -> None:
         nonlocal interrupted
@@ -2982,15 +3046,16 @@ def test_raw_close_interruption_after_commit_preserves_success(
                 and selected == releases
             )
         )
-        if not interrupted and selected_target:
+        if committed and not interrupted and selected_target:
             interrupted = True
             raise interruption("fictional raw close interruption")
         original_close(descriptor)
 
-    with patch.object(
-        sync_publication.os,
-        "close",
-        side_effect=interrupt_marker_close_once,
+    with (
+        patch.object(
+            sync_publication, "_remove_published_staging_marker", side_effect=arm_committed_close
+        ),
+        patch.object(sync_publication.os, "close", side_effect=interrupt_marker_close_once),
     ):
         assert run_sync(arguments) == 0
 
@@ -3203,3 +3268,70 @@ def test_committed_release_survives_status_interruption(
     bundles = list(releases.glob("g*-*"))
     assert len(bundles) == 1
     assert not list(bundles[0].glob(".ancestryllm-*"))
+
+
+def test_windows_capability_accepts_stat_birth_time_with_held_change_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_windows_capabilities
+) -> None:
+    capability = sync_publication._open_directory_capability(tmp_path, owned=False)
+    original_lstat = os.lstat
+    marker = tmp_path / capability.marker_name
+
+    def lstat_with_windows_birth_time(path, *args, **kwargs):
+        value = original_lstat(path, *args, **kwargs)
+        if Path(path) != marker:
+            return value
+        return SimpleNamespace(
+            st_mode=value.st_mode,
+            st_dev=value.st_dev,
+            st_ino=value.st_ino,
+            st_ctime_ns=value.st_ctime_ns - 1_000_000_000,
+            st_birthtime_ns=getattr(value, "st_birthtime_ns", None),
+            st_size=value.st_size,
+            st_mtime_ns=value.st_mtime_ns,
+            st_nlink=value.st_nlink,
+        )
+
+    try:
+        monkeypatch.setattr(os, "lstat", lstat_with_windows_birth_time)
+        assert sync_publication._capability_matches_selected(capability)
+    finally:
+        sync_publication._close_capability(capability)
+
+
+@pytest.mark.parametrize("tamper", ["replace", "modify", "hardlink"])
+def test_windows_rename_rejects_changed_marker_before_restoring_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_windows_capabilities, tamper: str
+) -> None:
+    source = tmp_path / "staging"
+    source.mkdir()
+    destination = tmp_path / "published"
+    capability = sync_publication._open_directory_capability(source, owned=True)
+    original_rename = sync_publication._windows_rename_held_directory
+    marker = destination / capability.marker_name
+
+    def tamper_after_rename(descriptor: int, target: Path) -> None:
+        original_rename(descriptor, target)
+        if tamper == "replace":
+            marker.rename(tmp_path / "original-marker")
+            marker.write_bytes(b"x" * 32)
+        elif tamper == "modify":
+            marker.write_bytes(b"x" * 32)
+        else:
+            os.link(marker, tmp_path / "external-marker")
+
+    monkeypatch.setattr(sync_publication, "_windows_rename_held_directory", tamper_after_rename)
+    try:
+        with pytest.raises(OSError, match="marker changed"):
+            sync_publication._rename_directory_with_marker(
+                source, destination, capability.marker_descriptor
+            )
+        assert stat.S_ISDIR(os.fstat(capability.marker_descriptor).st_mode)
+        assert not sync_publication._capability_matches_selected(capability)
+        assert marker.exists()
+    finally:
+        # The rejected marker must not be consumed by ordinary capability cleanup.
+        sync_publication._cleanup_capability_tree(capability)
+    assert destination.is_dir()
+    assert marker.exists()
+    assert capability.marker_descriptor == -1

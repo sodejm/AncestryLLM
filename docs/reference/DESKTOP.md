@@ -117,6 +117,16 @@ Optional cost and provider-retention choices are part of the exact preview.
 imports no provider SDK for execution, and cannot run desktop chat. A profile,
 credential, or renderer selection cannot override it.
 
+## Mutation recovery after restart
+
+The shared native mutation journal coordinates settings and existing publication
+helpers across processes. It stores no desktop grant-to-path map and does not
+revive grants after restart. An interrupted output that needs recovery must be
+selected again through an authorized product action; unresolved identity keeps
+conflicting writes blocked. The journal does not itself add a RootsMagic
+workbench, directory-output grant, or remote mutation service. Those interfaces
+remain separate delivery work. See [mutation recovery](MUTATION_RECOVERY.md).
+
 ## File-grant contract
 
 | Purpose | Access | Format |

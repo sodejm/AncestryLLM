@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 from ancestryllm.api import API_NAMESPACE
 from ancestryllm.api.openapi import canonical_openapi, contract_app
 from ancestryllm.core.errors import StorageError
 
 if TYPE_CHECKING:
-    import pytest
     from fastapi.testclient import TestClient
 
     from ancestryllm.core.secrets import MemorySecretStore
@@ -275,3 +276,41 @@ def test_openapi_marks_secret_input_write_only_and_has_no_readback_contract() ->
     assert "value" not in schema["components"]["schemas"]["SecretStatusResponse"]["properties"]
     assert "example" not in rendered.casefold()
     assert "credential-material" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("code", "status", "expected"),
+    [
+        ("MUTATION_CONFLICT", 409, "SETTINGS_REVISION_CONFLICT"),
+        ("MUTATION_REVISION_STALE", 409, "SETTINGS_REVISION_CONFLICT"),
+        ("MUTATION_RECOVERY_REQUIRED", 500, "SETTINGS_SAVE_FAILED"),
+    ],
+)
+def test_settings_translates_mutation_failures_at_api_boundary(
+    api_client: TestClient,
+    api_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    status: int,
+    expected: str,
+) -> None:
+    from ancestryllm.core.config import AppConfig
+    from ancestryllm.core.errors import AncestryError
+
+    def fail_save(self: AppConfig, *, expected_revision: int | None = None) -> bool:
+        raise AncestryError(code, "Private internal context must not escape")
+
+    monkeypatch.setattr(AppConfig, "save", fail_save)
+    response = api_client.patch(
+        f"{API_NAMESPACE}/settings",
+        headers=api_headers,
+        json={
+            "schema_version": 1,
+            "expected_revision": 0,
+            "changes": {"limits.max_query_rows": 251},
+        },
+    )
+    assert response.status_code == status
+    assert response.json()["code"] == expected
+    assert "Private internal" not in response.text
+    assert api_client.get(f"{API_NAMESPACE}/settings", headers=api_headers).json()["revision"] == 0

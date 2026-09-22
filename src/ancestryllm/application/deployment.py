@@ -19,7 +19,7 @@ from ancestryllm.core.deployment import (
     normalize_endpoint_identity,
     normalize_endpoint_origin,
 )
-from ancestryllm.core.errors import ConfigurationError
+from ancestryllm.core.errors import AncestryError, ConfigurationError
 
 DeploymentEvidencePurpose = Literal["backup", "support"]
 
@@ -306,6 +306,18 @@ class DeploymentService:
             candidate.revision = self.config.revision + 1
             try:
                 saved = candidate.save(expected_revision=expected_revision)
+            except AncestryError as exc:
+                if exc.code in {"MUTATION_CONFLICT", "MUTATION_REVISION_STALE"}:
+                    raise _deployment_error(
+                        "DEPLOYMENT_REVISION_CONFLICT",
+                        "Configuration changed or is being updated; reload and retry.",
+                    ) from exc
+                if not exc.code.startswith("MUTATION_"):
+                    raise
+                raise _deployment_error(
+                    "DEPLOYMENT_PERSISTENCE_FAILED",
+                    "Configuration could not be stored safely.",
+                ) from exc
             except OSError as exc:
                 raise _deployment_error(
                     "DEPLOYMENT_PERSISTENCE_FAILED",

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint, non_interruptible_section
+from ancestryllm.core.errors import AncestryError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -72,6 +73,10 @@ class _PathIdentity:
             other.file_type,
         ):
             return False
+        # Windows name tunneling can replace creation time during rename.
+        # Volume/file ID remains stable; sealed observations still compare times.
+        if _PLATFORM == "win32":
+            return True
         if (self.created_ns is None) != (other.created_ns is None):
             return False
         return self.created_ns is None or self.created_ns == other.created_ns
@@ -90,7 +95,11 @@ class _PathIdentity:
     def pristine(self, other: _PathIdentity) -> bool:
         """Compare fields that must not change after a staged file is sealed."""
 
-        return self.unchanged(other) and self.changed_ns == other.changed_ns
+        return (
+            self.unchanged(other)
+            and self.changed_ns == other.changed_ns
+            and self.created_ns == other.created_ns
+        )
 
     def same_observation(self, other: _PathIdentity) -> bool:
         """Compare every available field, including unreliable zero inode values."""
@@ -139,6 +148,18 @@ class _Artifact:
     published: _OwnedPath | None = None
     restored: _OwnedPath | None = None
     displacement_attempted: bool = False
+    observer: (
+        Callable[[str, _Artifact, _PreparedRegularInstall | None, _OwnedPath | None], None] | None
+    ) = None
+
+    def observe(
+        self,
+        event: str,
+        prepared: _PreparedRegularInstall | None = None,
+        reservation: _OwnedPath | None = None,
+    ) -> None:
+        if self.observer is not None:
+            self.observer(event, self, prepared, reservation)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +198,13 @@ class _PreparedRegularInstall:
     descriptor: int | None = None
     complete: bool = False
     active: bool = True
+    artifact: _Artifact | None = None
+    restoration: bool = False
+
+    def observe(self, event: str, owned: _OwnedPath | None = None) -> None:
+        if self.artifact is not None:
+            prefix = "restoration_" if self.restoration else ""
+            self.artifact.observe(prefix + event, self, owned)
 
 
 @dataclass(slots=True)
@@ -207,7 +235,127 @@ def _path_key(path: Path) -> str:
 
 
 def _identity(path: Path) -> _PathIdentity:
-    return _PathIdentity.from_stat(os.lstat(path))
+    return _PathIdentity.from_stat(path_stat(path))
+
+
+def path_stat(path: Path) -> os.stat_result:
+    """No-follow metadata using the same timestamp semantics as an open descriptor."""
+    return _windows_path_stat(path) if os.name == "nt" else os.lstat(path)
+
+
+def _windows_path_identity(path: Path) -> _PathIdentity:
+    return _PathIdentity.from_stat(_windows_path_stat(path))
+
+
+def _windows_descriptor_stat(descriptor: int) -> os.stat_result:
+    """Read a reparse tag from the held object, retaining native change time."""
+
+    info = os.fstat(descriptor)
+    attributes = getattr(info, "st_file_attributes", None)
+    if attributes is None:
+        raise OSError("Publication attributes are unavailable.")
+    if not attributes & 0x00000400:  # FILE_ATTRIBUTE_REPARSE_POINT
+        return info
+    # CPython 3.12 fstat passes a zero reparse tag when constructing its result.
+    # Query the same no-follow handle instead of resolving the pathname again.
+    ctypes = importlib.import_module("ctypes")
+    wintypes = importlib.import_module("ctypes.wintypes")
+    msvcrt = importlib.import_module("msvcrt")
+
+    class AttributeTagInfo(ctypes.Structure):  # type: ignore[misc,name-defined]
+        _fields_ = (("attributes", wintypes.DWORD), ("tag", wintypes.DWORD))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = kernel.GetFileInformationByHandleEx
+    get_info.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    get_info.restype = wintypes.BOOL
+    tag_info = AttributeTagInfo()
+    if not get_info(
+        msvcrt.get_osfhandle(descriptor), 9, ctypes.byref(tag_info), ctypes.sizeof(tag_info)
+    ):  # FileAttributeTagInfo
+        raise ctypes.WinError(ctypes.get_last_error())
+    return _windows_reparse_stat(info, tag_info.tag)
+
+
+def _windows_reparse_stat(info: os.stat_result, tag: int) -> os.stat_result:
+    """Normalize a verified symlink without admitting other reparse mechanisms."""
+
+    if tag != 0xA000000C:  # IO_REPARSE_TAG_SYMLINK
+        raise OSError("A publication pathname has an unsupported reparse tag.")
+    fields = list(info)
+    fields[0] = stat.S_IFLNK | stat.S_IMODE(info.st_mode)
+    extra = {
+        name: getattr(info, name)
+        for name in (
+            "st_atime",
+            "st_mtime",
+            "st_ctime",
+            "st_atime_ns",
+            "st_mtime_ns",
+            "st_ctime_ns",
+            "st_birthtime",
+            "st_birthtime_ns",
+            "st_file_attributes",
+            "st_reparse_tag",
+            "st_flags",
+            "st_gen",
+            "st_blocks",
+            "st_blksize",
+            "st_rdev",
+        )
+        if hasattr(info, name)
+    }
+    if "st_reparse_tag" in extra:
+        extra["st_reparse_tag"] = tag
+    return os.stat_result(fields, extra)
+
+
+def _windows_path_stat(path: Path) -> os.stat_result:
+    """Observe native change time consistently with descriptor observations.
+
+    Python 3.12 Windows lstat exposes creation time as ctime, while fstat exposes
+    change time. Use a no-follow attribute handle so strict comparisons retain
+    the actual change time and cannot silently follow a replaced reparse point.
+    """
+
+    ctypes = importlib.import_module("ctypes")
+    wintypes = importlib.import_module("ctypes.wintypes")
+    msvcrt = importlib.import_module("msvcrt")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = create_file(
+        os.fspath(path),
+        0x00000080,  # FILE_READ_ATTRIBUTES
+        0x00000007,  # FILE_SHARE_READ | WRITE | DELETE
+        None,
+        3,  # OPEN_EXISTING
+        0x00200000 | 0x02000000,  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS
+        None,
+    )
+    handle_value = ctypes.cast(handle, ctypes.c_void_p).value
+    if handle_value in {None, ctypes.c_void_p(-1).value}:
+        raise ctypes.WinError(ctypes.get_last_error())
+    descriptor: int | None = None
+    try:
+        descriptor = msvcrt.open_osfhandle(handle_value, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        return _windows_descriptor_stat(descriptor)
+    finally:
+        if descriptor is None:
+            kernel.CloseHandle(handle)
+        else:
+            os.close(descriptor)
 
 
 def _identity_or_none(path: Path) -> _PathIdentity | None:
@@ -266,7 +414,7 @@ def _descriptor_survived_move(
     before: _PathIdentity,
     after: _PathIdentity,
 ) -> bool:
-    """Verify a held descriptor across a rename that may update ctime."""
+    """Verify a held descriptor across rename bookkeeping and Windows tunneling."""
 
     return (
         before.device,
@@ -274,14 +422,14 @@ def _descriptor_survived_move(
         before.file_type,
         before.size,
         before.modified_ns,
-        before.created_ns,
+        before.created_ns if _PLATFORM != "win32" else None,
     ) == (
         after.device,
         after.inode,
         after.file_type,
         after.size,
         after.modified_ns,
-        after.created_ns,
+        after.created_ns if _PLATFORM != "win32" else None,
     )
 
 
@@ -301,7 +449,7 @@ def _remove_directory_if_owned(path: Path, expected: _PathIdentity) -> bool:
     if expected.file_type != stat.S_IFDIR:
         return False
     if os.rmdir in os.supports_dir_fd and os.stat in os.supports_dir_fd:
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_DIRECTORY"):
@@ -386,7 +534,7 @@ def _create_private_quarantine(
         identity = current
         prepared.quarantine_identity = identity
         if _supports_directory_fd_cleanup():
-            flags = os.O_RDONLY
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
             if hasattr(os, "O_CLOEXEC"):
                 flags |= os.O_CLOEXEC
             if hasattr(os, "O_DIRECTORY"):
@@ -407,6 +555,7 @@ def _create_private_quarantine(
             descriptor,
             identity,
         )
+        prepared.observe("quarantine")
         return
     except BaseException:
         if descriptor is not None:
@@ -518,7 +667,7 @@ def _windows_unlink_if_owned(path: Path, expected: _PathIdentity) -> bool:
             os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
         )
         handle = None
-        opened = _PathIdentity.from_stat(os.fstat(descriptor))
+        opened = _PathIdentity.from_stat(_windows_descriptor_stat(descriptor))
         if not expected.pristine(opened):
             return False
         delete_file = ctypes.c_ubyte(1)
@@ -589,6 +738,49 @@ def _restore_quarantined_path(
     return True
 
 
+def _windows_set_descriptor_times(descriptor: int, accessed_ns: int, modified_ns: int) -> None:
+    """Preserve timestamps without reopening a replaceable recovery pathname."""
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    def file_time(nanoseconds: int) -> wintypes.FILETIME:
+        ticks = nanoseconds // 100 + 116444736000000000
+        return wintypes.FILETIME(ticks & 0xFFFFFFFF, ticks >> 32)
+
+    accessed = file_time(accessed_ns)
+    modified = file_time(modified_ns)
+    library = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    set_file_time = library.SetFileTime
+    set_file_time.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    set_file_time.restype = wintypes.BOOL
+    if not set_file_time(
+        msvcrt.get_osfhandle(descriptor),  # type: ignore[attr-defined]
+        None,
+        ctypes.byref(accessed),
+        ctypes.byref(modified),
+    ):
+        raise OSError(
+            ctypes.get_last_error(),  # type: ignore[attr-defined]
+            "Windows could not preserve recovery file timestamps.",
+        )
+
+
+def _set_descriptor_times(descriptor: int, accessed_ns: int, modified_ns: int) -> None:
+    if os.utime in os.supports_fd:
+        os.utime(descriptor, ns=(accessed_ns, modified_ns))
+    elif sys.platform == "win32":
+        _windows_set_descriptor_times(descriptor, accessed_ns, modified_ns)
+    else:
+        raise OSError(errno.ENOTSUP, "Descriptor timestamp preservation is unavailable.")
+
+
 def _restore_open_descriptor(
     source_descriptor: int,
     source_identity: _PathIdentity,
@@ -598,7 +790,7 @@ def _restore_open_descriptor(
 
     if source_identity.file_type != stat.S_IFREG:
         return False
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -623,17 +815,9 @@ def _restore_open_descriptor(
                 remaining = remaining[written:]
         if hasattr(os, "fchmod"):
             os.fchmod(destination_descriptor, stat.S_IMODE(source_stat.st_mode))
-        if os.utime in os.supports_fd:
-            os.utime(
-                destination_descriptor,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-            )
-        else:
-            os.utime(
-                target,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                follow_symlinks=False,
-            )
+        _set_descriptor_times(
+            destination_descriptor, source_stat.st_atime_ns, source_stat.st_mtime_ns
+        )
         os.fsync(destination_descriptor)
         restored = _PathIdentity.from_stat(os.fstat(destination_descriptor))
         destination_identity = restored
@@ -710,7 +894,7 @@ def _unlink_if_owned(
     if descriptor is None and expected.inode <= 0:
         return False
     if descriptor is None and actual.file_type == stat.S_IFREG and _supports_directory_fd_cleanup():
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
@@ -851,7 +1035,7 @@ def seal_staged_path(path: Path) -> StagedFileToken:
     if reservation.sealed:
         raise OSError("The publication staging pathname is already sealed.")
 
-    flags = os.O_RDWR
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1014,7 +1198,7 @@ def write_staged_bytes(path: Path, payload: bytes) -> StagedFileToken:
     if reservation.sealed:
         raise OSError("The publication staging pathname is already sealed.")
 
-    flags = os.O_RDWR
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1092,7 +1276,7 @@ def write_staged_text(path: Path, payload: str) -> StagedFileToken:
 
 
 def _token_candidate(path: Path) -> tuple[_PathIdentity, bytes]:
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1171,18 +1355,19 @@ def _copy_regular_no_clobber(
     target: Path,
     *,
     owner: Callable[[_OwnedPath], None] | None = None,
+    created: Callable[[_OwnedPath], None] | None = None,
 ) -> _OwnedPath:
     """Copy one verified regular file into an exclusive destination."""
 
     _assert_pristine(source.path, source.identity)
-    source_flags = os.O_RDONLY
+    source_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         source_flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         source_flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         source_flags |= os.O_NONBLOCK
-    destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         destination_flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1203,6 +1388,8 @@ def _copy_regular_no_clobber(
             destination_flags,
             stat.S_IMODE(source_stat.st_mode),
         )
+        if created is not None:
+            created(_OwnedPath(target, _PathIdentity.from_stat(os.fstat(destination_descriptor))))
         digest = hashlib.sha256()
         while chunk := os.read(source_descriptor, 1024 * 1024):
             digest.update(chunk)
@@ -1214,17 +1401,9 @@ def _copy_regular_no_clobber(
                 remaining = remaining[written:]
         if hasattr(os, "fchmod"):
             os.fchmod(destination_descriptor, stat.S_IMODE(source_stat.st_mode))
-        if os.utime in os.supports_fd:
-            os.utime(
-                destination_descriptor,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-            )
-        else:
-            os.utime(
-                target,
-                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                follow_symlinks=False,
-            )
+        _set_descriptor_times(
+            destination_descriptor, source_stat.st_atime_ns, source_stat.st_mtime_ns
+        )
         os.fsync(destination_descriptor)
         copied = _PathIdentity.from_stat(os.fstat(destination_descriptor))
         source_after = _PathIdentity.from_stat(os.fstat(source_descriptor))
@@ -1310,40 +1489,30 @@ def _backup_target(artifact: _Artifact) -> None:
     if expected.file_type not in {stat.S_IFREG, stat.S_IFLNK}:
         raise OSError("Publication targets must be regular files or symbolic links.")
 
+    if expected.file_type == stat.S_IFLNK:
+        # The journaled displacement retains the original link itself. Creating
+        # another symlink would expose its payload before ownership is durable.
+        return
+
     for _attempt in range(100):
         _assert_pristine(target, expected)
         candidate = _candidate(target, "backup")
-        if expected.file_type == stat.S_IFLNK:
-            link_value = target.readlink()
-            try:
-                try:
-                    candidate.symlink_to(link_value)
-                except FileExistsError:
-                    continue
-                symlink_identity = _identity(candidate)
-                _assert_pristine(target, expected)
-                if candidate.readlink() != link_value:
-                    raise OSError("A publication backup changed while it was created.")
-                artifact.backup = _OwnedPath(candidate, symlink_identity)
-            except BaseException:
-                try:
-                    current = _identity(candidate)
-                    if current.file_type == stat.S_IFLNK and candidate.readlink() == link_value:
-                        _unlink_if_owned(candidate, current)
-                except BaseException:  # noqa: BLE001, S110 - preserve the creation failure
-                    pass
-                raise
-            return
         try:
             _copy_regular_no_clobber(
                 _OwnedPath(target, expected),
                 candidate,
-                owner=lambda backup: setattr(artifact, "backup", backup),
+                owner=lambda backup: _record_backup(artifact, backup),
+                created=lambda owned: artifact.observe("copy_created", reservation=owned),
             )
             return
         except FileExistsError:
             continue
     raise OSError("A publication backup name could not be reserved safely.")
+
+
+def _record_backup(artifact: _Artifact, backup: _OwnedPath) -> None:
+    artifact.backup = backup
+    artifact.observe("backup")
 
 
 def _cleanup_displacement_lifecycle(lifecycle: _DisplacementLifecycle) -> None:
@@ -1381,7 +1550,7 @@ def _reserve_displacement(
 ) -> None:
     """Reserve an empty path after registering its name with the caller."""
 
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1623,7 +1792,7 @@ def _open_directory_capability(
     if _PLATFORM == "win32":
         descriptor = _windows_open_directory_descriptor(path)
     else:
-        flags = os.O_RDONLY
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
         if hasattr(os, "O_DIRECTORY"):
@@ -1687,38 +1856,51 @@ def _windows_rename_descriptor_no_replace(
     ctypes = importlib.import_module("ctypes")
     wintypes = importlib.import_module("ctypes.wintypes")
     msvcrt = importlib.import_module("msvcrt")
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    set_file_information = kernel32.SetFileInformationByHandle
-    set_file_information.argtypes = (
+    # The Win32 FileRenameInfo wrapper rejects a non-null RootDirectory on
+    # supported Windows hosts. The native API accepts the held directory handle.
+    ntdll = ctypes.WinDLL("ntdll")
+    set_information = ntdll.NtSetInformationFile
+    set_information.argtypes = (
         wintypes.HANDLE,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
         ctypes.c_int,
-        wintypes.LPVOID,
-        wintypes.DWORD,
     )
-    set_file_information.restype = wintypes.BOOL
+    set_information.restype = ctypes.c_int32
+
+    class _IoStatusBlock(ctypes.Structure):  # type: ignore[misc,name-defined]
+        _fields_ = (("status", ctypes.c_void_p), ("information", ctypes.c_size_t))
 
     class _FileRenameInfo(ctypes.Structure):  # type: ignore[misc,name-defined]
         _fields_ = (
-            ("replace_if_exists", wintypes.BYTE),
-            ("root_directory", wintypes.HANDLE),
-            ("file_name_length", wintypes.DWORD),
-            ("file_name", wintypes.WCHAR * (len(target_name) + 1)),
+            ("replace_if_exists", ctypes.c_ubyte),
+            ("root_directory", ctypes.c_void_p),
+            ("file_name_length", ctypes.c_uint32),
+            ("file_name", ctypes.c_uint16 * 1),
         )
 
-    information = _FileRenameInfo()
+    name = target_name.encode("utf-16-le")
+    size = max(ctypes.sizeof(_FileRenameInfo), _FileRenameInfo.file_name.offset + len(name) + 2)
+    buffer = ctypes.create_string_buffer(size)
+    information = _FileRenameInfo.from_buffer(buffer)
     information.replace_if_exists = 0
     information.root_directory = msvcrt.get_osfhandle(destination.descriptor)
-    information.file_name_length = len(target_name.encode("utf-16-le"))
-    information.file_name = target_name
-    file_rename_info = 3
-    if not set_file_information(
+    information.file_name_length = len(name)
+    ctypes.memmove(ctypes.addressof(buffer) + _FileRenameInfo.file_name.offset, name, len(name))
+    status_block = _IoStatusBlock()
+    status = set_information(
         msvcrt.get_osfhandle(source_descriptor),
-        file_rename_info,
-        ctypes.byref(information),
-        ctypes.sizeof(information),
-    ):
-        error = ctypes.get_last_error()
-        raise ctypes.WinError(error)
+        ctypes.byref(status_block),
+        buffer,
+        size,
+        10,  # FileRenameInformation
+    )
+    if status < 0:
+        translate = ntdll.RtlNtStatusToDosError
+        translate.argtypes = (ctypes.c_int32,)
+        translate.restype = ctypes.c_uint32
+        raise ctypes.WinError(translate(status))
 
 
 def _windows_delete_descriptor(descriptor: int) -> bool:
@@ -1753,7 +1935,7 @@ def _open_verified_install_candidate(
 ) -> None:
     """Open and reverify the sealed private candidate before its namespace commit."""
 
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -2033,6 +2215,7 @@ def _prepare_regular_install(
             source,
             quarantine.path,
             owner=lambda candidate: setattr(prepared, "candidate", candidate),
+            created=lambda owned: prepared.observe("copy_created", owned),
         )
         candidate = prepared.candidate
         if candidate is None:
@@ -2083,6 +2266,9 @@ def _commit_prepared_install(
     if destination is None or not prepared.complete:
         raise OSError("A private publication candidate was not fully prepared.")
     try:
+        tracked = artifact if artifact is not None else restoration
+        if tracked is not None:
+            tracked.observe("installing" if artifact is not None else "restoring", prepared)
         _commit_prepared_namespace(prepared, target)
         _fsync_directory_capability(destination)
         installed = _verify_committed_install(prepared, target)
@@ -2090,6 +2276,8 @@ def _commit_prepared_install(
             artifact.published = installed
         if restoration is not None:
             restoration.restored = installed
+        if tracked is not None:
+            tracked.observe("installed" if artifact is not None else "restored", prepared)
     except BaseException as exc:
         recorded = artifact.published if artifact is not None else None
         if recorded is None and restoration is not None:
@@ -2113,6 +2301,67 @@ def _commit_prepared_install(
     return installed
 
 
+def _restore_symlink_no_clobber(
+    source: _OwnedPath,
+    target: Path,
+    restoration: _Artifact | None,
+) -> _OwnedPath:
+    """Move the journaled original link without creating an unowned replacement."""
+
+    origin = _PreparedRegularInstall(source.path)
+    prepared = _PreparedRegularInstall(target, candidate=source, restoration=True)
+    descriptor: int | None = None
+    try:
+        _open_directory_capability(source.path.parent, origin)
+        _open_directory_capability(target.parent, prepared)
+        source_parent = origin.destination
+        destination = prepared.destination
+        assert source_parent is not None and destination is not None
+        if _PLATFORM == "win32":
+            descriptor = _windows_open_shared_descriptor(source.path)
+            held = _PathIdentity.from_stat(_windows_descriptor_stat(descriptor))
+            if not source.identity.pristine(held):
+                raise OSError("The original symbolic link changed before restoration.")
+        _assert_pristine(source.path, source.identity)
+        if restoration is not None:
+            # Persist the existing inode before the only namespace mutation.
+            restoration.observe("restoring", prepared)
+        if not all(
+            _directory_capability_matches_path(parent) for parent in (source_parent, destination)
+        ):
+            raise OSError("A symbolic-link restoration directory changed before commit.")
+        _assert_pristine(source.path, source.identity)
+        if _PLATFORM == "win32":
+            assert descriptor is not None
+            _windows_rename_descriptor_no_replace(descriptor, destination, target.name)
+        elif _PLATFORM == "darwin":
+            _macos_rename_no_replace_at(
+                source_parent.descriptor, source.path.name, destination.descriptor, target.name
+            )
+        elif _PLATFORM.startswith("linux"):
+            _linux_rename_no_replace_at(
+                source_parent.descriptor, source.path.name, destination.descriptor, target.name
+            )
+        else:
+            raise OSError(errno.ENOTSUP, "Symbolic-link restoration is unsupported.")
+        _fsync_directory_capability(source_parent)
+        _fsync_directory_capability(destination)
+        actual = _identity_in_directory(destination, target.name)
+        if actual is None or not source.identity.unchanged(actual):
+            raise OSError("The restored symbolic link changed during publication.")
+        installed = _OwnedPath(target, actual)
+        if restoration is not None:
+            restoration.restored = installed
+            restoration.observe("restored", prepared)
+        return installed
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        for lifecycle in (origin, prepared):
+            if lifecycle.destination is not None:
+                _close_directory_capability(lifecycle.destination)
+
+
 def _install_no_clobber(
     source: _OwnedPath,
     target: Path,
@@ -2124,27 +2373,10 @@ def _install_no_clobber(
     _assert_pristine(source.path, source.identity)
     try:
         if source.identity.file_type == stat.S_IFLNK:
-            link_value = source.path.readlink()
-            try:
-                target.symlink_to(link_value)
-            except FileExistsError as exc:
-                raise OSError("A publication target appeared during the operation.") from exc
-            installed = _OwnedPath(target, _identity(target))
-            try:
-                if installed.identity.file_type != stat.S_IFLNK:
-                    raise OSError("The restored symbolic-link target changed during publication.")
-                _assert_pristine(source.path, source.identity)
-                if target.readlink() != link_value:
-                    raise OSError("The restored symbolic-link target changed during publication.")
-            except BaseException:
-                _unlink_if_owned(installed.path, installed.identity)
-                raise
-            if restoration is not None:
-                restoration.restored = installed
-            return installed
+            return _restore_symlink_no_clobber(source, target, restoration)
         if source.identity.file_type != stat.S_IFREG:
             raise OSError("Only regular files and symbolic links can be published.")
-        prepared = _PreparedRegularInstall(target)
+        prepared = _PreparedRegularInstall(target, artifact=restoration, restoration=True)
         try:
             _prepare_regular_install(source, prepared)
             return _commit_prepared_install(
@@ -2178,6 +2410,7 @@ def _displace_original(
         reservation = lifecycle.reservation
         if reservation is None:
             raise OSError("A displacement reservation was not retained.")
+        artifact.observe("displacing", reservation=reservation)
         replace(artifact.target, reservation.path)
         moved_identity = _identity(reservation.path)
         if not expected.unchanged(moved_identity):
@@ -2195,6 +2428,7 @@ def _displace_original(
         lifecycle.transferred = True
         if destination is not None:
             _fsync_directory_capability(destination)
+        artifact.observe("displaced")
     except BaseException:
         reservation = lifecycle.reservation
         if artifact.displaced is None and reservation is not None:
@@ -2218,9 +2452,10 @@ def _publish_artifact(
     _assert_pristine(artifact.source.path, artifact.source.identity)
     if artifact.source.identity.file_type != stat.S_IFREG:
         raise OSError("Publication staging files must remain regular files.")
-    prepared = _PreparedRegularInstall(artifact.target)
+    prepared = _PreparedRegularInstall(artifact.target, artifact=artifact)
     try:
         _prepare_regular_install(artifact.source, prepared)
+        artifact.observe("candidate", prepared)
         destination = prepared.destination
         if destination is None:
             raise OSError("A publication destination capability was not retained.")
@@ -2247,7 +2482,7 @@ def _publish_artifact(
 def _restore_original(artifact: _Artifact) -> OSError | None:
     if artifact.original_target is None:
         return None
-    if not artifact.displacement_attempted:
+    if not artifact.displacement_attempted and artifact.backup is None:
         return None
     current_target = _identity_or_none(artifact.target)
     if current_target is not None:
@@ -2258,6 +2493,10 @@ def _restore_original(artifact: _Artifact) -> OSError | None:
             return None
         return OSError(
             "A concurrent replacement was preserved; the prior target remains in recovery storage."
+        )
+    if not artifact.displacement_attempted:
+        return OSError(
+            "A publication target disappeared; the prior target remains in recovery storage."
         )
     # The sealed backup retains metadata captured before its source was read.
     # Prefer it because reading the original can advance the displaced inode's
@@ -2397,14 +2636,24 @@ def publish_staged_bundle(
     handles, so namespace crash durability cannot be strengthened there.
     """
 
+    from ancestryllm.core.bundle_mutation import BundleMutation
+    from ancestryllm.core.mutation import LocalMutationCoordinator
+
     cancellation_checkpoint()
-    selected = [(Path(source), Path(target)) for source, target in artifacts]
+    selected = [(Path(source).absolute(), Path(target).absolute()) for source, target in artifacts]
+    if not selected:
+        return
     for index, (_source, target) in enumerate(selected):
         for _other_source, other_target in selected[index + 1 :]:
             if paths_alias(target, other_target):
                 raise OSError("Publication bundle targets must not alias each other.")
 
-    with non_interruptible_section("publishing output bundle"):
+    with (
+        LocalMutationCoordinator() as coordinator,
+        non_interruptible_section("publishing output bundle"),
+    ):
+        journal = BundleMutation((target for _source, target in selected), coordinator)
+        journal.acquire()
         prepared = [
             _Artifact(
                 source=_claim_for_publication(source),
@@ -2420,10 +2669,12 @@ def publish_staged_bundle(
             }:
                 raise OSError("Publication targets must be regular files or symbolic links.")
 
+        journal.track(prepared)
         try:
             for artifact in prepared:
                 if artifact.original_target is not None:
                     _backup_target(artifact)
+            journal.committing()
             for artifact in prepared:
                 _publish_artifact(artifact, replace)
             if validate_after is not None:
@@ -2431,14 +2682,20 @@ def publish_staged_bundle(
             for artifact in prepared:
                 assert artifact.published is not None
                 _assert_pristine(artifact.target, artifact.published.identity)
+            journal.validated()
         except BaseException as publish_error:
             rollback_error = _rollback_bundle(prepared)
             if rollback_error is not None:
                 raise rollback_error from publish_error
+            # A foreign replacement leaves the journal unresolved and blocked.
+            # Preserve the publication error that explains how we got here.
+            with suppress(AncestryError):
+                journal.finish()
             raise
         else:
             with suppress(BaseException):  # The validated commit is authoritative.
                 _cleanup_committed_bundle(prepared)
+            journal.finish()
 
 
 __all__ = [

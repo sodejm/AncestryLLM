@@ -3953,8 +3953,9 @@ def test_candidate_copy_return_interruption_uses_registered_ownership(
         destination: Path,
         *,
         owner: Any = None,
+        created: Any = None,
     ) -> Any:
-        original_copy(source, destination, owner=owner)
+        original_copy(source, destination, owner=owner, created=created)
         raise error_type("fictional candidate return interruption")
 
     monkeypatch.setattr(
@@ -4878,7 +4879,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     target.symlink_to(victim)
     staged = _staged_bytes(target, b"new\n")
     original_link = publication_module.os.link
-    original_symlink = publication_module.os.symlink
+    original_restore = publication_module._restore_symlink_no_clobber
     raced = False
 
     def deny_symlink_hardlinks(
@@ -4892,27 +4893,20 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
         original_link(source, destination, follow_symlinks=follow_symlinks)
 
     def create_concurrent_target_before_restore(
-        source: str | bytes,
-        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-        target_is_directory: bool = False,
-        *,
-        dir_fd: int | None = None,
-    ) -> None:
+        source: publication_module._OwnedPath,
+        destination: Path,
+        restoration: publication_module._Artifact | None,
+    ) -> publication_module._OwnedPath:
         nonlocal raced
-        if Path(destination) == target and not raced:
+        if destination == target and not raced:
             target.write_bytes(b"concurrent\n")
             raced = True
-        original_symlink(
-            source,
-            destination,
-            target_is_directory=target_is_directory,
-            dir_fd=dir_fd,
-        )
+        return original_restore(source, destination, restoration)
 
     monkeypatch.setattr(publication_module.os, "link", deny_symlink_hardlinks)
     monkeypatch.setattr(
-        publication_module.os,
-        "symlink",
+        publication_module,
+        "_restore_symlink_no_clobber",
         create_concurrent_target_before_restore,
     )
 
@@ -4931,7 +4925,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     assert raced
     assert target.read_bytes() == b"concurrent\n"
     assert victim.read_bytes() == b"victim\n"
-    assert len(recovery) == 2
+    assert len(recovery) == 1  # The journaled displacement retains the original symlink.
     assert all(path.is_symlink() for path in recovery)
     for path in recovery:
         path.unlink()
@@ -5061,3 +5055,30 @@ def test_rootsmagic_missing_paths_use_sanitized_stable_errors(tmp_path: Path) ->
     assert relative_error.value.code == "ROOTSMAGIC_TREE_NOT_FOUND"
     assert str(explicit) not in explicit_error.value.render()
     assert "private-relative-name" not in relative_error.value.render()
+
+
+def test_windows_ingress_uses_descriptor_consistent_path_metadata(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    source = tmp_path / "fictional.ged"
+    source.write_bytes(b"0 HEAD\n0 TRLR\n")
+    observed = []
+
+    def native_stat(path):
+        observed.append(path)
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            return os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def legacy_stat(path):
+        raise AssertionError("Windows lstat ctime is not descriptor change time")
+
+    monkeypatch.setattr(publication_module, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(publication_module, "_windows_path_stat", native_stat, raising=False)
+    monkeypatch.setattr(ingress_module, "os", SimpleNamespace(**{**vars(os), "lstat": legacy_stat}))
+    policy = FileIngressPolicy()
+    fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
+    policy.assert_unchanged(source, FileKind.GEDCOM, fingerprint.snapshot)
+    assert len(observed) >= 2

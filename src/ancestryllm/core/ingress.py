@@ -17,7 +17,7 @@ from typing import Any, BinaryIO
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
-from ancestryllm.core.publication import cleanup_open_path
+from ancestryllm.core.publication import cleanup_open_path, path_stat
 
 _ARCHIVE_SIGNATURES = (
     b"PK\x03\x04",  # ZIP
@@ -391,7 +391,7 @@ class FileIngressPolicy:
         expected: FileSnapshot | None = None,
     ) -> tuple[int, FileSnapshot]:
         try:
-            preflight = self._validate_stat(os.lstat(path), kind)
+            preflight = self._validate_stat(path_stat(path), kind)
         except FileIngressError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:
@@ -477,7 +477,7 @@ class FileIngressPolicy:
 
         selected = self._selected_path(path, kind)
         try:
-            current = FileSnapshot.from_stat(os.lstat(selected))
+            current = FileSnapshot.from_stat(path_stat(selected))
         except (OSError, RuntimeError, ValueError) as exc:
             raise self._error(
                 "FILE_INPUT_CHANGED",
@@ -1038,6 +1038,7 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         expected: FileFingerprint,
+        on_created: Callable[[Path, int], None] | None = None,
     ) -> None:
         """Copy only the verified source identity and reject mid-copy changes."""
 
@@ -1055,6 +1056,8 @@ class FileIngressPolicy:
                 target.open("xb", buffering=0) as output,
             ):
                 try:
+                    if on_created is not None:
+                        on_created(target, output.fileno())
                     for chunk in self._bounded_chunks(source, kind):
                         digest.update(chunk)
                         remaining = memoryview(chunk)

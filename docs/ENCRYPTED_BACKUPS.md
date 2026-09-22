@@ -93,3 +93,26 @@ rotation. Host Remote is self-supported and has no project-operated backup,
 recovery, retention, or availability SLA. Support bundles may contain only
 structural, redacted diagnostics and never database contents, keys, tokens,
 paths, or container-environment values.
+
+## Interrupted native mutations
+
+The per-account `.ancestryllm-coordination` directory contains a protected SQLite
+coordination journal, an opaque-identifier key, and ownership-lock files. It is
+independent of workspace/configuration overrides and of the SQLCipher genealogy
+database. Its key derives opaque resource identities; it is not a genealogy
+encryption key. The journal contains metadata, never genealogy payloads,
+credentials, or private destination paths.
+
+After interruption, preserve the journal and adjacent operation-owned staging or
+backup files. Retry through an authorized invocation with the original output
+selection. The coordinator revalidates identity before completing the verified
+new output or restoring the previous complete set. Desktop grants expire on
+restart and must be selected again. Do not delete the journal, lock files, or
+unrecognized staging files to bypass a conflict: doing so discards recovery and
+ownership evidence. Unexpected replacement or content produces a stable
+recovery-required failure and preserves the ambiguous files for investigation.
+
+This journal is not a backup of genealogy data. Keep the encrypted backup and
+key-custody procedures above. Process-interruption tests do not establish
+power-loss durability on every filesystem. See [mutation recovery](reference/MUTATION_RECOVERY.md)
+for supported semantics, failure codes, and current validation boundaries.

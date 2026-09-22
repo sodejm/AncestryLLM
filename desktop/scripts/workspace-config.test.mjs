@@ -35,11 +35,11 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
   assert.match(
     workspace,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.5$/m,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
   )
   assert.match(
     lockfile,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.5$/m,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
   )
   assert.match(
     lockfile,
@@ -47,8 +47,12 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   )
   assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
   assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
-  assert.match(lockfile, /^ {2}fast-uri@3\.1\.5:$/m)
-  assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.4:$/m)
+  assert.match(lockfile, /^ {2}fast-uri@3\.1\.6:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.[45]:$/m)
+  assert.match(lockfile, /^ {2}js-yaml@4\.3\.2:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}js-yaml@4\.3\.[01]:$/m)
+  assert.match(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.15':$/m)
+  assert.doesNotMatch(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.13':$/m)
   assert.match(lockfile, /^ {2}deepmerge-ts@8\.0\.0:$/m)
   assert.doesNotMatch(lockfile, /^ {2}deepmerge-ts@7\.1\.6:$/m)
   assert.match(lockfile, /^ {2}serialize-javascript@7\.0\.3:$/m)
