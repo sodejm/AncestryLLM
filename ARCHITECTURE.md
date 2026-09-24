@@ -14,6 +14,8 @@ with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
 and the accepted deployment direction and implemented profile control plane in
 [`docs/ADR-0026-local-first-container-remote-deployment.md`](docs/ADR-0026-local-first-container-remote-deployment.md),
+the CORE-42 extraction decision in
+[`docs/ADR-0027-core-extraction-decision.md`](docs/ADR-0027-core-extraction-decision.md),
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 

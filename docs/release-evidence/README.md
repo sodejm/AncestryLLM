@@ -99,3 +99,10 @@ v0.7.0 consolidation audit, its before-and-after collection, runtime, and
 coverage measurements, and the rationale for both consolidated and retained
 test structures. It is a source-level maintenance record, not exact-candidate
 release-readiness evidence.
+
+## Extraction decision records
+
+[`issue-170-core-extraction-benchmark-and-dependency-report.md`](issue-170-core-extraction-benchmark-and-dependency-report.md)
+records CORE-42 benchmark/dependency inputs for GEDCOM and RootsMagic package
+extraction decisions. It is an issue-scoped architecture decision input, not a
+release-readiness gate result.
