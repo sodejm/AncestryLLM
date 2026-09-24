@@ -327,3 +327,29 @@ def test_issue_103_opaque_file_grant_boundary_is_documented() -> None:
     assert "renderer cannot invoke either resolver" in normalized_file_ingress
     assert "raw host path" in normalized_file_ingress
     assert "#114/#118/#131" in threat_model
+
+
+def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_decision() -> None:
+    architecture = _read(_ARCHITECTURE)
+    normalized = " ".join(architecture.split())
+
+    assert "## CORE-40 multi-adapter façade consumption and extraction evaluation" in architecture
+    assert (
+        "CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and "
+        "`CommandExecutor` boundaries" in normalized
+    )
+    assert (
+        "The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict"
+        in normalized
+    )
+    assert "OpenAPI/Pydantic ownership remains adapter local." in normalized
+    assert (
+        "Electron keeps file grants, sidecar lifecycle, settings/keyring ownership, and "
+        "presentation concerns in Main/application layers" in normalized
+    )
+    assert "#131" in normalized
+    assert (
+        "Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal."
+        in normalized
+    )
+    assert "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
