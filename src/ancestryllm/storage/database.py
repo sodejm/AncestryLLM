@@ -23,7 +23,7 @@ from ancestryllm.core.publication import (
     seal_staged_path,
     staging_path,
 )
-from ancestryllm.storage.models import Base, JobEventModel, JobModel
+from ancestryllm.storage.models import Base, JobEventModel, JobModel, OperationReceiptModel
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,8 +32,9 @@ if TYPE_CHECKING:
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 DATABASE_SECRET = "database.master_key"  # noqa: S105 - keyring reference, not a credential
-PREVIOUS_SCHEMA_REVISION = "0001"
-SCHEMA_REVISION = "0002"
+PREVIOUS_SCHEMA_REVISION = "0002"
+LEGACY_SCHEMA_REVISION = "0001"
+SCHEMA_REVISION = "0003"
 
 
 def _schema_table_names(connection: Any) -> frozenset[str]:
@@ -49,8 +50,10 @@ def _schema_table_names(connection: Any) -> frozenset[str]:
 
 def _expected_schema_tables(*, revision: str) -> frozenset[str]:
     tables = frozenset(str(name) for name in Base.metadata.tables)
-    if revision == PREVIOUS_SCHEMA_REVISION:
+    if revision == LEGACY_SCHEMA_REVISION:
         tables -= {JobModel.__tablename__, JobEventModel.__tablename__}
+    elif revision == PREVIOUS_SCHEMA_REVISION:
+        tables -= {OperationReceiptModel.__tablename__}
     return tables | {"alembic_version"}
 
 
@@ -249,7 +252,9 @@ class Database:
                     connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalars()
                 )
                 if len(revisions) > 1 or (
-                    revisions and revisions[0] not in {PREVIOUS_SCHEMA_REVISION, SCHEMA_REVISION}
+                    revisions
+                    and revisions[0]
+                    not in {LEGACY_SCHEMA_REVISION, PREVIOUS_SCHEMA_REVISION, SCHEMA_REVISION}
                 ):
                     rendered = revisions[0] if len(revisions) == 1 else "multiple revisions"
                     raise _migration_required(
@@ -283,13 +288,24 @@ class Database:
                     f"Workspace schema {current!r} has an incomplete or unexpected table layout."
                 )
 
-            if current == PREVIOUS_SCHEMA_REVISION:
+            if current == LEGACY_SCHEMA_REVISION:
                 _create_tables_on_native_connection(
                     connection,
                     (
                         cast("Table", JobModel.__table__),
                         cast("Table", JobEventModel.__table__),
                     ),
+                )
+                connection.exec_driver_sql(
+                    "UPDATE alembic_version SET version_num = ?",
+                    (PREVIOUS_SCHEMA_REVISION,),
+                )
+                return
+
+            if current == PREVIOUS_SCHEMA_REVISION:
+                _create_tables_on_native_connection(
+                    connection,
+                    (cast("Table", OperationReceiptModel.__table__),),
                 )
                 connection.exec_driver_sql(
                     "UPDATE alembic_version SET version_num = ?",

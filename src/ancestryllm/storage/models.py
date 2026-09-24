@@ -233,3 +233,24 @@ class JobEventModel(Base):
     event_json: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (Index("ix_job_events_replay", "job_id", "sequence"),)
+
+
+class OperationReceiptModel(Base):
+    """Durable privacy-minimal receipt for one logical operation."""
+
+    __tablename__ = "operation_receipts"
+
+    receipt_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    operation_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    completed_at: Mapped[str | None] = mapped_column(String(40))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(String(40))
+
+    __table_args__ = (
+        Index("ix_operation_receipts_started", "started_at"),
+        Index("ix_operation_receipts_expires", "expires_at"),
+    )

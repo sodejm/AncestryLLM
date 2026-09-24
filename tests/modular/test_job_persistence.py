@@ -39,7 +39,7 @@ def _legacy_database(path: Path, secrets: MemorySecretStore) -> Database:
     database.open()
     with database.engine.begin() as connection:
         for table in Base.metadata.sorted_tables:
-            if table.name not in {"jobs", "job_events"}:
+            if table.name not in {"jobs", "job_events", "operation_receipts"}:
                 table.create(connection, checkfirst=True)
         connection.exec_driver_sql(
             "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
@@ -65,7 +65,7 @@ def test_packaged_migration_chain_keeps_revision_0001_frozen(tmp_path: Path) -> 
 
     _upgrade_with_packaged_migrations(database, "0001")
 
-    legacy_tables = set(Base.metadata.tables) - {"jobs", "job_events"}
+    legacy_tables = set(Base.metadata.tables) - {"jobs", "job_events", "operation_receipts"}
     with database.engine.connect() as connection:
         tables_at_0001 = set(
             connection.exec_driver_sql(
@@ -89,7 +89,7 @@ def test_packaged_migration_chain_keeps_revision_0001_frozen(tmp_path: Path) -> 
         assert tables_at_head == set(Base.metadata.tables) | {"alembic_version"}
         assert (
             connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-            == "0002"
+            == "0003"
         )
 
 
@@ -123,9 +123,9 @@ def test_revision_0001_migrates_atomically_to_restart_safe_job_storage(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert {"jobs", "job_events"} <= tables
+        assert {"jobs", "job_events", "operation_receipts"} <= tables
         assert (
-            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "0002"
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "0003"
         )
 
 

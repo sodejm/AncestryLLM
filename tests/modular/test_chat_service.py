@@ -36,7 +36,7 @@ from ancestryllm.llm.contracts import (
     ProviderCapabilities,
 )
 from ancestryllm.llm.service import LLMService
-from ancestryllm.storage.models import LlmRunModel
+from ancestryllm.storage.models import LlmRunModel, OperationReceiptModel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -229,6 +229,10 @@ def test_local_chat_is_transient_bounded_and_privacy_minimal(
     assert all(row.response_hash for row in rows)
     assert all(row.input_payload is None for row in rows)
     assert all(row.output_payload is None for row in rows)
+    with chat_environment.app_context.database.session() as database_session:
+        receipts = list(database_session.scalars(select(OperationReceiptModel)))
+    assert len(receipts) == 2
+    assert {receipt.outcome for receipt in receipts} == {"succeeded"}
 
     chat_environment.chat.teardown(session.session_id)
     with pytest.raises(AncestryError) as missing:
@@ -343,6 +347,9 @@ def test_provider_failure_is_sanitized_and_does_not_commit_history(
     assert row.error_code == "PROVIDER_TRANSIENT"
     assert row.input_payload is None
     assert row.output_payload is None
+    with chat_environment.app_context.database.session() as database_session:
+        receipt = database_session.scalars(select(OperationReceiptModel)).one()
+    assert receipt.outcome == "failed"
 
 
 @pytest.mark.parametrize("selection", ["none", "ollama", "openai"])

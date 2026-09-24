@@ -39,7 +39,7 @@ def test_workspace_is_encrypted_and_has_schema_revision(tmp_path: Path) -> None:
     assert path.read_bytes()[: len(SQLITE_HEADER)] != SQLITE_HEADER
     with database.engine.connect() as connection:
         assert (
-            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "0002"
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "0003"
         )
         assert connection.exec_driver_sql("PRAGMA integrity_check").scalar() == "ok"
     assert secrets.present(DATABASE_SECRET)
