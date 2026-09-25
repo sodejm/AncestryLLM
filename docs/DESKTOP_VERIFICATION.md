@@ -35,13 +35,13 @@ evidence before a packaged application can claim this Chat destination.
 The desktop portion of `config/release-quality-policy-v1.json` is the only
 release-quality authority for tool versions, coverage, receipt gates,
 performance budgets, and diagnostics policy. Hosted verification uses Python
-3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+3.12, Node.js 26.5.0, pnpm 11.11.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
 
 On Intel macOS, the hosted gate installs pnpm from the isolated
 `desktop/toolchain/pnpm/package.json` manifest with `npm ci`. Its
-`package-lock.json` pins the pnpm 11.9.0 tarball by integrity hash, and the
+`package-lock.json` pins the pnpm 11.11.0 tarball by integrity hash, and the
 workflow verifies the resulting executable version. Application dependencies
 still use only `desktop/pnpm-lock.yaml`.
 

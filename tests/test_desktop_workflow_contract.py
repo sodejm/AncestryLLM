@@ -131,9 +131,27 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
+    bootstrap_manifest = json.loads(
+        (ROOT / "desktop/toolchain/pnpm/package.json").read_text(encoding="utf-8")
+    )
+    bootstrap_lock = json.loads(
+        (ROOT / "desktop/toolchain/pnpm/package-lock.json").read_text(encoding="utf-8")
+    )
 
     assert workflow.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413") == 2
-    assert workflow.count('version: "11.9.0"') == 2
+    assert workflow.count('version: "11.11.0"') == 2
+    assert (
+        "npm ci --prefix desktop/toolchain/pnpm --ignore-scripts --no-audit --no-fund" in workflow
+    )
+    assert (
+        'test "$(desktop/toolchain/pnpm/node_modules/.bin/pnpm --version)" = "11.11.0"' in workflow
+    )
+    assert bootstrap_manifest["dependencies"] == {"pnpm": "11.11.0"}
+    assert bootstrap_lock["packages"][""]["dependencies"] == bootstrap_manifest["dependencies"]
+    assert bootstrap_lock["packages"]["node_modules/pnpm"]["version"] == "11.11.0"
+    assert bootstrap_lock["packages"]["node_modules/pnpm"]["integrity"] == (
+        "sha512-RGP2X9gO2A1pvB1L8WPulPYFxzgPwxi7Wy6+FfjNEtScUaTVnpUbQB52TTtsp1HL9RvFDtcAGmvLSTXmhMNIgg=="
+    )
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 7

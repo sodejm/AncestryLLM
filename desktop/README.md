@@ -111,11 +111,11 @@ The persisted schema contains only color scheme, reduced-motion choice, onboardi
 
 ## Reproducible setup and gates
 
-Use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
+Use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.11.0`:
 
 ```sh
 corepack enable
-corepack prepare pnpm@11.9.0 --activate
+corepack prepare pnpm@11.11.0 --activate
 make desktop-install
 make desktop-check
 make desktop-e2e
