@@ -1,3 +1,4 @@
+/** Verifies packaged final-window shutdown despite WebdriverIO's terminal response. */
 import { describe, expect, it, vi } from 'vitest'
 import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
 

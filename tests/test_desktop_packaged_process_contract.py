@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
+PACKAGED_WINDOW_CLOSE = ROOT / "desktop" / "e2e" / "packaged-window-close.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
 NORMAL_LAUNCH_VERIFIER = ROOT / "desktop" / "scripts" / "verify-normal-launch.mjs"
@@ -76,6 +77,7 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    window_close_source = PACKAGED_WINDOW_CLOSE.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
@@ -90,10 +92,16 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
 
     assert "async function closeApplicationWindow(sidecarPath: string)" in quit_source
     assert "const activeSidecarPid = await sidecarPid(pid, sidecarPath)" in quit_source
-    assert "await browser.closeWindow()" in quit_source
-    assert "await Promise.all([" in quit_source
-    assert "expectProcessAbsent(pid)" in quit_source
-    assert "expectProcessAbsent(activeSidecarPid)" in quit_source
+    assert "await closeFinalWindowAndVerifyExit(" in quit_source
+    assert "() => browser.closeWindow()" in quit_source
+    assert "[pid, activeSidecarPid]" in quit_source
+    assert "expectProcessAbsent," in quit_source
+    assert "await closeWindow()" in window_close_source
+    assert (
+        "All window handles were removed, causing WebdriverIO to close the session."
+        in window_close_source
+    )
+    assert "await Promise.all(processIds.map((pid) => verifyExit(pid)))" in window_close_source
     assert "browser.electron.execute" not in quit_source
     assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
     assert "await closeApplicationWindow()" not in source
