@@ -10,6 +10,8 @@ friendly filename, fingerprint, detected version, and grant status. A version
 of **unknown** means the file did not supply reliable version metadata. Schema
 capabilities, rather than a guessed RootsMagic version, determine which queries
 can run. Inspection, queries, and exports appear in Task Center.
+Sources up to 8 GiB are accepted. If discarding a source fails, its access
+remains visible so you can retry.
 
 Choose **People** to browse names or apply a literal name filter. Select a person
 before using **Family links** or **Events**. Pages contain at most 100 rows;
@@ -23,6 +25,7 @@ An export requires a selected root person. Review the connected, ancestors, or
 descendants scope and any generation limit before exporting. Defaults are
 portable GEDCOM 5.5.5, generic destination, connected scope, and living people
 excluded. The living-person setting can instead include or anonymize them.
+Anonymize applies the exporter's living-person redaction policy.
 The immutable-source notice applies to every operation: the original database
 and validated SQLite companions are checked without modifying them.
 
@@ -39,6 +42,8 @@ on the same filesystem. Cancellation before publication produces no export
 folder. Once publication succeeds, Task Center reports the committed result
 even if cancellation arrives concurrently. Reveal opens the authorized output
 location through Main; the renderer does not receive a host path.
+After a failed or cancelled export, choose a new destination before retrying;
+the previous destination grant has been consumed.
 
 Discard a source when finished. Discard, window closure, and sidecar restart
 revoke its session; select the file again to authorize later access. Changed

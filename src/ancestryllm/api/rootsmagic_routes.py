@@ -116,7 +116,7 @@ def rootsmagic_router(
                 root_person_id=request.root_person_id,
                 scope=request.scope,
                 generations=request.generations,
-                living=request.living,
+                living="redact" if request.living == "anonymize" else request.living,
             )
         )
 

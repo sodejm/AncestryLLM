@@ -379,13 +379,14 @@ export class RootsMagicWorkbenchBroker {
   /** Discards one owned source and revokes its dependent result authority. */
   async discard(owner: object, request: Readonly<RootsMagicSourceReferenceRequest>): Promise<Readonly<RootsMagicAcknowledgement>> {
     const source = this.ownedSource(owner, request.source_ref)
+    const acknowledgement = await this.client.discard(source.sourceRef)
     this.sources.delete(source.sourceRef)
     for (const [id, job] of this.jobs) {
       if (job.owner !== owner || job.sourceRef !== source.sourceRef) continue
       if (job.outputId !== undefined) this.outputs.delete(job.outputId)
       this.jobs.delete(id)
     }
-    return this.client.discard(source.sourceRef)
+    return acknowledgement
   }
 
   /** Reveals the directory for one completed export owned by the requesting window. */

@@ -158,6 +158,11 @@ export type SidecarClientFailure =
   | 'GEDCOM_INTAKE_CAPACITY'
   | 'GEDCOM_JOB_RESULT_UNAVAILABLE'
   | 'GEDCOM_ROOT_CURSOR_INVALID'
+  | 'ROOTSMAGIC_CAPABILITY_INVALID'
+  | 'ROOTSMAGIC_RESULT_UNAVAILABLE'
+  | 'ROOTSMAGIC_SOURCE_UNAVAILABLE'
+  | 'ROOTSMAGIC_JOB_CAPACITY'
+  | 'ROOTSMAGIC_SOURCE_CAPACITY'
 
 /**
  * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
@@ -506,6 +511,18 @@ function gedcomFailure(response: Readonly<SidecarHttpResponse>): SidecarClientEr
     || code === 'GEDCOM_INTAKE_CAPACITY'
     || code === 'GEDCOM_JOB_RESULT_UNAVAILABLE'
     || code === 'GEDCOM_ROOT_CURSOR_INVALID') {
+    return new SidecarClientError(code)
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function rootsMagicFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'ROOTSMAGIC_CAPABILITY_INVALID'
+    || code === 'ROOTSMAGIC_RESULT_UNAVAILABLE'
+    || code === 'ROOTSMAGIC_SOURCE_UNAVAILABLE'
+    || code === 'ROOTSMAGIC_JOB_CAPACITY'
+    || code === 'ROOTSMAGIC_SOURCE_CAPACITY') {
     return new SidecarClientError(code)
   }
   return new SidecarClientError('request_failed')
@@ -1207,7 +1224,7 @@ export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
     try {
       const response = await transport(session, path, signal, options)
       if (signal?.aborted) throw new SidecarClientError('cancelled')
-      if (response.statusCode !== 200) throw gedcomFailure(response)
+      if (response.statusCode !== 200) throw rootsMagicFailure(response)
       return parseJson(response, parser)
     } catch (cause) {
       if (signal?.aborted) throw new SidecarClientError('cancelled')

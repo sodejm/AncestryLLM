@@ -39,6 +39,12 @@ performance budgets, and diagnostics policy. Hosted verification uses Python
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
 
+On Intel macOS, the hosted gate installs pnpm from the isolated
+`desktop/toolchain/pnpm/package.json` manifest with `npm ci`. Its
+`package-lock.json` pins the pnpm 11.9.0 tarball by integrity hash, and the
+workflow verifies the resulting executable version. Application dependencies
+still use only `desktop/pnpm-lock.yaml`.
+
 The source verification matrix is deliberately layered:
 
 | Evidence | Command | Boundary |
@@ -275,8 +281,15 @@ specifications deliberately avoid `browser.electron.execute`: renderer state is
 observed through WebDriver, while Main-process and sidecar lifecycle evidence
 comes from bounded native process snapshots. No repository-authored CDP
 endpoint, remote-debugging argument, direct CDP command, or external Chromium
-launch is part of product verification. A separate launch uses a fresh profile
-and the selected packaged runtime without WebDriver: the production package on
+launch is part of product verification. Native snapshots match the isolated
+Main process by executable and profile arguments. On Windows, the native
+executable path supplies identity when the launched command omits the profile
+argument. On Linux, a renderer whose inherited process title
+still says `zygote` is inferred from the largest memory-resident leaf zygote in
+the isolated application tree after WebDriver confirms the renderer DOM is live;
+this is process-observation evidence, not a direct renderer PID API. The
+separate launch uses a fresh profile and the selected packaged runtime without
+WebDriver: the production package on
 Windows and the unpublished verifier package on Linux and macOS. The test
 verifies that neither its process tree nor captured output exposes a debugging
 surface. The normal launch waits for a constant, non-sensitive lifecycle record
@@ -443,6 +456,15 @@ The verification-only dialog adapter supplies the selected fixture paths and
 checks that reveal receives the exact authorized export folder. It does not open
 the operating system's file browser. Native picker interaction and visible file
 browser reveal therefore require separate manual acceptance evidence.
+
+The PR #497 review regressions cover the 8 GiB source boundary, final-page
+offset, control-character normalization, retryable source discard, living-person
+redaction, stable path-free error codes, late inspection disposal, and fresh
+destination grants after failed or cancelled exports. The packaged scenario
+also checks source and WAL fingerprints, bounded pages, rooted redacted exports,
+digest agreement, and cancellation before publication. These fixes preserve
+the existing service and desktop authority boundaries in `ARCHITECTURE.md` and
+the RootsMagic threat model; neither boundary changes.
 
 The #119 acceptance criteria map to the following checks. Passing an automated
 check establishes its stated boundary; it does not substitute for the remaining

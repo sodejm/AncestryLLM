@@ -36,7 +36,7 @@ class _OutputManifest(BaseModel):
 
 
 class _SourceManifest(_OutputManifest):
-    size_bytes: int = Field(ge=0, le=512 * 1024 * 1024)
+    size_bytes: int = Field(ge=0, le=8 * 1024 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     friendly_name: str = Field(min_length=1, max_length=1024)
 

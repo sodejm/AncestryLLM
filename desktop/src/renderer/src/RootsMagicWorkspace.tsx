@@ -1,5 +1,5 @@
 /** Presents bounded RootsMagic presets without exposing source paths or database access. */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AncestryBridge, FileGrant, JobSnapshot } from '../../shared-contract/desktop'
 import type {
   RootsMagicExportRequest,
@@ -76,9 +76,34 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   const [failure, setFailure] = useState<string | null>(null)
   const mounted = useRef(true)
   const sourceRef = useRef<string | null>(null)
+  const inspectionJob = useRef<string | null>(null)
+  const abandonedInspections = useRef(new Set<string>())
   const sourceGeneration = useRef(0)
   const queryGeneration = useRef(0)
   const errorFocus = useRef<HTMLDivElement>(null)
+
+  const abandonInspection = useCallback(async (jobId: string) => {
+    if (abandonedInspections.current.has(jobId)) return
+    abandonedInspections.current.add(jobId)
+    const request = { schema_version: 1 as const, job_id: jobId }
+    try {
+      const cancelled = await rootsMagic.cancelJob(request)
+      const initial = cancelled.ok ? cancelled : await rootsMagic.getJob(request)
+      if (!initial.ok) return
+      let snapshot = initial.data
+      while (snapshot.state === 'queued' || snapshot.state === 'running') {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
+        const polled = await rootsMagic.getJob(request)
+        if (!polled.ok) return
+        snapshot = polled.data
+      }
+      if (snapshot.state !== 'completed') return
+      const result = await rootsMagic.getRootsMagicJobResult(request)
+      if (result.ok && result.data.kind === 'inspection') {
+        await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref })
+      }
+    } catch { /* The sidecar may already have closed and revoked the source. */ }
+  }, [rootsMagic])
 
   useEffect(() => {
     mounted.current = true
@@ -88,8 +113,10 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       queryGeneration.current += 1
       const activeSource = sourceRef.current
       if (activeSource) void rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: activeSource }).catch(() => undefined)
+      const pendingInspection = inspectionJob.current
+      if (pendingInspection) void abandonInspection(pendingInspection)
     }
-  }, [rootsMagic])
+  }, [rootsMagic, abandonInspection])
 
   useEffect(() => { if (failure) errorFocus.current?.focus() }, [failure])
 
@@ -107,8 +134,14 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     let current = snapshot
     while (mounted.current && isCurrent()) {
       if (current.state === 'completed') {
+        if (expected === 'inspection' && inspectionJob.current === current.job_id) inspectionJob.current = null
         const result = await rootsMagic.getRootsMagicJobResult({ schema_version: 1, job_id: current.job_id })
-        if (!mounted.current || !isCurrent()) return null
+        if (!mounted.current || !isCurrent()) {
+          if (result.ok && result.data.kind === 'inspection') {
+            await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref }).catch(() => undefined)
+          }
+          return null
+        }
         if (!result.ok) { fail(result.error.code); return null }
         if (result.data.kind !== expected) { fail('ROOTSMAGIC_RESULT_UNAVAILABLE'); return null }
         return result.data
@@ -120,7 +153,10 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
       if (!mounted.current || !isCurrent()) return null
       const result = await rootsMagic.getJob({ schema_version: 1, job_id: current.job_id })
-      if (!mounted.current || !isCurrent()) return null
+      if (!mounted.current || !isCurrent()) {
+        if (expected === 'inspection') void abandonInspection(current.job_id)
+        return null
+      }
       if (!result.ok) { fail(result.error.code); return null }
       current = result.data
     }
@@ -153,8 +189,12 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setFailure(null)
     const oldSource = sourceRef.current
     if (oldSource) {
+      try {
+        const disposed = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: oldSource })
+        if (!disposed.ok) { fail(disposed.error.code); return }
+      } catch { fail('ROOTSMAGIC_SOURCE_UNAVAILABLE'); return }
       sourceRef.current = null
-      void rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: oldSource }).catch(() => undefined)
+      if (!mounted.current) return
     }
     resetForSource()
     const selectionGeneration = sourceGeneration.current
@@ -167,7 +207,13 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       try {
         const submitted = await rootsMagic.inspectRootsMagicSource(grant.grantId)
         if (!submitted.ok) { fail(submitted.error.code); return }
+        if (!mounted.current || sourceGeneration.current !== selectionGeneration) {
+          void abandonInspection(submitted.data.job_id)
+          return
+        }
+        inspectionJob.current = submitted.data.job_id
         const complete = await awaitResult(submitted.data, 'inspection', () => sourceGeneration.current === selectionGeneration)
+        if (inspectionJob.current === submitted.data.job_id) inspectionJob.current = null
         if (!complete || complete.kind !== 'inspection' || !mounted.current || sourceGeneration.current !== selectionGeneration) return
         inspectedSource = complete.result.source_ref
         const presets = await rootsMagic.getRootsMagicPresets()
@@ -193,8 +239,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
 
   async function discardSource() {
     const activeSource = sourceRef.current
-    if (!activeSource || discarding) return
-    sourceRef.current = null
+    if (!activeSource || discarding || picking) return
     invalidateSourceWork()
     const discardGeneration = sourceGeneration.current
     setDiscarding(true)
@@ -204,15 +249,14 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       const result = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: activeSource })
       if (!mounted.current || sourceGeneration.current !== discardGeneration) return
       if (!result.ok) {
-        sourceRef.current = activeSource
         fail(result.error.code)
         return
       }
+      sourceRef.current = null
       resetForSource()
       setStatus('The RootsMagic source was discarded.')
     } catch {
       if (mounted.current && sourceGeneration.current === discardGeneration) {
-        sourceRef.current = activeSource
         fail('ROOTSMAGIC_SOURCE_UNAVAILABLE')
       }
     } finally { if (mounted.current) setDiscarding(false) }
@@ -279,9 +323,11 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setExportPending(true)
     setConfirmed(false)
     setFailure(null)
+    const destination = output
+    setOutput(null)
     try {
       const request: RootsMagicExportRequest = { schema_version: 1, source_ref: source.summary.source_ref,
-        output_capability: output.output_capability, root_person_id: selectedPerson.personId, scope,
+        output_capability: destination.output_capability, root_person_id: selectedPerson.personId, scope,
         generations: generationsValue, living }
       const submitted = await rootsMagic.exportRootsMagic(request)
       if (!submitted.ok) {
@@ -331,7 +377,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       <p>Version: {source.summary.detected_version}</p>
       <p>Source access: {source.summary.grant_status_code}</p>
       <p>This source is read-only and is never modified.</p>
-      <Button type="button" variant="quiet" disabled={discarding} onClick={() => { void discardSource() }}>
+      <Button type="button" variant="quiet" disabled={discarding || picking} onClick={() => { void discardSource() }}>
         {discarding ? 'Discarding active source…' : 'Discard active source'}
       </Button>
     </section>}

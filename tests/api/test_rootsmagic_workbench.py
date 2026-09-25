@@ -7,6 +7,7 @@ import json
 import sqlite3
 from contextlib import closing
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,28 @@ from pydantic import ValidationError
 from ancestryllm.application.jobs import JobLifecycleService, MemoryJobEventRepository
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager, JobState
+
+
+def test_export_route_maps_desktop_anonymize_to_established_redaction_policy() -> None:
+    from ancestryllm.api.rootsmagic_routes import FolderExportRequest, rootsmagic_router
+
+    boundary = Mock()
+    router = rootsmagic_router(lambda: boundary, lambda job: job, lambda: None)
+    route = next(
+        route for route in router.routes if route.operation_id == "exportInternalRootsMagicFolder"
+    )
+    request = FolderExportRequest.model_validate(
+        {
+            "schema_version": 1,
+            "source_ref": "a" * 64,
+            "output_capability": "b" * 64,
+            "root_person_id": 1,
+            "living": "anonymize",
+        }
+    )
+    route.endpoint(request)
+    assert boundary.export.call_args.kwargs["living"] == "redact"
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -508,3 +531,34 @@ def test_discard_prevents_export(native_client, api_headers, tmp_path, monkeypat
 
 def test_remote_adapter_does_not_mount_native_workbench(api_client, api_headers):
     assert api_client.get("/api/v1/rootsmagic/presets", headers=api_headers).status_code == 404
+
+
+@pytest.mark.parametrize("size_bytes", [512 * 1024 * 1024 + 1, 8 * 1024 * 1024 * 1024])
+def test_source_manifest_accepts_advertised_size_boundary(size_bytes: int) -> None:
+    from ancestryllm.api.rootsmagic_workbench import _SourceManifest
+
+    manifest = _SourceManifest.model_validate(
+        {
+            "schema_version": 1,
+            "path": "/fictional/tree.rmtree",
+            "size_bytes": size_bytes,
+            "sha256": "a" * 64,
+            "friendly_name": "tree.rmtree",
+        }
+    )
+    assert manifest.size_bytes == size_bytes
+
+
+def test_source_manifest_rejects_above_advertised_size() -> None:
+    from ancestryllm.api.rootsmagic_workbench import _SourceManifest
+
+    with pytest.raises(ValidationError):
+        _SourceManifest.model_validate(
+            {
+                "schema_version": 1,
+                "path": "/fictional/tree.rmtree",
+                "size_bytes": 8 * 1024 * 1024 * 1024 + 1,
+                "sha256": "a" * 64,
+                "friendly_name": "tree.rmtree",
+            }
+        )

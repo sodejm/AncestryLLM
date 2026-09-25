@@ -10,7 +10,7 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
+import { matchesPackagedMainProcess, observedRenderer, type ProcessRecord } from './process-records'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -149,11 +149,8 @@ async function mainPid(excluded: ReadonlySet<number> = new Set()): Promise<numbe
   return eventually(
     'Packaged Electron main-process PID was not observed',
     async () => (await processSnapshot()).find((record) => (
-      !excluded.has(record.pid) && matchesPackagedMainProcess(
-        record,
-        automatedPackagedExecutable,
-        userDataDirectory,
-      )
+      !excluded.has(record.pid)
+        && matchesPackagedMainProcess(record, automatedPackagedExecutable, userDataDirectory)
     ))?.pid ?? -1,
     (pid) => pid > 0,
   )
@@ -194,7 +191,8 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       '    pid = [int]$_.ProcessId;',
       '    ppid = [int]$_.ParentProcessId;',
       '    rssBytes = [long]$_.WorkingSetSize;',
-      '    commandLine = [string]$_.CommandLine',
+      '    commandLine = [string]$_.CommandLine;',
+      '    executablePath = [string]$_.ExecutablePath',
       '  }',
       '} | ConvertTo-Json -Compress',
     ].join('\n')
@@ -211,6 +209,7 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       ppid: Number(record.ppid),
       rssBytes: Number(record.rssBytes),
       commandLine: String(record.commandLine ?? ''),
+      executablePath: String(record.executablePath ?? ''),
     }))
   }
 
@@ -510,14 +509,18 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
   const rendererOutboundRequests = rendererOutboundAttemptUrls.length
   assert.deepEqual(rendererOutboundAttemptUrls, [])
 
-  const tree = await eventually(
+  const rendererObservation = await eventually(
     'Packaged renderer process was not observed',
-    async () => descendantProcessTree(await processSnapshot(), rootPid),
-    (records) => records.some((record) => (
-      record.commandLine.includes('--type=renderer')
-      && !record.commandLine.includes('--no-sandbox')
-    )),
+    async () => {
+      const records = await processSnapshot()
+      const tree = descendantProcessTree(records, rootPid)
+      return { tree, renderer: observedRenderer(records, rootPid) }
+    },
+    ({ renderer }) => renderer !== null,
   )
+  const { tree, renderer } = rendererObservation
+  assert.ok(renderer)
+  assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)
   assert.ok(tree.some((record) => record.pid === rootPid))
   // The WebdriverIO Electron service supplies a main-process inspector argument
   // for this automated session. Keep it out of renderer processes here; the
@@ -525,10 +528,7 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
   // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
   assert.doesNotMatch(
-    tree
-      .filter((record) => record.commandLine.includes('--type=renderer'))
-      .map((record) => record.commandLine)
-      .join('\n'),
+    renderer.commandLine,
     inspectPattern,
   )
   const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
@@ -543,7 +543,7 @@ async function expectAccessibleShell(): Promise<void> {
   assert.deepEqual(await browser.execute(() => Array.from(
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
-  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
+  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings'])
 
   await click('a=Settings')
   await expectFocusedHeading('Settings')

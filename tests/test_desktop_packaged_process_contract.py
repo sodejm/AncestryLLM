@@ -28,7 +28,7 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
     )
 
 
-def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
+def test_packaged_renderer_evidence_uses_native_process_snapshots() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     process_records_source = PROCESS_RECORDS.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
@@ -38,13 +38,17 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
         "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
     )
     assert "matchesPackagedMainProcess(" in source
+    assert "Get-CimInstance Win32_Process" in source
+    assert "executablePath = [string]$_.ExecutablePath" in source
     assert "record.commandLine" in process_records_source
     assert "commandLine.includes(expectedExecutable)" in process_records_source
     assert "commandLine.includes(expectedProfile)" in process_records_source
-    assert "!commandLine.includes('--type=')" in process_records_source
-    assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
-    assert "record.commandLine.includes('--type=renderer')" in source
-    assert "!record.commandLine.includes('--no-sandbox')" in source
+    assert "commandLine.includes('--type=')" in process_records_source
+    assert "nativeExecutable === expectedExecutable" in process_records_source
+    assert "descendantProcessTree(records, rootPid)" in source
+    assert "observedRenderer(records, rootPid)" in source
+    assert "assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)" in source
+    assert "assert.doesNotMatch(\n    renderer.commandLine,\n    inspectPattern," in source
     assert "app.enableSandbox()" in main_source
     for forbidden in (
         "newBrowserCDPSession",

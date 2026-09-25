@@ -90,6 +90,7 @@ function bridgeFor(results: readonly RootsMagicJobResult[] = [
     requestOpenFileGrant: vi.fn().mockResolvedValue(success(grant)),
     revokeFileGrant: vi.fn().mockResolvedValue(success({ revoked: true })),
     inspectRootsMagicSource: vi.fn().mockResolvedValue(success(job)),
+    cancelJob: vi.fn().mockResolvedValue(success(job)),
     getRootsMagicPresets: vi.fn().mockResolvedValue(success(definitions)),
     queryRootsMagic: vi.fn().mockResolvedValue(success(job)),
     requestRootsMagicOutput: vi.fn().mockResolvedValue(success({
@@ -104,6 +105,89 @@ function bridgeFor(results: readonly RootsMagicJobResult[] = [
 }
 
 describe('RootsMagic workspace', () => {
+  it('cancels an inspection submitted after the workspace closes', async () => {
+    const bridge = bridgeFor()
+    const runningJob: JobSnapshot = { ...job, state: 'running', finished_at: null }
+    vi.mocked(bridge.cancelJob).mockResolvedValueOnce(success({ ...runningJob, state: 'cancelled' }))
+    let finishSubmission!: (value: BridgeResult<JobSnapshot>) => void
+    vi.mocked(bridge.inspectRootsMagicSource).mockReturnValueOnce(new Promise((resolve) => { finishSubmission = resolve }))
+    const { unmount } = render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await waitFor(() => expect(bridge.inspectRootsMagicSource).toHaveBeenCalledOnce())
+    unmount()
+    finishSubmission(success(runningJob))
+    await waitFor(() => expect(bridge.cancelJob).toHaveBeenCalledWith({ schema_version: 1, job_id: job.job_id }))
+    expect(bridge.getRootsMagicJobResult).not.toHaveBeenCalled()
+  })
+
+  it('discards a completed inspection when cancellation loses the completion race', async () => {
+    const bridge = bridgeFor([inspection])
+    const runningJob: JobSnapshot = { ...job, state: 'running', finished_at: null }
+    vi.mocked(bridge.inspectRootsMagicSource).mockResolvedValueOnce(success(runningJob))
+    vi.mocked(bridge.cancelJob).mockResolvedValueOnce(failure('REQUEST_CANCELLED'))
+    vi.mocked(bridge.getJob).mockResolvedValueOnce(success(job))
+    const { unmount } = render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await waitFor(() => expect(bridge.inspectRootsMagicSource).toHaveBeenCalledOnce())
+    unmount()
+    await waitFor(() => expect(bridge.cancelJob).toHaveBeenCalledOnce())
+    await waitFor(() => expect(bridge.discardRootsMagicSource).toHaveBeenCalledWith({ schema_version: 1, source_ref: sourceRef }))
+  })
+
+  it('discards an inspection that completes after prolonged cooperative cancellation', async () => {
+    const bridge = bridgeFor([inspection])
+    const runningJob: JobSnapshot = { ...job, state: 'running', finished_at: null }
+    vi.mocked(bridge.inspectRootsMagicSource).mockResolvedValueOnce(success(runningJob))
+    vi.mocked(bridge.cancelJob).mockResolvedValueOnce(success(runningJob))
+    let polls = 0
+    vi.mocked(bridge.getJob).mockImplementation(async () => success(++polls > 120 ? job : runningJob))
+    const { unmount } = render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await waitFor(() => expect(bridge.inspectRootsMagicSource).toHaveBeenCalledOnce())
+    vi.useFakeTimers()
+    try {
+      unmount()
+      await vi.advanceTimersByTimeAsync(122_000)
+      expect(polls).toBeGreaterThan(120)
+      expect(bridge.discardRootsMagicSource).toHaveBeenCalledWith({ schema_version: 1, source_ref: sourceRef })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('discards an inspection result delivered after the workspace closes', async () => {
+    const bridge = bridgeFor([])
+    let finishResult!: (value: BridgeResult<RootsMagicJobResult>) => void
+    vi.mocked(bridge.getRootsMagicJobResult).mockReturnValueOnce(new Promise((resolve) => { finishResult = resolve }))
+    const { unmount } = render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await waitFor(() => expect(bridge.getRootsMagicJobResult).toHaveBeenCalledOnce())
+    unmount()
+    finishResult(success(inspection))
+    await waitFor(() => expect(bridge.discardRootsMagicSource).toHaveBeenCalledWith({ schema_version: 1, source_ref: sourceRef }))
+  })
+
+  it.each(['SIDECAR_UNAVAILABLE', 'REQUEST_CANCELLED'] as const)(
+    'requires a fresh destination after export %s', async (code) => {
+      const bridge = bridgeFor([inspection, queryResult(people)])
+      vi.mocked(bridge.exportRootsMagic).mockResolvedValueOnce(failure(code))
+      const { unmount } = render(<RootsMagicWorkspace bridge={bridge} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+      await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+      await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+      await screen.findByText('New export folder: fictional-family export')
+      await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export/i }))
+      await userEvent.click(screen.getByRole('button', { name: 'Export portable GEDCOM' }))
+      await waitFor(() => expect(bridge.exportRootsMagic).toHaveBeenCalledOnce())
+      await waitFor(() => expect(screen.queryByText('New export folder: fictional-family export')).not.toBeInTheDocument())
+      expect(screen.getByRole('button', { name: 'Export portable GEDCOM' })).toBeDisabled()
+      await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+      await waitFor(() => expect(bridge.requestRootsMagicOutput).toHaveBeenCalledTimes(2))
+      unmount()
+    },
+  )
+
   it('uses opaque grants and source references for literal-filtered preset pages and explicit export', async () => {
     const bridge = bridgeFor()
     render(<RootsMagicWorkspace bridge={bridge} />)
@@ -206,6 +290,21 @@ describe('RootsMagic workspace', () => {
 
     expect(screen.getByRole('button', { name: 'People' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Search people' })).toBeEnabled()
+  })
+
+  it('keeps the active source retryable when replacement disposal fails', async () => {
+    const bridge = bridgeFor([inspection])
+    vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('SIDECAR_UNAVAILABLE'))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    expect(await screen.findByText('Fictional Family')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Choose another RootsMagic source' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code: SIDECAR_UNAVAILABLE')
+    expect(screen.getByRole('heading', { name: 'Active source' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'People' })).toBeEnabled()
+    expect(bridge.requestOpenFileGrant).toHaveBeenCalledOnce()
   })
 
   it('does not carry a completed output-folder selection to a replacement source', async () => {

@@ -65,6 +65,16 @@ async function fixture() {
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
 describe('native RootsMagic workbench broker', () => {
+  it('keeps a source and its query authority retryable when sidecar disposal fails', async () => {
+    const { broker, client, owner, inspect } = await fixture()
+    await inspect()
+    client.discard.mockRejectedValueOnce(new Error('sidecar temporarily unavailable'))
+    await expect(broker.discard(owner, { schema_version: 1, source_ref: sourceRef })).rejects.toThrow()
+    await expect(broker.query(owner, queryRequest)).resolves.toHaveProperty('job_id')
+    await expect(broker.discard(owner, { schema_version: 1, source_ref: sourceRef })).resolves.toEqual({ schema_version: 1 })
+    await expect(broker.query(owner, queryRequest)).rejects.toThrow('FILE_GRANT_FORBIDDEN')
+  })
+
   it('passes an opaque manifest capability, preserves source bytes, and reports the actual selected folder name', async () => {
     const { broker, client, owner, directory, path } = await fixture()
     const before = await readFile(path)

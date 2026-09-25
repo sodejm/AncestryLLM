@@ -346,3 +346,42 @@ def test_preset_sql_execution_obeys_reader_deadline(source: Path) -> None:
         )
     assert raised.value.code == "ROOTSMAGIC_QUERY_TIMEOUT"
     assert source.read_bytes() == original
+
+
+def test_final_page_does_not_advertise_offset_above_limit(
+    source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
+    from ancestryllm.application.operations import RootsMagicPresetQueryRequest
+
+    reader = RootsMagicReader([source.parent])
+    monkeypatch.setattr(
+        reader,
+        "query",
+        lambda *args, **kwargs: SimpleNamespace(
+            rows=((1,),),
+            columns=("person_id",),
+            truncated=True,
+        ),
+    )
+    service = RootsMagicPresetService(reader)
+    page = service.query(
+        source, RootsMagicPresetQueryRequest("opaque", "people", None, "", 999_999, 100)
+    )
+    assert page.next_offset is None
+    assert not page.has_more
+
+
+def test_query_result_text_normalizes_control_characters(source: Path) -> None:
+    from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
+    from ancestryllm.application.operations import RootsMagicPresetQueryRequest
+
+    with closing(sqlite3.connect(source)) as connection:
+        connection.execute(
+            "UPDATE NameTable SET Given = ? WHERE OwnerID = 1",
+            ("Fictional\n\t\u202eName",),
+        )
+        connection.commit()
+    service = RootsMagicPresetService(RootsMagicReader([source.parent]))
+    page = service.query(source, RootsMagicPresetQueryRequest("opaque", "people", None, "", 0, 20))
+    assert page.rows[0].values[1] == "Fictional   Name Example"

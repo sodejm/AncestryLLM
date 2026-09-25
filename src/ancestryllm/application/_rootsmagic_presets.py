@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar, cast
+from unicodedata import category
 
 from ancestryllm.application.operations import (
     QueryRow,
@@ -109,6 +110,8 @@ class RootsMagicPresetService:
             sql, parameters = self._events_statement(schema, request)
         result = self.reader.query(path, sql, parameters=parameters, row_limit=request.page_size)
         rows = tuple(QueryRow(self._scalar_row(row)) for row in result.rows)
+        next_offset = request.offset + request.page_size
+        has_more = result.truncated and next_offset <= self._OFFSET_LIMIT
         return RootsMagicResultPage(
             request.query_id,
             result.columns,
@@ -116,8 +119,8 @@ class RootsMagicPresetService:
             request.offset,
             len(rows),
             None,
-            result.truncated,
-            request.offset + request.page_size if result.truncated else None,
+            has_more,
+            next_offset if has_more else None,
         )
 
     def _people_statement(
@@ -265,6 +268,10 @@ class RootsMagicPresetService:
             tuple(
                 str(value)
                 if type(value) is int and abs(value) > RootsMagicPresetService._PERSON_ID_MAX
+                else "".join(
+                    " " if category(character).startswith("C") else character for character in value
+                )
+                if type(value) is str
                 else value
                 for value in row
             ),
