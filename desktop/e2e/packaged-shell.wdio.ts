@@ -11,6 +11,7 @@ import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { matchesPackagedMainProcess, observedRenderer, type ProcessRecord } from './process-records'
+import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -280,11 +281,11 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
 async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   const pid = await mainPid()
   const activeSidecarPid = await sidecarPid(pid, sidecarPath)
-  await browser.closeWindow()
-  await Promise.all([
-    expectProcessAbsent(pid),
-    expectProcessAbsent(activeSidecarPid),
-  ])
+  await closeFinalWindowAndVerifyExit(
+    () => browser.closeWindow(),
+    [pid, activeSidecarPid],
+    expectProcessAbsent,
+  )
   return pid
 }
 
