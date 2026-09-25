@@ -125,10 +125,13 @@ async function writeManifest(directory: string, suffix: string, value: object): 
   }
 }
 
-async function inspectSource(path: string, maximum: number): Promise<Readonly<{ size: number; sha256: string }>> {
+async function inspectSource(path: string, maximum: number, checkpoint: () => void): Promise<Readonly<{ size: number; sha256: string }>> {
+  checkpoint()
   const before = await lstat(path)
+  checkpoint()
   if (!before.isFile() || before.isSymbolicLink() || before.size > maximum) fail('FILE_SELECTION_INVALID')
   const canonical = await realpath(path)
+  checkpoint()
   if (canonical !== resolve(path)) fail('FILE_SELECTION_INVALID')
   const handle = await open(path, constants.O_RDONLY)
   const hash = createHash('sha256')
@@ -136,7 +139,9 @@ async function inspectSource(path: string, maximum: number): Promise<Readonly<{ 
   try {
     let position = 0
     while (position < before.size) {
+      checkpoint()
       const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, before.size - position), position)
+      checkpoint()
       if (bytesRead === 0) fail('FILE_SELECTION_INVALID')
       hash.update(buffer.subarray(0, bytesRead))
       position += bytesRead
@@ -145,6 +150,7 @@ async function inspectSource(path: string, maximum: number): Promise<Readonly<{ 
     await handle.close()
   }
   const after = await lstat(path)
+  checkpoint()
   if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
     || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) fail('FILE_SELECTION_INVALID')
   return Object.freeze({ size: before.size, sha256: hash.digest('hex') })
@@ -193,6 +199,13 @@ export class RootsMagicWorkbenchBroker {
     if (!this.active(owner, generation)) fail('FILE_OPERATION_CANCELLED')
   }
 
+  private async cancelInspectionAndDiscard(jobId: string): Promise<void> {
+    const snapshot = await this.client.cancel(jobId)
+    if (snapshot.state !== 'completed') return
+    const result = await this.client.result(jobId)
+    if (result.kind === 'inspection') await this.client.discard(result.result.source_ref)
+  }
+
   private ownedSource(owner: object, sourceRef: string): SourceEntry {
     const entry = this.sources.get(sourceRef)
     if (!entry || entry.owner !== owner || !this.active(owner, entry.generation)) fail('FILE_GRANT_FORBIDDEN')
@@ -218,7 +231,10 @@ export class RootsMagicWorkbenchBroker {
       const grant = await this.files.resolveReadGrant(owner, grantId, 'rootsmagic-read')
       this.requireActive(owner, generation, signal)
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
-      const inspected = await inspectSource(grant.path, grant.maxBytes)
+      const inspected = await inspectSource(grant.path, grant.maxBytes, () => {
+        this.requireActive(owner, generation, signal)
+        if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
+      })
       this.requireActive(owner, generation, signal)
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
       const manifest = await writeManifest(this.directory, 'rootsmagic-source', {
@@ -233,7 +249,7 @@ export class RootsMagicWorkbenchBroker {
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
       const snapshot = await this.client.inspect(manifest.id, signal)
       if (!this.active(owner, generation) || pending.revoked || signal?.aborted) {
-        await this.client.cancel(snapshot.job_id).catch(() => undefined)
+        await this.cancelInspectionAndDiscard(snapshot.job_id).catch(() => undefined)
         fail('FILE_OPERATION_CANCELLED')
       }
       this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'inspection', generation })
@@ -265,7 +281,8 @@ export class RootsMagicWorkbenchBroker {
 
   /** Selects one exact, nonexistent destination path and returns only an opaque capability. */
   async selectOutput(owner: object, displayName: string, signal?: AbortSignal): Promise<Readonly<RootsMagicOutputSelection> | null> {
-    if (this.outputs.size + this.outputSelections >= outputLimit) fail('FILE_SELECTION_INVALID')
+    const replaceable = [...this.outputs.values()].filter((entry) => entry.owner === owner && !entry.used).length
+    if (this.outputs.size - replaceable + this.outputSelections >= outputLimit) fail('FILE_SELECTION_INVALID')
     this.outputSelections += 1
     const generation = this.generation(owner)
     this.owners.add(owner)
@@ -287,6 +304,9 @@ export class RootsMagicWorkbenchBroker {
       this.requireActive(owner, generation, signal)
       const id = opaque()
       const actualName = basename(path)
+      for (const [oldId, entry] of this.outputs) {
+        if (entry.owner === owner && !entry.used) this.outputs.delete(oldId)
+      }
       this.outputs.set(id, { owner, id, path, displayName: actualName, generation, used: false })
       return Object.freeze({ schema_version: 1, output_capability: id, display_name: actualName })
     } finally {
@@ -418,7 +438,8 @@ export class RootsMagicWorkbenchBroker {
     for (const entry of jobs) this.jobs.delete(entry.jobId)
     await Promise.allSettled([
       ...sources.map((entry) => this.client.discard(entry.sourceRef)),
-      ...jobs.map((entry) => this.client.cancel(entry.jobId)),
+      ...jobs.map((entry) => entry.kind === 'inspection' && entry.sourceRef === undefined
+        ? this.cancelInspectionAndDiscard(entry.jobId) : this.client.cancel(entry.jobId)),
       ...pending.map((entry) => removeManifest(entry.manifestPath)),
     ])
   }

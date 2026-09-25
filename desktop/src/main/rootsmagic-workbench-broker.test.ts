@@ -1,5 +1,5 @@
 /** Exercises native capability ownership and revocation at asynchronous handoff boundaries. */
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -159,6 +159,41 @@ describe('native RootsMagic workbench broker', () => {
     await expect(broker.query(owner, queryRequest)).rejects.toThrow('FILE_GRANT_FORBIDDEN')
   })
 
+  it('discards an inspection that completed before its window was revoked', async () => {
+    const { broker, client, owner } = await fixture()
+    const job = await broker.inspect(owner, grant)
+    client.cancel.mockResolvedValueOnce(terminalSnapshot(job, 'completed'))
+    await broker.revokeOwner(owner)
+    expect(client.result).toHaveBeenCalledWith(job.job_id)
+    expect(client.discard).toHaveBeenCalledWith(sourceRef)
+  })
+
+  it('stops reading source bytes when inspection is cancelled during hashing', async () => {
+    const { broker, client, files, owner, path } = await fixture()
+    await writeFile(path, Buffer.alloc(3 * 1024 * 1024))
+    files.resolveReadGrant.mockResolvedValueOnce({ grantId: grant, purpose: 'rootsmagic-read',
+      access: 'read', path, maxBytes: 8 * 1024 * 1024 * 1024 })
+    const controller = new AbortController()
+    const handle = await open(path, 'r')
+    const prototype = Object.getPrototypeOf(handle) as { read: typeof handle.read }
+    const originalRead = prototype.read
+    await handle.close()
+    let reads = 0
+    const read = vi.spyOn(prototype, 'read').mockImplementation(async function (this: typeof handle, ...args) {
+      const result = await originalRead.apply(this, args)
+      reads += 1
+      controller.abort()
+      return result
+    })
+    try {
+      await expect(broker.inspect(owner, grant, controller.signal)).rejects.toThrow('FILE_OPERATION_CANCELLED')
+      expect(reads).toBe(1)
+      expect(client.inspect).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+    }
+  })
+
   it('cannot recreate source authority by replaying an inspection result after discard', async () => {
     const { broker, client, owner, inspect } = await fixture()
     const job = await inspect()
@@ -288,13 +323,15 @@ describe('native RootsMagic workbench broker', () => {
   it('releases dependent export output authority when its source is discarded', async () => {
     const { broker, client, native, owner, directory, inspect } = await fixture()
     await inspect()
-    for (let index = 0; index < 16; index++) {
-      native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, `Export ${index}`))
-    }
-    const outputs = await Promise.all(Array.from({ length: 16 }, () => broker.selectOutput(owner, 'Export')))
+    native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, 'Export 0'))
+    const output = await broker.selectOutput(owner, 'Export')
     await broker.export(owner, { schema_version: 1, source_ref: sourceRef,
-      output_capability: outputs[0]!.output_capability, root_person_id: 1, scope: 'connected',
+      output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
       generations: null, living: 'exclude' })
+    for (let index = 1; index < 16; index++) {
+      native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, `Export ${index}`))
+      await broker.selectOutput({}, 'Export')
+    }
     await expect(broker.selectOutput(owner, 'Full')).rejects.toThrow('FILE_SELECTION_INVALID')
     await broker.discard(owner, { schema_version: 1, source_ref: sourceRef })
     native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, 'Replacement'))
@@ -312,6 +349,26 @@ describe('native RootsMagic workbench broker', () => {
     await expect(broker.selectOutput(owner, 'Seventeenth')).rejects.toThrow('FILE_SELECTION_INVALID')
     selections.forEach((selection, selected) => selection.resolve(join(directory, `Export ${selected}`)))
     await expect(Promise.all(pending)).resolves.toHaveLength(16)
+  })
+
+  it('replaces unused destination authority as the owner chooses new folders', async () => {
+    const { broker, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    let prior: string | undefined
+    for (let index = 0; index < 18; index++) {
+      native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, `Choice ${index}`))
+      const selected = await broker.selectOutput(owner, 'Export')
+      expect(selected?.display_name).toBe(`Choice ${index}`)
+      if (prior) {
+        await expect(broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+          output_capability: prior, root_person_id: 1, scope: 'connected',
+          generations: null, living: 'exclude' })).rejects.toThrow('FILE_GRANT_FORBIDDEN')
+      }
+      prior = selected!.output_capability
+    }
+    await expect(broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: prior!, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' })).resolves.toHaveProperty('job_id')
   })
 
   it('releases an output capability when export submission fails', async () => {

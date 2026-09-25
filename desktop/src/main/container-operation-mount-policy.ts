@@ -131,7 +131,7 @@ export async function initializeGedcomIntakeStaging(runtimeProfileRoot: string):
   try {
     const entries = await readdir(stagingRoot, { withFileTypes: true })
     // Validate the entire set before removing anything; never traverse an unexpected entry.
-    if (entries.some((entry) => !/^[a-f0-9]{64}\.ged$/.test(entry.name)
+    if (entries.some((entry) => !/^[a-f0-9]{64}(?:\.ged|\.rootsmagic-(?:source|output)\.json)$/.test(entry.name)
       || !entry.isFile() || entry.isSymbolicLink())) fail('STAGING_UNSAFE')
     for (const entry of entries) {
       const stagedPath = join(stagingRoot, entry.name)
