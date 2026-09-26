@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -143,8 +144,13 @@ class OperationReceipt(BoundaryDTO):
             ("estimated_cost_usd", self.estimated_cost_usd),
             ("provider_cost_usd", self.provider_cost_usd),
         ):
-            if cost is not None and (not isinstance(cost, (int, float)) or cost < 0):
-                raise ValueError(f"{label} must be a non-negative number.")
+            if cost is not None and (
+                isinstance(cost, bool)
+                or not isinstance(cost, (int, float))
+                or (isinstance(cost, float) and not math.isfinite(cost))
+                or cost < 0
+            ):
+                raise ValueError(f"{label} must be a non-negative finite number.")
         if self.error_code is not None:
             _code("error_code", self.error_code)
         if (

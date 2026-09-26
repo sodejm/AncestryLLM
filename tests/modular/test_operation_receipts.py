@@ -86,6 +86,13 @@ def test_terminal_receipt_is_immutable_once_written(app_context) -> None:  # typ
     assert retained.error_code is None
 
 
+@pytest.mark.parametrize("field", ["estimated_cost_usd", "provider_cost_usd"])
+@pytest.mark.parametrize("cost", [float("nan"), float("inf"), float("-inf"), True, False])
+def test_receipt_costs_must_be_finite_non_boolean_numbers(field: str, cost: float) -> None:
+    with pytest.raises(ValueError, match="non-negative finite number"):
+        replace(_receipt(), **{field: cost})
+
+
 def test_receipt_export_is_redacted_and_listing_is_bounded(app_context) -> None:  # type: ignore[no-untyped-def]
     repository = OperationReceiptRepository(app_context.database)
     first = _receipt(receipt_id="receipt_" + "a" * 63 + "1")
