@@ -197,6 +197,10 @@
     "title": "ADR-0026: Local-first container and advanced remote deployment — AncestryLLM",
     "description": "Implemented deployment-profile and macOS arm64 runtime-tool boundaries plus future application runtimes, trust boundaries, ownership, budgets, non-goals, and release gates."
   },
+  "ADR-0027-core-package-extraction-decision.md": {
+    "title": "ADR-0027: GEDCOM and RootsMagic extraction decision — AncestryLLM",
+    "description": "Accepted CORE-42 decision record for separate GEDCOM and RootsMagic extraction outcomes, safety invariants, provisional evidence, and measurable revisit triggers."
+  },
   "DOCS_AUTHORING.md": {
     "title": "Documentation architecture and authoring guide — AncestryLLM",
     "description": "Canonical Diátaxis architecture, authoring rules, macOS arm64 runtime boundary, editorial baseline, and documentation migration inventory."
