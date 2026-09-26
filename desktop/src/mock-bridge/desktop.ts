@@ -25,6 +25,7 @@ import {
   type CopyTextResult,
   type ClearDiagnosticsResult,
   type FileGrant,
+  type FileGrantId,
   type FileGrantRevocation,
   type JobEventDelivery,
   type JobEventKind,
@@ -76,6 +77,21 @@ import {
   parseSecretSetRequest,
   parseSettingsPatch,
 } from '../shared-contract/runtime'
+import {
+  parseRootsMagicArtifactRequest,
+  parseRootsMagicExportRequest,
+  parseRootsMagicOutputDisplayName,
+  parseRootsMagicQueryRequest,
+  parseRootsMagicSourceReferenceRequest,
+  type RootsMagicAcknowledgement,
+  type RootsMagicArtifactRequest,
+  type RootsMagicExportRequest,
+  type RootsMagicJobResult,
+  type RootsMagicOutputSelection,
+  type RootsMagicPresetDefinitions,
+  type RootsMagicQueryRequest,
+  type RootsMagicSourceReferenceRequest,
+} from '../shared-contract/rootsmagic'
 import {
   appInfoFixture,
   capabilitiesFixture,
@@ -662,6 +678,71 @@ export function createMockAncestryBridge(initialMode: DesktopFixtureMode = 'succ
     async getGedcomInspection() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
     async queryGedcomRoots() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
     async discardGedcomInspection() { return jobFailure<never>('JOB_SERVICE_UNAVAILABLE') },
+    async inspectRootsMagicSource(grantId: FileGrantId) {
+      void grantId
+      return jobFailure<JobSnapshot>('JOB_SERVICE_UNAVAILABLE')
+    },
+    async getRootsMagicPresets() {
+      const definitions: RootsMagicPresetDefinitions = {
+        schema_version: 1,
+        queries: [
+          {
+            query_id: 'people', label: 'People', description: 'Browse people by literal name.', maximum_rows: 100,
+            parameters: [
+              { parameter_id: 'name_filter', value_type_code: 'string', required: false, minimum: null, maximum: 200, allowed_values: [] },
+              { parameter_id: 'offset', value_type_code: 'integer', required: true, minimum: 0, maximum: 1_000_000, allowed_values: [] },
+              { parameter_id: 'page_size', value_type_code: 'integer', required: true, minimum: 1, maximum: 100, allowed_values: [] },
+            ],
+          },
+          {
+            query_id: 'family_links', label: 'Family links', description: 'Show family links for one person.', maximum_rows: 100,
+            parameters: [
+              { parameter_id: 'person_id', value_type_code: 'integer', required: true, minimum: 1, maximum: Number.MAX_SAFE_INTEGER, allowed_values: [] },
+              { parameter_id: 'offset', value_type_code: 'integer', required: true, minimum: 0, maximum: 1_000_000, allowed_values: [] },
+              { parameter_id: 'page_size', value_type_code: 'integer', required: true, minimum: 1, maximum: 100, allowed_values: [] },
+            ],
+          },
+          {
+            query_id: 'events', label: 'Events', description: 'Show events for one person.', maximum_rows: 100,
+            parameters: [
+              { parameter_id: 'person_id', value_type_code: 'integer', required: true, minimum: 1, maximum: Number.MAX_SAFE_INTEGER, allowed_values: [] },
+              { parameter_id: 'offset', value_type_code: 'integer', required: true, minimum: 0, maximum: 1_000_000, allowed_values: [] },
+              { parameter_id: 'page_size', value_type_code: 'integer', required: true, minimum: 1, maximum: 100, allowed_values: [] },
+            ],
+          },
+        ],
+      }
+      return success(definitions)
+    },
+    async queryRootsMagic(input: RootsMagicQueryRequest) {
+      parseRootsMagicQueryRequest(input)
+      return jobFailure<JobSnapshot>('JOB_SERVICE_UNAVAILABLE')
+    },
+    async requestRootsMagicOutput(input: string) {
+      parseRootsMagicOutputDisplayName(input)
+      const selection: RootsMagicOutputSelection = {
+        schema_version: 1,
+        output_capability: 'd'.repeat(64),
+        display_name: input,
+      }
+      return success(selection)
+    },
+    async exportRootsMagic(input: RootsMagicExportRequest) {
+      parseRootsMagicExportRequest(input)
+      return jobFailure<JobSnapshot>('JOB_SERVICE_UNAVAILABLE')
+    },
+    async getRootsMagicJobResult(input: JobRequest) {
+      parseJobRequest(input)
+      return jobFailure<RootsMagicJobResult>('JOB_SERVICE_UNAVAILABLE')
+    },
+    async discardRootsMagicSource(input: RootsMagicSourceReferenceRequest) {
+      parseRootsMagicSourceReferenceRequest(input)
+      return success<RootsMagicAcknowledgement>({ schema_version: 1 })
+    },
+    async revealRootsMagicArtifact(input: RootsMagicArtifactRequest) {
+      parseRootsMagicArtifactRequest(input)
+      return success<RootsMagicAcknowledgement>({ schema_version: 1 })
+    },
     async requestSaveFileGrant() {
       return deepFreeze({ ok: true, protocolVersion: DESKTOP_PROTOCOL_VERSION, data: null }) as BridgeResult<FileGrant | null>
     },

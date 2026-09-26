@@ -246,7 +246,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
     assert 'node-version: "26.5.0"' in job
     assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
-    assert 'version: "11.9.0"' in job
+    assert 'version: "11.11.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
@@ -258,8 +258,8 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
         "xvfb-run --auto-servernum make docs-screenshots-check"
     ) in job
 
-    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
-    assert desktop_package["packageManager"] == "pnpm@11.9.0"
+    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.11.0"}
+    assert desktop_package["packageManager"] == "pnpm@11.11.0"
     assert desktop_package["devDependencies"]["electron"] == "39.8.10"
     assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
@@ -525,7 +525,7 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
         assert setup_node in quality_job
         assert 'node-version: "26.5.0"' in quality_job
         assert setup_pnpm in quality_job
-        assert 'version: "11.9.0"' in quality_job
+        assert 'version: "11.11.0"' in quality_job
     assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
     assert makefile.count("check_code_documentation.py") == 2, (
         "Makefile code-docs-check target must invoke check_code_documentation.py"

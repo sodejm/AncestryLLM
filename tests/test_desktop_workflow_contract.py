@@ -131,12 +131,30 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
+    bootstrap_manifest = json.loads(
+        (ROOT / "desktop/toolchain/pnpm/package.json").read_text(encoding="utf-8")
+    )
+    bootstrap_lock = json.loads(
+        (ROOT / "desktop/toolchain/pnpm/package-lock.json").read_text(encoding="utf-8")
+    )
 
     assert workflow.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413") == 2
-    assert workflow.count('version: "11.9.0"') == 2
+    assert workflow.count('version: "11.11.0"') == 2
+    assert (
+        "npm ci --prefix desktop/toolchain/pnpm --ignore-scripts --no-audit --no-fund" in workflow
+    )
+    assert (
+        'test "$(desktop/toolchain/pnpm/node_modules/.bin/pnpm --version)" = "11.11.0"' in workflow
+    )
+    assert bootstrap_manifest["dependencies"] == {"pnpm": "11.11.0"}
+    assert bootstrap_lock["packages"][""]["dependencies"] == bootstrap_manifest["dependencies"]
+    assert bootstrap_lock["packages"]["node_modules/pnpm"]["version"] == "11.11.0"
+    assert bootstrap_lock["packages"]["node_modules/pnpm"]["integrity"] == (
+        "sha512-RGP2X9gO2A1pvB1L8WPulPYFxzgPwxi7Wy6+FfjNEtScUaTVnpUbQB52TTtsp1HL9RvFDtcAGmvLSTXmhMNIgg=="
+    )
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
-    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 7
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
@@ -207,6 +225,42 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     )
 
 
+def test_release_jobs_use_integrity_locked_pnpm_on_intel_macos() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert (
+        release.count(
+            "npm ci --prefix desktop/toolchain/pnpm --ignore-scripts --no-audit --no-fund"
+        )
+        == 2
+    )
+    assert release.count("if: runner.os == 'macOS' && matrix.arch == 'x64'") == 1
+    assert release.count("if: runner.os != 'macOS' || matrix.arch != 'x64'") == 1
+    assert release.count("if: runner.os == 'macOS' && matrix.runtime_arch == 'x64'") == 1
+    assert release.count("if: runner.os != 'macOS' || matrix.runtime_arch != 'x64'") == 1
+    assert (
+        release.count(
+            'test "$(desktop/toolchain/pnpm/node_modules/.bin/pnpm --version)" = "11.11.0"'
+        )
+        == 2
+    )
+
+
+def test_rootsmagic_packaged_receipt_allows_only_prior_row_evidence() -> None:
+    workflow = _workflow()
+    step = workflow.split("- name: Exercise packaged RootsMagic workbench", 1)[1].split(
+        "- name: Upload partial native-package diagnostics", 1
+    )[0]
+    assert "RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts" in step
+    for path in (
+        "$RECEIPTS_DIR/packaged-file-grants.json",
+        "$ROW_ROOT/target.json",
+        "$ROW_ROOT/file-grant-mediation.json",
+        "$ROW_ROOT/packaged-metrics.json",
+    ):
+        assert f'--allow-output "{path}"' in step
+    assert '--allow-output "$ROW_ROOT"' not in step
+
+
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     workflow = _workflow()
 
@@ -273,6 +327,7 @@ def test_packaged_scenarios_forward_webdriverio_filters_without_a_pnpm_separator
         "rejects a substituted packaged sidecar before launch",
         "mediates opaque packaged open and save file grants",
         "launches the selected packaged runtime normally without a debugging transport",
+        "queries and exports an immutable RootsMagic source through the native workbench",
     )
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == len(expected_scenarios)
     for scenario in expected_scenarios:
@@ -309,7 +364,7 @@ def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
 
     assert workflow.count(install) == 1
     assert release.count(install) == 2
-    assert workflow.count(verifier_launcher) == 2
+    assert workflow.count(verifier_launcher) == 3
     # Both the private build validation and the public artifact validation run
     # the automated and normal-launch packaged scenarios on Linux.
     assert release.count(production_launcher) == 4

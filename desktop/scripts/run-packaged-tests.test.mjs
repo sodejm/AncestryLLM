@@ -110,15 +110,21 @@ test('packaged test runner preserves WebDriver options without passing them to t
   })
 
   assert.equal(status, 0)
-  assert.equal(calls.length, 6)
-  assert.equal(scenarios.length, 6)
-  assert.equal(new Set(scenarios).size, 6)
-  assert.equal(calls.slice(0, -1).every(({ args }) => (
+  assert.equal(calls.length, 7)
+  assert.equal(scenarios.length, 7)
+  assert.equal(new Set(scenarios).size, 7)
+  const directVerification = calls.filter(({ args }) => (
+    args.includes('/repo/desktop/scripts/verify-normal-launch.mjs')
+  ))
+  const webdriverCalls = calls.filter(({ args }) => args.includes('--suite'))
+  assert.equal(webdriverCalls.length, 6)
+  assert.equal(directVerification.length, 1)
+  assert.equal(webdriverCalls.every(({ args }) => (
     args.includes('--mochaOpts.grep')
       && args.includes('--logLevel')
       && args.includes('debug')
   )), true)
-  assert.deepEqual(calls.at(-1)?.args, [
+  assert.deepEqual(directVerification[0]?.args, [
     '/repo/desktop/scripts/verify-normal-launch.mjs',
   ])
 })

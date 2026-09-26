@@ -1,10 +1,11 @@
 /** Adapts Electron native dialogs to the bounded file-grant selection port. */
-import { BrowserWindow, dialog, type WebContents } from 'electron'
+import { BrowserWindow, dialog, shell, type WebContents } from 'electron'
 import type { FileReadPurpose, FileWritePurpose } from '../shared-contract/desktop'
 import {
   FileGrantBrokerError,
   type NativeFileDialogPort,
 } from './file-grant-broker'
+import type { RootsMagicNativePort } from './rootsmagic-workbench-broker'
 
 interface FileFilter {
   readonly name: string
@@ -49,6 +50,7 @@ interface NativeDialogDependencies {
     owner: object,
     options: MessageBoxOptions,
   ) => Promise<Readonly<{ response: number }>>
+  readonly showItemInFolder?: (path: string) => void
 }
 
 const purposeFilters: Readonly<Record<FileReadPurpose | FileWritePurpose, readonly FileFilter[]>> = Object.freeze({
@@ -73,6 +75,7 @@ const electronDependencies: NativeDialogDependencies = Object.freeze({
     owner as BrowserWindow,
     options as unknown as Electron.MessageBoxOptions,
   ),
+  showItemInFolder: (path: string) => shell.showItemInFolder(path),
 })
 
 function requireActive(signal?: AbortSignal): void {
@@ -107,8 +110,8 @@ function ownerWindow(dependencies: NativeDialogDependencies, owner: object): obj
  */
 export function createNativeFileDialogPort(
   dependencies: NativeDialogDependencies = electronDependencies,
-): NativeFileDialogPort {
-  const port: NativeFileDialogPort = {
+): NativeFileDialogPort & RootsMagicNativePort {
+  const port: NativeFileDialogPort & RootsMagicNativePort = {
     async selectOpenFile(owner: object, purpose: FileReadPurpose, signal?: AbortSignal) {
       const result = await invokeDialog(signal, () => dependencies.showOpenDialog(
         ownerWindow(dependencies, owner),
@@ -157,6 +160,27 @@ export function createNativeFileDialogPort(
         }),
       ))
       return result.response === 1
+    },
+    async selectNewOutputDirectory(owner: object, displayName: string, signal?: AbortSignal) {
+      const result = await invokeDialog(signal, () => dependencies.showSaveDialog(
+        ownerWindow(dependencies, owner),
+        Object.freeze({
+          title: 'Choose a new RootsMagic export folder',
+          defaultPath: displayName,
+          showsTagField: false,
+          filters: Object.freeze([]),
+        }),
+      ))
+      if (result.canceled || result.filePath === undefined || result.filePath.length === 0) return null
+      return result.filePath
+    },
+    async reveal(path: string) {
+      if (!dependencies.showItemInFolder) throw new FileGrantBrokerError('FILE_DIALOG_FAILED')
+      try {
+        dependencies.showItemInFolder(path)
+      } catch {
+        throw new FileGrantBrokerError('FILE_DIALOG_FAILED')
+      }
     },
   }
   return Object.freeze(port)

@@ -1201,6 +1201,14 @@ export interface AncestryBridge {
   getGedcomInspection(request: JobRequest): Promise<BridgeResult<import('./gedcom').GedcomInspection>>
   queryGedcomRoots(request: import('./gedcom').GedcomRootQuery): Promise<BridgeResult<import('./gedcom').GedcomRootPage>>
   discardGedcomInspection(request: JobRequest): Promise<BridgeResult<import('./gedcom').GedcomDiscard>>
+  inspectRootsMagicSource(grantId: FileGrantId): Promise<BridgeResult<JobSnapshot>>
+  getRootsMagicPresets(): Promise<BridgeResult<import('./rootsmagic').RootsMagicPresetDefinitions>>
+  queryRootsMagic(request: import('./rootsmagic').RootsMagicQueryRequest): Promise<BridgeResult<JobSnapshot>>
+  requestRootsMagicOutput(displayName: string): Promise<BridgeResult<import('./rootsmagic').RootsMagicOutputSelection>>
+  exportRootsMagic(request: import('./rootsmagic').RootsMagicExportRequest): Promise<BridgeResult<JobSnapshot>>
+  getRootsMagicJobResult(request: JobRequest): Promise<BridgeResult<import('./rootsmagic').RootsMagicJobResult>>
+  discardRootsMagicSource(request: import('./rootsmagic').RootsMagicSourceReferenceRequest): Promise<BridgeResult<import('./rootsmagic').RootsMagicAcknowledgement>>
+  revealRootsMagicArtifact(request: import('./rootsmagic').RootsMagicArtifactRequest): Promise<BridgeResult<import('./rootsmagic').RootsMagicAcknowledgement>>
   getAppInfo(): Promise<BridgeResult<AppInfo>>
   getStartupDiagnostics(): Promise<BridgeResult<StartupDiagnostics>>
   getCapabilities(): Promise<BridgeResult<CapabilityManifest>>
@@ -1251,6 +1259,14 @@ export const desktopChannels = Object.freeze({
   getGedcomInspection: 'ancestry:desktop:get-gedcom-inspection',
   queryGedcomRoots: 'ancestry:desktop:query-gedcom-roots',
   discardGedcomInspection: 'ancestry:desktop:discard-gedcom-inspection',
+  inspectRootsMagicSource: 'ancestry:desktop:inspect-rootsmagic-source',
+  getRootsMagicPresets: 'ancestry:desktop:get-rootsmagic-presets',
+  queryRootsMagic: 'ancestry:desktop:query-rootsmagic',
+  requestRootsMagicOutput: 'ancestry:desktop:request-rootsmagic-output',
+  exportRootsMagic: 'ancestry:desktop:export-rootsmagic',
+  getRootsMagicJobResult: 'ancestry:desktop:get-rootsmagic-job-result',
+  discardRootsMagicSource: 'ancestry:desktop:discard-rootsmagic-source',
+  revealRootsMagicArtifact: 'ancestry:desktop:reveal-rootsmagic-artifact',
   getAppInfo: 'ancestry:desktop:get-app-info',
   getStartupDiagnostics: 'ancestry:desktop:get-startup-diagnostics',
   getCapabilities: 'ancestry:desktop:get-capabilities',

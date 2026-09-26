@@ -19,6 +19,7 @@ import type {
   ProviderConfiguration,
 } from '../shared-contract/desktop'
 import { desktopChannels, desktopEventChannels } from '../shared-contract/desktop'
+import type { RootsMagicPresetDefinitions } from '../shared-contract/rootsmagic'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
 import { SidecarClientError } from './sidecar-client'
@@ -506,7 +507,56 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(42)
+    expect(handlers.size).toBe(50)
+  })
+
+  it('envelopes RootsMagic preset definitions returned by the native broker', async () => {
+    const presets = Object.freeze({
+      schema_version: 1 as const,
+      queries: Object.freeze([
+        Object.freeze({
+          query_id: 'people' as const,
+          label: 'People',
+          description: 'Browse people.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'family_links' as const,
+          label: 'Family links',
+          description: 'Browse family links.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'events' as const,
+          label: 'Events',
+          description: 'Browse events.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+      ]),
+    }) satisfies RootsMagicPresetDefinitions
+    const rootsMagic = {
+      inspect: vi.fn(),
+      presets: vi.fn().mockResolvedValue(presets),
+      query: vi.fn(),
+      selectOutput: vi.fn(),
+      export: vi.fn(),
+      result: vi.fn(),
+      discard: vi.fn(),
+      reveal: vi.fn(),
+      observeJob: vi.fn(),
+      revokeGrant: vi.fn(),
+      revokeOwner: vi.fn(),
+      revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+
+    await expect(handlers.get(desktopChannels.getRootsMagicPresets)!(event())).resolves.toEqual(
+      result(presets),
+    )
+    expect(rootsMagic.presets).toHaveBeenCalledWith(expect.any(AbortSignal))
   })
 
   it('authorizes and bounds GEDCOM intake before entering its native owner port', async () => {

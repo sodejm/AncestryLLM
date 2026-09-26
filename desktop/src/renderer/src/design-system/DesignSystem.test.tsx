@@ -16,6 +16,7 @@ describe('desktop design-system contracts', () => {
       { route: 'chat', href: '#/chat', label: 'Chat' },
       { route: 'tasks', href: '#/tasks', label: 'Tasks' },
       { route: 'gedcom', href: '#/gedcom', label: 'GEDCOM' },
+      { route: 'rootsmagic', href: '#/rootsmagic', label: 'RootsMagic' },
       { route: 'diagnostics', href: '#/diagnostics', label: 'Diagnostics' },
       { route: 'settings', href: '#/settings', label: 'Settings' },
     ])

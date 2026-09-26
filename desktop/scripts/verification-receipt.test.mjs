@@ -12,6 +12,7 @@ import {
   parseReceiptArguments,
   runVerificationCommand,
   validateVerificationReceipt,
+  validateRootsMagicEvidence,
   verificationCommandInvocation,
   workspaceSnapshot,
 } from './verification-receipt.mjs'
@@ -128,6 +129,81 @@ test('receipt wrapper leaves no passing receipt for a failed command', async () 
     repositoryRoot,
     forwardOutput: false,
   }), /exited with code 7/)
+  await assert.rejects(access(outputPath), (error) => error.code === 'ENOENT')
+})
+
+function rootsMagicEvidence() {
+  return {
+    schemaVersion: 1, kind: 'ancestryllm-packaged-rootsmagic-workbench', status: 'passed',
+    target: 'darwin-arm64', verificationOnlyDialogAdapter: true,
+    observations: {
+      sourceInspection: true, peoplePaging: true, familyLinks: true, events: true,
+      rootedPortableExport: true, livingExcluded: true, unrelatedExcluded: true,
+      digestAgreement: true, sourceUnchanged: true, artifactReveal: true,
+      sourceWorkspaceReset: true, keyboardWorkflow: true, automatedWcagChecks: true,
+    },
+  }
+}
+
+test('RootsMagic evidence rejects partial observations, unknown fields and another native target', () => {
+  const valid = rootsMagicEvidence()
+  assert.equal(validateRootsMagicEvidence(valid, 'darwin-arm64'), valid)
+  for (const change of [
+    (value) => { delete value.observations.sourceUnchanged },
+    (value) => { value.observations.sourceUnchanged = false },
+    (value) => { value.observations.extra = true },
+    (value) => { value.extra = true },
+    (value) => { value.schemaVersion = 2 },
+    (value) => { value.kind = 'unrelated' },
+    (value) => { value.status = 'skipped' },
+    (value) => { value.verificationOnlyDialogAdapter = false },
+    (value) => { value.target = 'linux-x64' },
+  ]) {
+    const invalid = structuredClone(valid)
+    change(invalid)
+    assert.throws(() => validateRootsMagicEvidence(invalid, 'darwin-arm64'))
+  }
+})
+
+test('RootsMagic workflow receipt binds fresh validated evidence separately from core gates', async () => {
+  const { root, repositoryRoot, gitHead } = await cleanRepositoryFixture()
+  const artifactPath = join(root, 'rootsmagic.json')
+  const artifact = JSON.stringify(rootsMagicEvidence())
+  const receipt = await runReceipt({
+    gitHead, sidecarTarget: 'darwin-arm64',
+    outputPath: join(root, 'rootsmagic-receipt.json'),
+    gates: ['packagedRootsMagicWorkbenchPassed'],
+    artifacts: { rootsMagicEvidence: artifactPath },
+    command: [process.execPath, '-e', 'require("node:fs").writeFileSync(process.argv[1], process.argv[2])', artifactPath, artifact],
+    repositoryRoot, forwardOutput: false,
+  })
+  assert.deepEqual(receipt.gates, ['packagedRootsMagicWorkbenchPassed'])
+  assert.equal(TARGET_RECEIPT_GATES.includes('packagedRootsMagicWorkbenchPassed'), false)
+  assert.equal(receipt.artifacts.rootsMagicEvidence.sha256, sha256(artifact))
+  validateVerificationReceipt(receipt, gitHead)
+  const missing = structuredClone(receipt)
+  delete missing.artifacts.rootsMagicEvidence
+  assert.throws(() => validateVerificationReceipt(missing, gitHead), /RootsMagic evidence/)
+  await assert.rejects(runReceipt({
+    gitHead, sidecarTarget: 'darwin-arm64',
+    outputPath: join(root, 'stale-receipt.json'),
+    gates: ['packagedRootsMagicWorkbenchPassed'],
+    artifacts: { rootsMagicEvidence: artifactPath },
+    command: [process.execPath, '-e', 'process.exit(0)'],
+    repositoryRoot, forwardOutput: false,
+  }), /fresh RootsMagic evidence/)
+})
+
+test('RootsMagic receipt rejects a newly generated partial evidence document', async () => {
+  const { root, repositoryRoot, gitHead } = await cleanRepositoryFixture()
+  const artifactPath = join(root, 'partial.json')
+  const outputPath = join(root, 'receipt.json')
+  await assert.rejects(runReceipt({
+    gitHead, sidecarTarget: 'darwin-arm64', outputPath,
+    gates: ['packagedRootsMagicWorkbenchPassed'], artifacts: { rootsMagicEvidence: artifactPath },
+    command: [process.execPath, '-e', 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({status:"passed"}))', artifactPath],
+    repositoryRoot, forwardOutput: false,
+  }), /RootsMagic evidence/)
   await assert.rejects(access(outputPath), (error) => error.code === 'ENOENT')
 })
 

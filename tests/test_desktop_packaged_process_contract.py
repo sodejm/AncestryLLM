@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
+PACKAGED_WINDOW_CLOSE = ROOT / "desktop" / "e2e" / "packaged-window-close.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
 NORMAL_LAUNCH_VERIFIER = ROOT / "desktop" / "scripts" / "verify-normal-launch.mjs"
@@ -23,12 +24,12 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
 
     assert re.search(
         r"execFileAsync\(\s*'ps',\s*\[\s*'-ww',\s*'-axo',\s*"
-        r"'pid=,ppid=,rss=,command='\s*\]",
+        r"'pid=,ppid=,rss=,stat=,command='\s*\]",
         source,
     )
 
 
-def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
+def test_packaged_renderer_evidence_uses_native_process_snapshots() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     process_records_source = PROCESS_RECORDS.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
@@ -38,13 +39,18 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
         "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
     )
     assert "matchesPackagedMainProcess(" in source
+    assert "Get-CimInstance Win32_Process" in source
+    assert "executablePath = [string]$_.ExecutablePath" in source
     assert "record.commandLine" in process_records_source
     assert "commandLine.includes(expectedExecutable)" in process_records_source
     assert "commandLine.includes(expectedProfile)" in process_records_source
-    assert "!commandLine.includes('--type=')" in process_records_source
-    assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
-    assert "record.commandLine.includes('--type=renderer')" in source
-    assert "!record.commandLine.includes('--no-sandbox')" in source
+    assert "commandLine.includes('--type=')" in process_records_source
+    assert "nativeExecutable === expectedExecutable" in process_records_source
+    assert "descendantProcessTree(records, rootPid)" in source
+    assert "observedRenderers(records, rootPid)" in source
+    assert "renderers.length > 0" in source
+    assert "assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)" in source
+    assert "assert.doesNotMatch(renderer.commandLine, inspectPattern)" in source
     assert "app.enableSandbox()" in main_source
     for forbidden in (
         "newBrowserCDPSession",
@@ -72,6 +78,7 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    window_close_source = PACKAGED_WINDOW_CLOSE.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
@@ -86,10 +93,16 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
 
     assert "async function closeApplicationWindow(sidecarPath: string)" in quit_source
     assert "const activeSidecarPid = await sidecarPid(pid, sidecarPath)" in quit_source
-    assert "await browser.closeWindow()" in quit_source
-    assert "await Promise.all([" in quit_source
-    assert "expectProcessAbsent(pid)" in quit_source
-    assert "expectProcessAbsent(activeSidecarPid)" in quit_source
+    assert "await closeFinalWindowAndVerifyExit(" in quit_source
+    assert "() => browser.closeWindow()" in quit_source
+    assert "[pid, activeSidecarPid]" in quit_source
+    assert "expectProcessAbsent," in quit_source
+    assert "await closeWindow()" in window_close_source
+    assert (
+        "All window handles were removed, causing WebdriverIO to close the session."
+        in window_close_source
+    )
+    assert "await Promise.all(processIds.map((pid) => verifyExit(pid)))" in window_close_source
     assert "browser.electron.execute" not in quit_source
     assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
     assert "await closeApplicationWindow()" not in source

@@ -28,6 +28,7 @@ import {
 } from '../../shared-contract/desktop'
 import { ChatWorkspace } from './ChatWorkspace'
 import { GedcomIntakeWorkspace } from './GedcomIntakeWorkspace'
+import { RootsMagicWorkspace } from './RootsMagicWorkspace'
 import { Button } from './components/Button'
 import { AppShell } from './design-system/AppShell'
 import { TaskCenter } from './TaskCenter'
@@ -963,6 +964,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 function Shell() {
   const [route, setRoute] = useState<AppRoute>(() => routeFromHash(window.location.hash))
+  const [rootsMagicVisited, setRootsMagicVisited] = useState(route === 'rootsmagic')
   const [reviewingWelcome, setReviewingWelcome] = useState(false)
   const [onboardingFailure, setOnboardingFailure] = useState<BridgeErrorCode | null>(null)
   const [preferenceUpdatePending, setPreferenceUpdatePending] = useState(false)
@@ -990,6 +992,11 @@ function Shell() {
     queryFn: () => ancestryBridge().getCapabilities(),
     enabled: startupAllowsMutations,
   })
+  const rootsMagicPresets = useQuery({
+    queryKey: ['rootsmagic-presets'],
+    queryFn: () => ancestryBridge().getRootsMagicPresets(),
+    enabled: startupAllowsMutations,
+  })
   const preferences = useQuery({ queryKey: ['preferences'], queryFn: () => ancestryBridge().getPreferences() })
   const refetchStartup = startup.refetch
 
@@ -998,6 +1005,10 @@ function Shell() {
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
+
+  useEffect(() => {
+    if (route === 'rootsmagic') setRootsMagicVisited(true)
+  }, [route])
 
   useEffect(() => {
     if (startup.isError || (startup.data && !startup.data.ok)) startupAlert.current?.focus()
@@ -1013,6 +1024,7 @@ function Shell() {
 
   const appData = appInfo.data?.ok ? appInfo.data.data : undefined
   const capabilityData = capabilities.data?.ok ? capabilities.data.data : undefined
+  const rootsMagicAvailable = startupAllowsMutations && rootsMagicPresets.data?.ok === true
   const preferenceData = preferences.data?.ok ? preferences.data.data : undefined
   const showWelcome = route === 'home'
     && !preferences.isPending
@@ -1157,6 +1169,10 @@ function Shell() {
       title: 'GEDCOM',
       description: 'Inspect ordered local sources and explicitly choose roots without modifying records.',
     },
+    rootsmagic: {
+      title: 'RootsMagic',
+      description: 'Inspect a local RootsMagic source through fixed, read-only presets and explicit exports.',
+    },
     settings: {
       title: 'Settings',
       description: 'Choose local preferences, application behavior, and write-only credentials.',
@@ -1288,6 +1304,10 @@ function Shell() {
 
       {route === 'gedcom' && (startupAllowsMutations ? <GedcomIntakeWorkspace />
         : <p role="status">GEDCOM intake is unavailable until local startup diagnostics pass.</p>)}
+
+      {rootsMagicVisited && rootsMagicAvailable && <div hidden={route !== 'rootsmagic'}><RootsMagicWorkspace /></div>}
+      {route === 'rootsmagic' && !rootsMagicAvailable
+        && <p role="status">RootsMagic is unavailable until local startup diagnostics and RootsMagic capabilities are ready.</p>}
 
       {route === 'diagnostics' && <>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">

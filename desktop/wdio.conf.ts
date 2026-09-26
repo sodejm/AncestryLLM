@@ -58,7 +58,7 @@ export const config = {
   specs: [],
   suites: {
     source: ['./e2e/shell.wdio.ts'],
-    packaged: ['./e2e/packaged-shell.wdio.ts'],
+    packaged: ['./e2e/packaged-shell.wdio.ts', './e2e/rootsmagic-workbench.packaged.wdio.ts'],
   },
   maxInstances: 1,
   capabilities: [{

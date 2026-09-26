@@ -39,6 +39,13 @@ _GEDCOM_RESULT_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/gedcom/jobs/"
     r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}/result$"
 )
+_ROOTSMAGIC_DISCARD_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/rootsmagic/sources/[0-9a-f]{{64}}/discard$"
+)
+_ROOTSMAGIC_RESULT_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/rootsmagic/jobs/"
+    r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}/result$"
+)
 _GEDCOM_INTAKE_ROUTE = re.compile(
     rf"^{re.escape(API_NAMESPACE)}/gedcom/intake/"
     r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}(?P<operation>/roots|/discard)?$"
@@ -108,6 +115,14 @@ def _route_policy(
         return None
     if path == f"{API_NAMESPACE}/startup-diagnostics":
         return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/rootsmagic/presets" or _ROOTSMAGIC_RESULT_ROUTE.fullmatch(path):
+        return _RoutePolicy("GET")
+    if path in {
+        f"{API_NAMESPACE}/rootsmagic/sources",
+        f"{API_NAMESPACE}/rootsmagic/queries",
+        f"{API_NAMESPACE}/rootsmagic/exports",
+    } or _ROOTSMAGIC_DISCARD_ROUTE.fullmatch(path):
+        return _RoutePolicy("POST", accepts_json=True)
     if path == f"{API_NAMESPACE}/chat/capability":
         return _RoutePolicy("GET")
     if path == f"{API_NAMESPACE}/chat/sessions":

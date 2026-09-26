@@ -393,13 +393,13 @@ test('complete packaged plan prepares and cleans every isolated scenario', () =>
   ))
 
   assert.equal(status, 0)
-  assert.equal(invocations.length, 6)
-  assert.equal(preparations.length, 6)
-  assert.equal(packageCleanups.length, 6)
+  assert.equal(invocations.length, 7)
+  assert.equal(preparations.length, 7)
+  assert.equal(packageCleanups.length, 7)
   assert.equal(invocations.every(({ options }) => (
     options.env.ANCESTRYLLM_PACKAGED_EXECUTABLE === '/repo/release/ancestryllm'
   )), true)
-  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).length, 5)
+  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).length, 6)
   assert.equal(invocations.filter(({ args }) => (
     args.includes('/repo/desktop/scripts/verify-normal-launch.mjs')
   )).length, 1)
@@ -414,11 +414,11 @@ test('non-filter options are forwarded to every isolated packaged scenario', () 
     .map(({ preparation }) => preparation.scenario)
 
   assert.equal(status, 0)
-  assert.equal(invocations.length, 6)
-  assert.equal(preparations.length, 6)
-  assert.equal(new Set(preparations).size, 6)
+  assert.equal(invocations.length, 7)
+  assert.equal(preparations.length, 7)
+  assert.equal(new Set(preparations).size, 7)
   assert.equal(preparations.every((scenario) => scenario.length > 0), true)
-  assert.equal(invocations.slice(0, 5).every(({ args }) => (
+  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).every(({ args }) => (
     args.includes('--mochaOpts.grep')
       && args.includes('--logLevel')
       && args.includes('debug')

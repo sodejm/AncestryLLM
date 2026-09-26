@@ -1027,3 +1027,42 @@ exceptions must be recorded in release notes. This model does not prove absence
 of vulnerabilities, and passing OWASP/NIST-mapped checks is not such a claim; it
 defines required evidence, accountability, repeatable validation, and
 fail-closed boundaries.
+
+
+## Native RootsMagic workbench (#119)
+
+The workbench crosses the existing renderer → preload → Main → authenticated
+native-sidecar boundary. Main owns picker and output dialogs; opaque capabilities
+replace host paths in IPC and HTTP. The private mediation directory contains
+short-lived manifests with original paths and identity metadata, not database
+copies. Manifests are consumed once. Source sessions are bound to the owning
+window and sidecar lifetime. Restart, discard, and window closure revoke access.
+Container/external connection modes do not receive this native authority.
+
+Untrusted database content is constrained by immutable SQLite snapshot handling,
+validated companion access, schema allowlists, bound preset parameters, stable
+ordering, pagination, row/text/byte/time limits, and plain-text rendering. Unknown
+vendor versions are reported honestly; tested schema capabilities determine
+support. The CLI SQL/question boundary remains separate. Queries and exports
+are deterministic and require no provider or cloud consent.
+
+An output capability authorizes creation of one new folder. Existing destinations
+and source aliases are refused. The durable coordinator owns stage members and
+validates the GEDCOM, report, and manifest before exclusive same-filesystem
+publication. Final source checks and revocation serialize with the short commit
+boundary. Cancellation before commit publishes nothing; successful publication
+wins over concurrent cancellation. Reports/manifests omit private host paths.
+Recovery requires renewed authority and cannot revive expired grants.
+
+Residual risks include hostile same-account processes, original-source changes
+outside this application, filesystem failure, and users sharing unencrypted
+exports. Identity/fingerprint checks detect source changes; ambiguous recovery
+preserves the barrier and unrelated files. A digest manifest establishes byte
+agreement, not the accuracy of genealogy or confidentiality. Process-exit tests
+and source tests do not prove power-loss durability or packaged OS behavior.
+
+Evidence belongs to `test_rootsmagic_workbench.py`,
+`test_rootsmagic_presets.py`, `test_rootsmagic_directory_export.py`, native API
+boundary tests, and desktop broker/workspace tests, together with inherited
+coordinator recovery suites. Target-matched packaged accessibility, source
+revocation, cancellation, and artifact-reveal evidence remains a closure gate.

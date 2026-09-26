@@ -71,6 +71,15 @@ export function normalLaunchArguments(root, {
   ]
 }
 
+/** Keeps the Windows GUI visible to its native close request during verification. */
+export function normalLaunchSpawnOptions(environment, platform = process.platform) {
+  return {
+    env: environment,
+    stdio: 'pipe',
+    windowsHide: platform !== 'win32',
+  }
+}
+
 function inheritedEnvironment(names, source) {
   return Object.fromEntries(names.flatMap((name) => {
     const value = source[name]
@@ -248,11 +257,10 @@ export async function verifyNormalLaunch({
   assert.ok(root, 'ANCESTRYLLM_WDIO_USER_DATA is required')
   assert.ok(isAbsolute(root), 'Packaged normal-launch profile must be absolute')
   const launchArguments = normalLaunchArguments(root, { environment, platform })
-  const child = spawn(executable, launchArguments, {
-    env: await isolatedEnvironment(root, { environment, platform }),
-    stdio: 'pipe',
-    windowsHide: true,
-  })
+  const child = spawn(executable, launchArguments, normalLaunchSpawnOptions(
+    await isolatedEnvironment(root, { environment, platform }),
+    platform,
+  ))
   let output = ''
   let spawnError
   const consume = (chunk) => {

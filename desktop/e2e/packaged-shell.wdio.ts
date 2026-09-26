@@ -10,7 +10,8 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
+import { matchesPackagedMainProcess, observedRenderers, parsePosixProcessSnapshot, type ProcessRecord } from './process-records'
+import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -149,11 +150,8 @@ async function mainPid(excluded: ReadonlySet<number> = new Set()): Promise<numbe
   return eventually(
     'Packaged Electron main-process PID was not observed',
     async () => (await processSnapshot()).find((record) => (
-      !excluded.has(record.pid) && matchesPackagedMainProcess(
-        record,
-        automatedPackagedExecutable,
-        userDataDirectory,
-      )
+      !excluded.has(record.pid)
+        && matchesPackagedMainProcess(record, automatedPackagedExecutable, userDataDirectory)
     ))?.pid ?? -1,
     (pid) => pid > 0,
   )
@@ -194,7 +192,8 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       '    pid = [int]$_.ProcessId;',
       '    ppid = [int]$_.ParentProcessId;',
       '    rssBytes = [long]$_.WorkingSetSize;',
-      '    commandLine = [string]$_.CommandLine',
+      '    commandLine = [string]$_.CommandLine;',
+      '    executablePath = [string]$_.ExecutablePath',
       '  }',
       '} | ConvertTo-Json -Compress',
     ].join('\n')
@@ -211,23 +210,15 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       ppid: Number(record.ppid),
       rssBytes: Number(record.rssBytes),
       commandLine: String(record.commandLine ?? ''),
+      executablePath: String(record.executablePath ?? ''),
     }))
   }
 
-  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,command='], {
+  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,stat=,command='], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
   })
-  return stdout.split('\n').flatMap((line): ProcessRecord[] => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/u)
-    if (!match?.[1] || !match[2] || !match[3] || match[4] === undefined) return []
-    return [{
-      pid: Number.parseInt(match[1], 10),
-      ppid: Number.parseInt(match[2], 10),
-      rssBytes: Number.parseInt(match[3], 10) * 1024,
-      commandLine: match[4],
-    }]
-  })
+  return parsePosixProcessSnapshot(stdout)
 }
 
 function descendantProcessTree(records: readonly ProcessRecord[], rootPid: number): ProcessRecord[] {
@@ -281,11 +272,11 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
 async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   const pid = await mainPid()
   const activeSidecarPid = await sidecarPid(pid, sidecarPath)
-  await browser.closeWindow()
-  await Promise.all([
-    expectProcessAbsent(pid),
-    expectProcessAbsent(activeSidecarPid),
-  ])
+  await closeFinalWindowAndVerifyExit(
+    () => browser.closeWindow(),
+    [pid, activeSidecarPid],
+    expectProcessAbsent,
+  )
   return pid
 }
 
@@ -510,27 +501,27 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
   const rendererOutboundRequests = rendererOutboundAttemptUrls.length
   assert.deepEqual(rendererOutboundAttemptUrls, [])
 
-  const tree = await eventually(
+  const rendererObservation = await eventually(
     'Packaged renderer process was not observed',
-    async () => descendantProcessTree(await processSnapshot(), rootPid),
-    (records) => records.some((record) => (
-      record.commandLine.includes('--type=renderer')
-      && !record.commandLine.includes('--no-sandbox')
-    )),
+    async () => {
+      const records = await processSnapshot()
+      const tree = descendantProcessTree(records, rootPid)
+      return { tree, renderers: observedRenderers(records, rootPid) }
+    },
+    ({ renderers }) => renderers.length > 0,
   )
+  const { tree, renderers } = rendererObservation
+  assert.ok(renderers.length > 0)
   assert.ok(tree.some((record) => record.pid === rootPid))
   // The WebdriverIO Electron service supplies a main-process inspector argument
   // for this automated session. Keep it out of renderer processes here; the
   // package-fuse inspection and the separate normal-launch scenario prove that
   // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
-  assert.doesNotMatch(
-    tree
-      .filter((record) => record.commandLine.includes('--type=renderer'))
-      .map((record) => record.commandLine)
-      .join('\n'),
-    inspectPattern,
-  )
+  for (const renderer of renderers) {
+    assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)
+    assert.doesNotMatch(renderer.commandLine, inspectPattern)
+  }
   const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
   assert.ok(rssBytes > 0)
   return { rendererOutboundRequests, rssBytes }
@@ -543,7 +534,7 @@ async function expectAccessibleShell(): Promise<void> {
   assert.deepEqual(await browser.execute(() => Array.from(
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
-  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
+  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings'])
 
   await click('a=Settings')
   await expectFocusedHeading('Settings')
@@ -742,7 +733,11 @@ describe('unpublished unpacked native package', () => {
       automaticRestartsRemaining: 2,
       manualRetriesRemaining: 0,
     })
-    assert.equal((await $$('[role="alert"]')).length, 0)
+    await eventually(
+      'Diagnostics still showed a recovery alert after the sidecar became ready',
+      async () => (await $$('[role="alert"]')).length,
+      (count) => count === 0,
+    )
     await closeApplicationWindow(copiedSidecarPath)
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',
@@ -950,8 +945,8 @@ describe('unpublished unpacked native package', () => {
       format: 'gedcom',
       validation: 'replacement-confirmed',
     })
-    assert.deepEqual(results.openRevocation, { ok: true, data: { revoked: true } })
-    assert.deepEqual(results.saveRevocation, { ok: true, data: { revoked: true } })
+    assert.deepEqual(results.openRevocation, { ok: true, protocolVersion: '1', data: { revoked: true } })
+    assert.deepEqual(results.saveRevocation, { ok: true, protocolVersion: '1', data: { revoked: true } })
     const exposedStrings = stringsIn(results)
     for (const selectedPath of new Set([
       fileGrantOpenPath,

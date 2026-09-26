@@ -8,6 +8,7 @@ from ancestryllm.application._rootsmagic_export import (
     RootsMagicExporter,
     RootsMagicExportResult,
 )
+from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
 from ancestryllm.core.ingress import FileIngressPolicy
 from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
 from ancestryllm.rootsmagic.query import RootsMagicQueryService
@@ -15,7 +16,13 @@ from ancestryllm.rootsmagic.query import RootsMagicQueryService
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
+    from ancestryllm.application.operations import (
+        RootsMagicPresetQueryRequest,
+        RootsMagicQueryDefinition,
+        RootsMagicQueryRequest,
+        RootsMagicQueryResult,
+        RootsMagicResultPage,
+    )
     from ancestryllm.application.ports import CancellationPort, ProgressPort
     from ancestryllm.core.config import AppConfig
     from ancestryllm.llm.policy import ConsentGrant
@@ -50,6 +57,7 @@ class RootsMagicService:
             progress=progress,
             cancellation=cancellation,
         )
+        self.preset_service = RootsMagicPresetService(self.reader)
         self.exporter = RootsMagicExporter(self.reader)
 
     def list_trees(self) -> list[Path]:
@@ -87,6 +95,16 @@ class RootsMagicService:
         """Execute a typed query request through the application boundary."""
 
         return self.query_service.execute(request, consent=consent)
+
+    def preset_definitions(self) -> tuple[RootsMagicQueryDefinition, ...]:
+        """Return the fixed, bounded query definitions for desktop browsing."""
+
+        return self.preset_service.definitions()
+
+    def execute_preset(self, request: RootsMagicPresetQueryRequest) -> RootsMagicResultPage:
+        """Execute a bounded preset query without exposing arbitrary SQL."""
+
+        return self.preset_service.execute(request)
 
     def export(
         self,

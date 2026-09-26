@@ -240,5 +240,13 @@
   "release-notes/0.6.0.md": {
     "title": "AncestryLLM 0.6.0 release notes",
     "description": "Scope, compatibility limitations, installation guidance, and validation requirements for the AncestryLLM 0.6.0 release."
+  },
+  "how-to/desktop-rootsmagic-workbench.md": {
+    "title": "RootsMagic desktop workbench",
+    "description": "Browse an immutable RootsMagic source and export one person-rooted GEDCOM folder through the native desktop sidecar."
+  },
+  "release-notes/0.7.0-rootsmagic-workbench.md": {
+    "title": "RootsMagic workbench development notes",
+    "description": "Implementation scope and acceptance boundaries for the native RootsMagic query and export workbench."
   }
 }

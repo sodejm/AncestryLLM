@@ -62,7 +62,7 @@ group and calls `make lock-check`, whose canonical command is
 | Local full setup | All application extras and every dependency group, including `release-verifier` |
 | Python test matrix | `test` plus `all-llm` |
 | Quality | `lint` plus `typecheck`; exact ty is installed only for its visible advisory step |
-| Declaration documentation | `lint` plus the frozen desktop workspace under exact Node 26.5.0 and pnpm 11.9.0 |
+| Declaration documentation | `lint` plus the frozen desktop workspace under exact Node 26.5.0 and pnpm 11.11.0 |
 | Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
 | Package and release construction | `build`; release construction also installs `security` only for SBOM generation |
 | Production PyPI artifact verification | `release-verifier` only |
@@ -88,7 +88,7 @@ maintenance procedure are documented in [Dependency
 maintenance](DEPENDENCY_MAINTENANCE.md).
 
 The Python 3.12 quality job and its release-readiness counterpart install exact
-Node 26.5.0 and pnpm 11.9.0 before calling `make code-docs-check`. That Make
+Node 26.5.0 and pnpm 11.11.0 before calling `make code-docs-check`. That Make
 target owns the Ruff declaration subset, the tracked-file and Swift DocC
 classifier, the TypeScript compiler-AST export/security-boundary check, and the
 exact-pinned `eslint-plugin-jsdoc` syntax and description rules. The desktop

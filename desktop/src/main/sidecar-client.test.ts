@@ -11,6 +11,7 @@ import type {
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 import {
   SidecarClientError,
+  createRootsMagicWorkbenchClient,
   createSidecarCapabilitiesClient,
   requestSidecarRuntimeShutdown,
   type SidecarClientFailure,
@@ -19,6 +20,31 @@ import {
 const session: Readonly<AuthenticatedSidecarSession> = Object.freeze({
   host: '127.0.0.1', port: 43123, contract: 'ancestryllm.internal-api/1',
   appBuild: '0.5.0-dev', sidecarBuild: '0.5.0-dev', bearerToken: 'private-test-token',
+})
+
+describe('RootsMagic sidecar errors', () => {
+  it('preserves a stable workbench code without exposing server details', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'ROOTSMAGIC_SOURCE_UNAVAILABLE',
+        message: 'Private database at /Users/secret/tree.rmtree',
+        payload: { person: 'Private person' },
+      }),
+    })
+    const client = createRootsMagicWorkbenchClient({ session: () => session, request })
+    await expect(client.presets()).rejects.toEqual(new SidecarClientError('ROOTSMAGIC_SOURCE_UNAVAILABLE'))
+  })
+
+  it('rejects unrecognized server codes', async () => {
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 409, contentType: 'application/json',
+      body: JSON.stringify({ code: 'PRIVATE_PATH_DISCLOSURE', message: '/Users/secret/tree.rmtree' }),
+    })
+    const client = createRootsMagicWorkbenchClient({ session: () => session, request })
+    await expect(client.presets()).rejects.toEqual(new SidecarClientError('request_failed'))
+  })
 })
 
 const chatSessionId = `chat_${'a'.repeat(32)}`

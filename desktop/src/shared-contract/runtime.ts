@@ -95,6 +95,16 @@ import {
   startupDiagnosticComponents,
 } from './desktop'
 import { parseGedcomDiscard, parseGedcomInspection, parseGedcomRootPage } from './gedcom'
+import {
+  parseRootsMagicAcknowledgement,
+  parseRootsMagicJobResult,
+  parseRootsMagicOutputSelection,
+  parseRootsMagicPresetDefinitions,
+  type RootsMagicAcknowledgement,
+  type RootsMagicJobResult,
+  type RootsMagicOutputSelection,
+  type RootsMagicPresetDefinitions,
+} from './rootsmagic'
 
 type Parser<T> = (value: unknown) => T
 
@@ -104,6 +114,22 @@ export const parseGedcomInspectionResult = (value: unknown) => parseBridgeResult
 export const parseGedcomRootPageResult = (value: unknown) => parseBridgeResult(value, parseGedcomRootPage)
 /** Validates the envelope acknowledging source revocation. */
 export const parseGedcomDiscardResult = (value: unknown) => parseBridgeResult(value, parseGedcomDiscard)
+/** Validates a RootsMagic preset-definition bridge result. */
+export const parseRootsMagicPresetDefinitionsResult = (value: unknown): BridgeResult<RootsMagicPresetDefinitions> => (
+  parseBridgeResult(value, parseRootsMagicPresetDefinitions)
+)
+/** Validates a renderer-safe RootsMagic destination selection bridge result. */
+export const parseRootsMagicOutputSelectionResult = (value: unknown): BridgeResult<RootsMagicOutputSelection> => (
+  parseBridgeResult(value, parseRootsMagicOutputSelection)
+)
+/** Validates a completed RootsMagic workbench job result. */
+export const parseRootsMagicJobResultResult = (value: unknown): BridgeResult<RootsMagicJobResult> => (
+  parseBridgeResult(value, parseRootsMagicJobResult)
+)
+/** Validates a RootsMagic lifecycle acknowledgement bridge result. */
+export const parseRootsMagicAcknowledgementResult = (value: unknown): BridgeResult<RootsMagicAcknowledgement> => (
+  parseBridgeResult(value, parseRootsMagicAcknowledgement)
+)
 
 const colorSchemes: readonly DesktopColorScheme[] = ['system', 'light', 'dark']
 const bridgeErrorCodes: readonly BridgeErrorCode[] = [
