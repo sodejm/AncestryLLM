@@ -1,107 +1,78 @@
-# ADR-0027: Keep GEDCOM and RootsMagic package extraction internal for 0.6
+# ADR-0027: GEDCOM and RootsMagic standalone package extraction decision
 
 - Status: Accepted
 - Date: 2026-09-24
-- Decision owner: Core extraction decision story #170 under #159
-- Extends: [ADR-0025](ADR-0025-electron-fastapi-desktop.md)
-- Related issues: #155, #159, #160, #131, #170
+- Decision owner: AncestryLLM maintainer
+- Relates to: #155, #159, #160, #131, #162, #170, #132, ADR-0025, `ARCHITECTURE.md`
 
 ## Context and decision boundary
 
 Issue #170 asked whether GEDCOM and/or RootsMagic should move from the
-package-shaped monolith into separately released Python distributions. The
-accepted decision rule was to keep each core internal unless extraction shows an
-independent consumer or a material reduction in dependency and release surface.
-
-This decision does not publish any new package and does not block #132.
+package-shaped monolith into separately released Python distributions. Keep a
+candidate core internal unless extraction demonstrates an independent consumer
+or materially reduces dependency and release surface. Evaluate GEDCOM and
+RootsMagic independently. RootsMagic application orchestration, grants,
+provider behavior, and publication remain outside any reusable core.
 
 ## Evidence summary
 
-### Consumers and façade stability
-
-Current consumers are repository-internal adapters: one-shot CLI, prompt-toolkit
-REPL, authenticated FastAPI control adapter, and the bounded Electron shell over
-application services. No independent external consumer currently requires either
-GEDCOM or RootsMagic as a standalone distribution.
-
-The fixed characterization manifest keeps 10 supported façade modules and 51
-semantic test nodes over 13 fictional fixtures (`tests/characterization/core_contracts_0_3_baseline.json`).
-Architecture contracts continue to enforce dependency direction and private
-boundary imports (`reference/ARCHITECTURE_CONTRACTS.md`).
-
-### Dependency and import evidence
-
-`PYTHONPATH=src python scripts/characterize_core_contracts.py verify`
-confirmed the fixed CORE-11 inventory (13 fixtures, 5 semantic groups, 51 test
-nodes, 10 public façades). The current dependency snapshot digest is:
-
-- `ca42369af4bacf89066cb79295bb52f4a50795bf3ddd88eb188e9b3c88dbb239`
-
-The runtime dependency list remains shared at the monolith boundary (FastAPI,
-Pydantic, SQLAlchemy, SQLCipher, prompt-toolkit/Rich, and related support
-libraries), so extracting either core now would add release/process burden
-without evidence of meaningful dependency-surface reduction.
-
-### Concise benchmark report (fictional corpus)
-
-Method:
-
-1. Use the fixed CORE-11 manifest policy (7 runs, 60 warm merge iterations).
-2. Measure with `scripts.characterize_core_contracts.performance_snapshot(...)`
-   on fictional fixtures only.
-3. Treat medians and peak RSS as the comparison signal.
-
-Environment:
-
-- Repository source tree at this decision commit
-- Python 3.12 system runtime
-- Local-only execution with `provider=none`
-
-Measured medians (7 runs):
-
-| Operation | Median elapsed | Median peak RSS | Notes |
-| --- | ---: | ---: | --- |
-| CLI cold start (`python -m ancestryllm --version`) | 659.221 ms | 70,176,768 bytes | Gate remains max(100 ms, 10%) regression from baseline |
-| Offline GEDCOM merge (60 warm iterations) | 2,041.434 ms | 50,241,536 bytes | Deterministic digest `27be1afa27ad157ac3db0445521e31e918a6d8e099251e07980bd46e964b6640`, people read/written 6/4 |
-
-No result in this decision indicates a package-extraction performance win.
-
-### Security and operational ownership
-
-Desktop parity and control-surface evidence remains in #131 and
-`DESKTOP_VERIFICATION.md`. Existing release, security response, and provenance
-workflows are already owned for this repository and would need duplication for
-any extracted package release train.
-
-The decision explicitly preserves existing invariants: loss-minimal deterministic
-GEDCOM handling, immutable RootsMagic sources, network-free `provider=none`,
-bounded ingress, opaque artifacts, and cancellation-safe publication.
+- **Consumers and façades:** Current consumers are repository-internal adapters,
+  scripts, and tests; no verified external consumer requires either core as a
+  standalone distribution. The fixed CORE-11 characterization manifest covers
+  10 public façades, 51 semantic test nodes, and 13 fictional fixtures.
+- **Dependency and import boundaries:** Architecture contracts enforce
+  dependency direction and private-boundary imports, retaining exactly two
+  legacy characterization import exceptions.
+- **Provisional performance observations:** The CORE-11/#160 method and fixed
+  fictional corpus remain authoritative. Existing CLI/offline-merge samples
+  and peak-RSS observations have not been independently reproduced, and the
+  standard capture did not complete. These observations do not satisfy the
+  reproducible `capture` gate and are not acceptance evidence until reproduced
+  through that gate.
+- **Desktop parity:** #131 remains the packaged desktop parity gate; this
+  decision does not change desktop support scope or adapter ownership.
+- **Release and security ownership:** A separate package would add SemVer and
+  changelog ownership, release/signing/attestation workflows, vulnerability
+  response ownership, dependency maintenance, and cross-repository coordination
+  without a demonstrated independent-consumer benefit.
 
 ## Decision
 
 ### GEDCOM
 
-Keep GEDCOM internal for now. It remains the first extraction candidate only if
-an independent consumer appears and measured evidence shows a material
-release/dependency-surface reduction that offsets added release/security burden.
+**Decision: keep internal now (defer extraction).** GEDCOM remains the first
+extraction candidate if an independent consumer appears and measured evidence
+shows a material reduction in dependency and release surface that offsets the
+added operational burden.
 
 ### RootsMagic
 
-Keep RootsMagic internal. Read/query/mapping kernels remain reusable inside the
-repository, but publication, provider orchestration, grants, and application
-contracts make a separate release train unjustified at this stage.
+**Decision: keep internal (decline extraction).** The reusable boundary is
+already represented by internal façades without a demonstrated independent
+consumer. A separate release train would increase release and vulnerability-
+response surface without a compensating measured benefit.
+
+## Inherited safety and behavior invariants
+
+- GEDCOM 5.5.5 behavior remains loss-minimal and deterministic.
+- RootsMagic sources remain immutable across success, failure, timeout, and
+  cancellation paths.
+- `provider=none` remains network-free even when credentials exist.
+- File ingress and publication remain bounded, path-safe, opaque-reference
+  based, and cancellation-safe.
+- No package is published by this story, and #132 remains unblocked.
 
 ## Consequences and revisit triggers
 
-No packaging epic is created from #170. Revisit extraction only when all of the
-following are true for a candidate core:
+Revisit extraction for a candidate core only when all of the following are
+true:
 
-1. A confirmed independent consumer exists outside this repository.
-2. Import/dependency evidence shows a material release-surface reduction.
+1. A maintained independent consumer outside this repository uses its façade.
+2. A packaging prototype demonstrates a material dependency/release-surface
+   reduction.
 3. Security ownership, SemVer/changelog, CI, provenance, and vulnerability
    response plans are approved for the additional release train.
-4. CORE-11/#131-style semantic and parity evidence remains at or within existing
-   regression thresholds.
+4. Reproduced performance and parity evidence remains within existing
+   regression thresholds while preserving the invariants above.
 
-Until those triggers are met, the package-shaped monolith remains the accepted
-architecture.
+Until then, the package-shaped monolith remains the accepted architecture.

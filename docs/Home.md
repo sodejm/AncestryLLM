@@ -143,7 +143,7 @@ Concepts, rationale, and design context:
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md) — exact-head verification, not release approval
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md) — installer publication and app-owned macOS arm64 runtime-tool controls, not a hosted application
 - [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md) — implemented profile and macOS arm64 runtime-tool boundaries plus future application-runtime gates
-- [Core package extraction decision ADR](ADR-0027-core-package-extraction-decision.md) — accepted decision to keep GEDCOM and RootsMagic internal pending measurable extraction triggers
+- [GEDCOM and RootsMagic extraction decision ADR](ADR-0027-core-package-extraction-decision.md) — separate keep-internal decisions and revisit triggers
 - [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md) — released control-shell boundary and excluded domain scope
 - [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md) — recorded provider choice
 - [Data-flow threat model and control matrix](THREAT_MODEL.md) — security governance
