@@ -31,6 +31,13 @@ GitHub attestation authentication. To preserve the same harness operation logic,
 this report measured the built-in `_measure` operation directly with seven warm
 runs for each required operation.
 
+The environment description and samples below are inherited from the original
+measurement run and have not been independently reproduced in this review. The
+direct private-helper measurements are provisional observations: they do not
+satisfy the reproducible `capture` gate and must not be presented as completed
+acceptance evidence. Re-run the documented capture command in a verified setup
+before using these values for a release or regression decision.
+
 ## Measurement policy and results
 
 Policy source (#160 baseline): seven runs; warm-operation and RSS regression
@@ -49,8 +56,9 @@ budget 10%; CLI cold-start budget max(100 ms, 10%).
   - peak_rss_bytes samples: 49,795,072; 50,118,656; 49,909,760; 50,229,248; 50,298,880; 50,352,128; 50,368,512
   - median peak_rss_bytes: **50,229,248**
 
-Both measured operations are >= 500 ms and satisfy the report requirement for
-seven warm-run medians plus peak RSS and CLI cold start.
+The recorded operation durations exceed 500 ms and the notes include seven-run
+medians, peak RSS, and CLI cold-start data. Because the official capture did not
+complete, these values remain provisional under the limitation above.
 
 ## Dependency/import and façade stability evidence
 
@@ -87,4 +95,3 @@ seven warm-run medians plus peak RSS and CLI cold start.
 - Bounded ingress, opaque artifacts, and cancellation-safe publication remain
   required boundaries.
 - No package publication is performed under this issue.
-

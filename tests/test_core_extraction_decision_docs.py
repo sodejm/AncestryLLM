@@ -6,10 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 DOCS = ROOT / "docs"
-ADR = DOCS / "ADR-0027-core-extraction-decision.md"
-REPORT = (
-    DOCS / "release-evidence" / "issue-170-core-extraction-benchmark-and-dependency-report.md"
-)
+ADR = DOCS / "ADR-0027-core-package-extraction-decision.md"
+REPORT = DOCS / "release-evidence" / "issue-170-core-extraction-benchmark-and-dependency-report.md"
 
 
 def _read(path: Path) -> str:
@@ -26,7 +24,7 @@ def test_adr_0027_records_separate_gedcom_and_rootsmagic_decisions() -> None:
     assert "keep internal now (defer extraction)" in normalized
     assert "keep internal (decline extraction)" in normalized
     assert "independent consumer" in normalized
-    assert "materially reduces the dependency/release surface" in normalized
+    assert "materially reduces dependency and release surface" in normalized
     assert "orchestration, grants, provider behavior, and publication" in normalized
     assert "#131" in text
     assert "#160" in text
@@ -46,6 +44,15 @@ def test_adr_0027_preserves_required_safety_invariants() -> None:
         assert requirement in normalized
 
 
+def test_adr_0027_keeps_unreproduced_performance_observations_provisional() -> None:
+    normalized = " ".join(_read(ADR).split())
+
+    assert "have not been independently reproduced" in normalized
+    assert "the standard capture did not complete" in normalized
+    assert "do not satisfy the reproducible `capture` gate" in normalized
+    assert "are not acceptance evidence until reproduced" in normalized
+
+
 def test_issue_170_report_records_methods_and_seven_run_medians() -> None:
     text = _read(REPORT)
     normalized = " ".join(text.split())
@@ -59,6 +66,9 @@ def test_issue_170_report_records_methods_and_seven_run_medians() -> None:
     assert "median elapsed_ms: **1891.548**" in text
     assert "median peak_rss_bytes: **68,956,160**" in text
     assert "median peak_rss_bytes: **50,229,248**" in text
+    assert "have not been independently reproduced in this review" in normalized
+    assert "do not satisfy the reproducible `capture` gate" in normalized
+    assert "must not be presented as completed acceptance evidence" in normalized
 
 
 def test_issue_170_report_cites_dependency_facade_and_release_burden_evidence() -> None:

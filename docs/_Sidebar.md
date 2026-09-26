@@ -67,7 +67,7 @@
 
 ### Architecture and decisions
 
-- [GEDCOM and RootsMagic extraction decision ADR](ADR-0027-core-extraction-decision.md)
+- [GEDCOM and RootsMagic extraction decision ADR](ADR-0027-core-package-extraction-decision.md)
 - [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md)
 - [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md)
 - [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md)
