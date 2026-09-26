@@ -1,7 +1,7 @@
 /** Verifies packaged Electron main-process records match across supported platforms. */
 
 import { describe, expect, it } from 'vitest'
-import { matchesPackagedMainProcess, observedRenderer } from './process-records'
+import { matchesPackagedMainProcess, observedRenderer, observedRenderers } from './process-records'
 
 describe('packaged process records', () => {
   const windowsExecutable = String.raw`C:\a\AncestryLLM\dist\win-unpacked\AncestryLLM.exe`
@@ -75,6 +75,16 @@ describe('packaged process records', () => {
     expect(observedRenderer(records, 10, 'darwin')).toEqual(records[2])
     expect(observedRenderer([{ ...records[0]!, commandLine: '/app --type=renderer' }], 10, 'darwin')).toBeNull()
     expect(observedRenderer([{ ...records[2]!, ppid: 99 }, records[0]!], 10, 'darwin')).toBeNull()
+  })
+
+  it('returns every explicit renderer descendant for packaged argument checks', () => {
+    const records = [
+      { pid: 10, ppid: 1, rssBytes: 1, commandLine: '/app' },
+      { pid: 11, ppid: 10, rssBytes: 1, commandLine: '/app --type=renderer' },
+      { pid: 12, ppid: 10, rssBytes: 1, commandLine: '/app --type=renderer --inspect=0' },
+      { pid: 13, ppid: 1, rssBytes: 1, commandLine: '/other --type=renderer' },
+    ]
+    expect(observedRenderers(records, 10, 'darwin')).toEqual([records[1], records[2]])
   })
 
   it('identifies a Linux renderer from native nested zygote descendants when its process title is inherited', () => {

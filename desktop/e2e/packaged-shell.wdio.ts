@@ -10,7 +10,7 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, observedRenderer, type ProcessRecord } from './process-records'
+import { matchesPackagedMainProcess, observedRenderers, type ProcessRecord } from './process-records'
 import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
@@ -515,23 +515,22 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
     async () => {
       const records = await processSnapshot()
       const tree = descendantProcessTree(records, rootPid)
-      return { tree, renderer: observedRenderer(records, rootPid) }
+      return { tree, renderers: observedRenderers(records, rootPid) }
     },
-    ({ renderer }) => renderer !== null,
+    ({ renderers }) => renderers.length > 0,
   )
-  const { tree, renderer } = rendererObservation
-  assert.ok(renderer)
-  assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)
+  const { tree, renderers } = rendererObservation
+  assert.ok(renderers.length > 0)
   assert.ok(tree.some((record) => record.pid === rootPid))
   // The WebdriverIO Electron service supplies a main-process inspector argument
   // for this automated session. Keep it out of renderer processes here; the
   // package-fuse inspection and the separate normal-launch scenario prove that
   // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
-  assert.doesNotMatch(
-    renderer.commandLine,
-    inspectPattern,
-  )
+  for (const renderer of renderers) {
+    assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)
+    assert.doesNotMatch(renderer.commandLine, inspectPattern)
+  }
   const rssBytes = tree.reduce((total, record) => total + record.rssBytes, 0)
   assert.ok(rssBytes > 0)
   return { rendererOutboundRequests, rssBytes }

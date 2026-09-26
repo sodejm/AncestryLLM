@@ -669,6 +669,12 @@ class RootsMagicMapper:
             if _truthy(_value(row, "Living", "IsLiving", default="0")):
                 living_ids.add(person_id)
 
+        if root_person_id is not None and root_person_id not in people_by_id:
+            raise AncestryError(
+                "ROOTSMAGIC_EXPORT_ROOT_NOT_FOUND",
+                "The selected root person is not present in this RootsMagic source.",
+            )
+
         selected_rows = [
             row
             for person_id, row in people_by_id.items()

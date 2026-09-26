@@ -79,6 +79,29 @@ def test_people_literal_filter_and_stable_pages(source: Path) -> None:
     assert second.next_offset is None
 
 
+def test_preset_schema_and_page_share_one_source_connection(
+    source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
+    from ancestryllm.application.operations import RootsMagicPresetQueryRequest
+
+    reader = RootsMagicReader([source.parent])
+    original = reader._copy_bound_to
+    copied = 0
+
+    def counted(path: Path, destination: Path, expected: object) -> None:
+        nonlocal copied
+        copied += 1
+        original(path, destination, expected)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reader, "_copy_bound_to", counted)
+    page = RootsMagicPresetService(reader).query(
+        source, RootsMagicPresetQueryRequest("opaque", "people", None, "", 0, 2)
+    )
+    assert page.returned_rows == 2
+    assert copied == 1
+
+
 def test_people_preserves_missing_names_and_nullable_optional_columns(tmp_path: Path) -> None:
     from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
     from ancestryllm.application.operations import RootsMagicPresetQueryRequest

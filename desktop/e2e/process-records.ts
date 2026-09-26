@@ -38,12 +38,12 @@ export function matchesPackagedMainProcess(
   return nativeExecutable === expectedExecutable
 }
 
-/** Finds a native renderer process in the packaged application's descendant tree. */
-export function observedRenderer(
+/** Finds native renderer processes in the packaged application's descendant tree. */
+export function observedRenderers(
   records: readonly ProcessRecord[],
   rootPid: number,
   platform: NodeJS.Platform = process.platform,
-): ProcessRecord | null {
+): readonly ProcessRecord[] {
   const descendants = new Set([rootPid])
   let changed = true
   while (changed) {
@@ -55,15 +55,25 @@ export function observedRenderer(
     }
   }
   const children = records.filter((record) => record.pid !== rootPid && descendants.has(record.pid))
-  const explicit = children.find((record) => /(?:^|\s)--type=renderer(?:\s|$)/u.test(record.commandLine))
-  if (explicit) return explicit
+  const explicit = children.filter((record) => /(?:^|\s)--type=renderer(?:\s|$)/u.test(record.commandLine))
+  if (explicit.length > 0) return explicit
   // Chromium can leave Linux forked renderer argv as --type=zygote. With the
   // renderer DOM already visible through WebDriver, select the largest leaf
   // zygote in this app's process tree, excluding small idle zygote parents.
-  if (platform !== 'linux') return null
-  return children
+  if (platform !== 'linux') return []
+  const fallback = children
     .filter((record) => /(?:^|\s)--type=zygote(?:\s|$)/u.test(record.commandLine)
       && record.rssBytes >= 64 * 1024 * 1024
       && !children.some((child) => child.ppid === record.pid))
     .sort((left, right) => right.rssBytes - left.rssBytes)[0] ?? null
+  return fallback ? [fallback] : []
+}
+
+/** Returns one representative renderer for process-observation assertions. */
+export function observedRenderer(
+  records: readonly ProcessRecord[],
+  rootPid: number,
+  platform: NodeJS.Platform = process.platform,
+): ProcessRecord | null {
+  return observedRenderers(records, rootPid, platform)[0] ?? null
 }

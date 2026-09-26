@@ -47,9 +47,10 @@ def test_packaged_renderer_evidence_uses_native_process_snapshots() -> None:
     assert "commandLine.includes('--type=')" in process_records_source
     assert "nativeExecutable === expectedExecutable" in process_records_source
     assert "descendantProcessTree(records, rootPid)" in source
-    assert "observedRenderer(records, rootPid)" in source
+    assert "observedRenderers(records, rootPid)" in source
+    assert "renderers.length > 0" in source
     assert "assert.doesNotMatch(renderer.commandLine, /--no-sandbox/u)" in source
-    assert "assert.doesNotMatch(\n    renderer.commandLine,\n    inspectPattern," in source
+    assert "assert.doesNotMatch(renderer.commandLine, inspectPattern)" in source
     assert "app.enableSandbox()" in main_source
     for forbidden in (
         "newBrowserCDPSession",

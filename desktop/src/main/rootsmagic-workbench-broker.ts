@@ -161,8 +161,7 @@ async function inspectSource(path: string, maximum: number, checkpoint: () => vo
 function selectedOutput(value: string): string {
   if (!isAbsolute(value) || value.includes('\0') || normalize(value) !== value) fail('FILE_SELECTION_INVALID')
   const name = basename(value)
-  // eslint-disable-next-line no-control-regex
-  if (name === '.' || name === '..' || name.length === 0 || name.length > 255 || /[/\\\u0000-\u001f\u007f]/.test(name)) {
+  if (name === '.' || name === '..' || name.length === 0 || name.length > 255 || /[/\\\p{C}]/u.test(name)) {
     fail('FILE_SELECTION_INVALID')
   }
   return resolve(value)
@@ -277,6 +276,7 @@ export class RootsMagicWorkbenchBroker {
         fail('FILE_OPERATION_CANCELLED')
       }
       this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'inspection', generation })
+      this.observeJob(snapshot)
       return snapshot
     } finally {
       this.pending.delete(pending)
@@ -360,15 +360,19 @@ export class RootsMagicWorkbenchBroker {
       const parent = await inspectOutputPath(output.path)
       if (parent.dev !== output.parentDev || parent.ino !== output.parentIno) fail('FILE_SELECTION_INVALID')
       const snapshot = await this.client.export({ ...request, output_capability: manifest.id }, signal)
-      if (!this.active(owner, source.generation) || signal?.aborted || this.sources.get(source.sourceRef) !== source
-        || this.outputs.get(output.id) !== output) {
-        await this.client.cancel(snapshot.job_id).catch(() => undefined)
+      const stillOwned = this.active(owner, source.generation)
+        && this.sources.get(source.sourceRef) === source && this.outputs.get(output.id) === output
+      let current = snapshot
+      if (signal?.aborted || !stillOwned) {
+        current = await this.client.cancel(snapshot.job_id).catch(() => snapshot)
+      }
+      if (!stillOwned || (signal?.aborted && current.state !== 'completed')) {
         fail('FILE_OPERATION_CANCELLED')
       }
       this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'export', generation: source.generation,
         sourceRef: source.sourceRef, outputId: output.id })
       submitted = true
-      return snapshot
+      return current
     } finally {
       if (!submitted) this.outputs.delete(output.id)
       await removeManifest(manifest?.path).catch(() => undefined)

@@ -964,6 +964,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 function Shell() {
   const [route, setRoute] = useState<AppRoute>(() => routeFromHash(window.location.hash))
+  const [rootsMagicVisited, setRootsMagicVisited] = useState(route === 'rootsmagic')
   const [reviewingWelcome, setReviewingWelcome] = useState(false)
   const [onboardingFailure, setOnboardingFailure] = useState<BridgeErrorCode | null>(null)
   const [preferenceUpdatePending, setPreferenceUpdatePending] = useState(false)
@@ -1004,6 +1005,10 @@ function Shell() {
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
+
+  useEffect(() => {
+    if (route === 'rootsmagic') setRootsMagicVisited(true)
+  }, [route])
 
   useEffect(() => {
     if (startup.isError || (startup.data && !startup.data.ok)) startupAlert.current?.focus()
@@ -1300,8 +1305,9 @@ function Shell() {
       {route === 'gedcom' && (startupAllowsMutations ? <GedcomIntakeWorkspace />
         : <p role="status">GEDCOM intake is unavailable until local startup diagnostics pass.</p>)}
 
-      {route === 'rootsmagic' && (rootsMagicAvailable ? <RootsMagicWorkspace />
-        : <p role="status">RootsMagic is unavailable until local startup diagnostics and RootsMagic capabilities are ready.</p>)}
+      {rootsMagicVisited && rootsMagicAvailable && <div hidden={route !== 'rootsmagic'}><RootsMagicWorkspace /></div>}
+      {route === 'rootsmagic' && !rootsMagicAvailable
+        && <p role="status">RootsMagic is unavailable until local startup diagnostics and RootsMagic capabilities are ready.</p>}
 
       {route === 'diagnostics' && <>
         <section className="summary-card diagnostics-summary" aria-labelledby="service-status">

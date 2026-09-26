@@ -91,6 +91,12 @@ describe('native RootsMagic workbench broker', () => {
     expect(await broker.selectOutput(owner, 'Suggested')).toMatchObject({ display_name: 'Chosen export' })
   })
 
+  it('rejects format-control characters in the selected output name', async () => {
+    const { broker, native, owner, directory } = await fixture()
+    native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, 'Unsafe\u202e export'))
+    await expect(broker.selectOutput(owner, 'Export')).rejects.toThrow('FILE_SELECTION_INVALID')
+  })
+
   it('normalizes control characters in source display metadata before sidecar inspection', async () => {
     const { broker, client, files, owner, directory } = await fixture()
     const path = join(directory, 'Fictional\u200b.rmtree')
@@ -274,6 +280,26 @@ describe('native RootsMagic workbench broker', () => {
     expect(client.cancel).toHaveBeenCalledWith('j000009')
   })
 
+  it('retains a completed export when cancellation races with submission', async () => {
+    const { broker, client, owner, inspect } = await fixture()
+    await inspect()
+    const output = await broker.selectOutput(owner, 'Export')
+    const late = deferred<JobSnapshot>()
+    client.export.mockReturnValueOnce(late.promise)
+    const controller = new AbortController()
+    const pending = broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' }, controller.signal)
+    await vi.waitFor(() => expect(client.export).toHaveBeenCalled())
+    controller.abort()
+    const completed = terminalSnapshot(snapshot(9), 'completed')
+    client.cancel.mockResolvedValueOnce(completed)
+    late.resolve(snapshot(9))
+    await expect(pending).resolves.toEqual(completed)
+    client.result.mockResolvedValueOnce(exportResult)
+    await expect(broker.result(owner, request(completed))).resolves.toEqual(exportResult)
+  })
+
   it('reserves a directory grant before awaiting export submission', async () => {
     const { broker, client, owner, inspect } = await fixture()
     await inspect()
@@ -320,6 +346,16 @@ describe('native RootsMagic workbench broker', () => {
     await expect(broker.inspect(owner, grant)).resolves.toHaveProperty('job_id')
     await expect(broker.inspect(owner, grant)).rejects.toThrow('FILE_SELECTION_INVALID')
     expect(client.inspect).toHaveBeenCalledTimes(10)
+  })
+
+  it('releases an inspection that is already failed when submission returns', async () => {
+    const { broker, client, owner } = await fixture()
+    let id = 0
+    client.inspect.mockImplementation(async () => terminalSnapshot(snapshot(++id), 'failed'))
+    for (let attempt = 0; attempt < 9; attempt++) {
+      await expect(broker.inspect(owner, grant)).resolves.toHaveProperty('state', 'failed')
+    }
+    expect(client.inspect).toHaveBeenCalledTimes(9)
   })
 
   it('releases failed export output authority and retains completed artifact reveal authority', async () => {

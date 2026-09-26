@@ -101,14 +101,17 @@ class RootsMagicPresetService:
         """Return one deterministic page from an immutable source snapshot."""
         self._validate(request)
         path = self.reader.resolve_tree(source)
-        schema = self._schema(path, request.query_id)
-        if request.query_id == "people":
-            sql, parameters = self._people_statement(schema, request)
-        elif request.query_id == "family_links":
-            sql, parameters = self._family_statement(schema, request)
-        else:
-            sql, parameters = self._events_statement(schema, request)
-        result = self.reader.query(path, sql, parameters=parameters, row_limit=request.page_size)
+        with self.reader.operation(path):
+            schema = self._schema(path, request.query_id)
+            if request.query_id == "people":
+                sql, parameters = self._people_statement(schema, request)
+            elif request.query_id == "family_links":
+                sql, parameters = self._family_statement(schema, request)
+            else:
+                sql, parameters = self._events_statement(schema, request)
+            result = self.reader.query(
+                path, sql, parameters=parameters, row_limit=request.page_size
+            )
         rows = tuple(QueryRow(self._scalar_row(row)) for row in result.rows)
         next_offset = request.offset + request.page_size
         has_more = result.truncated and next_offset <= self._OFFSET_LIMIT

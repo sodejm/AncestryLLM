@@ -156,6 +156,20 @@ def test_default_export_is_rooted_private_and_digest_consistent(
     assert not list(tmp_path.glob(".ancestry-export-*"))
 
 
+def test_export_rejects_missing_root_without_publishing(
+    tmp_path: Path, fictional_tree: Path
+) -> None:
+    target = tmp_path / "missing-root"
+    before = sha256_file(fictional_tree)
+    with _coordinator(tmp_path) as coordinator, pytest.raises(AncestryError) as captured:
+        _exporter(tmp_path).export(
+            fictional_tree, target, root_person_id="999999", coordinator=coordinator
+        )
+    assert captured.value.code == "ROOTSMAGIC_EXPORT_ROOT_NOT_FOUND"
+    assert not target.exists()
+    assert sha256_file(fictional_tree) == before
+
+
 def test_descendant_scope_honors_generation_limit_and_living_policy(
     tmp_path: Path, fictional_tree: Path
 ) -> None:

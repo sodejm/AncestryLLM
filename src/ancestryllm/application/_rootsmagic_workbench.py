@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import RLock
@@ -44,6 +45,14 @@ def source_digest(fingerprint: SourceFingerprint) -> str:
             [fingerprint.wal.sha256, fingerprint.shm.sha256 if fingerprint.shm else None]
         )
     return hashlib.sha256(json.dumps(components, separators=(",", ":")).encode()).hexdigest()
+
+
+def sanitized_source_name(name: str) -> str:
+    """Keep native source names safe for the desktop's plain-text display."""
+    return (
+        "".join(char for char in name if not unicodedata.category(char).startswith("C"))
+        or "RootsMagic source"
+    )
 
 
 @dataclass(slots=True)
@@ -99,7 +108,12 @@ class RootsMagicWorkbench:
                 )
             source_ref = secrets.token_hex(32)
             summary = RootsMagicSourceSummary(
-                source_ref, selected.name, source_digest(fingerprint), "unknown", "active", True
+                source_ref,
+                sanitized_source_name(selected.name),
+                source_digest(fingerprint),
+                "unknown",
+                "active",
+                True,
             )
             self._sources[source_ref] = _SourceSession(selected, reader, fingerprint, summary)
             return summary

@@ -83,6 +83,42 @@ def test_native_source_capability_is_single_use_and_results_revoke(tmp_path: Pat
         jobs.close()
 
 
+def test_native_inspection_normalizes_format_controls_in_source_name(tmp_path: Path) -> None:
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
+
+    tree = tmp_path / "Fictional\u200b.rmtree"
+    with closing(sqlite3.connect(tree)) as connection:
+        connection.executescript(
+            "CREATE TABLE PersonTable (PersonID INTEGER PRIMARY KEY, Sex INTEGER, Living INTEGER);"
+            "CREATE TABLE NameTable (NameID INTEGER PRIMARY KEY, OwnerID INTEGER, Given TEXT, Surname TEXT, IsPrimary INTEGER);"
+            "INSERT INTO PersonTable VALUES(1,0,0);"
+            "INSERT INTO NameTable VALUES(1,1,'Fictional','Example',1);"
+        )
+    capability = "2" * 64
+    manifest = tmp_path / f"{capability}.rootsmagic-source.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "path": str(tree),
+                "size_bytes": tree.stat().st_size,
+                "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
+                "friendly_name": "Fictional.rmtree",
+            }
+        )
+    )
+    manifest.chmod(0o600)
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
+    try:
+        job = boundary.inspect(capability)
+        assert jobs.manager.wait(job.job_id, timeout=5).state is JobState.COMPLETED
+        assert boundary.result(job.job_id)["result"]["friendly_name"] == "Fictional.rmtree"
+    finally:
+        boundary.close()
+        jobs.close()
+
+
 @pytest.mark.parametrize(
     "payload",
     [

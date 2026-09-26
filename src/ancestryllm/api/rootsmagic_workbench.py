@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
-from ancestryllm.application._rootsmagic_workbench import RootsMagicWorkbench
+from ancestryllm.application._rootsmagic_workbench import RootsMagicWorkbench, sanitized_source_name
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import CommittedJobResult, JobState
 
@@ -91,7 +91,9 @@ class NativeRootsMagicWorkbench:
             target = Path(manifest.path)
             if not target.is_absolute():
                 raise ValueError("Relative path")
-            if isinstance(manifest, _SourceManifest) and manifest.friendly_name != target.name:
+            if isinstance(
+                manifest, _SourceManifest
+            ) and manifest.friendly_name != sanitized_source_name(target.name):
                 raise ValueError("Invalid friendly name")
             return manifest
         except (OSError, ValueError) as exc:
