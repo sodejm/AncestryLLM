@@ -59,6 +59,8 @@ interface OutputEntry {
   readonly path: string
   readonly displayName: string
   readonly generation: number
+  readonly parentDev: number
+  readonly parentIno: number
   used: boolean
 }
 
@@ -166,6 +168,28 @@ function selectedOutput(value: string): string {
   return resolve(value)
 }
 
+async function inspectOutputPath(path: string): Promise<Readonly<{ dev: number; ino: number }>> {
+  try {
+    await lstat(path)
+    fail('FILE_SELECTION_INVALID')
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      if (error instanceof FileGrantBrokerError) throw error
+      fail('FILE_SELECTION_INVALID')
+    }
+  }
+  try {
+    const parentPath = dirname(path)
+    const parent = await lstat(parentPath)
+    if (!parent.isDirectory() || parent.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
+    if (await realpath(parentPath) !== resolve(parentPath)) fail('FILE_SELECTION_INVALID')
+    return { dev: parent.dev, ino: parent.ino }
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    fail('FILE_SELECTION_INVALID')
+  }
+}
+
 /** Owns path-free RootsMagic source, output, result, and reveal authority per application window. */
 export class RootsMagicWorkbenchBroker {
   private readonly directory: string
@@ -242,7 +266,7 @@ export class RootsMagicWorkbenchBroker {
         path: grant.path,
         size_bytes: inspected.size,
         sha256: inspected.sha256,
-        friendly_name: basename(grant.path),
+        friendly_name: basename(grant.path).replace(/\p{C}/gu, '') || 'RootsMagic source',
       })
       pending.manifestPath = manifest.path
       this.requireActive(owner, generation, signal)
@@ -291,23 +315,15 @@ export class RootsMagicWorkbenchBroker {
       this.requireActive(owner, generation, signal)
       if (selected === null) fail('FILE_OPERATION_CANCELLED')
       const path = selectedOutput(selected)
-      try {
-        await lstat(path)
-        fail('FILE_SELECTION_INVALID')
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
-      }
-      const parent = await lstat(dirname(path))
-      if (!parent.isDirectory() || parent.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
-      const canonicalParent = await realpath(dirname(path))
-      if (canonicalParent !== resolve(dirname(path))) fail('FILE_SELECTION_INVALID')
+      const parent = await inspectOutputPath(path)
       this.requireActive(owner, generation, signal)
       const id = opaque()
       const actualName = basename(path)
       for (const [oldId, entry] of this.outputs) {
         if (entry.owner === owner && !entry.used) this.outputs.delete(oldId)
       }
-      this.outputs.set(id, { owner, id, path, displayName: actualName, generation, used: false })
+      this.outputs.set(id, { owner, id, path, displayName: actualName, generation,
+        parentDev: parent.dev, parentIno: parent.ino, used: false })
       return Object.freeze({ schema_version: 1, output_capability: id, display_name: actualName })
     } finally {
       this.outputSelections -= 1
@@ -341,6 +357,8 @@ export class RootsMagicWorkbenchBroker {
       if (this.sources.get(source.sourceRef) !== source || this.outputs.get(output.id) !== output) {
         fail('FILE_OPERATION_CANCELLED')
       }
+      const parent = await inspectOutputPath(output.path)
+      if (parent.dev !== output.parentDev || parent.ino !== output.parentIno) fail('FILE_SELECTION_INVALID')
       const snapshot = await this.client.export({ ...request, output_capability: manifest.id }, signal)
       if (!this.active(owner, source.generation) || signal?.aborted || this.sources.get(source.sourceRef) !== source
         || this.outputs.get(output.id) !== output) {

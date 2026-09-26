@@ -105,6 +105,45 @@ function bridgeFor(results: readonly RootsMagicJobResult[] = [
 }
 
 describe('RootsMagic workspace', () => {
+  it('clears an earlier export selection when a new People page is requested', async () => {
+    const bridge = bridgeFor([inspection, queryResult(people), queryResult(secondPeople)])
+    render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+    await screen.findByText('New export folder: fictional-family export')
+    await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export/i }))
+    expect(screen.getByRole('button', { name: 'Export portable GEDCOM' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Morgan Example')).toBeVisible()
+    expect(screen.queryByText('New export folder: fictional-family export')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /I confirm this export/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Export portable GEDCOM' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Choose new export folder' })).toBeDisabled()
+  })
+
+  it('ignores a destination picker that finishes after the People page changes', async () => {
+    const bridge = bridgeFor([inspection, queryResult(people), queryResult(secondPeople)])
+    let finishSelection!: (value: BridgeResult<RootsMagicOutputSelection>) => void
+    vi.mocked(bridge.requestRootsMagicOutput).mockReturnValueOnce(new Promise((resolve) => { finishSelection = resolve }))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+    await waitFor(() => expect(bridge.requestRootsMagicOutput).toHaveBeenCalledOnce())
+    await userEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Morgan Example')).toBeVisible()
+    finishSelection(success({ schema_version: 1, output_capability: 'd'.repeat(64),
+      display_name: 'fictional-family export' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Choose new export folder' })).toBeInTheDocument())
+    expect(screen.queryByText('New export folder: fictional-family export')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Select Morgan Example' }))
+    expect(screen.queryByText('New export folder: fictional-family export')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export portable GEDCOM' })).toBeDisabled()
+  })
+
   it('cancels an inspection submitted after the workspace closes', async () => {
     const bridge = bridgeFor()
     const runningJob: JobSnapshot = { ...job, state: 'running', finished_at: null }

@@ -1,5 +1,5 @@
 /** Exercises native capability ownership and revocation at asynchronous handoff boundaries. */
-import { mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -89,6 +89,36 @@ describe('native RootsMagic workbench broker', () => {
     expect(await readdir(directory)).toEqual(['Fictional.rmtree'])
     expect(await readFile(path)).toEqual(before)
     expect(await broker.selectOutput(owner, 'Suggested')).toMatchObject({ display_name: 'Chosen export' })
+  })
+
+  it('normalizes control characters in source display metadata before sidecar inspection', async () => {
+    const { broker, client, files, owner, directory } = await fixture()
+    const path = join(directory, 'Fictional\u200b.rmtree')
+    await writeFile(path, 'fictional immutable source bytes')
+    files.resolveReadGrant.mockResolvedValueOnce({ grantId: grant, purpose: 'rootsmagic-read',
+      access: 'read', path, maxBytes: 1024 })
+    client.inspect.mockImplementationOnce(async (...args: unknown[]) => {
+      const capability = args[0] as string
+      const manifest = JSON.parse(await readFile(join(directory, `${capability}.rootsmagic-source.json`), 'utf8'))
+      expect(manifest.friendly_name).toBe('Fictional.rmtree')
+      return snapshot(1)
+    })
+    await broker.inspect(owner, grant)
+  })
+
+  it('rejects a destination whose selected parent is replaced before export', async () => {
+    const { broker, client, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    const parent = join(directory, 'selected-parent')
+    await mkdir(parent)
+    native.selectNewOutputDirectory.mockResolvedValueOnce(join(parent, 'Export'))
+    const output = await broker.selectOutput(owner, 'Export')
+    await rename(parent, `${parent}-moved`)
+    await mkdir(parent)
+    await expect(broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' })).rejects.toThrow('FILE_SELECTION_INVALID')
+    expect(client.export).not.toHaveBeenCalled()
   })
 
   it('rejects another window before reading a private result or submitting a query', async () => {

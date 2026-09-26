@@ -269,6 +269,11 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setQueryPending(true)
     setFailure(null)
     setReceipt(null)
+    if (queryId === 'people') {
+      setSelectedPerson(null)
+      setOutput(null)
+      setConfirmed(false)
+    }
     try {
       const request: RootsMagicQueryRequest = { schema_version: 1, source_ref: source.summary.source_ref,
         query_id: queryId, person_id: queryId === 'people' ? null : selectedPerson?.personId ?? null,
@@ -294,11 +299,13 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   async function chooseOutput() {
     if (!source || !selectedPerson || outputPending || discarding) return
     const operationSourceGeneration = sourceGeneration.current
+    const operationQueryGeneration = queryGeneration.current
     setOutputPending(true)
     setFailure(null)
     try {
       const result = await rootsMagic.requestRootsMagicOutput(`${source.summary.friendly_name} export`)
-      if (sourceGeneration.current !== operationSourceGeneration || !mounted.current) return
+      if (sourceGeneration.current !== operationSourceGeneration
+        || queryGeneration.current !== operationQueryGeneration || !mounted.current) return
       if (!result.ok) {
         if (result.error.code === 'REQUEST_CANCELLED') setStatus('No new export folder was chosen.')
         else fail(result.error.code)
@@ -308,7 +315,8 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       setConfirmed(false)
       setStatus(`New export folder selected: ${result.data.display_name}. Confirm the export scope to continue.`)
     } catch {
-      if (sourceGeneration.current === operationSourceGeneration) fail('ROOTSMAGIC_OUTPUT_UNAVAILABLE')
+      if (sourceGeneration.current === operationSourceGeneration
+        && queryGeneration.current === operationQueryGeneration) fail('ROOTSMAGIC_OUTPUT_UNAVAILABLE')
     } finally {
       if (mounted.current && sourceGeneration.current === operationSourceGeneration) setOutputPending(false)
     }

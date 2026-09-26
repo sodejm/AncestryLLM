@@ -787,6 +787,7 @@ jobs:
         shell: bash
         env:
           ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
         run: |
           packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
           mkdir -p "$ROW_ROOT/rootsmagic-fixtures"
@@ -805,6 +806,25 @@ jobs:
             --runner "$VERIFICATION_RUNNER" \
             --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$ROW_ROOT/rootsmagic-receipt.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
+            --allow-output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-file-grants.json" \
+            --allow-output "$ROW_ROOT/packaged-metrics.json" \
+            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
+            --allow-output "$ROW_ROOT/fuse-inspection.json" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/input.ged" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
+            --allow-output "$ROW_ROOT/file-grant-mediation.json" \
+            --allow-output "$ROW_ROOT/target.json" \
             --allow-output "$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree" \
             --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/tree.ged" \
             --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/report.md" \

@@ -225,6 +225,42 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     )
 
 
+def test_release_jobs_use_integrity_locked_pnpm_on_intel_macos() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert (
+        release.count(
+            "npm ci --prefix desktop/toolchain/pnpm --ignore-scripts --no-audit --no-fund"
+        )
+        == 2
+    )
+    assert release.count("if: runner.os == 'macOS' && matrix.arch == 'x64'") == 1
+    assert release.count("if: runner.os != 'macOS' || matrix.arch != 'x64'") == 1
+    assert release.count("if: runner.os == 'macOS' && matrix.runtime_arch == 'x64'") == 1
+    assert release.count("if: runner.os != 'macOS' || matrix.runtime_arch != 'x64'") == 1
+    assert (
+        release.count(
+            'test "$(desktop/toolchain/pnpm/node_modules/.bin/pnpm --version)" = "11.11.0"'
+        )
+        == 2
+    )
+
+
+def test_rootsmagic_packaged_receipt_allows_only_prior_row_evidence() -> None:
+    workflow = _workflow()
+    step = workflow.split("- name: Exercise packaged RootsMagic workbench", 1)[1].split(
+        "- name: Upload partial native-package diagnostics", 1
+    )[0]
+    assert "RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts" in step
+    for path in (
+        "$RECEIPTS_DIR/packaged-file-grants.json",
+        "$ROW_ROOT/target.json",
+        "$ROW_ROOT/file-grant-mediation.json",
+        "$ROW_ROOT/packaged-metrics.json",
+    ):
+        assert f'--allow-output "{path}"' in step
+    assert '--allow-output "$ROW_ROOT"' not in step
+
+
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     workflow = _workflow()
 
