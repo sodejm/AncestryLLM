@@ -327,3 +327,33 @@ def test_issue_103_opaque_file_grant_boundary_is_documented() -> None:
     assert "renderer cannot invoke either resolver" in normalized_file_ingress
     assert "raw host path" in normalized_file_ingress
     assert "#114/#118/#131" in threat_model
+
+
+def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_decision() -> None:
+    architecture = _read(_ARCHITECTURE)
+    normalized = " ".join(architecture.split())
+
+    assert "## CORE-40 multi-adapter façade consumption and extraction evaluation" in architecture
+    assert (
+        "CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and "
+        "`CommandExecutor` boundaries" in normalized
+    )
+    assert (
+        "The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict" in normalized
+    )
+    assert "OpenAPI/Pydantic ownership remains adapter local." in normalized
+    assert "packaged Electron 0.6 support boundary is narrower" in normalized
+    assert "Home, Diagnostics, Settings, and onboarding form the supported core" in normalized
+    assert "provider, Tasks, and Chat surfaces remain source-level gates" in normalized
+    assert "target-matched packaged evidence passes" in normalized
+    assert "Genealogy and other domain desktop adapters remain future work" in normalized
+    assert "bounded Electron control shell keeps file grants, sidecar lifecycle" in normalized
+    assert "those surfaces require target-matched evidence before a support claim" in normalized
+    assert "#131" in normalized
+    assert (
+        "Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal."
+        in normalized
+    )
+    assert (
+        "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
+    )

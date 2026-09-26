@@ -1759,6 +1759,40 @@ developer has not installed local hooks.
 | Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. Issue #363 adds an Electron-Main-only container-control foundation with exact policy/plan validation and isolated native macOS arm64 lifecycle evidence. Issue #348 adds policy-bound acquisition and user-visible lifecycle management for an app-owned macOS arm64 Colima/Lima and Docker tool substrate. Issue #349 adds native Linux amd64/arm64 OCI and Compose evidence for a private probe gateway and optional dormant worker, with no published port and migration disabled. None of these activate a deployment profile or supported application container, and no remote runtime is supported. | The remaining G5-G7 controls, workload identity, secret/data lifecycle, operator activation runbooks, native packaged evidence, and independent review must pass before application-runtime availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
+## CORE-40 multi-adapter façade consumption and extraction evaluation
+
+The implemented terminal and authenticated HTTP adapters use the shared
+application-service contracts. The packaged Electron 0.6 support boundary is
+narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
+named provider, Tasks, and Chat surfaces remain source-level gates until
+target-matched packaged evidence passes. Genealogy and other domain desktop
+adapters remain future work and must consume the same application-service
+contracts rather than redefine behavior.
+
+- CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
+  `CommandExecutor` boundaries, then consume transport-neutral application DTOs.
+- The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict
+  OpenAPI/Pydantic payloads into the same application operation requests and
+  results used by terminal adapters; OpenAPI/Pydantic ownership remains adapter
+  local.
+- The bounded Electron control shell keeps file grants, sidecar lifecycle,
+  settings/keyring ownership, and presentation concerns in Main/application
+  layers. Fixed authenticated routes and validated bridge requests do not make
+  source-level provider, Tasks, or Chat surfaces supported packaged features;
+  those surfaces require target-matched evidence before a support claim.
+
+The extraction evaluation for GEDCOM and RootsMagic used the required criteria:
+independent consumer evidence, release cadence and dependency reduction impact,
+API stability and compatibility burden, test/security ownership and
+vulnerability-response obligations, SemVer/changelog load, cross-repository
+coordination cost, and `#131` parity/adversarial evidence readiness.
+
+Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal.
+No independent second consumer and no materially smaller dependency or release
+surface have been demonstrated. The two decisions may diverge in a later cycle
+if evidence changes, but this evaluation must not delay or redefine signing and
+notarization scope tracked by `#132`.
+
 ## Non-goals and prohibited shortcuts
 
 The current release intentionally excludes:
