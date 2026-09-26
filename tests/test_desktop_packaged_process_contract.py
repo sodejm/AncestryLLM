@@ -24,7 +24,7 @@ def test_posix_process_snapshot_requests_unbounded_command_lines() -> None:
 
     assert re.search(
         r"execFileAsync\(\s*'ps',\s*\[\s*'-ww',\s*'-axo',\s*"
-        r"'pid=,ppid=,rss=,command='\s*\]",
+        r"'pid=,ppid=,rss=,stat=,command='\s*\]",
         source,
     )
 
