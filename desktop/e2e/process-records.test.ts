@@ -1,9 +1,21 @@
 /** Verifies packaged Electron main-process records match across supported platforms. */
 
 import { describe, expect, it } from 'vitest'
-import { matchesPackagedMainProcess, observedRenderer, observedRenderers } from './process-records'
+import { matchesPackagedMainProcess, observedRenderer, observedRenderers, parsePosixProcessSnapshot } from './process-records'
 
 describe('packaged process records', () => {
+  it('treats a killed process awaiting reaping as exited while retaining live process records', () => {
+    const output = [
+      '  42   1   256  Z  /opt/AncestryLLM --user-data-dir=/tmp/profile',
+      '  43   1  1024  S+ /opt/AncestryLLM --user-data-dir=/tmp/profile with spaces',
+      '  44  43   512  R  /opt/AncestryLLM --type=renderer',
+    ].join('\n')
+
+    expect(parsePosixProcessSnapshot(output)).toEqual([
+      { pid: 43, ppid: 1, rssBytes: 1024 * 1024, commandLine: '/opt/AncestryLLM --user-data-dir=/tmp/profile with spaces' },
+      { pid: 44, ppid: 43, rssBytes: 512 * 1024, commandLine: '/opt/AncestryLLM --type=renderer' },
+    ])
+  })
   const windowsExecutable = String.raw`C:\a\AncestryLLM\dist\win-unpacked\AncestryLLM.exe`
   const windowsProfile = String.raw`C:\a\_temp\ancestryllm-profile`
 

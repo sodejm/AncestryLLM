@@ -10,7 +10,7 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, observedRenderers, type ProcessRecord } from './process-records'
+import { matchesPackagedMainProcess, observedRenderers, parsePosixProcessSnapshot, type ProcessRecord } from './process-records'
 import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
@@ -214,20 +214,11 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
     }))
   }
 
-  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,command='], {
+  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,stat=,command='], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
   })
-  return stdout.split('\n').flatMap((line): ProcessRecord[] => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/u)
-    if (!match?.[1] || !match[2] || !match[3] || match[4] === undefined) return []
-    return [{
-      pid: Number.parseInt(match[1], 10),
-      ppid: Number.parseInt(match[2], 10),
-      rssBytes: Number.parseInt(match[3], 10) * 1024,
-      commandLine: match[4],
-    }]
-  })
+  return parsePosixProcessSnapshot(stdout)
 }
 
 function descendantProcessTree(records: readonly ProcessRecord[], rootPid: number): ProcessRecord[] {
@@ -742,7 +733,11 @@ describe('unpublished unpacked native package', () => {
       automaticRestartsRemaining: 2,
       manualRetriesRemaining: 0,
     })
-    assert.equal((await $$('[role="alert"]')).length, 0)
+    await eventually(
+      'Diagnostics still showed a recovery alert after the sidecar became ready',
+      async () => (await $$('[role="alert"]')).length,
+      (count) => count === 0,
+    )
     await closeApplicationWindow(copiedSidecarPath)
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',

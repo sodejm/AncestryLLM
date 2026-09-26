@@ -9,6 +9,21 @@ export type ProcessRecord = Readonly<{
   executablePath?: string
 }>
 
+/** Parses live POSIX processes; a zombie has exited but may await parent reaping. */
+export function parsePosixProcessSnapshot(output: string): ProcessRecord[] {
+  return output.split('\n').flatMap((line): ProcessRecord[] => {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/u)
+    if (!match?.[1] || !match[2] || !match[3] || !match[4] || match[5] === undefined
+      || match[4].startsWith('Z')) return []
+    return [{
+      pid: Number.parseInt(match[1], 10),
+      ppid: Number.parseInt(match[2], 10),
+      rssBytes: Number.parseInt(match[3], 10) * 1024,
+      commandLine: match[5],
+    }]
+  })
+}
+
 function normalizedCommandValue(value: string, platform: NodeJS.Platform): string {
   return platform === 'win32' ? value.replaceAll('\\', '/').toLowerCase() : value
 }
