@@ -339,17 +339,21 @@ def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_de
         "`CommandExecutor` boundaries" in normalized
     )
     assert (
-        "The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict"
-        in normalized
+        "The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict" in normalized
     )
     assert "OpenAPI/Pydantic ownership remains adapter local." in normalized
-    assert (
-        "Electron keeps file grants, sidecar lifecycle, settings/keyring ownership, and "
-        "presentation concerns in Main/application layers" in normalized
-    )
+    assert "packaged Electron 0.6 support boundary is narrower" in normalized
+    assert "Home, Diagnostics, Settings, and onboarding form the supported core" in normalized
+    assert "provider, Tasks, and Chat surfaces remain source-level gates" in normalized
+    assert "target-matched packaged evidence passes" in normalized
+    assert "Genealogy and other domain desktop adapters remain future work" in normalized
+    assert "bounded Electron control shell keeps file grants, sidecar lifecycle" in normalized
+    assert "those surfaces require target-matched evidence before a support claim" in normalized
     assert "#131" in normalized
     assert (
         "Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal."
         in normalized
     )
-    assert "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
+    assert (
+        "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
+    )

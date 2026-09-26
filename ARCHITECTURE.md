@@ -1761,8 +1761,13 @@ developer has not installed local hooks.
 
 ## CORE-40 multi-adapter façade consumption and extraction evaluation
 
-The release line evidence confirms that terminal and desktop-control adapters use
-the same supported application-service contracts:
+The implemented terminal and authenticated HTTP adapters use the shared
+application-service contracts. The packaged Electron 0.6 support boundary is
+narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
+named provider, Tasks, and Chat surfaces remain source-level gates until
+target-matched packaged evidence passes. Genealogy and other domain desktop
+adapters remain future work and must consume the same application-service
+contracts rather than redefine behavior.
 
 - CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
   `CommandExecutor` boundaries, then consume transport-neutral application DTOs.
@@ -1770,10 +1775,11 @@ the same supported application-service contracts:
   OpenAPI/Pydantic payloads into the same application operation requests and
   results used by terminal adapters; OpenAPI/Pydantic ownership remains adapter
   local.
-- Electron keeps file grants, sidecar lifecycle, settings/keyring ownership, and
-  presentation concerns in Main/application layers while consuming the same
-  bounded service contracts over fixed authenticated routes and validated bridge
-  requests.
+- The bounded Electron control shell keeps file grants, sidecar lifecycle,
+  settings/keyring ownership, and presentation concerns in Main/application
+  layers. Fixed authenticated routes and validated bridge requests do not make
+  source-level provider, Tasks, or Chat surfaces supported packaged features;
+  those surfaces require target-matched evidence before a support claim.
 
 The extraction evaluation for GEDCOM and RootsMagic used the required criteria:
 independent consumer evidence, release cadence and dependency reduction impact,
