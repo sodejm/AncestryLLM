@@ -945,8 +945,8 @@ describe('unpublished unpacked native package', () => {
       format: 'gedcom',
       validation: 'replacement-confirmed',
     })
-    assert.deepEqual(results.openRevocation, { ok: true, data: { revoked: true } })
-    assert.deepEqual(results.saveRevocation, { ok: true, data: { revoked: true } })
+    assert.deepEqual(results.openRevocation, { ok: true, protocolVersion: '1', data: { revoked: true } })
+    assert.deepEqual(results.saveRevocation, { ok: true, protocolVersion: '1', data: { revoked: true } })
     const exposedStrings = stringsIn(results)
     for (const selectedPath of new Set([
       fileGrantOpenPath,
