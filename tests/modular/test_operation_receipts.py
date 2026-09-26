@@ -13,6 +13,7 @@ from ancestryllm.application.operation_receipts import (
     OperationReceiptOutcome,
 )
 from ancestryllm.core.errors import StorageError
+from ancestryllm.storage.models import OperationReceiptModel
 from ancestryllm.storage.operation_receipts import OperationReceiptRepository
 
 
@@ -28,7 +29,7 @@ def _receipt(*, receipt_id: str = "receipt_" + "a" * 64) -> OperationReceipt:
         duration_ms=None,
         adapter_class="llm.service",
         provider_class="openai",
-        authorization_ref="consent-policy",
+        authorization_ref="consent-policy-ref-v1",
         policy_revision_ref="consent-policy-v1",
         idempotency_digest="c" * 64,
         source_fingerprint="source_" + "d" * 32,
@@ -112,10 +113,44 @@ def test_receipt_export_is_redacted_and_listing_is_bounded(app_context) -> None:
     assert exported["source_count"] == 1
     assert exported["source_fingerprint"] is None
     assert exported["target_fingerprint"] is None
+    assert "logical_operation_id" not in exported
+    assert "idempotency_digest" not in exported
     assert exported["redactions"] == {
+        "idempotency_digest": "removed",
+        "logical_operation_id": "removed",
         "source_fingerprint": "removed",
         "target_fingerprint": "removed",
     }
+
+
+def test_create_pending_prunes_expired_receipts_in_same_write(app_context) -> None:  # type: ignore[no-untyped-def]
+    repository = OperationReceiptRepository(app_context.database)
+    expired = replace(
+        _receipt(receipt_id="receipt_" + "8" * 64),
+        logical_operation_id="operation_" + "8" * 64,
+    )
+    with app_context.database.session() as session:
+        session.add(
+            OperationReceiptModel(
+                receipt_id=expired.receipt_id,
+                operation_id=expired.logical_operation_id,
+                operation_type=expired.operation_type,
+                outcome=expired.outcome.value,
+                started_at=expired.started_at,
+                completed_at=None,
+                duration_ms=None,
+                payload_json=expired.to_json(),
+                expires_at="2020-01-01T00:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    current = _receipt(receipt_id="receipt_" + "9" * 64)
+    repository.create_pending(current)
+
+    with app_context.database.session() as session:
+        assert session.get(OperationReceiptModel, expired.receipt_id) is None
+        assert session.get(OperationReceiptModel, current.receipt_id) is not None
 
 
 def test_missing_receipt_error(app_context) -> None:  # type: ignore[no-untyped-def]

@@ -12,8 +12,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
+from ancestryllm.application.operation_receipts import OperationReceipt, OperationReceiptOutcome
 from ancestryllm.core.cancellation import CancellationError
-from ancestryllm.core.errors import ProviderError, SecurityPolicyError, normalize_provider_error
+from ancestryllm.core.errors import (
+    ProviderError,
+    SecurityPolicyError,
+    StorageError,
+    normalize_provider_error,
+)
 from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.llm.contracts import (
     DataClass,
@@ -632,9 +638,37 @@ class AuditSession:
         return None
 
 
+class AuditReceiptRepository:
+    """In-memory receipt port for provider tests using the audit-only database fake."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, OperationReceipt] = {}
+
+    def create_pending(self, receipt: OperationReceipt) -> None:
+        self.rows[receipt.receipt_id] = receipt
+
+    def finalize(self, receipt: OperationReceipt) -> OperationReceipt:
+        current = self.rows.get(receipt.receipt_id)
+        if current is None:
+            raise StorageError("OPERATION_RECEIPT_MISSING", "The operation receipt does not exist.")
+        if current.outcome is not OperationReceiptOutcome.PENDING:
+            return current
+        self.rows[receipt.receipt_id] = receipt
+        return receipt
+
+    def get(self, receipt_id: str) -> OperationReceipt:
+        try:
+            return self.rows[receipt_id]
+        except KeyError as exc:
+            raise StorageError(
+                "OPERATION_RECEIPT_NOT_FOUND", "The operation receipt was not found."
+            ) from exc
+
+
 class AuditDatabase:
     def __init__(self) -> None:
         self.rows: list[Any] = []
+        self.receipts = AuditReceiptRepository()
 
     def session(self) -> AuditSession:
         return AuditSession(self.rows)
@@ -811,7 +845,14 @@ class CloseFailureProvider(LifecycleProvider):
 
 def service(provider: LifecycleProvider) -> tuple[LLMService, AuditDatabase]:
     database = AuditDatabase()
-    return LLMService(StaticRegistry(provider), database), database  # type: ignore[arg-type]
+    return (
+        LLMService(
+            StaticRegistry(provider),  # type: ignore[arg-type]
+            database,  # type: ignore[arg-type]
+            receipts=database.receipts,  # type: ignore[arg-type]
+        ),
+        database,
+    )
 
 
 def retention_consent() -> ConsentGrant:
@@ -1137,6 +1178,7 @@ def test_service_async_stream_applies_bounded_backpressure() -> None:
         StaticRegistry(provider),  # type: ignore[arg-type]
         database,  # type: ignore[arg-type]
         async_stream_queue_items=2,
+        receipts=database.receipts,  # type: ignore[arg-type]
     )
 
     async def consume_one_chunk() -> None:
@@ -1161,6 +1203,7 @@ def test_service_async_stream_rejects_oversized_chunk_without_disclosure() -> No
         StaticRegistry(provider),  # type: ignore[arg-type]
         database,  # type: ignore[arg-type]
         async_stream_max_chunk_bytes=8,
+        receipts=database.receipts,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderError) as raised:
@@ -1403,6 +1446,7 @@ def test_retry_backoff_is_cancellation_aware_and_audited(
         StaticRegistry(provider),  # type: ignore[arg-type]
         database,  # type: ignore[arg-type]
         cancellation_check=cancellation_check,
+        receipts=database.receipts,  # type: ignore[arg-type]
     )
     monkeypatch.setattr("ancestryllm.llm.service.time.sleep", cancel_during_wait)
     retriable = request("test").model_copy(update={"max_safe_retries": 1})

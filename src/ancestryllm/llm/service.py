@@ -15,16 +15,15 @@ from typing import TYPE_CHECKING, Any, cast
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from ancestryllm.application.operation_receipts import (
+    SCHEMA_VERSION as OPERATION_RECEIPT_SCHEMA_VERSION,
+)
+from ancestryllm.application.operation_receipts import OperationReceipt, OperationReceiptOutcome
 from ancestryllm.core.errors import (
     ProviderError,
     StorageError,
     is_provider_cancellation,
     normalize_provider_error,
-)
-from ancestryllm.application.operation_receipts import (
-    OperationReceipt,
-    OperationReceiptOutcome,
-    SCHEMA_VERSION as OPERATION_RECEIPT_SCHEMA_VERSION,
 )
 from ancestryllm.llm.async_stream import (
     DEFAULT_ASYNC_STREAM_MAX_CHUNK_BYTES,
@@ -92,18 +91,13 @@ class LLMService:
         self.execution = execution or ProviderExecutionCoordinator()
         self.cache = cache or ExactResultCache()
         self._cache_key = secrets.token_bytes(32)
-        self._receipt_key = secrets.token_bytes(32)
         self._explicit_cancellation_check = cancellation_check
         self._async_stream_queue_items = async_stream_queue_items
         self._async_stream_max_chunk_bytes = async_stream_max_chunk_bytes
         self.receipts = receipts or OperationReceiptRepository(database)
 
     def _receipt_id(self, operation_id: str, operation_type: str) -> str:
-        digest = hmac.new(
-            self._receipt_key,
-            f"{operation_type}\0{operation_id}".encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        digest = hashlib.sha256(f"{operation_type}\0{operation_id}".encode()).hexdigest()
         return f"receipt_{digest}"
 
     def _receipt_pending(
@@ -126,10 +120,10 @@ class LLMService:
             duration_ms=None,
             adapter_class="llm.service",
             provider_class=provider_id,
-            authorization_ref="consent-policy",
+            authorization_ref="consent-policy-ref-v1",
             policy_revision_ref="consent-policy-v1",
             idempotency_digest=request_hash,
-            source_fingerprint=request_hash,
+            source_fingerprint=None,
             target_fingerprint=None,
             source_count=None,
             target_count=None,
@@ -166,7 +160,7 @@ class LLMService:
         error_code: str | None = None,
         warnings: tuple[str, ...] = (),
     ) -> None:
-        started = dt.datetime.fromisoformat(receipt.started_at.replace("Z", "+00:00"))
+        started = dt.datetime.fromisoformat(receipt.started_at)
         completed = dt.datetime.now(dt.UTC)
         terminal = replace(
             receipt,
@@ -531,7 +525,7 @@ class LLMService:
         retain = bool(consent and consent.retain_payloads)
         cache_hit = False
         receipt = self._receipt_pending(
-            operation_id=f"llm-generate:{request_hash}:{started}:{secrets.token_hex(4)}",
+            operation_id=f"llm-generate:{secrets.token_hex(16)}",
             operation_type="remote_llm_request",
             started_at=started,
             provider_id=planned_request.provider_id,
@@ -691,7 +685,7 @@ class LLMService:
         started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         receipt = self._receipt_pending(
-            operation_id=f"llm-stream:{request_hash}:{started}:{secrets.token_hex(4)}",
+            operation_id=f"llm-stream:{secrets.token_hex(16)}",
             operation_type="remote_llm_request",
             started_at=started,
             provider_id=planned_request.provider_id,
@@ -764,7 +758,7 @@ class LLMService:
             )
         else:
             receipt = self._receipt_pending(
-                operation_id=f"llm-async-stream:{request_hash}:{started}:{secrets.token_hex(4)}",
+                operation_id=f"llm-async-stream:{secrets.token_hex(16)}",
                 operation_type="remote_llm_request",
                 started_at=started,
                 provider_id=planned_request.provider_id,

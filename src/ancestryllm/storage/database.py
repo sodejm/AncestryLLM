@@ -51,7 +51,11 @@ def _schema_table_names(connection: Any) -> frozenset[str]:
 def _expected_schema_tables(*, revision: str) -> frozenset[str]:
     tables = frozenset(str(name) for name in Base.metadata.tables)
     if revision == LEGACY_SCHEMA_REVISION:
-        tables -= {JobModel.__tablename__, JobEventModel.__tablename__}
+        tables -= {
+            JobModel.__tablename__,
+            JobEventModel.__tablename__,
+            OperationReceiptModel.__tablename__,
+        }
     elif revision == PREVIOUS_SCHEMA_REVISION:
         tables -= {OperationReceiptModel.__tablename__}
     return tables | {"alembic_version"}
@@ -300,7 +304,7 @@ class Database:
                     "UPDATE alembic_version SET version_num = ?",
                     (PREVIOUS_SCHEMA_REVISION,),
                 )
-                return
+                current = PREVIOUS_SCHEMA_REVISION
 
             if current == PREVIOUS_SCHEMA_REVISION:
                 _create_tables_on_native_connection(
@@ -311,7 +315,6 @@ class Database:
                     "UPDATE alembic_version SET version_num = ?",
                     (SCHEMA_REVISION,),
                 )
-                return
 
     def session(self) -> Session:
         """Open a transactional session for application storage."""

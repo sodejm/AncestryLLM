@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import delete, select, update
 
 from ancestryllm.application.operation_receipts import OperationReceipt, OperationReceiptOutcome
 from ancestryllm.core.errors import StorageError
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import OperationReceiptModel
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import CursorResult
+    from sqlalchemy.orm import Session
+
+    from ancestryllm.storage.database import Database
 
 _MAX_LIST_LIMIT = 200
 _DEFAULT_LIST_LIMIT = 50
@@ -36,24 +42,33 @@ class OperationReceiptRepository:
     def _retention_expiry(self, now: dt.datetime) -> str:
         return _iso(now + dt.timedelta(days=self.retention_days))
 
+    @staticmethod
+    def _delete_expired(session: Session, now: str) -> None:
+        session.execute(
+            delete(OperationReceiptModel).where(
+                OperationReceiptModel.expires_at.is_not(None),
+                OperationReceiptModel.expires_at < now,
+            )
+        )
+
     def _prune_expired(self) -> None:
         now = _iso(_utc_now())
         with self.database.session() as session:
-            session.execute(
-                delete(OperationReceiptModel).where(
-                    OperationReceiptModel.expires_at.is_not(None),
-                    OperationReceiptModel.expires_at < now,
-                )
-            )
+            self._delete_expired(session, now)
             session.commit()
 
     def create_pending(self, receipt: OperationReceipt) -> None:
-        if receipt.outcome is not OperationReceiptOutcome.PENDING or receipt.completed_at is not None:
+        """Persist a pending receipt before its operation begins."""
+        if (
+            receipt.outcome is not OperationReceiptOutcome.PENDING
+            or receipt.completed_at is not None
+        ):
             raise ValueError("pending receipt creation requires pending outcome and no completion.")
         now = _utc_now()
         payload = receipt.to_json()
         try:
             with self.database.session() as session:
+                self._delete_expired(session, _iso(now))
                 session.add(
                     OperationReceiptModel(
                         receipt_id=receipt.receipt_id,
@@ -68,7 +83,7 @@ class OperationReceiptRepository:
                     )
                 )
                 session.commit()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise StorageError(
                 "OPERATION_RECEIPT_INIT_FAILED",
                 "The operation receipt could not be initialized durably.",
@@ -77,23 +92,27 @@ class OperationReceiptRepository:
             ) from exc
 
     def finalize(self, receipt: OperationReceipt) -> OperationReceipt:
+        """Atomically store a terminal outcome, preserving the first finalizer."""
         if receipt.outcome is OperationReceiptOutcome.PENDING or receipt.completed_at is None:
             raise ValueError("terminal receipt finalization requires a terminal outcome.")
         payload = receipt.to_json()
         with self.database.session() as session:
-            updated = session.execute(
-                update(OperationReceiptModel)
-                .where(
-                    OperationReceiptModel.receipt_id == receipt.receipt_id,
-                    OperationReceiptModel.completed_at.is_(None),
-                    OperationReceiptModel.outcome == OperationReceiptOutcome.PENDING.value,
-                )
-                .values(
-                    outcome=receipt.outcome.value,
-                    completed_at=receipt.completed_at,
-                    duration_ms=receipt.duration_ms,
-                    payload_json=payload,
-                )
+            updated = cast(
+                "CursorResult[Any]",
+                session.execute(
+                    update(OperationReceiptModel)
+                    .where(
+                        OperationReceiptModel.receipt_id == receipt.receipt_id,
+                        OperationReceiptModel.completed_at.is_(None),
+                        OperationReceiptModel.outcome == OperationReceiptOutcome.PENDING.value,
+                    )
+                    .values(
+                        outcome=receipt.outcome.value,
+                        completed_at=receipt.completed_at,
+                        duration_ms=receipt.duration_ms,
+                        payload_json=payload,
+                    )
+                ),
             )
             if updated.rowcount == 1:
                 session.commit()
@@ -115,26 +134,33 @@ class OperationReceiptRepository:
             return committed
 
     def get(self, receipt_id: str) -> OperationReceipt:
+        """Return one unexpired receipt by its opaque receipt ID."""
         self._prune_expired()
         with self.database.session() as session:
             row = session.get(OperationReceiptModel, receipt_id)
             if row is None:
-                raise StorageError("OPERATION_RECEIPT_NOT_FOUND", "The operation receipt was not found.")
+                raise StorageError(
+                    "OPERATION_RECEIPT_NOT_FOUND", "The operation receipt was not found."
+                )
             return OperationReceipt.from_json(row.payload_json)
 
     def list_recent(self, *, limit: int = _DEFAULT_LIST_LIMIT) -> tuple[OperationReceipt, ...]:
+        """List a bounded page of receipts ordered newest first."""
         self._prune_expired()
         if type(limit) is not int or not 1 <= limit <= _MAX_LIST_LIMIT:
             raise ValueError("receipt list limit is out of range.")
         with self.database.session() as session:
             rows = session.scalars(
                 select(OperationReceiptModel)
-                .order_by(OperationReceiptModel.started_at.desc(), OperationReceiptModel.receipt_id.desc())
+                .order_by(
+                    OperationReceiptModel.started_at.desc(), OperationReceiptModel.receipt_id.desc()
+                )
                 .limit(limit)
             )
             return tuple(OperationReceipt.from_json(row.payload_json) for row in rows)
 
     def export_redacted(self, receipt_id: str) -> dict[str, object]:
+        """Export one receipt without operation identifiers or fingerprints."""
         receipt = self.get(receipt_id)
         redacted = replace(
             receipt,
@@ -145,7 +171,6 @@ class OperationReceiptRepository:
         return {
             "schema_version": redacted.schema_version,
             "receipt_id": redacted.receipt_id,
-            "logical_operation_id": redacted.logical_operation_id,
             "operation_type": redacted.operation_type,
             "outcome": redacted.outcome.value,
             "started_at": redacted.started_at,
@@ -155,7 +180,6 @@ class OperationReceiptRepository:
             "provider_class": redacted.provider_class,
             "authorization_ref": redacted.authorization_ref,
             "policy_revision_ref": redacted.policy_revision_ref,
-            "idempotency_digest": redacted.idempotency_digest,
             "source_fingerprint": redacted.source_fingerprint,
             "target_fingerprint": redacted.target_fingerprint,
             "source_count": redacted.source_count,
@@ -170,6 +194,8 @@ class OperationReceiptRepository:
             "error_code": redacted.error_code,
             "warnings": list(redacted.warnings),
             "redactions": {
+                "idempotency_digest": "removed",
+                "logical_operation_id": "removed",
                 "source_fingerprint": "removed",
                 "target_fingerprint": "removed",
             },

@@ -662,8 +662,16 @@ def test_restart_reconciliation_terminalizes_running_stream_audit_once(
         assert running.status == "running"
         assert running.completed_at is None
 
-    assert chat_environment.llm.reconcile_interrupted_stream_runs() == 1
-    assert chat_environment.llm.reconcile_interrupted_stream_runs() == 0
+    restarted_llm = LLMService(  # type: ignore[arg-type]
+        _FixtureRegistry(chat_environment.provider),
+        chat_environment.app_context.database,
+        profiles=chat_environment.app_context.provider_profiles,
+    )
+    try:
+        assert restarted_llm.reconcile_interrupted_stream_runs() == 1
+        assert restarted_llm.reconcile_interrupted_stream_runs() == 0
+    finally:
+        restarted_llm.close()
     chat_environment.chat.abandon_stream(
         handle,
         error_code="CHAT_STREAM_RESTART_INTERRUPTED",
@@ -675,3 +683,7 @@ def test_restart_reconciliation_terminalizes_running_stream_audit_once(
         assert row.status == "aborted"
         assert row.error_code == "CHAT_STREAM_RESTART_INTERRUPTED"
         assert row.completed_at is not None
+        receipt = database_session.scalars(
+            select(OperationReceiptModel).where(OperationReceiptModel.operation_id == run_id)
+        ).one()
+    assert receipt.outcome == "recovered"
