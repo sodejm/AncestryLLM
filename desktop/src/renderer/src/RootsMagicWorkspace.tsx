@@ -191,7 +191,10 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     if (oldSource) {
       try {
         const disposed = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: oldSource })
-        if (!disposed.ok) { fail(disposed.error.code); return }
+        if (!disposed.ok && disposed.error.code !== 'FILE_GRANT_FORBIDDEN') {
+          fail(disposed.error.code)
+          return
+        }
       } catch { fail('ROOTSMAGIC_SOURCE_UNAVAILABLE'); return }
       sourceRef.current = null
       if (!mounted.current) return
@@ -248,7 +251,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     try {
       const result = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: activeSource })
       if (!mounted.current || sourceGeneration.current !== discardGeneration) return
-      if (!result.ok) {
+      if (!result.ok && result.error.code !== 'FILE_GRANT_FORBIDDEN') {
         fail(result.error.code)
         return
       }
@@ -303,7 +306,9 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setOutputPending(true)
     setFailure(null)
     try {
-      const result = await rootsMagic.requestRootsMagicOutput(`${source.summary.friendly_name} export`)
+      const suggestedName = `${source.summary.friendly_name.slice(0, 255 - ' export'.length)
+        .replace(/[\uD800-\uDBFF]$/u, '')} export`
+      const result = await rootsMagic.requestRootsMagicOutput(suggestedName)
       if (sourceGeneration.current !== operationSourceGeneration
         || queryGeneration.current !== operationQueryGeneration || !mounted.current) return
       if (!result.ok) {

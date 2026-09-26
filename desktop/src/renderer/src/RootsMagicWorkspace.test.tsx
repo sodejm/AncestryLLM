@@ -13,7 +13,7 @@ import type {
 import { RootsMagicWorkspace } from './RootsMagicWorkspace'
 
 const success = <T,>(data: T): BridgeResult<T> => ({ ok: true, protocolVersion: '1', data })
-const failure = <T,>(code: 'REQUEST_CANCELLED' | 'SIDECAR_UNAVAILABLE'): BridgeResult<T> => ({
+const failure = <T,>(code: 'REQUEST_CANCELLED' | 'SIDECAR_UNAVAILABLE' | 'FILE_GRANT_FORBIDDEN'): BridgeResult<T> => ({
   ok: false,
   protocolVersion: '1',
   error: { code, message: 'Internal bridge detail is not rendered.', remediation: 'Choose a source again.' },
@@ -344,6 +344,51 @@ describe('RootsMagic workspace', () => {
     expect(screen.getByRole('heading', { name: 'Active source' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'People' })).toBeEnabled()
     expect(bridge.requestOpenFileGrant).toHaveBeenCalledOnce()
+  })
+
+  it('replaces a source whose capability was already revoked', async () => {
+    const bridge = bridgeFor([inspection, inspection])
+    vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('FILE_GRANT_FORBIDDEN'))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    expect(await screen.findByText('Fictional Family')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Choose another RootsMagic source' }))
+
+    await waitFor(() => expect(bridge.requestOpenFileGrant).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('heading', { name: 'Active source' })).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('clears an active source whose capability was already revoked', async () => {
+    const bridge = bridgeFor([inspection])
+    vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('FILE_GRANT_FORBIDDEN'))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    expect(await screen.findByText('Fictional Family')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Discard active source' }))
+
+    expect(await screen.findByRole('button', { name: 'Choose RootsMagic source' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: 'Active source' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('bounds a suggested export folder name for a long source name', async () => {
+    const longName = 'A'.repeat(250)
+    const longInspection: RootsMagicJobResult = { ...inspection, result: { ...inspection.result, friendly_name: longName } }
+    const bridge = bridgeFor([longInspection, queryResult(people)])
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+
+    await waitFor(() => expect(bridge.requestRootsMagicOutput).toHaveBeenCalledOnce())
+    const suggested = vi.mocked(bridge.requestRootsMagicOutput).mock.calls[0]![0]
+    expect(suggested).toBe(`${'A'.repeat(248)} export`)
+    expect(suggested).toHaveLength(255)
   })
 
   it('does not carry a completed output-folder selection to a replacement source', async () => {

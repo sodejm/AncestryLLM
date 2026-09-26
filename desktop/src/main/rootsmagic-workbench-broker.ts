@@ -300,6 +300,7 @@ export class RootsMagicWorkbenchBroker {
     }
     this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'query', generation: source.generation,
       sourceRef: source.sourceRef })
+    this.observeJob(snapshot)
     return snapshot
   }
 
@@ -371,6 +372,7 @@ export class RootsMagicWorkbenchBroker {
       }
       this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'export', generation: source.generation,
         sourceRef: source.sourceRef, outputId: output.id })
+      this.observeJob(current)
       submitted = true
       return current
     } finally {

@@ -328,6 +328,28 @@ describe('native RootsMagic workbench broker', () => {
     }
   })
 
+  it.each(['failed', 'cancelled'] as const)('releases immediately %s query jobs', async (state) => {
+    const { broker, client, owner, inspect } = await fixture()
+    await inspect()
+    client.query.mockImplementation(async () => terminalSnapshot(snapshot(100 + client.query.mock.calls.length), state))
+    for (let index = 0; index < 70; index++) {
+      await expect(broker.query(owner, queryRequest)).resolves.toHaveProperty('state', state)
+    }
+  })
+
+  it.each(['failed', 'cancelled'] as const)('releases immediately %s export jobs and destinations', async (state) => {
+    const { broker, client, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    client.export.mockImplementation(async () => terminalSnapshot(snapshot(100 + client.export.mock.calls.length), state))
+    for (let index = 0; index < 70; index++) {
+      native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, `Export ${index}`))
+      const output = await broker.selectOutput(owner, 'Export')
+      await expect(broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+        output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+        generations: null, living: 'exclude' })).resolves.toHaveProperty('state', state)
+    }
+  })
+
   it('counts submitted inspections awaiting a result against the source bound', async () => {
     const { broker, client, owner } = await fixture()
     for (let index = 0; index < 8; index++) await broker.inspect(owner, grant)

@@ -117,7 +117,9 @@ describe('unpublished unpacked native package', () => {
     await activateWithKeyboard('a=Tasks')
     await waitText('Task activity')
     await activateWithKeyboard('a=RootsMagic')
-    await waitText('Choose a RootsMagic source to begin.')
+    await waitText('Source active:')
+    await clickButton('Discard active source')
+    await waitText('The RootsMagic source was discarded.')
     await writeFile(evidence, `${JSON.stringify({
       schemaVersion: 1,
       kind: 'ancestryllm-packaged-rootsmagic-workbench',
