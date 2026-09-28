@@ -9,13 +9,19 @@ import hmac
 import importlib
 import secrets
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from ancestryllm.application.operation_receipts import (
+    SCHEMA_VERSION as OPERATION_RECEIPT_SCHEMA_VERSION,
+)
+from ancestryllm.application.operation_receipts import OperationReceipt, OperationReceiptOutcome
 from ancestryllm.core.errors import (
     ProviderError,
+    StorageError,
     is_provider_cancellation,
     normalize_provider_error,
 )
@@ -33,6 +39,7 @@ from ancestryllm.llm.execution import (
 from ancestryllm.llm.policy import ConsentGrant, ConsentPolicy
 from ancestryllm.llm.validation import validate_structured_output
 from ancestryllm.storage.models import LlmRunModel
+from ancestryllm.storage.operation_receipts import OperationReceiptRepository
 
 if TYPE_CHECKING:
     import threading
@@ -71,6 +78,7 @@ class LLMService:
         cancellation_check: CancellationCheck | None = None,
         async_stream_queue_items: int = DEFAULT_ASYNC_STREAM_QUEUE_ITEMS,
         async_stream_max_chunk_bytes: int = DEFAULT_ASYNC_STREAM_MAX_CHUNK_BYTES,
+        receipts: OperationReceiptRepository | None = None,
     ) -> None:
         validate_async_stream_bounds(
             max_items=async_stream_queue_items,
@@ -86,6 +94,109 @@ class LLMService:
         self._explicit_cancellation_check = cancellation_check
         self._async_stream_queue_items = async_stream_queue_items
         self._async_stream_max_chunk_bytes = async_stream_max_chunk_bytes
+        self.receipts = receipts or OperationReceiptRepository(database)
+
+    def _receipt_id(self, operation_id: str, operation_type: str) -> str:
+        digest = hashlib.sha256(f"{operation_type}\0{operation_id}".encode()).hexdigest()
+        return f"receipt_{digest}"
+
+    def _receipt_pending(
+        self,
+        *,
+        operation_id: str,
+        operation_type: str,
+        started_at: str,
+        provider_id: str,
+        request_hash: str,
+    ) -> OperationReceipt:
+        return OperationReceipt(
+            schema_version=OPERATION_RECEIPT_SCHEMA_VERSION,
+            receipt_id=self._receipt_id(operation_id, operation_type),
+            logical_operation_id=operation_id,
+            operation_type=operation_type,
+            outcome=OperationReceiptOutcome.PENDING,
+            started_at=started_at,
+            completed_at=None,
+            duration_ms=None,
+            adapter_class="llm.service",
+            provider_class=provider_id,
+            authorization_ref="consent-policy-ref-v1",
+            policy_revision_ref="consent-policy-v1",
+            idempotency_digest=request_hash,
+            source_fingerprint=None,
+            target_fingerprint=None,
+            source_count=None,
+            target_count=None,
+            artifacts=(),
+            estimated_input_tokens=None,
+            estimated_output_tokens=None,
+            estimated_cost_usd=None,
+            provider_input_tokens=None,
+            provider_output_tokens=None,
+            provider_cost_usd=None,
+            error_code=None,
+            warnings=(),
+        )
+
+    def _initialize_receipt(self, receipt: OperationReceipt) -> None:
+        try:
+            self.receipts.create_pending(receipt)
+        except StorageError as exc:
+            raise ProviderError(
+                "OPERATION_RECEIPT_INIT_FAILED",
+                "The operation receipt could not be initialized before provider execution.",
+                details={"error_code": exc.code},
+            ) from exc
+
+    def _finalize_receipt(
+        self,
+        receipt: OperationReceipt,
+        *,
+        outcome: OperationReceiptOutcome,
+        provider_id: str | None = None,
+        provider_input_tokens: int | None = None,
+        provider_output_tokens: int | None = None,
+        provider_cost_usd: float | None = None,
+        error_code: str | None = None,
+        warnings: tuple[str, ...] = (),
+    ) -> None:
+        started = dt.datetime.fromisoformat(receipt.started_at)
+        completed = dt.datetime.now(dt.UTC)
+        terminal = replace(
+            receipt,
+            outcome=outcome,
+            completed_at=completed.isoformat(),
+            duration_ms=max(0, int((completed - started).total_seconds() * 1000)),
+            provider_class=provider_id or receipt.provider_class,
+            provider_input_tokens=provider_input_tokens,
+            provider_output_tokens=provider_output_tokens,
+            provider_cost_usd=provider_cost_usd,
+            error_code=error_code,
+            warnings=warnings,
+        )
+        self.receipts.finalize(terminal)
+
+    def _finalize_existing_receipt(
+        self,
+        *,
+        operation_id: str,
+        operation_type: str,
+        outcome: OperationReceiptOutcome,
+        error_code: str | None,
+    ) -> None:
+        receipt_id = self._receipt_id(operation_id, operation_type)
+        try:
+            receipt = self.receipts.get(receipt_id)
+        except StorageError:
+            return
+        if receipt.outcome is not OperationReceiptOutcome.PENDING:
+            return
+        self._finalize_receipt(
+            receipt,
+            outcome=outcome,
+            provider_id=receipt.provider_class,
+            error_code=error_code,
+        )
 
     @staticmethod
     def _request_metadata(request: GenerationRequest) -> tuple[str, str]:
@@ -343,6 +454,13 @@ class LLMService:
             )
             changed = result.rowcount == 1
             session.commit()
+            if changed:
+                self._finalize_existing_receipt(
+                    operation_id=run_id,
+                    operation_type="remote_llm_request",
+                    outcome=OperationReceiptOutcome.CANCELLED,
+                    error_code=error_code,
+                )
             return changed
 
     def reconcile_interrupted_stream_runs(self) -> int:
@@ -380,6 +498,13 @@ class LLMService:
                 ),
             )
             session.commit()
+            for run_id in run_ids:
+                self._finalize_existing_receipt(
+                    operation_id=run_id,
+                    operation_type="remote_llm_request",
+                    outcome=OperationReceiptOutcome.RECOVERED,
+                    error_code="CHAT_STREAM_RESTART_INTERRUPTED",
+                )
             return int(result.rowcount or 0)
 
     def generate(
@@ -399,6 +524,14 @@ class LLMService:
         started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
         cache_hit = False
+        receipt = self._receipt_pending(
+            operation_id=f"llm-generate:{secrets.token_hex(16)}",
+            operation_type="remote_llm_request",
+            started_at=started,
+            provider_id=planned_request.provider_id,
+            request_hash=request_hash,
+        )
+        self._initialize_receipt(receipt)
         try:
             with self.execution.admission(
                 self._execution_key(planned_request),
@@ -429,6 +562,16 @@ class LLMService:
                 input_payload=canonical if retain else None,
                 error_code=error.code,
             )
+            self._finalize_receipt(
+                receipt,
+                outcome=(
+                    OperationReceiptOutcome.CANCELLED
+                    if error.code == "PROVIDER_CANCELLED"
+                    else OperationReceiptOutcome.FAILED
+                ),
+                provider_id=planned_request.provider_id,
+                error_code=error.code,
+            )
             if error is exc:
                 raise
             raise error from exc
@@ -445,6 +588,15 @@ class LLMService:
             input_tokens=None if cache_hit else result.input_tokens,
             output_tokens=None if cache_hit else result.output_tokens,
             cost_usd=None if cache_hit else result.cost_usd,
+        )
+        self._finalize_receipt(
+            receipt,
+            outcome=OperationReceiptOutcome.SUCCEEDED,
+            provider_id=result.provider_id,
+            provider_input_tokens=None if cache_hit else result.input_tokens,
+            provider_output_tokens=None if cache_hit else result.output_tokens,
+            provider_cost_usd=None if cache_hit else result.cost_usd,
+            warnings=("cache_hit",) if cache_hit else (),
         )
         return result
 
@@ -532,6 +684,14 @@ class LLMService:
         canonical, request_hash = self._request_metadata(planned_request)
         started = dt.datetime.now(dt.UTC).isoformat()
         retain = bool(consent and consent.retain_payloads)
+        receipt = self._receipt_pending(
+            operation_id=f"llm-stream:{secrets.token_hex(16)}",
+            operation_type="remote_llm_request",
+            started_at=started,
+            provider_id=planned_request.provider_id,
+            request_hash=request_hash,
+        )
+        self._initialize_receipt(receipt)
         return self._stream_lifecycle(
             planned_request,
             consent,
@@ -540,6 +700,7 @@ class LLMService:
             request_hash=request_hash,
             started_at=started,
             retain=retain,
+            receipt=receipt,
         )
 
     def async_stream(
@@ -579,6 +740,14 @@ class LLMService:
         ):
             raise ValueError("maximum stream response characters must be positive")
         if audit_run_id is not None:
+            receipt = self._receipt_pending(
+                operation_id=audit_run_id,
+                operation_type="remote_llm_request",
+                started_at=started,
+                provider_id=planned_request.provider_id,
+                request_hash=request_hash,
+            )
+            self._initialize_receipt(receipt)
             self._begin_stream_run(
                 planned_request,
                 consent,
@@ -587,6 +756,15 @@ class LLMService:
                 started_at=started,
                 input_payload=canonical if retain else None,
             )
+        else:
+            receipt = self._receipt_pending(
+                operation_id=f"llm-async-stream:{secrets.token_hex(16)}",
+                operation_type="remote_llm_request",
+                started_at=started,
+                provider_id=planned_request.provider_id,
+                request_hash=request_hash,
+            )
+            self._initialize_receipt(receipt)
         return self._async_stream_lifecycle(
             planned_request,
             consent,
@@ -597,6 +775,7 @@ class LLMService:
             retain=retain,
             audit_run_id=audit_run_id,
             max_response_characters=max_response_characters,
+            receipt=receipt,
         )
 
     async def _async_stream_lifecycle(
@@ -611,6 +790,7 @@ class LLMService:
         retain: bool,
         audit_run_id: str | None,
         max_response_characters: int | None,
+        receipt: OperationReceipt,
     ) -> AsyncIterator[str]:
         response_hasher = hashlib.sha256()
         retained_chunks: list[str] | None = [] if retain else None
@@ -691,6 +871,18 @@ class LLMService:
                 stream_started=stream_started,
                 audit_run_id=audit_run_id,
             )
+            self._finalize_receipt(
+                receipt,
+                outcome=(
+                    OperationReceiptOutcome.CANCELLED
+                    if error.code == "PROVIDER_CANCELLED"
+                    else OperationReceiptOutcome.TIMED_OUT
+                    if error.code == "PROVIDER_TIMEOUT"
+                    else OperationReceiptOutcome.FAILED
+                ),
+                provider_id=planned_request.provider_id,
+                error_code=error.code,
+            )
             if isinstance(failure, GeneratorExit):
                 return
             if caller_cancelled:
@@ -709,6 +901,11 @@ class LLMService:
             input_payload=canonical if retain else None,
             output_payload=("".join(retained_chunks) if retained_chunks is not None else None),
             audit_run_id=audit_run_id,
+        )
+        self._finalize_receipt(
+            receipt,
+            outcome=OperationReceiptOutcome.SUCCEEDED,
+            provider_id=planned_request.provider_id,
         )
 
     def _produce_async_stream(
@@ -805,6 +1002,7 @@ class LLMService:
         request_hash: str,
         started_at: str,
         retain: bool,
+        receipt: OperationReceipt,
     ) -> Iterator[str]:
         response_hasher = hashlib.sha256()
         retained_chunks: list[str] | None = [] if retain else None
@@ -853,6 +1051,18 @@ class LLMService:
                 retained_chunks=retained_chunks,
                 stream_started=stream_started,
             )
+            self._finalize_receipt(
+                receipt,
+                outcome=(
+                    OperationReceiptOutcome.CANCELLED
+                    if error.code == "PROVIDER_CANCELLED"
+                    else OperationReceiptOutcome.TIMED_OUT
+                    if error.code == "PROVIDER_TIMEOUT"
+                    else OperationReceiptOutcome.FAILED
+                ),
+                provider_id=request.provider_id,
+                error_code=error.code,
+            )
             if isinstance(failure, GeneratorExit):
                 return
             if error is failure:
@@ -868,6 +1078,11 @@ class LLMService:
             response_hash=response_hasher.hexdigest(),
             input_payload=canonical if retain else None,
             output_payload="".join(retained_chunks) if retained_chunks is not None else None,
+        )
+        self._finalize_receipt(
+            receipt,
+            outcome=OperationReceiptOutcome.SUCCEEDED,
+            provider_id=request.provider_id,
         )
 
     def close(self) -> None:
