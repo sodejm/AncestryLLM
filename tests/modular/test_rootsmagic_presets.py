@@ -204,6 +204,49 @@ def test_capability_validation_rejects_malformed_schema_metadata(
 
 
 @pytest.mark.parametrize(
+    ("failure", "stage", "error_type"),
+    [
+        ("inspection", "inspection", "ValueError"),
+        ("metadata", "metadata", "AttributeError"),
+        ("table", "people_table", "none"),
+        ("columns", "people_columns", "none"),
+    ],
+)
+def test_schema_rejection_reports_only_structural_diagnostics(
+    source: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+    stage: str,
+    error_type: str,
+) -> None:
+    from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
+    from ancestryllm.core.errors import AncestryError
+
+    reader = RootsMagicReader([source.parent])
+
+    def inspect(path: Path) -> SimpleNamespace:
+        if failure == "inspection":
+            raise ValueError("/private/fictional/payload.rmtree: private SQL")
+        if failure == "metadata":
+            return SimpleNamespace(tables=(object(),))
+        if failure == "table":
+            return SimpleNamespace(tables=())
+        return SimpleNamespace(tables=(SimpleNamespace(name="PersonTable", columns=()),))
+
+    monkeypatch.setattr(reader, "inspect_schema", inspect)
+    with pytest.raises(AncestryError) as raised:
+        RootsMagicPresetService(reader).validate_capabilities(source, "people")
+
+    assert raised.value.code == "ROOTSMAGIC_SCHEMA_UNSUPPORTED"
+    assert caplog.messages == [
+        f"ROOTSMAGIC_SCHEMA_VALIDATION_FAILED: stage={stage} error_type={error_type}"
+    ]
+    assert "/private/fictional" not in caplog.text
+    assert "private SQL" not in caplog.text
+
+
+@pytest.mark.parametrize(
     "code", ["ROOTSMAGIC_QUERY_TIMEOUT", "FILE_INPUT_CHANGED", "ROOTSMAGIC_INPUT_INVALID"]
 )
 def test_schema_inspection_preserves_operational_errors(

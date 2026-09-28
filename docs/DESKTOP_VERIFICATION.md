@@ -479,7 +479,9 @@ identity is still required and its lookup time is measured separately.
 
 If a frozen runtime cannot parse a source schema, the smoke check forwards only
 an allowlisted exception type and, for a missing SQLGlot module, its validated
-module name. It excludes source paths, vendor SQL, exception messages, and raw
+module name. Schema validation also reports a fixed inspection, metadata, or
+required-record stage and an allowlisted error type. It excludes source paths,
+vendor SQL, exception messages, and raw
 subprocess output. Packaged settings interactions wait for preference persistence
 to re-enable the controls before changing the next preference.
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, cast
+import logging
+from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, cast
 from unicodedata import category
 
 from ancestryllm.application.operations import (
@@ -202,20 +203,26 @@ class RootsMagicPresetService:
     def _schema(self, path: Path, query_id: str) -> dict[str, TableSchema]:
         try:
             inspection = self.reader.inspect_schema(path)
+        except (AttributeError, TypeError, ValueError) as exc:
+            self._raise_schema_unsupported(query_id, stage="inspection", failure=exc)
+        try:
             schema = {table.name.casefold(): table for table in inspection.tables}
-        except (AttributeError, TypeError, ValueError):
-            self._raise_schema_unsupported(query_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            self._raise_schema_unsupported(query_id, stage="metadata", failure=exc)
         if not self._has(schema, "persontable", "personid"):
-            self._raise_schema_unsupported(query_id)
+            self._raise_schema_unsupported(
+                query_id,
+                stage="people_columns" if "persontable" in schema else "people_table",
+            )
         if query_id == "family_links" and not (
             self._has(schema, "familytable", "familyid", "fatherid", "motherid")
             and self._has(schema, "childtable", "familyid", "childid")
         ):
-            self._raise_schema_unsupported(query_id)
+            self._raise_schema_unsupported(query_id, stage="family_records")
         if query_id == "events" and not self._has(
             schema, "eventtable", "eventid", "ownerid", "ownertype"
         ):
-            self._raise_schema_unsupported(query_id)
+            self._raise_schema_unsupported(query_id, stage="event_records")
         return schema
 
     @staticmethod
@@ -321,7 +328,31 @@ class RootsMagicPresetService:
         )
 
     @staticmethod
-    def _raise_schema_unsupported(query_id: str) -> None:
+    def _raise_schema_unsupported(
+        query_id: str,
+        *,
+        stage: Literal[
+            "inspection",
+            "metadata",
+            "people_table",
+            "people_columns",
+            "family_records",
+            "event_records",
+        ],
+        failure: AttributeError | TypeError | ValueError | None = None,
+    ) -> NoReturn:
+        error_type = (
+            "AttributeError"
+            if isinstance(failure, AttributeError)
+            else "TypeError"
+            if isinstance(failure, TypeError)
+            else "ValueError"
+            if isinstance(failure, ValueError)
+            else "none"
+        )
+        logging.getLogger(__name__).warning(
+            "ROOTSMAGIC_SCHEMA_VALIDATION_FAILED: stage=%s error_type=%s", stage, error_type
+        )
         raise AncestryError(
             "ROOTSMAGIC_SCHEMA_UNSUPPORTED",
             "The selected RootsMagic tree does not support this browsing preset.",

@@ -29,10 +29,13 @@ if TYPE_CHECKING:
 
 TIMEOUT_SECONDS = 10.0
 _SCHEMA_DIAGNOSTIC = re.compile(
-    r"ROOTSMAGIC_SCHEMA_PARSE_FAILED: "
+    r"(?:ROOTSMAGIC_SCHEMA_PARSE_FAILED: "
     r"(?:Exception|AttributeError|ImportError|ModuleNotFoundError|TypeError|ValueError|"
     r"KeyError|IndexError|RuntimeError|RecursionError|OSError)"
-    r"(?: module=sqlglot(?:\.[a-z_]+)+)?$"
+    r"(?: module=sqlglot(?:\.[a-z_]+)+)?|"
+    r"ROOTSMAGIC_SCHEMA_VALIDATION_FAILED: "
+    r"stage=(?:inspection|metadata|people_table|people_columns|family_records|event_records) "
+    r"error_type=(?:AttributeError|TypeError|ValueError|none))$"
 )
 
 

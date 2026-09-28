@@ -106,6 +106,8 @@ def test_smoke_rejects_packaged_inspection_failure_without_private_payload(
             b"private SQL and /private/fictional/payload.rmtree\n"
             b"ROOTSMAGIC_SCHEMA_PARSE_FAILED: ModuleNotFoundError module=sqlglot.generators.sqlite\n"
             b"ROOTSMAGIC_SCHEMA_PARSE_FAILED: /private/fictional/payload.rmtree\n"
+            b"ROOTSMAGIC_SCHEMA_VALIDATION_FAILED: stage=people_columns error_type=none\n"
+            b"ROOTSMAGIC_SCHEMA_VALIDATION_FAILED: stage=/private/fictional error_type=none\n"
         )
         stderr.flush()
         return process
@@ -153,5 +155,6 @@ def test_smoke_rejects_packaged_inspection_failure_without_private_payload(
     assert "/private/fictional" not in str(caught.value)
     assert "private SQL" not in str(caught.value)
     assert "ModuleNotFoundError module=sqlglot.generators.sqlite" in str(caught.value)
+    assert "stage=people_columns error_type=none" in str(caught.value)
     assert "/api/v1/rootsmagic/sources" in requests
     assert process.terminated
