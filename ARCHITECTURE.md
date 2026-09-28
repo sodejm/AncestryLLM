@@ -1783,6 +1783,52 @@ developer has not installed local hooks.
 | Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. Issue #363 adds an Electron-Main-only container-control foundation with exact policy/plan validation and isolated native macOS arm64 lifecycle evidence. Issue #348 adds policy-bound acquisition and user-visible lifecycle management for an app-owned macOS arm64 Colima/Lima and Docker tool substrate. Issue #349 adds native Linux amd64/arm64 OCI and Compose evidence for a private probe gateway and optional dormant worker, with no published port and migration disabled. None of these activate a deployment profile or supported application container, and no remote runtime is supported. | The remaining G5-G7 controls, workload identity, secret/data lifecycle, operator activation runbooks, native packaged evidence, and independent review must pass before application-runtime availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
 
+## CORE-40 multi-adapter façade consumption and extraction evaluation
+
+Implemented adapter consumption is scoped to the boundaries below; complete
+typed DTO parity across terminal and HTTP adapters is not yet proven. The
+packaged Electron 0.6 support boundary is narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
+named provider, Tasks, and Chat surfaces remain source-level gates until
+target-matched packaged evidence passes. Read-only GEDCOM intake and root
+selection (`#115`) are implemented source-level gates with the same packaged
+evidence requirement. Genealogy mutation and RootsMagic desktop adapters remain
+future work and must consume the same application-service contracts rather than
+redefine behavior.
+
+- CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
+  `CommandExecutor` boundaries. Typed application façade coverage varies by
+  operation: RootsMagic terminal commands still use path-based service
+  convenience methods, so this shared dispatch does not prove complete DTO parity.
+- Within the authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes
+  translate strict OpenAPI/Pydantic payloads into transport-neutral application
+  operation requests and results; OpenAPI/Pydantic ownership remains adapter local.
+  The RootsMagic HTTP adapter tracked by `#119` remains future work.
+- The bounded Electron control shell keeps file grants, sidecar lifecycle, and
+  settings/keyring authority in Main/application layers. The sandboxed renderer
+  owns presentation only. Fixed authenticated routes and validated bridge
+  requests do not make source-level provider, Tasks, or Chat surfaces supported
+  packaged features;
+  those surfaces require target-matched evidence before a support claim.
+
+The extraction evaluation for GEDCOM and RootsMagic used the required criteria:
+independent consumer evidence, release cadence and dependency reduction impact,
+API stability and compatibility burden, test/security ownership and
+vulnerability-response obligations, SemVer/changelog load, cross-repository
+coordination cost, and `#131` parity/adversarial evidence readiness.
+
+The accepted dispositions in [ADR-0027](docs/ADR-0027-core-package-extraction-decision.md)
+feed CORE-42 `#170`:
+
+- GEDCOM: keep internal now (defer extraction). It remains the first extraction
+  candidate if an independent consumer and measured dependency/release-surface
+  reduction justify the added operational burden.
+- RootsMagic: keep internal (decline extraction). Existing internal façades serve
+  the current consumers; a separate release train would increase release and
+  vulnerability-response surface without a demonstrated compensating benefit.
+
+This evaluation must not delay or redefine signing and notarization scope tracked
+by `#132`.
+
 ## Non-goals and prohibited shortcuts
 
 The current release intentionally excludes:
