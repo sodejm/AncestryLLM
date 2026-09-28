@@ -329,8 +329,15 @@ def test_issue_103_opaque_file_grant_boundary_is_documented() -> None:
     assert "#114/#118/#131" in threat_model
 
 
-def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_decision() -> None:
+def _core_40_section() -> str:
+    heading = "## CORE-40 multi-adapter façade consumption and extraction evaluation"
     architecture = _read(_ARCHITECTURE)
+    assert heading in architecture
+    return heading + architecture.split(heading, 1)[1].split("\n## ", 1)[0]
+
+
+def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_decision() -> None:
+    architecture = _core_40_section()
     normalized = " ".join(architecture.split())
 
     assert "## CORE-40 multi-adapter façade consumption and extraction evaluation" in architecture
@@ -338,9 +345,8 @@ def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_de
         "CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and "
         "`CommandExecutor` boundaries" in normalized
     )
-    assert (
-        "The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict" in normalized
-    )
+    assert "authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes" in normalized
+    assert "translate strict OpenAPI/Pydantic payloads" in normalized
     assert "OpenAPI/Pydantic ownership remains adapter local." in normalized
     assert "packaged Electron 0.6 support boundary is narrower" in normalized
     assert "Home, Diagnostics, Settings, and onboarding form the supported core" in normalized
@@ -357,3 +363,26 @@ def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_de
     assert (
         "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
     )
+
+
+def test_core_40_qualifies_terminal_facade_coverage() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "Typed application façade coverage varies by operation" in normalized
+    assert (
+        "RootsMagic terminal commands still use path-based service convenience methods"
+        in normalized
+    )
+
+
+def test_core_40_keeps_rootsmagic_http_adapter_future() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "The RootsMagic HTTP adapter tracked by `#119` remains future work." in normalized
+
+
+def test_core_40_keeps_renderer_presentation_separate_from_privileged_authority() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "The sandboxed renderer owns presentation only." in normalized
+    assert "settings/keyring authority in Main/application layers" in normalized

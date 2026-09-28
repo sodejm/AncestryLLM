@@ -1763,24 +1763,27 @@ developer has not installed local hooks.
 
 ## CORE-40 multi-adapter façade consumption and extraction evaluation
 
-The implemented terminal and authenticated HTTP adapters use the shared
-application-service contracts. The packaged Electron 0.6 support boundary is
-narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
+Implemented adapter consumption is scoped to the boundaries below; complete
+typed DTO parity across terminal and HTTP adapters is not yet proven. The
+packaged Electron 0.6 support boundary is narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
 named provider, Tasks, and Chat surfaces remain source-level gates until
 target-matched packaged evidence passes. Genealogy and other domain desktop
 adapters remain future work and must consume the same application-service
 contracts rather than redefine behavior.
 
 - CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
-  `CommandExecutor` boundaries, then consume transport-neutral application DTOs.
-- The authenticated FastAPI adapter (`#11`, `#114`, `#119`) translates strict
-  OpenAPI/Pydantic payloads into the same application operation requests and
-  results used by terminal adapters; OpenAPI/Pydantic ownership remains adapter
-  local.
-- The bounded Electron control shell keeps file grants, sidecar lifecycle,
-  settings/keyring ownership, and presentation concerns in Main/application
-  layers. Fixed authenticated routes and validated bridge requests do not make
-  source-level provider, Tasks, or Chat surfaces supported packaged features;
+  `CommandExecutor` boundaries. Typed application façade coverage varies by
+  operation: RootsMagic terminal commands still use path-based service
+  convenience methods, so this shared dispatch does not prove complete DTO parity.
+- Within the authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes
+  translate strict OpenAPI/Pydantic payloads into transport-neutral application
+  operation requests and results; OpenAPI/Pydantic ownership remains adapter local.
+  The RootsMagic HTTP adapter tracked by `#119` remains future work.
+- The bounded Electron control shell keeps file grants, sidecar lifecycle, and
+  settings/keyring authority in Main/application layers. The sandboxed renderer
+  owns presentation only. Fixed authenticated routes and validated bridge
+  requests do not make source-level provider, Tasks, or Chat surfaces supported
+  packaged features;
   those surfaces require target-matched evidence before a support claim.
 
 The extraction evaluation for GEDCOM and RootsMagic used the required criteria:
