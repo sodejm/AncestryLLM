@@ -1791,9 +1791,10 @@ packaged Electron 0.6 support boundary is narrower: Home, Diagnostics, Settings,
 named provider, Tasks, and Chat surfaces remain source-level gates until
 target-matched packaged evidence passes. Read-only GEDCOM intake and root
 selection (`#115`) are implemented source-level gates with the same packaged
-evidence requirement. Genealogy mutation and RootsMagic desktop adapters remain
-future work and must consume the same application-service contracts rather than
-redefine behavior.
+evidence requirement. The RootsMagic workbench (`#119`) is also implemented as a
+source-level gate; its support claim requires target-matched packaged and manual
+acceptance evidence. Genealogy mutation remains future work and must consume the
+same application-service contracts rather than redefine behavior.
 
 - CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
   `CommandExecutor` boundaries. Typed application façade coverage varies by
@@ -1802,7 +1803,9 @@ redefine behavior.
 - Within the authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes
   translate strict OpenAPI/Pydantic payloads into transport-neutral application
   operation requests and results; OpenAPI/Pydantic ownership remains adapter local.
-  The RootsMagic HTTP adapter tracked by `#119` remains future work.
+  The native RootsMagic HTTP adapter (`#119`) implements six fixed routes over
+  the immutable-source query and export application-service contracts. It is
+  composed only for the private native sidecar mediation boundary.
 - The bounded Electron control shell keeps file grants, sidecar lifecycle, and
   settings/keyring authority in Main/application layers. The sandboxed renderer
   owns presentation only. Fixed authenticated routes and validated bridge

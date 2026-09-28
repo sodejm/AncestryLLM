@@ -370,10 +370,12 @@ def test_core_40_qualifies_terminal_facade_coverage() -> None:
     )
 
 
-def test_core_40_keeps_rootsmagic_http_adapter_future() -> None:
+def test_core_40_scopes_implemented_rootsmagic_http_adapter() -> None:
     normalized = " ".join(_core_40_section().split())
 
-    assert "The RootsMagic HTTP adapter tracked by `#119` remains future work." in normalized
+    assert "The native RootsMagic HTTP adapter (`#119`) implements six fixed routes" in normalized
+    assert "over the immutable-source query and export application-service contracts" in normalized
+    assert "target-matched packaged and manual acceptance evidence" in normalized
 
 
 def test_core_40_keeps_renderer_presentation_separate_from_privileged_authority() -> None:
@@ -383,14 +385,15 @@ def test_core_40_keeps_renderer_presentation_separate_from_privileged_authority(
     assert "settings/keyring authority in Main/application layers" in normalized
 
 
-def test_core_40_distinguishes_source_gedcom_intake_from_future_domain_adapters() -> None:
+def test_core_40_distinguishes_implemented_intake_from_future_genealogy_mutation() -> None:
     normalized = " ".join(_core_40_section().split())
 
     assert (
         "Read-only GEDCOM intake and root selection (`#115`) are implemented source-level gates"
         in normalized
     )
-    assert "Genealogy mutation and RootsMagic desktop adapters remain future work" in normalized
+    assert "RootsMagic workbench (`#119`) is also implemented as a source-level gate" in normalized
+    assert "Genealogy mutation remains future work" in normalized
 
 
 def test_core_40_preserves_separate_accepted_extraction_dispositions() -> None:
