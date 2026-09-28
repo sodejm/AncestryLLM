@@ -44,13 +44,13 @@ def test_adr_0027_preserves_required_safety_invariants() -> None:
         assert requirement in normalized
 
 
-def test_adr_0027_keeps_unreproduced_performance_observations_provisional() -> None:
+def test_adr_0027_bounds_reproduced_performance_evidence() -> None:
     normalized = " ".join(_read(ADR).split())
 
-    assert "have not been independently reproduced" in normalized
-    assert "the standard capture did not complete" in normalized
-    assert "do not satisfy the reproducible `capture` gate" in normalized
-    assert "are not acceptance evidence until reproduced" in normalized
+    assert "capture passes all 51 semantic nodes" in normalized
+    assert "A matched baseline comparison remains required" in normalized
+    assert "Historical private-helper observations remain provisional" in normalized
+    assert "are not acceptance evidence" in normalized
 
 
 def test_issue_170_report_records_methods_and_seven_run_medians() -> None:

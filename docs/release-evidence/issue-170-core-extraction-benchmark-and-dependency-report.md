@@ -3,7 +3,34 @@
 This report records the measured and architecture evidence used by
 ADR-0027 for GEDCOM and RootsMagic standalone-package extraction decisions.
 
-## Inputs and method
+## Reproduced public capture
+
+On 2026-09-27 the public `capture` command completed at source revision
+`8f79c0b93e093c8dedcde06c62593f2e0bdaeb62` on Darwin arm64,
+CPython 3.14.7. The checkout used the verified repository-local uv runtime
+from the delivery worktree, with the same locked dependencies. The command was:
+
+```bash
+PYTHONPATH=src /Users/justinsoderberg/.codex/worktrees/d308/AncestryLLM/.venv/bin/python scripts/characterize_core_contracts.py capture --output /private/tmp/core-extraction-pr501-capture.json
+```
+
+In a freshly verified setup, `.venv/bin/python` is the equivalent interpreter.
+The [raw capture](issue-170-core-extraction-capture-macos.json) records source,
+fixture, semantic and dependency digests, every sample, and environment identity.
+All five semantic groups and 51 test nodes pass, covering 13 fictional fixtures
+and 10 public façades. Seven runs of CLI cold start have median **1075.359 ms**
+and median peak RSS **100,466,688 bytes**. Seven runs of the representative warm
+offline GEDCOM merge (60 iterations per run) have median **1088.580 ms** and
+median peak RSS **57,311,232 bytes**; every measured run exceeds 500 ms.
+
+This completes a reproducible capture on this platform. It does not establish
+compliance with the 10% regression budgets: the inherited measurements below
+use a different OS and Python version and are not a matched baseline. A matched
+baseline comparison and target-matched packaged desktop parity under #131
+remain acceptance requirements. No cross-platform performance or desktop
+support claim follows from this capture.
+
+## Historical inputs and method
 
 - **Fixed corpus and semantic scope:** CORE-11/#160 characterization manifest
   (`tests/characterization/core_contracts_0_3_baseline.json`) and
