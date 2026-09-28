@@ -33,10 +33,10 @@ def test_core_extraction_decision_adr_is_linked_from_docs_navigation() -> None:
         assert "ADR-0027-core-package-extraction-decision.md" in text
 
 
-def test_core_extraction_performance_observations_are_not_acceptance_evidence() -> None:
+def test_core_extraction_performance_capture_preserves_acceptance_limits() -> None:
     normalized = " ".join(_ADR.read_text(encoding="utf-8").split())
 
-    assert "have not been independently reproduced" in normalized
-    assert "the standard capture did not complete" in normalized
-    assert "do not satisfy the reproducible `capture` gate" in normalized
-    assert "are not acceptance evidence until reproduced" in normalized
+    assert "all 51 semantic nodes" in normalized
+    assert "raw seven-run capture" in normalized
+    assert "matched baseline comparison remains required" in normalized
+    assert "Historical private-helper observations remain provisional" in normalized

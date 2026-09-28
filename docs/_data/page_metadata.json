@@ -221,6 +221,10 @@
     "title": "GEDCOM import smoke-test evidence — AncestryLLM",
     "description": "Reproducible evidence for the fictional GEDCOM importer smoke tests tracked by issue 10."
   },
+  "release-evidence/issue-170-core-extraction-benchmark-and-dependency-report.md": {
+    "title": "CORE-42 extraction benchmark and dependency report — AncestryLLM",
+    "description": "Measured CLI and architecture evidence used for CORE-42 standalone extraction decisions for GEDCOM and RootsMagic."
+  },
   "release-evidence/issue-453-test-suite-audit.md": {
     "title": "v0.7.0 test-suite consolidation audit — AncestryLLM",
     "description": "Before-and-after collection, runtime, coverage, and rationale for the issue 453 test-suite consolidation."

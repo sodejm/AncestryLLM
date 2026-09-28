@@ -62,12 +62,13 @@
 - [Desktop verification (released bounded shell and later changes)](DESKTOP_VERIFICATION.md)
 - [Desktop deployment (released bounded shell publication)](DEPLOYMENT.md)
 - [Release evidence index](release-evidence/README.md)
+- [CORE-42 extraction benchmark and dependency report](release-evidence/issue-170-core-extraction-benchmark-and-dependency-report.md)
 - [v0.7.0 test-suite audit](release-evidence/issue-453-test-suite-audit.md)
 
 ### Architecture and decisions
 
-- [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md)
 - [GEDCOM and RootsMagic extraction decision ADR](ADR-0027-core-package-extraction-decision.md)
+- [Local-first container and advanced remote deployment ADR](ADR-0026-local-first-container-remote-deployment.md)
 - [Electron and FastAPI desktop ADR](ADR-0025-electron-fastapi-desktop.md)
 - [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md)
 - [Core contracts baseline](CORE_CONTRACTS_BASELINE.md)

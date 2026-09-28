@@ -248,3 +248,26 @@ Interactive history is stored with owner-only permissions. Secret entry and
 secret-like commands are excluded from history and defensively redacted from
 persisted history. Do not paste credentials, private genealogy records, or
 prompt/response payloads into ordinary commands.
+
+
+## Operation receipt retention
+
+LLM operation receipts are persisted in the encrypted application database before
+provider execution. Receipts contain coded outcomes and bounded usage metadata;
+they exclude prompts, responses, credentials, raw paths, and genealogy payloads.
+The operation identity, initialized intent, authorization references, and estimates
+cannot change during terminalization. The first terminal outcome remains immutable.
+
+The default retention window is 30 days, configurable through the repository's
+`retention_days` argument from 1 to 3660 days. Terminalization starts the retention
+window. Pending receipts are retained until reconciliation produces a terminal
+outcome, including when their original expiry has passed; deleting an unresolved
+receipt would prevent crash recovery from recording its outcome. Queries and new
+receipt creation prune expired terminal records. This means unresolved operations
+can retain their minimal metadata beyond the configured terminal retention window.
+
+This implementation covers LLM lifecycle receipts. Receipt integration for all
+state-changing services, artifact publication, durable jobs, and adapter commands
+remains tracked in issue #201. Initializing a duplicate receipt fails closed;
+provider retry replay requires a matching durable operation result and is not
+provided by accepting a duplicate database row.

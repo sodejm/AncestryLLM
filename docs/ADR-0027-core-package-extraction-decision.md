@@ -23,12 +23,13 @@ provider behavior, and publication remain outside any reusable core.
 - **Dependency and import boundaries:** Architecture contracts enforce
   dependency direction and private-boundary imports, retaining exactly two
   legacy characterization import exceptions.
-- **Provisional performance observations:** The CORE-11/#160 method and fixed
-  fictional corpus remain authoritative. Existing CLI/offline-merge samples
-  and peak-RSS observations have not been independently reproduced, and the
-  standard capture did not complete. These observations do not satisfy the
-  reproducible `capture` gate and are not acceptance evidence until reproduced
-  through that gate.
+- **Reproduced performance capture:** The public CORE-11/#160 capture passes
+  all 51 semantic nodes on Darwin arm64 / CPython 3.14.7 at source revision
+  `8f79c0b93e093c8dedcde06c62593f2e0bdaeb62`. The linked
+  [benchmark report](release-evidence/issue-170-core-extraction-benchmark-and-dependency-report.md)
+  includes the raw seven-run capture. A matched baseline comparison remains
+  required before claiming compliance with regression budgets. Historical
+  private-helper observations remain provisional and are not acceptance evidence.
 - **Desktop parity:** #131 remains the packaged desktop parity gate; this
   decision does not change desktop support scope or adapter ownership.
 - **Release and security ownership:** A separate package would add SemVer and
