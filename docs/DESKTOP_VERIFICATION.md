@@ -460,11 +460,22 @@ browser reveal therefore require separate manual acceptance evidence.
 The PR #497 review regressions cover the 8 GiB source boundary, final-page
 offset, control-character normalization, retryable source discard, living-person
 redaction, stable path-free error codes, late inspection disposal, and fresh
-destination grants after failed or cancelled exports. The packaged scenario
-also checks source and WAL fingerprints, bounded pages, rooted redacted exports,
-digest agreement, and cancellation before publication. These fixes preserve
+destination grants after failed or cancelled exports. Python regressions check
+database and WAL fingerprints and cancellation around publication. The packaged
+scenario checks the database fingerprint, bounded pages, rooted redacted exports,
+digest agreement, retained source access after Task Center navigation, and
+explicit source disposal. These fixes preserve
 the existing service and desktop authority boundaries in `ARCHITECTURE.md` and
 the RootsMagic threat model; neither boundary changes.
+
+Additional review regressions require a trusted resolved source separately from
+the opaque public source reference, reject an excluded living export root,
+preserve source-session and capacity error codes, and compare the opened file
+descriptor with the picker-approved identity before and after hashing. The
+frozen sidecar smoke test runs fictional GEDCOM intake and RootsMagic inspection,
+paging, and disposal before Electron starts, with bounded polling and path-free
+failure codes. Packaged launch timings end at renderer readiness; process
+identity is still required and its lookup time is measured separately.
 
 The #119 acceptance criteria map to the following checks. Passing an automated
 check establishes its stated boundary; it does not substitute for the remaining

@@ -6,12 +6,15 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import contextlib
 import hashlib
 import hmac
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
@@ -47,14 +50,21 @@ def _minimal_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in allowed if name in os.environ}
 
 
-def _get_json(port: int, path: str, token: str) -> dict[str, object]:
+def _get_json(
+    port: int,
+    path: str,
+    token: str,
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         headers={
             "Authorization": f"Bearer {token}",
             "X-Ancestry-API-Version": API_CONTRACT,
             "X-Ancestry-App-Build": SIDECAR_BUILD,
+            **({"Content-Type": "application/json"} if payload is not None else {}),
         },
+        data=json.dumps(payload).encode() if payload is not None else None,
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
@@ -84,19 +94,122 @@ def _build_launch_frame(
     token: str,
     diagnostic_run_id: str,
     diagnostic_directory: str,
+    intake_directory: str | None = None,
 ) -> str:
     """Build the exact private frame required by the packaged sidecar."""
 
+    frame = {
+        "contract": API_CONTRACT,
+        "app_build": SIDECAR_BUILD,
+        "bearer_token": token,
+        "diagnostic_run_id": diagnostic_run_id,
+        "diagnostic_directory": diagnostic_directory,
+    }
+    if intake_directory is not None:
+        frame["gedcom_intake_directory"] = intake_directory
     return json.dumps(
-        {
-            "contract": API_CONTRACT,
-            "app_build": SIDECAR_BUILD,
-            "bearer_token": token,
-            "diagnostic_run_id": diagnostic_run_id,
-            "diagnostic_directory": diagnostic_directory,
-        },
+        frame,
         separators=(",", ":"),
     )
+
+
+def _job_result(port: int, token: str, job: dict[str, object]) -> dict[str, object]:
+    job_id = job.get("job_id")
+    if not isinstance(job_id, str) or not job_id:
+        _fail("packaged RootsMagic probe did not return a job")
+    deadline = time.monotonic() + TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        snapshot = _get_json(port, f"/api/v1/jobs/{job_id}", token)
+        state = snapshot.get("state")
+        if state == "completed":
+            response = _get_json(port, f"/api/v1/rootsmagic/jobs/{job_id}/result", token)
+            result = response.get("result")
+            if not isinstance(result, dict):
+                _fail("packaged RootsMagic probe returned an invalid result")
+            return result
+        if state in {"failed", "cancelled"}:
+            code = snapshot.get("error_code")
+            if (
+                isinstance(code, str)
+                and code.startswith("ROOTSMAGIC_")
+                and len(code) <= 80
+                and all(character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789" for character in code)
+            ):
+                _fail(f"packaged RootsMagic probe failed: {code}")
+            _fail("packaged RootsMagic probe failed")
+        time.sleep(0.05)
+    _fail("packaged RootsMagic probe timed out")
+
+
+def _probe_rootsmagic(port: int, token: str, root: Path, intake: Path) -> None:
+    source = root / "fictional.rmtree"
+    with contextlib.closing(sqlite3.connect(source)) as connection, connection:
+        connection.executescript(
+            "CREATE TABLE PersonTable (PersonID INTEGER PRIMARY KEY, Sex INTEGER, Living INTEGER);"
+            "CREATE TABLE NameTable (NameID INTEGER PRIMARY KEY, OwnerID INTEGER, "
+            "Given TEXT, Surname TEXT, IsPrimary INTEGER);"
+            "INSERT INTO PersonTable VALUES (1, 0, 0);"
+            "INSERT INTO NameTable VALUES (1, 1, 'Fictional', 'Example', 1);"
+        )
+    fingerprint = hashlib.sha256(source.read_bytes()).hexdigest()
+    capability = os.urandom(32).hex()
+    manifest = intake / f"{capability}.rootsmagic-source.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "path": str(source),
+                "size_bytes": source.stat().st_size,
+                "sha256": fingerprint,
+                "friendly_name": source.name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest.chmod(0o600)
+    inspection = _job_result(
+        port,
+        token,
+        _get_json(
+            port,
+            "/api/v1/rootsmagic/sources",
+            token,
+            {"schema_version": 1, "source_capability": capability},
+        ),
+    )
+    source_ref = inspection.get("source_ref")
+    if not isinstance(source_ref, str) or len(source_ref) != 64:
+        _fail("packaged RootsMagic probe did not return a source")
+    try:
+        query = _job_result(
+            port,
+            token,
+            _get_json(
+                port,
+                "/api/v1/rootsmagic/queries",
+                token,
+                {
+                    "schema_version": 1,
+                    "source_ref": source_ref,
+                    "query_id": "people",
+                    "offset": 0,
+                    "page_size": 25,
+                },
+            ),
+        )
+        if query.get("returned_rows") != 1 or query.get("next_offset") is not None:
+            _fail("packaged RootsMagic query returned unexpected fictional data")
+    finally:
+        disposal = _get_json(
+            port,
+            f"/api/v1/rootsmagic/sources/{source_ref}/discard",
+            token,
+            {"schema_version": 1},
+        )
+        if disposal != {"schema_version": 1}:
+            _fail("packaged RootsMagic probe did not dispose its source")
+    if hashlib.sha256(source.read_bytes()).hexdigest() != fingerprint:
+        _fail("packaged RootsMagic probe changed its source")
 
 
 def smoke(executable: Path) -> None:
@@ -104,16 +217,22 @@ def smoke(executable: Path) -> None:
 
     token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
     with tempfile.TemporaryDirectory(prefix="ancestryllm-sidecar-smoke-") as working_directory:
-        diagnostic_directory = str(Path(working_directory).resolve() / "diagnostics")
+        root = Path(working_directory).resolve()
+        diagnostic_directory = str(root / "diagnostics")
+        intake = root / "intake"
+        intake.mkdir(mode=0o700)
         launch_frame = _build_launch_frame(
             token,
             str(uuid4()),
             diagnostic_directory,
+            str(intake),
         )
+        environment = _minimal_environment()
+        environment["ANCESTRYLLM_NATIVE_VERIFICATION_EPHEMERAL_WORKSPACE"] = "1"
         process = subprocess.Popen(  # noqa: S603 - explicit artifact under test, no shell
             [str(executable.resolve())],
             cwd=working_directory,
-            env=_minimal_environment(),
+            env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -156,6 +275,7 @@ def smoke(executable: Path) -> None:
             capabilities = _get_json(port, "/api/v1/capabilities", token)
             if capabilities.get("modules") != []:
                 _fail("packaged control sidecar unexpectedly exposed domain capabilities")
+            _probe_rootsmagic(port, token, root, intake)
         finally:
             if process.poll() is None:
                 process.terminate()

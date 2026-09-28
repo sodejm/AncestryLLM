@@ -184,12 +184,17 @@ def test_packaged_warm_launch_timing_starts_at_the_replacement_process() -> None
     assert "async function processStartedAt(pid: number): Promise<number>" in source
     assert "const previousApplicationPid = await mainPid()" in scenario
     assert "await browser.reloadSession()" in scenario
+    assert "const warmLaunchMs = await measureWarmLaunchMs(" in scenario
+    assert "() => expectFocusedHeading('Home')" in scenario
     assert (
-        "const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))"
-        in scenario
+        "async () => processStartedAt(await mainPid(new Set([previousApplicationPid])))" in scenario
     )
-    assert "const warmLaunchedAt = await processStartedAt(replacementApplicationPid)" in scenario
-    assert "const warmLaunchMs = Date.now() - warmLaunchedAt" in scenario
+    measurement = (DESKTOP / "e2e" / "packaged-launch-metrics.ts").read_text(encoding="utf-8")
+    assert measurement.index("await waitForReady()") < measurement.index("const readyAt = now()")
+    assert measurement.index("const readyAt = now()") < measurement.index(
+        "const startedAt = await readProcessStartedAt()"
+    )
+    assert "return readyAt - startedAt" in measurement
     assert "const warmStartedAt = Date.now()" not in scenario
 
 

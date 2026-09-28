@@ -79,6 +79,33 @@ def test_people_literal_filter_and_stable_pages(source: Path) -> None:
     assert second.next_offset is None
 
 
+@pytest.mark.parametrize("entry_point", ["preset", "application"])
+def test_preset_execution_uses_resolved_source_separately_from_opaque_reference(
+    source: Path, entry_point: str
+) -> None:
+    from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
+    from ancestryllm.application.operations import RootsMagicPresetQueryRequest
+    from ancestryllm.core.config import AppConfig
+    from ancestryllm.rootsmagic.service import RootsMagicService
+
+    before = hashlib.sha256(source.read_bytes()).hexdigest()
+    request = RootsMagicPresetQueryRequest("opaque-session-capability", "people", None, "", 0, 2)
+    if entry_point == "preset":
+        page = RootsMagicPresetService(RootsMagicReader([source.parent])).execute(
+            request, source=source
+        )
+    else:
+        config = AppConfig(
+            config_path=source.parent / "config.toml",
+            data_dir=source.parent / "data",
+            family_tree_dirs=[source.parent],
+        )
+        page = RootsMagicService(config).execute_preset(request, source=source)
+    assert [row.values[0] for row in page.rows] == [1, 2]
+    assert page.next_offset == 2
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == before
+
+
 def test_preset_schema_and_page_share_one_source_connection(
     source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

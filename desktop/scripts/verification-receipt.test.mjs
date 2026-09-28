@@ -140,7 +140,8 @@ function rootsMagicEvidence() {
       sourceInspection: true, peoplePaging: true, familyLinks: true, events: true,
       rootedPortableExport: true, livingExcluded: true, unrelatedExcluded: true,
       digestAgreement: true, sourceUnchanged: true, artifactReveal: true,
-      sourceWorkspaceReset: true, keyboardWorkflow: true, automatedWcagChecks: true,
+      sourceWorkspaceRetained: true, sourceDisposal: true,
+      keyboardWorkflow: true, automatedWcagChecks: true,
     },
   }
 }

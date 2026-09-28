@@ -480,6 +480,16 @@ function fileGrantFailure<T>(cause: unknown): BridgeResult<T> {
         return error(cause.reason, 'The GEDCOM inspection is no longer available.', 'Select the file again and retry the inspection.')
       case 'GEDCOM_ROOT_CURSOR_INVALID':
         return error(cause.reason, 'The GEDCOM root query cursor is no longer valid.', 'Refresh the root list and try again.')
+      case 'ROOTSMAGIC_CAPABILITY_INVALID':
+        return error(cause.reason, 'The RootsMagic permission is no longer valid.', 'Select the source or destination again and retry.')
+      case 'ROOTSMAGIC_RESULT_UNAVAILABLE':
+        return error(cause.reason, 'The RootsMagic result is no longer available.', 'Run the operation again.')
+      case 'ROOTSMAGIC_SOURCE_UNAVAILABLE':
+        return error(cause.reason, 'The RootsMagic source is no longer available.', 'Select the file again and retry the inspection.')
+      case 'ROOTSMAGIC_JOB_CAPACITY':
+        return error(cause.reason, 'RootsMagic operations are at capacity.', 'Wait for another operation to finish and try again.')
+      case 'ROOTSMAGIC_SOURCE_CAPACITY':
+        return error(cause.reason, 'RootsMagic source sessions are at capacity.', 'Discard an unused source and try again.')
     }
     return error('SIDECAR_REQUEST_FAILED', 'The local service could not complete the request.', 'Check the local service status and try again.')
   }

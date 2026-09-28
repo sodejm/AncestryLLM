@@ -675,6 +675,13 @@ class RootsMagicMapper:
                 "The selected root person is not present in this RootsMagic source.",
             )
 
+        if living == "exclude" and root_person_id in living_ids:
+            raise AncestryError(
+                "ROOTSMAGIC_EXPORT_ROOT_EXCLUDED",
+                "The selected root person is excluded by the living-person policy.",
+                "Choose anonymize or include, or select a different root person.",
+            )
+
         selected_rows = [
             row
             for person_id, row in people_by_id.items()

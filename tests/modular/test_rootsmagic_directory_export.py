@@ -45,7 +45,7 @@ def fictional_tree(tmp_path: Path) -> Path:
         INSERT INTO NameTable VALUES
             (1, 1, 'Example', 'Alex', 1),
             (2, 2, 'Example', 'Blair', 1),
-            (3, 3, 'Private', 'Living', 1),
+            (3, 3, 'Confidential', 'Linden', 1),
             (4, 4, 'Example', 'Dana', 1),
             (5, 5, 'Elsewhere', 'Emery', 1);
         INSERT INTO FamilyTable VALUES (10, 1, 2), (11, 3, 4);
@@ -129,7 +129,7 @@ def test_default_export_is_rooted_private_and_digest_consistent(
     assert "0 @I1@ INDI" in gedcom
     assert "0 @I2@ INDI" in gedcom
     assert "0 @I3@ INDI" in gedcom
-    assert "Living /Private/" not in gedcom
+    assert "Linden /Confidential/" not in gedcom
     assert "Dana /Example/" in gedcom
     assert "0 @I4@ INDI" not in gedcom
     assert "0 @I5@ INDI" not in gedcom
@@ -170,6 +170,46 @@ def test_export_rejects_missing_root_without_publishing(
     assert sha256_file(fictional_tree) == before
 
 
+def test_export_rejects_excluded_living_root_without_publishing(
+    tmp_path: Path, fictional_tree: Path
+) -> None:
+    target = tmp_path / "excluded-living-root"
+    before = sha256_file(fictional_tree)
+    with _coordinator(tmp_path) as coordinator, pytest.raises(AncestryError) as captured:
+        _exporter(tmp_path).export(
+            fictional_tree, target, root_person_id="3", living="exclude", coordinator=coordinator
+        )
+    assert captured.value.code == "ROOTSMAGIC_EXPORT_ROOT_EXCLUDED"
+    assert not target.exists()
+    assert not list(tmp_path.glob(".ancestry-export-*"))
+    assert sha256_file(fictional_tree) == before
+
+
+@pytest.mark.parametrize("living", ["redact", "include"])
+def test_export_preserves_living_root_under_supported_inclusion_policies(
+    tmp_path: Path, fictional_tree: Path, living: str
+) -> None:
+    before = sha256_file(fictional_tree)
+    with _coordinator(tmp_path) as coordinator:
+        result = _exporter(tmp_path).export(
+            fictional_tree,
+            tmp_path / "included-living-root",
+            root_person_id="3",
+            living=living,
+            coordinator=coordinator,
+        )
+    gedcom = result.gedcom_path.read_text(encoding="utf-8")
+    assert "0 @I3@ INDI" in gedcom
+    assert ("Linden /Confidential/" in gedcom) is (living == "include")
+    assert ("Living /Private/" in gedcom) is (living == "redact")
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert (
+        manifest["files"]["tree.ged"]["sha256"]
+        == hashlib.sha256(result.gedcom_path.read_bytes()).hexdigest()
+    )
+    assert sha256_file(fictional_tree) == before
+
+
 def test_descendant_scope_honors_generation_limit_and_living_policy(
     tmp_path: Path, fictional_tree: Path
 ) -> None:
@@ -189,7 +229,7 @@ def test_descendant_scope_honors_generation_limit_and_living_policy(
     gedcom = result.gedcom_path.read_text(encoding="utf-8")
     assert "0 @I1@ INDI" in gedcom
     assert "0 @I2@ INDI" in gedcom
-    assert "Living /Private/" in gedcom
+    assert "Linden /Confidential/" in gedcom
     assert "Blair /Example/" not in gedcom
     assert "Dana /Example/" not in gedcom
     assert "Emery /Elsewhere/" not in gedcom

@@ -559,6 +559,23 @@ describe('desktop IPC handlers', () => {
     expect(rootsMagic.presets).toHaveBeenCalledWith(expect.any(AbortSignal))
   })
 
+  it.each([
+    'ROOTSMAGIC_CAPABILITY_INVALID', 'ROOTSMAGIC_RESULT_UNAVAILABLE', 'ROOTSMAGIC_SOURCE_UNAVAILABLE',
+    'ROOTSMAGIC_JOB_CAPACITY', 'ROOTSMAGIC_SOURCE_CAPACITY',
+  ] as const)('preserves %s without forwarding private error details', async (code) => {
+    const failure = new SidecarClientError(code)
+    failure.message = '/private/family-tree.rmtree: private payload\u0000'
+    const rootsMagic = {
+      inspect: vi.fn(), presets: vi.fn().mockRejectedValue(failure), query: vi.fn(),
+      selectOutput: vi.fn(), export: vi.fn(), result: vi.fn(), discard: vi.fn(), reveal: vi.fn(),
+      observeJob: vi.fn(), revokeGrant: vi.fn(), revokeOwner: vi.fn(), revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+    const response = await handlers.get(desktopChannels.getRootsMagicPresets)!(event())
+    expect(response).toMatchObject({ ok: false, error: { code } })
+    expect(JSON.stringify(response)).not.toMatch(/family-tree|private payload|\\u0000/)
+  })
+
   it('authorizes and bounds GEDCOM intake before entering its native owner port', async () => {
     const intake = {
       inspect: vi.fn().mockResolvedValue(runningJob),

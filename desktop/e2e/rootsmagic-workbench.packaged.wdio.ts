@@ -117,7 +117,9 @@ describe('unpublished unpacked native package', () => {
     await activateWithKeyboard('a=Tasks')
     await waitText('Task activity')
     await activateWithKeyboard('a=RootsMagic')
-    await waitText('Source active:')
+    await waitText('Source access: active')
+    await waitText('Events results')
+    assert.ok((await $('table').getText()).includes('Fictional County'))
     await clickButton('Discard active source')
     await waitText('The RootsMagic source was discarded.')
     await writeFile(evidence, `${JSON.stringify({
@@ -129,7 +131,8 @@ describe('unpublished unpacked native package', () => {
       observations: {
         sourceInspection: true, peoplePaging: true, familyLinks: true, events: true,
         rootedPortableExport: true, livingExcluded: true, unrelatedExcluded: true,
-        digestAgreement: true, sourceUnchanged: true, artifactReveal: true, sourceWorkspaceReset: true,
+        digestAgreement: true, sourceUnchanged: true, artifactReveal: true,
+        sourceWorkspaceRetained: true, sourceDisposal: true,
         keyboardWorkflow: true, automatedWcagChecks: true,
       },
     }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })

@@ -142,7 +142,8 @@ export function validateRootsMagicEvidence(value, target) {
   const observations = [
     'sourceInspection', 'peoplePaging', 'familyLinks', 'events', 'rootedPortableExport',
     'livingExcluded', 'unrelatedExcluded', 'digestAgreement', 'sourceUnchanged',
-    'artifactReveal', 'sourceWorkspaceReset', 'keyboardWorkflow', 'automatedWcagChecks',
+    'artifactReveal', 'sourceWorkspaceRetained', 'sourceDisposal',
+    'keyboardWorkflow', 'automatedWcagChecks',
   ].sort()
   assert.deepEqual(Object.keys(value.observations ?? {}).sort(), observations, 'RootsMagic evidence observations are incomplete')
   for (const observation of observations) {

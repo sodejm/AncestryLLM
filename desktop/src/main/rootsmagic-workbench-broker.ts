@@ -1,6 +1,6 @@
 /** Keeps RootsMagic filesystem authority in Electron Main while the sidecar handles data work. */
 import { createHash, randomBytes } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath, unlink, type FileHandle } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import type { FileGrantId, JobRequest, JobSnapshot } from '../shared-contract/desktop'
@@ -14,7 +14,7 @@ import type {
   RootsMagicQueryRequest,
   RootsMagicSourceReferenceRequest,
 } from '../shared-contract/rootsmagic'
-import { FileGrantBrokerError, type FileGrantBroker } from './file-grant-broker'
+import { FileGrantBrokerError, type FileGrantBroker, type FileFingerprint } from './file-grant-broker'
 
 const sourceLimit = 8
 const outputLimit = 16
@@ -127,18 +127,29 @@ async function writeManifest(directory: string, suffix: string, value: object): 
   }
 }
 
-async function inspectSource(path: string, maximum: number, checkpoint: () => void): Promise<Readonly<{ size: number; sha256: string }>> {
+function matchesApprovedSource(stat: Stats, approved: Readonly<FileFingerprint>, maximum: number): boolean {
+  return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1
+    && Number.isSafeInteger(stat.size) && stat.size >= 0 && stat.size <= maximum
+    && stat.dev === approved.dev && stat.ino === approved.ino && stat.mode === approved.mode
+    && stat.nlink === approved.nlink && stat.size === approved.size
+    && stat.mtimeMs === approved.mtimeMs && stat.ctimeMs === approved.ctimeMs
+}
+
+async function inspectSource(path: string, maximum: number, approved: Readonly<FileFingerprint>, checkpoint: () => void): Promise<Readonly<{ size: number; sha256: string }>> {
   checkpoint()
   const before = await lstat(path)
   checkpoint()
-  if (!before.isFile() || before.isSymbolicLink() || before.size > maximum) fail('FILE_SELECTION_INVALID')
+  if (!matchesApprovedSource(before, approved, maximum)) fail('FILE_SELECTION_INVALID')
   const canonical = await realpath(path)
   checkpoint()
   if (canonical !== resolve(path)) fail('FILE_SELECTION_INVALID')
-  const handle = await open(path, constants.O_RDONLY)
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   const hash = createHash('sha256')
   const buffer = Buffer.allocUnsafe(1024 * 1024)
   try {
+    const opened = await handle.stat()
+    checkpoint()
+    if (!matchesApprovedSource(opened, approved, maximum)) fail('FILE_SELECTION_INVALID')
     let position = 0
     while (position < before.size) {
       checkpoint()
@@ -148,13 +159,15 @@ async function inspectSource(path: string, maximum: number, checkpoint: () => vo
       hash.update(buffer.subarray(0, bytesRead))
       position += bytesRead
     }
+    const finished = await handle.stat()
+    checkpoint()
+    if (!matchesApprovedSource(finished, approved, maximum)) fail('FILE_SELECTION_INVALID')
   } finally {
     await handle.close()
   }
   const after = await lstat(path)
   checkpoint()
-  if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
-    || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) fail('FILE_SELECTION_INVALID')
+  if (!matchesApprovedSource(after, approved, maximum)) fail('FILE_SELECTION_INVALID')
   return Object.freeze({ size: before.size, sha256: hash.digest('hex') })
 }
 
@@ -254,7 +267,7 @@ export class RootsMagicWorkbenchBroker {
       const grant = await this.files.resolveReadGrant(owner, grantId, 'rootsmagic-read')
       this.requireActive(owner, generation, signal)
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
-      const inspected = await inspectSource(grant.path, grant.maxBytes, () => {
+      const inspected = await inspectSource(grant.path, grant.maxBytes, grant.fingerprint, () => {
         this.requireActive(owner, generation, signal)
         if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
       })

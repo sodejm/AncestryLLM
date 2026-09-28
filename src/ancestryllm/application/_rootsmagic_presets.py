@@ -85,9 +85,11 @@ class RootsMagicPresetService:
             ),
         )
 
-    def execute(self, request: RootsMagicPresetQueryRequest) -> RootsMagicResultPage:
-        """Execute a typed preset request through the application boundary."""
-        return self.query(request.source_ref, request)
+    def execute(
+        self, request: RootsMagicPresetQueryRequest, *, source: str | Path
+    ) -> RootsMagicResultPage:
+        """Execute a preset using the trusted source resolved by the calling adapter."""
+        return self.query(source, request)
 
     def validate_capabilities(self, source: str | Path, query_id: str) -> None:
         """Raise a stable error when a source cannot support a fixed preset."""

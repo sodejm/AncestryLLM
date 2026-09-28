@@ -101,10 +101,12 @@ class RootsMagicService:
 
         return self.preset_service.definitions()
 
-    def execute_preset(self, request: RootsMagicPresetQueryRequest) -> RootsMagicResultPage:
+    def execute_preset(
+        self, request: RootsMagicPresetQueryRequest, *, source: str | Path
+    ) -> RootsMagicResultPage:
         """Execute a bounded preset query without exposing arbitrary SQL."""
 
-        return self.preset_service.execute(request)
+        return self.preset_service.execute(request, source=source)
 
     def export(
         self,

@@ -12,6 +12,7 @@ import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import { matchesPackagedMainProcess, observedRenderers, parsePosixProcessSnapshot, type ProcessRecord } from './process-records'
 import { closeFinalWindowAndVerifyExit } from './packaged-window-close'
+import { measureWarmLaunchMs } from './packaged-launch-metrics'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -682,10 +683,10 @@ describe('unpublished unpacked native package', () => {
 
     const previousApplicationPid = await mainPid()
     await browser.reloadSession()
-    const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))
-    const warmLaunchedAt = await processStartedAt(replacementApplicationPid)
-    await expectFocusedHeading('Home')
-    const warmLaunchMs = Date.now() - warmLaunchedAt
+    const warmLaunchMs = await measureWarmLaunchMs(
+      () => expectFocusedHeading('Home'),
+      async () => processStartedAt(await mainPid(new Set([previousApplicationPid]))),
+    )
     assert.equal((await $$('h1=Welcome to AncestryLLM')).length, 0)
     assert.deepEqual(await browser.execute(() => ({
       theme: document.documentElement.dataset.theme,

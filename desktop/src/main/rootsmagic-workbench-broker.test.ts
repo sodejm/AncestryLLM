@@ -1,5 +1,5 @@
 /** Exercises native capability ownership and revocation at asynchronous handoff boundaries. */
-import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +41,8 @@ async function fixture() {
   directories.push(directory)
   const path = join(directory, 'Fictional.rmtree')
   await writeFile(path, 'fictional immutable source bytes')
-  const resolved = { grantId: grant, purpose: 'rootsmagic-read' as const, access: 'read' as const, path, maxBytes: 1024 }
+  const resolved = { grantId: grant, purpose: 'rootsmagic-read' as const, access: 'read' as const,
+    path, maxBytes: 1024, fingerprint: await lstat(path) }
   const files = { resolveReadGrant: vi.fn(async () => resolved), revokeGrant: vi.fn() }
   let jobId = 0
   const client = {
@@ -65,6 +66,40 @@ async function fixture() {
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
 describe('native RootsMagic workbench broker', () => {
+  it('rejects an opened inode that differs from the approved source while the path stays unchanged', async () => {
+    const { broker, client, owner, directory, path } = await fixture()
+    const original = await readFile(path)
+    const otherPath = join(directory, 'Other.rmtree')
+    await writeFile(otherPath, original)
+    const otherIdentity = await lstat(otherPath)
+    const handle = await open(path, 'r')
+    const prototype = Object.getPrototypeOf(handle) as { stat: typeof handle.stat }
+    await handle.close()
+    const stat = vi.spyOn(prototype, 'stat').mockResolvedValueOnce(otherIdentity)
+    try {
+      await expect(broker.inspect(owner, grant)).rejects.toThrow('FILE_SELECTION_INVALID')
+      expect(stat).toHaveBeenCalledOnce()
+      expect(client.inspect).not.toHaveBeenCalled()
+      expect(await readFile(path)).toEqual(original)
+    } finally {
+      stat.mockRestore()
+    }
+  })
+
+  it('rejects a source replaced after its grant was resolved', async () => {
+    const { broker, client, files, owner, path } = await fixture()
+    const original = await readFile(path)
+    const approved = await lstat(path)
+    files.resolveReadGrant.mockImplementationOnce(async () => {
+      await rename(path, `${path}.old`)
+      await writeFile(path, original)
+      return { grantId: grant, purpose: 'rootsmagic-read', access: 'read', path,
+        maxBytes: 1024, fingerprint: approved }
+    })
+    await expect(broker.inspect(owner, grant)).rejects.toThrow('FILE_SELECTION_INVALID')
+    expect(client.inspect).not.toHaveBeenCalled()
+  })
+
   it('keeps a source and its query authority retryable when sidecar disposal fails', async () => {
     const { broker, client, owner, inspect } = await fixture()
     await inspect()
@@ -102,7 +137,7 @@ describe('native RootsMagic workbench broker', () => {
     const path = join(directory, 'Fictional\u200b.rmtree')
     await writeFile(path, 'fictional immutable source bytes')
     files.resolveReadGrant.mockResolvedValueOnce({ grantId: grant, purpose: 'rootsmagic-read',
-      access: 'read', path, maxBytes: 1024 })
+      access: 'read', path, maxBytes: 1024, fingerprint: await lstat(path) })
     client.inspect.mockImplementationOnce(async (...args: unknown[]) => {
       const capability = args[0] as string
       const manifest = JSON.parse(await readFile(join(directory, `${capability}.rootsmagic-source.json`), 'utf8'))
@@ -208,7 +243,7 @@ describe('native RootsMagic workbench broker', () => {
     const { broker, client, files, owner, path } = await fixture()
     await writeFile(path, Buffer.alloc(3 * 1024 * 1024))
     files.resolveReadGrant.mockResolvedValueOnce({ grantId: grant, purpose: 'rootsmagic-read',
-      access: 'read', path, maxBytes: 8 * 1024 * 1024 * 1024 })
+      access: 'read', path, maxBytes: 8 * 1024 * 1024 * 1024, fingerprint: await lstat(path) })
     const controller = new AbortController()
     const handle = await open(path, 'r')
     const prototype = Object.getPrototypeOf(handle) as { read: typeof handle.read }
