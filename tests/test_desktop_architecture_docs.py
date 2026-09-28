@@ -352,14 +352,9 @@ def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_de
     assert "Home, Diagnostics, Settings, and onboarding form the supported core" in normalized
     assert "provider, Tasks, and Chat surfaces remain source-level gates" in normalized
     assert "target-matched packaged evidence passes" in normalized
-    assert "Genealogy and other domain desktop adapters remain future work" in normalized
     assert "bounded Electron control shell keeps file grants, sidecar lifecycle" in normalized
     assert "those surfaces require target-matched evidence before a support claim" in normalized
     assert "#131" in normalized
-    assert (
-        "Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal."
-        in normalized
-    )
     assert (
         "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
     )
@@ -386,3 +381,25 @@ def test_core_40_keeps_renderer_presentation_separate_from_privileged_authority(
 
     assert "The sandboxed renderer owns presentation only." in normalized
     assert "settings/keyring authority in Main/application layers" in normalized
+
+
+def test_core_40_distinguishes_source_gedcom_intake_from_future_domain_adapters() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert (
+        "Read-only GEDCOM intake and root selection (`#115`) are implemented source-level gates"
+        in normalized
+    )
+    assert "Genealogy mutation and RootsMagic desktop adapters remain future work" in normalized
+
+
+def test_core_40_preserves_separate_accepted_extraction_dispositions() -> None:
+    section = _core_40_section()
+    assert "- GEDCOM:" in section
+    assert "- RootsMagic:" in section
+    gedcom = " ".join(section.split("- GEDCOM:", 1)[1].split("- RootsMagic:", 1)[0].split())
+    rootsmagic = " ".join(section.split("- RootsMagic:", 1)[1].split())
+
+    assert "keep internal now (defer extraction)" in gedcom
+    assert "first extraction candidate" in gedcom
+    assert "keep internal (decline extraction)" in rootsmagic

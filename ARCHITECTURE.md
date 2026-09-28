@@ -1767,9 +1767,11 @@ Implemented adapter consumption is scoped to the boundaries below; complete
 typed DTO parity across terminal and HTTP adapters is not yet proven. The
 packaged Electron 0.6 support boundary is narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
 named provider, Tasks, and Chat surfaces remain source-level gates until
-target-matched packaged evidence passes. Genealogy and other domain desktop
-adapters remain future work and must consume the same application-service
-contracts rather than redefine behavior.
+target-matched packaged evidence passes. Read-only GEDCOM intake and root
+selection (`#115`) are implemented source-level gates with the same packaged
+evidence requirement. Genealogy mutation and RootsMagic desktop adapters remain
+future work and must consume the same application-service contracts rather than
+redefine behavior.
 
 - CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
   `CommandExecutor` boundaries. Typed application façade coverage varies by
@@ -1792,11 +1794,18 @@ API stability and compatibility burden, test/security ownership and
 vulnerability-response obligations, SemVer/changelog load, cross-repository
 coordination cost, and `#131` parity/adversarial evidence readiness.
 
-Current disposition (feeds CORE-42 `#170`): keep GEDCOM and RootsMagic internal.
-No independent second consumer and no materially smaller dependency or release
-surface have been demonstrated. The two decisions may diverge in a later cycle
-if evidence changes, but this evaluation must not delay or redefine signing and
-notarization scope tracked by `#132`.
+The accepted dispositions in [ADR-0027](docs/ADR-0027-core-package-extraction-decision.md)
+feed CORE-42 `#170`:
+
+- GEDCOM: keep internal now (defer extraction). It remains the first extraction
+  candidate if an independent consumer and measured dependency/release-surface
+  reduction justify the added operational burden.
+- RootsMagic: keep internal (decline extraction). Existing internal façades serve
+  the current consumers; a separate release train would increase release and
+  vulnerability-response surface without a demonstrated compensating benefit.
+
+This evaluation must not delay or redefine signing and notarization scope tracked
+by `#132`.
 
 ## Non-goals and prohibited shortcuts
 
