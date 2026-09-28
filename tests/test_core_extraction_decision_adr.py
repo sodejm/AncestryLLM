@@ -14,8 +14,10 @@ def test_core_extraction_decision_records_separate_outcomes_and_invariants() -> 
 
     assert "### GEDCOM" in text
     assert "### RootsMagic" in text
-    assert "keep internal now (defer extraction)" in normalized
-    assert "keep internal (decline extraction)" in normalized
+    gedcom = text.split("### GEDCOM", 1)[1].split("### RootsMagic", 1)[0]
+    rootsmagic = text.split("### RootsMagic", 1)[1].split("\n## ", 1)[0]
+    assert "keep internal now (defer extraction)" in " ".join(gedcom.split())
+    assert "keep internal (decline extraction)" in " ".join(rootsmagic.split())
     for invariant in (
         "loss-minimal and deterministic",
         "RootsMagic sources remain immutable",
