@@ -142,11 +142,16 @@ def test_create_pending_prunes_expired_receipts_in_same_write(app_context) -> No
                 receipt_id=expired.receipt_id,
                 operation_id=expired.logical_operation_id,
                 operation_type=expired.operation_type,
-                outcome=expired.outcome.value,
+                outcome=OperationReceiptOutcome.SUCCEEDED.value,
                 started_at=expired.started_at,
-                completed_at=None,
-                duration_ms=None,
-                payload_json=expired.to_json(),
+                completed_at="2026-09-24T01:00:02+00:00",
+                duration_ms=2000,
+                payload_json=replace(
+                    expired,
+                    outcome=OperationReceiptOutcome.SUCCEEDED,
+                    completed_at="2026-09-24T01:00:02+00:00",
+                    duration_ms=2000,
+                ).to_json(),
                 expires_at="2020-01-01T00:00:00+00:00",
             )
         )
@@ -165,3 +170,52 @@ def test_missing_receipt_error(app_context) -> None:  # type: ignore[no-untyped-
     with pytest.raises(StorageError) as raised:
         repository.get("receipt_missing")
     assert raised.value.code == "OPERATION_RECEIPT_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("logical_operation_id", "operation_" + "9" * 64),
+        ("operation_type", "artifact_publication"),
+        ("idempotency_digest", "9" * 64),
+        ("started_at", "2026-09-24T02:00:00+00:00"),
+        ("adapter_class", "different.adapter"),
+        ("authorization_ref", "different-policy-ref"),
+        ("policy_revision_ref", "different-policy-v2"),
+    ],
+)
+def test_finalization_cannot_replace_operation_identity(app_context, field, value) -> None:  # type: ignore[no-untyped-def]
+    repository = OperationReceiptRepository(app_context.database)
+    pending = _receipt()
+    repository.create_pending(pending)
+    terminal = replace(
+        pending,
+        outcome=OperationReceiptOutcome.SUCCEEDED,
+        completed_at="2026-09-24T03:00:00+00:00",
+        duration_ms=2000,
+        **{field: value},
+    )
+    with pytest.raises(StorageError) as raised:
+        repository.finalize(terminal)
+    assert raised.value.code == "OPERATION_RECEIPT_IDENTITY_MISMATCH"
+    assert repository.get(pending.receipt_id) == pending
+
+
+def test_retention_preserves_unresolved_receipt(app_context) -> None:  # type: ignore[no-untyped-def]
+    repository = OperationReceiptRepository(app_context.database)
+    pending = _receipt()
+    repository.create_pending(pending)
+    with app_context.database.session() as session:
+        row = session.get(OperationReceiptModel, pending.receipt_id)
+        assert row is not None
+        row.expires_at = "2020-01-01T00:00:00+00:00"
+        session.commit()
+    assert repository.get(pending.receipt_id) == pending
+    terminal = replace(
+        pending,
+        outcome=OperationReceiptOutcome.RECOVERED,
+        completed_at="2026-09-24T03:00:00+00:00",
+        duration_ms=2000,
+    )
+    repository.finalize(terminal)
+    assert repository.get(pending.receipt_id) == terminal

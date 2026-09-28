@@ -48,6 +48,8 @@ class OperationReceiptRepository:
             delete(OperationReceiptModel).where(
                 OperationReceiptModel.expires_at.is_not(None),
                 OperationReceiptModel.expires_at < now,
+                OperationReceiptModel.completed_at.is_not(None),
+                OperationReceiptModel.outcome != OperationReceiptOutcome.PENDING.value,
             )
         )
 
@@ -97,6 +99,38 @@ class OperationReceiptRepository:
             raise ValueError("terminal receipt finalization requires a terminal outcome.")
         payload = receipt.to_json()
         with self.database.session() as session:
+            row = session.get(OperationReceiptModel, receipt.receipt_id)
+            if row is None:
+                raise StorageError(
+                    "OPERATION_RECEIPT_MISSING",
+                    "The operation receipt does not exist.",
+                )
+            original = OperationReceipt.from_json(row.payload_json)
+            identity_fields = (
+                "schema_version",
+                "receipt_id",
+                "logical_operation_id",
+                "operation_type",
+                "started_at",
+                "adapter_class",
+                "authorization_ref",
+                "policy_revision_ref",
+                "idempotency_digest",
+                "source_fingerprint",
+                "target_fingerprint",
+                "source_count",
+                "target_count",
+                "estimated_input_tokens",
+                "estimated_output_tokens",
+                "estimated_cost_usd",
+            )
+            if any(
+                getattr(original, field) != getattr(receipt, field) for field in identity_fields
+            ):
+                raise StorageError(
+                    "OPERATION_RECEIPT_IDENTITY_MISMATCH",
+                    "Terminalization cannot change the initialized operation identity or intent.",
+                )
             updated = cast(
                 "CursorResult[Any]",
                 session.execute(
@@ -111,12 +145,14 @@ class OperationReceiptRepository:
                         completed_at=receipt.completed_at,
                         duration_ms=receipt.duration_ms,
                         payload_json=payload,
+                        expires_at=self._retention_expiry(_utc_now()),
                     )
                 ),
             )
             if updated.rowcount == 1:
                 session.commit()
                 return receipt
+            session.expire_all()
             row = session.get(OperationReceiptModel, receipt.receipt_id)
             if row is None:
                 session.rollback()
