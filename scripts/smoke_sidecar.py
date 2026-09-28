@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -27,6 +28,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 TIMEOUT_SECONDS = 10.0
+_SCHEMA_DIAGNOSTIC = re.compile(
+    r"ROOTSMAGIC_SCHEMA_PARSE_FAILED: "
+    r"(?:Exception|AttributeError|ImportError|ModuleNotFoundError|TypeError|ValueError|"
+    r"KeyError|IndexError|RuntimeError|RecursionError|OSError)"
+    r"(?: module=sqlglot(?:\.[a-z_]+)+)?$"
+)
 
 
 class _ReadableStream(Protocol):
@@ -216,7 +223,10 @@ def smoke(executable: Path) -> None:
     """Launch, authenticate, inspect, and terminate one native sidecar."""
 
     token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
-    with tempfile.TemporaryDirectory(prefix="ancestryllm-sidecar-smoke-") as working_directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="ancestryllm-sidecar-smoke-") as working_directory,
+        tempfile.TemporaryFile() as stderr,
+    ):
         root = Path(working_directory).resolve()
         diagnostic_directory = str(root / "diagnostics")
         intake = root / "intake"
@@ -235,7 +245,7 @@ def smoke(executable: Path) -> None:
             env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr,
         )
         try:
             if process.stdin is None or process.stdout is None:
@@ -276,6 +286,17 @@ def smoke(executable: Path) -> None:
             if capabilities.get("modules") != []:
                 _fail("packaged control sidecar unexpectedly exposed domain capabilities")
             _probe_rootsmagic(port, token, root, intake)
+        except RuntimeError as exc:
+            stderr.seek(0)
+            # Only forward the structural marker, never raw subprocess output.
+            diagnostics = {
+                match.group(0)
+                for line in stderr.read(65_536).decode("utf-8", errors="replace").splitlines()
+                if (match := _SCHEMA_DIAGNOSTIC.search(line))
+            }
+            if diagnostics:
+                raise RuntimeError(f"{exc}; {'; '.join(sorted(diagnostics)[:4])}") from exc
+            raise
         finally:
             if process.poll() is None:
                 process.terminate()

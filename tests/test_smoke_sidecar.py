@@ -97,7 +97,20 @@ def test_smoke_rejects_packaged_inspection_failure_without_private_payload(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     process = _SmokeProcess()
-    monkeypatch.setattr(smoke_sidecar.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    def launch(*args: object, **kwargs: object) -> _SmokeProcess:
+        stderr = kwargs["stderr"]
+        if not hasattr(stderr, "write"):
+            stderr = io.BytesIO()
+        stderr.write(
+            b"private SQL and /private/fictional/payload.rmtree\n"
+            b"ROOTSMAGIC_SCHEMA_PARSE_FAILED: ModuleNotFoundError module=sqlglot.generators.sqlite\n"
+            b"ROOTSMAGIC_SCHEMA_PARSE_FAILED: /private/fictional/payload.rmtree\n"
+        )
+        stderr.flush()
+        return process
+
+    monkeypatch.setattr(smoke_sidecar.subprocess, "Popen", launch)
     requests: list[str] = []
 
     class Opener:
@@ -139,5 +152,6 @@ def test_smoke_rejects_packaged_inspection_failure_without_private_payload(
 
     assert "/private/fictional" not in str(caught.value)
     assert "private SQL" not in str(caught.value)
+    assert "ModuleNotFoundError module=sqlglot.generators.sqlite" in str(caught.value)
     assert "/api/v1/rootsmagic/sources" in requests
     assert process.terminated

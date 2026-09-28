@@ -477,6 +477,12 @@ paging, and disposal before Electron starts, with bounded polling and path-free
 failure codes. Packaged launch timings end at renderer readiness; process
 identity is still required and its lookup time is measured separately.
 
+If a frozen runtime cannot parse a source schema, the smoke check forwards only
+an allowlisted exception type and, for a missing SQLGlot module, its validated
+module name. It excludes source paths, vendor SQL, exception messages, and raw
+subprocess output. Packaged settings interactions wait for preference persistence
+to re-enable the controls before changing the next preference.
+
 The #119 acceptance criteria map to the following checks. Passing an automated
 check establishes its stated boundary; it does not substitute for the remaining
 native-target or assistive-technology evidence.

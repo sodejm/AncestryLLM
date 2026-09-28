@@ -67,9 +67,11 @@ const click = async (selector: string) => {
 
 const text = async (selector: string) => (await visible(selector)).getText()
 
-const labeledInput = async (label: string) => visible(
-  `//label[normalize-space(.)="${label}"]//input`,
-)
+const labeledInput = async (label: string) => {
+  const input = await visible(`//label[normalize-space(.)="${label}"]//input`)
+  await input.waitForEnabled()
+  return input
+}
 
 async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds))
@@ -541,6 +543,9 @@ async function expectAccessibleShell(): Promise<void> {
   await expectFocusedHeading('Settings')
   assert.equal((await $$('[aria-labelledby="general-settings-title"] input[type="radio"]')).length, 3)
   await (await labeledInput('dark')).click()
+  await browser.waitUntil(async () => browser.execute(() => (
+    document.documentElement.dataset.theme === 'dark'
+  )), { timeoutMsg: 'Packaged theme preference was not applied' })
   await (await labeledInput('Reduce motion')).click()
   await browser.waitUntil(async () => browser.execute(() => (
     document.documentElement.dataset.theme === 'dark'

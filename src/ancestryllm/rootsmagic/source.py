@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 import errno
 import hashlib
+import logging
 import math
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -87,6 +89,20 @@ _ARCHIVE_SIGNATURES = (
 _READ_CHUNK_BYTES = 1024 * 1024
 _SQLITE_MAX_COLUMNS = 32_767
 _SQLITE_VARINT_MAX_BYTES = 9
+_SCHEMA_FAILURE_TYPES = frozenset(
+    {
+        "AttributeError",
+        "ImportError",
+        "ModuleNotFoundError",
+        "TypeError",
+        "ValueError",
+        "KeyError",
+        "IndexError",
+        "RuntimeError",
+        "RecursionError",
+        "OSError",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1432,7 +1448,23 @@ class RootsMagicReader:
                     )
                     for column in definitions
                 )
-            except Exception:  # noqa: BLE001 - vendor schemas can be unusual
+            except Exception as exc:  # noqa: BLE001 - vendor schemas can be unusual
+                # Keep failures diagnosable in frozen runtimes without recording
+                # vendor SQL, table names, exception messages, or source paths.
+                failure_type = type(exc).__name__
+                if failure_type not in _SCHEMA_FAILURE_TYPES:
+                    failure_type = "Exception"
+                module = getattr(exc, "name", None)
+                missing_module = (
+                    f" module={module}"
+                    if isinstance(exc, ModuleNotFoundError)
+                    and isinstance(module, str)
+                    and re.fullmatch(r"sqlglot(?:\.[a-z_]+)+", module)
+                    else ""
+                )
+                logging.getLogger(__name__).warning(
+                    "ROOTSMAGIC_SCHEMA_PARSE_FAILED: %s%s", failure_type, missing_module
+                )
                 columns = ()
                 column_types = ()
             self.ingress.validate_record(
