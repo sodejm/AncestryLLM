@@ -1359,6 +1359,50 @@ describe('desktop IPC handlers', () => {
     })
   })
 
+  it('allows sidecar recovery beyond the ordinary request deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      const recovered = await control.retrySidecar()
+      vi.mocked(control.retrySidecar).mockImplementation(() => new Promise((resolve) => {
+        setTimeout(() => resolve(recovered), 6_000)
+      }))
+      vi.mocked(control.getAppInfo).mockImplementation(() => new Promise(() => undefined))
+      const { event, handlers } = harness(control)
+      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
+      const ordinary = handlers.get(desktopChannels.getAppInfo)?.(event())
+      const ordinaryAssertion = expect(ordinary).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+      await vi.advanceTimersByTimeAsync(5_000)
+      await ordinaryAssertion
+      await vi.advanceTimersByTimeAsync(1_000)
+      await expect(retry).resolves.toEqual(recovered)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds stalled sidecar recovery and aborts it at its dedicated deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      let signal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((received) => {
+        signal = received
+        return new Promise(() => undefined)
+      })
+      const { event, handlers } = harness(control)
+      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
+      const assertion = expect(retry).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await assertion
+      expect(signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('returns a stable timeout while the underlying operation remains stalled', async () => {
     const control = bridge()
     const signals: AbortSignal[] = []

@@ -474,6 +474,15 @@ reject generation limits for connected exports at the HTTP boundary, and retain
 one main landmark in the application shell. The renderer and broker tests cover
 these behaviors with fictional data and opaque capabilities.
 
+Inspection-result regressions cover returned errors and rejected lookups. The
+workspace retains the job until it transfers the source or confirms cleanup,
+shares an in-flight lookup with navigation cleanup, and retries failed cleanup
+before admitting another source selection. Slow Diagnostics retry regressions
+prove recovery after six seconds and cancellation at its dedicated 30-second
+deadline while ordinary requests retain their five-second bound. These fixes
+preserve the existing user workflow, service contracts, architecture, and threat
+model boundaries; no additional user or API documentation changes are required.
+
 The source reader also supports SQLite builds that omit the optional
 `enable_load_extension` API. Database and WAL regressions exercise inspection,
 bounded pagination, disposal, and unchanged database and companion-file bytes

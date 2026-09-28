@@ -326,6 +326,7 @@ export interface DesktopIpcController {
  */
 export interface RegistrationOptions {
   readonly operationTimeoutMs?: number
+  readonly sidecarRetryTimeoutMs?: number
   readonly fileDialogTimeoutMs?: number
   readonly runtimeOperationTimeoutMs?: number
   readonly nativeActionTimeoutMs?: number
@@ -395,6 +396,7 @@ const MAX_QUEUED_REQUESTS = 8
 const MAX_CAPABILITY_SUBSCRIBERS = 32
 const MAX_JOB_SUBSCRIPTIONS = 32
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
+const DEFAULT_SIDECAR_RETRY_TIMEOUT_MS = 30_000
 const DEFAULT_FILE_DIALOG_TIMEOUT_MS = 300_000
 const DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
 const DEFAULT_NATIVE_ACTION_TIMEOUT_MS = 300_000
@@ -877,12 +879,16 @@ export function registerDesktopIpcHandlers(
   options: Readonly<RegistrationOptions> = {},
 ): DesktopIpcController {
   const timeoutMs = options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS
+  const sidecarRetryTimeoutMs = options.sidecarRetryTimeoutMs ?? DEFAULT_SIDECAR_RETRY_TIMEOUT_MS
   const fileDialogTimeoutMs = options.fileDialogTimeoutMs ?? DEFAULT_FILE_DIALOG_TIMEOUT_MS
   const runtimeOperationTimeoutMs = options.runtimeOperationTimeoutMs
     ?? DEFAULT_RUNTIME_OPERATION_TIMEOUT_MS
   const nativeActionTimeoutMs = options.nativeActionTimeoutMs ?? DEFAULT_NATIVE_ACTION_TIMEOUT_MS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error('Desktop IPC operation timeout must be positive.')
+  }
+  if (!Number.isFinite(sidecarRetryTimeoutMs) || sidecarRetryTimeoutMs <= 0) {
+    throw new Error('Desktop IPC sidecar retry timeout must be positive.')
   }
   if (!Number.isFinite(fileDialogTimeoutMs) || fileDialogTimeoutMs <= 0) {
     throw new Error('Desktop IPC file dialog timeout must be positive.')
@@ -945,7 +951,7 @@ export function registerDesktopIpcHandlers(
     }
     return capabilityRequest(state, timeoutMs, bridge)
   })
-  registerNoArgumentHandler(ipc, desktopChannels.retrySidecar, authorize, (signal) => bridge.retrySidecar(signal), parseStartupDiagnosticsResult, timeoutMs, rejectRoute)
+  registerNoArgumentHandler(ipc, desktopChannels.retrySidecar, authorize, (signal) => bridge.retrySidecar(signal), parseStartupDiagnosticsResult, sidecarRetryTimeoutMs, rejectRoute)
   registerNoArgumentHandler(ipc, desktopChannels.getPreferences, authorize, (signal) => bridge.getPreferences(signal), parsePreferencesResult, timeoutMs, rejectRoute)
   ipc.handle(desktopChannels.updatePreferences, async (event, ...args) => {
     const state = authorize(event)

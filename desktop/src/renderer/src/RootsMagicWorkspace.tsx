@@ -1,6 +1,6 @@
 /** Presents bounded RootsMagic presets without exposing source paths or database access. */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AncestryBridge, FileGrant, JobSnapshot } from '../../shared-contract/desktop'
+import type { AncestryBridge, BridgeResult, FileGrant, JobSnapshot } from '../../shared-contract/desktop'
 import type {
   RootsMagicExportRequest,
   RootsMagicExportReceipt,
@@ -77,32 +77,62 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   const mounted = useRef(true)
   const sourceRef = useRef<string | null>(null)
   const inspectionJob = useRef<string | null>(null)
-  const abandonedInspections = useRef(new Set<string>())
+  const inspectionResults = useRef(new Map<string, Promise<BridgeResult<RootsMagicJobResult>>>())
+  const abandonedInspections = useRef(new Map<string, Promise<boolean>>())
   const sourceGeneration = useRef(0)
   const queryGeneration = useRef(0)
   const errorFocus = useRef<HTMLDivElement>(null)
 
-  const abandonInspection = useCallback(async (jobId: string) => {
-    if (abandonedInspections.current.has(jobId)) return
-    abandonedInspections.current.add(jobId)
-    const request = { schema_version: 1 as const, job_id: jobId }
-    try {
-      const cancelled = await rootsMagic.cancelJob(request)
-      const initial = cancelled.ok ? cancelled : await rootsMagic.getJob(request)
-      if (!initial.ok) return
-      let snapshot = initial.data
-      while (snapshot.state === 'queued' || snapshot.state === 'running') {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
-        const polled = await rootsMagic.getJob(request)
-        if (!polled.ok) return
-        snapshot = polled.data
+  const inspectionResult = useCallback((jobId: string) => {
+    const pending = inspectionResults.current.get(jobId)
+    if (pending) return pending
+    const result = rootsMagic.getRootsMagicJobResult({ schema_version: 1, job_id: jobId })
+    inspectionResults.current.set(jobId, result)
+    return result
+  }, [rootsMagic])
+
+  const abandonInspection = useCallback((jobId: string): Promise<boolean> => {
+    const pending = abandonedInspections.current.get(jobId)
+    if (pending) return pending
+    const cleanup = (async () => {
+      const request = { schema_version: 1 as const, job_id: jobId }
+      let disposed = false
+      try {
+        const cancelled = await rootsMagic.cancelJob(request)
+        const initial = cancelled.ok ? cancelled : await rootsMagic.getJob(request)
+        if (!initial.ok) return false
+        let snapshot = initial.data
+        while (snapshot.state === 'queued' || snapshot.state === 'running') {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
+          const polled = await rootsMagic.getJob(request)
+          if (!polled.ok) return false
+          snapshot = polled.data
+        }
+        if (snapshot.state === 'failed' || snapshot.state === 'cancelled') {
+          disposed = true
+          return true
+        }
+        if (snapshot.state !== 'completed') return false
+        // Share an in-flight lookup with navigation cleanup; retry a failed lookup once.
+        const pendingResult = inspectionResults.current.get(jobId)
+        let result = pendingResult ? await pendingResult.catch(() => null) : null
+        if (!result?.ok) result = await rootsMagic.getRootsMagicJobResult(request)
+        if (!result.ok || result.data.kind !== 'inspection') return false
+        const discarded = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref })
+        disposed = discarded.ok || discarded.error.code === 'FILE_GRANT_FORBIDDEN'
+        return disposed
+      } catch { return false } // Preserve the job for a later cleanup attempt.
+      finally {
+        inspectionResults.current.delete(jobId)
+        if (disposed) {
+          if (inspectionJob.current === jobId) inspectionJob.current = null
+        } else {
+          abandonedInspections.current.delete(jobId)
+        }
       }
-      if (snapshot.state !== 'completed') return
-      const result = await rootsMagic.getRootsMagicJobResult(request)
-      if (result.ok && result.data.kind === 'inspection') {
-        await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref })
-      }
-    } catch { /* The sidecar may already have closed and revoked the source. */ }
+    })()
+    abandonedInspections.current.set(jobId, cleanup)
+    return cleanup
   }, [rootsMagic])
 
   useEffect(() => {
@@ -134,12 +164,10 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     let current = snapshot
     while (mounted.current && isCurrent()) {
       if (current.state === 'completed') {
-        if (expected === 'inspection' && inspectionJob.current === current.job_id) inspectionJob.current = null
-        const result = await rootsMagic.getRootsMagicJobResult({ schema_version: 1, job_id: current.job_id })
+        const result = expected === 'inspection'
+          ? await inspectionResult(current.job_id)
+          : await rootsMagic.getRootsMagicJobResult({ schema_version: 1, job_id: current.job_id })
         if (!mounted.current || !isCurrent()) {
-          if (result.ok && result.data.kind === 'inspection') {
-            await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref }).catch(() => undefined)
-          }
           return null
         }
         if (!result.ok) { fail(result.error.code); return null }
@@ -189,6 +217,12 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setFailure(null)
     let selectionGeneration = sourceGeneration.current
     try {
+      const pendingInspection = inspectionJob.current
+      if (pendingInspection && !await abandonInspection(pendingInspection)) {
+        fail('ROOTSMAGIC_SOURCE_UNAVAILABLE')
+        return
+      }
+      if (!mounted.current) return
       const oldSource = sourceRef.current
       if (oldSource) {
         try {
@@ -207,34 +241,33 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       if (!picked.ok) { fail(picked.error.code); return }
       const grant = picked.data
       if (!grant) { setStatus('No RootsMagic source was chosen.'); return }
-      let inspectedSource: string | null = null
+      let submittedInspection: string | null = null
+      let transferred = false
       try {
         const submitted = await rootsMagic.inspectRootsMagicSource(grant.grantId)
         if (!submitted.ok) { fail(submitted.error.code); return }
+        submittedInspection = submitted.data.job_id
+        inspectionJob.current = submittedInspection
         if (!mounted.current || sourceGeneration.current !== selectionGeneration) {
-          void abandonInspection(submitted.data.job_id)
           return
         }
-        inspectionJob.current = submitted.data.job_id
         const complete = await awaitResult(submitted.data, 'inspection', () => sourceGeneration.current === selectionGeneration)
-        if (inspectionJob.current === submitted.data.job_id) inspectionJob.current = null
         if (!complete || complete.kind !== 'inspection' || !mounted.current || sourceGeneration.current !== selectionGeneration) return
-        inspectedSource = complete.result.source_ref
         const presets = await rootsMagic.getRootsMagicPresets()
         if (!presets.ok) {
           if (mounted.current && sourceGeneration.current === selectionGeneration) fail(presets.error.code)
           return
         }
         if (!mounted.current || sourceGeneration.current !== selectionGeneration) return
-        sourceRef.current = inspectedSource
-        inspectedSource = null
+        sourceRef.current = complete.result.source_ref
+        transferred = true
+        if (inspectionJob.current === submittedInspection) inspectionJob.current = null
+        inspectionResults.current.delete(submittedInspection)
         setSource({ grant, summary: complete.result })
         setDefinitions(presets.data)
         setStatus(`Source active: ${complete.result.friendly_name}. Choose a fixed preset.`)
       } finally {
-        if (inspectedSource) {
-          await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: inspectedSource }).catch(() => undefined)
-        }
+        if (submittedInspection && !transferred) await abandonInspection(submittedInspection)
         await rootsMagic.revokeFileGrant(grant.grantId).catch(() => undefined)
       }
     } catch { if (sourceGeneration.current === selectionGeneration) fail('ROOTSMAGIC_SOURCE_UNAVAILABLE') }

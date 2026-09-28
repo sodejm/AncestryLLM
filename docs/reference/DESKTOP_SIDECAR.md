@@ -282,9 +282,11 @@ again before exposing it to the renderer.
 
 Main admits at most four non-coalesced operations per renderer and queues at
 most eight more. Capability reads share one in-flight operation for up to 32
-callers. Every call has an absolute five-second deadline; queue saturation,
-timeout, and cancellation return stable redacted codes rather than backend
-details. Cross-document or unclassifiable navigation of the main frame,
+callers. Ordinary calls have an absolute five-second deadline. Manual sidecar
+retry has a 30-second deadline to cover readiness, health checks, and the
+diagnostics report; native dialogs and long-running operations use their
+dedicated deadlines. Queue saturation, timeout, and cancellation return stable
+redacted codes rather than backend details. Cross-document or unclassifiable navigation of the main frame,
 renderer exit or destruction, bridge replacement, sidecar-session loss or
 replacement, and application shutdown cancel and clean up affected work.
 Trusted same-document application route changes preserve work; main still
