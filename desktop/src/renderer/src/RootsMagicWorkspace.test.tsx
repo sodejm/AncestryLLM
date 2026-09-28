@@ -1,6 +1,7 @@
 /** Verifies bounded, opaque RootsMagic source inspection, preset paging, and explicit export. */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { AncestryBridge, BridgeResult, FileGrant, JobSnapshot } from '../../shared-contract/desktop'
 import type {
@@ -11,6 +12,7 @@ import type {
   RootsMagicResultPage,
 } from '../../shared-contract/rootsmagic'
 import { RootsMagicWorkspace } from './RootsMagicWorkspace'
+import { AppShell } from './design-system/AppShell'
 
 const success = <T,>(data: T): BridgeResult<T> => ({ ok: true, protocolVersion: '1', data })
 const failure = <T,>(code: 'REQUEST_CANCELLED' | 'SIDECAR_UNAVAILABLE' | 'FILE_GRANT_FORBIDDEN'): BridgeResult<T> => ({
@@ -105,6 +107,16 @@ function bridgeFor(results: readonly RootsMagicJobResult[] = [
 }
 
 describe('RootsMagic workspace', () => {
+  it('uses one main landmark when rendered inside the application shell', () => {
+    render(<AppShell route="rootsmagic" title="RootsMagic" description="Inspect a local source."
+      headingRef={createRef<HTMLHeadingElement>()} onNavigate={vi.fn()}>
+      <RootsMagicWorkspace bridge={bridgeFor()} />
+    </AppShell>)
+
+    expect(screen.getAllByRole('main')).toHaveLength(1)
+    expect(screen.getByRole('region', { name: 'RootsMagic workspace' })).toBeVisible()
+  })
+
   it('clears an earlier export selection when a new People page is requested', async () => {
     const bridge = bridgeFor([inspection, queryResult(people), queryResult(secondPeople)])
     render(<RootsMagicWorkspace bridge={bridge} />)
@@ -331,19 +343,51 @@ describe('RootsMagic workspace', () => {
     expect(screen.getByRole('button', { name: 'Search people' })).toBeEnabled()
   })
 
-  it('keeps the active source retryable when replacement disposal fails', async () => {
+  it.each(['coded failure', 'exception'] as const)('keeps source replacement retryable after a disposal %s', async (mode) => {
     const bridge = bridgeFor([inspection])
-    vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('SIDECAR_UNAVAILABLE'))
+    if (mode === 'coded failure') {
+      vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('SIDECAR_UNAVAILABLE'))
+    } else {
+      vi.mocked(bridge.discardRootsMagicSource).mockRejectedValueOnce(new Error('private detail'))
+    }
     render(<RootsMagicWorkspace bridge={bridge} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
     expect(await screen.findByText('Fictional Family')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: 'Choose another RootsMagic source' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Code: SIDECAR_UNAVAILABLE')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      `Code: ${mode === 'coded failure' ? 'SIDECAR_UNAVAILABLE' : 'ROOTSMAGIC_SOURCE_UNAVAILABLE'}`)
     expect(screen.getByRole('heading', { name: 'Active source' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'People' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Choose another RootsMagic source' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Discard active source' })).toBeEnabled()
     expect(bridge.requestOpenFileGrant).toHaveBeenCalledOnce()
+  })
+
+  it('retains an in-flight export receipt when source disposal fails', async () => {
+    const bridge = bridgeFor([inspection, queryResult(people), { schema_version: 1, kind: 'export', result: {
+      schema_version: 1, artifact_id: 'art_fixture_export_0001', display_name: 'fictional-family export',
+      source_ref: sourceRef, source_fingerprint: fingerprint, profile_code: 'portable', gedcom_version: '5.5.5',
+    } }])
+    let resolveExport!: (value: BridgeResult<JobSnapshot>) => void
+    vi.mocked(bridge.exportRootsMagic).mockReturnValueOnce(new Promise((resolve) => { resolveExport = resolve }))
+    vi.mocked(bridge.discardRootsMagicSource).mockResolvedValueOnce(failure('SIDECAR_UNAVAILABLE'))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export is limited to connected people/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Export portable GEDCOM' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Discard active source' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('SIDECAR_UNAVAILABLE')
+    resolveExport(success(job))
+
+    expect(await screen.findByRole('region', { name: 'Export receipt' })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Reveal export folder' }))
+    expect(bridge.revealRootsMagicArtifact).toHaveBeenCalledWith({ schema_version: 1, artifact_id: 'art_fixture_export_0001' })
   })
 
   it('replaces a source whose capability was already revoked', async () => {

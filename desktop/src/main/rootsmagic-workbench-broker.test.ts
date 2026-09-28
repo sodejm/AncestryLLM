@@ -66,6 +66,37 @@ async function fixture() {
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
 describe('native RootsMagic workbench broker', () => {
+  it('retires superseded completed exports while retaining the latest receipt across a failed retry', async () => {
+    const { broker, client, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    let previousArtifact: string | undefined
+    for (let index = 0; index < 18; index++) {
+      const displayName = `Completed export ${index}`
+      native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, displayName))
+      const output = await broker.selectOutput(owner, 'Export')
+      const job = await broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+        output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+        generations: null, living: 'exclude' })
+      const artifact = `art_${String(index).padStart(32, '0')}`
+      client.result.mockResolvedValueOnce({ ...exportResult,
+        result: { ...exportResult.result, display_name: displayName, artifact_id: artifact } })
+      await broker.result(owner, request(job))
+      await expect(broker.reveal(owner, { schema_version: 1, artifact_id: artifact })).resolves.toEqual({ schema_version: 1 })
+      if (previousArtifact) {
+        await expect(broker.reveal(owner, { schema_version: 1, artifact_id: previousArtifact })).rejects.toThrow('FILE_GRANT_FORBIDDEN')
+      }
+      previousArtifact = artifact
+    }
+    native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, 'Failed retry'))
+    const retryOutput = await broker.selectOutput(owner, 'Export')
+    const retryJob = await broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: retryOutput!.output_capability, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' })
+    broker.observeJob(terminalSnapshot(retryJob, 'failed'))
+    await expect(broker.reveal(owner, { schema_version: 1, artifact_id: previousArtifact! })).resolves.toEqual({ schema_version: 1 })
+    expect(native.reveal).toHaveBeenLastCalledWith(join(directory, 'Completed export 17'))
+  })
+
   it('rejects an opened inode that differs from the approved source while the path stays unchanged', async () => {
     const { broker, client, owner, directory, path } = await fixture()
     const original = await readFile(path)

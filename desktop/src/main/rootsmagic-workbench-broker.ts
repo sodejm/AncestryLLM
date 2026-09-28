@@ -429,6 +429,12 @@ export class RootsMagicWorkbenchBroker {
         || result.result.display_name !== output.displayName) fail('FILE_OPERATION_CANCELLED')
       job.artifactId = result.result.artifact_id
       job.result = result
+      for (const [id, previous] of this.jobs) {
+        if (previous === job || previous.owner !== owner || previous.sourceRef !== job.sourceRef
+          || previous.kind !== 'export' || previous.artifactId === undefined) continue
+        if (previous.outputId !== undefined) this.outputs.delete(previous.outputId)
+        this.jobs.delete(id)
+      }
     }
     return result
   }

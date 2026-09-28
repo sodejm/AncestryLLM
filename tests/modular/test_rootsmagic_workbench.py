@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from contextlib import closing
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -140,3 +140,61 @@ def test_wal_source_session_preserves_all_original_bytes(tmp_path: Path) -> None
         assert second.rows[0].values[0] == 2
         workbench.close()
         assert {item: item.read_bytes() for item in paths} == before
+
+
+@pytest.mark.parametrize("wal", [False, True])
+def test_source_session_without_loadable_extension_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wal: bool
+) -> None:
+    """SQLite builds without loadable extensions still support immutable sessions."""
+    from ancestryllm.application._rootsmagic_workbench import RootsMagicWorkbench
+
+    class ConnectionWithoutExtensions(sqlite3.Connection):
+        def __getattribute__(self, name: str) -> Any:
+            if name == "enable_load_extension":
+                raise AttributeError("Loadable extensions were not compiled in")
+            return super().__getattribute__(name)
+
+    connect = sqlite3.connect
+
+    def connect_without_extensions(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        return connect(*args, **kwargs, factory=ConnectionWithoutExtensions)
+
+    path = tmp_path / "fictional.rmtree"
+    with closing(connect(path)) as writer:
+        if wal:
+            writer.execute("PRAGMA journal_mode=WAL")
+            writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.executescript(
+            "CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY);"
+            "INSERT INTO PersonTable VALUES(1); INSERT INTO PersonTable VALUES(2);"
+        )
+        paths = (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm"))
+        before = {item: item.read_bytes() for item in paths if item.exists()}
+        monkeypatch.setattr(sqlite3, "connect", connect_without_extensions)
+        workbench = RootsMagicWorkbench()
+        summary = workbench.inspect(
+            path, size_bytes=len(before[path]), sha256=hashlib.sha256(before[path]).hexdigest()
+        )
+        first = workbench.query(
+            RootsMagicPresetQueryRequest(summary.source_ref, "people", None, "", 0, 1)
+        )
+        second = workbench.query(
+            RootsMagicPresetQueryRequest(summary.source_ref, "people", None, "", 1, 1)
+        )
+        assert first.rows[0].values[0] == 1
+        assert second.rows[0].values[0] == 2
+        source = workbench.source(summary.source_ref)
+        with (
+            source.reader.connection(source.path, source.fingerprint) as reader,
+            pytest.raises(sqlite3.DatabaseError, match="not authorized"),
+        ):
+            reader.execute("SELECT load_extension('fictional')")
+        workbench.discard(summary.source_ref)
+        with pytest.raises(AncestryError) as discarded:
+            workbench.query(
+                RootsMagicPresetQueryRequest(summary.source_ref, "people", None, "", 0, 1)
+            )
+        assert discarded.value.code == "ROOTSMAGIC_SOURCE_UNAVAILABLE"
+        workbench.close()
+        assert {item: item.read_bytes() for item in before} == before

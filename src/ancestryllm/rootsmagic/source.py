@@ -971,7 +971,9 @@ class RootsMagicReader:
                 uri=True,
                 timeout=min(self.timeout_seconds, 30.0),
             )
-            connection.enable_load_extension(False)
+            disable_extensions = getattr(connection, "enable_load_extension", None)
+            if callable(disable_extensions):
+                disable_extensions(False)
             connection.execute("PRAGMA trusted_schema = OFF")
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
             if journal_mode is None or str(journal_mode[0]).casefold() != "wal":
@@ -1276,7 +1278,9 @@ class RootsMagicReader:
                 connection.execute("PRAGMA query_only = ON")
                 connection.execute("PRAGMA trusted_schema = OFF")
                 connection.execute("BEGIN")
-                connection.enable_load_extension(False)
+                disable_extensions = getattr(connection, "enable_load_extension", None)
+                if callable(disable_extensions):
+                    disable_extensions(False)
                 connection.set_authorizer(self._authorizer)
                 deadline = time.monotonic() + self.timeout_seconds
                 token = current_cancellation_token()

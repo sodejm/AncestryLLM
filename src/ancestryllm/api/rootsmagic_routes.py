@@ -67,6 +67,13 @@ class FolderExportRequest(VersionedRequest):
     generations: Annotated[int, Field(ge=1, le=100)] | None = None
     living: Literal["exclude", "include", "anonymize"] = "exclude"
 
+    @model_validator(mode="after")
+    def validate_generation_scope(self) -> FolderExportRequest:
+        """Generation limits apply only to ancestor or descendant exports."""
+        if self.scope == "connected" and self.generations is not None:
+            raise ValueError("Connected scope does not accept a generation limit.")
+        return self
+
 
 def rootsmagic_router(
     boundary: Callable[[], NativeRootsMagicWorkbench],

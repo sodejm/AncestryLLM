@@ -468,6 +468,19 @@ explicit source disposal. These fixes preserve
 the existing service and desktop authority boundaries in `ARCHITECTURE.md` and
 the RootsMagic threat model; neither boundary changes.
 
+Further review regressions keep source replacement and in-flight export receipts
+retryable after failed disposal, retire superseded completed export authority,
+reject generation limits for connected exports at the HTTP boundary, and retain
+one main landmark in the application shell. The renderer and broker tests cover
+these behaviors with fictional data and opaque capabilities.
+
+The source reader also supports SQLite builds that omit the optional
+`enable_load_extension` API. Database and WAL regressions exercise inspection,
+bounded pagination, disposal, and unchanged database and companion-file bytes
+under that runtime condition. SQL extension loading remains denied by the
+connection authorizer. This compatibility fix addresses the frozen macOS
+inspection failure that occurs before Electron or native dialogs start.
+
 Additional review regressions require a trusted resolved source separately from
 the opaque public source reference, reject an excluded living export root,
 preserve source-session and capacity error codes, and compare the opened file

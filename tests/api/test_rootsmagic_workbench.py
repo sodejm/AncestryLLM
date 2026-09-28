@@ -204,6 +204,33 @@ def native_client(tmp_path, api_settings):
         jobs.close()
 
 
+@pytest.mark.parametrize("generations", [1, 100])
+@pytest.mark.parametrize("explicit_scope", [False, True])
+def test_native_export_rejects_generation_limit_for_connected_scope(
+    native_client, api_headers, monkeypatch, generations, explicit_scope
+):
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
+
+    export = Mock()
+    monkeypatch.setattr(NativeRootsMagicWorkbench, "export", export)
+    client, _jobs = native_client
+    payload = {
+        "schema_version": 1,
+        "source_ref": "a" * 64,
+        "output_capability": "b" * 64,
+        "root_person_id": 1,
+        "generations": generations,
+    }
+    if explicit_scope:
+        payload["scope"] = "connected"
+    response = client.post("/api/v1/rootsmagic/exports", headers=api_headers, json=payload)
+    assert response.status_code == 400
+    assert response.json()["code"] == "REQUEST_INVALID"
+    export.assert_not_called()
+    assert payload["source_ref"] not in response.text
+    assert payload["output_capability"] not in response.text
+
+
 @pytest.mark.parametrize("cancel_after_publication", [False, True])
 def test_native_http_auth_validation_and_full_query(
     native_client, api_headers, tmp_path, monkeypatch, cancel_after_publication

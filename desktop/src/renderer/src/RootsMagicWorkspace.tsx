@@ -187,21 +187,22 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     if (picking || discarding) return
     setPicking(true)
     setFailure(null)
-    const oldSource = sourceRef.current
-    if (oldSource) {
-      try {
-        const disposed = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: oldSource })
-        if (!disposed.ok && disposed.error.code !== 'FILE_GRANT_FORBIDDEN') {
-          fail(disposed.error.code)
-          return
-        }
-      } catch { fail('ROOTSMAGIC_SOURCE_UNAVAILABLE'); return }
-      sourceRef.current = null
-      if (!mounted.current) return
-    }
-    resetForSource()
-    const selectionGeneration = sourceGeneration.current
+    let selectionGeneration = sourceGeneration.current
     try {
+      const oldSource = sourceRef.current
+      if (oldSource) {
+        try {
+          const disposed = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: oldSource })
+          if (!disposed.ok && disposed.error.code !== 'FILE_GRANT_FORBIDDEN') {
+            fail(disposed.error.code)
+            return
+          }
+        } catch { fail('ROOTSMAGIC_SOURCE_UNAVAILABLE'); return }
+        sourceRef.current = null
+        if (!mounted.current) return
+      }
+      resetForSource()
+      selectionGeneration = sourceGeneration.current
       const picked = await rootsMagic.requestOpenFileGrant({ purpose: 'rootsmagic-read' })
       if (!picked.ok) { fail(picked.error.code); return }
       const grant = picked.data
@@ -243,7 +244,6 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   async function discardSource() {
     const activeSource = sourceRef.current
     if (!activeSource || discarding || picking) return
-    invalidateSourceWork()
     const discardGeneration = sourceGeneration.current
     setDiscarding(true)
     setFailure(null)
@@ -372,7 +372,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     }
   }
 
-  return <main aria-labelledby="rootsmagic-workspace-title">
+  return <section aria-labelledby="rootsmagic-workspace-title">
     <h2 id="rootsmagic-workspace-title">RootsMagic workspace</h2>
     <p>Inspect a local RootsMagic source through fixed, read-only presets. This workspace never changes the source database.</p>
     <Button type="button" disabled={picking || discarding} onClick={() => { void chooseSource() }}>
@@ -470,5 +470,5 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       {receipt && <section aria-label="Export receipt"><p>Export complete using the portable GEDCOM {receipt.gedcom_version} profile.</p>
         <Button type="button" variant="quiet" disabled={discarding} onClick={() => { void revealArtifact() }}>Reveal export folder</Button></section>}
     </section>}
-  </main>
+  </section>
 }
