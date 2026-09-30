@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import SIDECAR_BUILD
+from ancestryllm.rootsmagic.source import RootsMagicReader
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -162,16 +163,28 @@ def _probe_rootsmagic(port: int, token: str, root: Path, intake: Path) -> None:
             "INSERT INTO NameTable VALUES (1, 1, 'Fictional', 'Example', 1);"
         )
     fingerprint = hashlib.sha256(source.read_bytes()).hexdigest()
+    info = source.stat()
+    identity = (info.st_dev, info.st_ino)
+    if os.name == "nt":
+        handle = RootsMagicReader._windows_open_directory_handle(source)
+        try:
+            identity = RootsMagicReader._windows_handle_identity(handle)
+        finally:
+            RootsMagicReader._windows_close_handle(handle)
     capability = os.urandom(32).hex()
     manifest = intake / f"{capability}.rootsmagic-source.json"
     manifest.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "path": str(source),
-                "size_bytes": source.stat().st_size,
+                "dev": str(identity[0]),
+                "ino": str(identity[1]),
+                "size_bytes": info.st_size,
                 "sha256": fingerprint,
                 "friendly_name": source.name,
+                "wal": None,
+                "shm": None,
             }
         ),
         encoding="utf-8",

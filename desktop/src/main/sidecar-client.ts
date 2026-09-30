@@ -1217,9 +1217,9 @@ export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
   const transport = dependencies.request ?? requestFixedRoute
   const perform = async <T>(path: SidecarPath,
     parser: (value: unknown) => { ok: boolean; data?: Readonly<T> },
-    signal?: AbortSignal, options?: SidecarRequestOptions): Promise<Readonly<T>> => {
+    signal?: AbortSignal, options?: SidecarRequestOptions,
+    session = dependencies.session()): Promise<Readonly<T>> => {
     if (signal?.aborted) throw new SidecarClientError('cancelled')
-    const session = dependencies.session()
     if (!session) throw new SidecarClientError('unavailable')
     try {
       const response = await transport(session, path, signal, options)
@@ -1232,12 +1232,44 @@ export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
       throw new SidecarClientError('request_failed')
     }
   }
+  const parseCancellation = (value: unknown): { ok: boolean; data?: { job: Readonly<JobSnapshot> | null } } => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)
+      || !('data' in value)) return { ok: false }
+    const body = value.data
+    if (typeof body !== 'object' || body === null || Array.isArray(body)
+      || Object.keys(body).length !== 2 || !('schema_version' in body)
+      || body.schema_version !== 1 || !('job' in body)) return { ok: false }
+    if (body.job === null) return { ok: true, data: { job: null } }
+    const parsed = parseJobSnapshotResult({ ok: true,
+      protocolVersion: DESKTOP_PROTOCOL_VERSION, data: body.job })
+    return parsed.ok ? { ok: true, data: { job: parsed.data } } : { ok: false }
+  }
+  const submit = async (path: SidecarPath, capability: string, body: unknown,
+    preserveExport: boolean, signal?: AbortSignal): Promise<Readonly<JobSnapshot>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      return await perform(path, parseJobSnapshotResult, signal,
+        { method: 'POST', body: JSON.stringify(body) }, session)
+    } catch (cause) {
+      if (!(cause instanceof SidecarClientError)
+        || !['cancelled', 'request_failed', 'invalid_response'].includes(cause.reason)) throw cause
+      // Cancellation must reach the accepting session even after its caller aborts.
+      const recovered = await perform(`${ROOTSMAGIC_PATH}/submissions/${capability}/cancel`,
+        parseCancellation, undefined,
+        { method: 'POST', body: JSON.stringify({ schema_version: 1 }) }, session)
+      if (preserveExport && recovered.job) return recovered.job
+      throw cause
+    }
+  }
   const jobId = (value: string) => parseJobRequest({ schema_version: 1, job_id: value }).job_id
   return Object.freeze<RootsMagicWorkbenchClient>({
     inspect(sourceCapability, signal) {
-      return perform(`${ROOTSMAGIC_PATH}/sources`, parseJobSnapshotResult, signal, {
-        method: 'POST', body: JSON.stringify({ schema_version: 1, source_capability: sourceCapability }),
-      })
+      const capability = parseRootsMagicSourceReferenceRequest({ schema_version: 1,
+        source_ref: sourceCapability }).source_ref
+      return submit(`${ROOTSMAGIC_PATH}/sources`, capability,
+        { schema_version: 1, source_capability: capability }, false, signal)
     },
     presets(signal) {
       return perform(`${ROOTSMAGIC_PATH}/presets`, parseRootsMagicPresetDefinitionsResult, signal)
@@ -1250,9 +1282,7 @@ export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
     },
     export(request, signal) {
       const parsed = parseRootsMagicExportRequest(request)
-      return perform(`${ROOTSMAGIC_PATH}/exports`, parseJobSnapshotResult, signal, {
-        method: 'POST', body: JSON.stringify(parsed),
-      })
+      return submit(`${ROOTSMAGIC_PATH}/exports`, parsed.output_capability, parsed, true, signal)
     },
     result(value, signal) {
       return perform(`${ROOTSMAGIC_PATH}/jobs/${jobId(value)}/result`, parseRootsMagicJobResultResult, signal)

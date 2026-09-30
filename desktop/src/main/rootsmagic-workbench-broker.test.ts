@@ -1,4 +1,5 @@
 /** Exercises native capability ownership and revocation at asynchronous handoff boundaries. */
+import { createHash } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -46,7 +47,7 @@ async function fixture() {
   const files = { resolveReadGrant: vi.fn(async () => resolved), revokeGrant: vi.fn() }
   let jobId = 0
   const client = {
-    inspect: vi.fn(async () => snapshot(++jobId)), presets: vi.fn(),
+    inspect: vi.fn<(capability: string) => Promise<JobSnapshot>>(async () => snapshot(++jobId)), presets: vi.fn(),
     query: vi.fn(async () => snapshot(++jobId)), export: vi.fn(async () => snapshot(++jobId)),
     result: vi.fn(async (): Promise<RootsMagicJobResult> => inspection),
     discard: vi.fn(async () => ({ schema_version: 1 as const })), cancel: vi.fn(async () => snapshot(99)),
@@ -66,6 +67,23 @@ async function fixture() {
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
 describe('native RootsMagic workbench broker', () => {
+  it('binds the main database and SQLite companions to exact identities and bytes', async () => {
+    const { broker, client, owner, directory, path } = await fixture()
+    await writeFile(`${path}-wal`, 'fictional WAL')
+    await writeFile(`${path}-shm`, 'fictional SHM')
+    client.inspect.mockImplementationOnce(async (capability) => {
+      const manifest = JSON.parse(await readFile(join(directory, `${capability}.rootsmagic-source.json`), 'utf8'))
+      expect(manifest.schema_version).toBe(2)
+      for (const [file, part] of [[path, manifest], [`${path}-wal`, manifest.wal], [`${path}-shm`, manifest.shm]] as const) {
+        const stat = await lstat(file, { bigint: true })
+        expect(part).toMatchObject({ dev: stat.dev.toString(), ino: stat.ino.toString(),
+          size_bytes: Number(stat.size), sha256: createHash('sha256').update(await readFile(file)).digest('hex') })
+      }
+      return snapshot(1)
+    })
+    await broker.inspect(owner, grant)
+  })
+
   it('retires superseded completed exports while retaining the latest receipt across a failed retry', async () => {
     const { broker, client, native, owner, directory, inspect } = await fixture()
     await inspect()
@@ -148,7 +166,7 @@ describe('native RootsMagic workbench broker', () => {
       const capability = args[0] as string
       expect(capability).toMatch(/^[a-f0-9]{64}$/)
       const manifest = JSON.parse(await readFile(join(directory, `${capability}.rootsmagic-source.json`), 'utf8'))
-      expect(manifest).toMatchObject({ schema_version: 1, path, friendly_name: 'Fictional.rmtree', size_bytes: before.length })
+      expect(manifest).toMatchObject({ schema_version: 2, path, friendly_name: 'Fictional.rmtree', size_bytes: before.length, wal: null, shm: null })
       return snapshot(1)
     })
     await broker.inspect(owner, grant)

@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ancestryllm.api.contracts import (
-    JobSnapshotResponse,  # noqa: TC001 - FastAPI resolves runtime response types
+    JobSnapshotResponse,
 )
 from ancestryllm.application.operations import RootsMagicPresetQueryRequest
 
@@ -33,6 +33,12 @@ class SourceInspectRequest(VersionedRequest):
     """One Main-issued, single-use source capability."""
 
     source_capability: Capability
+
+
+class SubmissionCancellationResponse(VersionedRequest):
+    """An export receipt survives cancellation after publication commits."""
+
+    job: JobSnapshotResponse | None
 
 
 class PresetQueryRequest(VersionedRequest):
@@ -92,6 +98,15 @@ def rootsmagic_router(
     def discard_source(source_ref: Capability, request: VersionedRequest) -> dict[str, int]:
         boundary().discard(source_ref)
         return {"schema_version": 1}
+
+    @router.post(
+        "/submissions/{capability}/cancel", operation_id="cancelInternalRootsMagicSubmission"
+    )
+    def cancel_submission(
+        capability: Capability, request: VersionedRequest
+    ) -> SubmissionCancellationResponse:
+        job = boundary().cancel_submission(capability)
+        return SubmissionCancellationResponse(schema_version=1, job=snapshot(job) if job else None)
 
     @router.get("/presets", operation_id="listInternalRootsMagicPresets")
     def presets() -> dict[str, Any]:

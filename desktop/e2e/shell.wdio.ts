@@ -91,6 +91,17 @@ async function expectNoUnsupportedSurfaces(allowProviderSettings = false) {
 }
 
 async function expectNoAccessibilityViolations() {
+  if (process.env.ANCESTRYLLM_E2E_HEADLESS !== '1') {
+    await browser.waitUntil(async () => browser.electron.execute((electron) => (
+      electron.BrowserWindow.getAllWindows().every((window) => window.isVisible())
+    )), { timeoutMsg: 'The application window must be presented before its accessibility audit' })
+  }
+  // DOM focus can precede the first composited frame; axe's background sampling
+  // needs the presented layout and the locally bundled fonts to be ready.
+  await browser.execute(async () => {
+    await document.fonts.ready
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  })
   await browser.execute(axe.source)
   const violations = await browser.execute(async () => {
     const axeRunner = (globalThis as unknown as {

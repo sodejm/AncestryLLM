@@ -373,7 +373,7 @@ def test_core_40_qualifies_terminal_facade_coverage() -> None:
 def test_core_40_scopes_implemented_rootsmagic_http_adapter() -> None:
     normalized = " ".join(_core_40_section().split())
 
-    assert "The native RootsMagic HTTP adapter (`#119`) implements six fixed routes" in normalized
+    assert "The native RootsMagic HTTP adapter (`#119`) implements seven fixed routes" in normalized
     assert "over the immutable-source query and export application-service contracts" in normalized
     assert "target-matched packaged and manual acceptance evidence" in normalized
 

@@ -135,7 +135,14 @@ function matchesApprovedSource(stat: Stats, approved: Readonly<FileFingerprint>,
     && stat.mtimeMs === approved.mtimeMs && stat.ctimeMs === approved.ctimeMs
 }
 
-async function inspectSource(path: string, maximum: number, approved: Readonly<FileFingerprint>, checkpoint: () => void): Promise<Readonly<{ size: number; sha256: string }>> {
+interface SourceFileApproval {
+  readonly dev: string
+  readonly ino: string
+  readonly size_bytes: number
+  readonly sha256: string
+}
+
+async function inspectSource(path: string, maximum: number, approved: Readonly<FileFingerprint>, checkpoint: () => void): Promise<Readonly<SourceFileApproval>> {
   checkpoint()
   const before = await lstat(path)
   checkpoint()
@@ -146,10 +153,14 @@ async function inspectSource(path: string, maximum: number, approved: Readonly<F
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   const hash = createHash('sha256')
   const buffer = Buffer.allocUnsafe(1024 * 1024)
+  let identity: Readonly<{ dev: string; ino: string }>
   try {
     const opened = await handle.stat()
     checkpoint()
     if (!matchesApprovedSource(opened, approved, maximum)) fail('FILE_SELECTION_INVALID')
+    const exact = await handle.stat({ bigint: true })
+    if (Number(exact.dev) !== opened.dev || Number(exact.ino) !== opened.ino) fail('FILE_SELECTION_INVALID')
+    identity = { dev: exact.dev.toString(), ino: exact.ino.toString() }
     let position = 0
     while (position < before.size) {
       checkpoint()
@@ -162,13 +173,30 @@ async function inspectSource(path: string, maximum: number, approved: Readonly<F
     const finished = await handle.stat()
     checkpoint()
     if (!matchesApprovedSource(finished, approved, maximum)) fail('FILE_SELECTION_INVALID')
+    const exactFinished = await handle.stat({ bigint: true })
+    if (exactFinished.dev !== exact.dev || exactFinished.ino !== exact.ino
+      || exactFinished.size !== exact.size || exactFinished.mtimeNs !== exact.mtimeNs
+      || exactFinished.ctimeNs !== exact.ctimeNs) fail('FILE_SELECTION_INVALID')
   } finally {
     await handle.close()
   }
   const after = await lstat(path)
   checkpoint()
   if (!matchesApprovedSource(after, approved, maximum)) fail('FILE_SELECTION_INVALID')
-  return Object.freeze({ size: before.size, sha256: hash.digest('hex') })
+  const finalIdentity = await lstat(path, { bigint: true })
+  if (finalIdentity.dev.toString() !== identity.dev || finalIdentity.ino.toString() !== identity.ino) fail('FILE_SELECTION_INVALID')
+  return Object.freeze({ ...identity, size_bytes: before.size, sha256: hash.digest('hex') })
+}
+
+async function inspectCompanion(path: string, maximum: number, checkpoint: () => void): Promise<Readonly<SourceFileApproval> | null> {
+  let approved: Stats
+  try {
+    approved = await lstat(path)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null
+    throw error
+  }
+  return inspectSource(path, maximum, approved, checkpoint)
 }
 
 function selectedOutput(value: string): string {
@@ -267,17 +295,22 @@ export class RootsMagicWorkbenchBroker {
       const grant = await this.files.resolveReadGrant(owner, grantId, 'rootsmagic-read')
       this.requireActive(owner, generation, signal)
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
-      const inspected = await inspectSource(grant.path, grant.maxBytes, grant.fingerprint, () => {
+      const checkpoint = () => {
         this.requireActive(owner, generation, signal)
         if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
-      })
+      }
+      const inspected = await inspectSource(grant.path, grant.maxBytes, grant.fingerprint, checkpoint)
+      const wal = await inspectCompanion(`${grant.path}-wal`, grant.maxBytes, checkpoint)
+      const shm = await inspectCompanion(`${grant.path}-shm`, grant.maxBytes, checkpoint)
+      if (shm !== null && wal === null) fail('FILE_SELECTION_INVALID')
       this.requireActive(owner, generation, signal)
       if (pending.revoked) fail('FILE_OPERATION_CANCELLED')
       const manifest = await writeManifest(this.directory, 'rootsmagic-source', {
-        schema_version: 1,
+        schema_version: 2,
         path: grant.path,
-        size_bytes: inspected.size,
-        sha256: inspected.sha256,
+        ...inspected,
+        wal,
+        shm,
         friendly_name: basename(grant.path).replace(/\p{C}/gu, '') || 'RootsMagic source',
       })
       pending.manifestPath = manifest.path

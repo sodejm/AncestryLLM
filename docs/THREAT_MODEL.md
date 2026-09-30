@@ -1039,12 +1039,33 @@ copies. Manifests are consumed once. Source sessions are bound to the owning
 window and sidecar lifetime. Restart, discard, and window closure revoke access.
 Container/external connection modes do not receive this native authority.
 
+The private version-2 source manifest binds the picker-approved database and
+present WAL/SHM companions to exact device/inode identities, sizes, and SHA-256
+digests, including explicit companion absence. Sidecar inspection compares the
+immutable snapshot with that approval before reading genealogy data. Windows
+identity translation checks Node's legacy identity and reads Python's full
+identity from the same held file handle. A byte-identical replacement on another
+inode or a different companion generation invalidates the approval.
+
+Lost submission responses trigger one bounded cancellation/recovery request to
+the original sidecar session. Inspection cancellation releases retained source
+authority and capacity; export cancellation returns the accepted job so a
+successful commit remains observable. Pre-acceptance cancellation consumes the
+private manifest, preventing delayed requests from reviving that capability.
+
 Untrusted database content is constrained by immutable SQLite snapshot handling,
 validated companion access, schema allowlists, bound preset parameters, stable
 ordering, pagination, row/text/byte/time limits, and plain-text rendering. Unknown
 vendor versions are reported honestly; tested schema capabilities determine
 support. The CLI SQL/question boundary remains separate. Queries and exports
 are deterministic and require no provider or cloud consent.
+
+Missing, null, conflicting, or invalid living status is protected by the chosen
+living-person policy. Anonymized families retain relationship links without
+family-owned events, notes, citations, media, or extension payload. The same
+payload restriction applies to partially selected families so directional and
+depth-limited exports do not disclose off-scope data. Published manifests use
+the stable source fingerprint rather than the private session capability.
 
 An output capability authorizes creation of one new folder. Existing destinations
 and source aliases are refused. Main's selected parent device/inode identity is
@@ -1060,8 +1081,9 @@ publication. Final source checks and revocation serialize with the short commit
 boundary. Cancellation before commit publishes nothing; successful publication
 wins over concurrent cancellation. Reports/manifests omit private host paths.
 The application result exposes opaque artifact references with sizes and digests,
-without publication paths. The workspace freezes the root and People query during
-export and records the exported root in its receipt. Confirmed inspection
+without publication paths. The workspace freezes the root during every query
+or export, freezes queries during export, and records the exported root in its
+receipt. Confirmed inspection
 revocation clears local pending state so a new picker grant can be requested;
 transient disposal failures remain retryable.
 Recovery requires renewed authority and cannot revive expired grants.

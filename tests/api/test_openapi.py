@@ -42,6 +42,7 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
         f"{API_NAMESPACE}/rootsmagic/presets",
         f"{API_NAMESPACE}/rootsmagic/queries",
         f"{API_NAMESPACE}/rootsmagic/exports",
+        f"{API_NAMESPACE}/rootsmagic/submissions/{{capability}}/cancel",
         f"{API_NAMESPACE}/rootsmagic/jobs/{{job_id}}/result",
         f"{API_NAMESPACE}/chat/capability",
         f"{API_NAMESPACE}/chat/sessions",

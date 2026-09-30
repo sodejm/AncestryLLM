@@ -227,6 +227,7 @@ def test_openapi_marks_secret_input_write_only_and_has_no_readback_contract() ->
         f"{API_NAMESPACE}/capabilities",
         f"{API_NAMESPACE}/rootsmagic/sources",
         f"{API_NAMESPACE}/rootsmagic/sources/{{source_ref}}/discard",
+        f"{API_NAMESPACE}/rootsmagic/submissions/{{capability}}/cancel",
         f"{API_NAMESPACE}/rootsmagic/presets",
         f"{API_NAMESPACE}/rootsmagic/queries",
         f"{API_NAMESPACE}/rootsmagic/exports",

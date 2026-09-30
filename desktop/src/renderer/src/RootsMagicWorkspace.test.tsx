@@ -397,6 +397,25 @@ describe('RootsMagic workspace', () => {
     expect(screen.getByRole('button', { name: 'Choose new export folder' })).toBeEnabled()
   })
 
+  it('keeps the root fixed while a family query is pending', async () => {
+    const bridge = bridgeFor([inspection, queryResult(people), queryResult(familyLinks)])
+    let finish!: (value: BridgeResult<JobSnapshot>) => void
+    vi.mocked(bridge.queryRootsMagic).mockResolvedValueOnce(success(job))
+      .mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Family links' }))
+    const staleSelection = screen.getByRole('button', { name: 'Select Jordan Example' })
+    expect(staleSelection).toBeDisabled()
+    await userEvent.click(staleSelection)
+    finish(success(job))
+    await waitFor(() => expect(screen.queryByText('Loading the requested page…')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Family links results' })).toBeVisible()
+    expect(bridge.queryRootsMagic).toHaveBeenLastCalledWith(expect.objectContaining({ person_id: 101 }))
+  })
+
   it('clears a stale query pending state when the active source is replaced', async () => {
     const bridge = bridgeFor([inspection, inspection])
     vi.mocked(bridge.queryRootsMagic).mockReturnValueOnce(new Promise<BridgeResult<JobSnapshot>>(() => undefined))

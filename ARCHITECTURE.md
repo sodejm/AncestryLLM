@@ -252,7 +252,7 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Internal FastAPI control adapter: authenticated health/capability discovery plus the `0.6.0` source-level fixed startup-diagnostics, settings read/patch, credential status/set/delete, provider-configuration, endpoint-validation, consent, Issue #104 job list/status/cancel/SSE/shutdown routes, Issue #110 synchronous transient-chat capability/session/run routes, and Issue #111 fixed stream-start/SSE/cancel routes, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. Startup diagnostics are side-effect-free, sanitized, and gate mutations when required components are degraded. Configuration routes administer profiles and consent; general job routes adapt a UI-neutral application lifecycle but submit or execute no operation. Chat routes execute only the exact bounded chat use cases after policy and consent preflight; SSE requires strict monotonic schema-v1 events and `Last-Event-ID` replay. Issue #114 supplies five fixed GEDCOM submissions and a result route only with an explicit artifact registry. Issue #115 adds a bounded root-query route to that façade and four separately composed private native intake routes over immutable Main-owned staging. Native intake is read-only and network-free. Issue #119 adds six separately composed native RootsMagic inspection, discard, preset, query, export, and result routes. No route exposes credential values, host paths, complete record trees, a generic command dispatcher, tools, or arbitrary provider dispatch. |
+| `src/ancestryllm/api/` | Internal FastAPI control adapter: authenticated health/capability discovery plus the `0.6.0` source-level fixed startup-diagnostics, settings read/patch, credential status/set/delete, provider-configuration, endpoint-validation, consent, Issue #104 job list/status/cancel/SSE/shutdown routes, Issue #110 synchronous transient-chat capability/session/run routes, and Issue #111 fixed stream-start/SSE/cancel routes, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. Startup diagnostics are side-effect-free, sanitized, and gate mutations when required components are degraded. Configuration routes administer profiles and consent; general job routes adapt a UI-neutral application lifecycle but submit or execute no operation. Chat routes execute only the exact bounded chat use cases after policy and consent preflight; SSE requires strict monotonic schema-v1 events and `Last-Event-ID` replay. Issue #114 supplies five fixed GEDCOM submissions and a result route only with an explicit artifact registry. Issue #115 adds a bounded root-query route to that façade and four separately composed private native intake routes over immutable Main-owned staging. Native intake is read-only and network-free. Issue #119 adds seven separately composed native RootsMagic inspection, discard, preset, query, export, submission-cancellation, and result routes. No route exposes credential values, host paths, complete record trees, a generic command dispatcher, tools, or arbitrary provider dispatch. |
 | `containers/` | Issue #349's minimal production OCI build plus base, Local Desktop, and Host Remote Compose validation models. They contain only a probe gateway and optional dormant worker, publish no host port, attach the data placeholder read-only, and do not activate a deployment profile. |
 | `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, Settings, Tasks, `0.6.0` source-level Chat, and `0.7.0` source-level GEDCOM intake and RootsMagic workbench surfaces use Issue #106's responsive presentation shell and fixed accessibility-state contracts. The sandboxed bridge contains 50 fixed request methods: six control, three opaque file-grant, five settings/credential, six provider-configuration/consent, five task-lifecycle, three local-runtime, four native-action, six chat, four read-only GEDCOM intake requests, and eight RootsMagic requests, plus validated job-event and chat-event listeners. Main owns native dialogs, file grants, private intake staging, clipboard writes, external-link confirmation, sender-bound private streams, sidecar supervision, runtime controls, diagnostics-directory actions, shutdown decisions, and hardened protocol/CSP/session/window policy. Issues #110/#111 supply fixed transient-chat service and transport boundaries; #112 adds bounded renderer conversation state, strict sequence/replay handling, safe Markdown allowlisting, plain-text copy, and explicit HTTPS-link confirmation without granting renderer network, filesystem, tool, generic IPC, or provider-selection authority. Issue #115 adds read-only source summaries and bounded root queries over the shared GEDCOM service; no raw paths, parser, complete trees, publication, or provider calls enter the renderer. Provider, runtime, task, and chat DTOs contain only reviewed non-secret fields, redacted identities, sanitized lifecycle state, coded failures, and path-free metadata. Root candidates separately carry bounded genealogy display text in transient memory. The host container authority and local-runtime bridge remain Main-only and expose no socket, executable path, arbitrary arguments, or general process capability. No AncestryLLM application container is started. RootsMagic presentation adds bounded plain-text pages and person-rooted export requests; filesystem publication remains in the sidecar behind Main-issued source and new-folder capabilities. General genealogy editing, remote enrollment/hosting, and updating remain excluded. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; unsigned CI artifacts are verification inputs only. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
@@ -1236,12 +1236,21 @@ adapter's complete tables. Existing SQL/question CLI and REPL requests retain
 their behavior. Query pages have bounded row, text, byte, and time budgets and
 nullable totals.
 
-Main consumes a picker grant into a private source capability, and the native
-sidecar retains an immutable source session for repeated queries. Database and
-validated WAL/SHM companion identities are rechecked throughout the session.
+Main consumes a picker grant into a private source capability. Its version-2
+manifest binds the database and each present WAL/SHM companion to exact decimal
+device/inode identities, sizes, and SHA-256 digests, including explicit companion
+absence. The sidecar verifies this approved generation before reading the
+snapshot, then retains an immutable source session for repeated queries.
+Database and validated companion identities are rechecked throughout the session.
 Renderer metadata contains friendly names and fingerprints, never private host
 paths. Sessions revoke on discard, window closure, or sidecar restart. Native
 routes are composed only when the private mediation directory is available.
+
+If a submission response is lost, Main makes one bounded cancellation/recovery
+request to the original sidecar session using the submission capability. The
+sidecar releases interrupted inspection sessions and their allowance. Export
+recovery preserves an accepted job, including its committed receipt. Revoking
+an unaccepted capability also prevents a delayed request from consuming it.
 
 Person-rooted folder exports stage a GEDCOM 5.5.5 document, conversion report,
 and digest manifest under the shared durable directory coordinator. A narrowly
@@ -1254,11 +1263,16 @@ does not establish packaged support without target-matched acceptance evidence.
 The private output manifest carries the parent device/inode identity captured by
 Main as exact decimal strings. On Windows, the adapter verifies Node's legacy
 32/64-bit identity and reads Python's full 64/128-bit identity from the same open
-directory handle; it refuses unavailable or mismatched identities. The worker
+directory handle; source files use the same held-handle translation. It refuses
+unavailable or mismatched identities. The worker
 rechecks the full identity at entry, before staging, and before publication. The application result contains serializable
 opaque artifact references, sizes, and digests; publication paths remain internal.
-While an export runs, the workspace freezes query and root selection and binds
-the completion receipt to the exported root.
+While a query or export runs, the workspace freezes root selection; exports also
+freeze queries and bind the completion receipt to the exported root. Unknown
+living status receives the selected living-person protection. Anonymization
+retains relationship-only family records, while families with protected or
+off-scope members omit family-owned payload. Published manifests identify the
+source by its stable fingerprint, never its session capability.
 
 `RootsMagicService` composes an immutable reader, a dedicated query
 orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
@@ -1812,7 +1826,7 @@ same application-service contracts rather than redefine behavior.
 - Within the authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes
   translate strict OpenAPI/Pydantic payloads into transport-neutral application
   operation requests and results; OpenAPI/Pydantic ownership remains adapter local.
-  The native RootsMagic HTTP adapter (`#119`) implements six fixed routes over
+  The native RootsMagic HTTP adapter (`#119`) implements seven fixed routes over
   the immutable-source query and export application-service contracts. It is
   composed only for the private native sidecar mediation boundary.
 - The bounded Electron control shell keeps file grants, sidecar lifecycle, and

@@ -50,6 +50,153 @@ def _broker_parent_identity(path: Path) -> tuple[int, int]:
     return identity
 
 
+def _source_file_manifest(path: Path) -> dict:
+    import sys
+
+    from ancestryllm.rootsmagic.core import RootsMagicReader
+
+    info = path.stat()
+    identity = (info.st_dev, info.st_ino)
+    if sys.platform == "win32":
+        handle = RootsMagicReader._windows_open_directory_handle(path)
+        try:
+            identity = RootsMagicReader._windows_handle_identity(handle)
+        finally:
+            RootsMagicReader._windows_close_handle(handle)
+    return {
+        "dev": str(identity[0]),
+        "ino": str(identity[1]),
+        "size_bytes": info.st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def _source_manifest(path: Path) -> dict:
+    from ancestryllm.application._rootsmagic_workbench import sanitized_source_name
+
+    wal = path.with_name(path.name + "-wal")
+    shm = path.with_name(path.name + "-shm")
+    return {
+        "schema_version": 2,
+        "path": str(path),
+        **_source_file_manifest(path),
+        "friendly_name": sanitized_source_name(path.name),
+        "wal": _source_file_manifest(wal) if wal.exists() else None,
+        "shm": _source_file_manifest(shm) if shm.exists() else None,
+    }
+
+
+@pytest.mark.parametrize("change", ["main-replace", "wal-replace", "wal-edit", "shm-edit"])
+def test_native_inspection_rejects_changed_picker_generation(tmp_path: Path, change: str) -> None:
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
+
+    tree = tmp_path / "Fictional.rmtree"
+    with closing(sqlite3.connect(tree)) as writer:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.executescript(
+            "CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY); INSERT INTO PersonTable VALUES(1);"
+        )
+        capability = "f" * 64
+        manifest = tmp_path / f"{capability}.rootsmagic-source.json"
+        manifest.write_text(json.dumps(_source_manifest(tree)))
+        manifest.chmod(0o600)
+        target = (
+            tree
+            if change == "main-replace"
+            else tree.with_name(tree.name + ("-shm" if change == "shm-edit" else "-wal"))
+        )
+        original = target.read_bytes()
+        if change.endswith("replace"):
+            target.rename(target.with_name(target.name + ".old"))
+            target.write_bytes(original)
+        elif change == "wal-edit":
+            writer.execute("INSERT INTO PersonTable VALUES(2)")
+            writer.commit()
+        else:
+            # SQLite ignores this unused region; the approved generation still changed.
+            with target.open("r+b") as stream:
+                stream.seek(-1, 2)
+                stream.write(bytes([original[-1] ^ 1]))
+        jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+        boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
+        try:
+            job = boundary.inspect(capability)
+            completed = jobs.manager.wait(job.job_id, timeout=5)
+            assert completed.state is JobState.FAILED
+        finally:
+            boundary.close()
+            jobs.close()
+
+
+def test_cancel_submission_reclaims_inspection_after_lost_reply(tmp_path: Path) -> None:
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
+
+    tree = tmp_path / "Fictional.rmtree"
+    with closing(sqlite3.connect(tree)) as connection:
+        connection.executescript(
+            "CREATE TABLE PersonTable (PersonID INTEGER PRIMARY KEY, Living INTEGER);"
+            "INSERT INTO PersonTable VALUES(1,0);"
+        )
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
+    try:
+        # More than the eight-source capacity proves each lost reply releases its lease.
+        for index in range(10):
+            capability = f"{index:064x}"
+            manifest = tmp_path / f"{capability}.rootsmagic-source.json"
+            manifest.write_text(json.dumps(_source_manifest(tree)))
+            manifest.chmod(0o600)
+            job = boundary.inspect(capability)
+            assert jobs.manager.wait(job.job_id, timeout=5).state is JobState.COMPLETED
+            assert boundary.cancel_submission(capability) is None
+            with pytest.raises(AncestryError):
+                boundary.result(job.job_id)
+    finally:
+        boundary.close()
+        jobs.close()
+
+
+@pytest.mark.parametrize("kind", ["source", "output"])
+def test_cancel_submission_before_acceptance_consumes_authority(tmp_path: Path, kind: str) -> None:
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
+
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
+    capability = "d" * 64
+    manifest = tmp_path / f"{capability}.rootsmagic-{kind}.json"
+    manifest.write_text("{}")
+    try:
+        assert boundary.cancel_submission(capability) is None
+        assert not manifest.exists()
+        with pytest.raises(AncestryError, match="invalid or expired"):
+            boundary.inspect(capability)
+    finally:
+        boundary.close()
+        jobs.close()
+
+
+def test_cancel_submission_preserves_committed_export_receipt(tmp_path: Path) -> None:
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench, _OwnedJob
+    from ancestryllm.core.jobs import CommittedJobResult
+
+    jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
+    boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
+    capability = "e" * 64
+    try:
+        job = boundary._submit(
+            _OwnedJob("export", None, submission_capability=capability),
+            lambda _: CommittedJobResult({"artifact_id": "fictional-committed-export"}),
+        )
+        assert jobs.manager.wait(job.job_id, timeout=5).state is JobState.COMPLETED
+        recovered = boundary.cancel_submission(capability)
+        assert recovered is not None and recovered.job_id == job.job_id
+        assert boundary.result(job.job_id)["result"]["artifact_id"] == "fictional-committed-export"
+    finally:
+        boundary.close()
+        jobs.close()
+
+
 def test_native_source_capability_is_single_use_and_results_revoke(tmp_path: Path) -> None:
     from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
 
@@ -60,17 +207,7 @@ def test_native_source_capability_is_single_use_and_results_revoke(tmp_path: Pat
         )
     capability = "1" * 64
     manifest = tmp_path / f"{capability}.rootsmagic-source.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "path": str(tree),
-                "size_bytes": tree.stat().st_size,
-                "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
-                "friendly_name": tree.name,
-            }
-        )
-    )
+    manifest.write_text(json.dumps(_source_manifest(tree)))
     manifest.chmod(0o600)
     jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
     boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
@@ -104,17 +241,7 @@ def test_native_inspection_normalizes_format_controls_in_source_name(tmp_path: P
         )
     capability = "2" * 64
     manifest = tmp_path / f"{capability}.rootsmagic-source.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "path": str(tree),
-                "size_bytes": tree.stat().st_size,
-                "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
-                "friendly_name": "Fictional.rmtree",
-            }
-        )
-    )
+    manifest.write_text(json.dumps(_source_manifest(tree)))
     manifest.chmod(0o600)
     jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
     boundary = NativeRootsMagicWorkbench(directory=tmp_path, jobs=jobs)
@@ -266,17 +393,7 @@ def test_native_http_auth_validation_and_full_query(
         )
     capability = "d" * 64
     manifest = tmp_path / f"{capability}.rootsmagic-source.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "path": str(tree),
-                "size_bytes": tree.stat().st_size,
-                "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
-                "friendly_name": tree.name,
-            }
-        )
-    )
+    manifest.write_text(json.dumps(_source_manifest(tree)))
     manifest.chmod(0o600)
     response = client.post(
         prefix + "/sources",
@@ -389,6 +506,8 @@ def test_native_http_auth_validation_and_full_query(
         "manifest.json",
     }
     assert tree.read_bytes() == before
+    published_manifest = json.loads((destination / "manifest.json").read_text())
+    assert result["source_ref"] not in json.dumps(published_manifest)
     discarded = client.post(
         prefix + f"/sources/{result['source_ref']}/discard",
         headers=api_headers,
@@ -425,17 +544,7 @@ def test_http_discard_waits_for_final_export_publication_guard(
         )
     source_capability = "a" * 64
     source_manifest = tmp_path / f"{source_capability}.rootsmagic-source.json"
-    source_manifest.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "path": str(tree),
-                "size_bytes": tree.stat().st_size,
-                "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
-                "friendly_name": tree.name,
-            }
-        )
-    )
+    source_manifest.write_text(json.dumps(_source_manifest(tree)))
     source_manifest.chmod(0o600)
     inspected = client.post(
         prefix + "/sources",
@@ -561,17 +670,7 @@ def test_discard_prevents_export(native_client, api_headers, tmp_path, monkeypat
 
         source_capability = "c" * 64
         source_manifest = tmp_path / f"{source_capability}.rootsmagic-source.json"
-        source_manifest.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "path": str(tree),
-                    "size_bytes": tree.stat().st_size,
-                    "sha256": hashlib.sha256(tree.read_bytes()).hexdigest(),
-                    "friendly_name": tree.name,
-                }
-            )
-        )
+        source_manifest.write_text(json.dumps(_source_manifest(tree)))
         source_manifest.chmod(0o600)
         inspected = client.post(
             prefix + "/sources",
@@ -661,7 +760,11 @@ def test_source_manifest_accepts_advertised_size_boundary(size_bytes: int) -> No
 
     manifest = _SourceManifest.model_validate(
         {
-            "schema_version": 1,
+            "schema_version": 2,
+            "dev": "1",
+            "ino": "2",
+            "wal": None,
+            "shm": None,
             "path": "/fictional/tree.rmtree",
             "size_bytes": size_bytes,
             "sha256": "a" * 64,
@@ -677,7 +780,11 @@ def test_source_manifest_rejects_above_advertised_size() -> None:
     with pytest.raises(ValidationError):
         _SourceManifest.model_validate(
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                "dev": "1",
+                "ino": "2",
+                "wal": None,
+                "shm": None,
                 "path": "/fictional/tree.rmtree",
                 "size_bytes": 8 * 1024 * 1024 * 1024 + 1,
                 "sha256": "a" * 64,

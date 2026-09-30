@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import sys
 import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from ancestryllm.application.operations import RootsMagicSourceSummary
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileFingerprint
+from ancestryllm.core.windows_identity import windows_stat_identity
 from ancestryllm.rootsmagic.core import RootsMagicReader
 
 if TYPE_CHECKING:
@@ -55,6 +57,36 @@ def sanitized_source_name(name: str) -> str:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PickerFileApproval:
+    """Exact identity and bytes approved by Main for one SQLite generation member."""
+
+    device: int
+    inode: int
+    size_bytes: int
+    sha256: str
+
+    def verify(self, path: Path, fingerprint: FileFingerprint) -> None:
+        """Reject a captured generation member that differs from Main's approval."""
+        expected = (self.device, self.inode)
+        if sys.platform == "win32":
+            import msvcrt
+
+            # Check libuv's legacy IDs and Python's full IDs on the same held file.
+            with path.open("rb") as stream:
+                handle = msvcrt.get_osfhandle(stream.fileno())
+                if RootsMagicReader._windows_handle_identity(handle) != expected:
+                    raise AncestryError("FILE_INPUT_CHANGED", "The selected source changed.")
+                expected = windows_stat_identity(handle)
+        snapshot = fingerprint.snapshot
+        if (
+            (snapshot.device, snapshot.inode) != expected
+            or snapshot.size != self.size_bytes
+            or fingerprint.sha256 != self.sha256
+        ):
+            raise AncestryError("FILE_INPUT_CHANGED", "The selected source changed.")
+
+
 @dataclass(slots=True)
 class _SourceSession:
     path: Path
@@ -87,7 +119,15 @@ class RootsMagicWorkbench:
         self._lock = RLock()
         self._closed = False
 
-    def inspect(self, path: Path, *, size_bytes: int, sha256: str) -> RootsMagicSourceSummary:
+    def inspect(
+        self,
+        path: Path,
+        *,
+        size_bytes: int,
+        sha256: str,
+        approval: tuple[PickerFileApproval, PickerFileApproval | None, PickerFileApproval | None]
+        | None = None,
+    ) -> RootsMagicSourceSummary:
         """Verify a picker-authorized source and issue a fresh session capability."""
         reader = RootsMagicReader(allowed_directories=[path.parent], max_rows=100)
         selected = reader.resolve_tree(path)
@@ -96,6 +136,19 @@ class RootsMagicWorkbench:
             raise AncestryError(
                 "FILE_INPUT_CHANGED", "The selected source changed before inspection."
             )
+        if approval is not None:
+            components = (
+                (fingerprint, None, None)
+                if isinstance(fingerprint, FileFingerprint)
+                else (fingerprint.main, fingerprint.wal, fingerprint.shm)
+            )
+            for suffix, approved, captured in zip(
+                ("", "-wal", "-shm"), approval, components, strict=True
+            ):
+                if (approved is None) != (captured is None):
+                    raise AncestryError("FILE_INPUT_CHANGED", "The selected source changed.")
+                if approved is not None and captured is not None:
+                    approved.verify(selected.with_name(selected.name + suffix), captured)
         RootsMagicPresetService(reader).validate_capabilities(selected, "people")
         reader.verify_source(selected, fingerprint)
         cancellation_checkpoint()

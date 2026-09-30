@@ -14,7 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ancestryllm.application._rootsmagic_directory_export import export_parent_identity
 from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
-from ancestryllm.application._rootsmagic_workbench import RootsMagicWorkbench, sanitized_source_name
+from ancestryllm.application._rootsmagic_workbench import (
+    PickerFileApproval,
+    RootsMagicWorkbench,
+    sanitized_source_name,
+)
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import CommittedJobResult, JobState
 
@@ -40,10 +44,22 @@ class _OutputManifest(_PathManifest):
     parent_ino: str = Field(pattern=r"^(0|[1-9][0-9]{0,39})$")
 
 
-class _SourceManifest(_PathManifest):
+class _SourceFileManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    dev: str = Field(pattern=r"^(0|[1-9][0-9]{0,39})$")
+    ino: str = Field(pattern=r"^(0|[1-9][0-9]{0,39})$")
     size_bytes: int = Field(ge=0, le=8 * 1024 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    def approval(self) -> PickerFileApproval:
+        return PickerFileApproval(int(self.dev), int(self.ino), self.size_bytes, self.sha256)
+
+
+class _SourceManifest(_PathManifest, _SourceFileManifest):
+    schema_version: int = Field(ge=2, le=2)
     friendly_name: str = Field(min_length=1, max_length=1024)
+    wal: _SourceFileManifest | None
+    shm: _SourceFileManifest | None
 
 
 def _unavailable() -> AncestryError:
@@ -57,6 +73,7 @@ class _OwnedJob:
     kind: str
     source_ref: str | None
     discarded: bool = False
+    submission_capability: str | None = None
 
 
 class NativeRootsMagicWorkbench:
@@ -117,7 +134,7 @@ class NativeRootsMagicWorkbench:
                 return
             if (
                 owned.kind == "inspection"
-                and snapshot.state != JobState.COMPLETED
+                and (snapshot.state != JobState.COMPLETED or owned.discarded or self._closed)
                 and owned.source_ref
             ):
                 self._service.discard(owned.source_ref)
@@ -152,12 +169,19 @@ class NativeRootsMagicWorkbench:
                 raise _unavailable()
             manifest = self._manifest(capability, "source")
             assert isinstance(manifest, _SourceManifest)
-            owned = _OwnedJob("inspection", None)
+            owned = _OwnedJob("inspection", None, submission_capability=capability)
 
             def work(reporter: JobReporter) -> Any:
                 reporter.update("rootsmagic.inspect")
                 summary = self._service.inspect(
-                    Path(manifest.path), size_bytes=manifest.size_bytes, sha256=manifest.sha256
+                    Path(manifest.path),
+                    size_bytes=manifest.size_bytes,
+                    sha256=manifest.sha256,
+                    approval=(
+                        manifest.approval(),
+                        manifest.wal.approval() if manifest.wal else None,
+                        manifest.shm.approval() if manifest.shm else None,
+                    ),
                 )
                 owned.source_ref = summary.source_ref
                 reporter.set_outcome(
@@ -208,38 +232,40 @@ class NativeRootsMagicWorkbench:
             manifest = self._manifest(output_capability, "output")
             assert isinstance(manifest, _OutputManifest)
 
-        def work(reporter: JobReporter) -> CommittedJobResult:
-            reporter.update("rootsmagic.export")
-            with source.lock:
-                source.verify()
-                exported = RootsMagicDirectoryExporter(reader=source.reader).export(
-                    source.path,
-                    Path(manifest.path),
-                    root_person_id=str(root_person_id),
-                    scope=scope,
-                    generations=generations,
-                    living=living,
-                    source_ref=source_ref,
-                    source_fingerprint=source.summary.fingerprint,
-                    verify_source=source.verify,
-                    publication_guard=source.publication_guard,
-                    expected_parent=export_parent_identity(
-                        Path(manifest.path), (int(manifest.parent_dev), int(manifest.parent_ino))
-                    ),
+            def work(reporter: JobReporter) -> CommittedJobResult:
+                reporter.update("rootsmagic.export")
+                with source.lock:
+                    source.verify()
+                    exported = RootsMagicDirectoryExporter(reader=source.reader).export(
+                        source.path,
+                        Path(manifest.path),
+                        root_person_id=str(root_person_id),
+                        scope=scope,
+                        generations=generations,
+                        living=living,
+                        source_fingerprint=source.summary.fingerprint,
+                        verify_source=source.verify,
+                        publication_guard=source.publication_guard,
+                        expected_parent=export_parent_identity(
+                            Path(manifest.path),
+                            (int(manifest.parent_dev), int(manifest.parent_ino)),
+                        ),
+                    )
+                return CommittedJobResult(
+                    {
+                        "schema_version": 1,
+                        "artifact_id": exported.manifest.artifact_id,
+                        "display_name": Path(manifest.path).name,
+                        "source_ref": source_ref,
+                        "source_fingerprint": source.summary.fingerprint,
+                        "profile_code": "portable",
+                        "gedcom_version": "5.5.5",
+                    }
                 )
-            return CommittedJobResult(
-                {
-                    "schema_version": 1,
-                    "artifact_id": exported.manifest.artifact_id,
-                    "display_name": Path(manifest.path).name,
-                    "source_ref": source_ref,
-                    "source_fingerprint": source.summary.fingerprint,
-                    "profile_code": "portable",
-                    "gedcom_version": "5.5.5",
-                }
-            )
 
-        return self._submit(_OwnedJob("export", source_ref), work)
+            return self._submit(
+                _OwnedJob("export", source_ref, submission_capability=output_capability), work
+            )
 
     def result(self, job_id: str) -> dict[str, Any]:
         """Return only this native session's completed, still-authorized result."""
@@ -253,6 +279,29 @@ class NativeRootsMagicWorkbench:
             if snapshot.state != JobState.COMPLETED or not isinstance(snapshot.result, dict):
                 raise _unavailable()
             return {"schema_version": 1, "kind": owned.kind, "result": snapshot.result}
+
+    def cancel_submission(self, capability: str) -> PublicJobSnapshot | None:
+        """Reconcile a lost submission reply using its original native authority."""
+        if not _CAPABILITY.fullmatch(capability):
+            raise AncestryError("ROOTSMAGIC_CAPABILITY_INVALID", "Invalid native capability.")
+        with self._lock:
+            for job_id, owned in tuple(self._owned.items()):
+                if owned.submission_capability != capability:
+                    continue
+                if owned.kind == "inspection":
+                    owned.discarded = True
+                    if owned.source_ref:
+                        self._service.discard(owned.source_ref)
+                    self._jobs.manager.discard_result(job_id)
+                    self._on_job(self._jobs.manager.cancel(job_id))
+                    return None
+                self._jobs.manager.cancel(job_id)
+                return self._jobs.get(job_id)
+            # Main writes authority before sending the POST. Serializing consumption
+            # with submission also prevents a late POST from accepting cancelled work.
+            for kind in ("source", "output"):
+                (self._directory / f"{capability}.rootsmagic-{kind}.json").unlink(missing_ok=True)
+            return None
 
     def discard(self, source_ref: str) -> None:
         """Revoke the source and all retained pages immediately."""

@@ -145,6 +145,44 @@ const jobSnapshot = (overrides: Partial<JobSnapshot> = {}): Readonly<JobSnapshot
   ...overrides,
 })
 
+describe('RootsMagic submission recovery', () => {
+  it.each([false, true])('reclaims an accepted inspection when its reply is lost (abort=%s)', async (abort) => {
+    const controller = new AbortController()
+    const capability = 'c'.repeat(64)
+    const request = vi.fn().mockImplementationOnce(async () => {
+      if (abort) controller.abort()
+      throw new Error('reply lost after acceptance')
+    }).mockResolvedValueOnce({ statusCode: 200, contentType: 'application/json',
+      body: JSON.stringify({ schema_version: 1, job: null }) })
+    const client = createRootsMagicWorkbenchClient({ session: () => session, request })
+    await expect(client.inspect(capability, controller.signal)).rejects.toEqual(
+      new SidecarClientError(abort ? 'cancelled' : 'request_failed'))
+    expect(request).toHaveBeenLastCalledWith(session,
+      `/api/v1/rootsmagic/submissions/${capability}/cancel`, undefined,
+      { method: 'POST', body: JSON.stringify({ schema_version: 1 }) })
+  })
+
+  it('recovers a committed export receipt through the original session after reply loss', async () => {
+    const controller = new AbortController()
+    const capability = 'd'.repeat(64)
+    let currentSession: typeof session | undefined = session
+    const completed = jobSnapshot({ state: 'completed', finished_at: '2026-08-12T12:00:04+00:00' })
+    const request = vi.fn().mockImplementationOnce(async () => {
+      controller.abort()
+      currentSession = undefined
+      throw new Error('reply lost after publication')
+    }).mockResolvedValueOnce({ statusCode: 200, contentType: 'application/json',
+      body: JSON.stringify({ schema_version: 1, job: completed }) })
+    const client = createRootsMagicWorkbenchClient({ session: () => currentSession, request })
+    await expect(client.export({ schema_version: 1, source_ref: 'b'.repeat(64),
+      output_capability: capability, root_person_id: 1, scope: 'connected', generations: null,
+      living: 'exclude' }, controller.signal)).resolves.toEqual(completed)
+    expect(request).toHaveBeenLastCalledWith(session,
+      `/api/v1/rootsmagic/submissions/${capability}/cancel`, undefined,
+      { method: 'POST', body: JSON.stringify({ schema_version: 1 }) })
+  })
+})
+
 describe('main-only sidecar capabilities client', () => {
   it('uses the fixed authenticated startup-diagnostics request and validates its response', async () => {
     const request = vi.fn().mockResolvedValue({ statusCode: 200, contentType: 'application/json', body: JSON.stringify({

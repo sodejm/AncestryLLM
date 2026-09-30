@@ -467,7 +467,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
             const person = query.id === 'people' ? rowPerson(query.page, row.values) : null
             return <tr key={`${query.page.offset}:${index}`}>
               {row.values.map((value, valueIndex) => <td key={`${query.page.columns[valueIndex]}:${valueIndex}`}>{displayValue(value)}</td>)}
-              {query.id === 'people' && <td>{person ? <Button type="button" variant="quiet" disabled={exportPending || discarding} onClick={() => {
+              {query.id === 'people' && <td>{person ? <Button type="button" variant="quiet" disabled={queryPending || exportPending || discarding} onClick={() => {
                 setSelectedPerson(person); setOutput(null); setReceipt(null); setConfirmed(false)
                 setStatus(`Selected root: ${person.label}`)
               }}>Select {person.label}</Button> : hasUnsupportedPersonId(query.page, row.values) ?

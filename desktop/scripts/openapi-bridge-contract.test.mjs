@@ -46,6 +46,7 @@ test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract'
     '/api/v1/rootsmagic/queries',
     '/api/v1/rootsmagic/sources',
     '/api/v1/rootsmagic/sources/{source_ref}/discard',
+    '/api/v1/rootsmagic/submissions/{capability}/cancel',
     '/api/v1/secrets/{reference}/delete',
     '/api/v1/secrets/{reference}/set',
     '/api/v1/secrets/{reference}/status',
